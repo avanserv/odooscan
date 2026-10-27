@@ -37,7 +37,7 @@ jobs:
           persist-credentials: false
 
       - name: Cache the build
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
 
       - name: Install cargo-machete
         uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2.87.29
@@ -48,7 +48,7 @@ jobs:
       # spelling and Markdown checks. The gitleaks hook is the one that proves nothing in this job:
       # it reads the staged diff, and nothing is staged. The Security Scan job covers the tree.
       - name: Run pre-commit
-        uses: j178/prek-action@af4d4fcb6922b8e6f65c0426947125fcc38794ce # v3.0.2
+        uses: j178/prek-action@44924fe9ef4a6f88253c4b6b1bf11c689d3ce53d # v3.1.0
         with:
           prek-version: 0.5.5
 
@@ -63,7 +63,7 @@ jobs:
           persist-credentials: false
 
       - name: Cache the build
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
 
       # The fixture snapshot is the rule gate: every rule fires on its custom module and nowhere else.
       - name: Run the tests
@@ -129,7 +129,7 @@ jobs:
           persist-credentials: false
 
       - name: Cache the build
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
 
       # The release profile is what a user downloads, and the only build with fat LTO.
       - name: Build the release binary
