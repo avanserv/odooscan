@@ -44,15 +44,19 @@ Fixtures are written by hand. Nothing is copied from Odoo, Odoo Enterprise or a 
 
 ## The false-positive oracle
 
-Odoo core is correct code, so a scan of it must stay near-silent for the index-aware rules. Run one
-on the oldest and newest supported series after any change to `index.rs` or `checks.rs`, and
-explain any new finding in the pull request:
+Odoo core is correct code, so its findings are recorded per series in `tests/oracle/`, and the CI
+`oracle` job fails when a scan of it finds anything new or no longer finds something recorded. The
+`Makefile` pins the odoo/odoo commit of each series. To run it, after any change to `index.rs` or
+`checks.rs`:
 
 ```bash
-git -C ~/repos/odoo/odoo archive origin/18.0 -- addons odoo/addons ':(exclude,glob)**/static/**' \
-  | tar -x -C /tmp/odoo-18.0
-target/release/oscn check /tmp/odoo-18.0 --odoo-version 18.0 --statistics
+make oracle-fetch oracle SERIES=18.0    # and SERIES=20.0
 ```
+
+When a change is meant to alter what core reports, `make oracle-update SERIES=...` rewrites the
+file. Read every changed entry and explain each new one in the pull request: an index-aware finding
+on core is a false positive until shown otherwise. To bump a pinned commit, change it in the
+`Makefile`, then fetch and update the same way.
 
 ## Commits and pull requests
 

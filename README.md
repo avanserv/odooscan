@@ -141,10 +141,5 @@ every rule. XML takes the same text inside `<!-- -->`.
 
 `cargo test` runs a snapshot over `crates/odooscan_core/tests/fixtures`. That fixture is a small
 core (`base`, `mail`) plus custom modules written to trigger every rule; review changes with
-`cargo insta review`. The false-positive oracle is Odoo itself. A scan of Odoo core must stay
-near-silent for the index-aware rules, so run one after any change to them:
-
-```sh
-git -C ~/repos/odoo/odoo archive origin/18.0 -- addons odoo/addons ':(exclude,glob)**/static/**' | tar -x -C /tmp/odoo-18.0
-oscn check /tmp/odoo-18.0 --odoo-version 18.0 --statistics
-```
+`cargo insta review`. The false-positive oracle is Odoo itself: a scan of core must report exactly
+the findings recorded in `tests/oracle/`, as CONTRIBUTING.md describes.
