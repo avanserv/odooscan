@@ -100,7 +100,7 @@ jobs:
         run: |
           name="odooscan-${TAG}-x86_64-unknown-linux-gnu"
           mkdir "$name"
-          cp target/release/odooscan LICENSE README.md "$name/"
+          cp target/release/oscn LICENSE README.md "$name/"
           tar -czf "$name.tar.gz" "$name"
           sha256sum "$name.tar.gz" > "$name.tar.gz.sha256"
           gh release upload --clobber "$TAG" "$name.tar.gz" "$name.tar.gz.sha256"

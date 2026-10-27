@@ -10,7 +10,7 @@ use odooscan_core::{Diagnostic, ScanOptions, scan};
 use serde_json::json;
 
 #[derive(Parser)]
-#[command(version, about = "Quality and security scanner for Odoo modules")]
+#[command(name = "oscn", version, about = "Quality and security scanner for Odoo modules")]
 struct Cli {
     #[command(subcommand)]
     command: Command,

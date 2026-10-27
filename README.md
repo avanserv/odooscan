@@ -14,10 +14,10 @@ belongs to a module missing from `depends`.
 
 ```sh
 cargo build --release
-target/release/odooscan check path/to/custom-addons --addons-path ~/repos/odoo/odoo,~/repos/odoo/enterprise
+target/release/oscn check path/to/custom-addons --addons-path ~/repos/odoo/odoo,~/repos/odoo/enterprise
 ```
 
-`check` reports on the modules found under the given paths. `--addons-path` holds what those
+The command is `oscn`. `check` reports on the modules found under the given paths. `--addons-path` holds what those
 modules build on. It is indexed but never reported on, and an Odoo source checkout stands for its
 `addons` and `odoo/addons` directories. The variable `ODOOSCAN_ADDONS_PATH` sets the same thing.
 Without `base` on the addons path, the rules marked `needs_index` in `src/rules.rs` are off and a
@@ -36,7 +36,7 @@ The exit status is 1 when anything is reported.
 Each rule declares the Odoo series it applies to, and every module is checked against its own
 series. The series is the first two parts of a five-part manifest version, so `18.0.1.2.0` means
 18.0. Pass `--odoo-version 18.0` for modules whose version does not name one. Those modules
-otherwise get only the rules that carry no range. `odooscan rules --odoo-version 18.0` lists the
+otherwise get only the rules that carry no range. `oscn rules --odoo-version 18.0` lists the
 rules for a series.
 
 ## Suppressing a finding
@@ -66,5 +66,5 @@ near-silent for the index-aware rules, so run one after any change to them:
 
 ```sh
 git -C ~/repos/odoo/odoo archive origin/18.0 -- addons odoo/addons ':(exclude,glob)**/static/**' | tar -x -C /tmp/odoo-18.0
-odooscan check /tmp/odoo-18.0 --odoo-version 18.0 --statistics
+oscn check /tmp/odoo-18.0 --odoo-version 18.0 --statistics
 ```

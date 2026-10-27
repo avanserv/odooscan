@@ -136,7 +136,7 @@ jobs:
         run: make build
 
       - name: Run the binary
-        run: ./target/release/odooscan --version
+        run: ./target/release/oscn --version
 
   # Single aggregation gate: passes if no job failed or was cancelled, and a skipped job counts as
   # a pass, exactly as GitHub treats a skipped required check. This is the one required status
