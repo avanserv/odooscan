@@ -589,6 +589,18 @@
       "count": 1
     },
     {
+      "path": "addons/l10n_es/data/mod390/mod390_section7.xml",
+      "code": "OD303",
+      "message": "XML id 'mod_390_casilla_641' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_es/data/mod390/mod390_section7.xml",
+      "code": "OD303",
+      "message": "XML id 'mod_390_casilla_641_balance' is already defined earlier in this file",
+      "count": 1
+    },
+    {
       "path": "addons/l10n_es_edi_facturae/data/template/account.tax-es_common.csv",
       "code": "OD303",
       "message": "XML id 'account_tax_template_p_irpf1' is already defined earlier in this file",
@@ -1246,6 +1258,36 @@
       "path": "addons/l10n_jo_edi/models/account_move_send.py",
       "code": "OD103",
       "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_kz/data/tax_report.xml",
+      "code": "OD303",
+      "message": "XML id 'l10n_kz_tr_expression_300_00_025_1_tax' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_mn/data/vat_report.xml",
+      "code": "OD303",
+      "message": "XML id 'vat_report_line42' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_mn/data/vat_report.xml",
+      "code": "OD303",
+      "message": "XML id 'vat_report_line52' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_mn/data/vat_report.xml",
+      "code": "OD303",
+      "message": "XML id 'vat_report_line64_balance' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_mt/data/account_tax_report_data.xml",
+      "code": "OD303",
+      "message": "XML id 'tax_report_line_I_5_tag_column1' is already defined earlier in this file",
       "count": 1
     },
     {
@@ -2303,6 +2345,12 @@
       "code": "OD103",
       "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
       "count": 2
+    },
+    {
+      "path": "addons/stock/models/stock_move.py",
+      "code": "OD301",
+      "message": "module stock defines no XML id 'stock.group_stock_tracking_lot'",
+      "count": 1
     },
     {
       "path": "addons/stock/models/stock_orderpoint.py",

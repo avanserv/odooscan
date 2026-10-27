@@ -90,6 +90,11 @@ pub struct PyFacts {
     pub classes: Vec<ClassFact>,
     /// Literal model names in `env['x']`.
     pub env_models: Vec<Spanned<String>>,
+    /// XML ids named by `env.ref()`.
+    pub xml_refs: Vec<XmlRef>,
+    /// Groups named by `has_group()` and the `groups` of fields, which may come from modules
+    /// that are not installed.
+    pub group_refs: Vec<XmlRef>,
     /// Base names of `.xml` and `.csv` files named in string literals, which Python code may load.
     pub file_mentions: Vec<String>,
     pub diags: Vec<RawDiag>,

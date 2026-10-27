@@ -140,7 +140,7 @@ impl Walker<'_> {
                     self.unsafe_qweb(child);
                 }
                 "menuitem" => self.menuitem(child),
-                "act_window" | "report" => {
+                "act_window" | "report" | "asset" => {
                     self.def(child);
                     self.groups(child);
                 }
@@ -180,6 +180,10 @@ impl Walker<'_> {
             fields: vec![],
         };
         for field in node.children().filter(|c| c.has_tag_name("field")) {
+            // Records nested in a one2many field are created with their own XML ids.
+            for nested in field.children().filter(|c| c.has_tag_name("record")) {
+                self.record(nested);
+            }
             let Some(name) = field.attribute("name") else { continue };
             let pos = self.pos(field);
             record.fields.push(Spanned {

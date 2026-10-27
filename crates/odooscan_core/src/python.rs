@@ -4,7 +4,7 @@ use ruff_python_parser::parse_module;
 use ruff_source_file::LineIndex;
 use ruff_text_size::{Ranged, TextSize};
 
-use crate::facts::{ClassFact, FieldFact, ModelKind, Pos, PyFacts, RawDiag, Spanned};
+use crate::facts::{ClassFact, FieldFact, ModelKind, Pos, PyFacts, RawDiag, Spanned, XmlRef};
 
 const FIELD_TYPES: &[&str] = &[
     "Boolean",
@@ -461,6 +461,49 @@ impl PyVisitor<'_> {
                 );
             }
             _ => {}
+        }
+        self.id_refs(call, expr);
+    }
+
+    fn id_refs(&mut self, call: &ast::ExprCall, expr: &Expr) {
+        let first = call.arguments.args.first().and_then(Expr::as_string_literal_expr);
+        match &*call.func {
+            Expr::Attribute(a) if a.attr.as_str() == "ref" && tail_name(&a.value) == Some("env") => self.env_ref(call),
+            Expr::Attribute(a) if a.attr.as_str() == "has_group" => first.into_iter().for_each(|s| self.group_refs(s)),
+            _ if field_call(expr).is_some() => {
+                if let Some(groups) = keyword(call, "groups").and_then(Expr::as_string_literal_expr) {
+                    self.group_refs(groups);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// `env.ref()` raises on an unknown id unless told not to, and then the caller handles it.
+    fn env_ref(&mut self, call: &ast::ExprCall) {
+        let raise = keyword(call, "raise_if_not_found").or_else(|| call.arguments.args.get(1));
+        if raise.is_none_or(|e| matches!(e, Expr::BooleanLiteral(b) if b.value))
+            && let Some(id) = call.arguments.args.first().and_then(Expr::as_string_literal_expr)
+            && id.value.to_str().contains('.')
+        {
+            let pos = self.loc.at(id);
+            self.facts.xml_refs.push(XmlRef {
+                id: id.value.to_str().to_owned(),
+                pos,
+            });
+        }
+    }
+
+    /// The ids in a comma-separated list of groups.
+    fn group_refs(&mut self, s: &ast::ExprStringLiteral) {
+        let pos = self.loc.at(s);
+        let ids = s
+            .value
+            .to_str()
+            .split(',')
+            .map(|g| g.trim().trim_start_matches(['!', '-']));
+        for id in ids.filter(|id| id.contains('.')) {
+            self.facts.group_refs.push(XmlRef { id: id.to_owned(), pos });
         }
     }
 

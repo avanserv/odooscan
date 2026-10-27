@@ -37,6 +37,14 @@
         <field name="name">Again</field>
     </record>
 
+    <record id="nested_parent" model="res.partner">
+        <field name="child_ids">
+            <record id="nested_child" model="res.partner"><field name="name">Child</field></record>
+        </field>
+    </record>
+
+    <asset id="bad_asset" name="Bad asset"/>
+
     <template id="portal_order">
         <div t-raw="order.note"/>
     </template>
