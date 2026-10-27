@@ -18,7 +18,8 @@ as errors (clippy), unused dependencies (cargo-machete), advisories, licenses an
 (cargo-deny, configured in `deny.toml`), and the tests. `make help` lists the individual targets.
 
 The git hooks add what only makes sense there: secrets (gitleaks), spelling (typos), Markdown
-(markdownlint) and the workflow audits (actionlint, zizmor, schema and timeout checks).
+(markdownlint), function complexity of at most 10 (polyscan) and the workflow audits (actionlint,
+zizmor, schema and timeout checks).
 
 ## How the workspace is laid out
 

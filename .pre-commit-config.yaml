@@ -115,3 +115,13 @@ repos:
         language: system
         files: (\.rs|Cargo\.toml)$
         pass_filenames: false
+
+      # The whole tree rather than the staged files: the dependency-cycle check needs every module.
+      - id: polyscan
+        name: rust     | complexity (polyscan)
+        entry: polyscan check --quiet crates
+        language: node
+        language_version: '22'
+        additional_dependencies: ['polyscan@0.6.0']
+        types: [rust]
+        pass_filenames: false
