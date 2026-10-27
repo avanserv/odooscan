@@ -25,7 +25,7 @@ zizmor, schema and timeout checks).
 
 - `odooscan_core` holds the parsers, the index and every rule. It never prints, and never reads
   anything but the paths it is given.
-- `odooscan` is the CLI: flags, output formats and the exit status, and no rule logic.
+- `odooscan` is the CLI, built as the `oscn` executable: flags, output formats and the exit status, and no rule logic.
 
 A dependency is declared in the same change as the code that uses it, never ahead of it:
 cargo-machete fails otherwise.
@@ -51,7 +51,7 @@ explain any new finding in the pull request:
 ```bash
 git -C ~/repos/odoo/odoo archive origin/18.0 -- addons odoo/addons ':(exclude,glob)**/static/**' \
   | tar -x -C /tmp/odoo-18.0
-target/release/odooscan check /tmp/odoo-18.0 --odoo-version 18.0 --statistics
+target/release/oscn check /tmp/odoo-18.0 --odoo-version 18.0 --statistics
 ```
 
 ## Commits and pull requests
