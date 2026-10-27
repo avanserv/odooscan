@@ -118,34 +118,52 @@ jobs:
           "$RUNNER_TEMP/gitleaks" dir . --redact --no-banner --exit-code 1
 
   wheel:
-    name: Wheel
-    runs-on: ubuntu-latest
+    name: Wheel (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # The release's most common target, built in the manylinux container like the release.
+          - { os: ubuntu-latest, target: x86_64, manylinux: auto, python: python3, bin: bin }
+          # The one that differs most: native paths, and the 260-character limit on them.
+          - { os: windows-latest, target: x64, python: python, bin: Scripts }
     steps:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
-      # The release workflow's build for its most common target, so a packaging break shows here
-      # and not on release day. It runs in the manylinux container, where the host's cache is no use.
+      # The same step as in release.yml, which says why.
+      - name: Allow long paths
+        if: ${{ runner.os == 'Windows' }}
+        run: git config --global core.longpaths true
+
+      # So a packaging break shows here and not on release day. No build cache: the Linux build
+      # runs in a container, where the host's cache is no use.
       - name: Build the wheel
         uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
         with:
-          target: x86_64
-          manylinux: auto
+          target: ${{ matrix.target }}
+          manylinux: ${{ matrix.manylinux }}
           args: --release --out dist
           sccache: false
 
       # Exit status 1 is the expected answer: the fixture is written to trigger every rule.
       - name: Install and run it
+        shell: bash
+        env:
+          PYTHON: ${{ matrix.python }}
+          VENV_BIN: ${{ matrix.bin }}
         run: |
-          python3 -m venv "$RUNNER_TEMP/venv"
-          "$RUNNER_TEMP/venv/bin/pip" install --quiet dist/*.whl
-          "$RUNNER_TEMP/venv/bin/oscn" --version
+          "$PYTHON" -m venv "$RUNNER_TEMP/venv"
+          bin="$RUNNER_TEMP/venv/$VENV_BIN"
+          "$bin/pip" install --quiet dist/*.whl
+          "$bin/oscn" --version
           fixtures=crates/odooscan_core/tests/fixtures
           status=0
-          "$RUNNER_TEMP/venv/bin/oscn" check "$fixtures/custom" --addons-path "$fixtures/core" --statistics || status=$?
+          "$bin/oscn" check "$fixtures/custom" --addons-path "$fixtures/core" --statistics || status=$?
           test "$status" -eq 1
 
   # Single aggregation gate: passes if no job failed or was cancelled, and a skipped job counts as
