@@ -1,0 +1,3022 @@
+{
+  "findings": [
+    {
+      "path": "addons/account/controllers/portal.py",
+      "code": "OD111",
+      "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
+      "count": 1
+    },
+    {
+      "path": "addons/account/controllers/terms.py",
+      "code": "OD111",
+      "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
+      "count": 1
+    },
+    {
+      "path": "addons/account/models/account_bank_statement.py",
+      "code": "OD101",
+      "message": "query built by string formatting; pass parameters separately or build it with odoo.tools.SQL",
+      "count": 1
+    },
+    {
+      "path": "addons/account/models/account_bank_statement_line.py",
+      "code": "OD205",
+      "message": "'amount_residual' is a Monetary field elsewhere and is redefined here as Float",
+      "count": 1
+    },
+    {
+      "path": "addons/account/models/account_bank_statement_line.py",
+      "code": "OD205",
+      "message": "'payment_ids' is a One2many field elsewhere and is redefined here as Many2many",
+      "count": 1
+    },
+    {
+      "path": "addons/account/models/account_code_mapping.py",
+      "code": "OD105",
+      "message": "create() override never calls super(), so other modules' overrides and the ORM itself are skipped",
+      "count": 1
+    },
+    {
+      "path": "addons/account/models/account_document_import_mixin.py",
+      "code": "OD103",
+      "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
+      "count": 2
+    },
+    {
+      "path": "addons/account/models/account_journal.py",
+      "code": "OD101",
+      "message": "query built by string formatting; pass parameters separately or build it with odoo.tools.SQL",
+      "count": 1
+    },
+    {
+      "path": "addons/account/models/account_lock_exception.py",
+      "code": "OD105",
+      "message": "copy() override never calls super(), so other modules' overrides and the ORM itself are skipped",
+      "count": 1
+    },
+    {
+      "path": "addons/account/models/product.py",
+      "code": "OD206",
+      "message": "no indexed module defines model 'account.intrastat.code'",
+      "count": 1
+    },
+    {
+      "path": "addons/account/models/product.py",
+      "code": "OD206",
+      "message": "no indexed module defines model 'product.unspsc.code'",
+      "count": 1
+    },
+    {
+      "path": "addons/account/populate/benchmarks.xml",
+      "code": "OD502",
+      "message": "'populate/benchmarks.xml' is not in the manifest's data or demo, so Odoo never loads it",
+      "count": 1
+    },
+    {
+      "path": "addons/account/populate/populate_demo.xml",
+      "code": "OD502",
+      "message": "'populate/populate_demo.xml' is not in the manifest's data or demo, so Odoo never loads it",
+      "count": 1
+    },
+    {
+      "path": "addons/account_edi/models/account_edi_document.py",
+      "code": "OD103",
+      "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
+      "count": 1
+    },
+    {
+      "path": "addons/account_edi_proxy_client/models/account_edi_proxy_user.py",
+      "code": "OD103",
+      "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
+      "count": 1
+    },
+    {
+      "path": "addons/account_peppol/controllers/authentication.py",
+      "code": "OD111",
+      "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
+      "count": 1
+    },
+    {
+      "path": "addons/account_peppol/controllers/authentication.py",
+      "code": "OD112",
+      "message": "csrf=False lets other sites submit this form on the user's behalf",
+      "count": 1
+    },
+    {
+      "path": "addons/account_peppol/controllers/webhooks.py",
+      "code": "OD111",
+      "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
+      "count": 3
+    },
+    {
+      "path": "addons/account_peppol/controllers/webhooks.py",
+      "code": "OD112",
+      "message": "csrf=False lets other sites submit this form on the user's behalf",
+      "count": 3
+    },
+    {
+      "path": "addons/account_peppol/models/account_edi_proxy_user.py",
+      "code": "OD103",
+      "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
+      "count": 7
+    },
+    {
+      "path": "addons/account_peppol/models/account_move_send.py",
+      "code": "OD103",
+      "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
+      "count": 1
+    },
+    {
+      "path": "addons/account_peppol/wizard/peppol_registration.py",
+      "code": "OD103",
+      "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
+      "count": 1
+    },
+    {
+      "path": "addons/auth_oauth/controllers/main.py",
+      "code": "OD103",
+      "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
+      "count": 1
+    },
+    {
+      "path": "addons/auth_passkey/security/ir.access.csv",
+      "code": "OD402",
+      "message": "base.group_portal gets write, create or unlink on auth.passkey.key.create; public and portal access should be read-only and go through controllers",
+      "count": 1
+    },
+    {
+      "path": "addons/auth_passkey/security/ir.access.csv",
+      "code": "OD402",
+      "message": "base.group_portal gets write, create or unlink on auth.passkey.key; public and portal access should be read-only and go through controllers",
+      "count": 1
+    },
+    {
+      "path": "addons/auth_signup/controllers/main.py",
+      "code": "OD103",
+      "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
+      "count": 1
+    },
+    {
+      "path": "addons/auth_signup/controllers/main.py",
+      "code": "OD111",
+      "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
+      "count": 2
+    },
+    {
+      "path": "addons/auth_totp/controllers/home.py",
+      "code": "OD111",
+      "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
+      "count": 1
+    },
+    {
+      "path": "addons/auth_totp/models/auth_totp_rate_limit_log.py",
+      "code": "OD401",
+      "message": "model 'auth.totp.rate.limit.log' has no ir.model.access rule, so only the superuser can use it",
+      "count": 1
+    },
+    {
+      "path": "addons/auth_totp_portal/security/ir.access.csv",
+      "code": "OD402",
+      "message": "base.group_portal gets write, create or unlink on auth_totp.wizard; public and portal access should be read-only and go through controllers",
+      "count": 1
+    },
+    {
+      "path": "addons/base_automation/controllers/main.py",
+      "code": "OD111",
+      "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
+      "count": 1
+    },
+    {
+      "path": "addons/base_automation/controllers/main.py",
+      "code": "OD112",
+      "message": "csrf=False lets other sites submit this form on the user's behalf",
+      "count": 1
+    },
+    {
+      "path": "addons/base_import_module/controllers/main.py",
+      "code": "OD112",
+      "message": "csrf=False lets other sites submit this form on the user's behalf",
+      "count": 1
+    },
+    {
+      "path": "addons/board/models/board.py",
+      "code": "OD105",
+      "message": "create() override never calls super(), so other modules' overrides and the ORM itself are skipped",
+      "count": 1
+    },
+    {
+      "path": "addons/bus/bus_dispatcher.py",
+      "code": "OD103",
+      "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
+      "count": 1
+    },
+    {
+      "path": "addons/bus/models/bus.py",
+      "code": "OD401",
+      "message": "model 'bus.bus' has no ir.model.access rule, so only the superuser can use it",
+      "count": 1
+    },
+    {
+      "path": "addons/calendar/__init__.py",
+      "code": "OD103",
+      "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
+      "count": 1
+    },
+    {
+      "path": "addons/calendar/controllers/main.py",
+      "code": "OD111",
+      "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
+      "count": 2
+    },
+    {
+      "path": "addons/calendar/models/calendar_attendee.py",
+      "code": "OD105",
+      "message": "copy() override never calls super(), so other modules' overrides and the ORM itself are skipped",
+      "count": 1
+    },
+    {
+      "path": "addons/cloud_storage/controllers/rtc.py",
+      "code": "OD111",
+      "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
+      "count": 1
+    },
+    {
+      "path": "addons/cloud_storage/controllers/rtc.py",
+      "code": "OD112",
+      "message": "csrf=False lets other sites submit this form on the user's behalf",
+      "count": 1
+    },
+    {
+      "path": "addons/crm/models/crm_lead.py",
+      "code": "OD103",
+      "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
+      "count": 1
+    },
+    {
+      "path": "addons/crm/models/crm_team.py",
+      "code": "OD103",
+      "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
+      "count": 1
+    },
+    {
+      "path": "addons/crm_iap_enrich/models/crm_lead.py",
+      "code": "OD103",
+      "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
+      "count": 1
+    },
+    {
+      "path": "addons/crm_iap_mine/models/crm_iap_lead_helpers.py",
+      "code": "OD401",
+      "message": "model 'crm.iap.lead.helpers' has no ir.model.access rule, so only the superuser can use it",
+      "count": 1
+    },
+    {
+      "path": "addons/data_recycle/models/data_recycle_model.py",
+      "code": "OD103",
+      "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
+      "count": 3
+    },
+    {
+      "path": "addons/digest/controllers/portal.py",
+      "code": "OD111",
+      "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
+      "count": 1
+    },
+    {
+      "path": "addons/digest/controllers/portal.py",
+      "code": "OD112",
+      "message": "csrf=False lets other sites submit this form on the user's behalf",
+      "count": 1
+    },
+    {
+      "path": "addons/event/controllers/main.py",
+      "code": "OD111",
+      "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
+      "count": 2
+    },
+    {
+      "path": "addons/event/models/event_mail.py",
+      "code": "OD103",
+      "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
+      "count": 3
+    },
+    {
+      "path": "addons/event_crm/models/event_lead_request.py",
+      "code": "OD103",
+      "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
+      "count": 1
+    },
+    {
+      "path": "addons/fleet/data/fleet_demo.xml",
+      "code": "OD303",
+      "message": "XML id 'type_service_7' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/gamification/models/gamification_challenge.py",
+      "code": "OD103",
+      "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
+      "count": 1
+    },
+    {
+      "path": "addons/gamification/models/gamification_goal.py",
+      "code": "OD103",
+      "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
+      "count": 1
+    },
+    {
+      "path": "addons/google_address_autocomplete/views/res_config_settings_views.xml",
+      "code": "OD302",
+      "message": "'base_setup.res_config_settings_view_form' is defined by module base_setup; add it to depends",
+      "count": 1
+    },
+    {
+      "path": "addons/google_calendar/controllers/main.py",
+      "code": "OD103",
+      "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
+      "count": 1
+    },
+    {
+      "path": "addons/google_calendar/models/res_users.py",
+      "code": "OD103",
+      "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
+      "count": 1
+    },
+    {
+      "path": "addons/google_calendar/models/res_users_settings.py",
+      "code": "OD103",
+      "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
+      "count": 1
+    },
+    {
+      "path": "addons/hr/data/hr_demo.xml",
+      "code": "OD303",
+      "message": "XML id 'dep_management' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/hr/data/hr_demo.xml",
+      "code": "OD303",
+      "message": "XML id 'dep_ps' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/hr/data/hr_demo.xml",
+      "code": "OD303",
+      "message": "XML id 'dep_rd' is already defined earlier in this file",
+      "count": 2
+    },
+    {
+      "path": "addons/hr/data/hr_demo.xml",
+      "code": "OD303",
+      "message": "XML id 'dep_rd_ltp' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/hr/data/hr_demo.xml",
+      "code": "OD303",
+      "message": "XML id 'dep_sales' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/hr/data/hr_demo.xml",
+      "code": "OD303",
+      "message": "XML id 'employee_admin' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/hr_attendance/controllers/main.py",
+      "code": "OD111",
+      "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
+      "count": 7
+    },
+    {
+      "path": "addons/hr_attendance/models/hr_attendance.py",
+      "code": "OD105",
+      "message": "copy() override never calls super(), so other modules' overrides and the ORM itself are skipped",
+      "count": 1
+    },
+    {
+      "path": "addons/hr_recruitment/data/hr_recruitment_demo.xml",
+      "code": "OD303",
+      "message": "XML id 'hr_case_traineemca1' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/hr_recruitment/data/hr_recruitment_demo.xml",
+      "code": "OD303",
+      "message": "XML id 'hr_talent_cto_2' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/hr_recruitment/data/hr_recruitment_demo.xml",
+      "code": "OD303",
+      "message": "XML id 'hr_talent_cto_3' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/hr_recruitment/data/hr_recruitment_demo.xml",
+      "code": "OD303",
+      "message": "XML id 'hr_talent_dev_1' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/hr_recruitment/data/scenarios/hr_recruitment_scenario.xml",
+      "code": "OD303",
+      "message": "XML id 'scenario_applicant_macm_enrique' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/hr_recruitment_survey/wizard/hr_recruitment_survey_invite.py",
+      "code": "OD205",
+      "message": "'survey_access_mode' is a Selection field elsewhere and is redefined here as Char",
+      "count": 1
+    },
+    {
+      "path": "addons/hr_skills/data/hr_skill_demo.xml",
+      "code": "OD303",
+      "message": "XML id 'hr_skill_nosql' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/html_editor/controllers/main.py",
+      "code": "OD111",
+      "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
+      "count": 1
+    },
+    {
+      "path": "addons/http_routing/controllers/main.py",
+      "code": "OD111",
+      "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
+      "count": 1
+    },
+    {
+      "path": "addons/im_livechat/controllers/cors/attachment.py",
+      "code": "OD112",
+      "message": "csrf=False lets other sites submit this form on the user's behalf",
+      "count": 1
+    },
+    {
+      "path": "addons/im_livechat/controllers/main.py",
+      "code": "OD111",
+      "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
+      "count": 4
+    },
+    {
+      "path": "addons/l10n_ar/demo/account_supplier_invoice_demo.xml",
+      "code": "OD303",
+      "message": "XML id 'demo_despacho_1' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_ar/demo/account_supplier_invoice_demo.xml",
+      "code": "OD303",
+      "message": "XML id 'demo_sup_invoice_1' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_ar/demo/account_supplier_invoice_demo.xml",
+      "code": "OD303",
+      "message": "XML id 'demo_sup_invoice_10' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_ar/demo/account_supplier_invoice_demo.xml",
+      "code": "OD303",
+      "message": "XML id 'demo_sup_invoice_11' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_ar/demo/account_supplier_invoice_demo.xml",
+      "code": "OD303",
+      "message": "XML id 'demo_sup_invoice_12' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_ar/demo/account_supplier_invoice_demo.xml",
+      "code": "OD303",
+      "message": "XML id 'demo_sup_invoice_2' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_ar/demo/account_supplier_invoice_demo.xml",
+      "code": "OD303",
+      "message": "XML id 'demo_sup_invoice_3' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_ar/demo/account_supplier_invoice_demo.xml",
+      "code": "OD303",
+      "message": "XML id 'demo_sup_invoice_4' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_ar/demo/account_supplier_invoice_demo.xml",
+      "code": "OD303",
+      "message": "XML id 'demo_sup_invoice_5' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_ar/demo/account_supplier_invoice_demo.xml",
+      "code": "OD303",
+      "message": "XML id 'demo_sup_invoice_6' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_ar/demo/account_supplier_invoice_demo.xml",
+      "code": "OD303",
+      "message": "XML id 'demo_sup_invoice_7' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_ar/demo/account_supplier_invoice_demo.xml",
+      "code": "OD303",
+      "message": "XML id 'demo_sup_invoice_8' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_ar/demo/account_supplier_invoice_demo.xml",
+      "code": "OD303",
+      "message": "XML id 'demo_sup_invoice_9' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_br/data/template/account.account-br.csv",
+      "code": "OD303",
+      "message": "XML id 'account_template_102010840' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_br/data/template/account.account-br.csv",
+      "code": "OD303",
+      "message": "XML id 'account_template_102010850' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_br/data/template/account.account-br.csv",
+      "code": "OD303",
+      "message": "XML id 'account_template_102010855' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_dk/controllers/webhooks.py",
+      "code": "OD111",
+      "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
+      "count": 3
+    },
+    {
+      "path": "addons/l10n_dk/controllers/webhooks.py",
+      "code": "OD112",
+      "message": "csrf=False lets other sites submit this form on the user's behalf",
+      "count": 3
+    },
+    {
+      "path": "addons/l10n_dk/models/account_edi_proxy_user.py",
+      "code": "OD103",
+      "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
+      "count": 2
+    },
+    {
+      "path": "addons/l10n_dk/models/account_move_send.py",
+      "code": "OD103",
+      "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_dk/wizard/nemhandel_registration.py",
+      "code": "OD103",
+      "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_es_edi_facturae/data/template/account.tax-es_common.csv",
+      "code": "OD303",
+      "message": "XML id 'account_tax_template_p_irpf1' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_es_edi_facturae/data/template/account.tax-es_common.csv",
+      "code": "OD303",
+      "message": "XML id 'account_tax_template_p_irpf15' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_es_edi_facturae/data/template/account.tax-es_common.csv",
+      "code": "OD303",
+      "message": "XML id 'account_tax_template_p_irpf18' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_es_edi_facturae/data/template/account.tax-es_common.csv",
+      "code": "OD303",
+      "message": "XML id 'account_tax_template_p_irpf19' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_es_edi_facturae/data/template/account.tax-es_common.csv",
+      "code": "OD303",
+      "message": "XML id 'account_tax_template_p_irpf195a' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_es_edi_facturae/data/template/account.tax-es_common.csv",
+      "code": "OD303",
+      "message": "XML id 'account_tax_template_p_irpf19a' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_es_edi_facturae/data/template/account.tax-es_common.csv",
+      "code": "OD303",
+      "message": "XML id 'account_tax_template_p_irpf2' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_es_edi_facturae/data/template/account.tax-es_common.csv",
+      "code": "OD303",
+      "message": "XML id 'account_tax_template_p_irpf20' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_es_edi_facturae/data/template/account.tax-es_common.csv",
+      "code": "OD303",
+      "message": "XML id 'account_tax_template_p_irpf20a' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_es_edi_facturae/data/template/account.tax-es_common.csv",
+      "code": "OD303",
+      "message": "XML id 'account_tax_template_p_irpf21a' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_es_edi_facturae/data/template/account.tax-es_common.csv",
+      "code": "OD303",
+      "message": "XML id 'account_tax_template_p_irpf21p' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_es_edi_facturae/data/template/account.tax-es_common.csv",
+      "code": "OD303",
+      "message": "XML id 'account_tax_template_p_irpf24' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_es_edi_facturae/data/template/account.tax-es_common.csv",
+      "code": "OD303",
+      "message": "XML id 'account_tax_template_p_irpf7' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_es_edi_facturae/data/template/account.tax-es_common.csv",
+      "code": "OD303",
+      "message": "XML id 'account_tax_template_p_irpf9' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_es_edi_facturae/data/template/account.tax-es_common.csv",
+      "code": "OD303",
+      "message": "XML id 'account_tax_template_p_iva10_ibc_group' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_es_edi_facturae/data/template/account.tax-es_common.csv",
+      "code": "OD303",
+      "message": "XML id 'account_tax_template_p_iva21_ibc_group' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_es_edi_facturae/data/template/account.tax-es_common.csv",
+      "code": "OD303",
+      "message": "XML id 'account_tax_template_p_iva4_ibc_group' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_es_edi_facturae/data/template/account.tax-es_common.csv",
+      "code": "OD303",
+      "message": "XML id 'account_tax_template_s_irpf1' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_es_edi_facturae/data/template/account.tax-es_common.csv",
+      "code": "OD303",
+      "message": "XML id 'account_tax_template_s_irpf15' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_es_edi_facturae/data/template/account.tax-es_common.csv",
+      "code": "OD303",
+      "message": "XML id 'account_tax_template_s_irpf18' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_es_edi_facturae/data/template/account.tax-es_common.csv",
+      "code": "OD303",
+      "message": "XML id 'account_tax_template_s_irpf19' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_es_edi_facturae/data/template/account.tax-es_common.csv",
+      "code": "OD303",
+      "message": "XML id 'account_tax_template_s_irpf195a' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_es_edi_facturae/data/template/account.tax-es_common.csv",
+      "code": "OD303",
+      "message": "XML id 'account_tax_template_s_irpf19a' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_es_edi_facturae/data/template/account.tax-es_common.csv",
+      "code": "OD303",
+      "message": "XML id 'account_tax_template_s_irpf2' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_es_edi_facturae/data/template/account.tax-es_common.csv",
+      "code": "OD303",
+      "message": "XML id 'account_tax_template_s_irpf20' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_es_edi_facturae/data/template/account.tax-es_common.csv",
+      "code": "OD303",
+      "message": "XML id 'account_tax_template_s_irpf20a' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_es_edi_facturae/data/template/account.tax-es_common.csv",
+      "code": "OD303",
+      "message": "XML id 'account_tax_template_s_irpf21' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_es_edi_facturae/data/template/account.tax-es_common.csv",
+      "code": "OD303",
+      "message": "XML id 'account_tax_template_s_irpf21a' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_es_edi_facturae/data/template/account.tax-es_common.csv",
+      "code": "OD303",
+      "message": "XML id 'account_tax_template_s_irpf24' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_es_edi_facturae/data/template/account.tax-es_common.csv",
+      "code": "OD303",
+      "message": "XML id 'account_tax_template_s_irpf7' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_es_edi_facturae/data/template/account.tax-es_common.csv",
+      "code": "OD303",
+      "message": "XML id 'account_tax_template_s_irpf9' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_es_edi_sii/models/account_move.py",
+      "code": "OD103",
+      "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_es_edi_tbai/models/account_move.py",
+      "code": "OD103",
+      "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
+      "count": 2
+    },
+    {
+      "path": "addons/l10n_es_edi_tbai/models/account_move_send.py",
+      "code": "OD103",
+      "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_es_edi_tbai_pos/models/pos_order.py",
+      "code": "OD103",
+      "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_es_edi_verifactu/data/template/account.tax-es_common.csv",
+      "code": "OD303",
+      "message": "XML id 'account_tax_template_p_irpf1' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_es_edi_verifactu/data/template/account.tax-es_common.csv",
+      "code": "OD303",
+      "message": "XML id 'account_tax_template_p_irpf15' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_es_edi_verifactu/data/template/account.tax-es_common.csv",
+      "code": "OD303",
+      "message": "XML id 'account_tax_template_p_irpf15e' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_es_edi_verifactu/data/template/account.tax-es_common.csv",
+      "code": "OD303",
+      "message": "XML id 'account_tax_template_p_irpf18' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_es_edi_verifactu/data/template/account.tax-es_common.csv",
+      "code": "OD303",
+      "message": "XML id 'account_tax_template_p_irpf19' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_es_edi_verifactu/data/template/account.tax-es_common.csv",
+      "code": "OD303",
+      "message": "XML id 'account_tax_template_p_irpf195a' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_es_edi_verifactu/data/template/account.tax-es_common.csv",
+      "code": "OD303",
+      "message": "XML id 'account_tax_template_p_irpf19a' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_es_edi_verifactu/data/template/account.tax-es_common.csv",
+      "code": "OD303",
+      "message": "XML id 'account_tax_template_p_irpf19ca' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_es_edi_verifactu/data/template/account.tax-es_common.csv",
+      "code": "OD303",
+      "message": "XML id 'account_tax_template_p_irpf19cs' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_es_edi_verifactu/data/template/account.tax-es_common.csv",
+      "code": "OD303",
+      "message": "XML id 'account_tax_template_p_irpf2' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_es_edi_verifactu/data/template/account.tax-es_common.csv",
+      "code": "OD303",
+      "message": "XML id 'account_tax_template_p_irpf20' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_es_edi_verifactu/data/template/account.tax-es_common.csv",
+      "code": "OD303",
+      "message": "XML id 'account_tax_template_p_irpf20a' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_es_edi_verifactu/data/template/account.tax-es_common.csv",
+      "code": "OD303",
+      "message": "XML id 'account_tax_template_p_irpf21a' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_es_edi_verifactu/data/template/account.tax-es_common.csv",
+      "code": "OD303",
+      "message": "XML id 'account_tax_template_p_irpf21p' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_es_edi_verifactu/data/template/account.tax-es_common.csv",
+      "code": "OD303",
+      "message": "XML id 'account_tax_template_p_irpf21t' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_es_edi_verifactu/data/template/account.tax-es_common.csv",
+      "code": "OD303",
+      "message": "XML id 'account_tax_template_p_irpf21td' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_es_edi_verifactu/data/template/account.tax-es_common.csv",
+      "code": "OD303",
+      "message": "XML id 'account_tax_template_p_irpf21te' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_es_edi_verifactu/data/template/account.tax-es_common.csv",
+      "code": "OD303",
+      "message": "XML id 'account_tax_template_p_irpf24' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_es_edi_verifactu/data/template/account.tax-es_common.csv",
+      "code": "OD303",
+      "message": "XML id 'account_tax_template_p_irpf24_rdc' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_es_edi_verifactu/data/template/account.tax-es_common.csv",
+      "code": "OD303",
+      "message": "XML id 'account_tax_template_p_irpf35cya' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_es_edi_verifactu/data/template/account.tax-es_common.csv",
+      "code": "OD303",
+      "message": "XML id 'account_tax_template_p_irpf7' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_es_edi_verifactu/data/template/account.tax-es_common.csv",
+      "code": "OD303",
+      "message": "XML id 'account_tax_template_p_irpf7e' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_es_edi_verifactu/data/template/account.tax-es_common.csv",
+      "code": "OD303",
+      "message": "XML id 'account_tax_template_p_irpf9' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_es_edi_verifactu/data/template/account.tax-es_common.csv",
+      "code": "OD303",
+      "message": "XML id 'account_tax_template_p_irpfnrnue0p' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_es_edi_verifactu/data/template/account.tax-es_common.csv",
+      "code": "OD303",
+      "message": "XML id 'account_tax_template_p_irpfnrnue24p' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_es_edi_verifactu/data/template/account.tax-es_common.csv",
+      "code": "OD303",
+      "message": "XML id 'account_tax_template_p_irpfnrue0p' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_es_edi_verifactu/data/template/account.tax-es_common.csv",
+      "code": "OD303",
+      "message": "XML id 'account_tax_template_p_irpfnrue19p' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_es_edi_verifactu/data/template/account.tax-es_common.csv",
+      "code": "OD303",
+      "message": "XML id 'account_tax_template_p_rp19' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_es_edi_verifactu/data/template/account.tax-es_common.csv",
+      "code": "OD303",
+      "message": "XML id 'account_tax_template_p_rrD19' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_es_edi_verifactu/data/template/account.tax-es_common.csv",
+      "code": "OD303",
+      "message": "XML id 'account_tax_template_s_irpf1' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_es_edi_verifactu/data/template/account.tax-es_common.csv",
+      "code": "OD303",
+      "message": "XML id 'account_tax_template_s_irpf15' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_es_edi_verifactu/data/template/account.tax-es_common.csv",
+      "code": "OD303",
+      "message": "XML id 'account_tax_template_s_irpf18' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_es_edi_verifactu/data/template/account.tax-es_common.csv",
+      "code": "OD303",
+      "message": "XML id 'account_tax_template_s_irpf19' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_es_edi_verifactu/data/template/account.tax-es_common.csv",
+      "code": "OD303",
+      "message": "XML id 'account_tax_template_s_irpf195a' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_es_edi_verifactu/data/template/account.tax-es_common.csv",
+      "code": "OD303",
+      "message": "XML id 'account_tax_template_s_irpf19a' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_es_edi_verifactu/data/template/account.tax-es_common.csv",
+      "code": "OD303",
+      "message": "XML id 'account_tax_template_s_irpf2' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_es_edi_verifactu/data/template/account.tax-es_common.csv",
+      "code": "OD303",
+      "message": "XML id 'account_tax_template_s_irpf20' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_es_edi_verifactu/data/template/account.tax-es_common.csv",
+      "code": "OD303",
+      "message": "XML id 'account_tax_template_s_irpf20a' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_es_edi_verifactu/data/template/account.tax-es_common.csv",
+      "code": "OD303",
+      "message": "XML id 'account_tax_template_s_irpf21' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_es_edi_verifactu/data/template/account.tax-es_common.csv",
+      "code": "OD303",
+      "message": "XML id 'account_tax_template_s_irpf21a' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_es_edi_verifactu/data/template/account.tax-es_common.csv",
+      "code": "OD303",
+      "message": "XML id 'account_tax_template_s_irpf24' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_es_edi_verifactu/data/template/account.tax-es_common.csv",
+      "code": "OD303",
+      "message": "XML id 'account_tax_template_s_irpf24_rdc' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_es_edi_verifactu/data/template/account.tax-es_common.csv",
+      "code": "OD303",
+      "message": "XML id 'account_tax_template_s_irpf7' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_es_edi_verifactu/data/template/account.tax-es_common.csv",
+      "code": "OD303",
+      "message": "XML id 'account_tax_template_s_irpf9' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_es_edi_verifactu/data/template/account.tax-es_common.csv",
+      "code": "OD303",
+      "message": "XML id 'account_tax_template_s_irpfnrnue0' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_es_edi_verifactu/data/template/account.tax-es_common.csv",
+      "code": "OD303",
+      "message": "XML id 'account_tax_template_s_irpfnrnue24' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_es_edi_verifactu/data/template/account.tax-es_common.csv",
+      "code": "OD303",
+      "message": "XML id 'account_tax_template_s_irpfnrue0' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_es_edi_verifactu/data/template/account.tax-es_common.csv",
+      "code": "OD303",
+      "message": "XML id 'account_tax_template_s_irpfnrue19' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_es_edi_verifactu/models/account_move_send.py",
+      "code": "OD103",
+      "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_es_edi_verifactu/models/verifactu_document.py",
+      "code": "OD103",
+      "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
+      "count": 2
+    },
+    {
+      "path": "addons/l10n_eu_account_vies/controllers/webhook.py",
+      "code": "OD112",
+      "message": "csrf=False lets other sites submit this form on the user's behalf",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_fi/data/account_account_tag_data.xml",
+      "code": "OD303",
+      "message": "XML id 'account_tag_impairment_losses_financial_assets_current_assets' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_fi/data/account_account_tag_data.xml",
+      "code": "OD303",
+      "message": "XML id 'account_tag_receivables_from_associated_companies_investments' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_fr_pdp/controllers/routes.py",
+      "code": "OD111",
+      "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_fr_pdp/controllers/routes.py",
+      "code": "OD112",
+      "message": "csrf=False lets other sites submit this form on the user's behalf",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_fr_pdp/controllers/webhooks.py",
+      "code": "OD111",
+      "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_fr_pdp/controllers/webhooks.py",
+      "code": "OD112",
+      "message": "csrf=False lets other sites submit this form on the user's behalf",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_fr_pdp/models/account_edi_proxy_user.py",
+      "code": "OD103",
+      "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_fr_pdp/wizard/pdp_registration.py",
+      "code": "OD103",
+      "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_fr_pos_cert/models/account_closing.py",
+      "code": "OD105",
+      "message": "write() override never calls super(), so other modules' overrides and the ORM itself are skipped",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_gr_edi/models/account_move.py",
+      "code": "OD103",
+      "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_gr_edi/models/l10n_gr_edi_document.py",
+      "code": "OD103",
+      "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_gr_edi_e_invoo/models/account_move.py",
+      "code": "OD103",
+      "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_gr_edi_e_invoo_bridge/models/account_move.py",
+      "code": "OD103",
+      "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_hr_edi/models/account_move_send.py",
+      "code": "OD103",
+      "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_hr_edi/models/res_company.py",
+      "code": "OD103",
+      "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_hu_edi/models/account_move.py",
+      "code": "OD103",
+      "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_hu_edi/models/account_move_send.py",
+      "code": "OD103",
+      "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
+      "count": 2
+    },
+    {
+      "path": "addons/l10n_hu_edi/wizard/l10n_hu_edi_cancellation.py",
+      "code": "OD103",
+      "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_in_edi/models/account_move.py",
+      "code": "OD103",
+      "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_in_edi/models/account_move_send.py",
+      "code": "OD103",
+      "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_in_ewaybill/models/l10n_in_ewaybill.py",
+      "code": "OD103",
+      "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
+      "count": 2
+    },
+    {
+      "path": "addons/l10n_in_ewaybill_irn/models/l10n_in_ewaybill.py",
+      "code": "OD103",
+      "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_it_edi/models/account_move.py",
+      "code": "OD103",
+      "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_jo_edi/models/account_move_send.py",
+      "code": "OD103",
+      "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_mt/migrations/1.1/post-fix-tax-grid-tags.py",
+      "code": "OD101",
+      "message": "query built by string formatting; pass parameters separately or build it with odoo.tools.SQL",
+      "count": 2
+    },
+    {
+      "path": "addons/l10n_my_edi/models/myinvois_document.py",
+      "code": "OD103",
+      "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
+      "count": 6
+    },
+    {
+      "path": "addons/l10n_pe/controllers/portal.py",
+      "code": "OD111",
+      "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_pk_edi/models/account_move_send.py",
+      "code": "OD103",
+      "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_pl/data/template/account.account-pl.csv",
+      "code": "OD303",
+      "message": "XML id 'chart01000200' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_pl_edi/models/account_move_send.py",
+      "code": "OD103",
+      "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_ro_edi/models/account_move.py",
+      "code": "OD103",
+      "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
+      "count": 3
+    },
+    {
+      "path": "addons/l10n_ro_edi/models/res_company.py",
+      "code": "OD103",
+      "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_rs_edi/models/account_move_send.py",
+      "code": "OD103",
+      "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_tw_edi_ecpay/controllers/main.py",
+      "code": "OD112",
+      "message": "csrf=False lets other sites submit this form on the user's behalf",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_tw_edi_ecpay/models/account_move_send.py",
+      "code": "OD103",
+      "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
+      "count": 2
+    },
+    {
+      "path": "addons/l10n_vn_edi_viettel/models/account_move.py",
+      "code": "OD103",
+      "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
+      "count": 2
+    },
+    {
+      "path": "addons/l10n_vn_edi_viettel/models/account_move_send.py",
+      "code": "OD103",
+      "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
+      "count": 2
+    },
+    {
+      "path": "addons/l10n_vn_edi_viettel_stock/models/stock_picking.py",
+      "code": "OD103",
+      "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
+      "count": 1
+    },
+    {
+      "path": "addons/link_tracker/controller/main.py",
+      "code": "OD111",
+      "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
+      "count": 1
+    },
+    {
+      "path": "addons/lunch/data/lunch_demo.xml",
+      "code": "OD303",
+      "message": "XML id 'product_chicken_curry' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/mail/controllers/attachment.py",
+      "code": "OD111",
+      "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
+      "count": 1
+    },
+    {
+      "path": "addons/mail/controllers/discuss/public_page.py",
+      "code": "OD103",
+      "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
+      "count": 1
+    },
+    {
+      "path": "addons/mail/controllers/discuss/rtc.py",
+      "code": "OD111",
+      "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
+      "count": 2
+    },
+    {
+      "path": "addons/mail/controllers/discuss/rtc.py",
+      "code": "OD112",
+      "message": "csrf=False lets other sites submit this form on the user's behalf",
+      "count": 1
+    },
+    {
+      "path": "addons/mail/controllers/mail.py",
+      "code": "OD111",
+      "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
+      "count": 2
+    },
+    {
+      "path": "addons/mail/controllers/mail.py",
+      "code": "OD112",
+      "message": "csrf=False lets other sites submit this form on the user's behalf",
+      "count": 1
+    },
+    {
+      "path": "addons/mail/data/discuss_channel_data.xml",
+      "code": "OD303",
+      "message": "XML id 'mail.channel_admin' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/mail/data/discuss_channel_data.xml",
+      "code": "OD303",
+      "message": "XML id 'mail.channel_all_employees' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/mail/models/fetchmail.py",
+      "code": "OD103",
+      "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
+      "count": 1
+    },
+    {
+      "path": "addons/mail/models/mail_mail.py",
+      "code": "OD103",
+      "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
+      "count": 1
+    },
+    {
+      "path": "addons/mail/models/mail_presence.py",
+      "code": "OD103",
+      "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
+      "count": 1
+    },
+    {
+      "path": "addons/mail/models/mail_scheduled_message.py",
+      "code": "OD103",
+      "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
+      "count": 2
+    },
+    {
+      "path": "addons/mail/security/ir.access.csv",
+      "code": "OD402",
+      "message": "base.group_portal gets write, create or unlink on mail.message; public and portal access should be read-only and go through controllers",
+      "count": 3
+    },
+    {
+      "path": "addons/mail_group/controllers/portal.py",
+      "code": "OD111",
+      "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
+      "count": 6
+    },
+    {
+      "path": "addons/mail_group/controllers/portal.py",
+      "code": "OD112",
+      "message": "csrf=False lets other sites submit this form on the user's behalf",
+      "count": 1
+    },
+    {
+      "path": "addons/mail_plugin/controllers/authenticate.py",
+      "code": "OD111",
+      "message": "route with auth='none' calls sudo(); check that every record it reads or writes is filtered by an access check",
+      "count": 1
+    },
+    {
+      "path": "addons/marketing_card/controllers/marketing_card.py",
+      "code": "OD111",
+      "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
+      "count": 3
+    },
+    {
+      "path": "addons/marketing_card/controllers/marketing_card_linkedin.py",
+      "code": "OD111",
+      "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
+      "count": 2
+    },
+    {
+      "path": "addons/marketing_card/models/card_campaign.py",
+      "code": "OD103",
+      "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
+      "count": 1
+    },
+    {
+      "path": "addons/mass_mailing/controllers/main.py",
+      "code": "OD111",
+      "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
+      "count": 9
+    },
+    {
+      "path": "addons/mass_mailing/controllers/main.py",
+      "code": "OD112",
+      "message": "csrf=False lets other sites submit this form on the user's behalf",
+      "count": 1
+    },
+    {
+      "path": "addons/mass_mailing/models/mailing.py",
+      "code": "OD103",
+      "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
+      "count": 1
+    },
+    {
+      "path": "addons/mass_mailing_sms/controllers/main.py",
+      "code": "OD111",
+      "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
+      "count": 3
+    },
+    {
+      "path": "addons/microsoft_calendar/models/res_users.py",
+      "code": "OD103",
+      "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
+      "count": 2
+    },
+    {
+      "path": "addons/mrp/data/mrp_demo.xml",
+      "code": "OD303",
+      "message": "XML id 'mrp_bom_line_plastic_laminate' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/mrp/data/mrp_demo.xml",
+      "code": "OD303",
+      "message": "XML id 'mrp_routing_workcenter_0' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/mrp/data/mrp_demo.xml",
+      "code": "OD303",
+      "message": "XML id 'mrp_routing_workcenter_1' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/mrp/data/mrp_demo.xml",
+      "code": "OD303",
+      "message": "XML id 'mrp_routing_workcenter_3' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/mrp/data/mrp_demo.xml",
+      "code": "OD303",
+      "message": "XML id 'mrp_routing_workcenter_4' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/mrp_subcontracting/security/ir.access.csv",
+      "code": "OD402",
+      "message": "base.group_portal gets write, create or unlink on mrp.consumption.warning.line; public and portal access should be read-only and go through controllers",
+      "count": 1
+    },
+    {
+      "path": "addons/mrp_subcontracting/security/ir.access.csv",
+      "code": "OD402",
+      "message": "base.group_portal gets write, create or unlink on mrp.consumption.warning; public and portal access should be read-only and go through controllers",
+      "count": 1
+    },
+    {
+      "path": "addons/mrp_subcontracting/security/ir.access.csv",
+      "code": "OD402",
+      "message": "base.group_portal gets write, create or unlink on mrp.production.serials; public and portal access should be read-only and go through controllers",
+      "count": 1
+    },
+    {
+      "path": "addons/mrp_subcontracting/security/ir.access.csv",
+      "code": "OD402",
+      "message": "base.group_portal gets write, create or unlink on mrp.production; public and portal access should be read-only and go through controllers",
+      "count": 1
+    },
+    {
+      "path": "addons/mrp_subcontracting/security/ir.access.csv",
+      "code": "OD402",
+      "message": "base.group_portal gets write, create or unlink on stock.lot; public and portal access should be read-only and go through controllers",
+      "count": 1
+    },
+    {
+      "path": "addons/mrp_subcontracting/security/ir.access.csv",
+      "code": "OD402",
+      "message": "base.group_portal gets write, create or unlink on stock.move.line; public and portal access should be read-only and go through controllers",
+      "count": 1
+    },
+    {
+      "path": "addons/mrp_subcontracting/security/ir.access.csv",
+      "code": "OD402",
+      "message": "base.group_portal gets write, create or unlink on stock.move; public and portal access should be read-only and go through controllers",
+      "count": 1
+    },
+    {
+      "path": "addons/mrp_subcontracting_account/security/ir.access.csv",
+      "code": "OD402",
+      "message": "base.group_portal gets write, create or unlink on account.analytic.line; public and portal access should be read-only and go through controllers",
+      "count": 1
+    },
+    {
+      "path": "addons/payment/controllers/portal.py",
+      "code": "OD111",
+      "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
+      "count": 2
+    },
+    {
+      "path": "addons/payment_adyen/controllers/main.py",
+      "code": "OD111",
+      "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
+      "count": 5
+    },
+    {
+      "path": "addons/payment_adyen/controllers/main.py",
+      "code": "OD112",
+      "message": "csrf=False lets other sites submit this form on the user's behalf",
+      "count": 2
+    },
+    {
+      "path": "addons/payment_aps/controllers/main.py",
+      "code": "OD111",
+      "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
+      "count": 2
+    },
+    {
+      "path": "addons/payment_aps/controllers/main.py",
+      "code": "OD112",
+      "message": "csrf=False lets other sites submit this form on the user's behalf",
+      "count": 2
+    },
+    {
+      "path": "addons/payment_asiapay/controllers/main.py",
+      "code": "OD111",
+      "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
+      "count": 1
+    },
+    {
+      "path": "addons/payment_asiapay/controllers/main.py",
+      "code": "OD112",
+      "message": "csrf=False lets other sites submit this form on the user's behalf",
+      "count": 1
+    },
+    {
+      "path": "addons/payment_authorize/controllers/main.py",
+      "code": "OD111",
+      "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
+      "count": 2
+    },
+    {
+      "path": "addons/payment_authorize/controllers/main.py",
+      "code": "OD112",
+      "message": "csrf=False lets other sites submit this form on the user's behalf",
+      "count": 1
+    },
+    {
+      "path": "addons/payment_buckaroo/controllers/main.py",
+      "code": "OD111",
+      "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
+      "count": 2
+    },
+    {
+      "path": "addons/payment_buckaroo/controllers/main.py",
+      "code": "OD112",
+      "message": "csrf=False lets other sites submit this form on the user's behalf",
+      "count": 2
+    },
+    {
+      "path": "addons/payment_custom/controllers/main.py",
+      "code": "OD111",
+      "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
+      "count": 1
+    },
+    {
+      "path": "addons/payment_custom/controllers/main.py",
+      "code": "OD112",
+      "message": "csrf=False lets other sites submit this form on the user's behalf",
+      "count": 1
+    },
+    {
+      "path": "addons/payment_demo/controllers/main.py",
+      "code": "OD111",
+      "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
+      "count": 1
+    },
+    {
+      "path": "addons/payment_ecpay/controllers/main.py",
+      "code": "OD111",
+      "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
+      "count": 2
+    },
+    {
+      "path": "addons/payment_ecpay/controllers/main.py",
+      "code": "OD112",
+      "message": "csrf=False lets other sites submit this form on the user's behalf",
+      "count": 2
+    },
+    {
+      "path": "addons/payment_flutterwave/controllers/main.py",
+      "code": "OD111",
+      "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
+      "count": 1
+    },
+    {
+      "path": "addons/payment_flutterwave/controllers/main.py",
+      "code": "OD112",
+      "message": "csrf=False lets other sites submit this form on the user's behalf",
+      "count": 1
+    },
+    {
+      "path": "addons/payment_iyzico/controllers/main.py",
+      "code": "OD112",
+      "message": "csrf=False lets other sites submit this form on the user's behalf",
+      "count": 2
+    },
+    {
+      "path": "addons/payment_mercado_pago/controllers/payment.py",
+      "code": "OD111",
+      "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
+      "count": 1
+    },
+    {
+      "path": "addons/payment_mercado_pago/controllers/payment.py",
+      "code": "OD112",
+      "message": "csrf=False lets other sites submit this form on the user's behalf",
+      "count": 1
+    },
+    {
+      "path": "addons/payment_mollie/controllers/main.py",
+      "code": "OD112",
+      "message": "csrf=False lets other sites submit this form on the user's behalf",
+      "count": 2
+    },
+    {
+      "path": "addons/payment_nuvei/controllers/main.py",
+      "code": "OD111",
+      "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
+      "count": 2
+    },
+    {
+      "path": "addons/payment_nuvei/controllers/main.py",
+      "code": "OD112",
+      "message": "csrf=False lets other sites submit this form on the user's behalf",
+      "count": 1
+    },
+    {
+      "path": "addons/payment_paymob/controllers/main.py",
+      "code": "OD111",
+      "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
+      "count": 2
+    },
+    {
+      "path": "addons/payment_paymob/controllers/main.py",
+      "code": "OD112",
+      "message": "csrf=False lets other sites submit this form on the user's behalf",
+      "count": 1
+    },
+    {
+      "path": "addons/payment_paypal/controllers/main.py",
+      "code": "OD111",
+      "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
+      "count": 1
+    },
+    {
+      "path": "addons/payment_paypal/controllers/main.py",
+      "code": "OD112",
+      "message": "csrf=False lets other sites submit this form on the user's behalf",
+      "count": 1
+    },
+    {
+      "path": "addons/payment_payu/controllers/main.py",
+      "code": "OD111",
+      "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
+      "count": 2
+    },
+    {
+      "path": "addons/payment_payu/controllers/main.py",
+      "code": "OD112",
+      "message": "csrf=False lets other sites submit this form on the user's behalf",
+      "count": 2
+    },
+    {
+      "path": "addons/payment_razorpay/controllers/main.py",
+      "code": "OD111",
+      "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
+      "count": 2
+    },
+    {
+      "path": "addons/payment_razorpay/controllers/main.py",
+      "code": "OD112",
+      "message": "csrf=False lets other sites submit this form on the user's behalf",
+      "count": 2
+    },
+    {
+      "path": "addons/payment_redsys/controllers/main.py",
+      "code": "OD111",
+      "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
+      "count": 2
+    },
+    {
+      "path": "addons/payment_redsys/controllers/main.py",
+      "code": "OD112",
+      "message": "csrf=False lets other sites submit this form on the user's behalf",
+      "count": 1
+    },
+    {
+      "path": "addons/payment_stripe/controllers/main.py",
+      "code": "OD111",
+      "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
+      "count": 3
+    },
+    {
+      "path": "addons/payment_stripe/controllers/main.py",
+      "code": "OD112",
+      "message": "csrf=False lets other sites submit this form on the user's behalf",
+      "count": 2
+    },
+    {
+      "path": "addons/payment_toss_payments/controllers/main.py",
+      "code": "OD111",
+      "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
+      "count": 3
+    },
+    {
+      "path": "addons/payment_toss_payments/controllers/main.py",
+      "code": "OD112",
+      "message": "csrf=False lets other sites submit this form on the user's behalf",
+      "count": 1
+    },
+    {
+      "path": "addons/payment_worldline/controllers/main.py",
+      "code": "OD111",
+      "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
+      "count": 2
+    },
+    {
+      "path": "addons/payment_worldline/controllers/main.py",
+      "code": "OD112",
+      "message": "csrf=False lets other sites submit this form on the user's behalf",
+      "count": 1
+    },
+    {
+      "path": "addons/payment_xendit/controllers/main.py",
+      "code": "OD111",
+      "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
+      "count": 2
+    },
+    {
+      "path": "addons/payment_xendit/controllers/main.py",
+      "code": "OD112",
+      "message": "csrf=False lets other sites submit this form on the user's behalf",
+      "count": 1
+    },
+    {
+      "path": "addons/point_of_sale/controllers/customer_display.py",
+      "code": "OD111",
+      "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
+      "count": 2
+    },
+    {
+      "path": "addons/point_of_sale/controllers/main.py",
+      "code": "OD111",
+      "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
+      "count": 2
+    },
+    {
+      "path": "addons/point_of_sale/wizard/pos_make_invoice.py",
+      "code": "OD103",
+      "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
+      "count": 2
+    },
+    {
+      "path": "addons/populate/cli/populate.py",
+      "code": "OD103",
+      "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
+      "count": 1
+    },
+    {
+      "path": "addons/populate/models/job.py",
+      "code": "OD103",
+      "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
+      "count": 1
+    },
+    {
+      "path": "addons/portal/controllers/portal.py",
+      "code": "OD111",
+      "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
+      "count": 2
+    },
+    {
+      "path": "addons/pos_adyen/controllers/main.py",
+      "code": "OD111",
+      "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
+      "count": 1
+    },
+    {
+      "path": "addons/pos_bancontact_pay/controllers/webhook.py",
+      "code": "OD112",
+      "message": "csrf=False lets other sites submit this form on the user's behalf",
+      "count": 1
+    },
+    {
+      "path": "addons/pos_mercado_pago/controllers/main.py",
+      "code": "OD111",
+      "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
+      "count": 1
+    },
+    {
+      "path": "addons/pos_mercado_pago/controllers/main.py",
+      "code": "OD112",
+      "message": "csrf=False lets other sites submit this form on the user's behalf",
+      "count": 1
+    },
+    {
+      "path": "addons/pos_mollie/controllers/webhook.py",
+      "code": "OD111",
+      "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
+      "count": 1
+    },
+    {
+      "path": "addons/pos_mollie/controllers/webhook.py",
+      "code": "OD112",
+      "message": "csrf=False lets other sites submit this form on the user's behalf",
+      "count": 1
+    },
+    {
+      "path": "addons/pos_online_payment/controllers/payment_portal.py",
+      "code": "OD111",
+      "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
+      "count": 3
+    },
+    {
+      "path": "addons/pos_qfpay/controllers/main.py",
+      "code": "OD111",
+      "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
+      "count": 1
+    },
+    {
+      "path": "addons/pos_qfpay/controllers/main.py",
+      "code": "OD112",
+      "message": "csrf=False lets other sites submit this form on the user's behalf",
+      "count": 1
+    },
+    {
+      "path": "addons/pos_safaricom/controllers/main.py",
+      "code": "OD111",
+      "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
+      "count": 3
+    },
+    {
+      "path": "addons/pos_safaricom/controllers/main.py",
+      "code": "OD112",
+      "message": "csrf=False lets other sites submit this form on the user's behalf",
+      "count": 3
+    },
+    {
+      "path": "addons/pos_self_order/controllers/orders.py",
+      "code": "OD111",
+      "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
+      "count": 5
+    },
+    {
+      "path": "addons/pos_self_order_bancontact_pay/controllers/kiosk.py",
+      "code": "OD111",
+      "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
+      "count": 1
+    },
+    {
+      "path": "addons/pos_sumup/controllers/webhook.py",
+      "code": "OD111",
+      "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
+      "count": 1
+    },
+    {
+      "path": "addons/pos_sumup/controllers/webhook.py",
+      "code": "OD112",
+      "message": "csrf=False lets other sites submit this form on the user's behalf",
+      "count": 1
+    },
+    {
+      "path": "addons/pos_viva_com/controllers/main.py",
+      "code": "OD111",
+      "message": "route with auth='none' calls sudo(); check that every record it reads or writes is filtered by an access check",
+      "count": 1
+    },
+    {
+      "path": "addons/pos_viva_com/controllers/main.py",
+      "code": "OD111",
+      "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
+      "count": 1
+    },
+    {
+      "path": "addons/pos_viva_com/controllers/main.py",
+      "code": "OD112",
+      "message": "csrf=False lets other sites submit this form on the user's behalf",
+      "count": 1
+    },
+    {
+      "path": "addons/product/data/product_demo.xml",
+      "code": "OD301",
+      "message": "module product defines no XML id 'product.acoustic_ptav_black'",
+      "count": 1
+    },
+    {
+      "path": "addons/product/data/product_demo.xml",
+      "code": "OD301",
+      "message": "module product defines no XML id 'product.acoustic_ptav_white'",
+      "count": 1
+    },
+    {
+      "path": "addons/product/data/product_demo.xml",
+      "code": "OD301",
+      "message": "module product defines no XML id 'product.pav_large_desk_glass'",
+      "count": 1
+    },
+    {
+      "path": "addons/product/data/product_demo.xml",
+      "code": "OD301",
+      "message": "module product defines no XML id 'product.pav_large_desk_metal'",
+      "count": 1
+    },
+    {
+      "path": "addons/product/data/product_demo.xml",
+      "code": "OD301",
+      "message": "module product defines no XML id 'product.pav_large_desk_wood'",
+      "count": 1
+    },
+    {
+      "path": "addons/product/data/product_demo.xml",
+      "code": "OD301",
+      "message": "module product defines no XML id 'product.pav_sofa_leather'",
+      "count": 1
+    },
+    {
+      "path": "addons/product/data/product_demo.xml",
+      "code": "OD301",
+      "message": "module product defines no XML id 'product.pav_sofa_linen'",
+      "count": 1
+    },
+    {
+      "path": "addons/product/data/product_demo.xml",
+      "code": "OD301",
+      "message": "module product defines no XML id 'product.pav_sofa_velvet'",
+      "count": 1
+    },
+    {
+      "path": "addons/product/data/product_demo.xml",
+      "code": "OD301",
+      "message": "module product defines no XML id 'product.product_11_attribute_1_value_1'",
+      "count": 1
+    },
+    {
+      "path": "addons/product/data/product_demo.xml",
+      "code": "OD301",
+      "message": "module product defines no XML id 'product.product_4_attribute_1_value_1'",
+      "count": 2
+    },
+    {
+      "path": "addons/product/data/product_demo.xml",
+      "code": "OD301",
+      "message": "module product defines no XML id 'product.product_4_attribute_1_value_3'",
+      "count": 2
+    },
+    {
+      "path": "addons/product/data/product_demo.xml",
+      "code": "OD301",
+      "message": "module product defines no XML id 'product.product_4_attribute_2_value_1'",
+      "count": 3
+    },
+    {
+      "path": "addons/product/data/product_demo.xml",
+      "code": "OD301",
+      "message": "module product defines no XML id 'product.product_4_attribute_2_value_2'",
+      "count": 3
+    },
+    {
+      "path": "addons/product/data/product_demo.xml",
+      "code": "OD301",
+      "message": "module product defines no XML id 'product.product_template_13'",
+      "count": 1
+    },
+    {
+      "path": "addons/product/data/product_demo.xml",
+      "code": "OD301",
+      "message": "module product defines no XML id 'product.product_template_5'",
+      "count": 1
+    },
+    {
+      "path": "addons/product/data/product_demo.xml",
+      "code": "OD301",
+      "message": "module product defines no XML id 'product.product_template_8'",
+      "count": 4
+    },
+    {
+      "path": "addons/product/data/product_demo.xml",
+      "code": "OD301",
+      "message": "module product defines no XML id 'product.sofa_product_template'",
+      "count": 4
+    },
+    {
+      "path": "addons/product/data/product_demo.xml",
+      "code": "OD308",
+      "message": "'product.product_11_attribute_1_value_2' is defined further down this file, which loads after this reference",
+      "count": 1
+    },
+    {
+      "path": "addons/product/data/product_demo.xml",
+      "code": "OD308",
+      "message": "'product.product_4_attribute_1_value_2' is defined further down this file, which loads after this reference",
+      "count": 1
+    },
+    {
+      "path": "addons/product/models/product_product.py",
+      "code": "OD105",
+      "message": "copy() override never calls super(), so other modules' overrides and the ORM itself are skipped",
+      "count": 1
+    },
+    {
+      "path": "addons/product/populate/benchmarks.xml",
+      "code": "OD502",
+      "message": "'populate/benchmarks.xml' is not in the manifest's data or demo, so Odoo never loads it",
+      "count": 1
+    },
+    {
+      "path": "addons/product/populate/common.xml",
+      "code": "OD502",
+      "message": "'populate/common.xml' is not in the manifest's data or demo, so Odoo never loads it",
+      "count": 1
+    },
+    {
+      "path": "addons/product/populate/config_parameter.xml",
+      "code": "OD502",
+      "message": "'populate/config_parameter.xml' is not in the manifest's data or demo, so Odoo never loads it",
+      "count": 1
+    },
+    {
+      "path": "addons/product/populate/populate_demo.xml",
+      "code": "OD502",
+      "message": "'populate/populate_demo.xml' is not in the manifest's data or demo, so Odoo never loads it",
+      "count": 1
+    },
+    {
+      "path": "addons/project/controllers/portal.py",
+      "code": "OD111",
+      "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
+      "count": 1
+    },
+    {
+      "path": "addons/project/models/project_task_type.py",
+      "code": "OD103",
+      "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
+      "count": 1
+    },
+    {
+      "path": "addons/project/populate/benchmarks.xml",
+      "code": "OD502",
+      "message": "'populate/benchmarks.xml' is not in the manifest's data or demo, so Odoo never loads it",
+      "count": 1
+    },
+    {
+      "path": "addons/project/populate/populate_demo.xml",
+      "code": "OD502",
+      "message": "'populate/populate_demo.xml' is not in the manifest's data or demo, so Odoo never loads it",
+      "count": 1
+    },
+    {
+      "path": "addons/purchase/views/purchase_views.xml",
+      "code": "OD303",
+      "message": "XML id 'menu_product_in_config_purchase' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/purchase_product_matrix/views/purchase_views.xml",
+      "code": "OD304",
+      "message": "'is_configurable_product': purchase.order has no field 'is_configurable_product'",
+      "count": 1
+    },
+    {
+      "path": "addons/purchase_product_matrix/views/purchase_views.xml",
+      "code": "OD304",
+      "message": "'product_no_variant_attribute_value_ids': purchase.order has no field 'product_no_variant_attribute_value_ids'",
+      "count": 1
+    },
+    {
+      "path": "addons/purchase_product_matrix/views/purchase_views.xml",
+      "code": "OD304",
+      "message": "'product_template_attribute_value_ids': purchase.order has no field 'product_template_attribute_value_ids'",
+      "count": 1
+    },
+    {
+      "path": "addons/rpc/controllers/xmlrpc.py",
+      "code": "OD112",
+      "message": "csrf=False lets other sites submit this form on the user's behalf",
+      "count": 2
+    },
+    {
+      "path": "addons/sale/controllers/portal.py",
+      "code": "OD111",
+      "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
+      "count": 2
+    },
+    {
+      "path": "addons/sale/data/sale_demo.xml",
+      "code": "OD303",
+      "message": "XML id 'portal_sale_order_2' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/sale/data/sale_demo.xml",
+      "code": "OD303",
+      "message": "XML id 'sale_order_11' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/sale/data/sale_demo.xml",
+      "code": "OD303",
+      "message": "XML id 'sale_order_15' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/sale/data/sale_demo.xml",
+      "code": "OD303",
+      "message": "XML id 'sale_order_17' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/sale/data/sale_demo.xml",
+      "code": "OD303",
+      "message": "XML id 'sale_order_18' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/sale/data/sale_demo.xml",
+      "code": "OD303",
+      "message": "XML id 'sale_order_9' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/sale/populate/benchmarks.xml",
+      "code": "OD502",
+      "message": "'populate/benchmarks.xml' is not in the manifest's data or demo, so Odoo never loads it",
+      "count": 1
+    },
+    {
+      "path": "addons/sale/populate/populate_demo.xml",
+      "code": "OD502",
+      "message": "'populate/populate_demo.xml' is not in the manifest's data or demo, so Odoo never loads it",
+      "count": 1
+    },
+    {
+      "path": "addons/sale_gelato/controllers/main.py",
+      "code": "OD111",
+      "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
+      "count": 1
+    },
+    {
+      "path": "addons/sale_gelato/controllers/main.py",
+      "code": "OD112",
+      "message": "csrf=False lets other sites submit this form on the user's behalf",
+      "count": 1
+    },
+    {
+      "path": "addons/sale_loyalty/controllers/gift_card.py",
+      "code": "OD111",
+      "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
+      "count": 1
+    },
+    {
+      "path": "addons/sale_management/controllers/portal.py",
+      "code": "OD111",
+      "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
+      "count": 1
+    },
+    {
+      "path": "addons/sale_stock/controllers/portal.py",
+      "code": "OD111",
+      "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
+      "count": 1
+    },
+    {
+      "path": "addons/sale_stock/controllers/return_order.py",
+      "code": "OD111",
+      "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
+      "count": 1
+    },
+    {
+      "path": "addons/sale_timesheet/data/sale_service_demo.xml",
+      "code": "OD303",
+      "message": "XML id 'sale_order_1' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/sale_timesheet/data/sale_service_demo.xml",
+      "code": "OD303",
+      "message": "XML id 'sale_order_2' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/sale_timesheet/data/sale_service_demo.xml",
+      "code": "OD303",
+      "message": "XML id 'sale_order_3' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/sms/controllers/main.py",
+      "code": "OD111",
+      "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
+      "count": 1
+    },
+    {
+      "path": "addons/sms_twilio/controllers/controllers.py",
+      "code": "OD111",
+      "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
+      "count": 1
+    },
+    {
+      "path": "addons/sms_twilio/controllers/controllers.py",
+      "code": "OD112",
+      "message": "csrf=False lets other sites submit this form on the user's behalf",
+      "count": 1
+    },
+    {
+      "path": "addons/snailmail/controller/snailmail_webhook.py",
+      "code": "OD111",
+      "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
+      "count": 1
+    },
+    {
+      "path": "addons/snailmail/controller/snailmail_webhook.py",
+      "code": "OD112",
+      "message": "csrf=False lets other sites submit this form on the user's behalf",
+      "count": 1
+    },
+    {
+      "path": "addons/snailmail/models/snailmail_letter.py",
+      "code": "OD103",
+      "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
+      "count": 2
+    },
+    {
+      "path": "addons/stock/models/stock_orderpoint.py",
+      "code": "OD103",
+      "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
+      "count": 1
+    },
+    {
+      "path": "addons/stock/models/stock_quant.py",
+      "code": "OD105",
+      "message": "copy() override never calls super(), so other modules' overrides and the ORM itself are skipped",
+      "count": 1
+    },
+    {
+      "path": "addons/stock/models/stock_rule.py",
+      "code": "OD103",
+      "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
+      "count": 1
+    },
+    {
+      "path": "addons/stock/populate/benchmarks.xml",
+      "code": "OD502",
+      "message": "'populate/benchmarks.xml' is not in the manifest's data or demo, so Odoo never loads it",
+      "count": 1
+    },
+    {
+      "path": "addons/stock/populate/populate_demo.xml",
+      "code": "OD502",
+      "message": "'populate/populate_demo.xml' is not in the manifest's data or demo, so Odoo never loads it",
+      "count": 1
+    },
+    {
+      "path": "addons/survey/controllers/main.py",
+      "code": "OD111",
+      "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
+      "count": 3
+    },
+    {
+      "path": "addons/survey/data/survey_demo_certification.xml",
+      "code": "OD303",
+      "message": "XML id 'vendor_certification_page_2_question_2_choice_5' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/test_import_export/models/models_export_impex.py",
+      "code": "OD205",
+      "message": "'value' is a Boolean field elsewhere and is redefined here as Char",
+      "count": 3
+    },
+    {
+      "path": "addons/test_import_export/models/models_export_impex.py",
+      "code": "OD205",
+      "message": "'value' is a Boolean field elsewhere and is redefined here as Date",
+      "count": 1
+    },
+    {
+      "path": "addons/test_import_export/models/models_export_impex.py",
+      "code": "OD205",
+      "message": "'value' is a Boolean field elsewhere and is redefined here as Datetime",
+      "count": 1
+    },
+    {
+      "path": "addons/test_import_export/models/models_export_impex.py",
+      "code": "OD205",
+      "message": "'value' is a Boolean field elsewhere and is redefined here as Float",
+      "count": 2
+    },
+    {
+      "path": "addons/test_import_export/models/models_export_impex.py",
+      "code": "OD205",
+      "message": "'value' is a Boolean field elsewhere and is redefined here as Integer",
+      "count": 2
+    },
+    {
+      "path": "addons/test_import_export/models/models_export_impex.py",
+      "code": "OD205",
+      "message": "'value' is a Boolean field elsewhere and is redefined here as Many2many",
+      "count": 1
+    },
+    {
+      "path": "addons/test_import_export/models/models_export_impex.py",
+      "code": "OD205",
+      "message": "'value' is a Boolean field elsewhere and is redefined here as Many2one",
+      "count": 1
+    },
+    {
+      "path": "addons/test_import_export/models/models_export_impex.py",
+      "code": "OD205",
+      "message": "'value' is a Boolean field elsewhere and is redefined here as One2many",
+      "count": 1
+    },
+    {
+      "path": "addons/test_import_export/models/models_export_impex.py",
+      "code": "OD205",
+      "message": "'value' is a Boolean field elsewhere and is redefined here as Reference",
+      "count": 1
+    },
+    {
+      "path": "addons/test_import_export/models/models_export_impex.py",
+      "code": "OD205",
+      "message": "'value' is a Boolean field elsewhere and is redefined here as Selection",
+      "count": 2
+    },
+    {
+      "path": "addons/test_import_export/models/models_export_impex.py",
+      "code": "OD205",
+      "message": "'value' is a Boolean field elsewhere and is redefined here as Text",
+      "count": 1
+    },
+    {
+      "path": "addons/test_mail/security/ir.access.csv",
+      "code": "OD402",
+      "message": "base.group_portal gets write, create or unlink on mail.test.access; public and portal access should be read-only and go through controllers",
+      "count": 1
+    },
+    {
+      "path": "addons/test_mail/security/ir.access.csv",
+      "code": "OD402",
+      "message": "base.group_portal gets write, create or unlink on mail.test.track.duration.mixin; public and portal access should be read-only and go through controllers",
+      "count": 1
+    },
+    {
+      "path": "addons/test_mail_full/models/test_mail_models_mail.py",
+      "code": "OD401",
+      "message": "model 'mail.test.portal.no.access' has no ir.model.access rule, so only the superuser can use it",
+      "count": 1
+    },
+    {
+      "path": "addons/test_mail_full/security/ir.access.csv",
+      "code": "OD402",
+      "message": "base.group_portal gets write, create or unlink on mail.test.portal; public and portal access should be read-only and go through controllers",
+      "count": 1
+    },
+    {
+      "path": "addons/test_populate/populate/sample_blueprints.xml",
+      "code": "OD502",
+      "message": "'populate/sample_blueprints.xml' is not in the manifest's data or demo, so Odoo never loads it",
+      "count": 1
+    },
+    {
+      "path": "addons/test_website/controllers/main.py",
+      "code": "OD111",
+      "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
+      "count": 1
+    },
+    {
+      "path": "addons/web/controllers/binary.py",
+      "code": "OD111",
+      "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
+      "count": 2
+    },
+    {
+      "path": "addons/web/controllers/database.py",
+      "code": "OD112",
+      "message": "csrf=False lets other sites submit this form on the user's behalf",
+      "count": 7
+    },
+    {
+      "path": "addons/web/controllers/session.py",
+      "code": "OD112",
+      "message": "csrf=False lets other sites submit this form on the user's behalf",
+      "count": 1
+    },
+    {
+      "path": "addons/web/controllers/webclient.py",
+      "code": "OD111",
+      "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
+      "count": 1
+    },
+    {
+      "path": "addons/website/controllers/form.py",
+      "code": "OD103",
+      "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
+      "count": 1
+    },
+    {
+      "path": "addons/website/controllers/form.py",
+      "code": "OD112",
+      "message": "csrf=False lets other sites submit this form on the user's behalf",
+      "count": 1
+    },
+    {
+      "path": "addons/website/controllers/main.py",
+      "code": "OD111",
+      "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
+      "count": 8
+    },
+    {
+      "path": "addons/website/controllers/model_page.py",
+      "code": "OD111",
+      "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
+      "count": 1
+    },
+    {
+      "path": "addons/website/models/mixins.py",
+      "code": "OD401",
+      "message": "model 'website.published.multi.mixin' has no ir.model.access rule, so only the superuser can use it",
+      "count": 1
+    },
+    {
+      "path": "addons/website/models/website_page_properties.py",
+      "code": "OD205",
+      "message": "'target_model_id' is a Reference field elsewhere and is redefined here as Many2one",
+      "count": 1
+    },
+    {
+      "path": "addons/website_blog/controllers/main.py",
+      "code": "OD111",
+      "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
+      "count": 1
+    },
+    {
+      "path": "addons/website_crm_iap_reveal/models/crm_reveal_rule.py",
+      "code": "OD103",
+      "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
+      "count": 1
+    },
+    {
+      "path": "addons/website_crm_partner_assign/data/crm_lead_demo.xml",
+      "code": "OD301",
+      "message": "module website_crm_partner_assign defines no XML id 'website_crm_partner_assign.'",
+      "count": 2
+    },
+    {
+      "path": "addons/website_customer/controllers/main.py",
+      "code": "OD111",
+      "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
+      "count": 2
+    },
+    {
+      "path": "addons/website_customer/data/res_partner_demo.xml",
+      "code": "OD303",
+      "message": "XML id 'base.res_partner_3' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/website_event/controllers/main.py",
+      "code": "OD111",
+      "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
+      "count": 3
+    },
+    {
+      "path": "addons/website_event_booth/controllers/event_booth.py",
+      "code": "OD111",
+      "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
+      "count": 2
+    },
+    {
+      "path": "addons/website_event_exhibitor/controllers/exhibitor.py",
+      "code": "OD111",
+      "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
+      "count": 2
+    },
+    {
+      "path": "addons/website_event_sale/data/event_data.xml",
+      "code": "OD301",
+      "message": "module event defines no XML id 'event.event_type_data_ticket'",
+      "count": 1
+    },
+    {
+      "path": "addons/website_event_track/controllers/event_track.py",
+      "code": "OD111",
+      "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
+      "count": 3
+    },
+    {
+      "path": "addons/website_event_track/data/event_data.xml",
+      "code": "OD301",
+      "message": "module event defines no XML id 'event.event_type_data_conference'",
+      "count": 1
+    },
+    {
+      "path": "addons/website_event_track_live/controllers/track_live.py",
+      "code": "OD111",
+      "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
+      "count": 1
+    },
+    {
+      "path": "addons/website_event_track_quiz/controllers/event_track_quiz.py",
+      "code": "OD111",
+      "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
+      "count": 2
+    },
+    {
+      "path": "addons/website_forum/controllers/website_forum.py",
+      "code": "OD111",
+      "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
+      "count": 1
+    },
+    {
+      "path": "addons/website_forum/security/ir.access.csv",
+      "code": "OD402",
+      "message": "base.group_portal gets write, create or unlink on forum.post.comment; public and portal access should be read-only and go through controllers",
+      "count": 1
+    },
+    {
+      "path": "addons/website_forum/security/ir.access.csv",
+      "code": "OD402",
+      "message": "base.group_portal gets write, create or unlink on forum.post.vote; public and portal access should be read-only and go through controllers",
+      "count": 1
+    },
+    {
+      "path": "addons/website_forum/security/ir.access.csv",
+      "code": "OD402",
+      "message": "base.group_portal gets write, create or unlink on forum.post; public and portal access should be read-only and go through controllers",
+      "count": 1
+    },
+    {
+      "path": "addons/website_google_map/controllers/main.py",
+      "code": "OD111",
+      "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
+      "count": 1
+    },
+    {
+      "path": "addons/website_hr_recruitment/controllers/main.py",
+      "code": "OD111",
+      "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
+      "count": 1
+    },
+    {
+      "path": "addons/website_mail/controllers/main.py",
+      "code": "OD111",
+      "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
+      "count": 2
+    },
+    {
+      "path": "addons/website_mail_group/controllers/main.py",
+      "code": "OD111",
+      "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
+      "count": 1
+    },
+    {
+      "path": "addons/website_mass_mailing/controllers/main.py",
+      "code": "OD111",
+      "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
+      "count": 1
+    },
+    {
+      "path": "addons/website_partner/controllers/main.py",
+      "code": "OD111",
+      "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
+      "count": 1
+    },
+    {
+      "path": "addons/website_payment/controllers/portal.py",
+      "code": "OD111",
+      "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
+      "count": 1
+    },
+    {
+      "path": "addons/website_profile/controllers/main.py",
+      "code": "OD111",
+      "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
+      "count": 3
+    },
+    {
+      "path": "addons/website_sale/controllers/cart.py",
+      "code": "OD111",
+      "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
+      "count": 2
+    },
+    {
+      "path": "addons/website_sale/controllers/delivery.py",
+      "code": "OD111",
+      "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
+      "count": 2
+    },
+    {
+      "path": "addons/website_sale/controllers/donation.py",
+      "code": "OD111",
+      "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
+      "count": 1
+    },
+    {
+      "path": "addons/website_sale/controllers/main.py",
+      "code": "OD111",
+      "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
+      "count": 10
+    },
+    {
+      "path": "addons/website_sale/controllers/reorder.py",
+      "code": "OD111",
+      "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
+      "count": 1
+    },
+    {
+      "path": "addons/website_sale/controllers/website.py",
+      "code": "OD111",
+      "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
+      "count": 1
+    },
+    {
+      "path": "addons/website_sale/controllers/wishlist.py",
+      "code": "OD111",
+      "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
+      "count": 3
+    },
+    {
+      "path": "addons/website_sale/data/demo.xml",
+      "code": "OD301",
+      "message": "module product defines no XML id 'product.pav_sofa_linen'",
+      "count": 1
+    },
+    {
+      "path": "addons/website_sale/data/demo.xml",
+      "code": "OD301",
+      "message": "module product defines no XML id 'product.product_4_attribute_1_value_1'",
+      "count": 2
+    },
+    {
+      "path": "addons/website_sale/data/demo.xml",
+      "code": "OD301",
+      "message": "module product defines no XML id 'product.product_4_attribute_2_value_1'",
+      "count": 2
+    },
+    {
+      "path": "addons/website_sale/data/demo.xml",
+      "code": "OD301",
+      "message": "module sale defines no XML id 'sale.product_product_1_product_product'",
+      "count": 2
+    },
+    {
+      "path": "addons/website_sale/data/demo.xml",
+      "code": "OD301",
+      "message": "module website_sale defines no XML id 'website_sale.product_1_attribute_3_value_1'",
+      "count": 1
+    },
+    {
+      "path": "addons/website_sale/data/demo.xml",
+      "code": "OD301",
+      "message": "module website_sale defines no XML id 'website_sale.product_1_attribute_3_value_3'",
+      "count": 1
+    },
+    {
+      "path": "addons/website_sale/data/demo.xml",
+      "code": "OD303",
+      "message": "XML id 'product.consu_delivery_03_product_template' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/website_sale/data/demo.xml",
+      "code": "OD303",
+      "message": "XML id 'product.product_product_1_product_template' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/website_sale/data/demo.xml",
+      "code": "OD303",
+      "message": "XML id 'product.product_product_2_product_template' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/website_sale/data/demo.xml",
+      "code": "OD303",
+      "message": "XML id 'product.product_product_4_product_template' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/website_sale/data/demo.xml",
+      "code": "OD303",
+      "message": "XML id 'public_category_furnitures_chairs' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/website_sale/data/demo.xml",
+      "code": "OD303",
+      "message": "XML id 'public_category_furnitures_couches' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/website_sale/data/demo.xml",
+      "code": "OD308",
+      "message": "'website_sale.product_1_attribute_3_value_2' is defined further down this file, which loads after this reference",
+      "count": 1
+    },
+    {
+      "path": "addons/website_sale/data/mail_template_data.xml",
+      "code": "OD308",
+      "message": "'website_sale.model_withdrawal_request' is defined in data/data.xml, which loads after this reference",
+      "count": 1
+    },
+    {
+      "path": "addons/website_sale/models/product_stock_notification.py",
+      "code": "OD401",
+      "message": "model 'product.stock.notification' has no ir.model.access rule, so only the superuser can use it",
+      "count": 1
+    },
+    {
+      "path": "addons/website_sale/security/ir.access.csv",
+      "code": "OD402",
+      "message": "base.group_portal gets write, create or unlink on product.wishlist; public and portal access should be read-only and go through controllers",
+      "count": 1
+    },
+    {
+      "path": "addons/website_sale_collect/controllers/delivery.py",
+      "code": "OD111",
+      "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
+      "count": 1
+    },
+    {
+      "path": "addons/website_sale_loyalty/controllers/main.py",
+      "code": "OD111",
+      "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
+      "count": 1
+    },
+    {
+      "path": "addons/website_sale_stock/controllers/location_selector.py",
+      "code": "OD111",
+      "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
+      "count": 1
+    },
+    {
+      "path": "addons/website_slides/controllers/main.py",
+      "code": "OD111",
+      "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
+      "count": 5
+    },
+    {
+      "path": "addons/website_slides/data/slide_user_demo.xml",
+      "code": "OD303",
+      "message": "XML id 'slide_channel_0_partner_demo' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/website_slides/data/slide_user_demo.xml",
+      "code": "OD303",
+      "message": "XML id 'slide_channel_0_partner_demo_portal' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/website_slides/data/slide_user_demo.xml",
+      "code": "OD303",
+      "message": "XML id 'slide_channel_1_partner_demo' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/website_slides/data/slide_user_demo.xml",
+      "code": "OD303",
+      "message": "XML id 'slide_channel_1_partner_demo_portal' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/website_slides/data/slide_user_demo.xml",
+      "code": "OD303",
+      "message": "XML id 'slide_slide_1_0_partner_demo' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/website_slides/models/slide_slide.py",
+      "code": "OD206",
+      "message": "no indexed module defines model 'google.drive.config'",
+      "count": 1
+    },
+    {
+      "path": "odoo/addons/base/data/res_users_demo.xml",
+      "code": "OD303",
+      "message": "XML id 'partner_demo' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "odoo/addons/base/data/res_users_demo.xml",
+      "code": "OD303",
+      "message": "XML id 'partner_light' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "odoo/addons/base/models/assetsbundle.py",
+      "code": "OD101",
+      "message": "query built by string formatting; pass parameters separately or build it with odoo.tools.SQL",
+      "count": 1
+    },
+    {
+      "path": "odoo/addons/base/models/ir_attachment.py",
+      "code": "OD103",
+      "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
+      "count": 2
+    },
+    {
+      "path": "odoo/addons/base/models/ir_cron.py",
+      "code": "OD103",
+      "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
+      "count": 4
+    },
+    {
+      "path": "odoo/addons/base/models/ir_model.py",
+      "code": "OD401",
+      "message": "model 'ir.model.inherit' has no ir.model.access rule, so only the superuser can use it",
+      "count": 1
+    },
+    {
+      "path": "odoo/addons/base/models/ir_module.py",
+      "code": "OD103",
+      "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
+      "count": 1
+    },
+    {
+      "path": "odoo/addons/base/models/res_company.py",
+      "code": "OD105",
+      "message": "copy() override never calls super(), so other modules' overrides and the ORM itself are skipped",
+      "count": 1
+    },
+    {
+      "path": "odoo/addons/base/models/res_config.py",
+      "code": "OD105",
+      "message": "copy() override never calls super(), so other modules' overrides and the ORM itself are skipped",
+      "count": 1
+    },
+    {
+      "path": "odoo/addons/base/models/res_device.py",
+      "code": "OD103",
+      "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
+      "count": 1
+    },
+    {
+      "path": "odoo/addons/base/models/res_users.py",
+      "code": "OD205",
+      "message": "'image_1920' is a Image field elsewhere and is redefined here as Binary",
+      "count": 1
+    },
+    {
+      "path": "odoo/addons/base/populate/common.xml",
+      "code": "OD502",
+      "message": "'populate/common.xml' is not in the manifest's data or demo, so Odoo never loads it",
+      "count": 1
+    },
+    {
+      "path": "odoo/addons/base/security/ir.access.csv",
+      "code": "OD402",
+      "message": "base.group_portal gets write, create or unlink on res.users.apikeys.description; public and portal access should be read-only and go through controllers",
+      "count": 1
+    },
+    {
+      "path": "odoo/addons/base/security/ir.access.csv",
+      "code": "OD402",
+      "message": "base.group_portal gets write, create or unlink on res.users.identitycheck; public and portal access should be read-only and go through controllers",
+      "count": 1
+    },
+    {
+      "path": "odoo/addons/base/wizard/base_module_upgrade.py",
+      "code": "OD103",
+      "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
+      "count": 1
+    },
+    {
+      "path": "odoo/addons/base/wizard/base_partner_merge.py",
+      "code": "OD103",
+      "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
+      "count": 2
+    },
+    {
+      "path": "odoo/addons/test_base/models/test_orm.py",
+      "code": "OD401",
+      "message": "model 'test_orm.model.no_access' has no ir.model.access rule, so only the superuser can use it",
+      "count": 1
+    },
+    {
+      "path": "odoo/addons/test_base/models/test_orm.py",
+      "code": "OD401",
+      "message": "model 'test_orm.onchange.order' has no ir.model.access rule, so only the superuser can use it",
+      "count": 1
+    },
+    {
+      "path": "odoo/addons/test_base/models/test_orm.py",
+      "code": "OD401",
+      "message": "model 'test_orm.onchange.order.line' has no ir.model.access rule, so only the superuser can use it",
+      "count": 1
+    },
+    {
+      "path": "odoo/addons/test_base/models/test_orm.py",
+      "code": "OD401",
+      "message": "model 'test_orm.req_m2o_transient' has no ir.model.access rule, so only the superuser can use it",
+      "count": 1
+    },
+    {
+      "path": "odoo/addons/test_http/controllers.py",
+      "code": "OD112",
+      "message": "csrf=False lets other sites submit this form on the user's behalf",
+      "count": 4
+    },
+    {
+      "path": "odoo/addons/test_inherit/models/mother_base.py",
+      "code": "OD401",
+      "message": "model 'test.inherit.partner' has no ir.model.access rule, so only the superuser can use it",
+      "count": 1
+    },
+    {
+      "path": "odoo/addons/test_tests/models/models.py",
+      "code": "OD401",
+      "message": "model 'test_testing_utilities.wide' has no ir.model.access rule, so only the superuser can use it",
+      "count": 1
+    },
+    {
+      "path": "odoo/addons/test_translation/data/test.translation.model1-translated.csv",
+      "code": "OD201",
+      "message": "no indexed module defines model 'test.translation.model1-translated'",
+      "count": 1
+    },
+    {
+      "path": "odoo/addons/test_translation/models/models.py",
+      "code": "OD102",
+      "message": "format after translating: _(\"Hello %s\", name), not _(\"Hello %s\" % name)",
+      "count": 1
+    },
+    {
+      "path": "odoo/addons/test_translation/models/models.py",
+      "code": "OD401",
+      "message": "model 'test.translation.model1' has no ir.model.access rule, so only the superuser can use it",
+      "count": 1
+    },
+    {
+      "path": "odoo/addons/test_translation/models/models.py",
+      "code": "OD401",
+      "message": "model 'test.translation.model2' has no ir.model.access rule, so only the superuser can use it",
+      "count": 1
+    }
+  ]
+}

@@ -69,6 +69,33 @@ jobs:
       - name: Run the tests
         run: make test
 
+  # Odoo core is correct code, so its findings are recorded in tests/oracle/ and any change to them,
+  # new or fixed, fails here until the pull request records and explains it.
+  oracle:
+    name: Odoo core oracle (${{ matrix.series }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        series: ["18.0", "20.0"]
+    env:
+      SERIES: ${{ matrix.series }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Cache the build
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+
+      - name: Fetch the pinned Odoo core
+        run: make oracle-fetch
+
+      - name: Scan it against the recorded findings
+        run: make oracle
+
   deps:
     name: Dependencies
     runs-on: ubuntu-latest
@@ -174,6 +201,7 @@ jobs:
     needs:
       - pre-commit
       - tests
+      - oracle
       - deps
       - security
       - wheel

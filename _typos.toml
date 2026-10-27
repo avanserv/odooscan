@@ -1,4 +1,4 @@
 # The custom fixture modules are wrong on purpose: a misspelled field name is how a test proves
-# that an unknown-field rule fires.
+# that an unknown-field rule fires. The oracle baselines quote Odoo identifiers.
 [files]
-extend-exclude = ["crates/*/tests/fixtures/custom/"]
+extend-exclude = ["crates/*/tests/fixtures/custom/", "tests/oracle/"]
