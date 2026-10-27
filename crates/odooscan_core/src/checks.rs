@@ -9,6 +9,9 @@ use crate::index::{Index, Scope, Status, full_id};
 use crate::project::Module;
 use crate::xml::{LOCATOR, UNKNOWN_CONTEXT};
 
+/// Directories of upgrade scripts, which name XML ids of past versions.
+const UPGRADE_DIRS: &[&str] = &["migrations", "upgrades"];
+
 /// Directories whose XML and CSV files are not meant to be listed in the manifest.
 const UNLISTED_DIRS: &[&str] = &["tests", "i18n", "migrations", "upgrades", "doc", "docs", "examples"];
 
@@ -33,6 +36,7 @@ pub fn check_module<'m>(index: &Index<'m>, mi: usize) -> Vec<(&'m Path, RawDiag)
             index,
             module,
             scope: &scope,
+            dep_names: module.manifest.depends.iter().map(|d| d.value.as_str()).collect(),
         };
         ctx.dependencies(&mut out);
         ctx.python(&mut out);
@@ -144,6 +148,7 @@ struct Ctx<'a, 'm> {
     index: &'a Index<'m>,
     module: &'m Module,
     scope: &'a Scope,
+    dep_names: FxHashSet<&'m str>,
 }
 
 impl<'m> Ctx<'_, 'm> {
@@ -189,6 +194,14 @@ impl<'m> Ctx<'_, 'm> {
             let path = file.path.as_path();
             for class in &file.facts.classes {
                 self.class(out, path, class);
+            }
+            if !UPGRADE_DIRS.contains(&file.rel.split('/').next().unwrap_or_default()) {
+                for r in &file.facts.xml_refs {
+                    self.py_ref(out, path, r, true);
+                }
+                for r in &file.facts.group_refs {
+                    self.py_ref(out, path, r, false);
+                }
             }
             // env['x'] for a model outside depends is usually guarded by `if 'x' in self.env`, and
             // a dotless name is as likely a key of some other mapping called env.
@@ -280,12 +293,11 @@ impl<'m> Ctx<'_, 'm> {
     }
 
     fn data(&self, out: &mut Out<'m>) {
-        let dep_names: FxHashSet<&str> = self.module.manifest.depends.iter().map(|d| d.value.as_str()).collect();
         // Files the manifest does not load, such as chart template CSVs read by Python code, are skipped.
         for file in self.module.data.iter().filter(|f| f.rank.is_some()) {
             let path = file.path.as_path();
             for r in &file.facts.refs {
-                self.xml_ref(out, path, r, &dep_names);
+                self.xml_ref(out, path, r);
             }
             for view in &file.facts.views {
                 self.view(out, path, view);
@@ -296,7 +308,7 @@ impl<'m> Ctx<'_, 'm> {
         }
     }
 
-    fn xml_ref(&self, out: &mut Out<'m>, path: &'m Path, r: &XmlRef, dep_names: &FxHashSet<&str>) {
+    fn xml_ref(&self, out: &mut Out<'m>, path: &'m Path, r: &XmlRef) {
         let index = self.index;
         let id = full_id(&self.module.name, &r.id);
         match index.xmlids.get(&id) {
@@ -310,11 +322,11 @@ impl<'m> Ctx<'_, 'm> {
                     format!("'{id}' is defined by module {m}; add it to depends"),
                 );
             }
-            None => self.undefined_ref(out, path, r.pos, &id, dep_names),
+            None => self.undefined_ref(out, path, r.pos, &id),
         }
     }
 
-    fn undefined_ref(&self, out: &mut Out<'m>, path: &'m Path, pos: Pos, id: &str, dep_names: &FxHashSet<&str>) {
+    fn undefined_ref(&self, out: &mut Out<'m>, path: &'m Path, pos: Pos, id: &str) {
         let owner = id.split_once('.').map_or("", |(m, _)| m);
         match self.index.by_name.get(owner) {
             Some(&mi) if self.scope.sees(mi) => {
@@ -326,7 +338,7 @@ impl<'m> Ctx<'_, 'm> {
                 pos,
                 format!("'{id}' belongs to module {owner}; add it to depends"),
             ),
-            None if !dep_names.contains(owner) => {
+            None if !self.dep_names.contains(owner) => {
                 out.push(
                     path,
                     "OD302",
@@ -335,6 +347,29 @@ impl<'m> Ctx<'_, 'm> {
                 );
             }
             None => {}
+        }
+    }
+
+    /// Python code may name ids of modules outside the index, such as Enterprise ones, behind a
+    /// runtime check, so only ids of indexed modules are checked; `hidden` also reports those of
+    /// modules missing from depends.
+    fn py_ref(&self, out: &mut Out<'m>, path: &'m Path, r: &XmlRef, hidden: bool) {
+        let owner = r.id.split_once('.').map_or("", |(m, _)| m);
+        let Some(&mi) = self.index.by_name.get(owner) else {
+            return;
+        };
+        if !self.scope.sees(mi) {
+            if hidden {
+                let message = format!("'{}' belongs to module {owner}; add it to depends", r.id);
+                out.push(path, "OD302", r.pos, message);
+            }
+        } else if !self.index.xmlids.contains_key(&r.id) {
+            out.push(
+                path,
+                "OD301",
+                r.pos,
+                format!("module {owner} defines no XML id '{}'", r.id),
+            );
         }
     }
 

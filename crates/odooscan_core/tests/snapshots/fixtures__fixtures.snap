@@ -1,5 +1,6 @@
 ---
 source: crates/odooscan_core/tests/fixtures.rs
+assertion_line: 27
 expression: "lines.join(\"\\n\")"
 ---
 custom/bad_sale/__manifest__.py:5:25: OD503 module 'not_installed' is not on the addons path
@@ -14,17 +15,21 @@ custom/bad_sale/models/models.py:10:32: OD104 this default is computed once at i
 custom/bad_sale/models/models.py:12:40: OD203 'partner_id.country_id.cde': res.country has no field 'cde'
 custom/bad_sale/models/models.py:14:34: OD204 bad.order has no method '_compute_total'
 custom/bad_sale/models/models.py:15:32: OD201 no indexed module defines model 'res.ghost'
-custom/bad_sale/models/models.py:17:37: OD203 'partner_id.name.size': res.partner.name is not a relational field, so the path cannot continue
-custom/bad_sale/models/models.py:22:5: OD107 @api.multi no longer exists; methods always receive a recordset
-custom/bad_sale/models/models.py:23:9: OD106 name_get() is no longer called; override _compute_display_name() instead
-custom/bad_sale/models/models.py:26:9: OD105 write() override never calls super(), so other modules' overrides and the ORM itself are skipped
-custom/bad_sale/models/models.py:27:9: OD101 query built by string formatting; pass parameters separately or build it with odoo.tools.SQL
-custom/bad_sale/models/models.py:30:9: OD103 do not commit the cursor; Odoo commits when the request ends and rolls back on error
-custom/bad_sale/models/models.py:35:26: OD102 format after translating: _("Hello %s", name), not _("Hello %s" % name)
-custom/bad_sale/models/models.py:38:62: OD206 no indexed module defines model 'bad.unknown'
-custom/bad_sale/models/models.py:41:7: OD401 model 'bad.order.line' has no ir.model.access rule, so only the superuser can use it
-custom/bad_sale/models/models.py:47:9: OD113 fields_view_get() is removed; override _get_view() or get_views() instead
-custom/bad_sale/models/models.py:54:12: OD205 'name' is a Char field elsewhere and is redefined here as Text
+custom/bad_sale/models/models.py:16:33: OD301 module base defines no XML id 'base.group_nobody'
+custom/bad_sale/models/models.py:18:37: OD203 'partner_id.name.size': res.partner.name is not a relational field, so the path cannot continue
+custom/bad_sale/models/models.py:23:5: OD107 @api.multi no longer exists; methods always receive a recordset
+custom/bad_sale/models/models.py:24:9: OD106 name_get() is no longer called; override _compute_display_name() instead
+custom/bad_sale/models/models.py:27:9: OD105 write() override never calls super(), so other modules' overrides and the ORM itself are skipped
+custom/bad_sale/models/models.py:28:9: OD101 query built by string formatting; pass parameters separately or build it with odoo.tools.SQL
+custom/bad_sale/models/models.py:31:9: OD103 do not commit the cursor; Odoo commits when the request ends and rolls back on error
+custom/bad_sale/models/models.py:36:26: OD102 format after translating: _("Hello %s", name), not _("Hello %s" % name)
+custom/bad_sale/models/models.py:39:22: OD301 module base defines no XML id 'base.group_missing'
+custom/bad_sale/models/models.py:40:22: OD302 'mail.mail_menu' belongs to module mail; add it to depends
+custom/bad_sale/models/models.py:45:40: OD301 module base defines no XML id 'base.group_admin'
+custom/bad_sale/models/models.py:48:62: OD206 no indexed module defines model 'bad.unknown'
+custom/bad_sale/models/models.py:51:7: OD401 model 'bad.order.line' has no ir.model.access rule, so only the superuser can use it
+custom/bad_sale/models/models.py:57:9: OD113 fields_view_get() is removed; override _get_view() or get_views() instead
+custom/bad_sale/models/models.py:64:12: OD205 'name' is a Char field elsewhere and is redefined here as Text
 custom/bad_sale/security/ir.model.access.csv:2:1: OD402 base.group_public gets write, create or unlink on model_bad_order; public and portal access should be read-only and go through controllers
 custom/bad_sale/views/views.xml:6:13: OD306 the <tree> view is renamed <list>
 custom/bad_sale/views/views.xml:7:17: OD305 the attrs attribute is removed; write invisible, readonly or required as a Python expression
@@ -36,7 +41,7 @@ custom/bad_sale/views/views.xml:22:9: OD301 module base defines no XML id 'base.
 custom/bad_sale/views/views.xml:26:17: OD304 'vat': res.partner has no field 'vat'
 custom/bad_sale/views/views.xml:34:9: OD309 res.partner has no field 'email'
 custom/bad_sale/views/views.xml:36:5: OD303 XML id 'partner_demo' is already defined earlier in this file
-custom/bad_sale/views/views.xml:41:9: OD307 t-raw renders unescaped HTML; use t-out and wrap trusted HTML in Markup
-custom/bad_sale/views/views.xml:45:9: OD306 view_mode 'tree' is renamed 'list'
+custom/bad_sale/views/views.xml:49:9: OD307 t-raw renders unescaped HTML; use t-out and wrap trusted HTML in Markup
+custom/bad_sale/views/views.xml:53:9: OD306 view_mode 'tree' is renamed 'list'
 custom/modern19/models/partner.py:6:5: OD110 _sql_constraints is ignored; declare models.Constraint, models.Index or models.UniqueIndex attributes instead
 custom/modern19/models/partner.py:9:9: OD109 self._cr is deprecated; use self.env.cr
