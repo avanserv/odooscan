@@ -5,7 +5,7 @@ use std::path::Path;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::facts::{ClassFact, FieldFact, ModelKind, Pos, RawDiag, RecordFact, Spanned, ViewFact, XmlRef};
-use crate::index::{Index, Scope, Status, full_id};
+use crate::index::{Index, Scope, Status, ViewTree, full_id, located};
 use crate::project::Module;
 use crate::xml::{LOCATOR, UNKNOWN_CONTEXT};
 
@@ -293,6 +293,7 @@ impl<'m> Ctx<'_, 'm> {
     }
 
     fn data(&self, out: &mut Out<'m>) {
+        let mut trees: FxHashMap<String, ViewTree<'m>> = FxHashMap::default();
         // Files the manifest does not load, such as chart template CSVs read by Python code, are skipped.
         for file in self.module.data.iter().filter(|f| f.rank.is_some()) {
             let path = file.path.as_path();
@@ -301,6 +302,7 @@ impl<'m> Ctx<'_, 'm> {
             }
             for view in &file.facts.views {
                 self.view(out, path, view);
+                self.locators(out, path, view, &mut trees);
             }
             for record in &file.facts.records {
                 self.record(out, path, record);
@@ -394,6 +396,43 @@ impl<'m> Ctx<'_, 'm> {
             if let Err(e) = self.index.resolve_path(model, &joined, self.scope) {
                 out.push(path, "OD304", field.pos, e.message(&joined));
             }
+        }
+    }
+
+    /// Specs of a view must each find their element in the tree of views it extends, which is
+    /// built once per root and module.
+    fn locators(
+        &self,
+        out: &mut Out<'m>,
+        path: &'m Path,
+        view: &'m ViewFact,
+        trees: &mut FxHashMap<String, ViewTree<'m>>,
+    ) {
+        let Some(parent) = view.inherit.as_deref().filter(|_| !view.locators.is_empty()) else {
+            return;
+        };
+        let parent = full_id(&self.module.name, parent);
+        // A parent outside depends is already reported by OD302.
+        if !self.index.view_visible(&parent, self.scope) {
+            return;
+        }
+        let Some(root) = self.index.view_root(parent) else {
+            return;
+        };
+        let tree = trees
+            .entry(root.clone())
+            .or_insert_with(|| self.index.view_tree(root, self.scope));
+        for locator in &view.locators {
+            let e = located(&locator.value, &self.module.name);
+            if tree.visible.contains(&e) {
+                continue;
+            }
+            let element = format!("<{} {}=\"{}\">", e.tag, e.attr, e.value);
+            let message = match tree.hidden.get(&e) {
+                Some(m) => format!("{element} is added by module {m}, which is not in depends"),
+                None => format!("no {element} in view {} or the views that extend it", tree.root),
+            };
+            out.push(path, "OD310", locator.pos, message);
         }
     }
 

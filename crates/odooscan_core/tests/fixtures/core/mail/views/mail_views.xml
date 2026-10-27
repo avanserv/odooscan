@@ -1,3 +1,13 @@
 <odoo>
     <record id="mail_menu" model="res.groups"><field name="name">Mail</field></record>
+
+    <record id="view_partner_simple_mail" model="ir.ui.view">
+        <field name="model">res.partner</field>
+        <field name="inherit_id" ref="base.view_partner_simple"/>
+        <field name="arch" type="xml">
+            <group name="main" position="after">
+                <notebook><page name="mail_page"/></notebook>
+            </group>
+        </field>
+    </record>
 </odoo>

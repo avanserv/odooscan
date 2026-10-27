@@ -87,6 +87,7 @@ rules! {
     "OD307" "t-raw-unsafe" Security Warning Some(">=15.0"), false, "t-raw is deprecated and renders unescaped HTML; use t-out with Markup.";
     "OD308" "xmlid-used-before-definition" Correctness Error None, false, "An XML id is referenced before the file that defines it is loaded.";
     "OD309" "unknown-record-field" Correctness Error None, true, "A data record sets a field its model does not have.";
+    "OD310" "unmatched-view-locator" Correctness Error None, true, "An inherited view locates an element its parent views do not have.";
     "OD401" "model-without-access" Security Warning None, true, "A new model has no ir.model.access rule.";
     "OD402" "public-write-access" Security Warning None, false, "Public or portal users get write, create or unlink access.";
     "OD501" "manifest-data-missing" Correctness Error None, false, "A file listed in the manifest does not exist.";
