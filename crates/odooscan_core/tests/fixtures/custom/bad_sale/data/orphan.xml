@@ -1,0 +1,3 @@
+<odoo>
+    <record id="orphan" model="res.partner"><field name="name">Orphan</field></record>
+</odoo>

@@ -1,0 +1,61 @@
+from odoo import fields, models
+
+
+class Base(models.AbstractModel):
+    _name = "base"
+
+
+class ResCountry(models.Model):
+    _name = "res.country"
+
+    name = fields.Char()
+    code = fields.Char()
+
+
+class ResPartner(models.Model):
+    _name = "res.partner"
+
+    name: str = fields.Char()
+    country_id = fields.Many2one("res.country")
+    parent_id = fields.Many2one("res.partner")
+    child_ids = fields.One2many("res.partner", "parent_id")
+
+
+class ResGroups(models.Model):
+    _name = "res.groups"
+
+    name = fields.Char()
+
+
+class IrUiView(models.Model):
+    _name = "ir.ui.view"
+
+    name = fields.Char()
+    model = fields.Char()
+    arch = fields.Text()
+    inherit_id = fields.Many2one("ir.ui.view")
+
+
+class IrActionsActWindow(models.Model):
+    _name = "ir.actions.act_window"
+
+    name = fields.Char()
+    view_mode = fields.Char()
+
+
+class IrModelAccess(models.Model):
+    _name = "ir.model.access"
+
+    name = fields.Char()
+    model_id = fields.Many2one("ir.model")
+    group_id = fields.Many2one("res.groups")
+    perm_read = fields.Boolean()
+    perm_write = fields.Boolean()
+    perm_create = fields.Boolean()
+    perm_unlink = fields.Boolean()
+
+
+class IrModel(models.Model):
+    _name = "ir.model"
+
+    model = fields.Char()

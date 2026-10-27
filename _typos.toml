@@ -1,0 +1,4 @@
+# The custom fixture modules are wrong on purpose: a misspelled field name is how a test proves
+# that an unknown-field rule fires.
+[files]
+extend-exclude = ["crates/*/tests/fixtures/custom/"]

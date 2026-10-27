@@ -1,0 +1,10 @@
+<odoo>
+    <record id="view_partner_tree" model="ir.ui.view">
+        <field name="model">res.partner</field>
+        <field name="arch" type="xml">
+            <tree>
+                <field name="name" attrs="{'invisible': [('parent_id', '=', False)]}"/>
+            </tree>
+        </field>
+    </record>
+</odoo>

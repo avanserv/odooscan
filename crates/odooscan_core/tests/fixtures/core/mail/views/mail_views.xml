@@ -1,0 +1,3 @@
+<odoo>
+    <record id="mail_menu" model="res.groups"><field name="name">Mail</field></record>
+</odoo>

@@ -1,0 +1,21 @@
+{
+  "folders": [
+    { "path": ".." }
+  ],
+  "settings": {
+    "rust-analyzer.check.command": "clippy",
+    "rust-analyzer.cargo.targetDir": true,
+    "files.exclude": { "target": true },
+    "files.watcherExclude": { "**/target/**": true },
+    "search.exclude": { "**/target/**": true, "**/tests/snapshots/**": true },
+    "files.associations": { "*.snap": "plaintext" },
+    "[rust]": { "editor.formatOnSave": true }
+  },
+  "extensions": {
+    "recommendations": [
+      "rust-lang.rust-analyzer",
+      "tamasfe.even-better-toml",
+      "vadimcn.vscode-lldb"
+    ]
+  }
+}

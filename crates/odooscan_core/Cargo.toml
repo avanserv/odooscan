@@ -1,0 +1,22 @@
+[package]
+name = "odooscan_core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+csv.workspace = true
+ignore.workspace = true
+rayon.workspace = true
+roxmltree.workspace = true
+rustc-hash.workspace = true
+serde.workspace = true
+regex.workspace = true
+ruff_python_ast.workspace = true
+ruff_python_parser.workspace = true
+ruff_source_file.workspace = true
+ruff_text_size.workspace = true
+
+[dev-dependencies]
+insta.workspace = true

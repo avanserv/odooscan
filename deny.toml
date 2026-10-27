@@ -1,0 +1,32 @@
+# `make deps` and CI run every check below. A license, a source or an advisory ignored here needs
+# the argument for it written beside it.
+
+[advisories]
+# Unmaintained crates are reported for the whole graph, not only for direct dependencies.
+unmaintained = "all"
+yanked = "deny"
+
+# Permissive licenses only, each one a dependency carries today. Unicode-DFS-2016 covers the
+# Unicode name tables inside ruff's parser. A dependency under anything else fails until it is
+# argued for here.
+[licenses]
+allow = [
+    "Apache-2.0",
+    "MIT",
+    "Unicode-3.0",
+    "Unicode-DFS-2016",
+    "Unlicense",
+    "Zlib",
+]
+confidence-threshold = 0.9
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+allow-wildcard-paths = true
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+# Ruff's parser crates are not on crates.io; Cargo.toml pins them to a release tag.
+allow-git = ["https://github.com/astral-sh/ruff"]

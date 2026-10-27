@@ -1,0 +1,150 @@
+//! What one pass over a file learns: the facts the index needs and the diagnostics local rules raise.
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Pos {
+    pub line: u32,
+    pub col: u32,
+}
+
+#[derive(Clone, Debug)]
+pub struct Spanned<T> {
+    pub value: T,
+    pub pos: Pos,
+}
+
+#[derive(Debug)]
+pub struct RawDiag {
+    pub code: &'static str,
+    pub pos: Pos,
+    pub message: String,
+}
+
+impl RawDiag {
+    pub fn new(code: &'static str, pos: Pos, message: impl Into<String>) -> Self {
+        Self {
+            code,
+            pos,
+            message: message.into(),
+        }
+    }
+}
+
+/// Byte offset to 1-based line and column, for parsers that only give offsets.
+pub struct Lines {
+    starts: Vec<usize>,
+}
+
+impl Lines {
+    pub fn new(text: &str) -> Self {
+        let mut starts = vec![0];
+        starts.extend(text.match_indices('\n').map(|(i, _)| i + 1));
+        Self { starts }
+    }
+
+    pub fn pos(&self, offset: usize) -> Pos {
+        let line = self.starts.partition_point(|&s| s <= offset);
+        Pos {
+            line: line as u32,
+            col: (offset - self.starts[line - 1] + 1) as u32,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ModelKind {
+    Model,
+    Transient,
+    Abstract,
+}
+
+#[derive(Debug)]
+pub struct FieldFact {
+    pub name: String,
+    pub ftype: String,
+    pub pos: Pos,
+    pub comodel: Option<Spanned<String>>,
+    pub inverse_name: Option<Spanned<String>>,
+    pub related: Option<Spanned<String>>,
+    /// Names given to compute, inverse and search.
+    pub methods: Vec<Spanned<String>>,
+}
+
+#[derive(Debug)]
+pub struct ClassFact {
+    pub pos: Pos,
+    pub model: String,
+    /// The class declares `_name` and that name is not among its `_inherit`.
+    pub new_model: bool,
+    pub kind: ModelKind,
+    pub inherit: Vec<Spanned<String>>,
+    /// `_inherits`: parent model to delegating field.
+    pub inherits: Vec<(String, String)>,
+    pub fields: Vec<FieldFact>,
+    pub methods: Vec<String>,
+    /// Field paths given to `@api.depends`, `@api.onchange` and `@api.constrains`.
+    pub paths: Vec<Spanned<String>>,
+}
+
+#[derive(Debug, Default)]
+pub struct PyFacts {
+    pub classes: Vec<ClassFact>,
+    /// Literal model names in `env['x']`.
+    pub env_models: Vec<Spanned<String>>,
+    /// Base names of `.xml` and `.csv` files named in string literals, which Python code may load.
+    pub file_mentions: Vec<String>,
+    pub diags: Vec<RawDiag>,
+}
+
+#[derive(Debug)]
+pub struct XmlDef {
+    pub id: String,
+    pub model: Option<String>,
+    pub pos: Pos,
+}
+
+#[derive(Debug)]
+pub struct XmlRef {
+    pub id: String,
+    pub pos: Pos,
+}
+
+/// A `<field>` in a view arch. `path` holds the x2many fields whose subviews enclose it.
+#[derive(Debug)]
+pub struct ArchField {
+    pub path: Vec<String>,
+    pub pos: Pos,
+}
+
+#[derive(Debug)]
+pub struct ViewFact {
+    pub id: Option<String>,
+    pub model: Option<Spanned<String>>,
+    pub inherit: Option<String>,
+    pub fields: Vec<ArchField>,
+}
+
+#[derive(Debug)]
+pub struct RecordFact {
+    pub model: Spanned<String>,
+    pub fields: Vec<Spanned<String>>,
+}
+
+#[derive(Debug)]
+pub struct AccessRow {
+    /// An `ir.model` XML id, or a model name when `by_name` (the `ir.access` CSV format).
+    pub model: String,
+    pub by_name: bool,
+}
+
+/// Facts from an XML or CSV data file.
+#[derive(Debug, Default)]
+pub struct DataFacts {
+    /// The file is Odoo data (an `<odoo>` document or a CSV), not an asset template.
+    pub is_data: bool,
+    pub defs: Vec<XmlDef>,
+    pub refs: Vec<XmlRef>,
+    pub views: Vec<ViewFact>,
+    pub records: Vec<RecordFact>,
+    pub access: Vec<AccessRow>,
+    pub diags: Vec<RawDiag>,
+}

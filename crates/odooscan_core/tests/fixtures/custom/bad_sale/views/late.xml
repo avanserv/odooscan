@@ -1,0 +1,5 @@
+<odoo>
+    <record id="action_late" model="ir.actions.act_window">
+        <field name="name">Late</field>
+    </record>
+</odoo>

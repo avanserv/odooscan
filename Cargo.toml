@@ -1,0 +1,33 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.0.0"
+edition = "2024"
+license = "MIT"
+# Released as binaries on GitHub, not on crates.io.
+publish = false
+
+[workspace.dependencies]
+odooscan_core = { path = "crates/odooscan_core" }
+clap = { version = "4", features = ["derive", "env"] }
+csv = "1"
+ignore = "0.4"
+rayon = "1"
+roxmltree = "0.21"
+rustc-hash = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+regex = "1"
+insta = "1"
+# Ruff publishes no crates and has no plugin API (astral-sh/ruff#283), so its parser is taken from
+# a release tag. A bump goes with a golden run on Odoo core: the AST shape is what every rule reads.
+ruff_python_ast = { git = "https://github.com/astral-sh/ruff", tag = "0.17.2" }
+ruff_python_parser = { git = "https://github.com/astral-sh/ruff", tag = "0.17.2" }
+ruff_source_file = { git = "https://github.com/astral-sh/ruff", tag = "0.17.2" }
+ruff_text_size = { git = "https://github.com/astral-sh/ruff", tag = "0.17.2" }
+
+[profile.release]
+lto = "fat"
+codegen-units = 1
