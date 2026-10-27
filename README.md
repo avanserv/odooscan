@@ -44,6 +44,7 @@ addons-path = ["../odoo", "../enterprise"]
 odoo-version = "18.0"
 ignore = ["OD111"]
 exclude = ["/legacy", "migrations/"]
+baseline = "odooscan-baseline.json"
 ```
 
 Paths in the file are relative to it, and so are anchored `exclude` patterns (those with a slash
@@ -57,6 +58,14 @@ series. The series is the first two parts of a five-part manifest version, so `1
 18.0. Pass `--odoo-version 18.0` for modules whose version does not name one. Those modules
 otherwise get only the rules that carry no range. `oscn rules --odoo-version 18.0` lists the
 rules for a series.
+
+## Adopting on an existing codebase
+
+`oscn check --write-baseline` records every current finding in `odooscan-baseline.json` beside the
+configuration file, and later runs given `--baseline odooscan-baseline.json` (or the `baseline`
+key) report only new ones. A finding is recorded by file, code and message, not line, so edits
+around it do not bring it back. When findings are fixed, a notice says so; write the baseline again
+to drop them and keep the file shrinking.
 
 ## Suppressing a finding
 

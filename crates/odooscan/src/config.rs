@@ -15,6 +15,7 @@ pub struct Config {
     pub select: Vec<String>,
     pub ignore: Vec<String>,
     pub exclude: Vec<String>,
+    pub baseline: Option<PathBuf>,
 }
 
 #[derive(Deserialize)]
@@ -67,6 +68,7 @@ fn read(path: &Path) -> Result<Option<Loaded>, String> {
     let dir = path.parent().unwrap_or(Path::new("")).to_path_buf();
     Ok(config.map(|mut config| {
         config.addons_path = config.addons_path.iter().map(|p| dir.join(p)).collect();
+        config.baseline = config.baseline.map(|p| dir.join(p));
         Loaded { config, dir }
     }))
 }
