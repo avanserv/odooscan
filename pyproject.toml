@@ -1,0 +1,45 @@
+# Packages the `oscn` binary as a Python wheel, so `pip install odooscan`, `uv tool install` and
+# pre-commit's Python hooks get a prebuilt executable. The version is read from Cargo.toml, which
+# Release Please owns. This file has no [tool.odooscan] table, so a scan run here ignores it.
+[build-system]
+requires = ["maturin>=1.15,<2"]
+build-backend = "maturin"
+
+[project]
+name = "odooscan"
+description = "A quality and security scanner for Odoo modules that checks them against an index of every module they build on"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.7"
+keywords = ["odoo", "linter", "static-analysis", "security", "pre-commit"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Framework :: Odoo",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python",
+    "Programming Language :: Rust",
+    "Topic :: Software Development :: Quality Assurance",
+]
+dynamic = ["version"]
+
+[project.urls]
+Repository = "https://github.com/avanserv/odooscan"
+Changelog = "https://github.com/avanserv/odooscan/blob/main/CHANGELOG.md"
+
+[tool.maturin]
+manifest-path = "crates/odooscan/Cargo.toml"
+bindings = "bin"
+strip = true
+# The sdist holds what building the wheel needs: repository tooling and test fixtures stay in the
+# repository.
+exclude = [
+    { path = ".*", format = "sdist" },
+    { path = ".github/**", format = "sdist" },
+    { path = "crates/*/tests/**", format = "sdist" },
+    { path = "CLAUDE.md", format = "sdist" },
+    { path = "Makefile", format = "sdist" },
+    { path = "deny.toml", format = "sdist" },
+    { path = "release-please-config.json", format = "sdist" },
+]

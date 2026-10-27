@@ -117,26 +117,36 @@ jobs:
         run: |
           "$RUNNER_TEMP/gitleaks" dir . --redact --no-banner --exit-code 1
 
-  build:
-    name: Build
-    # The image the release binary is built on, see release.yml.
-    runs-on: ubuntu-24.04
-    timeout-minutes: 20
+  wheel:
+    name: Wheel
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
-      - name: Cache the build
-        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      # The release workflow's build for its most common target, so a packaging break shows here
+      # and not on release day. It runs in the manylinux container, where the host's cache is no use.
+      - name: Build the wheel
+        uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
+        with:
+          target: x86_64
+          manylinux: auto
+          args: --release --out dist
+          sccache: false
 
-      # The release profile is what a user downloads, and the only build with fat LTO.
-      - name: Build the release binary
-        run: make build
-
-      - name: Run the binary
-        run: ./target/release/oscn --version
+      # Exit status 1 is the expected answer: the fixture is written to trigger every rule.
+      - name: Install and run it
+        run: |
+          python3 -m venv "$RUNNER_TEMP/venv"
+          "$RUNNER_TEMP/venv/bin/pip" install --quiet dist/*.whl
+          "$RUNNER_TEMP/venv/bin/oscn" --version
+          fixtures=crates/odooscan_core/tests/fixtures
+          status=0
+          "$RUNNER_TEMP/venv/bin/oscn" check "$fixtures/custom" --addons-path "$fixtures/core" --statistics || status=$?
+          test "$status" -eq 1
 
   # Single aggregation gate: passes if no job failed or was cancelled, and a skipped job counts as
   # a pass, exactly as GitHub treats a skipped required check. This is the one required status
@@ -148,7 +158,7 @@ jobs:
       - tests
       - deps
       - security
-      - build
+      - wheel
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 2
