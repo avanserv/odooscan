@@ -1,3 +1,4 @@
+mod baseline;
 mod config;
 mod output;
 
@@ -10,6 +11,7 @@ use odooscan_core::rules::RULES;
 use odooscan_core::series::Series;
 use odooscan_core::{Diagnostic, ScanOptions, scan};
 
+use crate::baseline::Baseline;
 use crate::config::{Config, Exclude};
 
 #[derive(Parser)]
@@ -53,6 +55,12 @@ struct CheckArgs {
     /// Never report findings in files matching these gitignore-style patterns.
     #[arg(long, value_delimiter = ',')]
     exclude: Vec<String>,
+    /// Hide the findings recorded in this file.
+    #[arg(long)]
+    baseline: Option<PathBuf>,
+    /// Record every current finding in the baseline file, by default odooscan-baseline.json.
+    #[arg(long)]
+    write_baseline: bool,
     /// Settings file; by default the nearest odooscan.toml, or pyproject.toml with [tool.odooscan].
     #[arg(long)]
     config: Option<PathBuf>,
@@ -74,6 +82,7 @@ struct Settings {
     select: Vec<String>,
     ignore: Vec<String>,
     exclude: Exclude,
+    baseline: Option<PathBuf>,
 }
 
 impl Settings {
@@ -91,6 +100,11 @@ impl Settings {
         } else {
             Exclude::new(cwd, &args.exclude)?
         };
+        let baseline = args.baseline.clone().or(file.baseline);
+        let baseline = match baseline {
+            None if args.write_baseline => Some(dir.join(baseline::DEFAULT_FILE)),
+            b => b,
+        };
         Ok(Self {
             scan: ScanOptions {
                 paths: args.paths.clone(),
@@ -100,6 +114,7 @@ impl Settings {
             select: or(&args.select, file.select),
             ignore: or(&args.ignore, file.ignore),
             exclude,
+            baseline,
         })
     }
 
@@ -151,22 +166,20 @@ fn check(args: &CheckArgs) -> ExitCode {
         }
     };
     let report = scan(&settings.scan);
-    let diags: Vec<&Diagnostic> = report.diagnostics.iter().filter(|d| settings.reports(d)).collect();
+    let mut diags: Vec<&Diagnostic> = report.diagnostics.iter().filter(|d| settings.reports(d)).collect();
     for notice in &report.notices {
         eprintln!("notice: {notice}");
     }
-    let rel = |p: &Path| p.strip_prefix(&cwd).unwrap_or(p).display().to_string();
-    let mut stdout = std::io::stdout().lock();
-    match args.format {
-        Format::Text if args.statistics => output::print_statistics(&mut stdout, &diags),
-        Format::Text => output::print_text(&mut stdout, &diags, &rel),
-        Format::Json => {
-            let _ = serde_json::to_writer_pretty(&mut stdout, &diags);
-        }
-        Format::Sarif => {
-            let _ = serde_json::to_writer_pretty(&mut stdout, &output::sarif(&diags, &rel));
-        }
+    if let (Some(path), true) = (&settings.baseline, args.write_baseline) {
+        return write_baseline(path, &diags);
     }
+    if let Some(path) = &settings.baseline
+        && let Err(e) = apply_baseline(path, &mut diags)
+    {
+        eprintln!("error: {e}");
+        return ExitCode::from(2);
+    }
+    print(args, &diags, &cwd);
     eprintln!(
         "{} diagnostics in {} modules ({} indexed, {} files) in {:.2?}",
         diags.len(),
@@ -180,4 +193,45 @@ fn check(args: &CheckArgs) -> ExitCode {
     } else {
         ExitCode::FAILURE
     }
+}
+
+fn print(args: &CheckArgs, diags: &[&Diagnostic], cwd: &Path) {
+    let rel = |p: &Path| p.strip_prefix(cwd).unwrap_or(p).display().to_string();
+    let mut stdout = std::io::stdout().lock();
+    match args.format {
+        Format::Text if args.statistics => output::print_statistics(&mut stdout, diags),
+        Format::Text => output::print_text(&mut stdout, diags, &rel),
+        Format::Json => {
+            let _ = serde_json::to_writer_pretty(&mut stdout, diags);
+        }
+        Format::Sarif => {
+            let _ = serde_json::to_writer_pretty(&mut stdout, &output::sarif(diags, &rel));
+        }
+    }
+}
+
+fn write_baseline(path: &Path, diags: &[&Diagnostic]) -> ExitCode {
+    match Baseline::write(path, diags) {
+        Ok(()) => {
+            eprintln!("recorded {} findings in {}", diags.len(), path.display());
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("error: {e}");
+            ExitCode::from(2)
+        }
+    }
+}
+
+fn apply_baseline(path: &Path, diags: &mut Vec<&Diagnostic>) -> Result<(), String> {
+    let mut baseline = Baseline::read(path)?;
+    let hidden = baseline.hide(diags);
+    if hidden > 0 {
+        eprintln!("notice: the baseline hid {hidden} findings");
+    }
+    let stale = baseline.stale();
+    if stale > 0 {
+        eprintln!("notice: {stale} findings in the baseline are fixed; run with --write-baseline to drop them");
+    }
+    Ok(())
 }
