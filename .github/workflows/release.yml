@@ -4,6 +4,14 @@ on:
   push:
     branches:
       - main
+  # Finishes a release whose build failed after Release Please tagged it: rebuilds and publishes
+  # the given tag, and leaves the release pull request alone.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag to build and publish, such as v0.2.0
+        required: true
+        type: string
 
 # Nothing by default; each job below names what it holds and why.
 permissions: {}
@@ -23,13 +31,14 @@ jobs:
     permissions:
       contents: read
     outputs:
-      release_created: ${{ steps.release.outputs.release_created }}
-      tag_name: ${{ steps.release.outputs.tag_name }}
+      release_created: ${{ inputs.tag && 'true' || steps.release.outputs.release_created }}
+      tag_name: ${{ inputs.tag || steps.release.outputs.tag_name }}
     steps:
       # The release App rather than the job's own token: GitHub holds the workflows of a pull
       # request that token opens until someone approves them, so the release pull request would
       # never get its CI unattended.
       - name: Generate the release App token
+        if: ${{ github.event_name == 'push' }}
         uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
         id: app-token
         with:
@@ -41,6 +50,7 @@ jobs:
           permission-pull-requests: write # opens and updates the release pull request
 
       - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
+        if: ${{ github.event_name == 'push' }}
         id: release
         with:
           token: ${{ steps.app-token.outputs.token }}
@@ -98,6 +108,12 @@ jobs:
         with:
           ref: ${{ needs.release-please.outputs.tag_name }}
           persist-credentials: false
+
+      # libgit2, which Cargo checks git dependencies out with, stops at Windows' 260-character
+      # path limit unless told otherwise, and ruff's tree has longer paths.
+      - name: Allow long paths
+        if: ${{ runner.os == 'Windows' }}
+        run: git config --global core.longpaths true
 
       # No cache in a workflow that publishes: a cache is writable by any job that can reach the
       # same key.
