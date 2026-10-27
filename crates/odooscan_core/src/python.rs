@@ -103,26 +103,34 @@ fn is_code_built(expr: &Expr) -> bool {
 /// values other than the model's own code.
 fn is_formatted_string(expr: &Expr) -> bool {
     match expr {
-        Expr::FString(f) => f.value.elements().any(|e| match e {
-            ast::InterpolatedStringElement::Interpolation(i) => !is_code_built(&i.expression),
-            ast::InterpolatedStringElement::Literal(_) => false,
-        }),
-        Expr::BinOp(b) if b.op == Operator::Mod => {
-            (str_lit(&b.left).is_some() || is_formatted_string(&b.left)) && !is_code_built(&b.right)
-        }
-        Expr::BinOp(b) if b.op == Operator::Add => {
-            let literal = |e: &Expr| str_lit(e).is_some();
-            (literal(&b.left) || literal(&b.right)) && !(literal(&b.left) && literal(&b.right))
-                || is_formatted_string(&b.left)
-                || is_formatted_string(&b.right)
-        }
-        Expr::Call(c) => {
-            matches!(&*c.func, Expr::Attribute(a) if a.attr.as_str() == "format" && str_lit(&a.value).is_some())
-                && !(c.arguments.args.iter().all(is_code_built)
-                    && c.arguments.keywords.iter().all(|k| is_code_built(&k.value)))
-        }
+        Expr::FString(f) => fstring_spliced(f),
+        Expr::BinOp(b) if b.op == Operator::Mod => percent_spliced(b),
+        Expr::BinOp(b) if b.op == Operator::Add => concat_spliced(b),
+        Expr::Call(c) => format_spliced(c),
         _ => false,
     }
+}
+
+fn fstring_spliced(f: &ast::ExprFString) -> bool {
+    f.value.elements().any(|e| match e {
+        ast::InterpolatedStringElement::Interpolation(i) => !is_code_built(&i.expression),
+        ast::InterpolatedStringElement::Literal(_) => false,
+    })
+}
+
+fn percent_spliced(b: &ast::ExprBinOp) -> bool {
+    (str_lit(&b.left).is_some() || is_formatted_string(&b.left)) && !is_code_built(&b.right)
+}
+
+fn concat_spliced(b: &ast::ExprBinOp) -> bool {
+    str_lit(&b.left).is_some() != str_lit(&b.right).is_some()
+        || is_formatted_string(&b.left)
+        || is_formatted_string(&b.right)
+}
+
+fn format_spliced(c: &ast::ExprCall) -> bool {
+    matches!(&*c.func, Expr::Attribute(a) if a.attr.as_str() == "format" && str_lit(&a.value).is_some())
+        && !(c.arguments.args.iter().all(is_code_built) && c.arguments.keywords.iter().all(|k| is_code_built(&k.value)))
 }
 
 fn field_call(expr: &Expr) -> Option<(&str, &ast::ExprCall)> {
@@ -170,6 +178,41 @@ fn body_contains(body: &[Stmt], attr: Option<&str>) -> bool {
     finder.found
 }
 
+fn model_kind(class: &ast::StmtClassDef) -> Option<ModelKind> {
+    class.bases().iter().find_map(|b| match tail_name(b) {
+        Some("Model") => Some(ModelKind::Model),
+        Some("TransientModel") => Some(ModelKind::Transient),
+        Some("AbstractModel") => Some(ModelKind::Abstract),
+        _ => None,
+    })
+}
+
+fn declares_model(class: &ast::StmtClassDef) -> bool {
+    class
+        .body
+        .iter()
+        .flat_map(|stmt| match stmt {
+            Stmt::Assign(a) => &a.targets[..],
+            Stmt::AnnAssign(a) => std::slice::from_ref(&*a.target),
+            _ => &[],
+        })
+        .filter_map(Expr::as_name_expr)
+        .any(|t| matches!(t.id.as_str(), "_name" | "_inherit"))
+}
+
+fn str_pairs(d: &ast::ExprDict) -> Vec<(String, String)> {
+    d.items
+        .iter()
+        .filter_map(|i| Some((str_lit(i.key.as_ref()?)?.to_owned(), str_lit(&i.value)?.to_owned())))
+        .collect()
+}
+
+fn is_delegate(value: &Expr) -> bool {
+    field_call(value)
+        .and_then(|(_, call)| keyword(call, "delegate"))
+        .is_some_and(|d| matches!(d, Expr::BooleanLiteral(b) if b.value))
+}
+
 pub fn analyze(src: &str) -> PyFacts {
     let loc = Locator::new(src);
     let mut v = PyVisitor {
@@ -205,24 +248,8 @@ impl PyVisitor<'_> {
     }
 
     fn class_fact(&mut self, class: &ast::StmtClassDef) -> Option<ClassFact> {
-        let kind = class.bases().iter().find_map(|b| match tail_name(b) {
-            Some("Model") => Some(ModelKind::Model),
-            Some("TransientModel") => Some(ModelKind::Transient),
-            Some("AbstractModel") => Some(ModelKind::Abstract),
-            _ => None,
-        });
-        let declares_model = class.body.iter().any(|stmt| {
-            let targets: &[Expr] = match stmt {
-                Stmt::Assign(a) => &a.targets,
-                Stmt::AnnAssign(a) => std::slice::from_ref(&*a.target),
-                _ => return false,
-            };
-            targets
-                .iter()
-                .filter_map(Expr::as_name_expr)
-                .any(|t| matches!(t.id.as_str(), "_name" | "_inherit"))
-        });
-        if kind.is_none() && !declares_model {
+        let kind = model_kind(class);
+        if kind.is_none() && !declares_model(class) {
             return None;
         }
         let mut name: Option<String> = None;
@@ -238,49 +265,18 @@ impl PyVisitor<'_> {
             paths: vec![],
         };
         for stmt in &class.body {
-            let (targets, value): (&[Expr], &Expr) = match stmt {
-                Stmt::Assign(assign) => (&assign.targets, &assign.value),
-                Stmt::AnnAssign(ann) => match &ann.value {
-                    Some(value) => (std::slice::from_ref(&*ann.target), value),
-                    None => continue,
-                },
+            match stmt {
+                Stmt::Assign(assign) => self.class_attrs(&assign.targets, &assign.value, &mut fact, &mut name),
+                Stmt::AnnAssign(ast::StmtAnnAssign {
+                    target,
+                    value: Some(value),
+                    ..
+                }) => self.class_attrs(std::slice::from_ref(&**target), value, &mut fact, &mut name),
                 Stmt::FunctionDef(func) => {
                     fact.methods.push(func.name.to_string());
                     self.method_checks(func, &mut fact);
-                    continue;
                 }
-                _ => continue,
-            };
-            for target in targets.iter().filter_map(Expr::as_name_expr) {
-                match target.id.as_str() {
-                    "_name" => name = str_lit(value).map(str::to_owned),
-                    "_inherit" => fact.inherit = strings(value).into_iter().map(|s| self.spanned(s)).collect(),
-                    "_inherits" => {
-                        if let Expr::Dict(d) = value {
-                            fact.inherits = d
-                                .items
-                                .iter()
-                                .filter_map(|i| Some((str_lit(i.key.as_ref()?)?.to_owned(), str_lit(&i.value)?.to_owned())))
-                                .collect();
-                        }
-                    }
-                    "_sql_constraints" => self.diag(
-                        "OD110",
-                        target,
-                        "_sql_constraints is ignored; declare models.Constraint, models.Index or models.UniqueIndex attributes instead",
-                    ),
-                    field_name => {
-                        if let Some(field) = self.field_fact(field_name, value) {
-                            let delegate = field_call(value)
-                                .and_then(|(_, call)| keyword(call, "delegate"))
-                                .is_some_and(|d| matches!(d, Expr::BooleanLiteral(b) if b.value));
-                            if let (true, Some(comodel)) = (delegate, &field.comodel) {
-                                fact.inherits.push((comodel.value.clone(), field.name.clone()));
-                            }
-                            fact.fields.push(field);
-                        }
-                    }
-                }
+                _ => {}
             }
         }
         fact.model = match (&name, fact.inherit.first()) {
@@ -290,6 +286,38 @@ impl PyVisitor<'_> {
         };
         fact.new_model = name.is_some_and(|n| !fact.inherit.iter().any(|i| i.value == n));
         Some(fact)
+    }
+
+    fn class_attrs(&mut self, targets: &[Expr], value: &Expr, fact: &mut ClassFact, name: &mut Option<String>) {
+        for target in targets.iter().filter_map(Expr::as_name_expr) {
+            match target.id.as_str() {
+                "_name" => *name = str_lit(value).map(str::to_owned),
+                "_inherit" => fact.inherit = strings(value).into_iter().map(|s| self.spanned(s)).collect(),
+                "_inherits" => {
+                    if let Expr::Dict(d) = value {
+                        fact.inherits = str_pairs(d);
+                    }
+                }
+                "_sql_constraints" => self.diag(
+                    "OD110",
+                    target,
+                    "_sql_constraints is ignored; declare models.Constraint, models.Index or models.UniqueIndex attributes instead",
+                ),
+                field_name => self.class_field(field_name, value, fact),
+            }
+        }
+    }
+
+    fn class_field(&mut self, name: &str, value: &Expr, fact: &mut ClassFact) {
+        let Some(field) = self.field_fact(name, value) else {
+            return;
+        };
+        if is_delegate(value)
+            && let Some(comodel) = &field.comodel
+        {
+            fact.inherits.push((comodel.value.clone(), field.name.clone()));
+        }
+        fact.fields.push(field);
     }
 
     fn field_fact(&mut self, name: &str, value: &Expr) -> Option<FieldFact> {
@@ -332,27 +360,7 @@ impl PyVisitor<'_> {
     }
 
     fn method_checks(&mut self, func: &ast::StmtFunctionDef, fact: &mut ClassFact) {
-        for decorator in &func.decorator_list {
-            match &decorator.expression {
-                Expr::Call(call) if matches!(tail_name(&call.func), Some("depends" | "onchange" | "constrains")) => {
-                    for arg in &call.arguments.args {
-                        if let Some(s) = arg.as_string_literal_expr() {
-                            fact.paths.push(self.spanned(s));
-                        }
-                    }
-                }
-                Expr::Attribute(a)
-                    if matches!(a.attr.as_str(), "multi" | "one") && tail_name(&a.value) == Some("api") =>
-                {
-                    self.diag(
-                        "OD107",
-                        decorator,
-                        format!("@api.{} no longer exists; methods always receive a recordset", a.attr),
-                    );
-                }
-                _ => {}
-            }
-        }
+        self.decorator_checks(func, fact);
         let name = func.name.as_str();
         if name == "fields_view_get" {
             self.diag(
@@ -376,6 +384,28 @@ impl PyVisitor<'_> {
                     "{name}() override never calls super(), so other modules' overrides and the ORM itself are skipped"
                 ),
             );
+        }
+    }
+
+    fn decorator_checks(&mut self, func: &ast::StmtFunctionDef, fact: &mut ClassFact) {
+        for decorator in &func.decorator_list {
+            match &decorator.expression {
+                Expr::Call(call) if matches!(tail_name(&call.func), Some("depends" | "onchange" | "constrains")) => {
+                    for s in call.arguments.args.iter().filter_map(Expr::as_string_literal_expr) {
+                        fact.paths.push(self.spanned(s));
+                    }
+                }
+                Expr::Attribute(a)
+                    if matches!(a.attr.as_str(), "multi" | "one") && tail_name(&a.value) == Some("api") =>
+                {
+                    self.diag(
+                        "OD107",
+                        decorator,
+                        format!("@api.{} no longer exists; methods always receive a recordset", a.attr),
+                    );
+                }
+                _ => {}
+            }
         }
     }
 
@@ -408,6 +438,59 @@ impl PyVisitor<'_> {
             }
         }
     }
+
+    fn file_mention(&mut self, s: &ast::ExprStringLiteral) {
+        let text = s.value.to_str();
+        if text.ends_with(".xml") || text.ends_with(".csv") {
+            let base = text.rsplit(['/', '\\']).next().unwrap_or(text);
+            self.facts.file_mentions.push(base.to_owned());
+        }
+    }
+
+    fn call_checks(&mut self, call: &ast::ExprCall, expr: &Expr) {
+        let formatted = call.arguments.args.first().is_some_and(is_formatted_string);
+        match &*call.func {
+            Expr::Attribute(a) if is_cursor(&a.value) && matches!(a.attr.as_str(), "execute" | "commit") => {
+                self.cursor_call(a.attr.as_str(), expr, formatted);
+            }
+            func if matches!(tail_name(func), Some("_" | "_lt")) && formatted => {
+                self.diag(
+                    "OD102",
+                    expr,
+                    "format after translating: _(\"Hello %s\", name), not _(\"Hello %s\" % name)",
+                );
+            }
+            _ => {}
+        }
+    }
+
+    fn cursor_call(&mut self, method: &str, expr: &Expr, formatted: bool) {
+        match method {
+            "execute" if formatted => self.diag(
+                "OD101",
+                expr,
+                "query built by string formatting; pass parameters separately or build it with odoo.tools.SQL",
+            ),
+            "commit" => self.diag(
+                "OD103",
+                expr,
+                "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
+            ),
+            _ => {}
+        }
+    }
+
+    fn private_attr(&mut self, a: &ast::ExprAttribute, expr: &Expr) {
+        if matches!(a.attr.as_str(), "_cr" | "_uid" | "_context")
+            && matches!(&*a.value, Expr::Name(n) if n.id.as_str() == "self")
+        {
+            self.diag(
+                "OD109",
+                expr,
+                format!("self.{} is deprecated; use self.env.{}", a.attr, &a.attr.as_str()[1..]),
+            );
+        }
+    }
 }
 
 impl<'a> Visitor<'a> for PyVisitor<'_> {
@@ -426,53 +509,15 @@ impl<'a> Visitor<'a> for PyVisitor<'_> {
 
     fn visit_expr(&mut self, expr: &'a Expr) {
         match expr {
-            Expr::StringLiteral(s) => {
-                let text = s.value.to_str();
-                if text.ends_with(".xml") || text.ends_with(".csv") {
-                    let base = text.rsplit(['/', '\\']).next().unwrap_or(text);
-                    self.facts.file_mentions.push(base.to_owned());
-                }
-            }
-            Expr::Call(call) => match &*call.func {
-                Expr::Attribute(a) if a.attr.as_str() == "execute" && is_cursor(&a.value) => {
-                    if call.arguments.args.first().is_some_and(is_formatted_string) {
-                        self.diag("OD101", expr, "query built by string formatting; pass parameters separately or build it with odoo.tools.SQL");
-                    }
-                }
-                Expr::Attribute(a) if a.attr.as_str() == "commit" && is_cursor(&a.value) => {
-                    self.diag(
-                        "OD103",
-                        expr,
-                        "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
-                    );
-                }
-                func if matches!(tail_name(func), Some("_" | "_lt"))
-                    && call.arguments.args.first().is_some_and(is_formatted_string) =>
-                {
-                    self.diag(
-                        "OD102",
-                        expr,
-                        "format after translating: _(\"Hello %s\", name), not _(\"Hello %s\" % name)",
-                    );
-                }
-                _ => {}
-            },
+            Expr::StringLiteral(s) => self.file_mention(s),
+            Expr::Call(call) => self.call_checks(call, expr),
             Expr::Subscript(sub) if tail_name(&sub.value) == Some("env") => {
                 if let Some(s) = sub.slice.as_string_literal_expr() {
                     let spanned = self.spanned(s);
                     self.facts.env_models.push(spanned);
                 }
             }
-            Expr::Attribute(a)
-                if matches!(a.attr.as_str(), "_cr" | "_uid" | "_context")
-                    && matches!(&*a.value, Expr::Name(n) if n.id.as_str() == "self") =>
-            {
-                self.diag(
-                    "OD109",
-                    expr,
-                    format!("self.{} is deprecated; use self.env.{}", a.attr, &a.attr.as_str()[1..]),
-                );
-            }
+            Expr::Attribute(a) => self.private_attr(a, expr),
             _ => {}
         }
         visitor::walk_expr(self, expr);
