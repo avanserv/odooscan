@@ -25,7 +25,8 @@ notice says so.
 
 Other options:
 
-- `--format json` and `--format sarif` are for CI and code review.
+- `--format github` and `--format gitlab` are for CI (see below); `json` and `sarif` for other
+  tools.
 - `--select OD3` and `--ignore OD111` filter by code prefix.
 - `--exclude migrations/,tests/` hides findings in files matching gitignore-style patterns.
 - `--statistics` prints counts per rule.
@@ -50,6 +51,47 @@ baseline = "odooscan-baseline.json"
 Paths in the file are relative to it, and so are anchored `exclude` patterns (those with a slash
 before the end, such as `/legacy`). An unanchored one, such as `migrations/`, matches at any depth.
 Excluded files are still indexed: they only go unreported.
+
+## In CI
+
+The scan needs the Odoo sources your modules build on. A shallow sparse clone into a hidden
+directory is enough, and module discovery skips hidden directories. On GitHub, `--format github`
+annotates the pull request, with no need for the Advanced Security that SARIF upload requires on a
+private repository:
+
+```yaml
+- uses: actions/checkout@v7
+- uses: actions/checkout@v7
+  with:
+    repository: odoo/odoo
+    ref: "18.0"
+    path: .odoo
+    fetch-depth: 1
+    sparse-checkout: |
+      addons
+      odoo/addons
+    persist-credentials: false
+- uses: astral-sh/setup-uv@v10
+- run: uvx --from odooscan oscn check --addons-path .odoo --format github
+```
+
+On GitLab, `--format gitlab` writes a Code Quality report for the merge request:
+
+```yaml
+odooscan:
+  image: python:3.13
+  script:
+    - git clone --depth 1 --branch 18.0 --filter=blob:none --sparse https://github.com/odoo/odoo .odoo
+    - git -C .odoo sparse-checkout set addons odoo/addons
+    - pip install odooscan
+    - oscn check --addons-path .odoo --format gitlab > gl-code-quality-report.json
+  artifacts:
+    when: always
+    reports:
+      codequality: gl-code-quality-report.json
+```
+
+Pin `odooscan` to a version, and the actions to commit SHAs, in a real pipeline.
 
 ## Series
 
