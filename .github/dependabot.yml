@@ -28,6 +28,11 @@ updates:
     commit-message:
       prefix: build
       include: scope
+    # Ruff's crates come from a git tag, which Dependabot cannot order: it proposed 0.17.1 over
+    # 0.17.2 and rewrote only Cargo.lock, breaking every `--locked` build. A bump is a hand edit of
+    # the tag in Cargo.toml, with the golden run on Odoo core that CONTRIBUTING.md asks for.
+    ignore:
+      - dependency-name: "ruff_*"
     groups:
       cargo:
         patterns: ["*"]
