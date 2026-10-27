@@ -79,5 +79,8 @@ Before merging one, wait for the Release run that last updated it to finish and 
 the branch head: Release Please does not know about `Cargo.lock`, so that run pushes a
 `chore: sync Cargo.lock with the release version` commit whenever the version changed.
 
-Merging the release pull request tags the release, and the Release workflow attaches a Linux
-x86_64 archive of the binary with its SHA-256.
+Merging the release pull request tags the release. The Release workflow then builds a wheel per
+platform and the sdist, publishes them to PyPI through trusted publishing (environment `pypi`),
+attaches them to the GitHub release with `SHA256SUMS`, and moves the pin and tag of
+[odooscan-pre-commit](https://github.com/avanserv/odooscan-pre-commit). The CI Wheel job builds
+the Linux wheel on every pull request, so a packaging break shows before release day.

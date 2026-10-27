@@ -13,9 +13,12 @@ cannot. For example, it can tell you that a view names a field its model lacks, 
 belongs to a module missing from `depends`.
 
 ```sh
-cargo build --release
-target/release/oscn check path/to/custom-addons --addons-path ~/repos/odoo/odoo,~/repos/odoo/enterprise
+uv tool install odooscan    # or: pip install odooscan
+oscn check path/to/custom-addons --addons-path ~/repos/odoo/odoo,~/repos/odoo/enterprise
 ```
+
+The wheels hold a prebuilt binary for Linux (glibc and musl), macOS and Windows; `cargo build
+--release` builds `target/release/oscn` anywhere else.
 
 The command is `oscn`. `check` reports on the modules found under the given paths. `--addons-path` holds what those
 modules build on. It is indexed but never reported on, and an Odoo source checkout stands for its
