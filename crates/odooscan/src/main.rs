@@ -2,7 +2,7 @@ mod baseline;
 mod config;
 mod output;
 
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::process::ExitCode;
 use std::time::Instant;
 
@@ -74,6 +74,10 @@ enum Format {
     Text,
     Json,
     Sarif,
+    /// Annotations on a GitHub pull request.
+    Github,
+    /// A GitLab Code Quality report.
+    Gitlab,
 }
 
 /// What `check` runs with once flags and the configuration file are merged.
@@ -196,7 +200,15 @@ fn check(args: &CheckArgs) -> ExitCode {
 }
 
 fn print(args: &CheckArgs, diags: &[&Diagnostic], cwd: &Path) {
-    let rel = |p: &Path| p.strip_prefix(cwd).unwrap_or(p).display().to_string();
+    // Scanning `.` yields `./a/b.py`, which GitLab and GitHub do not match to the file `a/b.py`.
+    let rel = |p: &Path| {
+        let p = p.strip_prefix(cwd).unwrap_or(p);
+        p.components()
+            .filter(|c| *c != Component::CurDir)
+            .collect::<PathBuf>()
+            .display()
+            .to_string()
+    };
     let mut stdout = std::io::stdout().lock();
     match args.format {
         Format::Text if args.statistics => output::print_statistics(&mut stdout, diags),
@@ -206,6 +218,10 @@ fn print(args: &CheckArgs, diags: &[&Diagnostic], cwd: &Path) {
         }
         Format::Sarif => {
             let _ = serde_json::to_writer_pretty(&mut stdout, &output::sarif(diags, &rel));
+        }
+        Format::Github => output::print_github(&mut stdout, diags, &rel),
+        Format::Gitlab => {
+            let _ = serde_json::to_writer_pretty(&mut stdout, &output::gitlab(diags, &rel));
         }
     }
 }
