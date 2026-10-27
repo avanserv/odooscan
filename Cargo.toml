@@ -19,6 +19,7 @@ roxmltree = "0.21"
 rustc-hash = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+toml = "1"
 regex = "1"
 insta = "1"
 # Ruff publishes no crates and has no plugin API (astral-sh/ruff#283), so its parser is taken from

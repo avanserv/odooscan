@@ -1,13 +1,16 @@
-use std::io::{IsTerminal, Write};
+mod config;
+mod output;
+
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::time::Instant;
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
-use odooscan_core::rules::{RULES, Severity};
+use odooscan_core::rules::RULES;
 use odooscan_core::series::Series;
 use odooscan_core::{Diagnostic, ScanOptions, scan};
-use serde_json::json;
+
+use crate::config::{Config, Exclude};
 
 #[derive(Parser)]
 #[command(name = "oscn", version, about = "Quality and security scanner for Odoo modules")]
@@ -27,6 +30,7 @@ enum Command {
     },
 }
 
+/// A flag or environment variable replaces the setting of the same name in the configuration file.
 #[derive(Args)]
 struct CheckArgs {
     /// Module directories, or directories to search for modules.
@@ -46,6 +50,12 @@ struct CheckArgs {
     /// Never report these codes or code prefixes.
     #[arg(long, value_delimiter = ',')]
     ignore: Vec<String>,
+    /// Never report findings in files matching these gitignore-style patterns.
+    #[arg(long, value_delimiter = ',')]
+    exclude: Vec<String>,
+    /// Settings file; by default the nearest odooscan.toml, or pyproject.toml with [tool.odooscan].
+    #[arg(long)]
+    config: Option<PathBuf>,
     /// Print a count per rule instead of each diagnostic.
     #[arg(long)]
     statistics: bool,
@@ -58,6 +68,51 @@ enum Format {
     Sarif,
 }
 
+/// What `check` runs with once flags and the configuration file are merged.
+struct Settings {
+    scan: ScanOptions,
+    select: Vec<String>,
+    ignore: Vec<String>,
+    exclude: Exclude,
+}
+
+impl Settings {
+    fn resolve(args: &CheckArgs, cwd: &Path) -> Result<Self, String> {
+        let loaded = config::load(args.config.as_deref(), cwd)?;
+        let (file, dir) = loaded.map_or_else(|| (Config::default(), cwd.to_path_buf()), |l| (l.config, l.dir));
+        let odoo_version = match (args.odoo_version, &file.odoo_version) {
+            (Some(s), _) => Some(s),
+            (None, Some(v)) => Some(parse_series(v)?),
+            (None, None) => None,
+        };
+        // A pattern applies where it is written: flags from here, the file from its directory.
+        let exclude = if args.exclude.is_empty() {
+            Exclude::new(&dir, &file.exclude)?
+        } else {
+            Exclude::new(cwd, &args.exclude)?
+        };
+        Ok(Self {
+            scan: ScanOptions {
+                paths: args.paths.clone(),
+                addons_paths: or(&args.addons_path, file.addons_path),
+                default_series: odoo_version,
+            },
+            select: or(&args.select, file.select),
+            ignore: or(&args.ignore, file.ignore),
+            exclude,
+        })
+    }
+
+    fn reports(&self, d: &Diagnostic) -> bool {
+        let matches = |list: &[String]| list.iter().any(|p| d.code.starts_with(p.as_str()));
+        (self.select.is_empty() || matches(&self.select)) && !matches(&self.ignore) && !self.exclude.matches(&d.path)
+    }
+}
+
+fn or<T: Clone>(flag: &[T], file: Vec<T>) -> Vec<T> {
+    if flag.is_empty() { file } else { flag.to_vec() }
+}
+
 fn parse_series(s: &str) -> Result<Series, String> {
     Series::parse(s).ok_or_else(|| format!("'{s}' is not a series such as 18.0"))
 }
@@ -65,7 +120,7 @@ fn parse_series(s: &str) -> Result<Series, String> {
 fn main() -> ExitCode {
     match Cli::parse().command {
         Command::Rules { odoo_version } => rules(odoo_version),
-        Command::Check(args) => check(args),
+        Command::Check(args) => check(&args),
     }
 }
 
@@ -85,33 +140,31 @@ fn rules(odoo_version: Option<Series>) -> ExitCode {
     ExitCode::SUCCESS
 }
 
-fn check(args: CheckArgs) -> ExitCode {
+fn check(args: &CheckArgs) -> ExitCode {
     let started = Instant::now();
-    let report = scan(&ScanOptions {
-        paths: args.paths,
-        addons_paths: args.addons_path,
-        default_series: args.odoo_version,
-    });
-    let matches = |code: &str, list: &[String]| list.iter().any(|p| code.starts_with(p.as_str()));
-    let diags: Vec<&Diagnostic> = report
-        .diagnostics
-        .iter()
-        .filter(|d| (args.select.is_empty() || matches(d.code, &args.select)) && !matches(d.code, &args.ignore))
-        .collect();
+    let cwd = std::env::current_dir().unwrap_or_default();
+    let settings = match Settings::resolve(args, &cwd) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("error: {e}");
+            return ExitCode::from(2);
+        }
+    };
+    let report = scan(&settings.scan);
+    let diags: Vec<&Diagnostic> = report.diagnostics.iter().filter(|d| settings.reports(d)).collect();
     for notice in &report.notices {
         eprintln!("notice: {notice}");
     }
-    let cwd = std::env::current_dir().unwrap_or_default();
     let rel = |p: &Path| p.strip_prefix(&cwd).unwrap_or(p).display().to_string();
     let mut stdout = std::io::stdout().lock();
     match args.format {
-        Format::Text if args.statistics => print_statistics(&mut stdout, &diags),
-        Format::Text => print_text(&mut stdout, &diags, &rel),
+        Format::Text if args.statistics => output::print_statistics(&mut stdout, &diags),
+        Format::Text => output::print_text(&mut stdout, &diags, &rel),
         Format::Json => {
             let _ = serde_json::to_writer_pretty(&mut stdout, &diags);
         }
         Format::Sarif => {
-            let _ = serde_json::to_writer_pretty(&mut stdout, &sarif(&diags, &rel));
+            let _ = serde_json::to_writer_pretty(&mut stdout, &output::sarif(&diags, &rel));
         }
     }
     eprintln!(
@@ -127,73 +180,4 @@ fn check(args: CheckArgs) -> ExitCode {
     } else {
         ExitCode::FAILURE
     }
-}
-
-fn print_statistics(out: &mut impl Write, diags: &[&Diagnostic]) {
-    let mut counts: Vec<(&str, usize)> = vec![];
-    for d in diags {
-        match counts.iter_mut().find(|(c, _)| *c == d.code) {
-            Some((_, n)) => *n += 1,
-            None => counts.push((d.code, 1)),
-        }
-    }
-    counts.sort_by_key(|&(_, n)| std::cmp::Reverse(n));
-    for (code, n) in counts {
-        let _ = writeln!(out, "{n:>6}  {code}  {}", odooscan_core::rules::rule(code).name);
-    }
-}
-
-fn print_text(out: &mut impl Write, diags: &[&Diagnostic], rel: &dyn Fn(&Path) -> String) {
-    let color = std::io::stdout().is_terminal();
-    for d in diags {
-        let (on, off) = if color { ansi(d.severity) } else { ("", "") };
-        let _ = writeln!(
-            out,
-            "{}:{}:{}: {on}{}{off} {}",
-            rel(&d.path),
-            d.line,
-            d.column,
-            d.code,
-            d.message
-        );
-    }
-}
-
-fn ansi(severity: Severity) -> (&'static str, &'static str) {
-    match severity {
-        Severity::Error => ("\x1b[1;31m", "\x1b[0m"),
-        Severity::Warning => ("\x1b[1;33m", "\x1b[0m"),
-        Severity::Info => ("\x1b[1;36m", "\x1b[0m"),
-    }
-}
-
-fn sarif(diags: &[&Diagnostic], rel: &dyn Fn(&Path) -> String) -> serde_json::Value {
-    let rules: Vec<_> = RULES
-        .iter()
-        .map(|r| json!({"id": r.code, "name": r.name, "shortDescription": {"text": r.summary}, "properties": {"category": r.category}}))
-        .collect();
-    let results: Vec<_> = diags
-        .iter()
-        .map(|d| {
-            let level = match d.severity {
-                Severity::Error => "error",
-                Severity::Warning => "warning",
-                Severity::Info => "note",
-            };
-            json!({
-                "ruleId": d.code,
-                "level": level,
-                "message": {"text": d.message},
-                "locations": [{"physicalLocation": {
-                    "artifactLocation": {"uri": rel(&d.path)},
-                    "region": {"startLine": d.line, "startColumn": d.column},
-                }}],
-            })
-        })
-        .collect();
-    json!({
-        "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
-        "version": "2.1.0",
-        "runs": [{"tool": {"driver": {"name": "odooscan", "version": env!("CARGO_PKG_VERSION"), "rules": rules}}, "results": results}],
-    })
 }
