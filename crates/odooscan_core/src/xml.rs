@@ -186,36 +186,7 @@ impl Walker<'_> {
                 value: name.to_owned(),
                 pos,
             });
-            if let Some(id) = field.attribute("ref") {
-                self.reference(id, field);
-                if name == "model_id" && matches!(model, "ir.model.access" | "ir.access") {
-                    self.facts.access.push(AccessRow {
-                        model: id.to_owned(),
-                        by_name: false,
-                    });
-                }
-            }
-            self.eval_refs(field);
-            match name {
-                "model" if model == "ir.ui.view" => {
-                    view.model = field.text().map(|t| Spanned {
-                        value: t.trim().to_owned(),
-                        pos,
-                    });
-                }
-                "inherit_id" if model == "ir.ui.view" => view.inherit = field.attribute("ref").map(str::to_owned),
-                "arch" | "arch_db" if model == "ir.ui.view" => {
-                    for root in field.children().filter(Node::is_element) {
-                        self.arch(root, &mut Vec::new(), &mut view);
-                    }
-                }
-                "view_mode" if field.text().is_some_and(|t| t.split(',').any(|m| m.trim() == "tree")) => {
-                    self.facts
-                        .diags
-                        .push(RawDiag::new("OD306", pos, "view_mode 'tree' is renamed 'list'"));
-                }
-                _ => {}
-            }
+            self.record_field(field, name, model, &mut view);
         }
         if model == "ir.ui.view" {
             self.facts.views.push(view);
@@ -223,9 +194,72 @@ impl Walker<'_> {
         self.facts.records.push(record);
     }
 
+    fn record_field(&mut self, field: Node, name: &str, model: &str, view: &mut ViewFact) {
+        if let Some(id) = field.attribute("ref") {
+            self.reference(id, field);
+            if name == "model_id" && matches!(model, "ir.model.access" | "ir.access") {
+                self.facts.access.push(AccessRow {
+                    model: id.to_owned(),
+                    by_name: false,
+                });
+            }
+        }
+        self.eval_refs(field);
+        if model == "ir.ui.view" {
+            self.view_field(field, name, view);
+        }
+        if name == "view_mode" && field.text().is_some_and(|t| t.split(',').any(|m| m.trim() == "tree")) {
+            let pos = self.pos(field);
+            self.facts
+                .diags
+                .push(RawDiag::new("OD306", pos, "view_mode 'tree' is renamed 'list'"));
+        }
+    }
+
+    fn view_field(&mut self, field: Node, name: &str, view: &mut ViewFact) {
+        match name {
+            "model" => {
+                let pos = self.pos(field);
+                view.model = field.text().map(|t| Spanned {
+                    value: t.trim().to_owned(),
+                    pos,
+                });
+            }
+            "inherit_id" => view.inherit = field.attribute("ref").map(str::to_owned),
+            "arch" | "arch_db" => {
+                for root in field.children().filter(Node::is_element) {
+                    self.arch(root, &mut Vec::new(), view);
+                }
+            }
+            _ => {}
+        }
+    }
+
     fn arch(&mut self, node: Node, path: &mut Vec<String>, view: &mut ViewFact) {
         let pos = self.pos(node);
         let tag = node.tag_name().name();
+        self.arch_attrs(node, pos);
+        self.groups(node);
+        self.arch_tag(node, tag, pos);
+        if tag == "field"
+            && let Some(name) = node.attribute("name").filter(|n| !n.contains('.'))
+        {
+            self.arch_field(node, name, pos, path, view);
+            return;
+        }
+        let depth = path.len();
+        match tag {
+            "xpath" => xpath_steps(node.attribute("expr").unwrap_or_default(), path),
+            "groupby" => path.extend(node.attribute("name").map(str::to_owned)),
+            _ => {}
+        }
+        for child in node.children().filter(Node::is_element) {
+            self.arch(child, path, view);
+        }
+        path.truncate(depth);
+    }
+
+    fn arch_attrs(&mut self, node: Node, pos: Pos) {
         for attr in node.attributes() {
             match attr.name() {
                 "attrs" | "states" => self.facts.diags.push(RawDiag::new(
@@ -248,7 +282,9 @@ impl Walker<'_> {
                 }
             }
         }
-        self.groups(node);
+    }
+
+    fn arch_tag(&mut self, node: Node, tag: &str, pos: Pos) {
         match tag {
             "tree" => self
                 .facts
@@ -259,56 +295,47 @@ impl Walker<'_> {
             }
             _ => {}
         }
-        if tag == "field"
-            && let Some(name) = node.attribute("name").filter(|n| !n.contains('.'))
-        {
-            if node.has_attribute("position") {
-                // A locator matches the first such field anywhere in the parent arch, subviews included.
-                path.push(format!("{LOCATOR}{name}"));
-                for child in node.children().filter(Node::is_element) {
-                    self.arch(child, path, view);
-                }
-                path.pop();
-                return;
-            }
-            view.fields.push(ArchField {
-                path: path.iter().cloned().chain([name.to_owned()]).collect(),
-                pos,
-            });
+    }
+
+    fn arch_field(&mut self, node: Node, name: &str, pos: Pos, path: &mut Vec<String>, view: &mut ViewFact) {
+        if node.has_attribute("position") {
+            // A locator matches the first such field anywhere in the parent arch, subviews included.
+            path.push(format!("{LOCATOR}{name}"));
             for child in node.children().filter(Node::is_element) {
-                if SUBVIEWS.contains(&child.tag_name().name()) {
-                    path.push(name.to_owned());
-                    self.arch(child, path, view);
-                    path.pop();
-                } else {
-                    self.arch(child, path, view);
-                }
+                self.arch(child, path, view);
             }
+            path.pop();
             return;
         }
-        let depth = path.len();
-        match tag {
-            "xpath" => {
-                let expr = node.attribute("expr").unwrap_or_default();
-                let before = path.len();
-                // Axes such as `/..` or `/following-sibling::x` stay in the field's own view.
-                let containers = XPATH_CONTAINER
-                    .captures_iter(expr)
-                    .filter(|c| c.get(3).is_none() && &c[2] != "..");
-                path.extend(containers.map(|c| c[1].to_owned()));
-                if path.len() == before && XPATH_AMBIGUOUS.is_match(expr) {
-                    path.push(UNKNOWN_CONTEXT.to_owned());
-                }
-                if let Some(c) = XPATH_LAST_FIELD.captures(expr.trim()) {
-                    path.push(format!("{LOCATOR}{}", &c[1]));
-                }
-            }
-            "groupby" => path.extend(node.attribute("name").map(str::to_owned)),
-            _ => {}
-        }
+        view.fields.push(ArchField {
+            path: path.iter().cloned().chain([name.to_owned()]).collect(),
+            pos,
+        });
         for child in node.children().filter(Node::is_element) {
-            self.arch(child, path, view);
+            if SUBVIEWS.contains(&child.tag_name().name()) {
+                path.push(name.to_owned());
+                self.arch(child, path, view);
+                path.pop();
+            } else {
+                self.arch(child, path, view);
+            }
         }
-        path.truncate(depth);
+    }
+}
+
+/// Extends `path` with where an xpath's target sits: the subviews it reaches into and the field it
+/// locates.
+fn xpath_steps(expr: &str, path: &mut Vec<String>) {
+    let before = path.len();
+    // Axes such as `/..` or `/following-sibling::x` stay in the field's own view.
+    let containers = XPATH_CONTAINER
+        .captures_iter(expr)
+        .filter(|c| c.get(3).is_none() && &c[2] != "..");
+    path.extend(containers.map(|c| c[1].to_owned()));
+    if path.len() == before && XPATH_AMBIGUOUS.is_match(expr) {
+        path.push(UNKNOWN_CONTEXT.to_owned());
+    }
+    if let Some(c) = XPATH_LAST_FIELD.captures(expr.trim()) {
+        path.push(format!("{LOCATOR}{}", &c[1]));
     }
 }

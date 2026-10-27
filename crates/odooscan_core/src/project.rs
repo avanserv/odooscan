@@ -113,44 +113,9 @@ pub struct Discovery {
 
 pub fn load(paths: &[PathBuf], addons_paths: &[PathBuf]) -> Discovery {
     let mut notices = vec![];
-    let mut seen = FxHashSet::default();
-    let mut candidates: Vec<(PathBuf, bool)> = vec![];
-    // Checked modules come first, so they shadow a same-named module on the addons path.
-    for dir in paths.iter().flat_map(|p| modules_under(p)) {
-        candidates.push((dir, true));
-    }
-    for dir in addons_paths.iter().flat_map(|p| modules_in_addons_path(p)) {
-        candidates.push((dir, false));
-    }
-    let mut chosen = vec![];
-    for (dir, checked) in candidates {
-        let Some(name) = dir
-            .canonicalize()
-            .ok()
-            .and_then(|d| d.file_name().map(|n| n.to_string_lossy().into_owned()))
-        else {
-            continue;
-        };
-        if seen.insert(name.clone()) {
-            chosen.push((name, dir, checked));
-        }
-    }
-    let mut modules: Vec<Module> = chosen
+    let mut modules: Vec<Module> = candidates(paths, addons_paths)
         .into_par_iter()
-        .filter_map(|(name, dir, checked)| {
-            let manifest_path = manifest_in(&dir)?;
-            let manifest = manifest::parse(&std::fs::read_to_string(&manifest_path).ok()?)?;
-            manifest.installable.then(|| Module {
-                series: manifest.series(),
-                name,
-                dir,
-                manifest_path,
-                manifest,
-                checked,
-                python: vec![],
-                data: vec![],
-            })
-        })
+        .filter_map(|(name, dir, checked)| read_module(name, dir, checked))
         .collect();
     for m in &modules {
         if m.checked && m.series.is_none() {
@@ -162,6 +127,46 @@ pub fn load(paths: &[PathBuf], addons_paths: &[PathBuf]) -> Discovery {
     }
     modules.par_iter_mut().for_each(parse_module_files);
     Discovery { modules, notices }
+}
+
+/// Module directories by name, with whether each is checked, keeping the first of each name.
+fn candidates(paths: &[PathBuf], addons_paths: &[PathBuf]) -> Vec<(String, PathBuf, bool)> {
+    let mut seen = FxHashSet::default();
+    // Checked modules come first, so they shadow a same-named module on the addons path.
+    let checked = paths.iter().flat_map(|p| modules_under(p)).map(|dir| (dir, true));
+    let indexed = addons_paths
+        .iter()
+        .flat_map(|p| modules_in_addons_path(p))
+        .map(|dir| (dir, false));
+    let mut chosen = vec![];
+    for (dir, checked) in checked.chain(indexed) {
+        let Some(name) = dir
+            .canonicalize()
+            .ok()
+            .and_then(|d| d.file_name().map(|n| n.to_string_lossy().into_owned()))
+        else {
+            continue;
+        };
+        if seen.insert(name.clone()) {
+            chosen.push((name, dir, checked));
+        }
+    }
+    chosen
+}
+
+fn read_module(name: String, dir: PathBuf, checked: bool) -> Option<Module> {
+    let manifest_path = manifest_in(&dir)?;
+    let manifest = manifest::parse(&std::fs::read_to_string(&manifest_path).ok()?)?;
+    manifest.installable.then(|| Module {
+        series: manifest.series(),
+        name,
+        dir,
+        manifest_path,
+        manifest,
+        checked,
+        python: vec![],
+        data: vec![],
+    })
 }
 
 fn parse_module_files(module: &mut Module) {

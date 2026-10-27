@@ -1,5 +1,11 @@
 # odooscan
 
+[![CI](https://github.com/avanserv/odooscan/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/avanserv/odooscan/actions/workflows/ci.yml?query=branch%3Amain)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+[![prek](https://img.shields.io/badge/prek-enabled-brightgreen?logo=pre-commit)](.pre-commit-config.yaml)
+[![Complexity: polyscan](https://img.shields.io/badge/complexity-polyscan-brightgreen)](https://github.com/ludo-technologies/polyscan)
+[![Conventional Commits](https://img.shields.io/badge/Conventional%20Commits-1.0.0-fe5196?logo=conventionalcommits&logoColor=white)](https://www.conventionalcommits.org)
+
 A quality and security scanner for Odoo modules, written in Rust. It parses Python with ruff's
 parser, and XML and CSV natively. It then builds one index of every model, field, method, XML id,
 view and access rule across the modules it is given, so rules can check what a single-file linter
