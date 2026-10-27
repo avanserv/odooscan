@@ -1,6 +1,6 @@
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use crate::facts::{ClassFact, FieldFact};
+use crate::facts::{ArchElement, ClassFact, FieldFact, ViewFact};
 use crate::project::Module;
 
 /// Fields every model has without declaring them.
@@ -49,6 +49,37 @@ type Models<'m> = FxHashMap<&'m str, Vec<(usize, &'m ClassFact)>>;
 
 type XmlIds = FxHashMap<String, Vec<XmlIdDef>>;
 
+/// Every definition of a view id: a module may redefine another module's view.
+type Views<'m> = FxHashMap<String, Vec<ViewNode<'m>>>;
+
+struct ViewNode<'m> {
+    module: usize,
+    inherit: Option<String>,
+    fact: &'m ViewFact,
+}
+
+/// The elements of the views in one inheritance tree: those of views in a module's scope, and for
+/// the others the first module that adds each.
+#[derive(Default)]
+pub struct ViewTree<'m> {
+    pub root: String,
+    pub visible: FxHashSet<ArchElement>,
+    pub hidden: FxHashMap<ArchElement, &'m str>,
+}
+
+/// `%(id)d` names an action by XML id, which Odoo resolves against the module of the view.
+pub fn located(e: &ArchElement, module: &str) -> ArchElement {
+    let value = match e.value.strip_prefix("%(").and_then(|v| v.strip_suffix(")d")) {
+        Some(id) => format!("%({})d", full_id(module, id)),
+        None => e.value.clone(),
+    };
+    ArchElement {
+        tag: e.tag.clone(),
+        attr: e.attr,
+        value,
+    }
+}
+
 /// The ids base generates for a module and for each level of its category.
 fn module_ids(module: &Module, base: usize, xmlids: &mut XmlIds) {
     xmlids
@@ -96,7 +127,7 @@ fn data_ids<'m>(
     module: &'m Module,
     by_name: &FxHashMap<&str, usize>,
     xmlids: &mut XmlIds,
-    views: &mut FxHashMap<String, (Option<&'m str>, Option<String>)>,
+    views: &mut Views<'m>,
 ) {
     let name = module.name.as_str();
     for file in &module.data {
@@ -112,11 +143,11 @@ fn data_ids<'m>(
         }
         for view in &file.facts.views {
             if let Some(id) = &view.id {
-                let inherit = view.inherit.as_deref().map(|i| full_id(name, i));
-                views.insert(
-                    full_id(name, id),
-                    (view.model.as_ref().map(|m| m.value.as_str()), inherit),
-                );
+                views.entry(full_id(name, id)).or_default().push(ViewNode {
+                    module: mi,
+                    inherit: view.inherit.as_deref().map(|i| full_id(name, i)),
+                    fact: view,
+                });
             }
         }
     }
@@ -211,7 +242,9 @@ pub struct Index<'m> {
     pub by_name: FxHashMap<&'m str, usize>,
     models: Models<'m>,
     pub xmlids: FxHashMap<String, Vec<XmlIdDef>>,
-    views: FxHashMap<String, (Option<&'m str>, Option<String>)>,
+    views: Views<'m>,
+    /// View id to the ids of the views that inherit from it.
+    children: FxHashMap<String, Vec<String>>,
     pub models_with_access: FxHashSet<String>,
     pub has_base: bool,
 }
@@ -236,6 +269,12 @@ impl<'m> Index<'m> {
             xmlids.entry(id).or_default().push(XmlIdDef { module: mi });
         }
         let models_with_access = access_models(modules, &model_by_xmlid);
+        let mut children: FxHashMap<String, Vec<String>> = FxHashMap::default();
+        for (id, nodes) in &views {
+            for parent in nodes.iter().filter_map(|n| n.inherit.clone()) {
+                children.entry(parent).or_default().push(id.clone());
+            }
+        }
         Self {
             modules,
             has_base: base.is_some(),
@@ -243,6 +282,7 @@ impl<'m> Index<'m> {
             models,
             xmlids,
             views,
+            children,
             models_with_access,
         }
     }
@@ -410,13 +450,61 @@ impl<'m> Index<'m> {
     /// The model a view applies to, following `inherit_id` when the view does not name one.
     pub fn view_model(&self, mut id: String) -> Option<&'m str> {
         for _ in 0..32 {
-            let (model, inherit) = self.views.get(&id)?;
-            if let Some(model) = model {
-                return Some(model);
+            let nodes = self.views.get(&id)?;
+            if let Some(model) = nodes.iter().find_map(|n| n.fact.model.as_ref()) {
+                return Some(&model.value);
             }
-            id = inherit.clone()?;
+            id = nodes.iter().find_map(|n| n.inherit.clone())?;
         }
         None
+    }
+
+    /// The root of the inheritance tree above view `id`, or None when a view on the way is not
+    /// indexed or its arch was not read, so the tree's elements would be incomplete.
+    pub fn view_root(&self, mut id: String) -> Option<String> {
+        for _ in 0..32 {
+            let nodes = self.views.get(&id)?;
+            if !nodes.iter().any(|n| n.fact.has_arch) {
+                return None;
+            }
+            match nodes.iter().find_map(|n| n.inherit.clone()) {
+                Some(parent) => id = parent,
+                None => return Some(id),
+            }
+        }
+        None
+    }
+
+    pub fn view_visible(&self, id: &str, scope: &Scope) -> bool {
+        self.views
+            .get(id)
+            .is_some_and(|nodes| nodes.iter().any(|n| scope.sees(n.module)))
+    }
+
+    /// The elements of every view in the tree under `root`.
+    pub fn view_tree(&self, root: String, scope: &Scope) -> ViewTree<'m> {
+        let mut tree = ViewTree::default();
+        let mut seen = FxHashSet::default();
+        let mut stack = vec![root.as_str()];
+        while let Some(id) = stack.pop() {
+            if !seen.insert(id) {
+                continue;
+            }
+            for node in self.views.get(id).map(Vec::as_slice).unwrap_or_default() {
+                let module = self.modules[node.module].name.as_str();
+                let elements = node.fact.elements.iter().map(|e| located(e, module));
+                if scope.sees(node.module) {
+                    tree.visible.extend(elements);
+                } else {
+                    for e in elements {
+                        tree.hidden.entry(e).or_insert(module);
+                    }
+                }
+            }
+            stack.extend(self.children.get(id).into_iter().flatten().map(String::as_str));
+        }
+        tree.root = root;
+        tree
     }
 }
 

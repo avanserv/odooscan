@@ -1,0 +1,25 @@
+<odoo>
+    <record id="action_partner" model="ir.actions.act_window">
+        <field name="name">Partners</field>
+    </record>
+
+    <record id="view_partner_simple" model="ir.ui.view">
+        <field name="model">res.partner</field>
+        <field name="arch" type="xml">
+            <form>
+                <sheet>
+                    <group name="main">
+                        <field name="name"/>
+                        <field name="parent_id"/>
+                    </group>
+                    <button name="%(action_partner)d" type="action"/>
+                    <div id="notes"/>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <template id="partner_card">
+        <div id="card"><span name="title"/></div>
+    </template>
+</odoo>

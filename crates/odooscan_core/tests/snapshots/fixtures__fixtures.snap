@@ -4,7 +4,7 @@ assertion_line: 27
 expression: "lines.join(\"\\n\")"
 ---
 custom/bad_sale/__manifest__.py:5:25: OD503 module 'not_installed' is not on the addons path
-custom/bad_sale/__manifest__.py:10:9: OD501 'data/missing.xml' does not exist
+custom/bad_sale/__manifest__.py:11:9: OD501 'data/missing.xml' does not exist
 custom/bad_sale/controllers/main.py:6:61: OD112 csrf=False lets other sites submit this form on the user's behalf
 custom/bad_sale/controllers/main.py:7:9: OD111 route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check
 custom/bad_sale/data/orphan.xml:1:1: OD502 'data/orphan.xml' is not in the manifest's data or demo, so Odoo never loads it
@@ -31,6 +31,10 @@ custom/bad_sale/models/models.py:51:7: OD401 model 'bad.order.line' has no ir.mo
 custom/bad_sale/models/models.py:57:9: OD113 fields_view_get() is removed; override _get_view() or get_views() instead
 custom/bad_sale/models/models.py:64:12: OD205 'name' is a Char field elsewhere and is redefined here as Text
 custom/bad_sale/security/ir.model.access.csv:2:1: OD402 base.group_public gets write, create or unlink on model_bad_order; public and portal access should be read-only and go through controllers
+custom/bad_sale/views/locators.xml:8:17: OD310 no <field name="nmae"> in view base.view_partner_simple or the views that extend it
+custom/bad_sale/views/locators.xml:9:17: OD310 no <group name="mian"> in view base.view_partner_simple or the views that extend it
+custom/bad_sale/views/locators.xml:10:17: OD310 <page name="mail_page"> is added by module mail, which is not in depends
+custom/bad_sale/views/locators.xml:23:9: OD310 no <div id="crad"> in view base.partner_card or the views that extend it
 custom/bad_sale/views/views.xml:6:13: OD306 the <tree> view is renamed <list>
 custom/bad_sale/views/views.xml:7:17: OD305 the attrs attribute is removed; write invisible, readonly or required as a Python expression
 custom/bad_sale/views/views.xml:8:17: OD304 'nmae': bad.order has no field 'nmae'

@@ -1,0 +1,25 @@
+<odoo>
+    <record id="view_partner_simple_sale" model="ir.ui.view">
+        <field name="model">res.partner</field>
+        <field name="inherit_id" ref="base.view_partner_simple"/>
+        <field name="arch" type="xml">
+            <data>
+                <field name="name" position="after"/>
+                <field name="nmae" position="after"/>
+                <xpath expr="//group[@name='mian']" position="inside"/>
+                <xpath expr="//page[@name='mail_page']" position="inside"/>
+                <xpath expr="//field[@name='a'] | //field[@name='b']" position="inside"/>
+                <button name="%(base.action_partner)d" position="before"/>
+                <div id="notes" position="attributes">
+                    <attribute name="id">remarks</attribute>
+                </div>
+                <div id="remarks" position="inside"/>
+            </data>
+        </field>
+    </record>
+
+    <template id="partner_card_sale" inherit_id="base.partner_card">
+        <xpath expr="//div[@id='card']/span[@name='title']" position="after"/>
+        <xpath expr="//div[@id='crad']" position="inside"/>
+    </template>
+</odoo>

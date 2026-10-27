@@ -7,6 +7,7 @@
         "security/ir.model.access.csv",
         "views/views.xml",
         "views/late.xml",
+        "views/locators.xml",
         "data/missing.xml",
     ],
 }
