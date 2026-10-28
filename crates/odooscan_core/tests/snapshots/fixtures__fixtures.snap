@@ -44,6 +44,9 @@ custom/bad_sale/models/models.py:48:62: OD206 no indexed module defines model 'b
 custom/bad_sale/models/models.py:51:7: OD401 model 'bad.order.line' has no ir.model.access rule, so only the superuser can use it
 custom/bad_sale/models/models.py:57:9: OD113 fields_view_get() is removed; override _get_view() or get_views() instead
 custom/bad_sale/models/models.py:64:12: OD205 'name' is a Char field elsewhere and is redefined here as Text
+custom/bad_sale/models/projects.py:7:34: OD202 model 'project.project' comes from module project; add it to depends
+custom/bad_sale/models/projects.py:8:31: OD202 model 'project.task' comes from module project; add it to depends
+custom/bad_sale/models/projects.py:9:36: OD202 model 'account.analytic.line' comes from module hr_timesheet; add it to depends
 custom/bad_sale/models/registry.py:6:14: OD203 'stat': bad.registry has no field 'stat'
 custom/bad_sale/models/registry.py:7:17: OD203 'titel': bad.registry has no field 'titel'
 custom/bad_sale/models/registry.py:10:40: OD207 'country_name' is a Char field related to 'partner_id.country_id', which is a Many2one field
@@ -92,4 +95,5 @@ custom/form_patches/static/src/quick_form_card.xml:15:9: OD606 <div> with class 
 custom/form_patches/static/src/quick_form_card.xml:18:19: OD605 no indexed bundle defines template 'web.FormCompiler'
 custom/modern19/models/partner.py:6:5: OD110 _sql_constraints is ignored; declare models.Constraint, models.Index or models.UniqueIndex attributes instead
 custom/modern19/models/partner.py:9:9: OD109 self._cr is deprecated; use self.env.cr
+custom/project_fork/models/task.py:4:7: OD209 module project already defines model 'project.task', and this class replaces it; extend it with _inherit = 'project.task'
 custom/supers/models/supers.py:29:24: OD211 no parent class of bad.super defines '_prepare_gone', so this super() call fails
