@@ -26,8 +26,12 @@ const OPAQUE_TYPES: &[&str] = &["Reference", "Many2oneReference", "Properties", 
 /// Fields declared outside the class body, which the extractor cannot see.
 const EXTRA_FIELDS: &[(&str, &str)] = &[("ir.rule", "global")];
 
-/// BaseModel methods that fields commonly name as compute or search.
-const BASE_METHODS: &[&str] = &["_compute_display_name", "_search_display_name"];
+/// BaseModel methods that fields commonly name as compute, search or group_expand.
+const BASE_METHODS: &[&str] = &[
+    "_compute_display_name",
+    "_search_display_name",
+    "_read_group_expand_full",
+];
 
 /// Methods of `BaseModel`, written from the ORM API reference: models inherit them from a class
 /// outside every addons directory, so the index never sees them.

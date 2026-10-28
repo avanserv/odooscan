@@ -96,7 +96,7 @@ pub struct FieldFact {
     pub comodel: Option<Spanned<String>>,
     pub inverse_name: Option<Spanned<String>>,
     pub related: Option<Spanned<String>>,
-    /// Names given to compute, inverse and search.
+    /// Methods named by a string given to compute, inverse, search, selection or group_expand.
     pub methods: Vec<Spanned<String>>,
     /// Fields the literal `domain` of a relational field names on its comodel.
     pub domain: Vec<Spanned<String>>,
@@ -127,20 +127,34 @@ pub struct ClassFact {
     pub new_model: bool,
     pub kind: ModelKind,
     pub inherit: Vec<Spanned<String>>,
-    /// `_inherits`: parent model to delegating field.
+    /// `_inherits` and `delegate=True` fields: parent model to delegating field.
     pub inherits: Vec<(String, String)>,
+    /// The delegating fields the `_inherits` dict names, at their entry.
+    pub delegations: Vec<Spanned<String>>,
     pub fields: Vec<FieldFact>,
     pub methods: Vec<String>,
-    /// Field paths given to `@api.depends`, `@api.onchange` and `@api.constrains`.
+    /// Field paths given to `@api.depends`, and the undotted names given to `@api.onchange` and
+    /// `@api.constrains`.
     pub paths: Vec<Spanned<String>>,
-    /// The fields `_order` sorts by and `_rec_name` names, which must exist on the model.
+    /// The fields `_order` sorts by and `_rec_name`, `_parent_name`, `_fold_name` and `_active_name`
+    /// name, which must exist on the model.
     pub order_fields: Vec<Spanned<String>>,
+    /// The field paths of `_rec_names_search`.
+    pub rec_names_search: Vec<Spanned<String>>,
     /// Methods the class's methods call through `super()`.
     pub super_calls: Vec<Spanned<String>>,
     /// A base class is a plain Python class, whose methods only Python knows.
     pub plain_bases: bool,
     /// The value of `_table`, when the class sets it.
     pub table: Option<OptionValue>,
+    /// `_parent_store` and `_auto`, when the class sets them.
+    pub attrs: Vec<(String, Spanned<OptionValue>)>,
+}
+
+impl ClassFact {
+    pub fn attr(&self, name: &str) -> Option<&Spanned<OptionValue>> {
+        self.attrs.iter().find(|(n, _)| n == name).map(|(_, v)| v)
+    }
 }
 
 /// The methods a call can run: those of a model, or of the same Python class in the file.

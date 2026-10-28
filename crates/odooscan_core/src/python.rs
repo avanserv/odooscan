@@ -168,7 +168,7 @@ fn positional_names(ftype: &str) -> &'static [&'static str] {
     match ftype {
         "Monetary" => &["string", "currency_field"],
         "Many2many" => &["comodel_name", "relation", "column1", "column2", "string"],
-        "Selection" => &["selection", "string"],
+        "Selection" | "Reference" => &["selection", "string"],
         _ => &[],
     }
 }
@@ -207,6 +207,23 @@ fn first_strings(elts: &[Expr]) -> OptionValue {
         .map(|e| first(e).map(str::to_owned))
         .collect::<Option<Vec<_>>>()
         .map_or(OptionValue::Other, OptionValue::Strs)
+}
+
+/// The methods a field names by a string: its compute, inverse and search, the method a
+/// `selection` names that returns the values, and the one `group_expand` names.
+fn methods(options: &[(String, Spanned<OptionValue>)]) -> Vec<Spanned<String>> {
+    let names = ["compute", "inverse", "search", "selection", "group_expand"];
+    options
+        .iter()
+        .filter(|(name, _)| names.contains(&name.as_str()))
+        .filter_map(|(_, o)| match &o.value {
+            OptionValue::Str(method) => Some(Spanned {
+                value: method.clone(),
+                pos: o.pos,
+            }),
+            _ => None,
+        })
+        .collect()
 }
 
 fn strings(expr: &Expr) -> Vec<&ast::ExprStringLiteral> {
@@ -348,6 +365,14 @@ fn depends_on_id(path: &str) -> String {
     format!("'{path}': a compute method cannot depend on 'id', so importing this file raises; {fix}")
 }
 
+/// The OD115 message: the field the path starts from is the one whose change Odoo can follow.
+fn dotted_name(kind: &str, path: &str) -> String {
+    let field = path.split('.').next().unwrap_or_default();
+    format!(
+        "'{path}': @api.{kind} takes field names of the model, not paths, so Odoo ignores it; name '{field}' instead"
+    )
+}
+
 fn is_delegate(value: &Expr) -> bool {
     field_call(value)
         .and_then(|(_, call)| keyword(call, "delegate"))
@@ -416,12 +441,15 @@ impl PyVisitor<'_> {
             kind: kind.unwrap_or(ModelKind::Model),
             inherit: vec![],
             inherits: vec![],
+            delegations: vec![],
             fields: vec![],
             methods: vec![],
             paths: vec![],
             order_fields: vec![],
+            rec_names_search: vec![],
             super_calls: vec![],
             table: None,
+            attrs: vec![],
             plain_bases: class
                 .bases()
                 .iter()
@@ -466,13 +494,21 @@ impl PyVisitor<'_> {
                     self.facts.dynamic_models |= name.is_none();
                 }
                 "_inherit" => self.inherit(value, fact, name.as_deref()),
-                "_order" | "_rec_name" => self.order_fields(value, fact),
-                "_inherits" => {
-                    if let Expr::Dict(d) = value {
-                        fact.inherits = str_pairs(d);
-                    }
+                "_order" | "_rec_name" | "_parent_name" | "_fold_name" | "_active_name" => {
+                    self.order_fields(value, fact);
                 }
+                "_rec_names_search" => {
+                    fact.rec_names_search = strings(value).into_iter().map(|s| self.spanned(s)).collect();
+                }
+                "_inherits" => self.inherits(value, fact),
                 "_table" => fact.table = Some(option_value(value)),
+                "_parent_store" | "_auto" => {
+                    let attr = Spanned {
+                        value: option_value(value),
+                        pos: self.loc.at(target),
+                    };
+                    fact.attrs.push((target.id.to_string(), attr));
+                }
                 "_sql_constraints" => self.diag(
                     "OD110",
                     target,
@@ -492,6 +528,24 @@ impl PyVisitor<'_> {
             }],
             _ => strings(value).into_iter().map(|s| self.spanned(s)).collect(),
         };
+    }
+
+    /// A `delegate=True` field may come before the dict, which adds to the pairs it gave.
+    fn inherits(&mut self, value: &Expr, fact: &mut ClassFact) {
+        let Expr::Dict(d) = value else { return };
+        for pair in str_pairs(d) {
+            if !fact.inherits.contains(&pair) {
+                fact.inherits.push(pair);
+            }
+        }
+        let fields = d
+            .items
+            .iter()
+            .filter(|i| i.key.as_ref().is_some_and(|k| str_lit(k).is_some()));
+        fact.delegations = fields
+            .filter_map(|i| i.value.as_string_literal_expr())
+            .map(|s| self.spanned(s))
+            .collect();
     }
 
     /// The field of each `field [asc|desc]` term; a term that is an SQL expression is not one.
@@ -518,7 +572,10 @@ impl PyVisitor<'_> {
         if is_delegate(value)
             && let Some(comodel) = &field.comodel
         {
-            fact.inherits.push((comodel.value.clone(), field.name.clone()));
+            let pair = (comodel.value.clone(), field.name.clone());
+            if !fact.inherits.contains(&pair) {
+                fact.inherits.push(pair);
+            }
         }
         fact.fields.push(field);
     }
@@ -547,6 +604,7 @@ impl PyVisitor<'_> {
         {
             self.diag("OD108", k, "group_operator is renamed aggregator");
         }
+        let options = self.options(ftype, call);
         Some(FieldFact {
             name: name.to_owned(),
             ftype: ftype.to_owned(),
@@ -554,13 +612,9 @@ impl PyVisitor<'_> {
             comodel: comodel.map(|s| self.spanned(s)),
             inverse_name: inverse_name.map(|s| self.spanned(s)),
             related: kw_str("related").map(|s| self.spanned(s)),
-            methods: ["compute", "inverse", "search"]
-                .iter()
-                .filter_map(|k| kw_str(k))
-                .map(|s| self.spanned(s))
-                .collect(),
+            methods: methods(&options),
             domain: keyword(call, "domain").map(|d| self.domain(d)).unwrap_or_default(),
-            options: self.options(ftype, call),
+            options,
             splat: call.arguments.args.iter().any(Expr::is_starred_expr)
                 || call.arguments.keywords.iter().any(|k| k.arg.is_none()),
         })
@@ -659,15 +713,7 @@ impl PyVisitor<'_> {
     fn decorator_checks(&mut self, func: &ast::StmtFunctionDef, fact: &mut ClassFact) {
         for decorator in &func.decorator_list {
             match &decorator.expression {
-                Expr::Call(call) if matches!(tail_name(&call.func), Some("depends" | "onchange" | "constrains")) => {
-                    let depends = tail_name(&call.func) == Some("depends");
-                    for s in call.arguments.args.iter().filter_map(Expr::as_string_literal_expr) {
-                        fact.paths.push(self.spanned(s));
-                        if depends && s.value.to_str().split('.').any(|segment| segment == "id") {
-                            self.diag("OD114", s, depends_on_id(s.value.to_str()));
-                        }
-                    }
-                }
+                Expr::Call(call) => self.decorator_paths(call, fact),
                 Expr::Attribute(a)
                     if matches!(a.attr.as_str(), "multi" | "one") && tail_name(&a.value) == Some("api") =>
                 {
@@ -678,6 +724,25 @@ impl PyVisitor<'_> {
                     );
                 }
                 _ => {}
+            }
+        }
+    }
+
+    /// The names given to `@api.depends`, `@api.onchange` and `@api.constrains`. The last two match
+    /// field names only, so a dotted one is no path to resolve.
+    fn decorator_paths(&mut self, call: &ast::ExprCall, fact: &mut ClassFact) {
+        let Some(kind @ ("depends" | "onchange" | "constrains")) = tail_name(&call.func) else {
+            return;
+        };
+        for s in call.arguments.args.iter().filter_map(Expr::as_string_literal_expr) {
+            let path = s.value.to_str();
+            if kind == "depends" && path.split('.').any(|segment| segment == "id") {
+                self.diag("OD114", s, depends_on_id(path));
+            }
+            if kind != "depends" && path.contains('.') {
+                self.diag("OD115", s, dotted_name(kind, path));
+            } else {
+                fact.paths.push(self.spanned(s));
             }
         }
     }
@@ -1003,6 +1068,63 @@ mod tests {
     }
 
     #[test]
+    fn reads_the_methods_a_field_names() {
+        let names = |f: FieldFact| f.methods.into_iter().map(|m| m.value).collect::<Vec<_>>();
+        assert_eq!(
+            names(field(
+                "fields.Selection('_sizes', group_expand='_expand', compute='_compute')"
+            )),
+            ["_sizes", "_expand", "_compute"]
+        );
+        assert_eq!(names(field("fields.Reference('_targets')")), ["_targets"]);
+        assert!(names(field("fields.Selection([('a', 'A')], group_expand=True)")).is_empty());
+        assert!(names(field("fields.Char('_label')")).is_empty());
+    }
+
+    #[test]
+    fn reads_the_fields_model_attributes_name() {
+        let facts = analyze(
+            "class X(models.Model):\n    _name = 'x'\n    _order = 'sequence desc, id'\n    _parent_name = 'up_id'\n    \
+             _fold_name = 'folded'\n    _active_name = 'x_active'\n    _rec_names_search = ['name', 'partner_id.ref']\n",
+        );
+        let values = |v: &[Spanned<String>]| v.iter().map(|s| s.value.clone()).collect::<Vec<_>>();
+        let class = &facts.classes[0];
+        assert_eq!(
+            values(&class.order_fields),
+            ["sequence", "id", "up_id", "folded", "x_active"]
+        );
+        assert_eq!(values(&class.rec_names_search), ["name", "partner_id.ref"]);
+    }
+
+    #[test]
+    fn reads_parent_store_auto_and_delegations() {
+        let facts = analyze(
+            "class X(models.Model):\n    _name = 'x'\n    company_id = fields.Many2one('res.company', delegate=True)\n    \
+             _inherits = {'res.partner': 'partner_id', 'res.company': 'company_id'}\n    _parent_store = True\n    \
+             _auto = AUTO\n",
+        );
+        let class = &facts.classes[0];
+        assert_eq!(
+            class.attr("_parent_store").map(|a| (&a.value, a.pos.line)),
+            Some((&OptionValue::Bool(true), 5))
+        );
+        assert_eq!(class.attr("_auto").map(|a| &a.value), Some(&OptionValue::Other));
+        let delegations: Vec<_> = class
+            .delegations
+            .iter()
+            .map(|d| (d.value.as_str(), d.pos.col))
+            .collect();
+        assert_eq!(delegations, [("partner_id", 33), ("company_id", 62)]);
+        assert_eq!(
+            class.inherits,
+            [
+                ("res.company".to_owned(), "company_id".to_owned()),
+                ("res.partner".to_owned(), "partner_id".to_owned())
+            ]
+        );
+    }
+
+    #[test]
     fn reads_the_table() {
         let facts = analyze("class X(models.Model):\n    _name = 'x'\n    _table = 'x_data'\n");
         assert_eq!(facts.classes[0].table, Some(OptionValue::Str("x_data".into())));
@@ -1016,5 +1138,19 @@ mod tests {
         );
         let codes: Vec<_> = facts.diags.iter().map(|d| (d.code, d.pos.col)).collect();
         assert_eq!(codes, [("OD114", 18), ("OD114", 24)]);
+    }
+
+    #[test]
+    fn reports_dotted_onchange_and_constrains_names_and_keeps_them_out_of_paths() {
+        let facts = analyze(
+            "class X(models.Model):\n    _name = 'x'\n\n    @api.onchange('partner_id.name', 'partner_id')\n    \
+             def _onchange_partner(self):\n        pass\n\n    @api.constrains('line_ids.qty')\n    \
+             def _check_qty(self):\n        pass\n\n    @api.depends('partner_id.name')\n    \
+             def _compute_label(self):\n        pass\n",
+        );
+        let codes: Vec<_> = facts.diags.iter().map(|d| (d.code, d.pos.line)).collect();
+        assert_eq!(codes, [("OD115", 4), ("OD115", 8)]);
+        let paths: Vec<_> = facts.classes[0].paths.iter().map(|p| p.value.as_str()).collect();
+        assert_eq!(paths, ["partner_id", "partner_id.name"]);
     }
 }

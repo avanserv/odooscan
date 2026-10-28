@@ -39,8 +39,13 @@ pub struct Rule {
 pub const SUPERSEDED: &[(&str, &str)] = &[("OD101", "OD701")];
 
 /// Severities that replace a rule's own from some series on, as (code, series range, severity).
-/// From 20.0, `ir.access` rows only grant access, so a model meant for the superuser alone has none.
-const SEVERITY_BY_SERIES: &[(&str, &str, Severity)] = &[("OD401", ">=20.0", Severity::Info)];
+/// From 20.0, `ir.access` rows only grant access, so a model meant for the superuser alone has none,
+/// and Odoo refuses a model whose `_inherits` field is not required with ondelete 'cascade' or
+/// 'restrict' instead of fixing it.
+const SEVERITY_BY_SERIES: &[(&str, &str, Severity)] = &[
+    ("OD401", ">=20.0", Severity::Info),
+    ("OD218", ">=20.0", Severity::Error),
+];
 
 impl Rule {
     pub fn severity_for(&self, module_series: Option<Series>) -> Severity {
@@ -91,10 +96,11 @@ rules! {
     "OD112" "csrf-disabled" Security Info None, false, "An HTTP route disables CSRF protection.";
     "OD113" "fields-view-get-removed" Deprecation Error Some(">=16.0"), false, "fields_view_get() is removed; override _get_view() or get_views().";
     "OD114" "depends-on-id" Correctness Error None, false, "@api.depends names the field id, which Odoo refuses.";
+    "OD115" "dotted-onchange-constrains" Correctness Warning None, false, "@api.onchange or @api.constrains names a dotted path, which Odoo ignores.";
     "OD201" "unknown-model" Correctness Error None, true, "The model is not defined by any indexed module.";
     "OD202" "model-not-in-depends" Correctness Error None, true, "The model comes from a module missing from depends.";
     "OD203" "unresolved-field-path" Correctness Error None, true, "A field path does not resolve on its model.";
-    "OD204" "missing-method" Correctness Error None, true, "compute, inverse or search names a method the model does not have.";
+    "OD204" "missing-method" Correctness Error None, true, "compute, inverse, search, selection or group_expand names a method the model does not have.";
     "OD205" "field-type-changed" Correctness Warning None, true, "An inherited field is redefined with another type.";
     "OD206" "unknown-env-model" Correctness Warning None, true, "env[...] names a model no indexed module defines.";
     "OD207" "related-type-mismatch" Correctness Error None, true, "A related field has another type than the field it relates to.";
@@ -107,6 +113,8 @@ rules! {
     "OD214" "many2many-table-clash" Correctness Error Some(">=13.0"), true, "Two Many2many fields of a model to one comodel get the same table.";
     "OD215" "many2many-table-too-long" Correctness Error None, true, "A Many2many's relation table name is longer than PostgreSQL allows.";
     "OD216" "selection-add-without-ondelete" Correctness Error Some(">=14.0"), true, "selection_add leaves a value of a required Selection with ondelete 'set null'.";
+    "OD217" "parent-store-without-path" Correctness Error None, true, "A model sets _parent_store without an indexed parent_path field.";
+    "OD218" "delegation-field-not-required" Correctness Warning None, true, "A field that delegates to a parent model is not required with ondelete cascade or restrict.";
     "OD301" "unresolved-xmlid" Correctness Error None, true, "The XML id is not defined by its module.";
     "OD302" "xmlid-not-in-depends" Correctness Error None, true, "The XML id comes from a module missing from depends.";
     "OD303" "duplicate-xmlid" Correctness Warning None, false, "The same XML id is defined twice in one file.";
@@ -179,6 +187,15 @@ mod tests {
         assert_eq!(od401.severity_for(Series::parse("18.0")), Severity::Warning);
         assert_eq!(od401.severity_for(Series::parse("20.0")), Severity::Info);
         assert_eq!(od401.severity_for(None), Severity::Warning);
+    }
+
+    #[test]
+    fn delegation_rule_is_an_error_from_20() {
+        let od218 = rule("OD218");
+        assert_eq!(od218.severity_for(Series::parse("18.0")), Severity::Warning);
+        assert_eq!(od218.severity_for(Series::parse("19.0")), Severity::Warning);
+        assert_eq!(od218.severity_for(Series::parse("20.0")), Severity::Error);
+        assert_eq!(od218.severity_for(None), Severity::Warning);
     }
 
     #[test]
