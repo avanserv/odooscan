@@ -217,6 +217,34 @@ pub struct JsName {
     pub specifier: String,
     /// The exported name asked for; `default` for a default import.
     pub name: Spanned<String>,
+    /// The binding an import creates; none for `export { x } from`.
+    pub local: Option<String>,
+}
+
+/// What a class extends.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Heritage {
+    None,
+    Name(String),
+    /// An expression, such as a mixin call, whose class only runs tell.
+    Other,
+}
+
+#[derive(Debug)]
+pub struct JsClass {
+    pub name: String,
+    pub extends: Heritage,
+    /// Instance methods, accessors and fields.
+    pub members: Vec<String>,
+}
+
+/// `patch(Target.prototype, { ... })`.
+#[derive(Debug)]
+pub struct JsPatch {
+    pub target: String,
+    pub members: Vec<String>,
+    /// Methods the patch calls through `super`.
+    pub supers: Vec<Spanned<String>>,
 }
 
 #[derive(Debug, Default)]
@@ -227,9 +255,15 @@ pub struct JsFacts {
     pub names: Vec<JsName>,
     /// Names the file exports itself or re-exports, `default` among them.
     pub exports: Vec<String>,
+    /// Exported names of the file's own bindings, with the binding.
+    pub export_locals: Vec<(String, String)>,
+    /// `export { imported as exported } from "specifier"`, as (exported, specifier, imported).
+    pub reexports: Vec<(String, String, String)>,
     /// Specifiers of `export * from`, whose names the file exports too.
     pub star_exports: Vec<String>,
     /// Module names given to `odoo.define()`, which a hand-written file registers under.
     pub defines: Vec<String>,
+    pub classes: Vec<JsClass>,
+    pub patches: Vec<JsPatch>,
     pub syntax_error: Option<Spanned<String>>,
 }

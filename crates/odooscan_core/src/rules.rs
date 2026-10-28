@@ -114,6 +114,7 @@ rules! {
     "OD503" "unknown-dependency" Correctness Error None, true, "A module in depends is not on the addons path.";
     "OD504" "circular-dependency" Correctness Error None, true, "A module in depends depends back on this module.";
     "OD601" "unresolved-js-import" Correctness Error None, true, "A JS import names a module or an export no indexed module provides.";
+    "OD602" "orphan-patch-super" Correctness Error Some(">=17.0"), true, "A patch calls a super method the class it patches does not have.";
 }
 
 pub fn rule(code: &str) -> &'static Rule {

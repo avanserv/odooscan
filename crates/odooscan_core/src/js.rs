@@ -1,10 +1,14 @@
 use oxc_allocator::Allocator;
-use oxc_ast::ast::{Argument, Expression, Program, Statement};
+use oxc_ast::ast::{
+    Argument, CallExpression, Class, Expression, ObjectExpression, ObjectPropertyKind, Program, Statement,
+};
+use oxc_ast_visit::Visit;
+use oxc_ast_visit::walk::{walk_call_expression, walk_class};
 use oxc_parser::Parser;
 use oxc_span::SourceType;
 use oxc_syntax::module_record::{ExportExportName, ExportImportName, ImportImportName, ModuleRecord};
 
-use crate::facts::{Annotation, JsFacts, JsName, Lines, Pos, Spanned};
+use crate::facts::{Annotation, Heritage, JsClass, JsFacts, JsName, JsPatch, Lines, Pos, Spanned};
 
 pub fn analyze(text: &str) -> JsFacts {
     let lines = Lines::new(text);
@@ -26,6 +30,11 @@ pub fn analyze(text: &str) -> JsFacts {
     }
     module_record(&parsed.module_record, &lines, &mut facts);
     facts.defines = defines(&parsed.program);
+    Collector {
+        lines: &lines,
+        facts: &mut facts,
+    }
+    .visit_program(&parsed.program);
     facts
 }
 
@@ -78,9 +87,9 @@ fn imports(record: &ModuleRecord, lines: &Lines, facts: &mut JsFacts) {
             ImportImportName::Default(span) => ("default".to_owned(), span.start),
             ImportImportName::NamespaceObject => continue,
         };
-        facts
-            .names
-            .push(js_name(&entry.module_request.name, name, lines.pos(start as usize)));
+        let mut name = js_name(&entry.module_request.name, name, lines.pos(start as usize));
+        name.local = Some(entry.local_name.name.to_string());
+        facts.names.push(name);
     }
 }
 
@@ -90,12 +99,18 @@ fn exports(record: &ModuleRecord, lines: &Lines, facts: &mut JsFacts) {
         .iter()
         .chain(&record.indirect_export_entries)
     {
-        match &entry.export_name {
-            ExportExportName::Name(n) => facts.exports.push(n.name.to_string()),
-            ExportExportName::Default(_) => facts.exports.push("default".to_owned()),
-            ExportExportName::Null => {}
+        facts.exports.extend(export_name(&entry.export_name));
+        if let Some(local) = entry.local_name.name().filter(|_| entry.module_request.is_none())
+            && let Some(exported) = export_name(&entry.export_name)
+        {
+            facts.export_locals.push((exported, local.to_string()));
         }
         if let (Some(request), ExportImportName::Name(n)) = (&entry.module_request, &entry.import_name) {
+            if let Some(exported) = export_name(&entry.export_name) {
+                facts
+                    .reexports
+                    .push((exported, request.name.to_string(), n.name.to_string()));
+            }
             facts.names.push(js_name(
                 &request.name,
                 n.name.to_string(),
@@ -110,10 +125,109 @@ fn exports(record: &ModuleRecord, lines: &Lines, facts: &mut JsFacts) {
     }
 }
 
+fn export_name(name: &ExportExportName) -> Option<String> {
+    match name {
+        ExportExportName::Name(n) => Some(n.name.to_string()),
+        ExportExportName::Default(_) => Some("default".to_owned()),
+        ExportExportName::Null => None,
+    }
+}
+
 fn js_name(specifier: &str, name: String, pos: Pos) -> JsName {
     JsName {
         specifier: specifier.to_owned(),
         name: Spanned { value: name, pos },
+        local: None,
+    }
+}
+
+/// Named classes and prototype patches, wherever they are.
+struct Collector<'f> {
+    lines: &'f Lines,
+    facts: &'f mut JsFacts,
+}
+
+impl<'a> Visit<'a> for Collector<'_> {
+    fn visit_class(&mut self, class: &Class<'a>) {
+        if let Some(id) = &class.id {
+            self.facts.classes.push(JsClass {
+                name: id.name.to_string(),
+                extends: match class.heritage.as_ref().map(|h| &h.expression) {
+                    None => Heritage::None,
+                    Some(Expression::Identifier(i)) => Heritage::Name(i.name.to_string()),
+                    Some(_) => Heritage::Other,
+                },
+                members: class
+                    .body
+                    .body
+                    .iter()
+                    .filter(|e| !e.r#static())
+                    .filter_map(|e| Some(e.static_name()?.as_str()?.to_owned()))
+                    .collect(),
+            });
+        }
+        walk_class(self, class);
+    }
+
+    fn visit_call_expression(&mut self, call: &CallExpression<'a>) {
+        if let Some(patch) = prototype_patch(call, self.lines) {
+            self.facts.patches.push(patch);
+        }
+        walk_call_expression(self, call);
+    }
+}
+
+fn prototype_patch(call: &CallExpression, lines: &Lines) -> Option<JsPatch> {
+    if !matches!(&call.callee, Expression::Identifier(i) if i.name == "patch") {
+        return None;
+    }
+    let target = match call.arguments.first()? {
+        Argument::StaticMemberExpression(m) if m.property.name == "prototype" => match &m.object {
+            Expression::Identifier(i) => i.name.to_string(),
+            _ => return None,
+        },
+        _ => return None,
+    };
+    let Argument::ObjectExpression(extension) = call.arguments.get(1)? else {
+        return None;
+    };
+    let mut supers = Supers { lines, found: vec![] };
+    supers.visit_object_expression(extension);
+    Some(JsPatch {
+        target,
+        members: members(extension),
+        supers: supers.found,
+    })
+}
+
+fn members(object: &ObjectExpression) -> Vec<String> {
+    object
+        .properties
+        .iter()
+        .filter_map(|p| match p {
+            ObjectPropertyKind::ObjectProperty(p) => Some(p.key.static_name()?.as_str()?.to_owned()),
+            ObjectPropertyKind::SpreadProperty(_) => None,
+        })
+        .collect()
+}
+
+/// `super.name()` calls. A read such as `super.name || fallback` tolerates a missing member.
+struct Supers<'f> {
+    lines: &'f Lines,
+    found: Vec<Spanned<String>>,
+}
+
+impl<'a> Visit<'a> for Supers<'_> {
+    fn visit_call_expression(&mut self, call: &CallExpression<'a>) {
+        if let Expression::StaticMemberExpression(member) = &call.callee
+            && matches!(member.object, Expression::Super(_))
+        {
+            self.found.push(Spanned {
+                value: member.property.name.to_string(),
+                pos: self.lines.pos(member.property.span.start as usize),
+            });
+        }
+        walk_call_expression(self, call);
     }
 }
 
@@ -184,7 +298,41 @@ odoo.define("@web/legacy", [], function () {});
         assert_eq!(facts.exports, ["f", "default", "e"]);
         assert_eq!(facts.star_exports, ["@web/v"]);
         assert_eq!(facts.defines, ["@web/legacy"]);
+        assert_eq!(
+            facts.export_locals,
+            [("f".to_owned(), "f".to_owned()), ("default".to_owned(), "G".to_owned())]
+        );
+        assert_eq!(facts.reexports, [("e".to_owned(), "@web/w".to_owned(), "e".to_owned())]);
+        assert_eq!(facts.names[1].local.as_deref(), Some("c"));
         assert!(facts.syntax_error.is_none());
+    }
+
+    #[test]
+    fn collects_classes_and_prototype_patches() {
+        let facts = analyze(
+            r#"class A extends B { static s() {} m() {} get g() {} f = 1; }
+class C extends mixin(B) {}
+patch(A.prototype, { m() { return super.m() + super.g; }, n: 1 });
+patch(A, { s() { super.s(); } });
+"#,
+        );
+        let classes: Vec<_> = facts
+            .classes
+            .iter()
+            .map(|c| (c.name.as_str(), &c.extends, c.members.join(",")))
+            .collect();
+        assert_eq!(
+            classes,
+            [
+                ("A", &Heritage::Name("B".to_owned()), "m,g,f".to_owned()),
+                ("C", &Heritage::Other, String::new())
+            ]
+        );
+        assert_eq!(facts.patches.len(), 1);
+        assert_eq!(facts.patches[0].target, "A");
+        assert_eq!(facts.patches[0].members, ["m", "n"]);
+        let supers: Vec<_> = facts.patches[0].supers.iter().map(|s| s.value.as_str()).collect();
+        assert_eq!(supers, ["m"]);
     }
 
     #[test]

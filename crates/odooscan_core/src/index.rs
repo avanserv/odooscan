@@ -1,7 +1,7 @@
 use globset::{GlobBuilder, GlobSetBuilder};
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use crate::facts::{Annotation, ArchElement, ClassFact, FieldFact, ViewFact};
+use crate::facts::{Annotation, ArchElement, ClassFact, FieldFact, Heritage, JsClass, ViewFact};
 use crate::project::Module;
 
 /// Fields every model has without declaring them.
@@ -311,8 +311,20 @@ pub fn js_module_path(module: &str, rel: &str) -> Option<String> {
     Some(format!("@{module}/{path}"))
 }
 
+/// Instance members of Owl's `Component`, which odooscan does not index: Owl is a library.
+const OWL_COMPONENT: &[&str] = &["setup", "render"];
+
+/// A class by the file that declares it and its name there.
+type ClassKey = (usize, usize, String);
+
+/// A prototype patch, as (module, file, index in the file).
+type PatchId = (usize, usize, usize);
+
+/// The members each prototype patch adds to a class.
+type Patched<'m> = FxHashMap<ClassKey, Vec<(PatchId, &'m [String])>>;
+
 /// The file a JS module name resolves to.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub struct JsTarget {
     pub module: usize,
     pub file: usize,
@@ -477,6 +489,7 @@ pub struct Index<'m> {
     js_paths: FxHashMap<String, JsTarget>,
     js_loaded: FxHashSet<(usize, usize)>,
     always_installed: Vec<bool>,
+    patched: Patched<'m>,
 }
 
 impl<'m> Index<'m> {
@@ -505,7 +518,7 @@ impl<'m> Index<'m> {
                 children.entry(parent).or_default().push(id.clone());
             }
         }
-        Self {
+        let mut index = Self {
             modules,
             has_base: base.is_some(),
             models,
@@ -517,7 +530,122 @@ impl<'m> Index<'m> {
             js_loaded: loaded_js(modules),
             always_installed: always_installed(modules, &by_name),
             by_name,
+            patched: FxHashMap::default(),
+        };
+        index.patched = index.patched_classes();
+        index
+    }
+
+    fn patched_classes(&self) -> Patched<'m> {
+        let mut patched: Patched<'m> = FxHashMap::default();
+        for (mi, module) in self.modules.iter().enumerate() {
+            for (fi, file) in module.js.iter().enumerate() {
+                let here = self.js_target(mi, fi);
+                for (pi, patch) in file.facts.patches.iter().enumerate() {
+                    if let Some((t, class)) = self.js_class(here, &patch.target, 0) {
+                        let key = (t.module, t.file, class.name.clone());
+                        patched
+                            .entry(key)
+                            .or_default()
+                            .push(((mi, fi, pi), patch.members.as_slice()));
+                    }
+                }
+            }
         }
+        patched
+    }
+
+    pub fn js_target(&self, module: usize, file: usize) -> JsTarget {
+        JsTarget {
+            module,
+            file,
+            opaque: false,
+        }
+    }
+
+    fn js_from(&self, t: JsTarget) -> String {
+        let module = &self.modules[t.module];
+        js_module_path(&module.name, &module.js[t.file].rel).unwrap_or_default()
+    }
+
+    /// The file and binding behind the name `exported` of the file `t`.
+    fn js_binding(&self, t: JsTarget, exported: &str, depth: u8) -> Option<(JsTarget, String)> {
+        let facts = &self.modules[t.module].js[t.file].facts;
+        if t.opaque || depth > 8 {
+            return None;
+        }
+        if let Some((_, local)) = facts.export_locals.iter().find(|(e, _)| e == exported) {
+            return Some((t, local.clone()));
+        }
+        let from = self.js_from(t);
+        let next = |specifier: &str, name: &str| match self.js_resolve(&from, specifier) {
+            JsSpec::Found(n) => self.js_binding(n, name, depth + 1),
+            _ => None,
+        };
+        if let Some((_, specifier, imported)) = facts.reexports.iter().find(|(e, ..)| e == exported) {
+            return next(specifier, imported);
+        }
+        facts
+            .star_exports
+            .iter()
+            .find_map(|specifier| next(specifier, exported))
+    }
+
+    /// The class the binding `local` of the file `t` holds, following imports.
+    pub fn js_class(&self, t: JsTarget, local: &str, depth: u8) -> Option<(JsTarget, &'m JsClass)> {
+        let facts = &self.modules[t.module].js[t.file].facts;
+        if depth > 8 {
+            return None;
+        }
+        if let Some(class) = facts.classes.iter().find(|c| c.name == local) {
+            return Some((t, class));
+        }
+        let import = facts.names.iter().find(|n| n.local.as_deref() == Some(local))?;
+        let JsSpec::Found(n) = self.js_resolve(&self.js_from(t), &import.specifier) else {
+            return None;
+        };
+        let (t, local) = self.js_binding(n, &import.name.value, depth + 1)?;
+        self.js_class(t, &local, depth + 1)
+    }
+
+    /// Whether the file `t` imports `local` as Owl's `Component`.
+    fn owl_component(&self, t: JsTarget, local: &str) -> bool {
+        self.modules[t.module].js[t.file]
+            .facts
+            .names
+            .iter()
+            .any(|n| n.local.as_deref() == Some(local) && n.specifier == "@odoo/owl" && n.name.value == "Component")
+    }
+
+    /// The members of a class, its parents, and every prototype patch of them but `except`, or
+    /// None when a parent cannot be resolved.
+    pub fn js_members(&self, t: JsTarget, class: &'m JsClass, except: PatchId) -> Option<FxHashSet<&'m str>> {
+        let mut members = FxHashSet::default();
+        let (mut t, mut class) = (t, class);
+        for _ in 0..32 {
+            members.extend(class.members.iter().map(String::as_str));
+            let key = (t.module, t.file, class.name.clone());
+            for (_, added) in self
+                .patched
+                .get(&key)
+                .into_iter()
+                .flatten()
+                .filter(|(p, _)| *p != except)
+            {
+                members.extend(added.iter().map(String::as_str));
+            }
+            let parent = match &class.extends {
+                Heritage::None => return Some(members),
+                Heritage::Other => return None,
+                Heritage::Name(parent) => parent,
+            };
+            if self.owl_component(t, parent) {
+                members.extend(OWL_COMPONENT);
+                return Some(members);
+            }
+            (t, class) = self.js_class(t, parent, 0)?;
+        }
+        None
     }
 
     /// Whether Odoo installs `module` with `base`, as it does `web`, so any module may use it.

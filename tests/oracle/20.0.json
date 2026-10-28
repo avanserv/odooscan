@@ -421,6 +421,12 @@
       "count": 1
     },
     {
+      "path": "addons/hr_work_entry/static/src/components/domain_count_field/domain_count_field.js",
+      "code": "OD602",
+      "message": "neither ListRenderer nor its parents have 'getCellTitle', so super.getCellTitle() fails",
+      "count": 1
+    },
+    {
       "path": "addons/html_editor/controllers/main.py",
       "code": "OD111",
       "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
@@ -1093,6 +1099,12 @@
       "count": 2
     },
     {
+      "path": "addons/l10n_es_pos/static/src/app/services/pos_store.js",
+      "code": "OD602",
+      "message": "neither PosStore nor its parents have '_getCreateOrderContext', so super._getCreateOrderContext() fails",
+      "count": 1
+    },
+    {
       "path": "addons/l10n_eu_account_vies/controllers/webhook.py",
       "code": "OD112",
       "message": "csrf=False lets other sites submit this form on the user's behalf",
@@ -1258,6 +1270,12 @@
       "path": "addons/l10n_jo_edi/models/account_move_send.py",
       "code": "OD103",
       "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_jo_edi_pos/static/src/overrides/app/utils/generate_printer_data.js",
+      "code": "OD602",
+      "message": "neither GeneratePrinterData nor its parents have 'generateData', so super.generateData() fails",
       "count": 1
     },
     {
@@ -1535,6 +1553,12 @@
       "code": "OD111",
       "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
       "count": 3
+    },
+    {
+      "path": "addons/mass_mailing_sms/static/src/components/sms_widget/fields_sms_widget.js",
+      "code": "OD602",
+      "message": "neither SmsCharCounter nor its parents have '_getValueForSmsCounts', so super._getValueForSmsCounts() fails",
+      "count": 1
     },
     {
       "path": "addons/microsoft_calendar/models/res_users.py",
@@ -1921,6 +1945,24 @@
       "count": 1
     },
     {
+      "path": "addons/pos_event/static/src/app/components/popup/print_popup/print_popup.js",
+      "code": "OD602",
+      "message": "neither PrintPopup nor its parents have 'printEventBadge', so super.printEventBadge() fails",
+      "count": 1
+    },
+    {
+      "path": "addons/pos_event/static/src/app/screens/product_screen/product_screen.js",
+      "code": "OD602",
+      "message": "neither ProductScreen nor its parents have 'onMouseDown', so super.onMouseDown() fails",
+      "count": 1
+    },
+    {
+      "path": "addons/pos_event/static/src/app/screens/product_screen/product_screen.js",
+      "code": "OD602",
+      "message": "neither ProductScreen nor its parents have 'onTouchStart', so super.onTouchStart() fails",
+      "count": 1
+    },
+    {
       "path": "addons/pos_mercado_pago/controllers/main.py",
       "code": "OD111",
       "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
@@ -1960,6 +2002,18 @@
       "path": "addons/pos_qfpay/controllers/main.py",
       "code": "OD112",
       "message": "csrf=False lets other sites submit this form on the user's behalf",
+      "count": 1
+    },
+    {
+      "path": "addons/pos_restaurant/static/src/app/components/navbar/navbar.js",
+      "code": "OD602",
+      "message": "neither Navbar nor its parents have 'showTabs', so super.showTabs() fails",
+      "count": 1
+    },
+    {
+      "path": "addons/pos_restaurant/static/src/app/models/pos_order_line.js",
+      "code": "OD602",
+      "message": "neither PosOrderline nor its parents have 'clone', so super.clone() fails",
       "count": 1
     },
     {
@@ -2077,6 +2131,12 @@
       "count": 1
     },
     {
+      "path": "addons/project_todo/static/src/core/web/activity_menu_patch.js",
+      "code": "OD602",
+      "message": "neither ActivityMenu nor its parents have 'onClickAction', so super.onClickAction() fails",
+      "count": 1
+    },
+    {
       "path": "addons/purchase/views/purchase_views.xml",
       "code": "OD303",
       "message": "XML id 'menu_product_in_config_purchase' is already defined earlier in this file",
@@ -2164,6 +2224,42 @@
       "path": "addons/sale_management/controllers/portal.py",
       "code": "OD111",
       "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
+      "count": 1
+    },
+    {
+      "path": "addons/sale_management/static/src/fields/sale_order_template_label_text/sale_order_template_label_text.js",
+      "code": "OD602",
+      "message": "neither SaleOrderTemplateLabelTextField nor its parents have '_getAdditionalDialogProps', so super._getAdditionalDialogProps() fails",
+      "count": 1
+    },
+    {
+      "path": "addons/sale_management/static/src/fields/sale_order_template_label_text/sale_order_template_label_text.js",
+      "code": "OD602",
+      "message": "neither SaleOrderTemplateLabelTextField nor its parents have '_getAdditionalRpcParams', so super._getAdditionalRpcParams() fails",
+      "count": 1
+    },
+    {
+      "path": "addons/sale_management/static/src/fields/sale_order_template_label_text/sale_order_template_label_text.js",
+      "code": "OD602",
+      "message": "neither SaleOrderTemplateLabelTextField nor its parents have '_prepareNewLineData', so super._prepareNewLineData() fails",
+      "count": 1
+    },
+    {
+      "path": "addons/sale_management/static/src/fields/sale_order_template_product_field/sale_order_template_product_field.js",
+      "code": "OD602",
+      "message": "neither SaleOrderTemplateLineProductField nor its parents have '_getAdditionalDialogProps', so super._getAdditionalDialogProps() fails",
+      "count": 1
+    },
+    {
+      "path": "addons/sale_management/static/src/fields/sale_order_template_product_field/sale_order_template_product_field.js",
+      "code": "OD602",
+      "message": "neither SaleOrderTemplateLineProductField nor its parents have '_getAdditionalRpcParams', so super._getAdditionalRpcParams() fails",
+      "count": 1
+    },
+    {
+      "path": "addons/sale_management/static/src/fields/sale_order_template_product_field/sale_order_template_product_field.js",
+      "code": "OD602",
+      "message": "neither SaleOrderTemplateLineProductField nor its parents have '_prepareNewLineData', so super._prepareNewLineData() fails",
       "count": 1
     },
     {
@@ -2383,6 +2479,12 @@
       "count": 1
     },
     {
+      "path": "addons/website/static/src/components/burger_menu/burger_menu.js",
+      "code": "OD602",
+      "message": "neither BurgerMenu nor its parents have '_onMenuClicked', so super._onMenuClicked() fails",
+      "count": 1
+    },
+    {
       "path": "addons/website_blog/controllers/main.py",
       "code": "OD111",
       "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
@@ -2440,6 +2542,12 @@
       "path": "addons/website_event_track_live/controllers/track_live.py",
       "code": "OD111",
       "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
+      "count": 1
+    },
+    {
+      "path": "addons/website_event_track_live_quiz/static/src/interactions/quiz.js",
+      "code": "OD602",
+      "message": "neither Quiz nor its parents have 'submitQuiz', so super.submitQuiz() fails",
       "count": 1
     },
     {

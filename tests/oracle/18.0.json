@@ -451,6 +451,12 @@
       "count": 6
     },
     {
+      "path": "addons/im_livechat/static/src/embed/cors/store_service_patch.js",
+      "code": "OD602",
+      "message": "neither Store nor its parents have 'avatarUrl', so super.avatarUrl() fails",
+      "count": 1
+    },
+    {
       "path": "addons/l10n_account_withholding_tax/models/account_payment_withholding_line.py",
       "code": "OD203",
       "message": "'payment_register_id.amount': account.payment.withholding.line has no field 'payment_register_id'",
@@ -833,6 +839,12 @@
       "code": "OD103",
       "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
       "count": 2
+    },
+    {
+      "path": "addons/l10n_es_pos/static/src/overrides/models/pos_store.js",
+      "code": "OD602",
+      "message": "neither PosStore nor its parents have '_getCreateOrderContext', so super._getCreateOrderContext() fails",
+      "count": 1
     },
     {
       "path": "addons/l10n_fi/data/account_account_tag_data.xml",
@@ -1663,6 +1675,12 @@
       "count": 1
     },
     {
+      "path": "addons/pos_hr_restaurant/static/src/overrides/models/pos_store.js",
+      "code": "OD602",
+      "message": "neither PosStore nor its parents have 'shouldResetIdleTimer', so super.shouldResetIdleTimer() fails",
+      "count": 1
+    },
+    {
       "path": "addons/pos_loyalty/models/pos_order_line.py",
       "code": "OD211",
       "message": "no parent class of pos.order.line defines 'is_not_sellable_line', so this super() call fails",
@@ -1696,6 +1714,12 @@
       "path": "addons/pos_online_payment_self_order/models/pos_config.py",
       "code": "OD211",
       "message": "no parent class of pos.config defines '_get_self_ordering_data', so this super() call fails",
+      "count": 1
+    },
+    {
+      "path": "addons/pos_restaurant/static/src/overrides/models/pos_order_line.js",
+      "code": "OD602",
+      "message": "neither PosOrderline nor its parents have 'clone', so super.clone() fails",
       "count": 1
     },
     {
@@ -1762,6 +1786,12 @@
       "path": "addons/project/models/project_project.py",
       "code": "OD103",
       "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
+      "count": 1
+    },
+    {
+      "path": "addons/project_todo/static/src/web/activity/activity_menu_patch.js",
+      "code": "OD602",
+      "message": "neither ActivityMenu nor its parents have 'onClickAction', so super.onClickAction() fails",
       "count": 1
     },
     {
@@ -2038,6 +2068,12 @@
       "path": "addons/website/controllers/model_page.py",
       "code": "OD111",
       "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
+      "count": 1
+    },
+    {
+      "path": "addons/website/static/src/components/burger_menu/burger_menu.js",
+      "code": "OD602",
+      "message": "neither BurgerMenu nor its parents have '_onMenuClicked', so super._onMenuClicked() fails",
       "count": 1
     },
     {
