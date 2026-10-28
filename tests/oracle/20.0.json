@@ -1489,6 +1489,12 @@
       "count": 1
     },
     {
+      "path": "addons/mail/models/mail_thread.py",
+      "code": "OD703",
+      "message": "RPC argument 'message' reaches Markup() through '_message_parse_extract_payload()', 'body', '_message_parse_extract_payload_postprocess()', 'body', 'root' unescaped; escape it, or pass it as an argument of Markup's % or format()",
+      "count": 1
+    },
+    {
       "path": "addons/mail/security/ir.access.csv",
       "code": "OD402",
       "message": "base.group_portal gets write, create or unlink on mail.message; public and portal access should be read-only and go through controllers",
@@ -1510,6 +1516,12 @@
       "path": "addons/mail_group/controllers/portal.py",
       "code": "OD112",
       "message": "csrf=False lets other sites submit this form on the user's behalf",
+      "count": 1
+    },
+    {
+      "path": "addons/mail_group/models/mail_group.py",
+      "code": "OD703",
+      "message": "RPC argument 'body' reaches Markup() through '_clean_email_body()', 'tree' unescaped; escape it, or pass it as an argument of Markup's % or format()",
       "count": 1
     },
     {

@@ -128,7 +128,13 @@ A value stays tainted through assignments, formatting, concatenation, f-strings,
 items, attributes, collections, comprehensions and module functions such as `json.loads()`. Records
 do not carry it: what a recordset method such as `browse()` or `search()` returns is not tainted.
 Both branches of an `if` are followed, a branch that returns or raises adds nothing after it, and
-a loop body is read twice. A value passed to another method is not followed into it.
+a loop body is read twice.
+
+A value passed to a method of `self`, of `env["x"]` or of a local bound to one is followed into
+every definition of that method the module's dependencies hold, overrides included, up to four
+calls deep; so is a value such a method returns. The finding is at the sink when the module holds
+it, otherwise at the call that leaves the module. A method that runs under `sudo()` only because
+its caller called it so is not known to write as superuser.
 
 The flow ends at a sanitizer: `int()`, `float()`, `bool()`, `len()`, `SQL.identifier()`,
 `escape()`, `html_escape()`, `html_sanitize()` and `plaintext2html()`; at `assert x in (...)` or

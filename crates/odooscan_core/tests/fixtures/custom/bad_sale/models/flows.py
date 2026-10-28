@@ -19,3 +19,16 @@ class SaleOrderFlows(models.Model):
     def apply_mode(self, mode):
         assert mode in ("upper", "lower")
         return safe_eval(mode)
+
+    def _search_by(self, term):
+        self.env.cr.execute("SELECT id FROM bad_order WHERE name = %s", [term])
+        return self.env.cr.fetchall()
+
+
+class SaleOrderSearch(models.Model):
+    _inherit = "bad.order"
+
+    def _search_by(self, term):
+        query = "SELECT id FROM bad_order WHERE name = '%s'" % term
+        self.env.cr.execute(query)
+        return super()._search_by(term)

@@ -8,6 +8,7 @@ use crate::facts::{
     Annotation, ClassFact, DomainFact, FieldFact, JsFacts, JsName, ModelKind, OrmCall, Pos, RawDiag, RecordFact,
     Spanned, ViewFact, XmlRef,
 };
+use crate::flows;
 use crate::index::{Export, Index, JsSpec, Scope, Status, ViewTree, full_id, js_module_path, located};
 use crate::project::{Module, SourceFile};
 use crate::series::Series;
@@ -43,6 +44,7 @@ pub fn check_module<'m>(index: &Index<'m>, mi: usize, series: Option<Series>) ->
         }
         private_rpc(&mut out, file);
     }
+    flows::check(index, mi, &index.scope(mi), &mut out);
     if index.has_base {
         let scope = index.scope(mi);
         let ctx = Ctx {

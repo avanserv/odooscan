@@ -1261,6 +1261,12 @@
       "count": 1
     },
     {
+      "path": "addons/mail/controllers/thread.py",
+      "code": "OD703",
+      "message": "route parameter 'post_data' reaches Markup() through 'key', 'post_data', '_prepare_post_data()' unescaped; escape it, or pass it as an argument of Markup's % or format()",
+      "count": 1
+    },
+    {
       "path": "addons/mail/data/discuss_channel_data.xml",
       "code": "OD303",
       "message": "XML id 'mail.channel_all_employees' is already defined earlier in this file",
@@ -1288,6 +1294,12 @@
       "path": "addons/mail/models/mail_thread.py",
       "code": "OD703",
       "message": "RPC argument 'body' reaches Markup() unescaped; escape it, or pass it as an argument of Markup's % or format()",
+      "count": 1
+    },
+    {
+      "path": "addons/mail/models/mail_thread.py",
+      "code": "OD703",
+      "message": "RPC argument 'message' reaches Markup() through '_message_parse_extract_payload()', 'body', '_message_parse_extract_payload_postprocess()', 'body', 'root' unescaped; escape it, or pass it as an argument of Markup's % or format()",
       "count": 1
     },
     {
@@ -1324,6 +1336,12 @@
       "path": "addons/mail_group/controllers/portal.py",
       "code": "OD112",
       "message": "csrf=False lets other sites submit this form on the user's behalf",
+      "count": 1
+    },
+    {
+      "path": "addons/mail_group/models/mail_group.py",
+      "code": "OD703",
+      "message": "RPC argument 'body' reaches Markup() through '_clean_email_body()', 'tree' unescaped; escape it, or pass it as an argument of Markup's % or format()",
       "count": 1
     },
     {

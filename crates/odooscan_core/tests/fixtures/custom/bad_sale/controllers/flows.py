@@ -46,3 +46,14 @@ class Flows(http.Controller):
         if any(key not in ("name", "phone") for key in post):
             raise ValueError("unexpected field")
         request.env.user.sudo().write(post)
+
+    @http.route("/bad/lookup", auth="user")
+    def lookup(self, term):
+        return request.env["bad.order"]._search_by(term)
+
+    @http.route("/bad/banner", auth="user")
+    def banner(self):
+        return Markup(self._banner_text())
+
+    def _banner_text(self):
+        return request.params.get("banner")

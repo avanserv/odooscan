@@ -6,7 +6,7 @@ use ruff_text_size::{Ranged, TextSize};
 use rustc_hash::FxHashMap;
 
 use crate::domain;
-use crate::facts::{ClassFact, DomainFact, FieldFact, ModelKind, Pos, PyFacts, RawDiag, Spanned, XmlRef};
+use crate::facts::{ClassFact, DomainFact, FieldFact, ModelKind, Pos, PyFacts, RawDiag, Receiver, Spanned, XmlRef};
 use crate::taint::{self, Params};
 
 const FIELD_TYPES: &[&str] = &[
@@ -46,7 +46,7 @@ const DOMAIN_METHODS: &[&str] = &[
 ];
 
 /// Recordset methods that return the same model.
-const SAME_MODEL: &[&str] = &["sudo", "with_context", "with_company", "with_user", "with_env"];
+pub(crate) const SAME_MODEL: &[&str] = &["sudo", "with_context", "with_company", "with_user", "with_env"];
 
 /// ORM methods whose overrides must chain to the parent implementation.
 const SUPER_REQUIRED: &[&str] = &["create", "write", "unlink", "copy", "default_get"];
@@ -85,7 +85,7 @@ pub fn str_lit(expr: &Expr) -> Option<&str> {
 }
 
 /// The last name in a dotted expression: `cr` for `self.env.cr`.
-fn tail_name(expr: &Expr) -> Option<&str> {
+pub(crate) fn tail_name(expr: &Expr) -> Option<&str> {
     match expr {
         Expr::Name(n) => Some(n.id.as_str()),
         Expr::Attribute(a) => Some(a.attr.as_str()),
@@ -302,7 +302,7 @@ pub fn analyze(src: &str) -> PyFacts {
         kinds: FxHashMap::default(),
         guarded: 0,
         class_models: vec![],
-        model_body: vec![],
+        owners: vec![],
     };
     match parse_module(src) {
         Ok(parsed) => v.visit_body(&parsed.syntax().body),
@@ -323,8 +323,8 @@ struct PyVisitor<'a> {
     guarded: u32,
     /// The model of each enclosing class, None for a mixin or a class that is no model.
     class_models: Vec<Option<String>>,
-    /// For each enclosing class or function, whether it is the body of a model class.
-    model_body: Vec<bool>,
+    /// What `self` is in a method of each enclosing class, none for an enclosing function.
+    owners: Vec<Option<Receiver>>,
 }
 
 impl PyVisitor<'_> {
@@ -607,12 +607,18 @@ impl PyVisitor<'_> {
         };
         let params = if decorated("route") {
             Params::Route
-        } else if self.model_body.last() == Some(&true) && !func.name.starts_with('_') && !decorated("private") {
+        } else if matches!(self.owners.last(), Some(Some(Receiver::Model(_))))
+            && !func.name.starts_with('_')
+            && !decorated("private")
+        {
             Params::Rpc
         } else {
             Params::None
         };
-        self.facts.diags.extend(taint::function(func, params, self.loc));
+        let owner = self.owners.last().cloned().flatten();
+        let (diags, summary) = taint::function(func, params, owner, self.loc);
+        self.facts.diags.extend(diags);
+        self.facts.flows.extend(summary);
     }
 
     fn route_checks(&mut self, func: &ast::StmtFunctionDef) {
@@ -800,20 +806,24 @@ impl<'a> Visitor<'a> for PyVisitor<'_> {
                     .as_ref()
                     .filter(|f| f.kind != ModelKind::Abstract)
                     .map(|f| f.model.clone());
-                self.model_body.push(fact.is_some());
+                let owner = match &fact {
+                    Some(f) => Receiver::Model(f.model.clone()),
+                    None => Receiver::Class(class.name.to_string()),
+                };
+                self.owners.push(Some(owner));
                 self.facts.classes.extend(fact);
                 self.class_models.push(model);
                 visitor::walk_stmt(self, stmt);
                 self.class_models.pop();
-                self.model_body.pop();
+                self.owners.pop();
                 return;
             }
             Stmt::FunctionDef(func) => {
                 self.route_checks(func);
                 self.flows(func);
-                self.model_body.push(false);
+                self.owners.push(None);
                 visitor::walk_stmt(self, stmt);
-                self.model_body.pop();
+                self.owners.pop();
                 return;
             }
             Stmt::If(i) => {

@@ -118,6 +118,65 @@ pub struct ClassFact {
     pub plain_bases: bool,
 }
 
+/// The methods a call can run: those of a model, or of the same Python class in the file.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Receiver {
+    Model(String),
+    Class(String),
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct CallSite {
+    pub receiver: Receiver,
+    pub method: String,
+    pub pos: Pos,
+}
+
+/// Where a tainted value comes from within a function: a source, a parameter (by position, without
+/// `self`), or what the call of that index in `FlowSummary::calls` returns.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FlowOrigin {
+    Source,
+    Param(usize),
+    Return(usize),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ArgSlot {
+    Pos(usize),
+    Name(String),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum FlowTarget {
+    /// The call a rule reports, by the rule's code.
+    Sink(&'static str),
+    Arg(usize, ArgSlot),
+    Return,
+}
+
+#[derive(Debug)]
+pub struct FlowEdge {
+    pub origin: FlowOrigin,
+    pub target: FlowTarget,
+    /// The user still picks the keys of the value at the target, if they picked those of the origin.
+    pub keys: bool,
+    /// The origin, each local in between, and for a sink the call that receives the value.
+    pub steps: Vec<Spanned<String>>,
+}
+
+/// How data moves through one function, for the flows that cross into the methods it calls.
+#[derive(Debug)]
+pub struct FlowSummary {
+    /// What `self` is in the function: a model, or a Python class of the file.
+    pub owner: Option<Receiver>,
+    pub method: String,
+    /// Parameter names in order, without `self`.
+    pub params: Vec<String>,
+    pub calls: Vec<CallSite>,
+    pub edges: Vec<FlowEdge>,
+}
+
 #[derive(Debug, Default)]
 pub struct PyFacts {
     pub classes: Vec<ClassFact>,
@@ -134,6 +193,8 @@ pub struct PyFacts {
     pub group_refs: Vec<XmlRef>,
     /// Base names of `.xml` and `.csv` files named in string literals, which Python code may load.
     pub file_mentions: Vec<String>,
+    /// Functions whose parameters or calls carry data a caller or callee may have from a user.
+    pub flows: Vec<FlowSummary>,
     pub diags: Vec<RawDiag>,
 }
 

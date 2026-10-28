@@ -5,8 +5,10 @@ use ruff_python_ast::visitor::{self, Visitor};
 use ruff_python_ast::{self as ast, CmpOp, Expr, Operator, Stmt};
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use crate::facts::{RawDiag, Spanned, Step};
-use crate::python::{Locator, exits};
+use crate::facts::{
+    ArgSlot, CallSite, FlowEdge, FlowOrigin, FlowSummary, FlowTarget, RawDiag, Receiver, Spanned, Step,
+};
+use crate::python::{Locator, SAME_MODEL, exits, str_lit, tail_name};
 
 /// What the user controls in a tainted value.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -68,6 +70,9 @@ const TABLE: &[(&str, Role)] = &[
     ("html_escape", Role::Sanitizer),
     ("html_sanitize", Role::Sanitizer),
     ("plaintext2html", Role::Sanitizer),
+    // QWeb escapes the values it renders.
+    ("_render", Role::Sanitizer),
+    ("_render_template", Role::Sanitizer),
 ];
 
 /// Keywords that carry the argument a sink checks when it is not passed by position.
@@ -106,6 +111,7 @@ pub enum Params {
 #[derive(Clone, Debug)]
 struct Taint {
     kind: Kind,
+    origin: FlowOrigin,
     /// Where the value entered, then each local it was assigned to.
     steps: Vec<Spanned<String>>,
 }
@@ -117,9 +123,12 @@ impl Taint {
     }
 }
 
+/// Of two values, the one from a source wins over one a caller or callee may taint, so that a
+/// finding in the function is never traded for a summary edge.
 fn join(a: Option<Taint>, b: Option<Taint>) -> Option<Taint> {
+    let rank = |t: &Taint| (t.origin == FlowOrigin::Source, t.kind);
     match (a, b) {
-        (Some(a), Some(b)) => Some(if b.kind > a.kind { b } else { a }),
+        (Some(a), Some(b)) => Some(if rank(&b) > rank(&a) { b } else { a }),
         (a, b) => a.or(b),
     }
 }
@@ -133,6 +142,8 @@ struct State {
     vars: FxHashMap<String, Taint>,
     /// Locals bound to a recordset under `sudo()`.
     sudo: FxHashSet<String>,
+    /// Locals bound to a model, as `Orders = env["sale.order"]` does.
+    models: FxHashMap<String, Receiver>,
 }
 
 impl State {
@@ -144,21 +155,39 @@ impl State {
             }
         }
         self.sudo.extend(other.sudo);
+        self.models.extend(other.models);
     }
 }
 
-pub fn function(func: &ast::StmtFunctionDef, params: Params, loc: &Locator) -> Vec<RawDiag> {
+/// The flows of one function: findings for those that start in it, and its summary when data
+/// may cross into or out of the methods it calls. `owner` is what `self` is.
+pub fn function(
+    func: &ast::StmtFunctionDef,
+    params: Params,
+    owner: Option<Receiver>,
+    loc: &Locator,
+) -> (Vec<RawDiag>, Option<FlowSummary>) {
     let mut flows = Flows {
         loc,
         state: State::default(),
         locals: FxHashSet::default(),
+        owner,
+        calls: vec![],
+        edges: vec![],
         diags: vec![],
     };
-    flows.params(&func.parameters, params);
+    let names = flows.params(&func.parameters, params);
     flows.body(&func.body);
     let mut seen = FxHashSet::default();
     flows.diags.retain(|d| seen.insert((d.code, d.pos)));
-    flows.diags
+    let summary = (!flows.edges.is_empty()).then(|| FlowSummary {
+        owner: flows.owner,
+        method: func.name.to_string(),
+        params: names,
+        calls: flows.calls,
+        edges: flows.edges,
+    });
+    (flows.diags, summary)
 }
 
 struct Flows<'a> {
@@ -166,33 +195,41 @@ struct Flows<'a> {
     state: State,
     /// Every name the function binds, so that `x.f()` on another name is a module's function.
     locals: FxHashSet<String>,
+    owner: Option<Receiver>,
+    calls: Vec<CallSite>,
+    edges: Vec<FlowEdge>,
     diags: Vec<RawDiag>,
 }
 
 impl Flows<'_> {
-    fn params(&mut self, params: &ast::Parameters, source: Params) {
+    /// Taints each parameter but `self`: as a source when the user sets it, otherwise by its
+    /// position, for the callers' flows. Returns their names.
+    fn params(&mut self, params: &ast::Parameters, source: Params) -> Vec<String> {
         let positional = params.posonlyargs.iter().chain(&params.args).chain(&params.kwonlyargs);
         let named = positional.map(|p| (&p.parameter, false));
         let rest = params.vararg.iter().map(|p| (&**p, false));
         let kwarg = params.kwarg.iter().map(|p| (&**p, true));
+        let mut names = vec![];
         for (param, mapping) in named.chain(rest).chain(kwarg) {
             let name = param.name.as_str();
             self.locals.insert(name.to_owned());
             if matches!(name, "self" | "cls") {
                 continue;
             }
-            let (label, kind) = match source {
-                Params::None => continue,
-                Params::Route if mapping => ("route parameter", Kind::Keys),
-                Params::Route => ("route parameter", Kind::Value),
-                Params::Rpc => ("RPC argument", Kind::Keys),
+            let (label, kind, origin) = match source {
+                Params::None => ("parameter", Kind::Keys, FlowOrigin::Param(names.len())),
+                Params::Route if mapping => ("route parameter", Kind::Keys, FlowOrigin::Source),
+                Params::Route => ("route parameter", Kind::Value, FlowOrigin::Source),
+                Params::Rpc => ("RPC argument", Kind::Keys, FlowOrigin::Source),
             };
+            names.push(name.to_owned());
             let steps = vec![Spanned {
                 value: format!("{label} '{name}'"),
                 pos: self.loc.at(param),
             }];
-            self.state.vars.insert(name.to_owned(), Taint { kind, steps });
+            self.state.vars.insert(name.to_owned(), Taint { kind, origin, steps });
         }
+        names
     }
 
     fn body(&mut self, body: &[Stmt]) {
@@ -241,7 +278,9 @@ impl Flows<'_> {
                 self.expr(&e.value);
             }
             Stmt::Return(ast::StmtReturn { value: Some(v), .. }) => {
-                self.expr(v);
+                if let Some(t) = self.expr(v) {
+                    self.edge(t, FlowTarget::Return);
+                }
             }
             Stmt::If(i) => self.if_stmt(i),
             _ => self.compound(stmt),
@@ -357,6 +396,10 @@ impl Flows<'_> {
                 } else {
                     self.state.sudo.remove(name);
                 }
+                match value.and_then(|v| self.receiver(v)) {
+                    Some(r) => self.state.models.insert(name.to_owned(), r),
+                    None => self.state.models.remove(name),
+                };
                 match t {
                     Some(mut t) => {
                         t.steps.push(Spanned {
@@ -430,7 +473,83 @@ impl Flows<'_> {
             value: label,
             pos: self.loc.at(expr),
         }];
-        Some(Taint { kind, steps })
+        Some(Taint {
+            kind,
+            origin: FlowOrigin::Source,
+            steps,
+        })
+    }
+
+    /// The methods a call on `expr` runs, when a summary may tell what they do: `self`, a model
+    /// of `env`, or a local bound to one, through methods that keep the model such as `sudo()`.
+    fn receiver(&self, expr: &Expr) -> Option<Receiver> {
+        match expr {
+            Expr::Name(n) if n.id.as_str() == "self" => self.owner.clone(),
+            Expr::Name(n) => self.state.models.get(n.id.as_str()).cloned(),
+            Expr::Subscript(sub) if tail_name(&sub.value) == Some("env") => {
+                str_lit(&sub.slice).map(|m| Receiver::Model(m.to_owned()))
+            }
+            Expr::Call(c) => match &*c.func {
+                Expr::Attribute(a) if SAME_MODEL.contains(&a.attr.as_str()) => self.receiver(&a.value),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
+    fn edge(&mut self, t: Taint, target: FlowTarget) {
+        if self.edges.iter().any(|e| e.origin == t.origin && e.target == target) {
+            return;
+        }
+        self.edges.push(FlowEdge {
+            origin: t.origin,
+            target,
+            keys: t.kind == Kind::Keys,
+            steps: t.steps,
+        });
+    }
+
+    /// Records a call to a method the index may resolve, with the arguments that carry taint,
+    /// and returns what it may return.
+    fn method_call(
+        &mut self,
+        call: &ast::ExprCall,
+        expr: &Expr,
+        args: Vec<Option<Taint>>,
+        keywords: Vec<Option<Taint>>,
+    ) -> Option<Taint> {
+        let Expr::Attribute(a) = &*call.func else { return None };
+        let receiver = self.receiver(&a.value)?;
+        let method = a.attr.to_string();
+        let pos = self.loc.at(expr);
+        let site = CallSite { receiver, method, pos };
+        let c = match self.calls.iter().position(|s| *s == site) {
+            Some(c) => c,
+            None => {
+                self.calls.push(site);
+                self.calls.len() - 1
+            }
+        };
+        let slots = (0..args.len()).map(ArgSlot::Pos).chain(
+            call.arguments
+                .keywords
+                .iter()
+                .map(|k| ArgSlot::Name(k.arg.as_ref().map(|a| a.to_string()).unwrap_or_default())),
+        );
+        for (slot, t) in slots.zip(args.into_iter().chain(keywords)) {
+            if let Some(t) = t {
+                self.edge(t, FlowTarget::Arg(c, slot));
+            }
+        }
+        let steps = vec![Spanned {
+            value: format!("{}()", a.attr),
+            pos,
+        }];
+        Some(Taint {
+            kind: Kind::Keys,
+            origin: FlowOrigin::Return(c),
+            steps,
+        })
     }
 
     fn expr(&mut self, expr: &Expr) -> Option<Taint> {
@@ -508,8 +627,9 @@ impl Flows<'_> {
         if b.op == Operator::Mod && self.is_markup(&b.left) {
             return None;
         }
-        // An intersection with values the user does not control holds only those values.
-        if b.op == Operator::BitAnd && (left.is_none() || right.is_none()) {
+        // An intersection with values the code chose holds only those values.
+        let chosen = |t: &Option<Taint>| t.as_ref().is_none_or(|t| matches!(t.origin, FlowOrigin::Return(_)));
+        if b.op == Operator::BitAnd && (chosen(&left) || chosen(&right)) {
             return None;
         }
         let t = join(left, right);
@@ -588,6 +708,7 @@ impl Flows<'_> {
                 self.sink(sink, pattern, arg, expr);
                 None
             }
+            None if receiver.is_none() && self.method_target(call) => self.method_call(call, expr, args, keywords),
             None => {
                 let args = args.into_iter().chain(keywords).fold(None, join);
                 self.result(call, &path, receiver, args)
@@ -614,12 +735,27 @@ impl Flows<'_> {
             self.add_to(&a.value, args);
             return None;
         }
+        // What a method returned is records as often as values: a call on it keeps what the
+        // summary of that method may tell, and takes nothing from its own arguments.
+        if receiver
+            .as_ref()
+            .is_some_and(|t| matches!(t.origin, FlowOrigin::Return(_)))
+        {
+            return receiver;
+        }
         if let Some(t) = receiver {
             let kind = if method == "copy" { t.kind } else { Kind::Value };
             return join(Some(t.kind(kind)), values(args));
         }
         let plain = matches!(&*a.value, Expr::StringLiteral(_)) || self.is_module(&a.value);
         if plain { values(args) } else { None }
+    }
+
+    /// A call of a model's method that a summary may describe; `sudo()` and the like return the
+    /// same records.
+    fn method_target(&self, call: &ast::ExprCall) -> bool {
+        matches!(&*call.func, Expr::Attribute(a)
+            if !SAME_MODEL.contains(&a.attr.as_str()) && self.receiver(&a.value).is_some())
     }
 
     /// A dotted name rooted in a name the function never binds, such as `json` or `tools.misc`.
@@ -632,14 +768,23 @@ impl Flows<'_> {
         }
     }
 
+    /// Reports a value from a source at a sink, and keeps one from a parameter or a call for the
+    /// callers' and callees' flows.
     fn sink(&mut self, sink: Sink, pattern: &str, t: Option<Taint>, expr: &Expr) {
-        let Some(t) = t else { return };
+        let Some(mut t) = t else { return };
         if sink == Sink::SudoWrite && t.kind != Kind::Keys {
             return;
         }
         let callee = format!("{pattern}()");
         let pos = self.loc.at(expr);
-        let (code, message) = message(sink, &callee, &t);
+        let code = code(sink);
+        if t.origin != FlowOrigin::Source {
+            t.steps.push(Spanned { value: callee, pos });
+            return self.edge(t, FlowTarget::Sink(code));
+        }
+        let origin = &t.steps[0].value;
+        let names: Vec<&str> = t.steps[1..].iter().map(|s| s.value.as_str()).collect();
+        let message = message(code, &callee, origin, &names);
         let mut flow: Vec<Step> = t.steps.iter().map(step).collect();
         flow.push(Step {
             path: None,
@@ -734,12 +879,22 @@ fn step(s: &Spanned<String>) -> Step {
     }
 }
 
-fn message(sink: Sink, callee: &str, t: &Taint) -> (&'static str, String) {
-    let origin = t.steps.first().map(|s| s.value.as_str()).unwrap_or_default();
+fn code(sink: Sink) -> &'static str {
+    match sink {
+        Sink::Sql => "OD701",
+        Sink::Eval => "OD702",
+        Sink::Markup => "OD703",
+        Sink::SudoWrite => "OD704",
+    }
+}
+
+/// The message of a flow from `origin` to the call `callee`, naming the locals and methods it
+/// went through, without lines, so that a baseline keeps it when lines move.
+pub(crate) fn message(code: &str, callee: &str, origin: &str, names: &[&str]) -> String {
     let mut through: Vec<&str> = vec![];
-    for s in &t.steps[1..] {
-        if through.last() != Some(&s.value.as_str()) {
-            through.push(&s.value);
+    for name in names {
+        if through.last() != Some(name) {
+            through.push(name);
         }
     }
     let through = if through.is_empty() {
@@ -747,28 +902,16 @@ fn message(sink: Sink, callee: &str, t: &Taint) -> (&'static str, String) {
     } else {
         format!(" through '{}'", through.join("', '"))
     };
-    match sink {
-        Sink::Sql => (
-            "OD701",
-            format!(
-                "{origin} reaches the query of {callee}{through}; pass it as a query parameter or build the query with odoo.tools.SQL"
-            ),
+    match code {
+        "OD701" => format!(
+            "{origin} reaches the query of {callee}{through}; pass it as a query parameter or build the query with odoo.tools.SQL"
         ),
-        Sink::Eval => (
-            "OD702",
-            format!("{origin} reaches {callee}{through}, which runs it as code"),
+        "OD702" => format!("{origin} reaches {callee}{through}, which runs it as code"),
+        "OD703" => format!(
+            "{origin} reaches {callee}{through} unescaped; escape it, or pass it as an argument of Markup's % or format()"
         ),
-        Sink::Markup => (
-            "OD703",
-            format!(
-                "{origin} reaches {callee}{through} unescaped; escape it, or pass it as an argument of Markup's % or format()"
-            ),
-        ),
-        Sink::SudoWrite => (
-            "OD704",
-            format!(
-                "{origin} reaches {callee}{through}, so the user picks the fields it sets as superuser; copy only the fields the user may set"
-            ),
+        _ => format!(
+            "{origin} reaches {callee}{through}, so the user picks the fields it sets as superuser; copy only the fields the user may set"
         ),
     }
 }
@@ -786,7 +929,8 @@ mod tests {
             panic!("no function");
         };
         let loc = Locator::new(src);
-        function(func, params, &loc)
+        function(func, params, None, &loc)
+            .0
             .into_iter()
             .map(|d| format!("{} {}", d.code, d.message.split(';').next().unwrap_or_default()))
             .collect()
@@ -809,7 +953,7 @@ mod tests {
         let Some(Stmt::FunctionDef(func)) = parsed.syntax().body.first() else {
             panic!()
         };
-        let diags = function(func, Params::None, &Locator::new(src));
+        let (diags, _) = function(func, Params::None, None, &Locator::new(src));
         let flow: Vec<_> = diags[0].flow.iter().map(|s| (s.pos.line, s.label.as_str())).collect();
         assert_eq!(flow, [(2, "request.get_json_data()"), (2, "data"), (3, "safe_eval()")]);
     }
@@ -883,6 +1027,56 @@ mod tests {
                 "OD703 route parameter 'post' reaches Markup() unescaped",
                 "OD703 route parameter 'post' reaches Markup() unescaped",
                 "OD702 route parameter 'post' reaches safe_eval(), which runs it as code",
+            ]
+        );
+    }
+
+    fn summary(params: Params, src: &str) -> FlowSummary {
+        let parsed = parse_module(src).expect("valid Python");
+        let Some(Stmt::FunctionDef(func)) = parsed.syntax().body.first() else {
+            panic!("no function");
+        };
+        let owner = Some(Receiver::Model("x.y".to_owned()));
+        function(func, params, owner, &Locator::new(src)).1.expect("a summary")
+    }
+
+    #[test]
+    fn summaries_keep_flows_from_parameters_and_calls() {
+        let helper = summary(
+            Params::None,
+            "def _h(self, a, b):\n    q = 'SELECT %s' % b\n    self.env.cr.execute(q)\n    return a\n",
+        );
+        let targets: Vec<_> = helper.edges.iter().map(|e| (e.origin, e.target.clone())).collect();
+        assert_eq!(
+            targets,
+            [
+                (FlowOrigin::Param(1), FlowTarget::Sink("OD701")),
+                (FlowOrigin::Param(0), FlowTarget::Return),
+            ]
+        );
+        assert_eq!(helper.params, ["a", "b"]);
+        let route = summary(
+            Params::Route,
+            "def f(self, term):\n    M = request.env['x.y'].sudo()\n    rows = M._h(1, b=term)\n    return Markup(self._g())\n",
+        );
+        let calls: Vec<_> = route
+            .calls
+            .iter()
+            .map(|c| (c.receiver.clone(), c.method.as_str()))
+            .collect();
+        assert_eq!(
+            calls,
+            [
+                (Receiver::Model("x.y".to_owned()), "_h"),
+                (Receiver::Model("x.y".to_owned()), "_g"),
+            ]
+        );
+        let targets: Vec<_> = route.edges.iter().map(|e| (e.origin, e.target.clone())).collect();
+        assert_eq!(
+            targets,
+            [
+                (FlowOrigin::Source, FlowTarget::Arg(0, ArgSlot::Name("b".to_owned()))),
+                (FlowOrigin::Return(1), FlowTarget::Sink("OD703")),
             ]
         );
     }
