@@ -5,8 +5,8 @@ use std::path::Path;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::facts::{
-    Annotation, ClassFact, DomainFact, FieldFact, JsFacts, JsName, ModelKind, Pos, RawDiag, RecordFact, Spanned,
-    ViewFact, XmlRef,
+    Annotation, ClassFact, DomainFact, FieldFact, JsFacts, JsName, ModelKind, OrmCall, Pos, RawDiag, RecordFact,
+    Spanned, ViewFact, XmlRef,
 };
 use crate::index::{Export, Index, JsSpec, Scope, Status, ViewTree, full_id, js_module_path, located};
 use crate::project::{Module, SourceFile};
@@ -58,6 +58,9 @@ pub fn check_module<'m>(index: &Index<'m>, mi: usize, series: Option<Series>) ->
         for (fi, file) in es_modules(index, mi, series) {
             ctx.js(&mut out, file);
             ctx.js_patches(&mut out, mi, fi, file);
+            for call in &file.facts.orm_calls {
+                ctx.orm_call(&mut out, &file.path, call);
+            }
         }
     }
     out.diags
@@ -352,6 +355,42 @@ impl<'m> Ctx<'_, 'm> {
                 );
             }
         }
+    }
+
+    fn orm_call(&self, out: &mut Out<'m>, path: &'m Path, call: &OrmCall) {
+        let model = &call.model;
+        let message = match self.index.model_status(&model.value, self.scope, None) {
+            Status::Visible => return self.orm_method(out, path, call),
+            Status::Hidden(m)
+                if !self
+                    .index
+                    .by_name
+                    .get(m)
+                    .is_some_and(|&mi| self.index.always_installed(mi)) =>
+            {
+                format!("model '{}' comes from module {m}, which is not in depends", model.value)
+            }
+            Status::Missing if !self.dynamic => format!("no indexed module defines model '{}'", model.value),
+            _ => return,
+        };
+        out.push(path, "OD603", model.pos, message);
+    }
+
+    /// A method from a module outside the index, such as an Enterprise one, may be the one called.
+    fn orm_method(&self, out: &mut Out<'m>, path: &'m Path, call: &OrmCall) {
+        let Some(method) = call.method.as_ref().filter(|_| !self.partial && !self.dynamic) else {
+            return;
+        };
+        let model = &call.model.value;
+        let message = match self.index.rpc_method(model, &method.value, self.scope) {
+            Status::Visible => return,
+            Status::Hidden(m) => format!(
+                "method '{}' of {model} comes from module {m}, which is not in depends",
+                method.value
+            ),
+            Status::Missing => format!("model '{model}' has no method '{}'", method.value),
+        };
+        out.push(path, "OD604", method.pos, message);
     }
 
     fn class(&self, out: &mut Out<'m>, path: &'m Path, class: &ClassFact) {

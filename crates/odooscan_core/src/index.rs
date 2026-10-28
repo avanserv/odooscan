@@ -891,6 +891,25 @@ impl<'m> Index<'m> {
                 .any(|(_, c)| c.methods.iter().any(|m| m == method))
     }
 
+    /// Whether a client may call `method` on `model`: a method of `BaseModel`, or of a class of the
+    /// model or of a model it inherits, in scope or in a module that is always installed.
+    pub fn rpc_method(&self, model: &str, method: &str, scope: &Scope) -> Status<'m> {
+        if BASE_MODEL_METHODS.contains(&method) || self.has_method(model, method, scope) {
+            return Status::Visible;
+        }
+        let defining: Vec<usize> = self
+            .chain(model, None)
+            .iter()
+            .filter(|(_, c)| c.methods.iter().any(|m| m == method))
+            .map(|(mi, _)| *mi)
+            .collect();
+        match defining.first() {
+            None => Status::Missing,
+            Some(_) if defining.iter().any(|&mi| self.always_installed(mi)) => Status::Visible,
+            Some(&mi) => Status::Hidden(&self.modules[mi].name),
+        }
+    }
+
     /// Follows a dotted field path from `model`. Paths through models nobody defines are accepted.
     pub fn resolve_path(&self, model: &str, path: &str, scope: &Scope) -> Result<(), PathError<'m>> {
         let mut model = model.to_owned();
