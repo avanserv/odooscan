@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.6.0](https://github.com/avanserv/odooscan/compare/v0.5.0...v0.6.0) (2026-10-28)
+
+
+### Features
+
+* **checks:** Check the models and methods of ORM calls ([#37](https://github.com/avanserv/odooscan/issues/37)) ([1b1338f](https://github.com/avanserv/odooscan/commit/1b1338fe4e25f961b2c4c9fe13c710ab637df823))
+* **checks:** Report a patch whose super call has no parent method ([#36](https://github.com/avanserv/odooscan/issues/36)) ([704ac3b](https://github.com/avanserv/odooscan/commit/704ac3b2338a95231ce0d5b258cd9ab9db4bd531))
+* **js:** Index JS modules and report unresolved imports ([#35](https://github.com/avanserv/odooscan/issues/35)) ([317f897](https://github.com/avanserv/odooscan/commit/317f8979fac0d5f7702461b0e02f784213d3177b))
+* **js:** Report an RPC call to a private method ([#41](https://github.com/avanserv/odooscan/issues/41)) ([59df3fe](https://github.com/avanserv/odooscan/commit/59df3fe140e26d67fe63ec01393cc94c1fc5af86))
+* **owl:** Check Owl template names and extension locators ([#40](https://github.com/avanserv/odooscan/issues/40)) ([79d2ccf](https://github.com/avanserv/odooscan/commit/79d2ccf48bb6bf1d1ad17bbaa779b2329e5f2593))
+
 ## [0.5.0](https://github.com/avanserv/odooscan/compare/v0.4.0...v0.5.0) (2026-10-28)
 
 
