@@ -96,6 +96,26 @@ jobs:
       - name: Scan it against the recorded findings
         run: make oracle
 
+  # The pages a release publishes, built the same way, so a broken link or page fails here and not
+  # on release day.
+  site:
+    name: Documentation site
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          enable-cache: false # the same build as the release, which caches nothing
+
+      - name: Build the site
+        run: make site
+
   deps:
     name: Dependencies
     runs-on: ubuntu-latest
@@ -202,6 +222,7 @@ jobs:
       - pre-commit
       - tests
       - oracle
+      - site
       - deps
       - security
       - wheel

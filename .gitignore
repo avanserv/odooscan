@@ -4,3 +4,5 @@
 /.claude/
 .mcp.json
 /.oracle/
+/site/
+/.venv/

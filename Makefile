@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := help
 
-.PHONY: help build format lint deps test check hooks tools oracle-fetch oracle oracle-update
+.PHONY: help build format lint deps test check hooks tools site site-serve oracle-fetch oracle oracle-update
 
 # The odoo/odoo commits the false-positive oracle scans, per series. A bump is reviewed through the
 # diff that `make oracle-update` leaves in tests/oracle/.
@@ -39,6 +39,14 @@ hooks: ## Install the git hooks, then run them over the whole tree (prek)
 
 tools: ## Install the cargo tools `deps` runs
 	cargo install --locked cargo-deny@0.20.2 cargo-machete@0.9.2
+
+site: ## Build the documentation site into site/, failing on any warning or broken link
+	uv sync --locked --only-group docs --no-install-project
+	uv run --no-sync zensical build --clean --strict
+
+site-serve: ## Serve the documentation site locally, rebuilding on change
+	uv sync --locked --only-group docs --no-install-project
+	uv run --no-sync zensical serve
 
 oracle-fetch: ## Fetch the pinned Odoo core of SERIES (default 18.0) into .oracle/, without tests and assets
 	rm -rf $(ORACLE)

@@ -37,6 +37,20 @@ updates:
       cargo:
         patterns: ["*"]
 
+  # The site generator, the only Python dependency: uv.lock holds it for `make site`.
+  - package-ecosystem: uv
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: build
+      include: scope
+    groups:
+      docs:
+        patterns: ["*"]
+
   # Its own pull request, never grouped with the crates: a new toolchain brings new clippy lints,
   # and the fixes for them belong with the bump.
   - package-ecosystem: rust-toolchain
