@@ -1,0 +1,9 @@
+<odoo>
+    <template id="pinboard">
+        <html>
+            <body>
+                <div id="pins"/>
+            </body>
+        </html>
+    </template>
+</odoo>

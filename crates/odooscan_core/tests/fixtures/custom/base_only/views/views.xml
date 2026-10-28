@@ -1,0 +1,61 @@
+<odoo>
+    <record id="layout_banner" model="ir.ui.view">
+        <field name="inherit_id" ref="web.layout"/>
+        <field name="arch" type="xml">
+            <xpath expr="//body/div[@id='shell']" position="inside">
+                <div class="banner"/>
+            </xpath>
+        </field>
+    </record>
+
+    <record id="layout_footer" model="ir.ui.view">
+        <field name="inherit_id" ref="web.no_such_layout"/>
+        <field name="arch" type="xml">
+            <xpath expr="//body" position="inside">
+                <div class="footer"/>
+            </xpath>
+        </field>
+    </record>
+
+    <record id="view_partner_color" model="ir.ui.view">
+        <field name="model">res.partner</field>
+        <field name="arch" type="xml">
+            <form>
+                <field name="web_color"/>
+                <field name="theme_id"/>
+            </form>
+        </field>
+    </record>
+
+    <record id="canvas_frame" model="ir.ui.view">
+        <field name="inherit_id" ref="web_canvas.canvas"/>
+        <field name="arch" type="xml">
+            <xpath expr="//body/div[@id='easel']" position="inside">
+                <div class="frame"/>
+            </xpath>
+        </field>
+    </record>
+
+    <record id="digest_footer" model="ir.ui.view">
+        <field name="inherit_id" ref="mail_digest.digest"/>
+        <field name="arch" type="xml">
+            <xpath expr="//body" position="inside">
+                <div class="footer"/>
+            </xpath>
+        </field>
+    </record>
+
+    <record id="pinboard_header" model="ir.ui.view">
+        <field name="inherit_id" ref="web_pinboard.pinboard"/>
+        <field name="arch" type="xml">
+            <xpath expr="//body" position="inside">
+                <div class="header"/>
+            </xpath>
+        </field>
+    </record>
+
+    <record id="partner_teal" model="res.partner">
+        <field name="name">Teal Studio</field>
+        <field name="web_color">teal</field>
+    </record>
+</odoo>
