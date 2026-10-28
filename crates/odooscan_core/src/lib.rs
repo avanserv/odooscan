@@ -5,6 +5,7 @@ mod facts;
 mod index;
 mod js;
 mod manifest;
+mod owl;
 mod project;
 mod python;
 pub mod rules;
@@ -94,6 +95,7 @@ pub fn scan(opts: &ScanOptions) -> Report {
                     .map(|f| (&f.path, &f.suppressions))
                     .chain(module.data.iter().map(|f| (&f.path, &f.suppressions)))
                     .chain(module.js.iter().map(|f| (&f.path, &f.suppressions)))
+                    .chain(module.templates.iter().map(|f| (&f.path, &f.suppressions)))
                     .find(|(fp, _)| fp.as_path() == p)
                     .is_none_or(|(_, s)| s.allows(d.pos.line, d.code));
                 (p.to_path_buf(), allowed, d)
@@ -117,7 +119,10 @@ pub fn scan(opts: &ScanOptions) -> Report {
         diagnostics,
         modules_checked: modules.iter().filter(|m| m.checked).count(),
         modules_indexed: modules.len(),
-        files: modules.iter().map(|m| m.python.len() + m.data.len() + m.js.len()).sum(),
+        files: modules
+            .iter()
+            .map(|m| m.python.len() + m.data.len() + m.js.len() + m.templates.len())
+            .sum(),
         notices,
     }
 }

@@ -153,7 +153,7 @@ pub struct ArchDomain {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ArchElement {
     pub tag: String,
-    pub attr: &'static str,
+    pub attr: String,
     pub value: String,
 }
 
@@ -236,6 +236,8 @@ pub struct JsClass {
     pub extends: Heritage,
     /// Instance methods, accessors and fields.
     pub members: Vec<String>,
+    /// The Owl template a literal `static template` or `Class.template = "..."` names.
+    pub template: Option<Spanned<String>>,
 }
 
 /// `patch(Target.prototype, { ... })`.
@@ -275,4 +277,19 @@ pub struct JsFacts {
     pub patches: Vec<JsPatch>,
     pub orm_calls: Vec<OrmCall>,
     pub syntax_error: Option<Spanned<String>>,
+}
+
+/// A template of a bundle's XML file, the child of its root element.
+#[derive(Debug)]
+pub struct OwlTemplate {
+    /// The name it registers; none for an extension, which modifies its parent in place.
+    pub name: Option<String>,
+    pub inherit: Option<Spanned<String>>,
+    /// The elements it adds and the elements its specs locate, as in a view arch.
+    pub arch: ViewFact,
+}
+
+#[derive(Debug, Default)]
+pub struct TemplateFacts {
+    pub templates: Vec<OwlTemplate>,
 }

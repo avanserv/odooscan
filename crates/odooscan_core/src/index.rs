@@ -166,17 +166,25 @@ type Models<'m> = FxHashMap<&'m str, Vec<(usize, &'m ClassFact)>>;
 
 type XmlIds = FxHashMap<String, Vec<XmlIdDef>>;
 
-/// Every definition of a view id: a module may redefine another module's view.
-type Views<'m> = FxHashMap<String, Vec<ViewNode<'m>>>;
+/// Every node of an id: a module may redefine another module's view, or extend a template in place.
+type Nodes<'m> = FxHashMap<String, Vec<ViewNode<'m>>>;
 
 struct ViewNode<'m> {
     module: usize,
     inherit: Option<String>,
+    /// The node defines the id, rather than extending in place what defines it.
+    defines: bool,
     fact: &'m ViewFact,
 }
 
-/// The elements of the views in one inheritance tree: those of views in a module's scope, and for
-/// the others the first module that adds each.
+/// Views by XML id, or Owl templates by name, with the ids that inherit from each.
+pub struct Inheritance<'m> {
+    nodes: Nodes<'m>,
+    children: FxHashMap<String, Vec<String>>,
+}
+
+/// The elements of the views or templates in one inheritance tree: those of a module's scope, and
+/// for the others the first module that adds each.
 #[derive(Default)]
 pub struct ViewTree<'m> {
     pub root: String,
@@ -192,7 +200,7 @@ pub fn located(e: &ArchElement, module: &str) -> ArchElement {
     };
     ArchElement {
         tag: e.tag.clone(),
-        attr: e.attr,
+        attr: e.attr.clone(),
         value,
     }
 }
@@ -244,7 +252,7 @@ fn data_ids<'m>(
     module: &'m Module,
     by_name: &FxHashMap<&str, usize>,
     xmlids: &mut XmlIds,
-    views: &mut Views<'m>,
+    views: &mut Nodes<'m>,
 ) {
     let name = module.name.as_str();
     for file in &module.data {
@@ -263,6 +271,7 @@ fn data_ids<'m>(
                 views.entry(full_id(name, id)).or_default().push(ViewNode {
                     module: mi,
                     inherit: view.inherit.as_deref().map(|i| full_id(name, i)),
+                    defines: true,
                     fact: view,
                 });
             }
@@ -394,9 +403,12 @@ fn always_installed(modules: &[Module], by_name: &FxHashMap<&str, usize>) -> Vec
     }
 }
 
-/// The scripts some bundle of an indexed manifest adds, as (module, file). Odoo expands the globs
-/// against the addons directories, so a module may add another module's files.
-fn loaded_js(modules: &[Module]) -> FxHashSet<(usize, usize)> {
+/// Files of a kind, as (module, index among the module's files of that kind).
+type Loaded = FxHashSet<(usize, usize)>;
+
+/// The scripts and the template files some bundle of an indexed manifest adds, as (module, file).
+/// Odoo expands the globs against the addons directories, so a module may add another module's files.
+fn loaded_static(modules: &[Module]) -> (Loaded, Loaded) {
     let mut builder = GlobSetBuilder::new();
     for glob in modules.iter().flat_map(|m| &m.manifest.assets) {
         if let Ok(g) = GlobBuilder::new(glob).literal_separator(true).build() {
@@ -404,17 +416,47 @@ fn loaded_js(modules: &[Module]) -> FxHashSet<(usize, usize)> {
         }
     }
     let Ok(set) = builder.build() else {
-        return FxHashSet::default();
+        return Default::default();
     };
-    let mut loaded = FxHashSet::default();
-    for (mi, module) in modules.iter().enumerate() {
-        for (fi, file) in module.js.iter().enumerate() {
-            if set.is_match(format!("{}/{}", module.name, file.rel)) {
-                loaded.insert((mi, fi));
+    let loaded = |files: fn(&Module) -> Vec<&str>| {
+        let mut loaded = FxHashSet::default();
+        for (mi, module) in modules.iter().enumerate() {
+            for (fi, rel) in files(module).into_iter().enumerate() {
+                if set.is_match(format!("{}/{rel}", module.name)) {
+                    loaded.insert((mi, fi));
+                }
             }
         }
+        loaded
+    };
+    (
+        loaded(|m| m.js.iter().map(|f| f.rel.as_str()).collect()),
+        loaded(|m| m.templates.iter().map(|f| f.rel.as_str()).collect()),
+    )
+}
+
+/// The templates of the loaded template files: a registered one under its name, and an extension
+/// under its parent's, since it changes the parent in place.
+fn template_nodes<'m>(modules: &'m [Module], loaded: &Loaded) -> Nodes<'m> {
+    let mut nodes: Nodes<'m> = FxHashMap::default();
+    // In module order, so the module a hidden element names does not vary between runs.
+    let mut loaded: Vec<_> = loaded.iter().copied().collect();
+    loaded.sort_unstable();
+    for (mi, fi) in loaded {
+        for t in &modules[mi].templates[fi].facts.templates {
+            let (key, inherit) = match &t.name {
+                Some(name) => (name, t.inherit.as_ref().map(|i| i.value.clone())),
+                None => (&t.inherit.as_ref().expect("an extension has a parent").value, None),
+            };
+            nodes.entry(key.clone()).or_default().push(ViewNode {
+                module: mi,
+                inherit,
+                defines: t.name.is_some(),
+                fact: &t.arch,
+            });
+        }
     }
-    loaded
+    nodes
 }
 
 /// Appends the segments of a specifier to a module path's, or None when it climbs out of the
@@ -481,15 +523,17 @@ pub struct Index<'m> {
     pub by_name: FxHashMap<&'m str, usize>,
     models: Models<'m>,
     pub xmlids: FxHashMap<String, Vec<XmlIdDef>>,
-    views: Views<'m>,
-    /// View id to the ids of the views that inherit from it.
-    children: FxHashMap<String, Vec<String>>,
+    pub views: Inheritance<'m>,
+    pub templates: Inheritance<'m>,
     pub models_with_access: FxHashSet<String>,
     pub has_base: bool,
     js_paths: FxHashMap<String, JsTarget>,
-    js_loaded: FxHashSet<(usize, usize)>,
+    js_loaded: Loaded,
+    templates_loaded: Loaded,
     always_installed: Vec<bool>,
     patched: Patched<'m>,
+    /// Classes a subclass with a template of its own extends.
+    template_bases: FxHashSet<ClassKey>,
 }
 
 impl<'m> Index<'m> {
@@ -512,28 +556,47 @@ impl<'m> Index<'m> {
             xmlids.entry(id).or_default().push(XmlIdDef { module: mi });
         }
         let models_with_access = access_models(modules, &model_by_xmlid);
-        let mut children: FxHashMap<String, Vec<String>> = FxHashMap::default();
-        for (id, nodes) in &views {
-            for parent in nodes.iter().filter_map(|n| n.inherit.clone()) {
-                children.entry(parent).or_default().push(id.clone());
-            }
-        }
+        let (js_loaded, templates_loaded) = loaded_static(modules);
         let mut index = Self {
             modules,
             has_base: base.is_some(),
             models,
             xmlids,
-            views,
-            children,
+            views: Inheritance::new(views),
+            templates: Inheritance::new(template_nodes(modules, &templates_loaded)),
             models_with_access,
             js_paths: js_paths(modules),
-            js_loaded: loaded_js(modules),
+            js_loaded,
+            templates_loaded,
             always_installed: always_installed(modules, &by_name),
             by_name,
             patched: FxHashMap::default(),
+            template_bases: FxHashSet::default(),
         };
         index.patched = index.patched_classes();
+        index.template_bases = index.template_bases();
         index
+    }
+
+    fn template_bases(&self) -> FxHashSet<ClassKey> {
+        let mut bases = FxHashSet::default();
+        for (mi, module) in self.modules.iter().enumerate() {
+            for (fi, file) in module.js.iter().enumerate() {
+                for class in file.facts.classes.iter().filter(|c| c.template.is_some()) {
+                    if let Heritage::Name(parent) = &class.extends
+                        && let Some((t, base)) = self.js_class(self.js_target(mi, fi), parent, 0)
+                    {
+                        bases.insert((t.module, t.file, base.name.clone()));
+                    }
+                }
+            }
+        }
+        bases
+    }
+
+    /// Whether every subclass of the class may replace its template, as for an abstract base.
+    pub fn template_base(&self, module: usize, file: usize, class: &str) -> bool {
+        self.template_bases.contains(&(module, file, class.to_owned()))
     }
 
     fn patched_classes(&self) -> Patched<'m> {
@@ -655,6 +718,28 @@ impl<'m> Index<'m> {
 
     pub fn js_loaded(&self, module: usize, file: usize) -> bool {
         self.js_loaded.contains(&(module, file))
+    }
+
+    pub fn template_loaded(&self, module: usize, file: usize) -> bool {
+        self.templates_loaded.contains(&(module, file))
+    }
+
+    /// Whether a module may use what `module` provides: it is in scope or always installed.
+    pub fn usable(&self, scope: &Scope, module: usize) -> bool {
+        scope.sees(module) || self.always_installed(module)
+    }
+
+    /// Whether some loaded template file registers `name` in scope.
+    pub fn template_status(&self, name: &str, scope: &Scope) -> Status<'m> {
+        let mut definers = self.templates.definers(name).peekable();
+        let Some(&first) = definers.peek() else {
+            return Status::Missing;
+        };
+        if definers.any(|m| self.usable(scope, m)) {
+            Status::Visible
+        } else {
+            Status::Hidden(&self.modules[first].name)
+        }
     }
 
     /// The file a specifier imported by the module `from` names.
@@ -955,7 +1040,7 @@ impl<'m> Index<'m> {
     /// The model a view applies to, following `inherit_id` when the view does not name one.
     pub fn view_model(&self, mut id: String) -> Option<&'m str> {
         for _ in 0..32 {
-            let nodes = self.views.get(&id)?;
+            let nodes = self.views.nodes.get(&id)?;
             if let Some(model) = nodes.iter().find_map(|n| n.fact.model.as_ref()) {
                 return Some(&model.value);
             }
@@ -963,13 +1048,31 @@ impl<'m> Index<'m> {
         }
         None
     }
+}
 
-    /// The root of the inheritance tree above view `id`, or None when a view on the way is not
-    /// indexed or its arch was not read, so the tree's elements would be incomplete.
-    pub fn view_root(&self, mut id: String) -> Option<String> {
+impl<'m> Inheritance<'m> {
+    fn new(nodes: Nodes<'m>) -> Self {
+        let mut children: FxHashMap<String, Vec<String>> = FxHashMap::default();
+        for (id, nodes) in &nodes {
+            for parent in nodes.iter().filter_map(|n| n.inherit.clone()) {
+                children.entry(parent).or_default().push(id.clone());
+            }
+        }
+        Self { nodes, children }
+    }
+
+    /// The modules whose nodes define `id`.
+    pub fn definers(&self, id: &str) -> impl Iterator<Item = usize> {
+        let nodes = self.nodes.get(id).map(Vec::as_slice).unwrap_or_default();
+        nodes.iter().filter(|n| n.defines).map(|n| n.module)
+    }
+
+    /// The root of the inheritance tree above `id`, or None when an id on the way is not defined
+    /// or its arch was not read, so the tree's elements would be incomplete.
+    pub fn root(&self, mut id: String) -> Option<String> {
         for _ in 0..32 {
-            let nodes = self.views.get(&id)?;
-            if !nodes.iter().any(|n| n.fact.has_arch) {
+            let nodes = self.nodes.get(&id)?;
+            if !nodes.iter().any(|n| n.defines && n.fact.has_arch) {
                 return None;
             }
             match nodes.iter().find_map(|n| n.inherit.clone()) {
@@ -980,14 +1083,14 @@ impl<'m> Index<'m> {
         None
     }
 
-    pub fn view_visible(&self, id: &str, scope: &Scope) -> bool {
-        self.views
+    pub fn visible(&self, id: &str, sees: impl Fn(usize) -> bool) -> bool {
+        self.nodes
             .get(id)
-            .is_some_and(|nodes| nodes.iter().any(|n| scope.sees(n.module)))
+            .is_some_and(|nodes| nodes.iter().any(|n| sees(n.module)))
     }
 
-    /// The elements of every view in the tree under `root`.
-    pub fn view_tree(&self, root: String, scope: &Scope) -> ViewTree<'m> {
+    /// The elements of every node in the tree under `root`.
+    pub fn tree(&self, root: String, modules: &'m [Module], sees: impl Fn(usize) -> bool) -> ViewTree<'m> {
         let mut tree = ViewTree::default();
         let mut seen = FxHashSet::default();
         let mut stack = vec![root.as_str()];
@@ -995,10 +1098,10 @@ impl<'m> Index<'m> {
             if !seen.insert(id) {
                 continue;
             }
-            for node in self.views.get(id).map(Vec::as_slice).unwrap_or_default() {
-                let module = self.modules[node.module].name.as_str();
+            for node in self.nodes.get(id).map(Vec::as_slice).unwrap_or_default() {
+                let module = modules[node.module].name.as_str();
                 let elements = node.fact.elements.iter().map(|e| located(e, module));
-                if scope.sees(node.module) {
+                if sees(node.module) {
                     tree.visible.extend(elements);
                 } else {
                     for e in elements {

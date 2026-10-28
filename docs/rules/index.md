@@ -110,3 +110,5 @@ module.
 | [OD602](OD602.md) | `orphan-patch-super` | A patch calls a super method the class it patches does not have. |
 | [OD603](OD603.md) | `unknown-rpc-model` | An ORM call from JS names a model no indexed module defines. |
 | [OD604](OD604.md) | `unknown-rpc-method` | orm.call() names a method its model does not have. |
+| [OD605](OD605.md) | `unknown-template` | A component or a t-inherit names a template no indexed bundle defines. |
+| [OD606](OD606.md) | `unmatched-template-locator` | A template locates an element its parent templates do not have. |

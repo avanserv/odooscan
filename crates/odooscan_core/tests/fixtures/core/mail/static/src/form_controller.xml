@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<templates xml:space="preserve">
+    <t t-inherit="web.FormController" t-inherit-mode="extension">
+        <xpath expr="//div[hasclass('o_form_sheet')]" position="after">
+            <div class="o_mail_chatter"/>
+        </xpath>
+    </t>
+</templates>

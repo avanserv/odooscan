@@ -4,11 +4,11 @@ use ignore::WalkBuilder;
 use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use crate::facts::{DataFacts, JsFacts, PyFacts};
+use crate::facts::{DataFacts, JsFacts, PyFacts, TemplateFacts};
 use crate::manifest::{self, Manifest};
 use crate::series::Series;
 use crate::suppress::Suppressions;
-use crate::{csvdata, js, python, xml};
+use crate::{csvdata, js, owl, python, xml};
 
 const MANIFESTS: &[&str] = &["__manifest__.py", "__openerp__.py"];
 
@@ -37,6 +37,8 @@ pub struct Module {
     pub data: Vec<SourceFile<DataFacts>>,
     /// Scripts under `static/src`, the only JS the web client loads as Odoo modules.
     pub js: Vec<SourceFile<JsFacts>>,
+    /// Owl templates: the XML files under `static/src`.
+    pub templates: Vec<SourceFile<TemplateFacts>>,
 }
 
 fn manifest_in(dir: &Path) -> Option<PathBuf> {
@@ -104,7 +106,7 @@ fn module_files(dir: &Path) -> Vec<PathBuf> {
         .collect()
 }
 
-fn js_files(dir: &Path) -> Vec<PathBuf> {
+fn static_files(dir: &Path, extension: &str) -> Vec<PathBuf> {
     let src = dir.join("static/src");
     if !src.is_dir() {
         return vec![];
@@ -115,7 +117,7 @@ fn js_files(dir: &Path) -> Vec<PathBuf> {
         .filter_map(Result::ok)
         .filter(|e| e.file_type().is_some_and(|t| t.is_file()))
         .map(|e| e.into_path())
-        .filter(|p| p.extension().is_some_and(|e| e == "js"))
+        .filter(|p| p.extension().is_some_and(|e| e == extension))
         .collect()
 }
 
@@ -184,6 +186,7 @@ fn read_module(name: String, dir: PathBuf, checked: bool) -> Option<Module> {
         python: vec![],
         data: vec![],
         js: vec![],
+        templates: vec![],
     })
 }
 
@@ -248,11 +251,17 @@ fn parse_module_files(module: &mut Module) {
     module
         .data
         .sort_by_key(|f| (f.rank.unwrap_or(usize::MAX), f.rel.clone()));
-    module.js = parse_js_files(&module.dir, checked);
+    module.js = parse_static_files(&module.dir, "js", checked, js::analyze);
+    module.templates = parse_static_files(&module.dir, "xml", checked, owl::analyze);
 }
 
-fn parse_js_files(dir: &Path, checked: bool) -> Vec<SourceFile<JsFacts>> {
-    let mut files: Vec<_> = js_files(dir)
+fn parse_static_files<T: Send>(
+    dir: &Path,
+    extension: &str,
+    checked: bool,
+    analyze: fn(&str) -> T,
+) -> Vec<SourceFile<T>> {
+    let mut files: Vec<_> = static_files(dir, extension)
         .into_par_iter()
         .filter_map(|path| {
             let text = std::fs::read_to_string(&path).ok()?;
@@ -264,7 +273,7 @@ fn parse_js_files(dir: &Path, checked: bool) -> Vec<SourceFile<JsFacts>> {
                 } else {
                     Suppressions::default()
                 },
-                facts: js::analyze(&text),
+                facts: analyze(&text),
                 path,
             })
         })

@@ -72,6 +72,10 @@ custom/form_patches/static/src/partner_card.js:5:45: OD604 method 'action_follow
 custom/form_patches/static/src/partner_card.js:6:38: OD603 no indexed module defines model 'res.partner.title'
 custom/form_patches/static/src/partner_card.js:7:30: OD603 model 'mail.thread' comes from module mail, which is not in depends
 custom/form_patches/static/src/quick_form.js:21:22: OD602 neither QuickForm nor its parents have 'discard', so super.discard() fails
+custom/form_patches/static/src/quick_form_card.js:8:24: OD605 no indexed bundle defines template 'form_patches.QuickFormBadge'
+custom/form_patches/static/src/quick_form_card.xml:14:9: OD606 no <div> with class 'o_form_status' in template web.FormController or the templates that extend it
+custom/form_patches/static/src/quick_form_card.xml:15:9: OD606 <div> with class 'o_mail_chatter' is added by module mail, which is not in depends
+custom/form_patches/static/src/quick_form_card.xml:18:19: OD605 no indexed bundle defines template 'web.FormCompiler'
 custom/modern19/models/partner.py:6:5: OD110 _sql_constraints is ignored; declare models.Constraint, models.Index or models.UniqueIndex attributes instead
 custom/modern19/models/partner.py:9:9: OD109 self._cr is deprecated; use self.env.cr
 custom/supers/models/supers.py:29:24: OD211 no parent class of bad.super defines '_prepare_gone', so this super() call fails

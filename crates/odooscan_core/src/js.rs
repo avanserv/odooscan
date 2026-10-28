@@ -1,9 +1,10 @@
 use oxc_allocator::Allocator;
 use oxc_ast::ast::{
-    Argument, CallExpression, Class, Expression, ObjectExpression, ObjectPropertyKind, Program, Statement,
+    Argument, AssignmentExpression, AssignmentTarget, CallExpression, Class, ClassElement, Expression,
+    ObjectExpression, ObjectPropertyKind, Program, Statement, StringLiteral,
 };
 use oxc_ast_visit::Visit;
-use oxc_ast_visit::walk::{walk_call_expression, walk_class};
+use oxc_ast_visit::walk::{walk_assignment_expression, walk_call_expression, walk_class};
 use oxc_parser::Parser;
 use oxc_span::SourceType;
 use oxc_syntax::module_record::{ExportExportName, ExportImportName, ImportImportName, ModuleRecord};
@@ -48,11 +49,17 @@ pub fn analyze(text: &str) -> JsFacts {
     }
     module_record(&parsed.module_record, &lines, &mut facts);
     facts.defines = defines(&parsed.program);
-    Collector {
+    let mut collector = Collector {
         lines: &lines,
         facts: &mut facts,
+        templates: vec![],
+    };
+    collector.visit_program(&parsed.program);
+    for (class, template) in collector.templates {
+        if let Some(c) = facts.classes.iter_mut().find(|c| c.name == class) {
+            c.template = Some(template);
+        }
     }
-    .visit_program(&parsed.program);
     facts
 }
 
@@ -163,6 +170,8 @@ fn js_name(specifier: &str, name: String, pos: Pos) -> JsName {
 struct Collector<'f> {
     lines: &'f Lines,
     facts: &'f mut JsFacts,
+    /// `Class.template = "..."` assignments, which may precede the class.
+    templates: Vec<(String, Spanned<String>)>,
 }
 
 impl<'a> Visit<'a> for Collector<'_> {
@@ -182,9 +191,35 @@ impl<'a> Visit<'a> for Collector<'_> {
                     .filter(|e| !e.r#static())
                     .filter_map(|e| Some(e.static_name()?.as_str()?.to_owned()))
                     .collect(),
+                template: class.body.body.iter().find_map(|e| match e {
+                    ClassElement::PropertyDefinition(p)
+                        if p.r#static && p.key.static_name().is_some_and(|n| n == "template") =>
+                    {
+                        match &p.value {
+                            // An abstract component leaves its template empty for subclasses to set.
+                            Some(Expression::StringLiteral(s)) => {
+                                literal(s, self.lines).filter(|t| !t.value.is_empty())
+                            }
+                            _ => None,
+                        }
+                    }
+                    _ => None,
+                }),
             });
         }
         walk_class(self, class);
+    }
+
+    fn visit_assignment_expression(&mut self, assignment: &AssignmentExpression<'a>) {
+        if let AssignmentTarget::StaticMemberExpression(m) = &assignment.left
+            && m.property.name == "template"
+            && let Expression::Identifier(class) = &m.object
+            && let Expression::StringLiteral(s) = &assignment.right
+            && let Some(template) = literal(s, self.lines)
+        {
+            self.templates.push((class.name.to_string(), template));
+        }
+        walk_assignment_expression(self, assignment);
     }
 
     fn visit_call_expression(&mut self, call: &CallExpression<'a>) {
@@ -230,15 +265,20 @@ fn orm_call(call: &CallExpression, lines: &Lines) -> Option<OrmCall> {
         return None;
     }
     let literal = |i: usize| match call.arguments.get(i)? {
-        Argument::StringLiteral(s) => Some(Spanned {
-            value: s.value.as_str()?.to_owned(),
-            pos: lines.pos(s.span.start as usize + 1),
-        }),
+        Argument::StringLiteral(s) => literal(s, lines),
         _ => None,
     };
     Some(OrmCall {
         model: literal(0)?,
         method: if method == "call" { Some(literal(1)?) } else { None },
+    })
+}
+
+/// A string's value, placed after its opening quote.
+fn literal(s: &StringLiteral, lines: &Lines) -> Option<Spanned<String>> {
+    Some(Spanned {
+        value: s.value.as_str()?.to_owned(),
+        pos: lines.pos(s.span.start as usize + 1),
     })
 }
 
@@ -392,10 +432,11 @@ this.rpc.call("res.partner", "x");
     #[test]
     fn collects_classes_and_prototype_patches() {
         let facts = analyze(
-            r#"class A extends B { static s() {} m() {} get g() {} f = 1; }
+            r#"class A extends B { static s() {} static template = "x.A"; m() {} get g() {} f = 1; }
 class C extends mixin(B) {}
 patch(A.prototype, { m() { return super.m() + super.g; }, n: 1 });
 patch(A, { s() { super.s(); } });
+C.template = "x.C";
 "#,
         );
         let classes: Vec<_> = facts
@@ -410,6 +451,12 @@ patch(A, { s() { super.s(); } });
                 ("C", &Heritage::Other, String::new())
             ]
         );
+        let templates: Vec<_> = facts
+            .classes
+            .iter()
+            .filter_map(|c| c.template.as_ref().map(|t| (t.value.as_str(), t.pos.line)))
+            .collect();
+        assert_eq!(templates, [("x.A", 1), ("x.C", 5)]);
         assert_eq!(facts.patches.len(), 1);
         assert_eq!(facts.patches[0].target, "A");
         assert_eq!(facts.patches[0].members, ["m", "n"]);

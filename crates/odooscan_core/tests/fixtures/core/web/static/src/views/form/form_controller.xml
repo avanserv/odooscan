@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<templates xml:space="preserve">
+    <t t-name="web.FormController">
+        <div class="o_form_view o_form_editable">
+            <div class="o_form_sheet" t-ref="sheet"/>
+            <button name="save" class="btn btn-primary o_form_button_save"/>
+        </div>
+    </t>
+</templates>
