@@ -4,3 +4,4 @@ expression: "String::from_utf8(out).unwrap()"
 ---
 ::error file=bad_sale/models/sale_order.py,line=7,col=5,title=OD203 unresolved-field-path::'partner_id.cde': res.partner has no field 'cde'%0A%0ASee https://avanserv.github.io/odooscan/rules/OD203/
 ::notice file=bad_sale/models/sale_order.py,line=12,col=5,title=OD111 public-route-sudo::route with auth='public' calls sudo()%0A%0ASee https://avanserv.github.io/odooscan/rules/OD111/
+::error file=bad_sale/controllers/main.py,line=14,col=5,title=OD701 sql-injection-flow::route parameter 'term' reaches the query of cr.execute() through 'query'%0A%0A  bad_sale/controllers/main.py:11:9 route parameter 'term'%0A  bad_sale/controllers/main.py:12:9 query%0A  bad_sale/controllers/main.py:14:9 cr.execute()%0A%0ASee https://avanserv.github.io/odooscan/rules/OD701/

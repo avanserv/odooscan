@@ -4,12 +4,22 @@ expression: "lines.join(\"\\n\")"
 ---
 custom/bad_sale/__manifest__.py:5:25: OD503 module 'not_installed' is not on the addons path
 custom/bad_sale/__manifest__.py:11:9: OD501 'data/missing.xml' does not exist
+custom/bad_sale/controllers/flows.py:14:9: OD701 route parameter 'term' reaches the query of cr.execute() through 'where', 'query'; pass it as a query parameter or build the query with odoo.tools.SQL
+custom/bad_sale/controllers/flows.py:15:9: OD701 route parameter 'kw' reaches the query of cr.execute(); pass it as a query parameter or build the query with odoo.tools.SQL
+custom/bad_sale/controllers/flows.py:25:16: OD702 request.get_json_data() reaches safe_eval() through 'data', which runs it as code
+custom/bad_sale/controllers/flows.py:31:16: OD703 route parameter 'post' reaches Markup() unescaped; escape it, or pass it as an argument of Markup's % or format()
+custom/bad_sale/controllers/flows.py:35:9: OD111 route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check
+custom/bad_sale/controllers/flows.py:38:9: OD704 route parameter 'post' reaches sudo().create() through 'values', so the user picks the fields it sets as superuser; copy only the fields the user may set
 custom/bad_sale/controllers/main.py:6:61: OD112 csrf=False lets other sites submit this form on the user's behalf
 custom/bad_sale/controllers/main.py:7:9: OD111 route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check
 custom/bad_sale/data/orphan.xml:1:1: OD502 'data/orphan.xml' is not in the manifest's data or demo, so Odoo never loads it
 custom/bad_sale/models/domains.py:7:64: OD210 'is_company': res.partner has no field 'is_company'
 custom/bad_sale/models/domains.py:11:23: OD210 'stat': bad.order has no field 'stat'
 custom/bad_sale/models/domains.py:12:55: OD210 'nmae': res.partner has no field 'nmae'
+custom/bad_sale/models/flows.py:9:9: OD701 RPC argument 'name' reaches the query of cr.execute(); pass it as a query parameter or build the query with odoo.tools.SQL
+custom/bad_sale/models/flows.py:10:9: OD704 RPC argument 'vals' reaches sudo().write(), so the user picks the fields it sets as superuser; copy only the fields the user may set
+custom/bad_sale/models/flows.py:13:9: OD101 query built by string formatting; pass parameters separately or build it with odoo.tools.SQL
+custom/bad_sale/models/flows.py:17:9: OD101 query built by string formatting; pass parameters separately or build it with odoo.tools.SQL
 custom/bad_sale/models/models.py:6:17: OD202 model 'mail.thread' comes from module mail; add it to depends
 custom/bad_sale/models/models.py:6:32: OD201 no indexed module defines model 'res.nothing'
 custom/bad_sale/models/models.py:9:24: OD108 group_operator is renamed aggregator
@@ -22,7 +32,7 @@ custom/bad_sale/models/models.py:18:37: OD203 'partner_id.name.size': res.partne
 custom/bad_sale/models/models.py:23:5: OD107 @api.multi no longer exists; methods always receive a recordset
 custom/bad_sale/models/models.py:24:9: OD106 name_get() is no longer called; override _compute_display_name() instead
 custom/bad_sale/models/models.py:27:9: OD105 write() override never calls super(), so other modules' overrides and the ORM itself are skipped
-custom/bad_sale/models/models.py:28:9: OD101 query built by string formatting; pass parameters separately or build it with odoo.tools.SQL
+custom/bad_sale/models/models.py:28:9: OD701 RPC argument 'vals' reaches the query of cr.execute(); pass it as a query parameter or build the query with odoo.tools.SQL
 custom/bad_sale/models/models.py:31:9: OD103 do not commit the cursor; Odoo commits when the request ends and rolls back on error
 custom/bad_sale/models/models.py:36:26: OD102 format after translating: _("Hello %s", name), not _("Hello %s" % name)
 custom/bad_sale/models/models.py:39:22: OD301 module base defines no XML id 'base.group_missing'

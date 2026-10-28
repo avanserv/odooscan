@@ -34,6 +34,10 @@ pub struct Rule {
     pub doc: &'static str,
 }
 
+/// Rules that say less than another rule reporting at the same position, as (code, by).
+/// A flow from a known source is the finding a pattern match on the same call only suspects.
+pub const SUPERSEDED: &[(&str, &str)] = &[("OD101", "OD701")];
+
 /// Severities that replace a rule's own from some series on, as (code, series range, severity).
 /// From 20.0, `ir.access` rows only grant access, so a model meant for the superuser alone has none.
 const SEVERITY_BY_SERIES: &[(&str, &str, Severity)] = &[("OD401", ">=20.0", Severity::Info)];
@@ -120,6 +124,10 @@ rules! {
     "OD605" "unknown-template" Correctness Error Some(">=17.0"), true, "A component or a t-inherit names a template no indexed bundle defines.";
     "OD606" "unmatched-template-locator" Correctness Error Some(">=17.0"), true, "A template locates an element its parent templates do not have.";
     "OD607" "private-rpc-method" Correctness Error None, false, "orm.call() names a private method, which Odoo refuses to call over RPC.";
+    "OD701" "sql-injection-flow" Security Error None, false, "Data a user controls reaches the text of an SQL query.";
+    "OD702" "code-injection-flow" Security Error None, false, "Data a user controls reaches safe_eval(), eval() or exec().";
+    "OD703" "markup-injection-flow" Security Warning None, false, "Data a user controls is wrapped in Markup() without escaping.";
+    "OD704" "sudo-mass-assignment" Security Error None, false, "A mapping a user controls is written as superuser, so the user picks the fields.";
 }
 
 pub fn rule(code: &str) -> &'static Rule {
