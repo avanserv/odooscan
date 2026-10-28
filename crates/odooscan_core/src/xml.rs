@@ -454,7 +454,7 @@ fn arch_element(node: Node, pos: Pos, view: &mut ViewFact) {
         .filter_map(|&attr| node.attribute(attr).map(|v| (attr, v)))
         .map(|(attr, v)| ArchElement {
             tag: tag.to_owned(),
-            attr,
+            attr: attr.to_owned(),
             value: v.to_owned(),
         });
     match tag {
@@ -471,20 +471,23 @@ fn arch_element(node: Node, pos: Pos, view: &mut ViewFact) {
 /// The element an `<attribute name="name">` spec gives a new name to.
 fn renamed(node: Node) -> Option<ArchElement> {
     let attr = LOCATING_ATTRS.into_iter().find(|a| node.attribute("name") == Some(a))?;
-    let spec = node.parent_element()?;
-    let tag = match spec.tag_name().name() {
+    Some(ArchElement {
+        tag: spec_tag(node.parent_element()?)?.to_owned(),
+        attr: attr.to_owned(),
+        value: node.text()?.trim().to_owned(),
+    })
+}
+
+/// The tag of the element a spec locates: its own, or an xpath's last step's.
+pub fn spec_tag<'a>(spec: Node<'a, '_>) -> Option<&'a str> {
+    match spec.tag_name().name() {
         "xpath" => {
             let step = spec.attribute("expr")?.rsplit('/').next()?;
             let step = step.rsplit("::").next()?;
-            step.split('[').next()?
+            step.split('[').next()
         }
-        tag => tag,
-    };
-    Some(ArchElement {
-        tag: tag.to_owned(),
-        attr,
-        value: node.text()?.trim().to_owned(),
-    })
+        tag => Some(tag),
+    }
 }
 
 /// The named steps of an xpath, each of which must match some element. A union or an `or` would
@@ -498,7 +501,7 @@ fn xpath_locators(expr: &str, pos: Pos) -> Vec<Spanned<ArchElement>> {
         .map(|c| Spanned {
             value: ArchElement {
                 tag: c[1].to_owned(),
-                attr: if &c[2] == "name" { "name" } else { "id" },
+                attr: c[2].to_owned(),
                 value: c[3].to_owned(),
             },
             pos,

@@ -117,6 +117,8 @@ rules! {
     "OD602" "orphan-patch-super" Correctness Error Some(">=17.0"), true, "A patch calls a super method the class it patches does not have.";
     "OD603" "unknown-rpc-model" Correctness Error None, true, "An ORM call from JS names a model no indexed module defines.";
     "OD604" "unknown-rpc-method" Correctness Error None, true, "orm.call() names a method its model does not have.";
+    "OD605" "unknown-template" Correctness Error Some(">=17.0"), true, "A component or a t-inherit names a template no indexed bundle defines.";
+    "OD606" "unmatched-template-locator" Correctness Error Some(">=17.0"), true, "A template locates an element its parent templates do not have.";
 }
 
 pub fn rule(code: &str) -> &'static Rule {

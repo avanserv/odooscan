@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<templates xml:space="preserve">
+    <t t-inherit="web.FormController" t-inherit-mode="extension">
+        <xpath expr="//div[hasclass('o_form_sheet')]" position="before">
+            <div class="o_quick_banner"/>
+        </xpath>
+        <button name="save" position="after">
+            <Dropdown position="'bottom-end'"/>
+        </button>
+    </t>
+
+    <t t-name="form_patches.QuickFormCard" t-inherit="web.FormController">
+        <xpath expr="//div[hasclass('o_quick_banner')]" position="replace"/>
+        <xpath expr="//div[hasclass('o_form_status')]" position="after"/>
+        <xpath expr="//div[hasclass('o_mail_chatter')]" position="before"/>
+    </t>
+
+    <t t-inherit="web.FormCompiler" t-inherit-mode="extension"/>
+</templates>

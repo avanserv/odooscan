@@ -1999,6 +1999,12 @@
       "count": 4
     },
     {
+      "path": "addons/stock_account/static/src/stock_account_forecasted/forecasted_header.js",
+      "code": "OD605",
+      "message": "no indexed bundle defines template 'stock_account.ForecastedHeader'",
+      "count": 1
+    },
+    {
       "path": "addons/survey/controllers/main.py",
       "code": "OD111",
       "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",

@@ -61,7 +61,19 @@ pub fn check_module<'m>(index: &Index<'m>, mi: usize, series: Option<Series>) ->
             for call in &file.facts.orm_calls {
                 ctx.orm_call(&mut out, &file.path, call);
             }
+            // A base whose subclasses set their own template may name one that is never rendered.
+            for class in file
+                .facts
+                .classes
+                .iter()
+                .filter(|c| !index.template_base(mi, fi, &c.name))
+            {
+                if let Some(template) = &class.template {
+                    ctx.template_ref(&mut out, &file.path, template);
+                }
+            }
         }
+        ctx.templates(&mut out, mi);
     }
     out.diags
 }
@@ -391,6 +403,77 @@ impl<'m> Ctx<'_, 'm> {
             Status::Missing => format!("model '{model}' has no method '{}'", method.value),
         };
         out.push(path, "OD604", method.pos, message);
+    }
+
+    /// Whether the template `name` names is registered in scope. A template of a module outside the
+    /// index, such as an Enterprise one, may be the one named.
+    fn template_ref(&self, out: &mut Out<'m>, path: &'m Path, name: &Spanned<String>) -> bool {
+        if self.partial {
+            return false;
+        }
+        let message = match self.index.template_status(&name.value, self.scope) {
+            Status::Visible => return true,
+            Status::Hidden(m) => format!(
+                "template '{}' comes from module {m}, which is not in depends",
+                name.value
+            ),
+            Status::Missing => format!("no indexed bundle defines template '{}'", name.value),
+        };
+        out.push(path, "OD605", name.pos, message);
+        false
+    }
+
+    fn templates(&self, out: &mut Out<'m>, mi: usize) {
+        let mut trees: FxHashMap<String, ViewTree<'m>> = FxHashMap::default();
+        for (fi, file) in self.module.templates.iter().enumerate() {
+            if !self.index.template_loaded(mi, fi) {
+                continue;
+            }
+            for t in &file.facts.templates {
+                if let Some(parent) = &t.inherit
+                    && self.template_ref(out, &file.path, parent)
+                {
+                    self.template_locators(out, &file.path, &parent.value, &t.arch, &mut trees);
+                }
+            }
+        }
+    }
+
+    /// Specs of a template must each find their element in the tree of templates it extends.
+    fn template_locators(
+        &self,
+        out: &mut Out<'m>,
+        path: &'m Path,
+        parent: &str,
+        arch: &ViewFact,
+        trees: &mut FxHashMap<String, ViewTree<'m>>,
+    ) {
+        let Some(root) = self.index.templates.root(parent.to_owned()) else {
+            return;
+        };
+        let tree = trees.entry(root.clone()).or_insert_with(|| {
+            let sees = |m| self.index.usable(self.scope, m);
+            self.index.templates.tree(root, self.index.modules, sees)
+        });
+        for locator in &arch.locators {
+            let e = &locator.value;
+            if tree.visible.contains(e) {
+                continue;
+            }
+            let tag = match e.tag.as_str() {
+                "*" => "an element".to_owned(),
+                tag => format!("<{tag}>"),
+            };
+            let element = match e.attr.as_str() {
+                "hasclass" => format!("{tag} with class '{}'", e.value),
+                attr => format!("{tag} with {attr}=\"{}\"", e.value),
+            };
+            let message = match tree.hidden.get(e) {
+                Some(m) => format!("{element} is added by module {m}, which is not in depends"),
+                None => format!("no {element} in template {} or the templates that extend it", tree.root),
+            };
+            out.push(path, "OD606", locator.pos, message);
+        }
     }
 
     fn class(&self, out: &mut Out<'m>, path: &'m Path, class: &ClassFact) {
@@ -738,15 +821,15 @@ impl<'m> Ctx<'_, 'm> {
         };
         let parent = full_id(&self.module.name, parent);
         // A parent outside depends is already reported by OD302.
-        if !self.index.view_visible(&parent, self.scope) {
+        if !self.index.views.visible(&parent, |m| self.scope.sees(m)) {
             return;
         }
-        let Some(root) = self.index.view_root(parent) else {
+        let Some(root) = self.index.views.root(parent) else {
             return;
         };
         let tree = trees
             .entry(root.clone())
-            .or_insert_with(|| self.index.view_tree(root, self.scope));
+            .or_insert_with(|| self.index.views.tree(root, self.index.modules, |m| self.scope.sees(m)));
         for locator in &view.locators {
             let e = located(&locator.value, &self.module.name);
             if tree.visible.contains(&e) {

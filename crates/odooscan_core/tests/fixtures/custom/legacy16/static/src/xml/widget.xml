@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<templates xml:space="preserve">
+    <t t-inherit="web.LegacyWidget" t-inherit-mode="extension">
+        <xpath expr="//div[hasclass('o_legacy')]" position="inside"/>
+    </t>
+</templates>
