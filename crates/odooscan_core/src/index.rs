@@ -413,6 +413,11 @@ impl<'m> Index<'m> {
         (!defs.is_empty()).then_some(defs)
     }
 
+    /// The comodel a dotted path of relational fields ends on.
+    pub fn path_comodel(&self, model: &str, path: &str, scope: &Scope) -> Option<String> {
+        self.related_comodel(model, path, scope, 0)
+    }
+
     fn related_comodel(&self, model: &str, path: &str, scope: &Scope, depth: u8) -> Option<String> {
         if depth > 8 {
             return None;

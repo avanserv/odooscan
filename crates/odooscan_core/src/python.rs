@@ -5,7 +5,8 @@ use ruff_source_file::LineIndex;
 use ruff_text_size::{Ranged, TextSize};
 use rustc_hash::FxHashMap;
 
-use crate::facts::{ClassFact, FieldFact, ModelKind, Pos, PyFacts, RawDiag, Spanned, XmlRef};
+use crate::domain;
+use crate::facts::{ClassFact, DomainFact, FieldFact, ModelKind, Pos, PyFacts, RawDiag, Spanned, XmlRef};
 
 const FIELD_TYPES: &[&str] = &[
     "Boolean",
@@ -30,6 +31,21 @@ const FIELD_TYPES: &[&str] = &[
     "PropertiesDefinition",
     "Id",
 ];
+
+/// Recordset methods whose first argument, or `domain`, is a domain on the recordset's model.
+const DOMAIN_METHODS: &[&str] = &[
+    "search",
+    "search_count",
+    "search_read",
+    "search_fetch",
+    "filtered_domain",
+    "_search",
+    "read_group",
+    "_read_group",
+];
+
+/// Recordset methods that return the same model.
+const SAME_MODEL: &[&str] = &["sudo", "with_context", "with_company", "with_user", "with_env"];
 
 /// ORM methods whose overrides must chain to the parent implementation.
 const SUPER_REQUIRED: &[&str] = &["create", "write", "unlink", "copy", "default_get"];
@@ -200,6 +216,11 @@ impl<'a> Visitor<'a> for GuardFinder {
     }
 }
 
+/// A block that leaves the function or the loop when its guard fails.
+fn exits(body: &[Stmt]) -> bool {
+    matches!(body.last(), Some(Stmt::Return(_) | Stmt::Raise(_) | Stmt::Continue(_)))
+}
+
 fn is_registry(expr: &Expr) -> bool {
     matches!(tail_name(expr), Some("env" | "_fields" | "pool"))
 }
@@ -260,6 +281,7 @@ pub fn analyze(src: &str) -> PyFacts {
         facts: PyFacts::default(),
         kinds: FxHashMap::default(),
         guarded: 0,
+        class_models: vec![],
     };
     match parse_module(src) {
         Ok(parsed) => v.visit_body(&parsed.syntax().body),
@@ -278,6 +300,8 @@ struct PyVisitor<'a> {
     kinds: FxHashMap<String, ModelKind>,
     /// Depth of code that runs only once a guard has passed.
     guarded: u32,
+    /// The model of each enclosing class, None for a mixin or a class that is no model.
+    class_models: Vec<Option<String>>,
 }
 
 impl PyVisitor<'_> {
@@ -438,7 +462,53 @@ impl PyVisitor<'_> {
                 .filter_map(|k| kw_str(k))
                 .map(|s| self.spanned(s))
                 .collect(),
+            domain: keyword(call, "domain").map(|d| self.domain(d)).unwrap_or_default(),
         })
+    }
+
+    /// The fields a literal domain names, given as a list or as the text of one.
+    fn domain(&self, expr: &Expr) -> Vec<Spanned<String>> {
+        if let Expr::StringLiteral(s) = expr {
+            let pos = self.loc.at(s);
+            let fields = domain::parse(s.value.to_str()).unwrap_or_default();
+            return fields.into_iter().map(|value| Spanned { value, pos }).collect();
+        }
+        domain::fields(expr)
+            .unwrap_or_default()
+            .into_iter()
+            .map(|s| self.spanned(s))
+            .collect()
+    }
+
+    /// The model of `self` in a model class other than a mixin, or of `env['x']`, through methods
+    /// that keep the model.
+    fn receiver_model(&self, expr: &Expr) -> Option<String> {
+        match expr {
+            Expr::Name(n) if n.id.as_str() == "self" => self.class_models.last().cloned().flatten(),
+            Expr::Subscript(sub) if tail_name(&sub.value) == Some("env") => str_lit(&sub.slice).map(str::to_owned),
+            Expr::Call(c) => match &*c.func {
+                Expr::Attribute(a) if SAME_MODEL.contains(&a.attr.as_str()) => self.receiver_model(&a.value),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
+    fn domain_call(&mut self, call: &ast::ExprCall) {
+        let Expr::Attribute(a) = &*call.func else { return };
+        if !DOMAIN_METHODS.contains(&a.attr.as_str()) || self.guarded > 0 {
+            return;
+        }
+        let Some(model) = self.receiver_model(&a.value) else {
+            return;
+        };
+        let Some(domain) = keyword(call, "domain").or_else(|| call.arguments.args.first()) else {
+            return;
+        };
+        let fields = self.domain(domain);
+        if !fields.is_empty() {
+            self.facts.domains.push(DomainFact { model, fields });
+        }
     }
 
     fn method_checks(&mut self, func: &ast::StmtFunctionDef, fact: &mut ClassFact) {
@@ -544,6 +614,7 @@ impl PyVisitor<'_> {
             }
             _ => {}
         }
+        self.domain_call(call);
         self.id_refs(call, expr);
     }
 
@@ -650,12 +721,36 @@ impl PyVisitor<'_> {
 }
 
 impl<'a> Visitor<'a> for PyVisitor<'_> {
+    /// Statements after `if 'x' not in self.env: return` run only once the guard passed.
+    fn visit_body(&mut self, body: &'a [Stmt]) {
+        let mut depth = 0;
+        for stmt in body {
+            self.visit_stmt(stmt);
+            if depth == 0
+                && let Stmt::If(i) = stmt
+                && is_guard(&i.test)
+                && exits(&i.body)
+            {
+                depth = 1;
+                self.guarded += 1;
+            }
+        }
+        self.guarded -= depth;
+    }
+
     fn visit_stmt(&mut self, stmt: &'a Stmt) {
         match stmt {
             Stmt::ClassDef(class) => {
-                if let Some(fact) = self.class_fact(class) {
-                    self.facts.classes.push(fact);
-                }
+                let fact = self.class_fact(class);
+                let model = fact
+                    .as_ref()
+                    .filter(|f| f.kind != ModelKind::Abstract)
+                    .map(|f| f.model.clone());
+                self.facts.classes.extend(fact);
+                self.class_models.push(model);
+                visitor::walk_stmt(self, stmt);
+                self.class_models.pop();
+                return;
             }
             Stmt::FunctionDef(func) => self.route_checks(func),
             Stmt::If(i) => {

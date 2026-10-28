@@ -41,6 +41,9 @@ class IrActionsActWindow(models.Model):
 
     name = fields.Char()
     view_mode = fields.Char()
+    res_model = fields.Char()
+    domain = fields.Char()
+    context = fields.Char()
 
 
 class IrModelAccess(models.Model):

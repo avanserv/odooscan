@@ -67,6 +67,15 @@ pub struct FieldFact {
     pub related: Option<Spanned<String>>,
     /// Names given to compute, inverse and search.
     pub methods: Vec<Spanned<String>>,
+    /// Fields the literal `domain` of a relational field names on its comodel.
+    pub domain: Vec<Spanned<String>>,
+}
+
+/// The fields a literal domain names, and the model it filters.
+#[derive(Debug)]
+pub struct DomainFact {
+    pub model: String,
+    pub fields: Vec<Spanned<String>>,
 }
 
 #[derive(Debug)]
@@ -94,6 +103,8 @@ pub struct PyFacts {
     pub dynamic_models: bool,
     /// Literal model names in `env['x']` outside code guarded by a test that the model exists.
     pub env_models: Vec<Spanned<String>>,
+    /// Literal domains given to `search()` and the like on `self` or `env['x']`.
+    pub domains: Vec<DomainFact>,
     /// XML ids named by `env.ref()`.
     pub xml_refs: Vec<XmlRef>,
     /// Groups named by `has_group()` and the `groups` of fields, which may come from modules
@@ -126,6 +137,14 @@ pub struct ArchField {
     pub pos: Pos,
 }
 
+/// Fields a literal domain or `group_by` in an arch names, on the model of the arch position `path`
+/// (the x2many fields whose subviews enclose it, as in `ArchField`).
+#[derive(Debug)]
+pub struct ArchDomain {
+    pub path: Vec<String>,
+    pub fields: Vec<Spanned<String>>,
+}
+
 /// An arch element as an inheriting view locates it: its tag and its `name` or `id`.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ArchElement {
@@ -146,6 +165,7 @@ pub struct ViewFact {
     pub elements: Vec<ArchElement>,
     /// Elements the arch's specs (`position` elements and xpaths) must find in the parent views.
     pub locators: Vec<Spanned<ArchElement>>,
+    pub domains: Vec<ArchDomain>,
 }
 
 #[derive(Debug)]
@@ -170,6 +190,8 @@ pub struct DataFacts {
     pub refs: Vec<XmlRef>,
     pub views: Vec<ViewFact>,
     pub records: Vec<RecordFact>,
+    /// Domains and `group_by` fields of window actions, on their `res_model`.
+    pub action_domains: Vec<DomainFact>,
     pub access: Vec<AccessRow>,
     pub diags: Vec<RawDiag>,
 }
