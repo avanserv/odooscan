@@ -30,6 +30,8 @@ enum Command {
         #[arg(long, value_parser = parse_series)]
         odoo_version: Option<Series>,
     },
+    /// Print a rule's documentation, given its code or its name.
+    Explain { rule: String },
 }
 
 /// A flag or environment variable replaces the setting of the same name in the configuration file.
@@ -140,7 +142,26 @@ fn main() -> ExitCode {
     match Cli::parse().command {
         Command::Rules { odoo_version } => rules(odoo_version),
         Command::Check(args) => check(&args),
+        Command::Explain { rule } => explain(&rule),
     }
+}
+
+fn explain(query: &str) -> ExitCode {
+    if let Some(rule) = odooscan_core::rules::find(query) {
+        print!("{}", rule.doc);
+        return ExitCode::SUCCESS;
+    }
+    eprintln!("error: no rule is called '{query}'");
+    let nearest = odooscan_core::rules::nearest(query);
+    if nearest.is_empty() {
+        eprintln!("`oscn rules` lists them all");
+    } else {
+        eprintln!("did you mean:");
+        for r in nearest {
+            eprintln!("  {}  {}", r.code, r.name);
+        }
+    }
+    ExitCode::from(2)
 }
 
 fn rules(odoo_version: Option<Series>) -> ExitCode {

@@ -30,6 +30,8 @@ pub struct Rule {
     /// Rules that need the whole dependency graph are skipped when `base` is not indexed.
     pub needs_index: bool,
     pub summary: &'static str,
+    /// The rule's page in `docs/rules/`, embedded so that `oscn explain` and the site print the same text.
+    pub doc: &'static str,
 }
 
 /// Severities that replace a rule's own from some series on, as (code, series range, severity).
@@ -64,6 +66,7 @@ macro_rules! rules {
             series: $series,
             needs_index: $index,
             summary: $summary,
+            doc: include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../docs/rules/", $code, ".md")),
         }),*];
     };
 }
@@ -119,6 +122,32 @@ pub fn rule(code: &str) -> &'static Rule {
         .unwrap_or_else(|| panic!("unregistered rule {code}"))
 }
 
+/// The rule a code or a name designates, in any case.
+pub fn find(query: &str) -> Option<&'static Rule> {
+    RULES
+        .iter()
+        .find(|r| r.code.eq_ignore_ascii_case(query) || r.name.eq_ignore_ascii_case(query))
+}
+
+/// The rules whose code or name shares the longest prefix with the query, at most five. A prefix
+/// shorter than three characters, such as the `OD` every code has, says nothing, so it yields none.
+pub fn nearest(query: &str) -> Vec<&'static Rule> {
+    let query = query.to_ascii_lowercase();
+    let shared = |s: &str| {
+        s.to_ascii_lowercase()
+            .bytes()
+            .zip(query.bytes())
+            .take_while(|(a, b)| a == b)
+            .count()
+    };
+    let score = |r: &Rule| shared(r.code).max(shared(r.name));
+    let best = RULES.iter().map(score).max().unwrap_or_default();
+    if best < 3 {
+        return vec![];
+    }
+    RULES.iter().filter(|r| score(r) == best).take(5).collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -129,6 +158,17 @@ mod tests {
         assert_eq!(od401.severity_for(Series::parse("18.0")), Severity::Warning);
         assert_eq!(od401.severity_for(Series::parse("20.0")), Severity::Info);
         assert_eq!(od401.severity_for(None), Severity::Warning);
+    }
+
+    #[test]
+    fn finds_by_code_or_name_and_suggests_by_prefix() {
+        assert_eq!(find("od211").map(|r| r.code), Some("OD211"));
+        assert_eq!(find("orphan-super").map(|r| r.code), Some("OD211"));
+        assert!(find("OD999").is_none());
+        let codes = |q| nearest(q).iter().map(|r| r.code).collect::<Vec<_>>();
+        assert_eq!(codes("od21"), ["OD210", "OD211"]);
+        assert_eq!(codes("orphan-supper"), ["OD211"]);
+        assert!(codes("OD999").is_empty());
     }
 
     fn pages() -> std::path::PathBuf {
