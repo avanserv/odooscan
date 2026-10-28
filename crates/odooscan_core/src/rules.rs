@@ -92,6 +92,7 @@ rules! {
     "OD207" "related-type-mismatch" Correctness Error None, true, "A related field has another type than the field it relates to.";
     "OD208" "invalid-one2many-inverse" Correctness Error None, true, "A One2many's inverse is not a Many2one back to its model.";
     "OD209" "model-redefined" Correctness Error None, true, "A new _name replaces a model that a module in depends already defines.";
+    "OD210" "unknown-domain-field" Correctness Error None, true, "A literal domain or group_by names a field its model does not have.";
     "OD301" "unresolved-xmlid" Correctness Error None, true, "The XML id is not defined by its module.";
     "OD302" "xmlid-not-in-depends" Correctness Error None, true, "The XML id comes from a module missing from depends.";
     "OD303" "duplicate-xmlid" Correctness Warning None, false, "The same XML id is defined twice in one file.";

@@ -1,0 +1,22 @@
+<odoo>
+    <record id="action_done_orders" model="ir.actions.act_window">
+        <field name="name">Done orders</field>
+        <field name="res_model">bad.order</field>
+        <field name="domain">[('stat', '=', 'done'), ('partner_id', '=', uid)]</field>
+        <field name="context">{'group_by': 'stage_id'}</field>
+    </record>
+
+    <record id="view_order_search" model="ir.ui.view">
+        <field name="model">bad.order</field>
+        <field name="arch" type="xml">
+            <search>
+                <field name="name" filter_domain="[('nam', 'ilike', self)]"/>
+                <field name="partner_id" domain="[('is_company', '=', True)]"/>
+                <filter name="mine" domain="[('partner_id.nmae', '=', uid)]"/>
+                <filter name="by_partner" context="{'group_by': 'partnr_id'}"/>
+                <filter name="by_month" context="{'group_by': 'date:month'}"/>
+                <filter name="extra" domain="[('stat', '=', 1)] + extra"/>
+            </search>
+        </field>
+    </record>
+</odoo>

@@ -3,8 +3,10 @@ use std::sync::LazyLock;
 use regex::Regex;
 use roxmltree::{Document, Node, ParsingOptions};
 
+use crate::domain;
 use crate::facts::{
-    AccessRow, ArchElement, ArchField, DataFacts, Lines, Pos, RawDiag, RecordFact, Spanned, ViewFact, XmlDef, XmlRef,
+    AccessRow, ArchDomain, ArchElement, ArchField, DataFacts, DomainFact, Lines, Pos, RawDiag, RecordFact, Spanned,
+    ViewFact, XmlDef, XmlRef,
 };
 
 /// A `False` second argument makes `ref()` return nothing for an unknown id instead of failing.
@@ -247,7 +249,37 @@ impl Walker<'_> {
         if model == "ir.ui.view" {
             self.facts.views.push(view);
         }
+        if model == "ir.actions.act_window" {
+            self.action_domain(node);
+        }
         self.facts.records.push(record);
+    }
+
+    fn action_domain(&mut self, node: Node) {
+        let field = |name: &str| {
+            node.children()
+                .find(|c| c.has_tag_name("field") && c.attribute("name") == Some(name))
+        };
+        let Some(model) = field("res_model").and_then(|f| f.text()).map(str::trim) else {
+            return;
+        };
+        let mut fields = vec![];
+        for (name, read) in [
+            ("domain", read_domain as fn(&str) -> Vec<String>),
+            ("context", domain::group_by),
+        ] {
+            if let Some(f) = field(name) {
+                let pos = self.pos(f);
+                let text = f.attribute("eval").or_else(|| f.text()).unwrap_or_default();
+                fields.extend(read(text).into_iter().map(|value| Spanned { value, pos }));
+            }
+        }
+        if !fields.is_empty() {
+            self.facts.action_domains.push(DomainFact {
+                model: model.to_owned(),
+                fields,
+            });
+        }
     }
 
     fn record_field(&mut self, field: Node, name: &str, model: &str, view: &mut ViewFact) {
@@ -305,6 +337,10 @@ impl Walker<'_> {
         {
             self.arch_field(node, name, pos, path, view);
             return;
+        }
+        if tag == "filter" {
+            let fields = domain_attr(node, "domain").chain(group_by_attr(node));
+            arch_domain(pos, path.clone(), fields, view);
         }
         let depth = path.len();
         match tag {
@@ -369,10 +405,11 @@ impl Walker<'_> {
             path.pop();
             return;
         }
-        view.fields.push(ArchField {
-            path: path.iter().cloned().chain([name.to_owned()]).collect(),
-            pos,
-        });
+        let field_path: Vec<String> = path.iter().cloned().chain([name.to_owned()]).collect();
+        // A field's domain filters its comodel; its filter_domain, in a search view, the view's model.
+        arch_domain(pos, field_path.clone(), domain_attr(node, "domain"), view);
+        arch_domain(pos, path.clone(), domain_attr(node, "filter_domain"), view);
+        view.fields.push(ArchField { path: field_path, pos });
         for child in node.children().filter(Node::is_element) {
             if SUBVIEWS.contains(&child.tag_name().name()) {
                 path.push(name.to_owned());
@@ -382,6 +419,28 @@ impl Walker<'_> {
                 self.arch(child, path, view);
             }
         }
+    }
+}
+
+fn read_domain(text: &str) -> Vec<String> {
+    domain::parse(text).unwrap_or_default()
+}
+
+fn domain_attr(node: Node, attr: &str) -> impl Iterator<Item = String> {
+    node.attribute(attr).map(read_domain).unwrap_or_default().into_iter()
+}
+
+fn group_by_attr(node: Node) -> impl Iterator<Item = String> {
+    node.attribute("context")
+        .map(domain::group_by)
+        .unwrap_or_default()
+        .into_iter()
+}
+
+fn arch_domain(pos: Pos, path: Vec<String>, fields: impl Iterator<Item = String>, view: &mut ViewFact) {
+    let fields: Vec<Spanned<String>> = fields.map(|value| Spanned { value, pos }).collect();
+    if !fields.is_empty() {
+        view.domains.push(ArchDomain { path, fields });
     }
 }
 

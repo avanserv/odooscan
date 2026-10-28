@@ -1,5 +1,6 @@
 mod checks;
 mod csvdata;
+mod domain;
 mod facts;
 mod index;
 mod manifest;

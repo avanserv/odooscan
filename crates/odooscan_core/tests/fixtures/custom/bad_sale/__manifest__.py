@@ -11,5 +11,6 @@
         "data/missing.xml",
         "data/assigned.xml",
         "data/res.partner-extra.csv",
+        "views/domains.xml",
     ],
 }

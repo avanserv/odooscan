@@ -4,7 +4,7 @@ use std::path::Path;
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use crate::facts::{ClassFact, FieldFact, ModelKind, Pos, RawDiag, RecordFact, Spanned, ViewFact, XmlRef};
+use crate::facts::{ClassFact, DomainFact, FieldFact, ModelKind, Pos, RawDiag, RecordFact, Spanned, ViewFact, XmlRef};
 use crate::index::{Index, Scope, Status, ViewTree, full_id, located};
 use crate::project::Module;
 use crate::xml::{LOCATOR, UNKNOWN_CONTEXT};
@@ -237,6 +237,7 @@ impl<'m> Ctx<'_, 'm> {
                 for r in &file.facts.group_refs {
                     self.py_ref(out, path, r, false);
                 }
+                self.domains(out, path, &file.facts.domains);
             }
             // env['x'] for a model outside depends is usually guarded by `if 'x' in self.env`, and
             // a dotless name is as likely a key of some other mapping called env.
@@ -332,6 +333,11 @@ impl<'m> Ctx<'_, 'm> {
             self.path(out, path, "OD203", &comodel.value, inverse);
             self.inverse(out, path, comodel, inverse);
         }
+        if let Some(comodel) = &field.comodel {
+            for f in &field.domain {
+                self.path(out, path, "OD210", &comodel.value, f);
+            }
+        }
         // Odoo replaces the compute and inverse of a related field with its own.
         for method in field.methods.iter().filter(|_| field.related.is_none()) {
             if !index.has_method(&class.model, &method.value, self.scope) {
@@ -426,6 +432,7 @@ impl<'m> Ctx<'_, 'm> {
             for record in &file.facts.records {
                 self.record(out, path, record);
             }
+            self.domains(out, path, &file.facts.action_domains);
         }
     }
 
@@ -512,6 +519,7 @@ impl<'m> Ctx<'_, 'm> {
             (None, None) => None,
         };
         let Some(model) = model else { return };
+        self.view_domains(out, path, model, view);
         for field in view
             .fields
             .iter()
@@ -522,6 +530,34 @@ impl<'m> Ctx<'_, 'm> {
             };
             if let Err(e) = self.index.resolve_path(model, &joined, self.scope) {
                 out.push(path, "OD304", field.pos, e.message(&joined));
+            }
+        }
+    }
+
+    fn domains(&self, out: &mut Out<'m>, path: &'m Path, domains: &[DomainFact]) {
+        for d in domains {
+            for f in &d.fields {
+                self.path(out, path, "OD210", &d.model, f);
+            }
+        }
+    }
+
+    /// Domains in an arch filter the model at their position: the view's, or a subview's comodel.
+    fn view_domains(&self, out: &mut Out<'m>, path: &'m Path, model: &str, view: &ViewFact) {
+        for d in view
+            .domains
+            .iter()
+            .filter(|d| !d.path.iter().any(|s| s == UNKNOWN_CONTEXT))
+        {
+            let Some(joined) = self.arch_path(model, &d.path) else {
+                continue;
+            };
+            let target = match joined.as_str() {
+                "" => Some(model.to_owned()),
+                joined => self.index.path_comodel(model, joined, self.scope),
+            };
+            for f in target.iter().flat_map(|t| d.fields.iter().map(move |f| (t, f))) {
+                self.path(out, path, "OD210", f.0, f.1);
             }
         }
     }
