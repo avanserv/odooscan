@@ -12,6 +12,9 @@ use crate::xml::{LOCATOR, UNKNOWN_CONTEXT};
 /// Directories of upgrade scripts, which name XML ids of past versions.
 const UPGRADE_DIRS: &[&str] = &["migrations", "upgrades"];
 
+/// Types a One2many's inverse may have: an Integer holds the id of a `res_model`/`res_id` pair.
+const INVERSE_TYPES: &[&str] = &["Many2one", "Many2oneReference", "Integer"];
+
 /// Directories whose XML and CSV files are not meant to be listed in the manifest.
 const UNLISTED_DIRS: &[&str] = &["tests", "i18n", "migrations", "upgrades", "doc", "docs", "examples"];
 
@@ -138,6 +141,11 @@ fn first_defs<'m>(module: &'m Module, out: &mut Out<'m>) -> FxHashMap<String, (u
     first_def
 }
 
+/// An Image field is a Binary one to Odoo, which compares field types by that name.
+fn odoo_type(ftype: &str) -> &str {
+    if ftype == "Image" { "Binary" } else { ftype }
+}
+
 /// The registry creates the `ir.model` and `ir.model.fields` ids of a module's models before any of
 /// its data files load, so a record with such an id only updates it.
 fn registry_id(module: &Module, id: &str) -> bool {
@@ -186,14 +194,26 @@ impl<'m> Ctx<'_, 'm> {
     }
 
     fn dependencies(&self, out: &mut Out<'m>) {
+        let me = self.index.by_name[self.module.name.as_str()];
+        let manifest = &self.module.manifest_path;
         for dep in &self.module.manifest.depends {
-            if !self.index.by_name.contains_key(dep.value.as_str()) {
-                out.push(
-                    &self.module.manifest_path,
+            match self.index.by_name.get(dep.value.as_str()) {
+                None => out.push(
+                    manifest,
                     "OD503",
                     dep.pos,
                     format!("module '{}' is not on the addons path", dep.value),
-                );
+                ),
+                Some(&d) if self.index.reaches(d, me) => out.push(
+                    manifest,
+                    "OD504",
+                    dep.pos,
+                    format!(
+                        "module '{}' depends back on {}, so Odoo installs neither",
+                        dep.value, self.module.name
+                    ),
+                ),
+                Some(_) => {}
             }
         }
     }
@@ -240,9 +260,11 @@ impl<'m> Ctx<'_, 'm> {
         for field in &class.fields {
             self.field(out, path, class, field);
         }
-        for p in class.paths.iter().filter(|_| class.kind != ModelKind::Abstract) {
+        let paths = class.paths.iter().chain(&class.order_fields);
+        for p in paths.filter(|_| class.kind != ModelKind::Abstract) {
             self.path(out, path, "OD203", &class.model, p);
         }
+        self.redefinition(out, path, class);
         if class.new_model
             && class.kind != ModelKind::Abstract
             && !self.index.models_with_access.contains(class.model.as_str())
@@ -259,6 +281,40 @@ impl<'m> Ctx<'_, 'm> {
         }
     }
 
+    /// A new `_name` that a module in scope already defines builds a fresh model in its place.
+    fn redefinition(&self, out: &mut Out<'m>, path: &'m Path, class: &ClassFact) {
+        if !class.new_model {
+            return;
+        }
+        let me = self.index.by_name[self.module.name.as_str()];
+        let other = self.index.classes(&class.model).iter().find(|(mi, c)| {
+            c.new_model
+                && !std::ptr::eq(*c, class)
+                && self.scope.sees(*mi)
+                && (*mi != me || self.defined_before(c, class))
+        });
+        if let Some((mi, _)) = other {
+            out.push(
+                path,
+                "OD209",
+                class.pos,
+                format!(
+                    "module {} already defines model '{}', and this class replaces it; extend it with _inherit = '{}'",
+                    self.index.modules[*mi].name, class.model, class.model
+                ),
+            );
+        }
+    }
+
+    /// Whether `first` comes before `then` in the same file of this module. The order of the files
+    /// is that of the imports, which is not indexed.
+    fn defined_before(&self, first: &ClassFact, then: &ClassFact) -> bool {
+        self.module.python.iter().any(|f| {
+            let has = |c: &ClassFact| f.facts.classes.iter().any(|x| std::ptr::eq(x, c));
+            has(first) && has(then) && first.pos < then.pos
+        })
+    }
+
     fn field(&self, out: &mut Out<'m>, path: &'m Path, class: &ClassFact, field: &FieldFact) {
         let index = self.index;
         if let Some(comodel) = &field.comodel {
@@ -268,11 +324,13 @@ impl<'m> Ctx<'_, 'm> {
         let mixin = class.kind == ModelKind::Abstract;
         if let Some(related) = field.related.as_ref().filter(|_| !mixin) {
             self.path(out, path, "OD203", &class.model, related);
+            self.related_type(out, path, class, field, related);
         }
         if let (Some(comodel), Some(inverse)) = (&field.comodel, &field.inverse_name)
             && index.has_model(&comodel.value)
         {
             self.path(out, path, "OD203", &comodel.value, inverse);
+            self.inverse(out, path, comodel, inverse);
         }
         // Odoo replaces the compute and inverse of a related field with its own.
         for method in field.methods.iter().filter(|_| field.related.is_none()) {
@@ -295,6 +353,50 @@ impl<'m> Ctx<'_, 'm> {
                     field.name, field.ftype
                 ),
             );
+        }
+    }
+
+    /// Odoo refuses to load a related field whose type is not its target's.
+    fn related_type(
+        &self,
+        out: &mut Out<'m>,
+        path: &'m Path,
+        class: &ClassFact,
+        field: &FieldFact,
+        related: &Spanned<String>,
+    ) {
+        let Some(targets) = self.index.path_target(&class.model, &related.value, self.scope) else {
+            return;
+        };
+        if targets.iter().all(|t| odoo_type(&t.ftype) != odoo_type(&field.ftype)) {
+            out.push(
+                path,
+                "OD207",
+                related.pos,
+                format!(
+                    "'{}' is a {} field related to '{}', which is a {} field",
+                    field.name, field.ftype, related.value, targets[0].ftype
+                ),
+            );
+        }
+    }
+
+    /// A One2many lists the comodel records whose inverse field points back at this record.
+    fn inverse(&self, out: &mut Out<'m>, path: &'m Path, comodel: &Spanned<String>, inverse: &Spanned<String>) {
+        let defs: Vec<&FieldFact> = self
+            .index
+            .field_defs(&comodel.value, &inverse.value, Some(self.scope))
+            .into_iter()
+            .map(|(_, _, f)| f)
+            .collect();
+        if let Some(first) = defs.first()
+            && defs.iter().all(|f| !INVERSE_TYPES.contains(&f.ftype.as_str()))
+        {
+            let message = format!(
+                "inverse '{}' on {} is a {} field, not a Many2one",
+                inverse.value, comodel.value, first.ftype
+            );
+            out.push(path, "OD208", inverse.pos, message);
         }
     }
 

@@ -1849,6 +1849,12 @@
       "count": 1
     },
     {
+      "path": "addons/test_base_automation/models/test_base_automation.py",
+      "code": "OD209",
+      "message": "module test_base_automation already defines model 'base.automation.lead.thread.test', and this class replaces it; extend it with _inherit = 'base.automation.lead.thread.test'",
+      "count": 1
+    },
+    {
       "path": "addons/test_event_full/data/event_type_data.xml",
       "code": "OD502",
       "message": "'data/event_type_data.xml' is not in the manifest's data or demo, so Odoo never loads it",
@@ -2464,6 +2470,12 @@
       "path": "odoo/addons/test_read_group/models.py",
       "code": "OD201",
       "message": "no indexed module defines model 'bar_name'",
+      "count": 1
+    },
+    {
+      "path": "odoo/addons/test_testing_utilities/models.py",
+      "code": "OD209",
+      "message": "module test_testing_utilities already defines model 'test_testing_utilities.sub3', and this class replaces it; extend it with _inherit = 'test_testing_utilities.sub3'",
       "count": 1
     }
   ]

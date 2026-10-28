@@ -89,6 +89,9 @@ rules! {
     "OD204" "missing-method" Correctness Error None, true, "compute, inverse or search names a method the model does not have.";
     "OD205" "field-type-changed" Correctness Warning None, true, "An inherited field is redefined with another type.";
     "OD206" "unknown-env-model" Correctness Warning None, true, "env[...] names a model no indexed module defines.";
+    "OD207" "related-type-mismatch" Correctness Error None, true, "A related field has another type than the field it relates to.";
+    "OD208" "invalid-one2many-inverse" Correctness Error None, true, "A One2many's inverse is not a Many2one back to its model.";
+    "OD209" "model-redefined" Correctness Error None, true, "A new _name replaces a model that a module in depends already defines.";
     "OD301" "unresolved-xmlid" Correctness Error None, true, "The XML id is not defined by its module.";
     "OD302" "xmlid-not-in-depends" Correctness Error None, true, "The XML id comes from a module missing from depends.";
     "OD303" "duplicate-xmlid" Correctness Warning None, false, "The same XML id is defined twice in one file.";
@@ -104,6 +107,7 @@ rules! {
     "OD501" "manifest-data-missing" Correctness Error None, false, "A file listed in the manifest does not exist.";
     "OD502" "data-file-not-loaded" Quality Warning None, false, "A data file is not listed in the manifest, so Odoo never loads it.";
     "OD503" "unknown-dependency" Correctness Error None, true, "A module in depends is not on the addons path.";
+    "OD504" "circular-dependency" Correctness Error None, true, "A module in depends depends back on this module.";
 }
 
 pub fn rule(code: &str) -> &'static Rule {
