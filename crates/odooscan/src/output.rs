@@ -1,10 +1,26 @@
 use std::collections::HashMap;
-use std::io::{IsTerminal, Write};
+use std::io::Write;
 use std::path::Path;
 
 use odooscan_core::Diagnostic;
-use odooscan_core::rules::{RULES, Severity};
+use odooscan_core::rules::{RULES, Severity, rule};
 use serde_json::json;
+
+/// Where the release workflow publishes `docs/`.
+const DOCS: &str = "https://avanserv.github.io/odooscan/";
+
+/// A rule's page on the site, derived from its code. Every report written links here, so the path
+/// never changes.
+pub fn help_url(code: &str) -> String {
+    format!("{DOCS}rules/{code}/")
+}
+
+/// The page with its links to other rule pages made absolute, for a reader outside the site.
+fn help_markdown(doc: &str) -> String {
+    RULES.iter().fold(doc.to_owned(), |doc, r| {
+        doc.replace(&format!("]({}.md)", r.code), &format!("]({})", help_url(r.code)))
+    })
+}
 
 pub fn print_statistics(out: &mut impl Write, diags: &[&Diagnostic]) {
     let mut counts: Vec<(&str, usize)> = vec![];
@@ -16,23 +32,21 @@ pub fn print_statistics(out: &mut impl Write, diags: &[&Diagnostic]) {
     }
     counts.sort_by_key(|&(_, n)| std::cmp::Reverse(n));
     for (code, n) in counts {
-        let _ = writeln!(out, "{n:>6}  {code}  {}", odooscan_core::rules::rule(code).name);
+        let _ = writeln!(out, "{n:>6}  {code}  {}", rule(code).name);
     }
 }
 
-pub fn print_text(out: &mut impl Write, diags: &[&Diagnostic], rel: &dyn Fn(&Path) -> String) {
-    let color = std::io::stdout().is_terminal();
+/// On a terminal, the code is coloured and links to its page (OSC 8), which terminals that do not
+/// support links print as plain text.
+pub fn print_text(out: &mut impl Write, diags: &[&Diagnostic], rel: &dyn Fn(&Path) -> String, terminal: bool) {
     for d in diags {
-        let (on, off) = if color { ansi(d.severity) } else { ("", "") };
-        let _ = writeln!(
-            out,
-            "{}:{}:{}: {on}{}{off} {}",
-            rel(&d.path),
-            d.line,
-            d.column,
-            d.code,
-            d.message
-        );
+        let code = if terminal {
+            let (on, off) = ansi(d.severity);
+            format!("\x1b]8;;{}\x1b\\{on}{}{off}\x1b]8;;\x1b\\", help_url(d.code), d.code)
+        } else {
+            d.code.to_owned()
+        };
+        let _ = writeln!(out, "{}:{}:{}: {code} {}", rel(&d.path), d.line, d.column, d.message);
     }
 }
 
@@ -47,7 +61,16 @@ fn ansi(severity: Severity) -> (&'static str, &'static str) {
 pub fn sarif(diags: &[&Diagnostic], rel: &dyn Fn(&Path) -> String) -> serde_json::Value {
     let rules: Vec<_> = RULES
         .iter()
-        .map(|r| json!({"id": r.code, "name": r.name, "shortDescription": {"text": r.summary}, "properties": {"category": r.category}}))
+        .map(|r| {
+            json!({
+                "id": r.code,
+                "name": r.name,
+                "shortDescription": {"text": r.summary},
+                "helpUri": help_url(r.code),
+                "help": {"text": r.doc, "markdown": help_markdown(r.doc)},
+                "properties": {"category": r.category},
+            })
+        })
         .collect();
     let results: Vec<_> = diags
         .iter()
@@ -84,7 +107,7 @@ pub fn print_github(out: &mut impl Write, diags: &[&Diagnostic], rel: &dyn Fn(&P
             Severity::Warning => "warning",
             Severity::Info => "notice",
         };
-        let title = format!("{} {}", d.code, odooscan_core::rules::rule(d.code).name);
+        let title = format!("{} {}", d.code, rule(d.code).name);
         let _ = writeln!(
             out,
             "::{level} file={},line={},col={},title={}::{}",
@@ -92,7 +115,7 @@ pub fn print_github(out: &mut impl Write, diags: &[&Diagnostic], rel: &dyn Fn(&P
             d.line,
             d.column,
             escape_property(&title),
-            escape_data(&d.message)
+            escape_data(&format!("{}\n\nSee {}", d.message, help_url(d.code)))
         );
     }
 }
@@ -105,7 +128,8 @@ fn escape_property(s: &str) -> String {
     escape_data(s).replace(':', "%3A").replace(',', "%2C")
 }
 
-/// GitLab's Code Quality report, shown in the merge request widget and diff.
+/// GitLab's Code Quality report, shown in the merge request widget and diff. `content.body` is the
+/// Code Climate field for a finding's documentation.
 pub fn gitlab(diags: &[&Diagnostic], rel: &dyn Fn(&Path) -> String) -> serde_json::Value {
     let mut seen: HashMap<u64, u32> = HashMap::new();
     let issues: Vec<_> = diags
@@ -128,6 +152,7 @@ pub fn gitlab(diags: &[&Diagnostic], rel: &dyn Fn(&Path) -> String) -> serde_jso
                 "fingerprint": format!("{:016x}", fnv1a(&[&base.to_string(), &nth.to_string()])),
                 "severity": severity,
                 "location": {"path": path, "lines": {"begin": d.line}},
+                "content": {"body": format!("[{} {}]({})", d.code, rule(d.code).name, help_url(d.code))},
             })
         })
         .collect();
@@ -141,4 +166,98 @@ fn fnv1a(parts: &[&str]) -> u64 {
         hash = (hash ^ u64::from(byte)).wrapping_mul(0x0100_0000_01b3);
     }
     hash
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use super::*;
+
+    fn diags() -> Vec<Diagnostic> {
+        let at = |code, severity, line, message: &str| Diagnostic {
+            code,
+            severity,
+            path: PathBuf::from("bad_sale/models/sale_order.py"),
+            line,
+            column: 5,
+            message: message.to_owned(),
+        };
+        vec![
+            at(
+                "OD203",
+                Severity::Error,
+                7,
+                "'partner_id.cde': res.partner has no field 'cde'",
+            ),
+            at("OD111", Severity::Info, 12, "route with auth='public' calls sudo()"),
+        ]
+    }
+
+    fn rel(p: &Path) -> String {
+        p.display().to_string()
+    }
+
+    fn text(terminal: bool) -> String {
+        let diags = diags();
+        let mut out = vec![];
+        print_text(&mut out, &diags.iter().collect::<Vec<_>>(), &rel, terminal);
+        String::from_utf8(out).unwrap()
+    }
+
+    #[test]
+    fn text_links_the_code_on_a_terminal_only() {
+        insta::assert_snapshot!("text_piped", text(false));
+        insta::assert_snapshot!("text_terminal", text(true).escape_debug().to_string());
+    }
+
+    #[test]
+    fn github_annotations_end_with_the_page() {
+        let diags = diags();
+        let mut out = vec![];
+        print_github(&mut out, &diags.iter().collect::<Vec<_>>(), &rel);
+        insta::assert_snapshot!(String::from_utf8(out).unwrap());
+    }
+
+    #[test]
+    fn gitlab_issues_link_the_page() {
+        let diags = diags();
+        let report = gitlab(&diags.iter().collect::<Vec<_>>(), &rel);
+        insta::assert_snapshot!(serde_json::to_string_pretty(&report).unwrap());
+    }
+
+    #[test]
+    fn sarif_rules_carry_their_page() {
+        let diags = diags();
+        let mut report = sarif(&diags.iter().collect::<Vec<_>>(), &rel);
+        let rules = &mut report["runs"][0]["tool"]["driver"]["rules"];
+        let mut od203 = rules
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|r| r["id"] == "OD203")
+            .unwrap()
+            .clone();
+        assert_eq!(od203["helpUri"], "https://avanserv.github.io/odooscan/rules/OD203/");
+        assert!(
+            od203["help"]["markdown"]
+                .as_str()
+                .unwrap()
+                .starts_with("# OD203 unresolved-field-path")
+        );
+        // Every rule and its whole page is in the report; the snapshot keeps one, without the page.
+        od203["help"] = json!("<docs/rules/OD203.md>");
+        *rules = json!([od203]);
+        report["runs"][0]["tool"]["driver"]["version"] = json!("<version>");
+        insta::assert_snapshot!(serde_json::to_string_pretty(&report).unwrap());
+    }
+
+    #[test]
+    fn help_markdown_makes_rule_links_absolute() {
+        let md = help_markdown("is [OD201](OD201.md) instead");
+        assert_eq!(
+            md,
+            "is [OD201](https://avanserv.github.io/odooscan/rules/OD201/) instead"
+        );
+    }
 }

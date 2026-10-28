@@ -1,0 +1,6 @@
+---
+source: crates/odooscan/src/output.rs
+expression: text(false)
+---
+bad_sale/models/sale_order.py:7:5: OD203 'partner_id.cde': res.partner has no field 'cde'
+bad_sale/models/sale_order.py:12:5: OD111 route with auth='public' calls sudo()
