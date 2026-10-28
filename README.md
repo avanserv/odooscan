@@ -33,10 +33,11 @@ page in the terminal.
 
 - `crates/odooscan_core/src/project.rs` finds modules, parses every file in parallel, and keeps
   per-file facts.
-  - `python.rs`, `xml.rs`, `csvdata.rs` and `manifest.rs` extract those facts and raise the
-    single-file rules.
+  - `python.rs`, `xml.rs`, `csvdata.rs`, `js.rs` and `manifest.rs` extract those facts and raise
+    the single-file rules.
 - `index.rs` merges the facts. It resolves fields through `_inherit`, `_inherits` and
-  `delegate=True`, related comodels, view inheritance, and the dependency scope of each module.
+  `delegate=True`, related comodels, view inheritance, JS module paths and the scripts bundles
+  load, and the dependency scope of each module.
 - `checks.rs` holds the cross-file rules.
 - `rules.rs` is the registry: code, series range, severity and category. `docs/rules/` has a page
   per rule.
@@ -45,6 +46,6 @@ page in the terminal.
 ## Testing
 
 `cargo test` runs a snapshot over `crates/odooscan_core/tests/fixtures`. That fixture is a small
-core (`base`, `mail`) plus custom modules written to trigger every rule; review changes with
+core (`base`, `mail`, `web`) plus custom modules written to trigger every rule; review changes with
 `cargo insta review`. The false-positive oracle is Odoo itself: a scan of core must report exactly
 the findings recorded in `tests/oracle/`, as CONTRIBUTING.md describes.

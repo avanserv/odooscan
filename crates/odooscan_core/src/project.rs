@@ -4,11 +4,11 @@ use ignore::WalkBuilder;
 use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use crate::facts::{DataFacts, PyFacts};
+use crate::facts::{DataFacts, JsFacts, PyFacts};
 use crate::manifest::{self, Manifest};
 use crate::series::Series;
 use crate::suppress::Suppressions;
-use crate::{csvdata, python, xml};
+use crate::{csvdata, js, python, xml};
 
 const MANIFESTS: &[&str] = &["__manifest__.py", "__openerp__.py"];
 
@@ -35,6 +35,8 @@ pub struct Module {
     pub checked: bool,
     pub python: Vec<SourceFile<PyFacts>>,
     pub data: Vec<SourceFile<DataFacts>>,
+    /// Scripts under `static/src`, the only JS the web client loads as Odoo modules.
+    pub js: Vec<SourceFile<JsFacts>>,
 }
 
 fn manifest_in(dir: &Path) -> Option<PathBuf> {
@@ -102,6 +104,21 @@ fn module_files(dir: &Path) -> Vec<PathBuf> {
         .collect()
 }
 
+fn js_files(dir: &Path) -> Vec<PathBuf> {
+    let src = dir.join("static/src");
+    if !src.is_dir() {
+        return vec![];
+    }
+    WalkBuilder::new(src)
+        .filter_entry(|e| e.file_name() != "node_modules")
+        .build()
+        .filter_map(Result::ok)
+        .filter(|e| e.file_type().is_some_and(|t| t.is_file()))
+        .map(|e| e.into_path())
+        .filter(|p| p.extension().is_some_and(|e| e == "js"))
+        .collect()
+}
+
 fn normalize(rel: &str) -> String {
     rel.trim_start_matches("./").replace('\\', "/")
 }
@@ -166,6 +183,7 @@ fn read_module(name: String, dir: PathBuf, checked: bool) -> Option<Module> {
         checked,
         python: vec![],
         data: vec![],
+        js: vec![],
     })
 }
 
@@ -230,4 +248,27 @@ fn parse_module_files(module: &mut Module) {
     module
         .data
         .sort_by_key(|f| (f.rank.unwrap_or(usize::MAX), f.rel.clone()));
+    module.js = parse_js_files(&module.dir, checked);
+}
+
+fn parse_js_files(dir: &Path, checked: bool) -> Vec<SourceFile<JsFacts>> {
+    let mut files: Vec<_> = js_files(dir)
+        .into_par_iter()
+        .filter_map(|path| {
+            let text = std::fs::read_to_string(&path).ok()?;
+            Some(SourceFile {
+                rel: normalize(&path.strip_prefix(dir).ok()?.to_string_lossy()),
+                rank: None,
+                suppressions: if checked {
+                    Suppressions::parse(&text)
+                } else {
+                    Suppressions::default()
+                },
+                facts: js::analyze(&text),
+                path,
+            })
+        })
+        .collect();
+    files.sort_by(|a, b| a.rel.cmp(&b.rel));
+    files
 }

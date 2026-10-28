@@ -23,7 +23,7 @@ impl Suppressions {
                 continue;
             };
             let trimmed = line.trim_start();
-            let standalone = trimmed.starts_with('#') || trimmed.starts_with("<!--");
+            let standalone = ["#", "<!--", "//"].iter().any(|c| trimmed.starts_with(c));
             map.insert(i as u32 + if standalone { 2 } else { 1 }, codes);
         }
         Self(map)
@@ -56,5 +56,7 @@ mod tests {
         assert!(s.allows(2, "OD102"));
         assert!(!s.allows(3, "OD103"));
         assert!(s.allows(1, "OD101"));
+        let js = Suppressions::parse("// odooscan: ignore[OD601]\nimport { a } from \"@web/x\";\n");
+        assert!(!js.allows(2, "OD601"));
     }
 }

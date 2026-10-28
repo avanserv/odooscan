@@ -117,9 +117,10 @@ repos:
         pass_filenames: false
 
       # The whole tree rather than the staged files: the dependency-cycle check needs every module.
+      # Fixtures are scanned code, broken on purpose, not code of this repository.
       - id: polyscan
         name: rust     | complexity (polyscan)
-        entry: polyscan check --quiet crates
+        entry: polyscan check --quiet --exclude odooscan_core/tests/fixtures crates
         language: node
         language_version: '22'
         additional_dependencies: ['polyscan@0.6.0']

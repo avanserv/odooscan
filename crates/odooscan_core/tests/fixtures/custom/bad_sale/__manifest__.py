@@ -13,4 +13,5 @@
         "data/res.partner-extra.csv",
         "views/domains.xml",
     ],
+    "assets": {"web.assets_backend": ["bad_sale/static/src/js/**/*"]},
 }

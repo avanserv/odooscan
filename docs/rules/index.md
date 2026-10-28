@@ -98,3 +98,12 @@ The manifest and the dependency graph: listed files, unlisted files and dependen
 | [OD502](OD502.md) | `data-file-not-loaded` | A data file is not listed in the manifest, so Odoo never loads it. |
 | [OD503](OD503.md) | `unknown-dependency` | A module in depends is not on the addons path. |
 | [OD504](OD504.md) | `circular-dependency` | A module in depends depends back on this module. |
+
+## OD6: JavaScript and Owl
+
+Scripts under `static/src` that a bundle loads, checked against the scripts of every indexed
+module.
+
+| Code | Name | Reports |
+| --- | --- | --- |
+| [OD601](OD601.md) | `unresolved-js-import` | A JS import names a module or an export no indexed module provides. |

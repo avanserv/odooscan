@@ -48,11 +48,12 @@ site-serve: ## Serve the documentation site locally, rebuilding on change
 	uv sync --locked --only-group docs --no-install-project
 	uv run --no-sync zensical serve
 
-oracle-fetch: ## Fetch the pinned Odoo core of SERIES (default 18.0) into .oracle/, without tests and assets
+oracle-fetch: ## Fetch the pinned Odoo core of SERIES (default 18.0) into .oracle/, without tests and assets but scripts
 	rm -rf $(ORACLE)
 	git init -q $(ORACLE)
 	git -C $(ORACLE) fetch -q --depth 1 --filter=blob:none https://github.com/odoo/odoo $(ODOO_$(SERIES))
-	git -C $(ORACLE) sparse-checkout set --no-cone '/addons/' '/odoo/addons/' '!**/i18n/' '!**/static/' '!**/tests/'
+	git -C $(ORACLE) sparse-checkout set --no-cone '/addons/' '/odoo/addons/' '!**/i18n/' '!**/static/**' \
+		'**/static/src/**/*.js' '!**/tests/'
 	git -C $(ORACLE) checkout -q FETCH_HEAD
 
 # A fixed finding fails the gate as much as a new one, so the recorded list stays exact.

@@ -113,6 +113,7 @@ rules! {
     "OD502" "data-file-not-loaded" Quality Warning None, false, "A data file is not listed in the manifest, so Odoo never loads it.";
     "OD503" "unknown-dependency" Correctness Error None, true, "A module in depends is not on the addons path.";
     "OD504" "circular-dependency" Correctness Error None, true, "A module in depends depends back on this module.";
+    "OD601" "unresolved-js-import" Correctness Error None, true, "A JS import names a module or an export no indexed module provides.";
 }
 
 pub fn rule(code: &str) -> &'static Rule {

@@ -1,8 +1,8 @@
 # odooscan
 
 A quality and security scanner for Odoo modules, written in Rust. It parses Python with ruff's
-parser, and XML and CSV natively. It then builds one index of every model, field, method, XML id,
-view and access rule across the modules it is given, so rules can check what a single-file linter
+parser, JS with oxc, and XML and CSV natively. It then builds one index of every model, field,
+method, XML id, view, access rule and JS module across the modules it is given, so rules can check what a single-file linter
 cannot. For example, it can tell you that a view names a field its model lacks, or that an XML id
 belongs to a module missing from `depends`.
 

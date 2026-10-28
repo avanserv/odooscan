@@ -385,6 +385,12 @@
       "count": 1
     },
     {
+      "path": "addons/hr_holidays/static/src/views/calendar/calendar_controller.js",
+      "code": "OD601",
+      "message": "'@web/core/dropdown/dropdown' does not export 'DropdownItem'",
+      "count": 1
+    },
+    {
       "path": "addons/hr_recruitment/data/scenarios/hr_recruitment_scenario.xml",
       "code": "OD303",
       "message": "XML id 'scenario_applicant_macm_enrique' is already defined earlier in this file",
@@ -412,6 +418,12 @@
       "path": "addons/html_editor/controllers/main.py",
       "code": "OD111",
       "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
+      "count": 1
+    },
+    {
+      "path": "addons/html_editor/static/src/main/table/table_plugin.js",
+      "code": "OD601",
+      "message": "'@html_editor/utils/dom_info' does not export 'isTableCell'",
       "count": 1
     },
     {

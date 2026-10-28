@@ -199,3 +199,37 @@ pub struct DataFacts {
     pub access: Vec<AccessRow>,
     pub diags: Vec<RawDiag>,
 }
+
+/// What the leading comment of a JS file says about it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Annotation {
+    #[default]
+    None,
+    /// `@odoo-module`: an ES module from 15.0 on, when unannotated files are still scripts.
+    Module,
+    /// `@odoo-module ignore`: never an ES module, such as a library under `static/src`.
+    Ignore,
+}
+
+/// A name a JS file imports, or re-exports, from another module.
+#[derive(Debug)]
+pub struct JsName {
+    pub specifier: String,
+    /// The exported name asked for; `default` for a default import.
+    pub name: Spanned<String>,
+}
+
+#[derive(Debug, Default)]
+pub struct JsFacts {
+    pub annotation: Annotation,
+    /// Every module specifier the file imports or re-exports from, at its first use.
+    pub specifiers: Vec<Spanned<String>>,
+    pub names: Vec<JsName>,
+    /// Names the file exports itself or re-exports, `default` among them.
+    pub exports: Vec<String>,
+    /// Specifiers of `export * from`, whose names the file exports too.
+    pub star_exports: Vec<String>,
+    /// Module names given to `odoo.define()`, which a hand-written file registers under.
+    pub defines: Vec<String>,
+    pub syntax_error: Option<Spanned<String>>,
+}
