@@ -94,6 +94,10 @@ pub struct ClassFact {
     pub paths: Vec<Spanned<String>>,
     /// The fields `_order` sorts by and `_rec_name` names, which must exist on the model.
     pub order_fields: Vec<Spanned<String>>,
+    /// Methods the class's methods call through `super()`.
+    pub super_calls: Vec<Spanned<String>>,
+    /// A base class is a plain Python class, whose methods only Python knows.
+    pub plain_bases: bool,
 }
 
 #[derive(Debug, Default)]

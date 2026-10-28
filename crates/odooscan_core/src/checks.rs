@@ -41,6 +41,7 @@ pub fn check_module<'m>(index: &Index<'m>, mi: usize) -> Vec<(&'m Path, RawDiag)
             scope: &scope,
             dep_names: module.manifest.depends.iter().map(|d| d.value.as_str()).collect(),
             dynamic: module.python.iter().any(|f| f.facts.dynamic_models),
+            partial: index.partial_scope(&scope),
         };
         ctx.dependencies(&mut out);
         ctx.python(&mut out);
@@ -171,6 +172,8 @@ struct Ctx<'a, 'm> {
     dep_names: FxHashSet<&'m str>,
     /// The module builds model names at runtime, so its models and their ids cannot be listed.
     dynamic: bool,
+    /// A module in scope depends on one that is not indexed, such as an Enterprise module.
+    partial: bool,
 }
 
 impl<'m> Ctx<'_, 'm> {
@@ -266,6 +269,7 @@ impl<'m> Ctx<'_, 'm> {
             self.path(out, path, "OD203", &class.model, p);
         }
         self.redefinition(out, path, class);
+        self.super_calls(out, path, class);
         if class.new_model
             && class.kind != ModelKind::Abstract
             && !self.index.models_with_access.contains(class.model.as_str())
@@ -304,6 +308,28 @@ impl<'m> Ctx<'_, 'm> {
                     self.index.modules[*mi].name, class.model, class.model
                 ),
             );
+        }
+    }
+
+    /// Parents the index cannot see: a Python base class, a module that is not indexed, a model
+    /// nobody indexes, and for a mixin, every model that inherits it.
+    fn super_calls(&self, out: &mut Out<'m>, path: &'m Path, class: &ClassFact) {
+        if class.plain_bases || self.partial || class.kind == ModelKind::Abstract || !self.index.has_model(&class.model)
+        {
+            return;
+        }
+        for call in &class.super_calls {
+            if !self.index.has_parent_method(&class.model, &call.value, class) {
+                out.push(
+                    path,
+                    "OD211",
+                    call.pos,
+                    format!(
+                        "no parent class of {} defines '{}', so this super() call fails",
+                        class.model, call.value
+                    ),
+                );
+            }
         }
     }
 
