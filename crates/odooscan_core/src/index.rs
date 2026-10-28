@@ -1,6 +1,7 @@
+use globset::{GlobBuilder, GlobSetBuilder};
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use crate::facts::{ArchElement, ClassFact, FieldFact, ViewFact};
+use crate::facts::{Annotation, ArchElement, ClassFact, FieldFact, ViewFact};
 use crate::project::Module;
 
 /// Fields every model has without declaring them.
@@ -304,6 +305,122 @@ fn access_models(modules: &[Module], model_by_xmlid: &FxHashMap<String, &str>) -
     models_with_access
 }
 
+/// The name Odoo registers a script under `static/src` as: `@module/` and its path from there.
+pub fn js_module_path(module: &str, rel: &str) -> Option<String> {
+    let path = rel.strip_prefix("static/src/")?.strip_suffix(".js")?;
+    Some(format!("@{module}/{path}"))
+}
+
+/// The file a JS module name resolves to.
+#[derive(Clone, Copy)]
+pub struct JsTarget {
+    pub module: usize,
+    pub file: usize,
+    /// Registered by `odoo.define()` or marked `@odoo-module ignore`, so its exports are unknown.
+    opaque: bool,
+}
+
+pub enum JsSpec {
+    Found(JsTarget),
+    /// The path is in an indexed module whose scripts are indexed, but no file provides it.
+    Missing(usize),
+    /// A library, or a module that is not indexed.
+    Outside,
+}
+
+#[derive(PartialEq, Eq)]
+pub enum Export {
+    Found,
+    Missing,
+    /// Through an `export *` the index cannot follow.
+    Unknown,
+}
+
+fn js_paths(modules: &[Module]) -> FxHashMap<String, JsTarget> {
+    let mut paths = FxHashMap::default();
+    for (mi, module) in modules.iter().enumerate() {
+        for (fi, file) in module.js.iter().enumerate() {
+            let target = JsTarget {
+                module: mi,
+                file: fi,
+                opaque: file.facts.annotation == Annotation::Ignore,
+            };
+            if let Some(path) = js_module_path(&module.name, &file.rel) {
+                if let Some(dir) = path.strip_suffix("/index") {
+                    paths.entry(dir.to_owned()).or_insert(target);
+                }
+                paths.insert(path, target);
+            }
+            for name in &file.facts.defines {
+                paths.entry(name.clone()).or_insert(JsTarget { opaque: true, ..target });
+            }
+        }
+    }
+    paths
+}
+
+/// `base`, and the modules that auto-install once their depends are, when those are all such modules.
+fn always_installed(modules: &[Module], by_name: &FxHashMap<&str, usize>) -> Vec<bool> {
+    let mut always: Vec<bool> = modules.iter().map(|m| m.name == "base").collect();
+    loop {
+        let next: Vec<usize> = (0..modules.len())
+            .filter(|&mi| !always[mi] && modules[mi].manifest.auto_install)
+            .filter(|&mi| {
+                modules[mi]
+                    .manifest
+                    .depends
+                    .iter()
+                    .all(|d| by_name.get(d.value.as_str()).is_some_and(|&di| always[di]))
+            })
+            .collect();
+        if next.is_empty() {
+            return always;
+        }
+        for mi in next {
+            always[mi] = true;
+        }
+    }
+}
+
+/// The scripts some bundle of an indexed manifest adds, as (module, file). Odoo expands the globs
+/// against the addons directories, so a module may add another module's files.
+fn loaded_js(modules: &[Module]) -> FxHashSet<(usize, usize)> {
+    let mut builder = GlobSetBuilder::new();
+    for glob in modules.iter().flat_map(|m| &m.manifest.assets) {
+        if let Ok(g) = GlobBuilder::new(glob).literal_separator(true).build() {
+            builder.add(g);
+        }
+    }
+    let Ok(set) = builder.build() else {
+        return FxHashSet::default();
+    };
+    let mut loaded = FxHashSet::default();
+    for (mi, module) in modules.iter().enumerate() {
+        for (fi, file) in module.js.iter().enumerate() {
+            if set.is_match(format!("{}/{}", module.name, file.rel)) {
+                loaded.insert((mi, fi));
+            }
+        }
+    }
+    loaded
+}
+
+/// Appends the segments of a specifier to a module path's, or None when it climbs out of the
+/// module, as `@web/../tests` does.
+fn join_segments<'s>(mut parts: Vec<&'s str>, specifier: &'s str) -> Option<String> {
+    for segment in specifier.split('/') {
+        match segment {
+            "." | "" => {}
+            ".." if parts.len() > 1 => {
+                parts.pop();
+            }
+            ".." => return None,
+            s => parts.push(s),
+        }
+    }
+    Some(parts.join("/"))
+}
+
 pub struct XmlIdDef {
     pub module: usize,
 }
@@ -357,6 +474,9 @@ pub struct Index<'m> {
     children: FxHashMap<String, Vec<String>>,
     pub models_with_access: FxHashSet<String>,
     pub has_base: bool,
+    js_paths: FxHashMap<String, JsTarget>,
+    js_loaded: FxHashSet<(usize, usize)>,
+    always_installed: Vec<bool>,
 }
 
 impl<'m> Index<'m> {
@@ -388,13 +508,73 @@ impl<'m> Index<'m> {
         Self {
             modules,
             has_base: base.is_some(),
-            by_name,
             models,
             xmlids,
             views,
             children,
             models_with_access,
+            js_paths: js_paths(modules),
+            js_loaded: loaded_js(modules),
+            always_installed: always_installed(modules, &by_name),
+            by_name,
         }
+    }
+
+    /// Whether Odoo installs `module` with `base`, as it does `web`, so any module may use it.
+    pub fn always_installed(&self, module: usize) -> bool {
+        self.always_installed[module]
+    }
+
+    pub fn js_loaded(&self, module: usize, file: usize) -> bool {
+        self.js_loaded.contains(&(module, file))
+    }
+
+    /// The file a specifier imported by the module `from` names.
+    pub fn js_resolve(&self, from: &str, specifier: &str) -> JsSpec {
+        let path = if specifier.starts_with('.') {
+            let mut dir: Vec<&str> = from.split('/').collect();
+            dir.pop();
+            join_segments(dir, specifier)
+        } else {
+            join_segments(vec![], specifier).filter(|_| specifier.starts_with('@'))
+        };
+        let Some(path) = path.map(|p| p.strip_suffix(".js").map(str::to_owned).unwrap_or(p)) else {
+            return JsSpec::Outside;
+        };
+        if let Some(target) = self.js_paths.get(&path) {
+            return JsSpec::Found(*target);
+        }
+        let addon = path[1..].split('/').next().unwrap_or_default();
+        match self.by_name.get(addon) {
+            Some(&mi) if !self.modules[mi].js.is_empty() => JsSpec::Missing(mi),
+            _ => JsSpec::Outside,
+        }
+    }
+
+    /// Whether the file `target` exports `name`, following `export *`.
+    pub fn js_export(&self, target: JsTarget, name: &str, depth: u8) -> Export {
+        let module = &self.modules[target.module];
+        let file = &module.js[target.file];
+        if target.opaque || depth > 8 {
+            return Export::Unknown;
+        }
+        if file.facts.exports.iter().any(|e| e == name) {
+            return Export::Found;
+        }
+        let from = js_module_path(&module.name, &file.rel).unwrap_or_default();
+        let mut found = Export::Missing;
+        for specifier in file.facts.star_exports.iter().filter(|_| name != "default") {
+            let next = match self.js_resolve(&from, specifier) {
+                JsSpec::Found(t) => self.js_export(t, name, depth + 1),
+                _ => Export::Unknown,
+            };
+            match next {
+                Export::Found => return Export::Found,
+                Export::Unknown => found = Export::Unknown,
+                Export::Missing => {}
+            }
+        }
+        found
     }
 
     pub fn scope(&self, module: usize) -> Scope {

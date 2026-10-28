@@ -4,9 +4,13 @@ use std::path::Path;
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use crate::facts::{ClassFact, DomainFact, FieldFact, ModelKind, Pos, RawDiag, RecordFact, Spanned, ViewFact, XmlRef};
-use crate::index::{Index, Scope, Status, ViewTree, full_id, located};
-use crate::project::Module;
+use crate::facts::{
+    Annotation, ClassFact, DomainFact, FieldFact, JsFacts, JsName, ModelKind, Pos, RawDiag, RecordFact, Spanned,
+    ViewFact, XmlRef,
+};
+use crate::index::{Export, Index, JsSpec, Scope, Status, ViewTree, full_id, js_module_path, located};
+use crate::project::{Module, SourceFile};
+use crate::series::Series;
 use crate::xml::{LOCATOR, UNKNOWN_CONTEXT};
 
 /// Directories of upgrade scripts, which name XML ids of past versions.
@@ -28,11 +32,16 @@ impl<'m> Out<'m> {
     }
 }
 
-pub fn check_module<'m>(index: &Index<'m>, mi: usize) -> Vec<(&'m Path, RawDiag)> {
+pub fn check_module<'m>(index: &Index<'m>, mi: usize, series: Option<Series>) -> Vec<(&'m Path, RawDiag)> {
     let module = &index.modules[mi];
     let mut out = Out { diags: vec![] };
     manifest_files(module, &mut out);
     same_module_xmlids(module, &mut out);
+    for file in es_modules(index, mi, series) {
+        if let Some(e) = &file.facts.syntax_error {
+            out.push(&file.path, "OD000", e.pos, e.value.clone());
+        }
+    }
     if index.has_base {
         let scope = index.scope(mi);
         let ctx = Ctx {
@@ -46,8 +55,34 @@ pub fn check_module<'m>(index: &Index<'m>, mi: usize) -> Vec<(&'m Path, RawDiag)
         ctx.dependencies(&mut out);
         ctx.python(&mut out);
         ctx.data(&mut out);
+        for file in es_modules(index, mi, series) {
+            ctx.js(&mut out, file);
+        }
     }
     out.diags
+}
+
+/// The module's scripts that a bundle loads as ES modules: annotated, or from 17.0 on, any script
+/// under `static/src` not marked `ignore`. A script that is not one cannot use `import`.
+fn es_modules<'a, 'm>(
+    index: &'a Index<'m>,
+    mi: usize,
+    series: Option<Series>,
+) -> impl Iterator<Item = &'m SourceFile<JsFacts>> + 'a {
+    let unannotated = series.is_some_and(|s| s >= Series { major: 17, minor: 0 });
+    index.modules[mi]
+        .js
+        .iter()
+        .enumerate()
+        .filter(move |(fi, f)| {
+            index.js_loaded(mi, *fi)
+                && match f.facts.annotation {
+                    Annotation::Module => true,
+                    Annotation::Ignore => false,
+                    Annotation::None => unannotated,
+                }
+        })
+        .map(|(_, f)| f)
 }
 
 fn manifest_files<'m>(module: &'m Module, out: &mut Out<'m>) {
@@ -255,6 +290,44 @@ impl<'m> Ctx<'_, 'm> {
                 }
             }
         }
+    }
+
+    fn js(&self, out: &mut Out<'m>, file: &'m SourceFile<JsFacts>) {
+        let from = js_module_path(&self.module.name, &file.rel).unwrap_or_default();
+        for specifier in &file.facts.specifiers {
+            self.js_specifier(out, &file.path, &from, specifier);
+        }
+        for name in &file.facts.names {
+            self.js_name(out, &file.path, &from, name);
+        }
+    }
+
+    fn js_specifier(&self, out: &mut Out<'m>, path: &'m Path, from: &str, specifier: &Spanned<String>) {
+        let module = |mi: usize| &self.index.modules[mi].name;
+        let message = match self.index.js_resolve(from, &specifier.value) {
+            JsSpec::Missing(mi) => format!("no file of module {} provides '{}'", module(mi), specifier.value),
+            JsSpec::Found(t) if !self.scope.sees(t.module) && !self.index.always_installed(t.module) => format!(
+                "'{}' comes from module {}, which is not in depends",
+                specifier.value,
+                module(t.module)
+            ),
+            _ => return,
+        };
+        out.push(path, "OD601", specifier.pos, message);
+    }
+
+    fn js_name(&self, out: &mut Out<'m>, path: &'m Path, from: &str, name: &JsName) {
+        let JsSpec::Found(target) = self.index.js_resolve(from, &name.specifier) else {
+            return;
+        };
+        if self.index.js_export(target, &name.name.value, 0) != Export::Missing {
+            return;
+        }
+        let message = match name.name.value.as_str() {
+            "default" => format!("'{}' has no default export", name.specifier),
+            n => format!("'{}' does not export '{n}'", name.specifier),
+        };
+        out.push(path, "OD601", name.name.pos, message);
     }
 
     fn class(&self, out: &mut Out<'m>, path: &'m Path, class: &ClassFact) {

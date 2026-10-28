@@ -14,6 +14,10 @@ pub struct Manifest {
     pub demo: Vec<Spanned<String>>,
     pub category: Option<String>,
     pub installable: bool,
+    /// `auto_install` is `True`, not a list of the depends that trigger it.
+    pub auto_install: bool,
+    /// Globs the `assets` bundles add, relative to the addons directory.
+    pub assets: Vec<String>,
 }
 
 impl Manifest {
@@ -29,6 +33,8 @@ impl Manifest {
             "demo" => self.demo = list(loc, value),
             "category" => self.category = str_lit(value).map(str::to_owned),
             "installable" => self.installable = !matches!(value, Expr::BooleanLiteral(b) if !b.value),
+            "assets" => self.assets = asset_globs(value),
+            "auto_install" => self.auto_install = matches!(value, Expr::BooleanLiteral(b) if b.value),
             _ => {}
         }
     }
@@ -68,4 +74,47 @@ fn list(loc: &Locator, e: &Expr) -> Vec<Spanned<String>> {
             })
         })
         .collect()
+}
+
+/// The globs of every bundle, whether a plain entry or the last item of an `(op, ..., glob)` one.
+/// `include` names a bundle and `remove` takes files out, so neither adds anything.
+fn asset_globs(e: &Expr) -> Vec<String> {
+    let Expr::Dict(bundles) = e else {
+        return vec![];
+    };
+    let entries = bundles.items.iter().flat_map(|item| match &item.value {
+        Expr::List(l) => &l.elts[..],
+        _ => &[],
+    });
+    entries
+        .filter_map(|entry| match entry {
+            Expr::Tuple(t) => {
+                let op = t.elts.first().and_then(str_lit)?;
+                (!matches!(op, "include" | "remove")).then(|| t.elts.last().and_then(str_lit))?
+            }
+            e => str_lit(e),
+        })
+        .filter(|glob| !glob.contains("://"))
+        .map(|glob| glob.trim_start_matches('/').to_owned())
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reads_the_globs_bundles_add() {
+        let m = parse(
+            r#"{"assets": {"web.assets_backend": [
+                "x/static/src/**/*",
+                ("include", "web._assets_core"),
+                ("remove", "x/static/src/old.js"),
+                ("after", "web/static/src/a.js", "/x/static/src/b.js"),
+                "https://cdn.example.com/lib.js",
+            ]}}"#,
+        )
+        .unwrap();
+        assert_eq!(m.assets, ["x/static/src/**/*", "x/static/src/b.js"]);
+    }
 }

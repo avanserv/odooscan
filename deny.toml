@@ -7,11 +7,13 @@ unmaintained = "all"
 yanked = "deny"
 
 # Permissive licenses only, each one a dependency carries today. Unicode-DFS-2016 covers the
-# Unicode name tables inside ruff's parser. A dependency under anything else fails until it is
-# argued for here.
+# Unicode name tables inside ruff's parser. BSL-1.0, as permissive as MIT and asking only that the
+# notice travel with the source, covers dragonbox_ecma, oxc's number formatting. A dependency under
+# anything else fails until it is argued for here.
 [licenses]
 allow = [
     "Apache-2.0",
+    "BSL-1.0",
     "MIT",
     "Unicode-3.0",
     "Unicode-DFS-2016",

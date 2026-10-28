@@ -1,1 +1,7 @@
-{"name": "Legacy", "version": "16.0.1.0.0", "depends": ["base"], "data": ["views/views.xml"]}
+{
+    "name": "Legacy",
+    "version": "16.0.1.0.0",
+    "depends": ["base", "web"],
+    "data": ["views/views.xml"],
+    "assets": {"web.assets_backend": ["legacy16/static/src/**/*"]},
+}

@@ -1471,6 +1471,12 @@
       "count": 3
     },
     {
+      "path": "addons/mail/static/src/core/common/thread.js",
+      "code": "OD601",
+      "message": "'@web/core/utils/strings' does not export 'escape'",
+      "count": 1
+    },
+    {
       "path": "addons/mail_group/controllers/portal.py",
       "code": "OD111",
       "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
@@ -2344,6 +2350,12 @@
       "path": "addons/web/controllers/webclient.py",
       "code": "OD111",
       "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
+      "count": 1
+    },
+    {
+      "path": "addons/web/static/src/views/kanban/kanban_record.js",
+      "code": "OD601",
+      "message": "'@web/views/card/card_renderer' does not export 'getImageSrcFromRecordInfo'",
       "count": 1
     },
     {

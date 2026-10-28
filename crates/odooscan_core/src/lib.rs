@@ -3,6 +3,7 @@ mod csvdata;
 mod domain;
 mod facts;
 mod index;
+mod js;
 mod manifest;
 mod project;
 mod python;
@@ -86,12 +87,13 @@ pub fn scan(opts: &ScanOptions) -> Report {
                         RawDiag::new(d.code, d.pos, d.message.clone()),
                     )
                 });
-            let cross = checks::check_module(&index, mi).into_iter().map(|(p, d)| {
+            let cross = checks::check_module(&index, mi, series).into_iter().map(|(p, d)| {
                 let allowed = module
                     .python
                     .iter()
                     .map(|f| (&f.path, &f.suppressions))
                     .chain(module.data.iter().map(|f| (&f.path, &f.suppressions)))
+                    .chain(module.js.iter().map(|f| (&f.path, &f.suppressions)))
                     .find(|(fp, _)| fp.as_path() == p)
                     .is_none_or(|(_, s)| s.allows(d.pos.line, d.code));
                 (p.to_path_buf(), allowed, d)
@@ -115,7 +117,7 @@ pub fn scan(opts: &ScanOptions) -> Report {
         diagnostics,
         modules_checked: modules.iter().filter(|m| m.checked).count(),
         modules_indexed: modules.len(),
-        files: modules.iter().map(|m| m.python.len() + m.data.len()).sum(),
+        files: modules.iter().map(|m| m.python.len() + m.data.len() + m.js.len()).sum(),
         notices,
     }
 }

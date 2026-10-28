@@ -1,6 +1,5 @@
 ---
 source: crates/odooscan_core/tests/fixtures.rs
-assertion_line: 27
 expression: "lines.join(\"\\n\")"
 ---
 custom/bad_sale/__manifest__.py:5:25: OD503 module 'not_installed' is not on the addons path
@@ -39,6 +38,11 @@ custom/bad_sale/models/registry.py:10:40: OD207 'country_name' is a Char field r
 custom/bad_sale/models/registry.py:12:53: OD208 inverse 'label' on bad.registry.note is a Char field, not a Many2one
 custom/bad_sale/models/registry.py:26:7: OD209 module base already defines model 'res.partner', and this class replaces it; extend it with _inherit = 'res.partner'
 custom/bad_sale/security/ir.model.access.csv:2:1: OD402 base.group_public gets write, create or unlink on model_bad_order; public and portal access should be read-only and go through controllers
+custom/bad_sale/static/src/js/broken.js:1:35: OD000 Unexpected token
+custom/bad_sale/static/src/js/form_patch.js:3:26: OD601 '@web/views/form/form_controller' does not export 'Missing'
+custom/bad_sale/static/src/js/form_patch.js:5:24: OD601 '@mail/thread' comes from module mail, which is not in depends
+custom/bad_sale/static/src/js/form_patch.js:6:22: OD601 no file of module web provides '@web/core/gone'
+custom/bad_sale/static/src/js/form_patch.js:9:8: OD601 './helpers' has no default export
 custom/bad_sale/views/domains.xml:5:9: OD210 'stat': bad.order has no field 'stat'
 custom/bad_sale/views/domains.xml:6:9: OD210 'stage_id': bad.order has no field 'stage_id'
 custom/bad_sale/views/domains.xml:13:17: OD210 'nam': bad.order has no field 'nam'

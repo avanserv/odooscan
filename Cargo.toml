@@ -13,6 +13,7 @@ publish = false
 odooscan_core = { path = "crates/odooscan_core" }
 clap = { version = "4", features = ["derive", "env"] }
 csv = "1"
+globset = "0.4"
 ignore = "0.4"
 rayon = "1"
 roxmltree = "0.21"
@@ -21,6 +22,13 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 toml = "1"
 regex = "1"
+# oxc releases often and breaks its AST between minor versions, so it is pinned exactly; a bump goes
+# with an oracle run on Odoo core, like ruff.
+oxc_allocator = "=0.156.0"
+oxc_ast = "=0.156.0"
+oxc_parser = { version = "=0.156.0", default-features = false }
+oxc_span = "=0.156.0"
+oxc_syntax = "=0.156.0"
 insta = "1"
 # Ruff publishes no crates and has no plugin API (astral-sh/ruff#283), so its parser is taken from
 # a release tag. A bump goes with a golden run on Odoo core: the AST shape is what every rule reads.
