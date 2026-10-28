@@ -67,6 +67,10 @@ custom/bad_sale/views/views.xml:49:9: OD307 t-raw renders unescaped HTML; use t-
 custom/bad_sale/views/views.xml:53:9: OD306 view_mode 'tree' is renamed 'list'
 custom/cycle_a/__manifest__.py:1:66: OD504 module 'cycle_b' depends back on cycle_a, so Odoo installs neither
 custom/cycle_b/__manifest__.py:1:58: OD504 module 'cycle_a' depends back on cycle_b, so Odoo installs neither
+custom/form_patches/static/src/partner_card.js:4:45: OD604 model 'res.partner' has no method 'action_unfollow'
+custom/form_patches/static/src/partner_card.js:5:45: OD604 method 'action_follow' of res.partner comes from module mail, which is not in depends
+custom/form_patches/static/src/partner_card.js:6:38: OD603 no indexed module defines model 'res.partner.title'
+custom/form_patches/static/src/partner_card.js:7:30: OD603 model 'mail.thread' comes from module mail, which is not in depends
 custom/form_patches/static/src/quick_form.js:21:22: OD602 neither QuickForm nor its parents have 'discard', so super.discard() fails
 custom/modern19/models/partner.py:6:5: OD110 _sql_constraints is ignored; declare models.Constraint, models.Index or models.UniqueIndex attributes instead
 custom/modern19/models/partner.py:9:9: OD109 self._cr is deprecated; use self.env.cr

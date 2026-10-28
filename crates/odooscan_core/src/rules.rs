@@ -115,6 +115,8 @@ rules! {
     "OD504" "circular-dependency" Correctness Error None, true, "A module in depends depends back on this module.";
     "OD601" "unresolved-js-import" Correctness Error None, true, "A JS import names a module or an export no indexed module provides.";
     "OD602" "orphan-patch-super" Correctness Error Some(">=17.0"), true, "A patch calls a super method the class it patches does not have.";
+    "OD603" "unknown-rpc-model" Correctness Error None, true, "An ORM call from JS names a model no indexed module defines.";
+    "OD604" "unknown-rpc-method" Correctness Error None, true, "orm.call() names a method its model does not have.";
 }
 
 pub fn rule(code: &str) -> &'static Rule {

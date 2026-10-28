@@ -8,7 +8,25 @@ use oxc_parser::Parser;
 use oxc_span::SourceType;
 use oxc_syntax::module_record::{ExportExportName, ExportImportName, ImportImportName, ModuleRecord};
 
-use crate::facts::{Annotation, Heritage, JsClass, JsFacts, JsName, JsPatch, Lines, Pos, Spanned};
+use crate::facts::{Annotation, Heritage, JsClass, JsFacts, JsName, JsPatch, Lines, OrmCall, Pos, Spanned};
+
+/// Methods of the `orm` service whose first argument is a model name.
+const ORM_METHODS: &[&str] = &[
+    "call",
+    "create",
+    "nameGet",
+    "read",
+    "readGroup",
+    "search",
+    "searchCount",
+    "searchRead",
+    "unlink",
+    "webRead",
+    "webReadGroup",
+    "webSave",
+    "webSearchRead",
+    "write",
+];
 
 pub fn analyze(text: &str) -> JsFacts {
     let lines = Lines::new(text);
@@ -173,6 +191,9 @@ impl<'a> Visit<'a> for Collector<'_> {
         if let Some(patch) = prototype_patch(call, self.lines) {
             self.facts.patches.push(patch);
         }
+        if let Some(orm) = orm_call(call, self.lines) {
+            self.facts.orm_calls.push(orm);
+        }
         walk_call_expression(self, call);
     }
 }
@@ -198,6 +219,42 @@ fn prototype_patch(call: &CallExpression, lines: &Lines) -> Option<JsPatch> {
         members: members(extension),
         supers: supers.found,
     })
+}
+
+fn orm_call(call: &CallExpression, lines: &Lines) -> Option<OrmCall> {
+    let Expression::StaticMemberExpression(callee) = &call.callee else {
+        return None;
+    };
+    let method = callee.property.name.as_str();
+    if !ORM_METHODS.contains(&method) || !is_orm(&callee.object) {
+        return None;
+    }
+    let literal = |i: usize| match call.arguments.get(i)? {
+        Argument::StringLiteral(s) => Some(Spanned {
+            value: s.value.as_str()?.to_owned(),
+            pos: lines.pos(s.span.start as usize + 1),
+        }),
+        _ => None,
+    };
+    Some(OrmCall {
+        model: literal(0)?,
+        method: if method == "call" { Some(literal(1)?) } else { None },
+    })
+}
+
+/// `orm`, `x.orm`, and those through `.silent` or `.cache({...})`.
+fn is_orm(e: &Expression) -> bool {
+    match e {
+        Expression::Identifier(i) => i.name == "orm",
+        Expression::StaticMemberExpression(m) => {
+            m.property.name == "orm" || (m.property.name == "silent" && is_orm(&m.object))
+        }
+        Expression::CallExpression(c) => match &c.callee {
+            Expression::StaticMemberExpression(m) => m.property.name == "cache" && is_orm(&m.object),
+            _ => false,
+        },
+        _ => false,
+    }
 }
 
 fn members(object: &ObjectExpression) -> Vec<String> {
@@ -305,6 +362,31 @@ odoo.define("@web/legacy", [], function () {});
         assert_eq!(facts.reexports, [("e".to_owned(), "@web/w".to_owned(), "e".to_owned())]);
         assert_eq!(facts.names[1].local.as_deref(), Some("c"));
         assert!(facts.syntax_error.is_none());
+    }
+
+    #[test]
+    fn collects_orm_calls_with_literal_models() {
+        let facts = analyze(
+            r#"this.orm.call("res.partner", "action_x", []);
+orm.silent.searchRead("res.users", [], []);
+this.env.services.orm.cache({ type: "disk" }).call("res.company", "read", []);
+this.orm.call(this.props.resModel, "write", []);
+this.orm.call("res.partner", method, []);
+this.rpc.call("res.partner", "x");
+"#,
+        );
+        let calls: Vec<_> = facts
+            .orm_calls
+            .iter()
+            .map(|c| {
+                let method = c.method.as_ref().map_or("", |m| m.value.as_str());
+                format!("{}:{}:{}", c.model.pos.col, c.model.value, method)
+            })
+            .collect();
+        assert_eq!(
+            calls,
+            ["16:res.partner:action_x", "24:res.users:", "53:res.company:read"]
+        );
     }
 
     #[test]

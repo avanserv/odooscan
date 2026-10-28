@@ -247,6 +247,14 @@ pub struct JsPatch {
     pub supers: Vec<Spanned<String>>,
 }
 
+/// A call of the `orm` service with a literal model, such as `this.orm.call("x", "m", ...)`.
+#[derive(Debug)]
+pub struct OrmCall {
+    pub model: Spanned<String>,
+    /// The method `call` names; the other service methods map to methods every model has.
+    pub method: Option<Spanned<String>>,
+}
+
 #[derive(Debug, Default)]
 pub struct JsFacts {
     pub annotation: Annotation,
@@ -265,5 +273,6 @@ pub struct JsFacts {
     pub defines: Vec<String>,
     pub classes: Vec<JsClass>,
     pub patches: Vec<JsPatch>,
+    pub orm_calls: Vec<OrmCall>,
     pub syntax_error: Option<Spanned<String>>,
 }

@@ -108,3 +108,5 @@ module.
 | --- | --- | --- |
 | [OD601](OD601.md) | `unresolved-js-import` | A JS import names a module or an export no indexed module provides. |
 | [OD602](OD602.md) | `orphan-patch-super` | A patch calls a super method the class it patches does not have. |
+| [OD603](OD603.md) | `unknown-rpc-model` | An ORM call from JS names a model no indexed module defines. |
+| [OD604](OD604.md) | `unknown-rpc-method` | orm.call() names a method its model does not have. |
