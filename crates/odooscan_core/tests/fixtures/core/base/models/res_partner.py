@@ -12,10 +12,17 @@ class ResCountry(models.Model):
     code = fields.Char()
 
 
+class ResCurrency(models.Model):
+    _name = "res.currency"
+
+    name = fields.Char()
+
+
 class ResPartner(models.Model):
     _name = "res.partner"
 
     name: str = fields.Char()
+    type = fields.Selection([("contact", "Contact"), ("invoice", "Invoice")], required=True, default="contact")
     country_id = fields.Many2one("res.country")
     parent_id = fields.Many2one("res.partner")
     child_ids = fields.One2many("res.partner", "parent_id")

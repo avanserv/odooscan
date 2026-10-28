@@ -2,7 +2,8 @@ use globset::{GlobBuilder, GlobSetBuilder};
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::facts::{
-    Annotation, ArchElement, ClassFact, FieldFact, FlowSummary, Heritage, JsClass, PyFacts, Receiver, ViewFact,
+    Annotation, ArchElement, ClassFact, FieldFact, FlowSummary, Heritage, JsClass, OptionValue, PyFacts, Receiver,
+    ViewFact,
 };
 use crate::project::{Module, SourceFile};
 
@@ -511,6 +512,9 @@ pub enum Status<'m> {
     Missing,
 }
 
+/// A field definition, with its module and class.
+pub type FieldDef<'m> = (usize, &'m ClassFact, &'m FieldFact);
+
 pub struct FieldInfo<'m> {
     pub ftype: &'m str,
     pub comodel: Option<String>,
@@ -903,8 +907,9 @@ impl<'m> Index<'m> {
             .reduce(|first, mi| if self.reaches(first, mi) { mi } else { first })
     }
 
-    /// Every class of `model` and of the models it inherits from, `base` included.
-    fn chain(&self, model: &str, scope: Option<&Scope>) -> Vec<(usize, &'m ClassFact)> {
+    /// Every class of `model` and of the models it inherits from, `base` included. `delegated`
+    /// adds the models it reaches through `_inherits`, whose fields it has but does not merge.
+    fn chain(&self, model: &str, scope: Option<&Scope>, delegated: bool) -> Vec<(usize, &'m ClassFact)> {
         let mut out = vec![];
         let mut seen = FxHashSet::default();
         let mut stack = vec![model, "base"];
@@ -918,22 +923,57 @@ impl<'m> Index<'m> {
                 }
                 out.push((mi, class));
                 stack.extend(class.inherit.iter().map(|i| i.value.as_str()).filter(|i| *i != m));
-                stack.extend(class.inherits.iter().map(|(parent, _)| parent.as_str()));
+                if delegated {
+                    stack.extend(class.inherits.iter().map(|(parent, _)| parent.as_str()));
+                }
             }
         }
         out
     }
 
-    pub fn field_defs(
-        &self,
-        model: &str,
-        field: &str,
-        scope: Option<&Scope>,
-    ) -> Vec<(usize, &'m ClassFact, &'m FieldFact)> {
-        self.chain(model, scope)
+    pub fn field_defs(&self, model: &str, field: &str, scope: Option<&Scope>) -> Vec<FieldDef<'m>> {
+        self.chain(model, scope, true)
             .into_iter()
             .flat_map(|(mi, c)| c.fields.iter().filter(|f| f.name == field).map(move |f| (mi, c, f)))
             .collect()
+    }
+
+    /// Every in-scope field definition the registry merges into the fields of `model`: those of its
+    /// classes and of the models it inherits by `_inherit`.
+    pub fn merged_fields(&self, model: &str, scope: &Scope) -> Vec<FieldDef<'m>> {
+        self.chain(model, Some(scope), false)
+            .into_iter()
+            .flat_map(|(mi, c)| c.fields.iter().map(move |f| (mi, c, f)))
+            .collect()
+    }
+
+    /// Whether a class in scope of `model`, or of a model it inherits or delegates to, has a plain
+    /// Python base class, whose fields and methods only Python knows.
+    pub fn plain_bases(&self, model: &str, scope: &Scope) -> bool {
+        self.chain(model, Some(scope), true).iter().any(|(_, c)| c.plain_bases)
+    }
+
+    /// Whether the class that introduces `model` with `_name` is in scope. When it is not, the
+    /// definitions that give its fields their first attributes are missing from the index.
+    pub fn introduced(&self, model: &str, scope: &Scope) -> bool {
+        self.classes(model).iter().any(|(mi, c)| c.new_model && scope.sees(*mi))
+    }
+
+    /// The table of `model`: the `_table` its classes in scope set, or its name with dots made
+    /// underscores. None when they set different ones, or one Python computes.
+    pub fn table(&self, model: &str, scope: &Scope) -> Option<String> {
+        let mut tables = self
+            .classes(model)
+            .iter()
+            .filter(|(mi, _)| scope.sees(*mi))
+            .filter_map(|(_, c)| c.table.as_ref());
+        let Some(first) = tables.next() else {
+            return Some(model.replace('.', "_"));
+        };
+        match first {
+            OptionValue::Str(t) if tables.all(|other| other == first) => Some(t.clone()),
+            _ => None,
+        }
     }
 
     /// `Err(Some(module))` when the field exists only outside the scope.
@@ -999,7 +1039,7 @@ impl<'m> Index<'m> {
     pub fn has_parent_method(&self, model: &str, method: &str, except: &ClassFact) -> bool {
         BASE_MODEL_METHODS.contains(&method)
             || self
-                .chain(model, None)
+                .chain(model, None, true)
                 .iter()
                 .any(|(_, c)| !std::ptr::eq(*c, except) && c.methods.iter().any(|m| m == method))
     }
@@ -1007,7 +1047,7 @@ impl<'m> Index<'m> {
     pub fn has_method(&self, model: &str, method: &str, scope: &Scope) -> bool {
         BASE_METHODS.contains(&method)
             || self
-                .chain(model, Some(scope))
+                .chain(model, Some(scope), true)
                 .iter()
                 .any(|(_, c)| c.methods.iter().any(|m| m == method))
     }
@@ -1019,7 +1059,7 @@ impl<'m> Index<'m> {
             return Status::Visible;
         }
         let defining: Vec<usize> = self
-            .chain(model, None)
+            .chain(model, None, true)
             .iter()
             .filter(|(_, c)| c.methods.iter().any(|m| m == method))
             .map(|(mi, _)| *mi)

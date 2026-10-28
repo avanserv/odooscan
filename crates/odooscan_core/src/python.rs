@@ -6,7 +6,9 @@ use ruff_text_size::{Ranged, TextSize};
 use rustc_hash::FxHashMap;
 
 use crate::domain;
-use crate::facts::{ClassFact, DomainFact, FieldFact, ModelKind, Pos, PyFacts, RawDiag, Receiver, Spanned, XmlRef};
+use crate::facts::{
+    ClassFact, DomainFact, FieldFact, ModelKind, OptionValue, Pos, PyFacts, RawDiag, Receiver, Spanned, XmlRef,
+};
 use crate::taint::{self, Params};
 
 const FIELD_TYPES: &[&str] = &[
@@ -161,6 +163,52 @@ fn field_call(expr: &Expr) -> Option<(&str, &ast::ExprCall)> {
     FIELD_TYPES.contains(&ftype).then_some((ftype, call))
 }
 
+/// The attributes a field type's constructor takes by position, in order.
+fn positional_names(ftype: &str) -> &'static [&'static str] {
+    match ftype {
+        "Monetary" => &["string", "currency_field"],
+        "Many2many" => &["comodel_name", "relation", "column1", "column2", "string"],
+        "Selection" => &["selection", "string"],
+        _ => &[],
+    }
+}
+
+fn option_value(expr: &Expr) -> OptionValue {
+    match expr {
+        Expr::StringLiteral(s) => OptionValue::Str(s.value.to_str().to_owned()),
+        Expr::BooleanLiteral(b) => OptionValue::Bool(b.value),
+        Expr::List(l) => first_strings(&l.elts),
+        Expr::Tuple(t) => first_strings(&t.elts),
+        Expr::Dict(d) => d
+            .items
+            .iter()
+            .map(|i| {
+                Some((
+                    str_lit(i.key.as_ref()?)?.to_owned(),
+                    str_lit(&i.value).map(str::to_owned),
+                ))
+            })
+            .collect::<Option<Vec<_>>>()
+            .map_or(OptionValue::Other, OptionValue::Dict),
+        _ => OptionValue::Other,
+    }
+}
+
+/// `["a", "b"]`, or the values of `[("a", "A"), ("b",)]`.
+fn first_strings(elts: &[Expr]) -> OptionValue {
+    fn first(e: &Expr) -> Option<&str> {
+        match e {
+            Expr::Tuple(t) => t.elts.first().and_then(str_lit),
+            Expr::List(l) => l.elts.first().and_then(str_lit),
+            e => str_lit(e),
+        }
+    }
+    elts.iter()
+        .map(|e| first(e).map(str::to_owned))
+        .collect::<Option<Vec<_>>>()
+        .map_or(OptionValue::Other, OptionValue::Strs)
+}
+
 fn strings(expr: &Expr) -> Vec<&ast::ExprStringLiteral> {
     match expr {
         Expr::StringLiteral(s) => vec![s],
@@ -288,6 +336,18 @@ fn str_pairs(d: &ast::ExprDict) -> Vec<(String, String)> {
         .collect()
 }
 
+/// The OD114 message for a dependency with an `id` segment: the path up to that segment is the
+/// relational field whose change the method means to follow.
+fn depends_on_id(path: &str) -> String {
+    let field: Vec<&str> = path.split('.').take_while(|segment| *segment != "id").collect();
+    let fix = if field.is_empty() {
+        "remove it".to_owned()
+    } else {
+        format!("depend on '{}'", field.join("."))
+    };
+    format!("'{path}': a compute method cannot depend on 'id', so importing this file raises; {fix}")
+}
+
 fn is_delegate(value: &Expr) -> bool {
     field_call(value)
         .and_then(|(_, call)| keyword(call, "delegate"))
@@ -361,6 +421,7 @@ impl PyVisitor<'_> {
             paths: vec![],
             order_fields: vec![],
             super_calls: vec![],
+            table: None,
             plain_bases: class
                 .bases()
                 .iter()
@@ -411,6 +472,7 @@ impl PyVisitor<'_> {
                         fact.inherits = str_pairs(d);
                     }
                 }
+                "_table" => fact.table = Some(option_value(value)),
                 "_sql_constraints" => self.diag(
                     "OD110",
                     target,
@@ -498,7 +560,27 @@ impl PyVisitor<'_> {
                 .map(|s| self.spanned(s))
                 .collect(),
             domain: keyword(call, "domain").map(|d| self.domain(d)).unwrap_or_default(),
+            options: self.options(ftype, call),
+            splat: call.arguments.args.iter().any(Expr::is_starred_expr)
+                || call.arguments.keywords.iter().any(|k| k.arg.is_none()),
         })
+    }
+
+    fn options(&self, ftype: &str, call: &ast::ExprCall) -> Vec<(String, Spanned<OptionValue>)> {
+        let spanned = |e: &Expr| Spanned {
+            value: option_value(e),
+            pos: self.loc.at(e),
+        };
+        let positional = positional_names(ftype)
+            .iter()
+            .zip(call.arguments.args.iter().take_while(|a| !a.is_starred_expr()))
+            .map(|(name, e)| ((*name).to_owned(), spanned(e)));
+        let keywords = call
+            .arguments
+            .keywords
+            .iter()
+            .filter_map(|k| Some((k.arg.as_ref()?.to_string(), spanned(&k.value))));
+        positional.chain(keywords).collect()
     }
 
     /// The fields a literal domain names, given as a list or as the text of one.
@@ -578,8 +660,12 @@ impl PyVisitor<'_> {
         for decorator in &func.decorator_list {
             match &decorator.expression {
                 Expr::Call(call) if matches!(tail_name(&call.func), Some("depends" | "onchange" | "constrains")) => {
+                    let depends = tail_name(&call.func) == Some("depends");
                     for s in call.arguments.args.iter().filter_map(Expr::as_string_literal_expr) {
                         fact.paths.push(self.spanned(s));
+                        if depends && s.value.to_str().split('.').any(|segment| segment == "id") {
+                            self.diag("OD114", s, depends_on_id(s.value.to_str()));
+                        }
                     }
                 }
                 Expr::Attribute(a)
@@ -852,5 +938,83 @@ impl<'a> Visitor<'a> for PyVisitor<'_> {
             _ => {}
         }
         visitor::walk_expr(self, expr);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn field(src: &str) -> FieldFact {
+        let src = format!("class X(models.Model):\n    _name = 'x'\n    f = {src}\n");
+        let mut facts = analyze(&src);
+        facts.classes.remove(0).fields.remove(0)
+    }
+
+    fn option(f: &FieldFact, name: &str) -> Option<OptionValue> {
+        f.option(name).map(|o| o.value.clone())
+    }
+
+    #[test]
+    fn names_positional_arguments_by_field_type() {
+        let f = field("fields.Many2many('res.partner', 'x_partner_rel', 'x_id', string='Partners')");
+        assert_eq!(option(&f, "comodel_name"), Some(OptionValue::Str("res.partner".into())));
+        assert_eq!(option(&f, "relation"), Some(OptionValue::Str("x_partner_rel".into())));
+        assert_eq!(option(&f, "column1"), Some(OptionValue::Str("x_id".into())));
+        assert_eq!(option(&f, "column2"), None);
+        assert_eq!(option(&f, "string"), Some(OptionValue::Str("Partners".into())));
+        let f = field("fields.Monetary('Amount', 'company_currency_id')");
+        assert_eq!(
+            option(&f, "currency_field"),
+            Some(OptionValue::Str("company_currency_id".into()))
+        );
+        assert!(field("fields.Char('Name')").options.is_empty());
+    }
+
+    #[test]
+    fn reads_literal_values() {
+        let f = field(
+            "fields.Selection([('a', 'A'), ('b',)], required=True, ondelete={'a': 'cascade', 'b': drop}, \
+             selection_add=compute_values())",
+        );
+        assert_eq!(
+            option(&f, "selection"),
+            Some(OptionValue::Strs(vec!["a".into(), "b".into()]))
+        );
+        assert_eq!(option(&f, "required"), Some(OptionValue::Bool(true)));
+        assert_eq!(
+            option(&f, "ondelete"),
+            Some(OptionValue::Dict(vec![
+                ("a".into(), Some("cascade".into())),
+                ("b".into(), None)
+            ]))
+        );
+        assert_eq!(option(&f, "selection_add"), Some(OptionValue::Other));
+        assert!(!f.splat);
+    }
+
+    #[test]
+    fn notes_unpacked_arguments() {
+        assert!(field("fields.Monetary(**kwargs)").splat);
+        let f = field("fields.Many2many(*args, relation='r')");
+        assert!(f.splat);
+        assert_eq!(option(&f, "comodel_name"), None);
+        assert_eq!(option(&f, "relation"), Some(OptionValue::Str("r".into())));
+    }
+
+    #[test]
+    fn reads_the_table() {
+        let facts = analyze("class X(models.Model):\n    _name = 'x'\n    _table = 'x_data'\n");
+        assert_eq!(facts.classes[0].table, Some(OptionValue::Str("x_data".into())));
+    }
+
+    #[test]
+    fn reports_a_compute_depending_on_id() {
+        let facts = analyze(
+            "class X(models.Model):\n    _name = 'x'\n\n    @api.depends('id', 'partner_id.id', 'identity')\n    \
+             def _compute_y(self):\n        pass\n\n    @api.onchange('id')\n    def _onchange_id(self):\n        pass\n",
+        );
+        let codes: Vec<_> = facts.diags.iter().map(|d| (d.code, d.pos.col)).collect();
+        assert_eq!(codes, [("OD114", 18), ("OD114", 24)]);
     }
 }

@@ -5,11 +5,11 @@ use std::path::Path;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::facts::{
-    Annotation, ClassFact, DomainFact, FieldFact, JsFacts, JsName, ModelKind, OrmCall, Pos, RawDiag, RecordFact,
-    Spanned, ViewFact, XmlRef,
+    Annotation, ClassFact, DomainFact, FieldFact, JsFacts, JsName, ModelKind, OptionValue, OrmCall, Pos, RawDiag,
+    RecordFact, Spanned, ViewFact, XmlRef,
 };
 use crate::flows;
-use crate::index::{Export, Index, JsSpec, Scope, Status, ViewTree, full_id, js_module_path, located};
+use crate::index::{Export, FieldDef, Index, JsSpec, Scope, Status, ViewTree, full_id, js_module_path, located};
 use crate::project::{Module, SourceFile};
 use crate::series::Series;
 use crate::xml::{LOCATOR, UNKNOWN_CONTEXT};
@@ -19,6 +19,9 @@ const UPGRADE_DIRS: &[&str] = &["migrations", "upgrades"];
 
 /// Types a One2many's inverse may have: an Integer holds the id of a `res_model`/`res_id` pair.
 const INVERSE_TYPES: &[&str] = &["Many2one", "Many2oneReference", "Integer"];
+
+/// The longest identifier PostgreSQL keeps, which Odoo checks a relation table name against.
+const PG_NAME_MAX: usize = 63;
 
 /// Directories whose XML and CSV files are not meant to be listed in the manifest.
 const UNLISTED_DIRS: &[&str] = &["tests", "i18n", "migrations", "upgrades", "doc", "docs", "examples"];
@@ -54,9 +57,11 @@ pub fn check_module<'m>(index: &Index<'m>, mi: usize, series: Option<Series>) ->
             dep_names: module.manifest.depends.iter().map(|d| d.value.as_str()).collect(),
             dynamic: module.python.iter().any(|f| f.facts.dynamic_models),
             partial: index.partial_scope(&scope),
+            series,
         };
         ctx.dependencies(&mut out);
         ctx.python(&mut out);
+        ctx.registry(&mut out);
         ctx.data(&mut out);
         for (fi, file) in es_modules(index, mi, series) {
             ctx.js(&mut out, file);
@@ -235,6 +240,7 @@ struct Ctx<'a, 'm> {
     dynamic: bool,
     /// A module in scope depends on one that is not indexed, such as an Enterprise module.
     partial: bool,
+    series: Option<Series>,
 }
 
 impl<'m> Ctx<'_, 'm> {
@@ -568,9 +574,14 @@ impl<'m> Ctx<'_, 'm> {
     /// Whether `first` comes before `then` in the same file of this module. The order of the files
     /// is that of the imports, which is not indexed.
     fn defined_before(&self, first: &ClassFact, then: &ClassFact) -> bool {
-        self.module.python.iter().any(|f| {
+        let me = self.index.by_name[self.module.name.as_str()];
+        self.in_one_file(me, first, then) && first.pos < then.pos
+    }
+
+    fn in_one_file(&self, mi: usize, a: &ClassFact, b: &ClassFact) -> bool {
+        self.index.modules[mi].python.iter().any(|f| {
             let has = |c: &ClassFact| f.facts.classes.iter().any(|x| std::ptr::eq(x, c));
-            has(first) && has(then) && first.pos < then.pos
+            has(a) && has(b)
         })
     }
 
@@ -901,4 +912,449 @@ impl<'m> Ctx<'_, 'm> {
             }
         }
     }
+}
+
+/// What the registry makes of an attribute of a field, as far as literals tell.
+#[derive(Clone, Copy, PartialEq)]
+enum Merged<'m> {
+    Unset,
+    Known(&'m OptionValue),
+    Unknown,
+}
+
+/// A field of a model as the registry builds it in scope: the definitions it merges, from the last
+/// one that changes the field's type.
+struct Field<'m> {
+    model: &'m str,
+    defs: Vec<FieldDef<'m>>,
+    /// `before[i][j]` when the registry certainly merges `defs[i]` before `defs[j]`.
+    before: Vec<Vec<bool>>,
+}
+
+impl<'m> Field<'m> {
+    /// The definitions `pick` keeps that no other one it keeps certainly comes after.
+    fn last(&self, pick: impl Fn(&FieldDef<'m>) -> bool) -> Vec<usize> {
+        let picked: Vec<usize> = (0..self.defs.len()).filter(|&i| pick(&self.defs[i])).collect();
+        let open = |i: &usize| !picked.iter().any(|&j| self.before[*i][j]);
+        picked.iter().copied().filter(open).collect()
+    }
+
+    /// The definitions `pick` keeps that no other one it keeps certainly comes before.
+    fn first(&self, pick: impl Fn(&FieldDef<'m>) -> bool) -> Vec<usize> {
+        let picked: Vec<usize> = (0..self.defs.len()).filter(|&i| pick(&self.defs[i])).collect();
+        let open = |i: &usize| !picked.iter().any(|&j| self.before[j][*i]);
+        picked.iter().copied().filter(open).collect()
+    }
+
+    /// The value the last definitions that set the attribute agree on. One that unpacks `**kwargs`
+    /// may set anything, and an expression only a run evaluates, so either makes it unknown.
+    fn get(&self, name: &str) -> Merged<'m> {
+        let mut merged = Merged::Unset;
+        for i in self.last(|d| d.2.splat || d.2.option(name).is_some()) {
+            let def: &'m FieldFact = self.defs[i].2;
+            let value = match def.option(name) {
+                Some(o) if o.value != OptionValue::Other => &o.value,
+                _ => return Merged::Unknown,
+            };
+            match merged {
+                Merged::Known(v) if v != value => return Merged::Unknown,
+                _ => merged = Merged::Known(value),
+            }
+        }
+        merged
+    }
+
+    fn is(&self, name: &str, value: &OptionValue) -> bool {
+        self.get(name) == Merged::Known(value)
+    }
+
+    /// Whether the field has a column, or for a Many2many a table: a related or computed one has
+    /// none unless `store=True`.
+    fn stored(&self) -> Option<bool> {
+        match self.get("store") {
+            Merged::Known(OptionValue::Bool(b)) => Some(*b),
+            Merged::Unset => match (self.get("related"), self.get("compute")) {
+                (Merged::Unset, Merged::Unset) => Some(true),
+                (Merged::Unknown, _) | (_, Merged::Unknown) => None,
+                _ => Some(false),
+            },
+            _ => None,
+        }
+    }
+
+    fn position(&self, own: &FieldFact) -> Option<usize> {
+        self.defs.iter().position(|d| std::ptr::eq(d.2, own))
+    }
+}
+
+/// Where a definition's attribute is, or the definition when it does not set it.
+fn pos_of(own: &FieldFact, name: &str) -> Pos {
+    own.option(name).map_or(own.pos, |o| o.pos)
+}
+
+/// Whether another stored Many2many without relation has the field's comodel and columns.
+fn same_table(field: &Field, other: &Field) -> bool {
+    let same = |name: &str| field.get(name) == other.get(name) && field.get(name) != Merged::Unknown;
+    matches!(field.get("comodel_name"), Merged::Known(_))
+        && same("comodel_name")
+        && same("column1")
+        && same("column2")
+        && other.get("relation") == Merged::Unset
+        && other.stored() == Some(true)
+}
+
+/// The values a definition leaves with ondelete 'set null': the default for each value it adds
+/// that the field did not have, and those it gives 'set null'. Odoo only checks a definition that
+/// adds a value. None when its ondelete is not a literal dict.
+fn set_null_values<'m>(own: &'m FieldFact, added: &'m [String], known: &FxHashSet<&str>) -> Option<Vec<&'m str>> {
+    let ondelete = match own.option("ondelete").map(|o| &o.value) {
+        Some(OptionValue::Dict(d)) => d.as_slice(),
+        None if !own.splat => &[],
+        _ => return None,
+    };
+    let new: Vec<&String> = added.iter().filter(|v| !known.contains(v.as_str())).collect();
+    if new.is_empty() {
+        return Some(vec![]);
+    }
+    let unset = |v: &&&String| !ondelete.iter().any(|(k, _)| k == **v);
+    let mut values: Vec<&str> = new.iter().filter(unset).map(|v| v.as_str()).collect();
+    let explicit = ondelete.iter().filter(|(_, p)| p.as_deref() == Some("set null"));
+    values.extend(explicit.map(|(k, _)| k.as_str()));
+    Some(values)
+}
+
+/// Field definitions Odoo refuses when it sets up the registry. Each rule reads every definition
+/// merged into the field, so none runs where a module in scope depends on one that is not indexed,
+/// on a model whose introducing class is out of scope, or on one with a plain Python base class,
+/// whose fields only Python knows.
+impl<'m> Ctx<'_, 'm> {
+    fn registry(&self, out: &mut Out<'m>) {
+        if self.partial {
+            return;
+        }
+        let checked = |c: &&ClassFact| {
+            self.index.introduced(&c.model, self.scope) && !self.index.plain_bases(&c.model, self.scope)
+        };
+        let typed = |f: &&FieldFact| matches!(f.ftype.as_str(), "Monetary" | "Many2one" | "Many2many" | "Selection");
+        for file in &self.module.python {
+            for class in file.facts.classes.iter().filter(checked) {
+                for own in class.fields.iter().filter(typed) {
+                    self.registry_field(out, &file.path, &class.model, own);
+                }
+            }
+        }
+    }
+
+    fn registry_field(&self, out: &mut Out<'m>, path: &'m Path, model: &'m str, own: &'m FieldFact) {
+        let Some(field) = self.merged(model, &own.name) else {
+            return;
+        };
+        let Some(at) = field.position(own) else {
+            return;
+        };
+        match own.ftype.as_str() {
+            "Monetary" => self.monetary(out, path, &field, own),
+            "Many2one" => self.required_set_null(out, path, &field, own),
+            "Many2many" if field.stored() == Some(true) => {
+                self.long_relation(out, path, &field, own);
+                self.relation_clash(out, path, &field, own);
+            }
+            "Selection" => self.selection_add(out, path, &field, at),
+            _ => {}
+        }
+    }
+
+    /// The field `name` of `model` as the registry builds it in scope. None when the order of a
+    /// definition that changes its type against another one is unknown, or the type is not that of
+    /// the last definitions.
+    fn merged(&self, model: &'m str, name: &str) -> Option<Field<'m>> {
+        let mut defs = self.index.merged_fields(model, self.scope);
+        defs.retain(|d| d.2.name == name);
+        let before = |a: &FieldDef<'m>, b: &FieldDef<'m>| self.before(model, a, b);
+        let mut last = defs.iter().filter(|a| !defs.iter().any(|b| before(a, b)));
+        let ftype = &last.next()?.2.ftype;
+        if !last.all(|d| d.2.ftype == *ftype) {
+            return None;
+        }
+        let (same, other): (Vec<&FieldDef<'m>>, Vec<_>) = defs.iter().partition(|d| d.2.ftype == *ftype);
+        if same
+            .iter()
+            .any(|s| other.iter().any(|o| !before(o, s) && !before(s, o)))
+        {
+            return None;
+        }
+        // Odoo drops what the definitions before one of another type set.
+        let kept = same.into_iter().filter(|s| other.iter().all(|o| before(o, s)));
+        let defs: Vec<FieldDef<'m>> = kept.copied().collect();
+        let before = defs
+            .iter()
+            .map(|a| defs.iter().map(|b| before(a, b)).collect())
+            .collect();
+        Some(Field { model, defs, before })
+    }
+
+    /// Whether the registry certainly merges definition `a` of a field of `model` before `b`. The
+    /// classes of `model` come after those of the models they inherit, unless one of them lists
+    /// another model before its own in `_inherit`, which puts that model after the classes loaded
+    /// before it. Among them, a dependency's come first, then in each module the class that
+    /// introduces the model, then the others of one file in order; files load in the order of the
+    /// imports, which is not indexed.
+    fn before(&self, model: &str, a: &FieldDef<'m>, b: &FieldDef<'m>) -> bool {
+        match (a.1.model == model, b.1.model == model) {
+            (_, false) => false,
+            (false, true) => !self.inherits_ahead(model),
+            _ if a.0 != b.0 => self.index.reaches(b.0, a.0) && !self.index.reaches(a.0, b.0),
+            _ if a.1.new_model != b.1.new_model => a.1.new_model,
+            _ => self.in_one_file(a.0, a.1, b.1) && a.2.pos < b.2.pos,
+        }
+    }
+
+    /// Whether a class of `model` in scope lists another model before `model` in `_inherit`.
+    fn inherits_ahead(&self, model: &str) -> bool {
+        let ahead = |c: &ClassFact| c.inherit.iter().position(|i| i.value == model).is_some_and(|p| p > 0);
+        self.index
+            .classes(model)
+            .iter()
+            .any(|(mi, c)| self.scope.sees(*mi) && ahead(c))
+    }
+
+    /// Where this module's definition loads, among those `before` leaves unordered: by the module's
+    /// file list, which may not be the order of the imports, so it only picks where to report.
+    fn load_key(&self, (_, class, field): &FieldDef<'m>) -> (usize, Pos) {
+        let has = |c: &ClassFact| std::ptr::eq(c, *class);
+        let file = self.module.python.iter().position(|f| f.facts.classes.iter().any(has));
+        (file.unwrap_or_default(), field.pos)
+    }
+
+    /// Whether this module's definitions of the field that `sets` picks are reported at `own`: the
+    /// last of them, so that the field is reported once per module.
+    fn reported_at(&self, field: &Field<'m>, own: &FieldFact, sets: impl Fn(&FieldFact) -> bool) -> bool {
+        let me = self.index.by_name[self.module.name.as_str()];
+        let last = field.last(|d| d.0 == me && d.1.model == field.model && sets(d.2));
+        last.into_iter()
+            .max_by_key(|&i| self.load_key(&field.defs[i]))
+            .is_some_and(|i| std::ptr::eq(field.defs[i].2, own))
+    }
+
+    /// The field's first definition: of a dependency when there is one, else of this module.
+    fn first_def<'f>(&self, field: &'f Field<'m>) -> Option<&'f FieldDef<'m>> {
+        let me = self.index.by_name[self.module.name.as_str()];
+        let first = field.first(|_| true).into_iter().map(|i| &field.defs[i]);
+        first.min_by_key(|d| (d.0 == me, self.load_key(d)))
+    }
+
+    /// Whether the field is new in this module and reported at `own`, its first definition here.
+    fn introduces(&self, field: &Field<'m>, own: &FieldFact) -> bool {
+        let me = self.index.by_name[self.module.name.as_str()];
+        let first = field.first(|d| d.1.model == field.model).into_iter();
+        field.defs.iter().all(|d| d.0 == me)
+            && first
+                .min_by_key(|&i| self.load_key(&field.defs[i]))
+                .is_some_and(|i| std::ptr::eq(field.defs[i].2, own))
+    }
+
+    /// Odoo asserts that a Monetary's `currency_field`, by default `currency_id` or `x_currency_id`,
+    /// is a field of the model; from 15.0 a related Monetary is held to it too.
+    fn monetary(&self, out: &mut Out<'m>, path: &'m Path, field: &Field<'m>, own: &FieldFact) {
+        let checked_related = self.series.is_some_and(|s| s >= Series { major: 15, minor: 0 });
+        if (field.get("related") != Merged::Unset && !checked_related) || !self.reported_at(field, own, |_| true) {
+            return;
+        }
+        let model = field.model;
+        let missing = |name: &str| matches!(self.index.field(model, name, self.scope), Err(None));
+        let name = &own.name;
+        let message = match field.get("currency_field") {
+            Merged::Known(OptionValue::Str(currency)) if missing(currency) => {
+                format!("Monetary field '{name}' takes its currency from '{currency}', which {model} does not have")
+            }
+            Merged::Unset if missing("currency_id") && missing("x_currency_id") => format!(
+                "Monetary field '{name}' has no currency: {model} has no currency_id, and the field names no currency_field"
+            ),
+            _ => return,
+        };
+        out.push(path, "OD212", pos_of(own, "currency_field"), message);
+    }
+
+    fn required_set_null(&self, out: &mut Out<'m>, path: &'m Path, field: &Field<'m>, own: &FieldFact) {
+        let sets = |f: &FieldFact| f.option("required").is_some() || f.option("ondelete").is_some();
+        if field.get("related") != Merged::Unset || !self.reported_at(field, own, sets) {
+            return;
+        }
+        if field.is("required", &OptionValue::Bool(true))
+            && field.is("ondelete", &OptionValue::Str("set null".to_owned()))
+        {
+            let at = match own.option("ondelete") {
+                Some(o) => o.pos,
+                None => pos_of(own, "required"),
+            };
+            let message = format!(
+                "'{}' is required, so Odoo refuses ondelete='set null'; use 'restrict' or 'cascade'",
+                own.name
+            );
+            out.push(path, "OD213", at, message);
+        }
+    }
+
+    /// The table Odoo names a Many2many's relation after when it gives none: both tables, sorted.
+    /// None when a table is unknown, or both are the same, which Odoo refuses on its own.
+    fn implicit_relation(&self, field: &Field<'m>) -> Option<String> {
+        let Merged::Known(OptionValue::Str(comodel)) = field.get("comodel_name") else {
+            return None;
+        };
+        if !self.index.introduced(comodel, self.scope) {
+            return None;
+        }
+        let mut tables = [
+            self.index.table(field.model, self.scope)?,
+            self.index.table(comodel, self.scope)?,
+        ];
+        tables.sort();
+        (tables[0] != tables[1]).then(|| format!("{}_{}_rel", tables[0], tables[1]))
+    }
+
+    fn long_relation(&self, out: &mut Out<'m>, path: &'m Path, field: &Field<'m>, own: &FieldFact) {
+        let (relation, at, derived) = match field.get("relation") {
+            Merged::Known(OptionValue::Str(r)) if self.reported_at(field, own, |f| f.option("relation").is_some()) => {
+                (r.clone(), pos_of(own, "relation"), false)
+            }
+            Merged::Unset if self.introduces(field, own) => match self.implicit_relation(field) {
+                Some(r) => (r, own.pos, true),
+                None => return,
+            },
+            _ => return,
+        };
+        if relation.len() <= PG_NAME_MAX {
+            return;
+        }
+        let fix = if derived {
+            "; name a shorter one with relation="
+        } else {
+            ""
+        };
+        let message = format!(
+            "relation table '{relation}' of '{}' is {} characters long, and PostgreSQL allows {PG_NAME_MAX}{fix}",
+            own.name,
+            relation.len()
+        );
+        out.push(path, "OD215", at, message);
+    }
+
+    /// Two Many2many fields of a model to one comodel that leave the relation to Odoo get the same
+    /// table and columns. The later field is reported, when it is new in this module; when files
+    /// leave the order open, the later in the module's file list. A field to its own model is not:
+    /// Odoo refuses it alone, and a `relation` on the other field would not help.
+    fn relation_clash(&self, out: &mut Out<'m>, path: &'m Path, field: &Field<'m>, own: &'m FieldFact) {
+        let Merged::Known(comodel) = field.get("comodel_name") else {
+            return;
+        };
+        if field.get("relation") != Merged::Unset
+            || !self.introduces(field, own)
+            || self.implicit_relation(field).is_none()
+        {
+            return;
+        }
+        let Some(own_def) = field.defs.iter().find(|d| std::ptr::eq(d.2, own)) else {
+            return;
+        };
+        let model = field.model;
+        let mut seen = FxHashSet::default();
+        let fields = self.index.merged_fields(model, self.scope);
+        let mut candidates = fields.iter().map(|d| d.2).filter(|f| {
+            f.ftype == "Many2many"
+                && f.name != own.name
+                && f.option("comodel_name").is_some_and(|c| c.value == *comodel)
+                && seen.insert(&f.name)
+        });
+        if let Some(other) = candidates.find(|f| self.clashes(field, own_def, &f.name)) {
+            let message = format!(
+                "'{}' and '{}' are Many2many fields of {model} to the same comodel without relation, so Odoo gives both the same table; set relation on one",
+                other.name, own.name
+            );
+            out.push(path, "OD214", own.pos, message);
+        }
+    }
+
+    /// Whether the Many2many `name` of the field's model gets the same table and comes before `own`.
+    fn clashes(&self, field: &Field<'m>, own: &FieldDef<'m>, name: &str) -> bool {
+        let Some(other) = self.merged(field.model, name) else {
+            return false;
+        };
+        other.defs[0].2.ftype == "Many2many"
+            && same_table(field, &other)
+            && self
+                .first_def(&other)
+                .is_some_and(|first| self.earlier(field.model, first, own))
+    }
+
+    /// Whether definition `a` loads before `b`, or comes first in the module's file list when their
+    /// order is open; a dependency's comes first.
+    fn earlier(&self, model: &str, a: &FieldDef<'m>, b: &FieldDef<'m>) -> bool {
+        let me = self.index.by_name[self.module.name.as_str()];
+        self.before(model, a, b) || (!self.before(model, b, a) && (a.0 != me || self.load_key(a) < self.load_key(b)))
+    }
+
+    /// Odoo gives each value `selection_add` adds to a Selection the ondelete policy 'set null'
+    /// unless told otherwise, and refuses that policy on a required field.
+    fn selection_add(&self, out: &mut Out<'m>, path: &'m Path, field: &Field<'m>, at: usize) {
+        let own = field.defs[at].2;
+        let Some(Spanned {
+            value: OptionValue::Strs(added),
+            pos,
+        }) = own.option("selection_add")
+        else {
+            return;
+        };
+        if field.get("related") != Merged::Unset || !field.is("required", &OptionValue::Bool(true)) {
+            return;
+        }
+        let Some(known) = earlier_values(field, at) else {
+            return;
+        };
+        let Some(set_null) = set_null_values(own, added, &known).filter(|v| !v.is_empty()) else {
+            return;
+        };
+        let (values, them) = if set_null.len() == 1 {
+            ("value", "it")
+        } else {
+            ("values", "each")
+        };
+        let message = format!(
+            "'{}' is required, so Odoo refuses ondelete 'set null' for the selection_add {values} '{}'; give {them} 'cascade', 'set default' or a function",
+            own.name,
+            set_null.join("', '")
+        );
+        out.push(path, "OD216", *pos, message);
+    }
+}
+
+/// The values the field has before its definition `at`, or None when a definition computes them,
+/// or one that sets them may come before or after it.
+fn earlier_values<'m>(field: &Field<'m>, at: usize) -> Option<FxHashSet<&'m str>> {
+    let mut values = FxHashSet::default();
+    let mut based = false;
+    for i in (0..field.defs.len()).filter(|&i| i != at && !field.before[at][i]) {
+        let def: &'m FieldFact = field.defs[i].2;
+        let sets = def.option("selection").is_some() || def.option("selection_add").is_some();
+        if def.splat || (sets && !field.before[i][at]) {
+            return None;
+        }
+        if sets {
+            based |= selection_values(def, &mut values)?;
+        }
+    }
+    based.then_some(values)
+}
+
+/// Adds the values of a definition's `selection` and `selection_add`, and tells whether it sets
+/// `selection`. None when one is not a literal list.
+fn selection_values<'m>(def: &'m FieldFact, values: &mut FxHashSet<&'m str>) -> Option<bool> {
+    for name in ["selection", "selection_add"] {
+        if let Some(option) = def.option(name) {
+            let OptionValue::Strs(added) = &option.value else {
+                return None;
+            };
+            values.extend(added.iter().map(String::as_str));
+        }
+    }
+    Some(def.option("selection").is_some())
 }

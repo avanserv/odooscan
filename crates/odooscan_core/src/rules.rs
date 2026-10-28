@@ -90,6 +90,7 @@ rules! {
     "OD111" "public-route-sudo" Security Info None, false, "A public or auth='none' route escalates with sudo().";
     "OD112" "csrf-disabled" Security Info None, false, "An HTTP route disables CSRF protection.";
     "OD113" "fields-view-get-removed" Deprecation Error Some(">=16.0"), false, "fields_view_get() is removed; override _get_view() or get_views().";
+    "OD114" "depends-on-id" Correctness Error None, false, "@api.depends names the field id, which Odoo refuses.";
     "OD201" "unknown-model" Correctness Error None, true, "The model is not defined by any indexed module.";
     "OD202" "model-not-in-depends" Correctness Error None, true, "The model comes from a module missing from depends.";
     "OD203" "unresolved-field-path" Correctness Error None, true, "A field path does not resolve on its model.";
@@ -101,6 +102,11 @@ rules! {
     "OD209" "model-redefined" Correctness Error None, true, "A new _name replaces a model that a module in depends already defines.";
     "OD210" "unknown-domain-field" Correctness Error None, true, "A literal domain or group_by names a field its model does not have.";
     "OD211" "orphan-super" Correctness Error None, true, "super() calls a method no parent class defines.";
+    "OD212" "monetary-without-currency" Correctness Error None, true, "A Monetary field's currency field is not a field of its model.";
+    "OD213" "required-many2one-set-null" Correctness Error Some(">=13.0"), true, "A required Many2one declares ondelete='set null'.";
+    "OD214" "many2many-table-clash" Correctness Error Some(">=13.0"), true, "Two Many2many fields of a model to one comodel get the same table.";
+    "OD215" "many2many-table-too-long" Correctness Error None, true, "A Many2many's relation table name is longer than PostgreSQL allows.";
+    "OD216" "selection-add-without-ondelete" Correctness Error Some(">=14.0"), true, "selection_add leaves a value of a required Selection with ondelete 'set null'.";
     "OD301" "unresolved-xmlid" Correctness Error None, true, "The XML id is not defined by its module.";
     "OD302" "xmlid-not-in-depends" Correctness Error None, true, "The XML id comes from a module missing from depends.";
     "OD303" "duplicate-xmlid" Correctness Warning None, false, "The same XML id is defined twice in one file.";
@@ -181,7 +187,7 @@ mod tests {
         assert_eq!(find("orphan-super").map(|r| r.code), Some("OD211"));
         assert!(find("OD999").is_none());
         let codes = |q| nearest(q).iter().map(|r| r.code).collect::<Vec<_>>();
-        assert_eq!(codes("od21"), ["OD210", "OD211"]);
+        assert_eq!(codes("od21"), ["OD210", "OD211", "OD212", "OD213", "OD214"]);
         assert_eq!(codes("orphan-supper"), ["OD211"]);
         assert!(codes("OD999").is_empty());
     }

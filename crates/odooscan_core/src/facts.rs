@@ -75,6 +75,19 @@ pub enum ModelKind {
     Abstract,
 }
 
+/// The value a field definition gives an attribute, as far as a literal tells it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum OptionValue {
+    Str(String),
+    Bool(bool),
+    /// A list or tuple of strings, or of tuples whose first item is a string, as selection values.
+    Strs(Vec<String>),
+    /// A dict with string keys; a value other than a string literal is none.
+    Dict(Vec<(String, Option<String>)>),
+    /// An expression whose value only a run tells.
+    Other,
+}
+
 #[derive(Debug)]
 pub struct FieldFact {
     pub name: String,
@@ -87,6 +100,16 @@ pub struct FieldFact {
     pub methods: Vec<Spanned<String>>,
     /// Fields the literal `domain` of a relational field names on its comodel.
     pub domain: Vec<Spanned<String>>,
+    /// Attributes given by keyword, or by position under the name the field type gives it.
+    pub options: Vec<(String, Spanned<OptionValue>)>,
+    /// The call unpacks `*args` or `**kwargs`, so it may set any attribute it does not name.
+    pub splat: bool,
+}
+
+impl FieldFact {
+    pub fn option(&self, name: &str) -> Option<&Spanned<OptionValue>> {
+        self.options.iter().find(|(n, _)| n == name).map(|(_, v)| v)
+    }
 }
 
 /// The fields a literal domain names, and the model it filters.
@@ -116,6 +139,8 @@ pub struct ClassFact {
     pub super_calls: Vec<Spanned<String>>,
     /// A base class is a plain Python class, whose methods only Python knows.
     pub plain_bases: bool,
+    /// The value of `_table`, when the class sets it.
+    pub table: Option<OptionValue>,
 }
 
 /// The methods a call can run: those of a model, or of the same Python class in the file.
