@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.5.0](https://github.com/avanserv/odooscan/compare/v0.4.0...v0.5.0) (2026-10-28)
+
+
+### Features
+
+* **cli:** Print a rule's documentation with oscn explain ([#29](https://github.com/avanserv/odooscan/issues/29)) ([20084af](https://github.com/avanserv/odooscan/commit/20084afa6aec5a11a84184f09e91827c4f2f6ec6))
+* **output:** Link each finding to its rule page ([#31](https://github.com/avanserv/odooscan/issues/31)) ([9df56e8](https://github.com/avanserv/odooscan/commit/9df56e8c20942b36e7484fc4e5ad9cc85321dd55))
+
 ## [0.4.0](https://github.com/avanserv/odooscan/compare/v0.3.0...v0.4.0) (2026-10-28)
 
 
