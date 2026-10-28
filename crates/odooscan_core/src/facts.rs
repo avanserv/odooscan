@@ -88,7 +88,9 @@ pub struct ClassFact {
 #[derive(Debug, Default)]
 pub struct PyFacts {
     pub classes: Vec<ClassFact>,
-    /// Literal model names in `env['x']`.
+    /// A class names its model with an expression, so models and their ids are built at runtime.
+    pub dynamic_models: bool,
+    /// Literal model names in `env['x']` outside code guarded by a test that the model exists.
     pub env_models: Vec<Spanned<String>>,
     /// XML ids named by `env.ref()`.
     pub xml_refs: Vec<XmlRef>,
@@ -105,6 +107,8 @@ pub struct XmlDef {
     pub id: String,
     pub model: Option<String>,
     pub pos: Pos,
+    /// The id is given to an existing record, which a `<record>` with that id may then update.
+    pub assigned: bool,
 }
 
 #[derive(Debug)]

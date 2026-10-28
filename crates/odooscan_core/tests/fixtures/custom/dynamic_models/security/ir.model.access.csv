@@ -1,0 +1,3 @@
+id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
+access_generated_small,generated small,model_bad_generated_small,base.group_user,1,0,0,0
+access_generated_user,generated user,model_bad_generated_user,base.group_user,1,0,0,0

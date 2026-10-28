@@ -9,5 +9,7 @@
         "views/late.xml",
         "views/locators.xml",
         "data/missing.xml",
+        "data/assigned.xml",
+        "data/res.partner-extra.csv",
     ],
 }

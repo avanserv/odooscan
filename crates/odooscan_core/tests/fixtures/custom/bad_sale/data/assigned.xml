@@ -1,0 +1,24 @@
+<odoo>
+    <function model="ir.model.data" name="_update_xmlids">
+        <value model="base" eval="[{'xml_id': 'bad_sale.assigned_partner', 'record': obj().env['res.partner'].search([], limit=1)}]"/>
+    </function>
+    <record id="assigned_child" model="res.partner">
+        <field name="parent_id" ref="assigned_partner"/>
+        <field name="country_id" ref=""/>
+    </record>
+    <record id="assigned_partner" model="res.partner">
+        <field name="name">Updated</field>
+    </record>
+
+    <function model="res.partner" name="write">
+        <value eval="[ref('bad_sale.gone', False)]"/>
+    </function>
+
+    <record id="access_order_xml" model="ir.model.access">
+        <field name="name">order</field>
+        <field name="model_id" ref="model_bad_order"/>
+    </record>
+    <record id="model_bad_order" model="ir.model">
+        <field name="model">bad.order</field>
+    </record>
+</odoo>
