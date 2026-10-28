@@ -27,6 +27,12 @@ dynamic = ["version"]
 [project.urls]
 Repository = "https://github.com/avanserv/odooscan"
 Changelog = "https://github.com/avanserv/odooscan/blob/main/CHANGELOG.md"
+Documentation = "https://avanserv.github.io/odooscan/"
+
+# The site generator, locked in uv.lock and used only by `make site`. It needs Python 3.11 or
+# later, while the wheel installs on 3.7, hence the marker.
+[dependency-groups]
+docs = ["zensical>=0.0.68; python_version >= '3.11'"]
 
 [tool.maturin]
 manifest-path = "crates/odooscan/Cargo.toml"

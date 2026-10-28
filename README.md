@@ -20,113 +20,14 @@ oscn check path/to/custom-addons --addons-path ~/repos/odoo/odoo,~/repos/odoo/en
 The wheels hold a prebuilt binary for Linux (glibc and musl), macOS and Windows; `cargo build
 --release` builds `target/release/oscn` anywhere else.
 
-The command is `oscn`. `check` reports on the modules found under the given paths. `--addons-path` holds what those
-modules build on. It is indexed but never reported on, and an Odoo source checkout stands for its
-`addons` and `odoo/addons` directories. The variable `ODOOSCAN_ADDONS_PATH` sets the same thing.
-Without `base` on the addons path, the rules marked `needs_index` in `src/rules.rs` are off and a
-notice says so.
-
-Other options:
-
-- `--format github` and `--format gitlab` are for CI (see below); `json` and `sarif` for other
-  tools.
-- `--select OD3` and `--ignore OD111` filter by code prefix.
-- `--exclude migrations/,tests/` hides findings in files matching gitignore-style patterns.
-- `--statistics` prints counts per rule.
-
-The exit status is 1 when anything is reported, and 2 when the settings are invalid.
-
-`oscn explain OD203`, or `oscn explain unresolved-field-path`, prints a rule's page: what it
-reports, why Odoo fails on it, and an example of the fix. The pages are in `docs/rules/`.
-
-## Configuration
-
-`oscn check` reads the nearest `odooscan.toml`, or `pyproject.toml` with a `[tool.odooscan]`
-table, in the current directory or above it; `--config` names one instead. Its keys are the
-`check` flags, and a flag or `ODOOSCAN_ADDONS_PATH` replaces the key of the same name.
-
-```toml
-[tool.odooscan]
-addons-path = ["../odoo", "../enterprise"]
-odoo-version = "18.0"
-ignore = ["OD111"]
-exclude = ["/legacy", "migrations/"]
-baseline = "odooscan-baseline.json"
-```
-
-Paths in the file are relative to it, and so are anchored `exclude` patterns (those with a slash
-before the end, such as `/legacy`). An unanchored one, such as `migrations/`, matches at any depth.
-Excluded files are still indexed: they only go unreported.
-
-## In CI
-
-The scan needs the Odoo sources your modules build on. A shallow sparse clone into a hidden
-directory is enough, and module discovery skips hidden directories. Leaving out translations,
-static assets and tests makes it about 20 MB instead of 190 MB, with the same index. On GitHub, `--format github`
-annotates the pull request, with no need for the Advanced Security that SARIF upload requires on a
-private repository:
-
-```yaml
-- uses: actions/checkout@v7
-- uses: actions/checkout@v7
-  with:
-    repository: odoo/odoo
-    ref: "18.0"
-    path: .odoo
-    fetch-depth: 1
-    filter: blob:none
-    sparse-checkout-cone-mode: false
-    sparse-checkout: |
-      /addons/
-      /odoo/addons/
-      !**/i18n/
-      !**/static/
-      !**/tests/
-    persist-credentials: false
-- uses: astral-sh/setup-uv@v10
-- run: uvx --from odooscan oscn check --addons-path .odoo --format github
-```
-
-On GitLab, `--format gitlab` writes a Code Quality report for the merge request:
-
-```yaml
-odooscan:
-  image: python:3.13
-  script:
-    - git clone --depth 1 --branch 18.0 --filter=blob:none --no-checkout https://github.com/odoo/odoo .odoo
-    - git -C .odoo sparse-checkout set --no-cone '/addons/' '/odoo/addons/' '!**/i18n/' '!**/static/' '!**/tests/'
-    - git -C .odoo checkout 18.0
-    - pip install odooscan
-    - oscn check --addons-path .odoo --format gitlab > gl-code-quality-report.json
-  artifacts:
-    when: always
-    reports:
-      codequality: gl-code-quality-report.json
-```
-
-Pin `odooscan` to a version, and the actions to commit SHAs, in a real pipeline.
-
-## Series
-
-Each rule declares the Odoo series it applies to, and every module is checked against its own
-series. The series is the first two parts of a five-part manifest version, so `18.0.1.2.0` means
-18.0. Pass `--odoo-version 18.0` for modules whose version does not name one. Those modules
-otherwise get only the rules that carry no range. `oscn rules --odoo-version 18.0` lists the
-rules for a series.
-
-## Adopting on an existing codebase
-
-`oscn check --write-baseline` records every current finding in `odooscan-baseline.json` beside the
-configuration file, and later runs given `--baseline odooscan-baseline.json` (or the `baseline`
-key) report only new ones. A finding is recorded by file, code and message, not line, so edits
-around it do not bring it back. When findings are fixed, a notice says so; write the baseline again
-to drop them and keep the file shrinking.
-
-## Suppressing a finding
-
-Write `odooscan: ignore[OD103]` in a comment, or `noqa: OD103`. A trailing comment covers its own
-line, and a comment alone on a line covers the next one. `odooscan: ignore` without codes covers
-every rule. XML takes the same text inside `<!-- -->`.
+The [documentation](https://avanserv.github.io/odooscan/) covers the options,
+[configuration](https://avanserv.github.io/odooscan/configuration/),
+[CI](https://avanserv.github.io/odooscan/ci/),
+[series](https://avanserv.github.io/odooscan/series/),
+[baselines](https://avanserv.github.io/odooscan/baseline/) and
+[suppression](https://avanserv.github.io/odooscan/suppressing/), with a
+[page per rule](https://avanserv.github.io/odooscan/rules/). `oscn explain OD203` prints a rule's
+page in the terminal.
 
 ## Layout
 
