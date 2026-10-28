@@ -111,13 +111,13 @@ pub struct Discovery {
     pub notices: Vec<String>,
 }
 
-pub fn load(paths: &[PathBuf], addons_paths: &[PathBuf]) -> Discovery {
+pub fn load(paths: &[PathBuf], addons_paths: &[PathBuf], default_series: Option<Series>) -> Discovery {
     let mut notices = vec![];
     let mut modules: Vec<Module> = candidates(paths, addons_paths)
         .into_par_iter()
         .filter_map(|(name, dir, checked)| read_module(name, dir, checked))
         .collect();
-    for m in &modules {
+    for m in modules.iter().filter(|_| default_series.is_none()) {
         if m.checked && m.series.is_none() {
             notices.push(format!(
                 "{}: the manifest version does not name a series; pass --odoo-version",
