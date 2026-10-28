@@ -37,6 +37,7 @@ pub fn check_module<'m>(index: &Index<'m>, mi: usize) -> Vec<(&'m Path, RawDiag)
             module,
             scope: &scope,
             dep_names: module.manifest.depends.iter().map(|d| d.value.as_str()).collect(),
+            dynamic: module.python.iter().any(|f| f.facts.dynamic_models),
         };
         ctx.dependencies(&mut out);
         ctx.python(&mut out);
@@ -97,6 +98,7 @@ fn same_module_xmlids<'m>(module: &'m Module, out: &mut Out<'m>) {
             if let Some(&(def_rank, def_line)) = first_def.get(&id)
                 && (def_rank, def_line) > (rank, r.pos.line)
                 && !bootstrapped
+                && !registry_id(module, &id)
             {
                 let place = load_place(module, def_rank, rank);
                 out.push(
@@ -116,7 +118,7 @@ fn first_defs<'m>(module: &'m Module, out: &mut Out<'m>) -> FxHashMap<String, (u
     for file in &module.data {
         let mut in_file: FxHashSet<&str> = FxHashSet::default();
         for def in &file.facts.defs {
-            if !in_file.insert(&def.id) {
+            if !def.assigned && !in_file.insert(&def.id) {
                 out.push(
                     &file.path,
                     "OD303",
@@ -136,6 +138,16 @@ fn first_defs<'m>(module: &'m Module, out: &mut Out<'m>) -> FxHashMap<String, (u
     first_def
 }
 
+/// The registry creates the `ir.model` and `ir.model.fields` ids of a module's models before any of
+/// its data files load, so a record with such an id only updates it.
+fn registry_id(module: &Module, id: &str) -> bool {
+    let local = id.split_once('.').map_or(id, |(_, l)| l);
+    module.python.iter().flat_map(|f| &f.facts.classes).any(|c| {
+        let model = c.model.replace('.', "_");
+        local == format!("model_{model}") || local.starts_with(&format!("field_{model}__"))
+    })
+}
+
 fn load_place(module: &Module, def_rank: usize, rank: usize) -> String {
     if def_rank == rank {
         return "further down this file".to_owned();
@@ -149,6 +161,8 @@ struct Ctx<'a, 'm> {
     module: &'m Module,
     scope: &'a Scope,
     dep_names: FxHashSet<&'m str>,
+    /// The module builds model names at runtime, so its models and their ids cannot be listed.
+    dynamic: bool,
 }
 
 impl<'m> Ctx<'_, 'm> {
@@ -161,6 +175,7 @@ impl<'m> Ctx<'_, 'm> {
                 model.pos,
                 format!("model '{}' comes from module {m}; add it to depends", model.value),
             ),
+            Status::Missing if self.dynamic => {}
             Status::Missing => out.push(
                 path,
                 "OD201",
@@ -259,7 +274,8 @@ impl<'m> Ctx<'_, 'm> {
         {
             self.path(out, path, "OD203", &comodel.value, inverse);
         }
-        for method in &field.methods {
+        // Odoo replaces the compute and inverse of a related field with its own.
+        for method in field.methods.iter().filter(|_| field.related.is_none()) {
             if !index.has_method(&class.model, &method.value, self.scope) {
                 out.push(
                     path,
@@ -282,12 +298,13 @@ impl<'m> Ctx<'_, 'm> {
         }
     }
 
-    /// A type another class in scope gives the same field, when it differs from this one's.
+    /// A type another class of the same model in scope gives the field, when it differs from this
+    /// one's. A new model, or one delegating through `_inherits`, may give a parent's field any type.
     fn other_type(&self, class: &ClassFact, field: &FieldFact) -> Option<&'m str> {
         self.index
             .field_defs(&class.model, &field.name, Some(self.scope))
             .into_iter()
-            .filter(|(_, c, _)| !std::ptr::eq(*c, class))
+            .filter(|(_, c, _)| !std::ptr::eq(*c, class) && c.model == class.model)
             .map(|(_, _, f)| f.ftype.as_str())
             .find(|t| *t != field.ftype)
     }
@@ -328,8 +345,16 @@ impl<'m> Ctx<'_, 'm> {
         }
     }
 
+    /// An `ir.model` or `ir.model.fields` id of a model this module names at runtime.
+    fn runtime_id(&self, owner: &str, local: &str) -> bool {
+        self.dynamic && owner == self.module.name && (local.starts_with("model_") || local.starts_with("field_"))
+    }
+
     fn undefined_ref(&self, out: &mut Out<'m>, path: &'m Path, pos: Pos, id: &str) {
-        let owner = id.split_once('.').map_or("", |(m, _)| m);
+        let (owner, local) = id.split_once('.').unwrap_or_default();
+        if self.runtime_id(owner, local) {
+            return;
+        }
         match self.index.by_name.get(owner) {
             Some(&mi) if self.scope.sees(mi) => {
                 out.push(path, "OD301", pos, format!("module {owner} defines no XML id '{id}'"))

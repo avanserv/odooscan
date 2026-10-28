@@ -7,7 +7,13 @@ use crate::facts::{
     AccessRow, ArchElement, ArchField, DataFacts, Lines, Pos, RawDiag, RecordFact, Spanned, ViewFact, XmlDef, XmlRef,
 };
 
-static EVAL_REF: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"\bref\(\s*['"]([\w.]+)['"]"#).unwrap());
+/// A `False` second argument makes `ref()` return nothing for an unknown id instead of failing.
+static EVAL_REF: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"\bref\(\s*['"]([\w.]+)['"]\s*(,\s*(?:raise_if_not_found\s*=\s*)?False\b)?"#).unwrap()
+});
+/// The ids `ir.model.data._update_xmlids` gives to records that Python expressions select.
+static UPDATE_XMLID: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"['"]xml_id['"]\s*:\s*['"]([\w.]+)['"]"#).unwrap());
 /// A field step followed by more steps, as in `//field[@name='line_ids']//field[...]`, reaches into
 /// the subview of line_ids.
 static XPATH_CONTAINER: LazyLock<Regex> =
@@ -15,7 +21,7 @@ static XPATH_CONTAINER: LazyLock<Regex> =
 /// An xpath ending on a field step locates that field wherever it is, subviews included.
 static XPATH_LAST_FIELD: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"field\[@name=['"](\w+)['"]\]$"#).unwrap());
 /// A step on a view tag other than through a field may land in the main view or in any subview.
-static XPATH_AMBIGUOUS: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(^|/)(list|tree|kanban)\b").unwrap());
+static XPATH_AMBIGUOUS: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(^|/)(list|tree|kanban|column)\b").unwrap());
 
 /// Path segment for an arch position whose model cannot be told without the parent view.
 pub const UNKNOWN_CONTEXT: &str = "?";
@@ -30,6 +36,9 @@ static ACTION_REF: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"%\(([\w.]+)\)
 
 /// Tags under which a `<field>` opens a subview on the field's comodel.
 const SUBVIEWS: &[&str] = &["list", "tree", "form", "kanban", "graph", "pivot", "calendar", "search"];
+
+/// Tags a spec may locate in the main view or in the subview of any x2many field.
+const AMBIGUOUS_SPECS: &[&str] = &["list", "tree", "kanban", "column"];
 
 pub fn analyze(text: &str) -> DataFacts {
     let lines = Lines::new(text);
@@ -87,6 +96,7 @@ impl Walker<'_> {
                 id: id.to_owned(),
                 model,
                 pos,
+                assigned: false,
             });
         }
     }
@@ -113,9 +123,29 @@ impl Walker<'_> {
         for n in node.descendants().filter(Node::is_element) {
             if let Some(eval) = n.attribute("eval") {
                 // `ref('module.' + name)` builds the id at runtime; the literal part is not an id.
-                for cap in EVAL_REF.captures_iter(eval).filter(|c| !c[1].ends_with('.')) {
+                for cap in EVAL_REF
+                    .captures_iter(eval)
+                    .filter(|c| !c[1].ends_with('.') && c.get(2).is_none())
+                {
                     self.reference(&cap[1], n);
                 }
+            }
+        }
+    }
+
+    fn update_xmlids(&mut self, node: Node) {
+        if node.attribute("model") != Some("ir.model.data") || node.attribute("name") != Some("_update_xmlids") {
+            return;
+        }
+        let pos = self.pos(node);
+        for eval in node.descendants().filter_map(|n| n.attribute("eval")) {
+            for cap in UPDATE_XMLID.captures_iter(eval) {
+                self.facts.defs.push(XmlDef {
+                    id: cap[1].to_owned(),
+                    model: None,
+                    pos,
+                    assigned: true,
+                });
             }
         }
     }
@@ -150,7 +180,10 @@ impl Walker<'_> {
                     self.def(child);
                     self.groups(child);
                 }
-                "function" => self.eval_refs(child),
+                "function" => {
+                    self.update_xmlids(child);
+                    self.eval_refs(child);
+                }
                 _ => {}
             }
         }
@@ -218,7 +251,8 @@ impl Walker<'_> {
     }
 
     fn record_field(&mut self, field: Node, name: &str, model: &str, view: &mut ViewFact) {
-        if let Some(id) = field.attribute("ref") {
+        // Odoo reads an empty ref as no value.
+        if let Some(id) = field.attribute("ref").filter(|r| !r.is_empty()) {
             self.reference(id, field);
             if name == "model_id" && matches!(model, "ir.model.access" | "ir.access") {
                 self.facts.access.push(AccessRow {
@@ -275,6 +309,9 @@ impl Walker<'_> {
         let depth = path.len();
         match tag {
             "xpath" => xpath_steps(node.attribute("expr").unwrap_or_default(), path),
+            _ if AMBIGUOUS_SPECS.contains(&tag) && node.has_attribute("position") => {
+                path.push(UNKNOWN_CONTEXT.to_owned())
+            }
             "groupby" => path.extend(node.attribute("name").map(str::to_owned)),
             _ => {}
         }

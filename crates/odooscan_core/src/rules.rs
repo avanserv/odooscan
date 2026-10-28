@@ -32,7 +32,18 @@ pub struct Rule {
     pub summary: &'static str,
 }
 
+/// Severities that replace a rule's own from some series on, as (code, series range, severity).
+/// From 20.0, `ir.access` rows only grant access, so a model meant for the superuser alone has none.
+const SEVERITY_BY_SERIES: &[(&str, &str, Severity)] = &[("OD401", ">=20.0", Severity::Info)];
+
 impl Rule {
+    pub fn severity_for(&self, module_series: Option<Series>) -> Severity {
+        SEVERITY_BY_SERIES
+            .iter()
+            .find(|(code, spec, _)| *code == self.code && module_series.is_some_and(|s| series::matches(spec, s)))
+            .map_or(self.severity, |(_, _, severity)| *severity)
+    }
+
     /// A module of unknown series gets only the rules that carry no range.
     pub fn applies_to(&self, module_series: Option<Series>) -> bool {
         match (self.series, module_series) {
@@ -100,4 +111,17 @@ pub fn rule(code: &str) -> &'static Rule {
         .iter()
         .find(|r| r.code == code)
         .unwrap_or_else(|| panic!("unregistered rule {code}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn access_rule_is_info_from_20() {
+        let od401 = rule("OD401");
+        assert_eq!(od401.severity_for(Series::parse("18.0")), Severity::Warning);
+        assert_eq!(od401.severity_for(Series::parse("20.0")), Severity::Info);
+        assert_eq!(od401.severity_for(None), Severity::Warning);
+    }
 }

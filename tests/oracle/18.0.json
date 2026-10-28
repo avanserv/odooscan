@@ -13,18 +13,6 @@
       "count": 1
     },
     {
-      "path": "addons/account/models/account_bank_statement_line.py",
-      "code": "OD205",
-      "message": "'amount_residual' is a Monetary field elsewhere and is redefined here as Float",
-      "count": 1
-    },
-    {
-      "path": "addons/account/models/account_bank_statement_line.py",
-      "code": "OD205",
-      "message": "'payment_ids' is a One2many field elsewhere and is redefined here as Many2many",
-      "count": 1
-    },
-    {
       "path": "addons/account/models/account_code_mapping.py",
       "code": "OD105",
       "message": "create() override never calls super(), so other modules' overrides and the ORM itself are skipped",
@@ -52,18 +40,6 @@
       "path": "addons/account/models/partner.py",
       "code": "OD101",
       "message": "query built by string formatting; pass parameters separately or build it with odoo.tools.SQL",
-      "count": 1
-    },
-    {
-      "path": "addons/account/models/product.py",
-      "code": "OD206",
-      "message": "no indexed module defines model 'account.intrastat.code'",
-      "count": 1
-    },
-    {
-      "path": "addons/account/models/product.py",
-      "code": "OD206",
-      "message": "no indexed module defines model 'product.unspsc.code'",
       "count": 1
     },
     {
@@ -281,12 +257,6 @@
       "code": "OD103",
       "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
       "count": 3
-    },
-    {
-      "path": "addons/event/models/event_registration.py",
-      "code": "OD206",
-      "message": "no indexed module defines model 'iot.device'",
-      "count": 1
     },
     {
       "path": "addons/event_crm/models/event_lead_request.py",
@@ -769,12 +739,6 @@
       "count": 1
     },
     {
-      "path": "addons/l10n_dk_nemhandel/wizard/nemhandel_registration.py",
-      "code": "OD204",
-      "message": "nemhandel.registration has no method '_inverse_phone_number'",
-      "count": 1
-    },
-    {
       "path": "addons/l10n_es/data/mod390/mod390_section7.xml",
       "code": "OD303",
       "message": "XML id 'mod_390_casilla_641' is already defined earlier in this file",
@@ -808,12 +772,6 @@
       "path": "addons/l10n_es_edi_facturae/data/template/account.tax-es_common_mainland.csv",
       "code": "OD303",
       "message": "XML id 'account_tax_template_p_iva4_ibc_group' is already defined earlier in this file",
-      "count": 1
-    },
-    {
-      "path": "addons/l10n_es_edi_facturae/views/uom_uom_views.xml",
-      "code": "OD304",
-      "message": "'l10n_es_edi_facturae_uom_code': uom.category has no field 'l10n_es_edi_facturae_uom_code'",
       "count": 1
     },
     {
@@ -1411,12 +1369,6 @@
       "count": 1
     },
     {
-      "path": "addons/partner_autocomplete/models/res_partner.py",
-      "code": "OD206",
-      "message": "no indexed module defines model 'product.unspsc.code'",
-      "count": 1
-    },
-    {
       "path": "addons/partner_autocomplete/security/ir.model.access.csv",
       "code": "OD402",
       "message": "base.group_portal gets write, create or unlink on model_res_partner_autocomplete_sync; public and portal access should be read-only and go through controllers",
@@ -1693,42 +1645,6 @@
       "count": 1
     },
     {
-      "path": "addons/product/data/product_demo.xml",
-      "code": "OD301",
-      "message": "module product defines no XML id 'product.product_11_attribute_1_value_1'",
-      "count": 2
-    },
-    {
-      "path": "addons/product/data/product_demo.xml",
-      "code": "OD301",
-      "message": "module product defines no XML id 'product.product_4_attribute_2_value_1'",
-      "count": 2
-    },
-    {
-      "path": "addons/product/data/product_demo.xml",
-      "code": "OD301",
-      "message": "module product defines no XML id 'product.product_4_attribute_2_value_2'",
-      "count": 2
-    },
-    {
-      "path": "addons/product/data/product_demo.xml",
-      "code": "OD308",
-      "message": "'product.product_11_attribute_1_value_2' is defined further down this file, which loads after this reference",
-      "count": 1
-    },
-    {
-      "path": "addons/product/data/product_demo.xml",
-      "code": "OD308",
-      "message": "'product.product_4_attribute_1_value_1' is defined further down this file, which loads after this reference",
-      "count": 2
-    },
-    {
-      "path": "addons/product/data/product_demo.xml",
-      "code": "OD308",
-      "message": "'product.product_4_attribute_1_value_2' is defined further down this file, which loads after this reference",
-      "count": 1
-    },
-    {
       "path": "addons/product/models/product_product.py",
       "code": "OD105",
       "message": "copy() override never calls super(), so other modules' overrides and the ORM itself are skipped",
@@ -1774,24 +1690,6 @@
       "path": "addons/sale/controllers/portal.py",
       "code": "OD111",
       "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
-      "count": 2
-    },
-    {
-      "path": "addons/sale/data/product_demo.xml",
-      "code": "OD301",
-      "message": "module product defines no XML id 'product.product_4_attribute_2_value_1'",
-      "count": 1
-    },
-    {
-      "path": "addons/sale/data/product_demo.xml",
-      "code": "OD301",
-      "message": "module product defines no XML id 'product.product_4_attribute_2_value_2'",
-      "count": 1
-    },
-    {
-      "path": "addons/sale/data/product_demo.xml",
-      "code": "OD301",
-      "message": "module sale defines no XML id 'sale.product_4_attribute_1_value_3'",
       "count": 2
     },
     {
@@ -1939,12 +1837,6 @@
       "count": 4
     },
     {
-      "path": "addons/stock_fleet/data/stock_fleet_demo.xml",
-      "code": "OD301",
-      "message": "module stock defines no XML id 'stock.stock_location_output'",
-      "count": 2
-    },
-    {
       "path": "addons/survey/controllers/main.py",
       "code": "OD111",
       "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
@@ -1960,126 +1852,6 @@
       "path": "addons/test_event_full/data/event_type_data.xml",
       "code": "OD502",
       "message": "'data/event_type_data.xml' is not in the manifest's data or demo, so Odoo never loads it",
-      "count": 1
-    },
-    {
-      "path": "addons/test_import_export/models/models_export.py",
-      "code": "OD201",
-      "message": "no indexed module defines model 'export.integer'",
-      "count": 1
-    },
-    {
-      "path": "addons/test_import_export/models/models_export_impex.py",
-      "code": "OD201",
-      "message": "no indexed module defines model 'export.integer'",
-      "count": 1
-    },
-    {
-      "path": "addons/test_import_export/models/models_export_impex.py",
-      "code": "OD201",
-      "message": "no indexed module defines model 'export.one2many'",
-      "count": 1
-    },
-    {
-      "path": "addons/test_import_export/security/ir.model.access.csv",
-      "code": "OD301",
-      "message": "module test_import_export defines no XML id 'test_import_export.model_export_boolean'",
-      "count": 1
-    },
-    {
-      "path": "addons/test_import_export/security/ir.model.access.csv",
-      "code": "OD301",
-      "message": "module test_import_export defines no XML id 'test_import_export.model_export_date'",
-      "count": 1
-    },
-    {
-      "path": "addons/test_import_export/security/ir.model.access.csv",
-      "code": "OD301",
-      "message": "module test_import_export defines no XML id 'test_import_export.model_export_datetime'",
-      "count": 1
-    },
-    {
-      "path": "addons/test_import_export/security/ir.model.access.csv",
-      "code": "OD301",
-      "message": "module test_import_export defines no XML id 'test_import_export.model_export_decimal'",
-      "count": 1
-    },
-    {
-      "path": "addons/test_import_export/security/ir.model.access.csv",
-      "code": "OD301",
-      "message": "module test_import_export defines no XML id 'test_import_export.model_export_float'",
-      "count": 1
-    },
-    {
-      "path": "addons/test_import_export/security/ir.model.access.csv",
-      "code": "OD301",
-      "message": "module test_import_export defines no XML id 'test_import_export.model_export_function'",
-      "count": 1
-    },
-    {
-      "path": "addons/test_import_export/security/ir.model.access.csv",
-      "code": "OD301",
-      "message": "module test_import_export defines no XML id 'test_import_export.model_export_integer'",
-      "count": 1
-    },
-    {
-      "path": "addons/test_import_export/security/ir.model.access.csv",
-      "code": "OD301",
-      "message": "module test_import_export defines no XML id 'test_import_export.model_export_many2many'",
-      "count": 1
-    },
-    {
-      "path": "addons/test_import_export/security/ir.model.access.csv",
-      "code": "OD301",
-      "message": "module test_import_export defines no XML id 'test_import_export.model_export_many2one'",
-      "count": 1
-    },
-    {
-      "path": "addons/test_import_export/security/ir.model.access.csv",
-      "code": "OD301",
-      "message": "module test_import_export defines no XML id 'test_import_export.model_export_one2many'",
-      "count": 1
-    },
-    {
-      "path": "addons/test_import_export/security/ir.model.access.csv",
-      "code": "OD301",
-      "message": "module test_import_export defines no XML id 'test_import_export.model_export_reference'",
-      "count": 1
-    },
-    {
-      "path": "addons/test_import_export/security/ir.model.access.csv",
-      "code": "OD301",
-      "message": "module test_import_export defines no XML id 'test_import_export.model_export_selection'",
-      "count": 1
-    },
-    {
-      "path": "addons/test_import_export/security/ir.model.access.csv",
-      "code": "OD301",
-      "message": "module test_import_export defines no XML id 'test_import_export.model_export_selection_function'",
-      "count": 1
-    },
-    {
-      "path": "addons/test_import_export/security/ir.model.access.csv",
-      "code": "OD301",
-      "message": "module test_import_export defines no XML id 'test_import_export.model_export_string'",
-      "count": 1
-    },
-    {
-      "path": "addons/test_import_export/security/ir.model.access.csv",
-      "code": "OD301",
-      "message": "module test_import_export defines no XML id 'test_import_export.model_export_string_bounded'",
-      "count": 1
-    },
-    {
-      "path": "addons/test_import_export/security/ir.model.access.csv",
-      "code": "OD301",
-      "message": "module test_import_export defines no XML id 'test_import_export.model_export_string_required'",
-      "count": 1
-    },
-    {
-      "path": "addons/test_import_export/security/ir.model.access.csv",
-      "code": "OD301",
-      "message": "module test_import_export defines no XML id 'test_import_export.model_export_text'",
       "count": 1
     },
     {
@@ -2155,18 +1927,6 @@
       "count": 1
     },
     {
-      "path": "addons/website/models/mixins.py",
-      "code": "OD401",
-      "message": "model 'website.published.multi.mixin' has no ir.model.access rule, so only the superuser can use it",
-      "count": 1
-    },
-    {
-      "path": "addons/website/models/website_page_properties.py",
-      "code": "OD205",
-      "message": "'target_model_id' is a Reference field elsewhere and is redefined here as Many2one",
-      "count": 1
-    },
-    {
       "path": "addons/website/views/snippets/s_btn.xml",
       "code": "OD502",
       "message": "'views/snippets/s_btn.xml' is not in the manifest's data or demo, so Odoo never loads it",
@@ -2189,12 +1949,6 @@
       "code": "OD111",
       "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
       "count": 1
-    },
-    {
-      "path": "addons/website_crm_partner_assign/data/crm_lead_demo.xml",
-      "code": "OD301",
-      "message": "module website_crm_partner_assign defines no XML id 'website_crm_partner_assign.'",
-      "count": 2
     },
     {
       "path": "addons/website_customer/controllers/main.py",
@@ -2239,12 +1993,6 @@
       "count": 1
     },
     {
-      "path": "addons/website_event_sale/data/event_data.xml",
-      "code": "OD301",
-      "message": "module event defines no XML id 'event.event_type_data_ticket'",
-      "count": 1
-    },
-    {
       "path": "addons/website_event_sale/views/assets.xml",
       "code": "OD502",
       "message": "'views/assets.xml' is not in the manifest's data or demo, so Odoo never loads it",
@@ -2255,12 +2003,6 @@
       "code": "OD111",
       "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
       "count": 2
-    },
-    {
-      "path": "addons/website_event_track/data/event_data.xml",
-      "code": "OD301",
-      "message": "module event defines no XML id 'event.event_type_data_conference'",
-      "count": 1
     },
     {
       "path": "addons/website_event_track_live/controllers/track_live.py",
@@ -2432,12 +2174,6 @@
     },
     {
       "path": "addons/website_sale/data/demo.xml",
-      "code": "OD301",
-      "message": "module website_sale defines no XML id 'website_sale.product_1_attribute_3_value_1'",
-      "count": 1
-    },
-    {
-      "path": "addons/website_sale/data/demo.xml",
       "code": "OD303",
       "message": "XML id 'product.consu_delivery_03_product_template' is already defined earlier in this file",
       "count": 1
@@ -2470,12 +2206,6 @@
       "path": "addons/website_sale/data/demo.xml",
       "code": "OD303",
       "message": "XML id 'public_category_furnitures_couches' is already defined earlier in this file",
-      "count": 1
-    },
-    {
-      "path": "addons/website_sale/data/demo.xml",
-      "code": "OD308",
-      "message": "'website_sale.product_1_attribute_3_value_2' is defined further down this file, which loads after this reference",
       "count": 1
     },
     {
@@ -2554,12 +2284,6 @@
       "path": "addons/website_slides/data/slide_user_demo.xml",
       "code": "OD303",
       "message": "XML id 'slide_slide_1_0_partner_demo' is already defined earlier in this file",
-      "count": 1
-    },
-    {
-      "path": "addons/website_slides/models/slide_slide.py",
-      "code": "OD206",
-      "message": "no indexed module defines model 'google.drive.config'",
       "count": 1
     },
     {

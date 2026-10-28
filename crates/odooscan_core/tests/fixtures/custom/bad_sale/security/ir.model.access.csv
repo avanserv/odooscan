@@ -1,2 +1,3 @@
 id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
 access_bad_order_public,bad.order public,model_bad_order,base.group_public,1,1,0,0
+access_bad_quiet_wizard,bad.quiet.wizard,model_bad_quiet_wizard,base.group_user,1,1,1,0

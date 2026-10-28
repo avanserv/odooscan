@@ -2,4 +2,13 @@
     <record id="action_late" model="ir.actions.act_window">
         <field name="name">Late</field>
     </record>
+
+    <record id="view_order_tree_lines" model="ir.ui.view">
+        <field name="inherit_id" ref="view_order_tree"/>
+        <field name="arch" type="xml">
+            <list position="inside">
+                <field name="amount"/>
+            </list>
+        </field>
+    </record>
 </odoo>

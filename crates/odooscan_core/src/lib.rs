@@ -100,7 +100,7 @@ pub fn scan(opts: &ScanOptions) -> Report {
                 .filter(move |(_, allowed, d)| *allowed && rule(d.code).applies_to(series))
                 .map(|(path, _, d)| Diagnostic {
                     code: d.code,
-                    severity: rule(d.code).severity,
+                    severity: rule(d.code).severity_for(series),
                     path,
                     line: d.pos.line,
                     column: d.pos.col,

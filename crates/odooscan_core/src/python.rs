@@ -1,8 +1,9 @@
 use ruff_python_ast::visitor::{self, Visitor};
-use ruff_python_ast::{self as ast, Expr, Operator, Stmt};
+use ruff_python_ast::{self as ast, BoolOp, CmpOp, Expr, Operator, Stmt};
 use ruff_python_parser::parse_module;
 use ruff_source_file::LineIndex;
 use ruff_text_size::{Ranged, TextSize};
+use rustc_hash::FxHashMap;
 
 use crate::facts::{ClassFact, FieldFact, ModelKind, Pos, PyFacts, RawDiag, Spanned, XmlRef};
 
@@ -172,18 +173,57 @@ impl<'a> Visitor<'a> for Finder<'_> {
     }
 }
 
+/// Whether an expression tests that a model, field or module is installed, as `'x' in self.env`,
+/// `'f' in self._fields`, `self.env.get('x')` or `ir.module.module._get('m')` do.
+#[derive(Default)]
+struct GuardFinder {
+    found: bool,
+}
+
+impl<'a> Visitor<'a> for GuardFinder {
+    fn visit_expr(&mut self, expr: &'a Expr) {
+        self.found |= match expr {
+            Expr::Compare(c) => c
+                .ops
+                .iter()
+                .zip(c.comparators())
+                .any(|(op, right)| matches!(op, CmpOp::In | CmpOp::NotIn) && is_registry(right)),
+            Expr::Call(c) => match &*c.func {
+                Expr::Attribute(a) if a.attr.as_str() == "get" => is_registry(&a.value),
+                func => tail_name(func) == Some("_get"),
+            },
+            _ => false,
+        };
+        if !self.found {
+            visitor::walk_expr(self, expr);
+        }
+    }
+}
+
+fn is_registry(expr: &Expr) -> bool {
+    matches!(tail_name(expr), Some("env" | "_fields" | "pool"))
+}
+
+fn is_guard(expr: &Expr) -> bool {
+    let mut finder = GuardFinder::default();
+    finder.visit_expr(expr);
+    finder.found
+}
+
 fn body_contains(body: &[Stmt], attr: Option<&str>) -> bool {
     let mut finder = Finder { attr, found: false };
     finder.visit_body(body);
     finder.found
 }
 
-fn model_kind(class: &ast::StmtClassDef) -> Option<ModelKind> {
+/// The kind of the ORM base class, or of a model class `kinds` names earlier in the file.
+fn model_kind(class: &ast::StmtClassDef, kinds: &FxHashMap<String, ModelKind>) -> Option<ModelKind> {
     class.bases().iter().find_map(|b| match tail_name(b) {
         Some("Model") => Some(ModelKind::Model),
         Some("TransientModel") => Some(ModelKind::Transient),
         Some("AbstractModel") => Some(ModelKind::Abstract),
-        _ => None,
+        Some(name) => kinds.get(name).copied(),
+        None => None,
     })
 }
 
@@ -218,6 +258,8 @@ pub fn analyze(src: &str) -> PyFacts {
     let mut v = PyVisitor {
         loc: &loc,
         facts: PyFacts::default(),
+        kinds: FxHashMap::default(),
+        guarded: 0,
     };
     match parse_module(src) {
         Ok(parsed) => v.visit_body(&parsed.syntax().body),
@@ -232,6 +274,10 @@ pub fn analyze(src: &str) -> PyFacts {
 struct PyVisitor<'a> {
     loc: &'a Locator<'a>,
     facts: PyFacts,
+    /// Model classes of the file by Python class name.
+    kinds: FxHashMap<String, ModelKind>,
+    /// Depth of code that runs only once a guard has passed.
+    guarded: u32,
 }
 
 impl PyVisitor<'_> {
@@ -248,9 +294,12 @@ impl PyVisitor<'_> {
     }
 
     fn class_fact(&mut self, class: &ast::StmtClassDef) -> Option<ClassFact> {
-        let kind = model_kind(class);
+        let kind = model_kind(class, &self.kinds);
         if kind.is_none() && !declares_model(class) {
             return None;
+        }
+        if let Some(kind) = kind {
+            self.kinds.insert(class.name.to_string(), kind);
         }
         let mut name: Option<String> = None;
         let mut fact = ClassFact {
@@ -291,7 +340,10 @@ impl PyVisitor<'_> {
     fn class_attrs(&mut self, targets: &[Expr], value: &Expr, fact: &mut ClassFact, name: &mut Option<String>) {
         for target in targets.iter().filter_map(Expr::as_name_expr) {
             match target.id.as_str() {
-                "_name" => *name = str_lit(value).map(str::to_owned),
+                "_name" => {
+                    *name = str_lit(value).map(str::to_owned);
+                    self.facts.dynamic_models |= name.is_none();
+                }
                 "_inherit" => fact.inherit = strings(value).into_iter().map(|s| self.spanned(s)).collect(),
                 "_inherits" => {
                     if let Expr::Dict(d) = value {
@@ -523,6 +575,37 @@ impl PyVisitor<'_> {
         }
     }
 
+    fn env_model(&mut self, sub: &ast::ExprSubscript) {
+        if tail_name(&sub.value) == Some("env")
+            && self.guarded == 0
+            && let Some(s) = sub.slice.as_string_literal_expr()
+        {
+            let spanned = self.spanned(s);
+            self.facts.env_models.push(spanned);
+        }
+    }
+
+    fn guarded(&mut self, guard: &Expr, then: impl FnOnce(&mut Self)) {
+        self.visit_expr(guard);
+        let depth = u32::from(is_guard(guard));
+        self.guarded += depth;
+        then(self);
+        self.guarded -= depth;
+    }
+
+    /// Operands of an `and` after a guard run only once it passed.
+    fn and_chain(&mut self, values: &[Expr]) {
+        let mut depth = 0;
+        for value in values {
+            self.visit_expr(value);
+            if depth == 0 && is_guard(value) {
+                depth = 1;
+                self.guarded += 1;
+            }
+        }
+        self.guarded -= depth;
+    }
+
     fn private_attr(&mut self, a: &ast::ExprAttribute, expr: &Expr) {
         if matches!(a.attr.as_str(), "_cr" | "_uid" | "_context")
             && matches!(&*a.value, Expr::Name(n) if n.id.as_str() == "self")
@@ -545,6 +628,13 @@ impl<'a> Visitor<'a> for PyVisitor<'_> {
                 }
             }
             Stmt::FunctionDef(func) => self.route_checks(func),
+            Stmt::If(i) => {
+                self.guarded(&i.test, |v| v.visit_body(&i.body));
+                for clause in &i.elif_else_clauses {
+                    self.visit_elif_else_clause(clause);
+                }
+                return;
+            }
             _ => {}
         }
         visitor::walk_stmt(self, stmt);
@@ -554,12 +644,12 @@ impl<'a> Visitor<'a> for PyVisitor<'_> {
         match expr {
             Expr::StringLiteral(s) => self.file_mention(s),
             Expr::Call(call) => self.call_checks(call, expr),
-            Expr::Subscript(sub) if tail_name(&sub.value) == Some("env") => {
-                if let Some(s) = sub.slice.as_string_literal_expr() {
-                    let spanned = self.spanned(s);
-                    self.facts.env_models.push(spanned);
-                }
+            Expr::BoolOp(b) if b.op == BoolOp::And => return self.and_chain(&b.values),
+            Expr::If(i) => {
+                self.guarded(&i.test, |v| v.visit_expr(&i.body));
+                return self.visit_expr(&i.orelse);
             }
+            Expr::Subscript(sub) => self.env_model(sub),
             Expr::Attribute(a) => self.private_attr(a, expr),
             _ => {}
         }

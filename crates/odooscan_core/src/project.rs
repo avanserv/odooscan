@@ -207,7 +207,9 @@ fn parse_module_files(module: &mut Module) {
                     suppressions,
                 }),
                 _ => {
-                    let model = path.file_stem()?.to_string_lossy().into_owned();
+                    // `model-suffix.csv` loads into model, so one model can have several files.
+                    let stem = path.file_stem()?.to_string_lossy();
+                    let model = stem.split('-').next().unwrap_or_default().to_owned();
                     Err(SourceFile {
                         facts: csvdata::analyze(&text, &model),
                         path,

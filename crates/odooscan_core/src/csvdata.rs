@@ -62,6 +62,7 @@ fn row_ids(facts: &mut DataFacts, row: &csv::StringRecord, columns: &[(&str, boo
             id: id.to_owned(),
             model: Some(model.to_owned()),
             pos,
+            assigned: false,
         });
     }
     for (i, (_, is_ref)) in columns.iter().enumerate() {

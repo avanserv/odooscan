@@ -25,14 +25,6 @@ const EXTRA_FIELDS: &[(&str, &str)] = &[("ir.rule", "global")];
 /// BaseModel methods that fields commonly name as compute or search.
 const BASE_METHODS: &[&str] = &["_compute_display_name", "_search_display_name"];
 
-const RUNTIME_XMLIDS: &[&str] = &[
-    "stock.stock_location_stock",
-    "stock.stock_location_company",
-    "stock.picking_type_in",
-    "stock.picking_type_out",
-    "stock.picking_type_internal",
-];
-
 pub fn full_id(module: &str, id: &str) -> String {
     if id.contains('.') {
         id.to_owned()
@@ -153,8 +145,8 @@ fn data_ids<'m>(
     }
 }
 
-/// Ids of records Odoo creates alongside others or from Python code, with the module they belong to.
-fn derived_ids(modules: &[Module], by_name: &FxHashMap<&str, usize>, models: &Models) -> Vec<(String, usize)> {
+/// Ids of records Odoo creates alongside others, with the module they belong to.
+fn derived_ids(modules: &[Module], models: &Models) -> Vec<(String, usize)> {
     // A record of a model with _inherits also gets an id for each parent record Odoo creates,
     // e.g. <cron id>_ir_actions_server for an ir.cron.
     let mut derived = vec![];
@@ -169,12 +161,6 @@ fn derived_ids(modules: &[Module], by_name: &FxHashMap<&str, usize>, models: &Mo
                     mi,
                 ));
             }
-        }
-    }
-    // Records Python code creates with an XML id, such as the locations of the first warehouse.
-    for id in RUNTIME_XMLIDS {
-        if let Some(&mi) = by_name.get(id.split_once('.').map_or("", |(m, _)| m)) {
-            derived.push(((*id).to_owned(), mi));
         }
     }
     derived
@@ -265,7 +251,7 @@ impl<'m> Index<'m> {
             class_ids(mi, module, &mut models, &mut model_by_xmlid, &mut xmlids);
             data_ids(mi, module, &by_name, &mut xmlids, &mut views);
         }
-        for (id, mi) in derived_ids(modules, &by_name, &models) {
+        for (id, mi) in derived_ids(modules, &models) {
             xmlids.entry(id).or_default().push(XmlIdDef { module: mi });
         }
         let models_with_access = access_models(modules, &model_by_xmlid);
