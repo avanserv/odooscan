@@ -268,10 +268,11 @@ fn orm_call(call: &CallExpression, lines: &Lines) -> Option<OrmCall> {
         Argument::StringLiteral(s) => literal(s, lines),
         _ => None,
     };
-    Some(OrmCall {
-        model: literal(0)?,
-        method: if method == "call" { Some(literal(1)?) } else { None },
-    })
+    let call = OrmCall {
+        model: literal(0),
+        method: if method == "call" { literal(1) } else { None },
+    };
+    (call.model.is_some() || call.method.is_some()).then_some(call)
 }
 
 /// A string's value, placed after its opening quote.
@@ -405,13 +406,14 @@ odoo.define("@web/legacy", [], function () {});
     }
 
     #[test]
-    fn collects_orm_calls_with_literal_models() {
+    fn collects_orm_calls_with_literal_names() {
         let facts = analyze(
             r#"this.orm.call("res.partner", "action_x", []);
 orm.silent.searchRead("res.users", [], []);
 this.env.services.orm.cache({ type: "disk" }).call("res.company", "read", []);
 this.orm.call(this.props.resModel, "write", []);
 this.orm.call("res.partner", method, []);
+this.orm.call(model, method, []);
 this.rpc.call("res.partner", "x");
 "#,
         );
@@ -420,12 +422,20 @@ this.rpc.call("res.partner", "x");
             .iter()
             .map(|c| {
                 let method = c.method.as_ref().map_or("", |m| m.value.as_str());
-                format!("{}:{}:{}", c.model.pos.col, c.model.value, method)
+                let model = c.model.as_ref().map_or("", |m| m.value.as_str());
+                let col = c.model.as_ref().or(c.method.as_ref()).map_or(0, |s| s.pos.col);
+                format!("{col}:{model}:{method}")
             })
             .collect();
         assert_eq!(
             calls,
-            ["16:res.partner:action_x", "24:res.users:", "53:res.company:read"]
+            [
+                "16:res.partner:action_x",
+                "24:res.users:",
+                "53:res.company:read",
+                "37::write",
+                "16:res.partner:"
+            ]
         );
     }
 

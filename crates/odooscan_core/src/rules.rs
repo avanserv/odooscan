@@ -119,6 +119,7 @@ rules! {
     "OD604" "unknown-rpc-method" Correctness Error None, true, "orm.call() names a method its model does not have.";
     "OD605" "unknown-template" Correctness Error Some(">=17.0"), true, "A component or a t-inherit names a template no indexed bundle defines.";
     "OD606" "unmatched-template-locator" Correctness Error Some(">=17.0"), true, "A template locates an element its parent templates do not have.";
+    "OD607" "private-rpc-method" Correctness Error None, false, "orm.call() names a private method, which Odoo refuses to call over RPC.";
 }
 
 pub fn rule(code: &str) -> &'static Rule {

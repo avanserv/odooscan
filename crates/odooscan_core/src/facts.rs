@@ -249,10 +249,11 @@ pub struct JsPatch {
     pub supers: Vec<Spanned<String>>,
 }
 
-/// A call of the `orm` service with a literal model, such as `this.orm.call("x", "m", ...)`.
+/// A call of the `orm` service with a literal model or method, such as `this.orm.call("x", "m", ...)`.
 #[derive(Debug)]
 pub struct OrmCall {
-    pub model: Spanned<String>,
+    /// The model when it is a literal; a call naming a private method fails whatever the model.
+    pub model: Option<Spanned<String>>,
     /// The method `call` names; the other service methods map to methods every model has.
     pub method: Option<Spanned<String>>,
 }
