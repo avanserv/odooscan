@@ -41,6 +41,7 @@ pub fn check_module<'m>(index: &Index<'m>, mi: usize, series: Option<Series>) ->
         if let Some(e) = &file.facts.syntax_error {
             out.push(&file.path, "OD000", e.pos, e.value.clone());
         }
+        private_rpc(&mut out, file);
     }
     if index.has_base {
         let scope = index.scope(mi);
@@ -94,6 +95,18 @@ fn es_modules<'a, 'm>(
                 Annotation::None => unannotated,
             }
     })
+}
+
+/// The server refuses to dispatch a method whose name starts with `_` to a model.
+fn private_rpc<'m>(out: &mut Out<'m>, file: &'m SourceFile<JsFacts>) {
+    let calls = file.facts.orm_calls.iter().filter_map(|c| c.method.as_ref());
+    for method in calls.filter(|m| m.value.starts_with('_')) {
+        let message = format!(
+            "method '{}' is private, so the server refuses to call it over RPC",
+            method.value
+        );
+        out.push(&file.path, "OD607", method.pos, message);
+    }
 }
 
 fn manifest_files<'m>(module: &'m Module, out: &mut Out<'m>) {
@@ -370,9 +383,11 @@ impl<'m> Ctx<'_, 'm> {
     }
 
     fn orm_call(&self, out: &mut Out<'m>, path: &'m Path, call: &OrmCall) {
-        let model = &call.model;
+        let Some(model) = &call.model else {
+            return;
+        };
         let message = match self.index.model_status(&model.value, self.scope, None) {
-            Status::Visible => return self.orm_method(out, path, call),
+            Status::Visible => return self.orm_method(out, path, call, &model.value),
             Status::Hidden(m)
                 if !self
                     .index
@@ -389,11 +404,15 @@ impl<'m> Ctx<'_, 'm> {
     }
 
     /// A method from a module outside the index, such as an Enterprise one, may be the one called.
-    fn orm_method(&self, out: &mut Out<'m>, path: &'m Path, call: &OrmCall) {
-        let Some(method) = call.method.as_ref().filter(|_| !self.partial && !self.dynamic) else {
+    /// A private method is OD607's, whether the model has it or not.
+    fn orm_method(&self, out: &mut Out<'m>, path: &'m Path, call: &OrmCall, model: &str) {
+        let Some(method) = call
+            .method
+            .as_ref()
+            .filter(|m| !self.partial && !self.dynamic && !m.value.starts_with('_'))
+        else {
             return;
         };
-        let model = &call.model.value;
         let message = match self.index.rpc_method(model, &method.value, self.scope) {
             Status::Visible => return,
             Status::Hidden(m) => format!(

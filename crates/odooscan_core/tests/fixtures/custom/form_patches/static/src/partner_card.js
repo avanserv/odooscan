@@ -6,5 +6,7 @@ export class PartnerCard {
         await orm.silent.searchRead("res.partner.title", [], []);
         await this.orm.read("mail.thread", [1], []);
         await this.orm.call(this.props.resModel, "write", []);
+        await this.orm.call("res.partner", "_compute_display_name", []);
+        await this.orm.call(this.props.resModel, "_onchange_partner", []);
     }
 }

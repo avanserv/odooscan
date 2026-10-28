@@ -71,6 +71,8 @@ custom/form_patches/static/src/partner_card.js:4:45: OD604 model 'res.partner' h
 custom/form_patches/static/src/partner_card.js:5:45: OD604 method 'action_follow' of res.partner comes from module mail, which is not in depends
 custom/form_patches/static/src/partner_card.js:6:38: OD603 no indexed module defines model 'res.partner.title'
 custom/form_patches/static/src/partner_card.js:7:30: OD603 model 'mail.thread' comes from module mail, which is not in depends
+custom/form_patches/static/src/partner_card.js:9:45: OD607 method '_compute_display_name' is private, so the server refuses to call it over RPC
+custom/form_patches/static/src/partner_card.js:10:51: OD607 method '_onchange_partner' is private, so the server refuses to call it over RPC
 custom/form_patches/static/src/quick_form.js:21:22: OD602 neither QuickForm nor its parents have 'discard', so super.discard() fails
 custom/form_patches/static/src/quick_form_card.js:8:24: OD605 no indexed bundle defines template 'form_patches.QuickFormBadge'
 custom/form_patches/static/src/quick_form_card.xml:14:9: OD606 no <div> with class 'o_form_status' in template web.FormController or the templates that extend it
