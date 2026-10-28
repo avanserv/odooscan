@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.7.0](https://github.com/avanserv/odooscan/compare/v0.6.0...v0.7.0) (2026-10-28)
+
+
+### Features
+
+* **checks:** Follow tainted data across model methods ([#43](https://github.com/avanserv/odooscan/issues/43)) ([5d311cb](https://github.com/avanserv/odooscan/commit/5d311cbb16dcab6bb175c17b983fb80d98f02c70))
+* **taint:** Report request data that reaches SQL, eval, Markup or a sudo() write ([#42](https://github.com/avanserv/odooscan/issues/42)) ([b8925c0](https://github.com/avanserv/odooscan/commit/b8925c0cf98e5e72d1bf051d5ec410ba2197a37d))
+
 ## [0.6.0](https://github.com/avanserv/odooscan/compare/v0.5.0...v0.6.0) (2026-10-28)
 
 
