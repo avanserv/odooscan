@@ -2233,6 +2233,12 @@
       "count": 1
     },
     {
+      "path": "addons/test_base_automation/models/test_base_automation.py",
+      "code": "OD209",
+      "message": "module test_base_automation already defines model 'base.automation.lead.thread.test', and this class replaces it; extend it with _inherit = 'base.automation.lead.thread.test'",
+      "count": 1
+    },
+    {
       "path": "addons/test_mail/security/ir.access.csv",
       "code": "OD402",
       "message": "base.group_portal gets write, create or unlink on mail.test.access; public and portal access should be read-only and go through controllers",

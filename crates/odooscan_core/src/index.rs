@@ -292,6 +292,33 @@ impl<'m> Index<'m> {
         Scope { visible }
     }
 
+    /// Every class that defines or extends `model`, with its module.
+    pub fn classes(&self, model: &str) -> &[(usize, &'m ClassFact)] {
+        self.models.get(model).map(Vec::as_slice).unwrap_or_default()
+    }
+
+    /// Whether `from` depends on `to`, directly or through other modules.
+    pub fn reaches(&self, from: usize, to: usize) -> bool {
+        let mut seen = vec![false; self.modules.len()];
+        let mut stack = vec![from];
+        while let Some(m) = stack.pop() {
+            if m == to {
+                return true;
+            }
+            if std::mem::replace(&mut seen[m], true) {
+                continue;
+            }
+            stack.extend(
+                self.modules[m]
+                    .manifest
+                    .depends
+                    .iter()
+                    .filter_map(|d| self.by_name.get(d.value.as_str())),
+            );
+        }
+        false
+    }
+
     pub fn has_model(&self, model: &str) -> bool {
         self.models.contains_key(model)
     }
@@ -369,6 +396,21 @@ impl<'m> Index<'m> {
             ftype: &first.ftype,
             comodel,
         }))
+    }
+
+    /// Every in-scope definition of the field a dotted path ends on, or None when the path does not
+    /// resolve or ends on a field every model has.
+    pub fn path_target(&self, model: &str, path: &str, scope: &Scope) -> Option<Vec<&'m FieldFact>> {
+        let (head, last) = match path.rsplit_once('.') {
+            Some((head, last)) => (self.related_comodel(model, head, scope, 0)?, last),
+            None => (model.to_owned(), path),
+        };
+        let defs: Vec<_> = self
+            .field_defs(&head, last, Some(scope))
+            .into_iter()
+            .map(|(_, _, f)| f)
+            .collect();
+        (!defs.is_empty()).then_some(defs)
     }
 
     fn related_comodel(&self, model: &str, path: &str, scope: &Scope, depth: u8) -> Option<String> {

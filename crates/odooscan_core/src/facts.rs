@@ -83,6 +83,8 @@ pub struct ClassFact {
     pub methods: Vec<String>,
     /// Field paths given to `@api.depends`, `@api.onchange` and `@api.constrains`.
     pub paths: Vec<Spanned<String>>,
+    /// The fields `_order` sorts by and `_rec_name` names, which must exist on the model.
+    pub order_fields: Vec<Spanned<String>>,
 }
 
 #[derive(Debug, Default)]

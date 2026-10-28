@@ -30,6 +30,11 @@ custom/bad_sale/models/models.py:48:62: OD206 no indexed module defines model 'b
 custom/bad_sale/models/models.py:51:7: OD401 model 'bad.order.line' has no ir.model.access rule, so only the superuser can use it
 custom/bad_sale/models/models.py:57:9: OD113 fields_view_get() is removed; override _get_view() or get_views() instead
 custom/bad_sale/models/models.py:64:12: OD205 'name' is a Char field elsewhere and is redefined here as Text
+custom/bad_sale/models/registry.py:6:14: OD203 'stat': bad.registry has no field 'stat'
+custom/bad_sale/models/registry.py:7:17: OD203 'titel': bad.registry has no field 'titel'
+custom/bad_sale/models/registry.py:10:40: OD207 'country_name' is a Char field related to 'partner_id.country_id', which is a Many2one field
+custom/bad_sale/models/registry.py:12:53: OD208 inverse 'label' on bad.registry.note is a Char field, not a Many2one
+custom/bad_sale/models/registry.py:26:7: OD209 module base already defines model 'res.partner', and this class replaces it; extend it with _inherit = 'res.partner'
 custom/bad_sale/security/ir.model.access.csv:2:1: OD402 base.group_public gets write, create or unlink on model_bad_order; public and portal access should be read-only and go through controllers
 custom/bad_sale/views/locators.xml:8:17: OD310 no <field name="nmae"> in view base.view_partner_simple or the views that extend it
 custom/bad_sale/views/locators.xml:9:17: OD310 no <group name="mian"> in view base.view_partner_simple or the views that extend it
@@ -47,5 +52,7 @@ custom/bad_sale/views/views.xml:34:9: OD309 res.partner has no field 'email'
 custom/bad_sale/views/views.xml:36:5: OD303 XML id 'partner_demo' is already defined earlier in this file
 custom/bad_sale/views/views.xml:49:9: OD307 t-raw renders unescaped HTML; use t-out and wrap trusted HTML in Markup
 custom/bad_sale/views/views.xml:53:9: OD306 view_mode 'tree' is renamed 'list'
+custom/cycle_a/__manifest__.py:1:66: OD504 module 'cycle_b' depends back on cycle_a, so Odoo installs neither
+custom/cycle_b/__manifest__.py:1:58: OD504 module 'cycle_a' depends back on cycle_b, so Odoo installs neither
 custom/modern19/models/partner.py:6:5: OD110 _sql_constraints is ignored; declare models.Constraint, models.Index or models.UniqueIndex attributes instead
 custom/modern19/models/partner.py:9:9: OD109 self._cr is deprecated; use self.env.cr

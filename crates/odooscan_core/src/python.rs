@@ -312,6 +312,7 @@ impl PyVisitor<'_> {
             fields: vec![],
             methods: vec![],
             paths: vec![],
+            order_fields: vec![],
         };
         for stmt in &class.body {
             match stmt {
@@ -344,7 +345,8 @@ impl PyVisitor<'_> {
                     *name = str_lit(value).map(str::to_owned);
                     self.facts.dynamic_models |= name.is_none();
                 }
-                "_inherit" => fact.inherit = strings(value).into_iter().map(|s| self.spanned(s)).collect(),
+                "_inherit" => self.inherit(value, fact, name.as_deref()),
+                "_order" | "_rec_name" => self.order_fields(value, fact),
                 "_inherits" => {
                     if let Expr::Dict(d) = value {
                         fact.inherits = str_pairs(d);
@@ -356,6 +358,34 @@ impl PyVisitor<'_> {
                     "_sql_constraints is ignored; declare models.Constraint, models.Index or models.UniqueIndex attributes instead",
                 ),
                 field_name => self.class_field(field_name, value, fact),
+            }
+        }
+    }
+
+    /// `_inherit = _name` extends the model the class names.
+    fn inherit(&mut self, value: &Expr, fact: &mut ClassFact, name: Option<&str>) {
+        fact.inherit = match (value, name) {
+            (Expr::Name(n), Some(name)) if n.id.as_str() == "_name" => vec![Spanned {
+                value: name.to_owned(),
+                pos: self.loc.at(value),
+            }],
+            _ => strings(value).into_iter().map(|s| self.spanned(s)).collect(),
+        };
+    }
+
+    /// The field of each `field [asc|desc]` term; a term that is an SQL expression is not one.
+    fn order_fields(&mut self, value: &Expr, fact: &mut ClassFact) {
+        let Some(s) = value.as_string_literal_expr() else {
+            return;
+        };
+        let pos = self.loc.at(s);
+        for term in s.value.to_str().split(',') {
+            let field = term.split_whitespace().next().unwrap_or_default();
+            if !field.is_empty() && field.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '.') {
+                fact.order_fields.push(Spanned {
+                    value: field.to_owned(),
+                    pos,
+                });
             }
         }
     }

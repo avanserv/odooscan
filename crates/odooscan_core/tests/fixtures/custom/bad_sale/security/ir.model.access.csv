@@ -1,3 +1,6 @@
 id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
 access_bad_order_public,bad.order public,model_bad_order,base.group_public,1,1,0,0
 access_bad_quiet_wizard,bad.quiet.wizard,model_bad_quiet_wizard,base.group_user,1,1,1,0
+access_bad_registry,bad.registry,model_bad_registry,base.group_user,1,0,0,0
+access_bad_registry_note,bad.registry.note,model_bad_registry_note,base.group_user,1,0,0,0
+access_res_partner,res.partner,base.model_res_partner,base.group_user,1,0,0,0
