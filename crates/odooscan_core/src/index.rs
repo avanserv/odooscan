@@ -1,8 +1,10 @@
 use globset::{GlobBuilder, GlobSetBuilder};
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use crate::facts::{Annotation, ArchElement, ClassFact, FieldFact, Heritage, JsClass, ViewFact};
-use crate::project::Module;
+use crate::facts::{
+    Annotation, ArchElement, ClassFact, FieldFact, FlowSummary, Heritage, JsClass, PyFacts, Receiver, ViewFact,
+};
+use crate::project::{Module, SourceFile};
 
 /// Fields every model has without declaring them.
 const MAGIC_FIELDS: &[&str] = &[
@@ -165,6 +167,17 @@ fn model_xmlid(model: &str) -> String {
 type Models<'m> = FxHashMap<&'m str, Vec<(usize, &'m ClassFact)>>;
 
 type XmlIds = FxHashMap<String, Vec<XmlIdDef>>;
+
+/// The flow summary of a function, with the file and module it is in.
+#[derive(Clone, Copy)]
+pub struct FlowRef<'m> {
+    pub module: usize,
+    pub file: &'m SourceFile<PyFacts>,
+    pub summary: &'m FlowSummary,
+}
+
+/// By model, then method name.
+type MethodFlows<'m> = FxHashMap<&'m str, FxHashMap<&'m str, Vec<FlowRef<'m>>>>;
 
 /// Every node of an id: a module may redefine another module's view, or extend a template in place.
 type Nodes<'m> = FxHashMap<String, Vec<ViewNode<'m>>>;
@@ -534,6 +547,8 @@ pub struct Index<'m> {
     patched: Patched<'m>,
     /// Classes a subclass with a template of its own extends.
     template_bases: FxHashSet<ClassKey>,
+    /// Flow summaries of model methods, by model and method name.
+    method_flows: MethodFlows<'m>,
 }
 
 impl<'m> Index<'m> {
@@ -572,6 +587,7 @@ impl<'m> Index<'m> {
             by_name,
             patched: FxHashMap::default(),
             template_bases: FxHashSet::default(),
+            method_flows: method_flows(modules),
         };
         index.patched = index.patched_classes();
         index.template_bases = index.template_bases();
@@ -807,6 +823,15 @@ impl<'m> Index<'m> {
             );
         }
         Scope { visible }
+    }
+
+    /// The summaries of every definition of a model's method, overrides included.
+    pub fn method_flows(&self, model: &str, method: &str) -> &[FlowRef<'m>] {
+        self.method_flows
+            .get(model)
+            .and_then(|m| m.get(method))
+            .map(Vec::as_slice)
+            .unwrap_or_default()
     }
 
     /// Every class that defines or extends `model`, with its module.
@@ -1128,4 +1153,20 @@ impl PathError<'_> {
             }
         }
     }
+}
+
+fn method_flows(modules: &[Module]) -> MethodFlows<'_> {
+    let mut flows: MethodFlows = FxHashMap::default();
+    for (module, m) in modules.iter().enumerate() {
+        for file in &m.python {
+            for summary in &file.facts.flows {
+                if let Some(Receiver::Model(model)) = &summary.owner {
+                    let at = FlowRef { module, file, summary };
+                    let methods = flows.entry(model.as_str()).or_default();
+                    methods.entry(summary.method.as_str()).or_default().push(at);
+                }
+            }
+        }
+    }
+    flows
 }

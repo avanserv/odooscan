@@ -2,6 +2,7 @@ mod checks;
 mod csvdata;
 mod domain;
 mod facts;
+mod flows;
 mod index;
 mod js;
 mod manifest;
