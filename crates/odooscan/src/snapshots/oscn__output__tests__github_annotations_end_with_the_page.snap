@@ -1,0 +1,6 @@
+---
+source: crates/odooscan/src/output.rs
+expression: "String::from_utf8(out).unwrap()"
+---
+::error file=bad_sale/models/sale_order.py,line=7,col=5,title=OD203 unresolved-field-path::'partner_id.cde': res.partner has no field 'cde'%0A%0ASee https://avanserv.github.io/odooscan/rules/OD203/
+::notice file=bad_sale/models/sale_order.py,line=12,col=5,title=OD111 public-route-sudo::route with auth='public' calls sudo()%0A%0ASee https://avanserv.github.io/odooscan/rules/OD111/

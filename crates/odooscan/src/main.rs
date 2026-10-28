@@ -2,6 +2,7 @@ mod baseline;
 mod config;
 mod output;
 
+use std::io::IsTerminal;
 use std::path::{Component, Path, PathBuf};
 use std::process::ExitCode;
 use std::time::Instant;
@@ -233,7 +234,7 @@ fn print(args: &CheckArgs, diags: &[&Diagnostic], cwd: &Path) {
     let mut stdout = std::io::stdout().lock();
     match args.format {
         Format::Text if args.statistics => output::print_statistics(&mut stdout, diags),
-        Format::Text => output::print_text(&mut stdout, diags, &rel),
+        Format::Text => output::print_text(&mut stdout, diags, &rel, std::io::stdout().is_terminal()),
         Format::Json => {
             let _ = serde_json::to_writer_pretty(&mut stdout, diags);
         }

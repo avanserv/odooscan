@@ -1,5 +1,5 @@
 # insta writes the snapshots byte for byte, and a fixer applied there fails the next `cargo test`.
-exclude: ^crates/[^/]+/tests/snapshots/
+exclude: ^crates/[^/]+/(src|tests)/snapshots/
 
 repos:
 

@@ -1,0 +1,5 @@
+---
+source: crates/odooscan/src/output.rs
+expression: text(true).escape_debug().to_string()
+---
+bad_sale/models/sale_order.py:7:5: \u{1b}]8;;https://avanserv.github.io/odooscan/rules/OD203/\u{1b}\\\u{1b}[1;31mOD203\u{1b}[0m\u{1b}]8;;\u{1b}\\ \'partner_id.cde\': res.partner has no field \'cde\'\nbad_sale/models/sale_order.py:12:5: \u{1b}]8;;https://avanserv.github.io/odooscan/rules/OD111/\u{1b}\\\u{1b}[1;36mOD111\u{1b}[0m\u{1b}]8;;\u{1b}\\ route with auth=\'public\' calls sudo()\n

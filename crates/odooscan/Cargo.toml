@@ -13,6 +13,9 @@ serde.workspace = true
 serde_json.workspace = true
 toml.workspace = true
 
+[dev-dependencies]
+insta.workspace = true
+
 # Short to type; the package, configuration and suppression comments keep the project's name.
 [[bin]]
 name = "oscn"

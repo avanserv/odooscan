@@ -1,0 +1,36 @@
+---
+source: crates/odooscan/src/output.rs
+expression: "serde_json::to_string_pretty(&report).unwrap()"
+---
+[
+  {
+    "check_name": "OD203",
+    "content": {
+      "body": "[OD203 unresolved-field-path](https://avanserv.github.io/odooscan/rules/OD203/)"
+    },
+    "description": "OD203: 'partner_id.cde': res.partner has no field 'cde'",
+    "fingerprint": "f0b041070117bf35",
+    "location": {
+      "lines": {
+        "begin": 7
+      },
+      "path": "bad_sale/models/sale_order.py"
+    },
+    "severity": "critical"
+  },
+  {
+    "check_name": "OD111",
+    "content": {
+      "body": "[OD111 public-route-sudo](https://avanserv.github.io/odooscan/rules/OD111/)"
+    },
+    "description": "OD111: route with auth='public' calls sudo()",
+    "fingerprint": "f6967fc25ab00922",
+    "location": {
+      "lines": {
+        "begin": 12
+      },
+      "path": "bad_sale/models/sale_order.py"
+    },
+    "severity": "info"
+  }
+]
