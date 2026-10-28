@@ -36,6 +36,11 @@ A rule is registered in `crates/odooscan_core/src/rules.rs` with its code, serie
 and category, and raised from the file that owns its facts: `python.rs`, `xml.rs`, `csvdata.rs`,
 `manifest.rs`, or `checks.rs` when it needs the index.
 
+Every rule comes with its page, `docs/rules/<code>.md`, and a row in `docs/rules/index.md`. A
+test holds each page's heading and facts table to the registry. The page's failing example must
+fire the rule and its fixed one must not: check both on a scratch module before opening the pull
+request. A code is never renumbered or reused: a retired rule's code stays a gap.
+
 Every rule fires at least once in `crates/odooscan_core/tests/fixtures/custom`, and a rule gated
 by series also has a module of an earlier series where it stays silent. After changing what a rule
 reports, run `cargo insta review` and read every changed line.
