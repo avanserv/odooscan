@@ -6,6 +6,10 @@ class MailThread(models.AbstractModel):
 
     message_ids = fields.One2many("res.partner", "parent_id")
 
+    def _valid_field_parameter(self, field, option):
+        accepted = option in {"tracking"}
+        return accepted or super()._valid_field_parameter(field, option)
+
 
 class ResPartner(models.Model):
     _inherit = "res.partner"

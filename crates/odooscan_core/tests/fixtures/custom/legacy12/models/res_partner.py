@@ -11,3 +11,5 @@ class ResPartner(models.Model):
     country_currency_id = fields.Many2one("res.currency")
     balance = fields.Monetary(currency_field="country_currency_id")
     parent_balance = fields.Monetary(related="parent_id.balance")
+    company_id = fields.Many2one("res.company")
+    home_country_id = fields.Many2one("res.country", check_company=True)

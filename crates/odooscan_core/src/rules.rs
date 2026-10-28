@@ -41,10 +41,13 @@ pub const SUPERSEDED: &[(&str, &str)] = &[("OD101", "OD701")];
 /// Severities that replace a rule's own from some series on, as (code, series range, severity).
 /// From 20.0, `ir.access` rows only grant access, so a model meant for the superuser alone has none,
 /// and Odoo refuses a model whose `_inherits` field is not required with ondelete 'cascade' or
-/// 'restrict' instead of fixing it.
+/// 'restrict' instead of fixing it. From 18.0, a `check_company` field of `res.company`, of a model
+/// with `company_id` or `company_ids`, or that is company-dependent, gets the domain its comodel's
+/// `_check_company_domain` gives, which by default names a `company_id` the comodel may lack.
 const SEVERITY_BY_SERIES: &[(&str, &str, Severity)] = &[
     ("OD401", ">=20.0", Severity::Info),
     ("OD218", ">=20.0", Severity::Error),
+    ("OD222", ">=18.0", Severity::Error),
 ];
 
 impl Rule {
@@ -97,6 +100,7 @@ rules! {
     "OD113" "fields-view-get-removed" Deprecation Error Some(">=16.0"), false, "fields_view_get() is removed; override _get_view() or get_views().";
     "OD114" "depends-on-id" Correctness Error None, false, "@api.depends names the field id, which Odoo refuses.";
     "OD115" "dotted-onchange-constrains" Correctness Warning None, false, "@api.onchange or @api.constrains names a dotted path, which Odoo ignores.";
+    "OD116" "field-shadows-model-member" Correctness Error None, false, "A field is named like a method or an attribute every model has.";
     "OD201" "unknown-model" Correctness Error None, true, "The model is not defined by any indexed module.";
     "OD202" "model-not-in-depends" Correctness Error None, true, "The model comes from a module missing from depends.";
     "OD203" "unresolved-field-path" Correctness Error None, true, "A field path does not resolve on its model.";
@@ -115,6 +119,10 @@ rules! {
     "OD216" "selection-add-without-ondelete" Correctness Error Some(">=14.0"), true, "selection_add leaves a value of a required Selection with ondelete 'set null'.";
     "OD217" "parent-store-without-path" Correctness Error None, true, "A model sets _parent_store without an indexed parent_path field.";
     "OD218" "delegation-field-not-required" Correctness Warning None, true, "A field that delegates to a parent model is not required with ondelete cascade or restrict.";
+    "OD219" "tracking-without-mail-thread" Correctness Warning Some(">=14.0"), true, "A field sets tracking on a model that does not inherit mail.thread, which Odoo ignores.";
+    "OD220" "duplicate-field-label" Correctness Warning None, true, "Two fields of a model have the same label.";
+    "OD221" "self-dependency-not-recursive" Correctness Warning Some(">=15.0"), true, "A computed field depends on itself through other records without recursive=True.";
+    "OD222" "check-company-without-company" Correctness Warning Some(">=13.0"), true, "A field sets check_company to a comodel without company_id.";
     "OD301" "unresolved-xmlid" Correctness Error None, true, "The XML id is not defined by its module.";
     "OD302" "xmlid-not-in-depends" Correctness Error None, true, "The XML id comes from a module missing from depends.";
     "OD303" "duplicate-xmlid" Correctness Warning None, false, "The same XML id is defined twice in one file.";
@@ -196,6 +204,15 @@ mod tests {
         assert_eq!(od218.severity_for(Series::parse("19.0")), Severity::Warning);
         assert_eq!(od218.severity_for(Series::parse("20.0")), Severity::Error);
         assert_eq!(od218.severity_for(None), Severity::Warning);
+    }
+
+    #[test]
+    fn company_check_rule_is_an_error_from_18() {
+        let od222 = rule("OD222");
+        assert_eq!(od222.severity_for(Series::parse("17.0")), Severity::Warning);
+        assert_eq!(od222.severity_for(Series::parse("18.0")), Severity::Error);
+        assert_eq!(od222.severity_for(Series::parse("20.0")), Severity::Error);
+        assert_eq!(od222.severity_for(None), Severity::Warning);
     }
 
     #[test]

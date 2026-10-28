@@ -167,9 +167,12 @@ fn field_call(expr: &Expr) -> Option<(&str, &ast::ExprCall)> {
 fn positional_names(ftype: &str) -> &'static [&'static str] {
     match ftype {
         "Monetary" => &["string", "currency_field"],
+        "Float" => &["string", "digits"],
+        "Many2one" => &["comodel_name", "string"],
+        "One2many" => &["comodel_name", "inverse_name", "string"],
         "Many2many" => &["comodel_name", "relation", "column1", "column2", "string"],
         "Selection" | "Reference" => &["selection", "string"],
-        _ => &[],
+        _ => &["string"],
     }
 }
 
@@ -445,6 +448,7 @@ impl PyVisitor<'_> {
             fields: vec![],
             methods: vec![],
             paths: vec![],
+            depends: vec![],
             order_fields: vec![],
             rec_names_search: vec![],
             super_calls: vec![],
@@ -501,21 +505,30 @@ impl PyVisitor<'_> {
                     fact.rec_names_search = strings(value).into_iter().map(|s| self.spanned(s)).collect();
                 }
                 "_inherits" => self.inherits(value, fact),
-                "_table" => fact.table = Some(option_value(value)),
-                "_parent_store" | "_auto" => {
-                    let attr = Spanned {
-                        value: option_value(value),
-                        pos: self.loc.at(target),
-                    };
-                    fact.attrs.push((target.id.to_string(), attr));
-                }
-                "_sql_constraints" => self.diag(
-                    "OD110",
-                    target,
-                    "_sql_constraints is ignored; declare models.Constraint, models.Index or models.UniqueIndex attributes instead",
-                ),
-                field_name => self.class_field(field_name, value, fact),
+                _ => self.attr_or_field(target, value, fact),
             }
+        }
+    }
+
+    /// Any other class attribute: one that shapes the table, a company domain, `_sql_constraints`,
+    /// or else a field.
+    fn attr_or_field(&mut self, target: &ast::ExprName, value: &Expr, fact: &mut ClassFact) {
+        match target.id.as_str() {
+            "_table" => fact.table = Some(option_value(value)),
+            "_parent_store" | "_auto" | "_log_access" => {
+                let attr = Spanned {
+                    value: option_value(value),
+                    pos: self.loc.at(target),
+                };
+                fact.attrs.push((target.id.to_string(), attr));
+            }
+            "_check_company_domain" => fact.methods.push(target.id.to_string()),
+            "_sql_constraints" => self.diag(
+                "OD110",
+                target,
+                "_sql_constraints is ignored; declare models.Constraint, models.Index or models.UniqueIndex attributes instead",
+            ),
+            _ => self.class_field(target, value, fact),
         }
     }
 
@@ -565,8 +578,8 @@ impl PyVisitor<'_> {
         }
     }
 
-    fn class_field(&mut self, name: &str, value: &Expr, fact: &mut ClassFact) {
-        let Some(field) = self.field_fact(name, value) else {
+    fn class_field(&mut self, target: &ast::ExprName, value: &Expr, fact: &mut ClassFact) {
+        let Some(field) = self.field_fact(target, value) else {
             return;
         };
         if is_delegate(value)
@@ -580,7 +593,7 @@ impl PyVisitor<'_> {
         fact.fields.push(field);
     }
 
-    fn field_fact(&mut self, name: &str, value: &Expr) -> Option<FieldFact> {
+    fn field_fact(&mut self, target: &ast::ExprName, value: &Expr) -> Option<FieldFact> {
         let (ftype, call) = field_call(value)?;
         let relational = matches!(ftype, "Many2one" | "One2many" | "Many2many");
         let positional = |i: usize| call.arguments.args.get(i).and_then(|a| a.as_string_literal_expr());
@@ -606,7 +619,8 @@ impl PyVisitor<'_> {
         }
         let options = self.options(ftype, call);
         Some(FieldFact {
-            name: name.to_owned(),
+            name: target.id.to_string(),
+            name_pos: self.loc.at(target),
             ftype: ftype.to_owned(),
             pos: self.loc.at(value),
             comodel: comodel.map(|s| self.spanned(s)),
@@ -713,7 +727,7 @@ impl PyVisitor<'_> {
     fn decorator_checks(&mut self, func: &ast::StmtFunctionDef, fact: &mut ClassFact) {
         for decorator in &func.decorator_list {
             match &decorator.expression {
-                Expr::Call(call) => self.decorator_paths(call, fact),
+                Expr::Call(call) => self.decorator_paths(func.name.as_str(), call, fact),
                 Expr::Attribute(a)
                     if matches!(a.attr.as_str(), "multi" | "one") && tail_name(&a.value) == Some("api") =>
                 {
@@ -730,20 +744,26 @@ impl PyVisitor<'_> {
 
     /// The names given to `@api.depends`, `@api.onchange` and `@api.constrains`. The last two match
     /// field names only, so a dotted one is no path to resolve.
-    fn decorator_paths(&mut self, call: &ast::ExprCall, fact: &mut ClassFact) {
+    fn decorator_paths(&mut self, method: &str, call: &ast::ExprCall, fact: &mut ClassFact) {
         let Some(kind @ ("depends" | "onchange" | "constrains")) = tail_name(&call.func) else {
             return;
         };
+        let mut depends = vec![];
         for s in call.arguments.args.iter().filter_map(Expr::as_string_literal_expr) {
             let path = s.value.to_str();
-            if kind == "depends" && path.split('.').any(|segment| segment == "id") {
-                self.diag("OD114", s, depends_on_id(path));
-            }
-            if kind != "depends" && path.contains('.') {
+            if kind == "depends" {
+                if path.split('.').any(|segment| segment == "id") {
+                    self.diag("OD114", s, depends_on_id(path));
+                }
+                depends.push(self.spanned(s));
+            } else if path.contains('.') {
                 self.diag("OD115", s, dotted_name(kind, path));
             } else {
                 fact.paths.push(self.spanned(s));
             }
+        }
+        if !depends.is_empty() {
+            fact.depends.push((method.to_owned(), depends));
         }
     }
 
@@ -1033,7 +1053,20 @@ mod tests {
             option(&f, "currency_field"),
             Some(OptionValue::Str("company_currency_id".into()))
         );
-        assert!(field("fields.Char('Name')").options.is_empty());
+        assert_eq!(
+            option(&field("fields.Char('Name')"), "string"),
+            Some(OptionValue::Str("Name".into()))
+        );
+        assert_eq!(
+            option(&field("fields.Float('Rate', (3, 2))"), "digits"),
+            Some(OptionValue::Other)
+        );
+        let f = field("fields.Many2one('res.partner', 'Owner')");
+        assert_eq!(option(&f, "comodel_name"), Some(OptionValue::Str("res.partner".into())));
+        assert_eq!(option(&f, "string"), Some(OptionValue::Str("Owner".into())));
+        let f = field("fields.One2many('res.partner', 'parent_id', 'Contacts')");
+        assert_eq!(option(&f, "inverse_name"), Some(OptionValue::Str("parent_id".into())));
+        assert_eq!(option(&f, "string"), Some(OptionValue::Str("Contacts".into())));
     }
 
     #[test]
@@ -1125,6 +1158,13 @@ mod tests {
     }
 
     #[test]
+    fn records_where_a_field_is_named() {
+        let f = field("fields.Boolean()");
+        assert_eq!((f.name_pos.line, f.name_pos.col), (3, 5));
+        assert_eq!((f.pos.line, f.pos.col), (3, 9));
+    }
+
+    #[test]
     fn reads_the_table() {
         let facts = analyze("class X(models.Model):\n    _name = 'x'\n    _table = 'x_data'\n");
         assert_eq!(facts.classes[0].table, Some(OptionValue::Str("x_data".into())));
@@ -1151,6 +1191,45 @@ mod tests {
         let codes: Vec<_> = facts.diags.iter().map(|d| (d.code, d.pos.line)).collect();
         assert_eq!(codes, [("OD115", 4), ("OD115", 8)]);
         let paths: Vec<_> = facts.classes[0].paths.iter().map(|p| p.value.as_str()).collect();
-        assert_eq!(paths, ["partner_id", "partner_id.name"]);
+        assert_eq!(paths, ["partner_id"]);
+    }
+
+    #[test]
+    fn keeps_depends_paths_by_method() {
+        let facts = analyze(
+            "class X(models.Model):\n    _name = 'x'\n\n    @api.depends('child_ids.total', 'qty')\n    \
+             def _compute_total(self):\n        pass\n\n    @api.onchange('qty')\n    \
+             def _onchange_qty(self):\n        pass\n",
+        );
+        let class = &facts.classes[0];
+        let depends: Vec<_> = class
+            .depends
+            .iter()
+            .map(|(method, paths)| {
+                (
+                    method.as_str(),
+                    paths.iter().map(|p| p.value.as_str()).collect::<Vec<_>>(),
+                )
+            })
+            .collect();
+        assert_eq!(depends, [("_compute_total", vec!["child_ids.total", "qty"])]);
+        assert_eq!(
+            class.paths.iter().map(|p| p.value.as_str()).collect::<Vec<_>>(),
+            ["qty"]
+        );
+    }
+
+    #[test]
+    fn reads_log_access_and_an_assigned_company_domain() {
+        let facts = analyze(
+            "class X(models.Model):\n    _name = 'x'\n    _log_access = False\n    \
+             _check_company_domain = models.check_company_domain_parent_of\n",
+        );
+        let class = &facts.classes[0];
+        assert_eq!(
+            class.attr("_log_access").map(|a| &a.value),
+            Some(&OptionValue::Bool(false))
+        );
+        assert_eq!(class.methods, ["_check_company_domain"]);
     }
 }

@@ -9,9 +9,12 @@ use crate::facts::{
     RecordFact, Spanned, ViewFact, XmlRef,
 };
 use crate::flows;
-use crate::index::{Export, FieldDef, Index, JsSpec, Scope, Status, ViewTree, full_id, js_module_path, located};
+use crate::index::{
+    BASE_MODEL_METHODS, Export, FieldDef, FieldInfo, Index, JsSpec, RELATIONAL_TYPES, Scope, Status, ViewTree, full_id,
+    js_module_path, located,
+};
 use crate::project::{Module, SourceFile};
-use crate::series::Series;
+use crate::series::{self, Series};
 use crate::xml::{LOCATOR, UNKNOWN_CONTEXT};
 
 /// Directories of upgrade scripts, which name XML ids of past versions.
@@ -41,6 +44,7 @@ pub fn check_module<'m>(index: &Index<'m>, mi: usize, series: Option<Series>) ->
     let mut out = Out { diags: vec![] };
     manifest_files(module, &mut out);
     same_module_xmlids(module, &mut out);
+    shadowed_members(module, series, &mut out);
     for (_, file) in es_modules(index, mi, series) {
         if let Some(e) = &file.facts.syntax_error {
             out.push(&file.path, "OD000", e.pos, e.value.clone());
@@ -113,6 +117,83 @@ fn private_rpc<'m>(out: &mut Out<'m>, file: &'m SourceFile<JsFacts>) {
             method.value
         );
         out.push(&file.path, "OD607", method.pos, message);
+    }
+}
+
+/// Attributes every record has besides the methods of `BaseModel`.
+const RECORD_ATTRS: &[&str] = &["env", "ids", "pool"];
+
+/// Methods of `BaseModel` that only some series have, by the range of series that has them. 18.0
+/// deprecates `check_access_rights` and `check_access_rule` for `check_access` and `has_access`
+/// (`odoo/models.py:4503-4530`). The others are in 18.0 `odoo/models.py` or 20.0 `odoo/orm`, not
+/// both; 19.0 is not checked, so it falls in neither range.
+const MEMBER_SERIES: &[(&str, &[&str])] = &[
+    (">=18.0", &["check_access", "has_access"]),
+    (
+        ">=20.0",
+        &[
+            "_access_domain",
+            "_additional_allowed_keys_properties_definition",
+            "_can_return_content",
+            "_has_field_access",
+            "_make_access_error_message",
+            "_post_model_setup__",
+            "_read_grouping_sets",
+        ],
+    ),
+    (
+        "<=18.0",
+        &[
+            "toggle_active",
+            "check_access_rights",
+            "check_access_rule",
+            "_filter_access_rules",
+            "check_field_access_rights",
+            "_table_query",
+            "_where_calc",
+            "_setup_complete",
+            "copy_translations",
+            "_check_recursion",
+            "_check_m2m_recursion",
+            "_add_inherited_fields",
+        ],
+    ),
+];
+
+/// Methods of `BaseModel` that neither 18.0 nor 20.0 has, so the series that do are not known.
+/// The other methods are in both, and when they came is not known either, so they count in every
+/// series: `grouped`, `fetch` and `search_fetch` among them.
+const UNPLACED_MEMBERS: &[&str] = &["copy_multi", "_read", "_name_search"];
+
+/// Python finds a field before the member of `BaseModel` it is named like, so the model loses the
+/// member. Odoo never checks for it.
+fn shadowed_members<'m>(module: &'m Module, series: Option<Series>, out: &mut Out<'m>) {
+    for file in &module.python {
+        for field in file.facts.classes.iter().flat_map(|c| &c.fields) {
+            if let Some(member) = shadowed_member(&field.name, series) {
+                let message = format!(
+                    "field '{}' replaces the {member} of BaseModel on this model, so callers get the field instead; rename it",
+                    field.name
+                );
+                out.push(&file.path, "OD116", field.name_pos, message);
+            }
+        }
+    }
+}
+
+/// The member of `BaseModel` in `series` that a field called `name` replaces, as the message
+/// names it. A module of unknown series has only the members of every series.
+fn shadowed_member(name: &str, series: Option<Series>) -> Option<String> {
+    let range = MEMBER_SERIES.iter().find(|(_, names)| names.contains(&name));
+    if range.is_some_and(|(spec, _)| !series.is_some_and(|s| series::matches(spec, s))) {
+        return None;
+    }
+    if RECORD_ATTRS.contains(&name) {
+        Some(format!("attribute {name}"))
+    } else if BASE_MODEL_METHODS.contains(&name) && !UNPLACED_MEMBERS.contains(&name) {
+        Some(format!("method {name}()"))
+    } else {
+        None
     }
 }
 
@@ -505,6 +586,7 @@ impl<'m> Ctx<'_, 'm> {
         let paths = class
             .paths
             .iter()
+            .chain(class.depends.iter().flat_map(|(_, paths)| paths))
             .chain(&class.order_fields)
             .chain(self.rec_names_search(class));
         for p in paths.filter(|_| class.kind != ModelKind::Abstract) {
@@ -1024,6 +1106,77 @@ impl<'m> Field<'m> {
     }
 }
 
+/// The fields of a model as the registry builds them in scope, by name, and their labels.
+struct ModelFields<'m> {
+    model: &'m str,
+    fields: FxHashMap<&'m str, Field<'m>>,
+    labels: Vec<Label<'m>>,
+}
+
+/// The label Odoo gives a field of a model, and the definition of this module that decides it with
+/// its load key, if one does.
+struct Label<'m> {
+    text: String,
+    name: &'m str,
+    here: Option<(&'m FieldFact, (usize, Pos))>,
+}
+
+/// The fields Odoo adds to a model, with their labels; those after the first two only when the
+/// model logs access. See `Ctx::magic_labels` for the models that get the first two.
+const MAGIC_LABELS: &[(&str, &str)] = &[
+    ("id", "ID"),
+    ("display_name", "Display Name"),
+    ("create_uid", "Created by"),
+    ("create_date", "Created on"),
+    ("write_uid", "Last Updated by"),
+    ("write_date", "Last Updated on"),
+];
+
+/// The label Odoo derives from a field's name: without `_ids` or `_id`, underscores made spaces,
+/// in Python's title case, which capitalizes each letter that follows no other letter.
+fn derived_label(name: &str) -> String {
+    let stem = name
+        .strip_suffix("_ids")
+        .or_else(|| name.strip_suffix("_id"))
+        .unwrap_or(name);
+    let mut label = String::with_capacity(stem.len());
+    let mut after_letter = false;
+    for c in stem.chars() {
+        let cased = c.is_lowercase() || c.is_uppercase();
+        match (c, cased, after_letter) {
+            ('_', ..) => label.push(' '),
+            (_, true, true) => label.extend(c.to_lowercase()),
+            (_, true, false) => label.extend(c.to_uppercase()),
+            _ => label.push(c),
+        }
+        after_letter = cased;
+    }
+    label
+}
+
+/// What becomes of the field Odoo adds to a model under a name that indexed classes define too.
+enum MagicBase<'a> {
+    /// Classes of the model merge into it, so its label stands unless one sets `string`.
+    Kept(&'a str),
+    /// The class that introduces the model defines the field, so Odoo does not add its own.
+    Replaced,
+    /// A model it inherits defines the field too, and where Odoo merges that one is not modelled.
+    Unknown,
+}
+
+/// What becomes of the field Odoo adds as `name`, labelled `text`, given the definitions of
+/// `field`. Odoo adds `id` over whatever the introducing class defines.
+fn magic_base<'a>(name: &str, field: &Field, text: &'a str) -> MagicBase<'a> {
+    let introducer = |d: &FieldDef| d.1.model == field.model && d.1.new_model;
+    if name != "id" && field.defs.iter().any(introducer) {
+        MagicBase::Replaced
+    } else if field.defs.iter().any(|d| d.1.model != field.model) {
+        MagicBase::Unknown
+    } else {
+        MagicBase::Kept(text)
+    }
+}
+
 /// Where a definition's attribute is, or the definition when it does not set it.
 fn pos_of(own: &FieldFact, name: &str) -> Pos {
     own.option(name).map_or(own.pos, |o| o.pos)
@@ -1060,10 +1213,10 @@ fn set_null_values<'m>(own: &'m FieldFact, added: &'m [String], known: &FxHashSe
     Some(values)
 }
 
-/// Model and field definitions Odoo refuses or logs as wrong when it sets up the registry or
-/// creates the tables. Each rule reads every definition merged into the model, so none runs where
-/// a module in scope depends on one that is not indexed, on a model whose introducing class is out
-/// of scope, or on one with a plain Python base class, whose fields only Python knows.
+/// Model and field definitions Odoo refuses, ignores or logs as wrong when it loads the registry,
+/// or that fail once used. Each rule reads every definition merged into the model, so none runs
+/// where a module in scope depends on one that is not indexed, on a model whose introducing class
+/// is out of scope, or on one with a plain Python base class, whose fields only Python knows.
 impl<'m> Ctx<'_, 'm> {
     fn registry(&self, out: &mut Out<'m>) {
         if self.partial {
@@ -1072,12 +1225,16 @@ impl<'m> Ctx<'_, 'm> {
         let checked = |c: &&ClassFact| {
             self.index.introduced(&c.model, self.scope) && !self.index.plain_bases(&c.model, self.scope)
         };
-        let typed = |f: &&FieldFact| matches!(f.ftype.as_str(), "Monetary" | "Many2one" | "Many2many" | "Selection");
+        let mut models: FxHashMap<&'m str, ModelFields<'m>> = FxHashMap::default();
+        let mut reported_self_dependencies = FxHashSet::default();
         for file in &self.module.python {
             for class in file.facts.classes.iter().filter(checked) {
-                for own in class.fields.iter().filter(typed) {
-                    self.registry_field(out, &file.path, &class.model, own);
+                let model = class.model.as_str();
+                let fields = models.entry(model).or_insert_with(|| self.model_fields(model));
+                for own in &class.fields {
+                    self.registry_field(out, &file.path, fields, own);
                 }
+                self.self_dependencies(out, &file.path, class, fields, &mut reported_self_dependencies);
                 self.parent_store(out, &file.path, class);
                 for entry in &class.delegations {
                     self.delegation(out, &file.path, class, entry);
@@ -1086,34 +1243,71 @@ impl<'m> Ctx<'_, 'm> {
         }
     }
 
-    fn registry_field(&self, out: &mut Out<'m>, path: &'m Path, model: &'m str, own: &'m FieldFact) {
-        let Some(field) = self.merged(model, &own.name) else {
+    fn registry_field(&self, out: &mut Out<'m>, path: &'m Path, fields: &ModelFields<'m>, own: &'m FieldFact) {
+        let Some(field) = fields.fields.get(own.name.as_str()) else {
             return;
         };
         let Some(at) = field.position(own) else {
             return;
         };
         match own.ftype.as_str() {
-            "Monetary" => self.monetary(out, path, &field, own),
+            "Monetary" => self.monetary(out, path, field, own),
             "Many2one" => {
-                self.required_set_null(out, path, &field, own);
-                self.delegate_field(out, path, &field, own);
+                self.required_set_null(out, path, field, own);
+                self.delegate_field(out, path, field, own);
             }
             "Many2many" if field.stored() == Some(true) => {
-                self.long_relation(out, path, &field, own);
-                self.relation_clash(out, path, &field, own);
+                self.long_relation(out, path, field, own);
+                self.relation_clash(out, path, field, own);
             }
-            "Selection" => self.selection_add(out, path, &field, at),
+            "Selection" => self.selection_add(out, path, field, at),
             _ => {}
         }
+        self.tracking(out, path, field, own);
+        self.check_company(out, path, field, own);
+        self.duplicate_label(out, path, fields, own);
     }
 
-    /// The field `name` of `model` as the registry builds it in scope. None when the order of a
-    /// definition that changes its type against another one is unknown, or the type is not that of
-    /// the last definitions.
+    /// The fields of `model` as the registry builds them in scope, merged once for every rule.
+    fn model_fields(&self, model: &'m str) -> ModelFields<'m> {
+        let mut by_name: FxHashMap<&'m str, Vec<FieldDef<'m>>> = FxHashMap::default();
+        for def in self.index.merged_fields(model, self.scope) {
+            by_name.entry(def.2.name.as_str()).or_default().push(def);
+        }
+        let names: FxHashSet<&str> = by_name.keys().copied().collect();
+        let fields: FxHashMap<&'m str, Field<'m>> = by_name
+            .into_iter()
+            .filter_map(|(name, defs)| Some((name, self.merge(model, defs)?)))
+            .collect();
+        let magic = self.magic_labels(model);
+        let magic_of = |name: &str| magic.iter().find(|(n, _)| *n == name).map(|(_, text)| *text);
+        let mut labels: Vec<Label<'m>> = fields
+            .iter()
+            .filter_map(|(name, f)| self.label(name, f, magic_of(name)))
+            .collect();
+        labels.extend(
+            magic
+                .iter()
+                .filter(|(name, _)| !names.contains(name))
+                .map(|&(name, text)| Label {
+                    text: text.to_owned(),
+                    name,
+                    here: None,
+                }),
+        );
+        ModelFields { model, fields, labels }
+    }
+
+    /// The field `name` of `model` as the registry builds it in scope.
     fn merged(&self, model: &'m str, name: &str) -> Option<Field<'m>> {
         let mut defs = self.index.merged_fields(model, self.scope);
         defs.retain(|d| d.2.name == name);
+        self.merge(model, defs)
+    }
+
+    /// A field from its definitions in scope. None when the order of a definition that changes its
+    /// type against another one is unknown, or the type is not that of the last definitions.
+    fn merge(&self, model: &'m str, defs: Vec<FieldDef<'m>>) -> Option<Field<'m>> {
         let before = |a: &FieldDef<'m>, b: &FieldDef<'m>| self.before(model, a, b);
         let mut last = defs.iter().filter(|a| !defs.iter().any(|b| before(a, b)));
         let ftype = &last.next()?.2.ftype;
@@ -1487,6 +1681,218 @@ impl<'m> Ctx<'_, 'm> {
         );
         out.push(path, "OD216", *pos, message);
     }
+
+    /// Odoo hands each attribute a field does not know to the model's `_valid_field_parameter`, and
+    /// logs a warning when it refuses it. `BaseModel` only accepts `related_sudo`; `mail.thread` and
+    /// the other models that override the method may accept `tracking`, and before 20.0 so does
+    /// `mail` for an abstract model.
+    fn tracking(&self, out: &mut Out<'m>, path: &'m Path, field: &Field<'m>, own: &FieldFact) {
+        let Some(at) = own.option("tracking") else {
+            return;
+        };
+        let model = field.model;
+        let abstract_accepted = self.series.is_none_or(|s| s < Series { major: 20, minor: 0 })
+            && self.index.kind(model, self.scope) == Some(ModelKind::Abstract);
+        if abstract_accepted
+            || self.index.defines_method(model, "_valid_field_parameter", false)
+            || !self.reported_at(field, own, |f| f.option("tracking").is_some())
+        {
+            return;
+        }
+        let message = format!(
+            "'{}' sets tracking, but {model} does not inherit mail.thread, so Odoo ignores it and logs a warning; inherit mail.thread or remove tracking",
+            own.name
+        );
+        out.push(path, "OD219", at.pos, message);
+    }
+
+    /// Odoo logs a warning for each field of a model whose label another field already has. The
+    /// definition of this module that decides a label is reported, against a label decided by
+    /// another module or one this module loads earlier.
+    fn duplicate_label(&self, out: &mut Out<'m>, path: &'m Path, fields: &ModelFields<'m>, own: &FieldFact) {
+        let Some((label, key)) = fields.labels.iter().find_map(|l| match l.here {
+            Some((def, key)) if std::ptr::eq(def, own) => Some((l, key)),
+            _ => None,
+        }) else {
+            return;
+        };
+        let earlier = |o: &&Label<'m>| o.name != label.name && o.text == label.text && o.here.map(|h| h.1) < Some(key);
+        let Some(other) = fields
+            .labels
+            .iter()
+            .filter(earlier)
+            .min_by_key(|o| (o.here.map(|h| h.1), o.name))
+        else {
+            return;
+        };
+        let message = format!(
+            "'{}' has the label '{}' of field '{}' of {}, so Odoo logs a warning and users cannot tell them apart; give it another string",
+            own.name, label.text, other.name, fields.model
+        );
+        out.push(path, "OD220", pos_of(own, "string"), message);
+    }
+
+    /// A field's label: a non-empty literal `string`, else the label of the field Odoo adds under
+    /// that name, `magic`, else unless related one derived from its name, with the definition of
+    /// this module that decides it, the last one, if any.
+    fn label(&self, name: &'m str, field: &Field<'m>, magic: Option<&str>) -> Option<Label<'m>> {
+        let magic = match magic.map(|text| magic_base(name, field, text)) {
+            Some(MagicBase::Unknown) => return None,
+            Some(MagicBase::Kept(text)) => Some(text),
+            Some(MagicBase::Replaced) | None => None,
+        };
+        let (text, deciders) = match (field.get("string"), magic) {
+            (Merged::Known(OptionValue::Str(s)), _) if !s.is_empty() => {
+                (s.clone(), field.last(|d| d.2.option("string").is_some()))
+            }
+            (Merged::Unset, Some(text)) => (text.to_owned(), vec![]),
+            (Merged::Unset, None) if field.get("related") == Merged::Unset => {
+                (derived_label(name), field.first(|_| true))
+            }
+            _ => return None,
+        };
+        let me = self.index.by_name[self.module.name.as_str()];
+        let here = deciders
+            .into_iter()
+            .map(|i| &field.defs[i])
+            .filter(|d| d.0 == me && d.1.model == field.model)
+            .map(|d| (d.2, self.load_key(d)))
+            .max_by_key(|(_, key)| *key);
+        Some(Label { text, name, here })
+    }
+
+    /// The fields Odoo adds to `model`, with their labels. Before 20.0 the class that introduces a
+    /// model that is not abstract gets `id` and `display_name`; from 20.0 `BaseModel` defines them,
+    /// so an abstract model has them too. Whether 19.0 has them on an abstract model is not known.
+    fn magic_labels(&self, model: &str) -> &'static [(&'static str, &'static str)] {
+        let on_base = self.series.is_some_and(|s| s >= Series { major: 20, minor: 0 });
+        if !on_base && self.index.kind(model, self.scope) == Some(ModelKind::Abstract) {
+            return &[];
+        }
+        &MAGIC_LABELS[..if self.log_access(model) { MAGIC_LABELS.len() } else { 2 }]
+    }
+
+    /// Whether Odoo adds the fields that log access to `model`: it has a table of its own, and no
+    /// class of it in scope sets `_auto` or `_log_access` to anything but True.
+    fn log_access(&self, model: &str) -> bool {
+        let on = |c: &ClassFact, name: &str| c.attr(name).is_none_or(|a| a.value == OptionValue::Bool(true));
+        self.index.kind(model, self.scope) != Some(ModelKind::Abstract)
+            && self
+                .index
+                .classes(model)
+                .iter()
+                .all(|(mi, c)| !self.scope.sees(*mi) || (on(c, "_auto") && on(c, "_log_access")))
+    }
+
+    /// Odoo warns about a computed field whose dependency leads back to the field itself on
+    /// another record, and makes it recursive. Each field is reported once per module, at the first
+    /// such path. Abstract models get no dependencies, and from a transient model Odoo does not
+    /// follow a path into a regular one.
+    fn self_dependencies(
+        &self,
+        out: &mut Out<'m>,
+        path: &'m Path,
+        class: &ClassFact,
+        fields: &ModelFields<'m>,
+        reported: &mut FxHashSet<(&'m str, &'m str)>,
+    ) {
+        let kind = self.index.kind(&class.model, self.scope);
+        if kind == Some(ModelKind::Abstract) {
+            return;
+        }
+        let transient = kind == Some(ModelKind::Transient);
+        for (method, paths) in &class.depends {
+            for field in fields.fields.values().filter(|f| non_recursive_compute_of(f, method)) {
+                let name = field.defs[0].2.name.as_str();
+                if let Some(dep) = paths.iter().find(|p| self.leads_back(field, &p.value, transient))
+                    && reported.insert((field.model, name))
+                {
+                    let message = format!(
+                        "'{}' makes '{name}' depend on itself on other records, so Odoo logs a warning; declare '{name}' with recursive=True",
+                        dep.value
+                    );
+                    out.push(path, "OD221", dep.pos, message);
+                }
+            }
+        }
+    }
+
+    /// Whether a later segment of the dotted path names the field on its own model.
+    fn leads_back(&self, field: &Field<'m>, path: &str, transient: bool) -> bool {
+        let name = field.defs[0].2.name.as_str();
+        let mut model = field.model.to_owned();
+        for (i, segment) in path.split('.').enumerate() {
+            if i > 0 && model == field.model && segment == name {
+                return true;
+            }
+            let Ok(Some(FieldInfo {
+                comodel: Some(next), ..
+            })) = self.index.field(&model, segment, self.scope)
+            else {
+                return false;
+            };
+            if transient && self.index.kind(&next, self.scope) != Some(ModelKind::Transient) {
+                return false;
+            }
+            model = next;
+        }
+        false
+    }
+
+    /// From 18.0 Odoo gives a relational field with `check_company` a domain on the comodel's
+    /// `company_id`, through the comodel's `_check_company_domain`, which fails on a comodel without
+    /// one. Odoo builds that domain only for a model that has a company field, is `res.company`, or
+    /// for a company-dependent field.
+    fn check_company(&self, out: &mut Out<'m>, path: &'m Path, field: &Field<'m>, own: &FieldFact) {
+        if !RELATIONAL_TYPES.contains(&own.ftype.as_str())
+            || !field.is("check_company", &OptionValue::Bool(true))
+            || field.get("related") != Merged::Unset
+            || !self.reported_at(field, own, |f| f.option("check_company").is_some())
+        {
+            return;
+        }
+        let Merged::Known(OptionValue::Str(comodel)) = field.get("comodel_name") else {
+            return;
+        };
+        if !self.lacks_company(comodel) || !self.company_domain(field) {
+            return;
+        }
+        let message = format!(
+            "'{}' has check_company=True, but {comodel} has no company_id field to check; remove check_company",
+            own.name
+        );
+        out.push(path, "OD222", pos_of(own, "check_company"), message);
+    }
+
+    /// Whether the comodel is introduced in scope with no `company_id` anywhere, and nothing but
+    /// `BaseModel` gives its `_check_company_domain`.
+    fn lacks_company(&self, comodel: &str) -> bool {
+        self.index.introduced(comodel, self.scope)
+            && !self.index.plain_bases(comodel, self.scope)
+            && matches!(self.index.field(comodel, "company_id", self.scope), Err(None))
+            && !self.index.defines_method(comodel, "_check_company_domain", true)
+    }
+
+    /// Whether Odoo builds a company domain for the field rather than logging that it cannot.
+    fn company_domain(&self, field: &Field<'m>) -> bool {
+        field.model == "res.company"
+            || field.is("company_dependent", &OptionValue::Bool(true))
+            || ["company_id", "company_ids"]
+                .iter()
+                .any(|name| self.index.field(field.model, name, self.scope).is_ok())
+    }
+}
+
+/// Whether the field is computed by `method` with dependencies it takes from the method, and is
+/// not declared recursive.
+fn non_recursive_compute_of(field: &Field, method: &str) -> bool {
+    matches!(field.get("compute"), Merged::Known(OptionValue::Str(m)) if m == method)
+        && field.get("related") == Merged::Unset
+        && field.get("depends") == Merged::Unset
+        && matches!(
+            field.get("recursive"),
+            Merged::Unset | Merged::Known(OptionValue::Bool(false))
+        )
 }
 
 /// Whether the field is required, when a literal tells.
@@ -1552,4 +1958,31 @@ fn selection_values<'m>(def: &'m FieldFact, values: &mut FxHashSet<&'m str>) -> 
         }
     }
     Some(def.option("selection").is_some())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{derived_label, shadowed_member};
+    use crate::series::Series;
+
+    #[test]
+    fn derives_labels_as_python_title_case() {
+        assert_eq!(derived_label("partner_id"), "Partner");
+        assert_eq!(derived_label("tag_ids"), "Tag");
+        assert_eq!(derived_label("parent_id_ids"), "Parent Id");
+        assert_eq!(derived_label("x_studio_9a_date"), "X Studio 9A Date");
+        assert_eq!(derived_label("is_VAT"), "Is Vat");
+        assert_eq!(derived_label("id"), "Id");
+    }
+
+    #[test]
+    fn shadows_only_the_members_the_series_has() {
+        let shadows = |name: &str, series: &str| shadowed_member(name, Series::parse(series)).is_some();
+        assert!(shadows("copy", "12.0") && shadows("env", "20.0") && shadows("grouped", "16.0"));
+        assert!(!shadows("has_access", "17.0") && shadows("has_access", "18.0"));
+        assert!(!shadows("_read_grouping_sets", "19.0") && shadows("_read_grouping_sets", "20.0"));
+        assert!(shadows("toggle_active", "18.0") && !shadows("toggle_active", "20.0"));
+        assert!(!shadows("_name_search", "16.0") && !shadows("copied", "18.0"));
+        assert!(shadowed_member("has_access", None).is_none() && shadowed_member("copy", None).is_some());
+    }
 }

@@ -91,6 +91,8 @@ pub enum OptionValue {
 #[derive(Debug)]
 pub struct FieldFact {
     pub name: String,
+    /// Where the class body assigns the field to its name.
+    pub name_pos: Pos,
     pub ftype: String,
     pub pos: Pos,
     pub comodel: Option<Spanned<String>>,
@@ -132,10 +134,12 @@ pub struct ClassFact {
     /// The delegating fields the `_inherits` dict names, at their entry.
     pub delegations: Vec<Spanned<String>>,
     pub fields: Vec<FieldFact>,
+    /// Methods the class defines, and `_check_company_domain` when it assigns one.
     pub methods: Vec<String>,
-    /// Field paths given to `@api.depends`, and the undotted names given to `@api.onchange` and
-    /// `@api.constrains`.
+    /// The undotted names given to `@api.onchange` and `@api.constrains`.
     pub paths: Vec<Spanned<String>>,
+    /// The field paths each method decorated with `@api.depends` names, by method.
+    pub depends: Vec<(String, Vec<Spanned<String>>)>,
     /// The fields `_order` sorts by and `_rec_name`, `_parent_name`, `_fold_name` and `_active_name`
     /// name, which must exist on the model.
     pub order_fields: Vec<Spanned<String>>,
@@ -147,7 +151,7 @@ pub struct ClassFact {
     pub plain_bases: bool,
     /// The value of `_table`, when the class sets it.
     pub table: Option<OptionValue>,
-    /// `_parent_store` and `_auto`, when the class sets them.
+    /// `_parent_store`, `_auto` and `_log_access`, when the class sets them.
     pub attrs: Vec<(String, Spanned<OptionValue>)>,
 }
 
