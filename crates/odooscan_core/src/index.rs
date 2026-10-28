@@ -25,6 +25,130 @@ const EXTRA_FIELDS: &[(&str, &str)] = &[("ir.rule", "global")];
 /// BaseModel methods that fields commonly name as compute or search.
 const BASE_METHODS: &[&str] = &["_compute_display_name", "_search_display_name"];
 
+/// Methods of `BaseModel`, written from the ORM API reference: models inherit them from a class
+/// outside every addons directory, so the index never sees them.
+const BASE_MODEL_METHODS: &[&str] = &[
+    // Records and environment
+    "browse",
+    "exists",
+    "ensure_one",
+    "sudo",
+    "with_user",
+    "with_company",
+    "with_context",
+    "with_env",
+    "with_prefetch",
+    "mapped",
+    "filtered",
+    "filtered_domain",
+    "sorted",
+    "grouped",
+    "invalidate_recordset",
+    "invalidate_model",
+    "modified",
+    "flush_recordset",
+    "flush_model",
+    // Create, read, update, delete
+    "create",
+    "write",
+    "unlink",
+    "read",
+    "copy",
+    "copy_data",
+    "copy_multi",
+    "default_get",
+    "name_create",
+    "_create",
+    "_write",
+    "_read",
+    "fetch",
+    "update",
+    "toggle_active",
+    "action_archive",
+    "action_unarchive",
+    // Search and grouping
+    "search",
+    "search_count",
+    "search_fetch",
+    "search_read",
+    "name_search",
+    "_search",
+    "_name_search",
+    "read_group",
+    "_read_group",
+    "_compute_display_name",
+    "_search_display_name",
+    // Fields, views and onchange
+    "fields_get",
+    "get_views",
+    "get_view",
+    "_get_view",
+    "_get_view_cache_key",
+    "onchange",
+    // Access
+    "check_access",
+    "has_access",
+    "check_access_rights",
+    "check_access_rule",
+    "_filter_access_rules",
+    "_check_company",
+    "check_field_access_rights",
+    // Import, export and translations
+    "load",
+    "export_data",
+    "_load_records",
+    "_load_records_create",
+    "_load_records_write",
+    "get_field_translations",
+    "update_field_translations",
+    // Model setup and lifecycle
+    "init",
+    "_auto_init",
+    "_table_query",
+    "_register_hook",
+    "_unregister_hook",
+    "_validate_fields",
+    "_check_recursion",
+    "_check_m2m_recursion",
+    "_parent_store_compute",
+    "_compute_field_value",
+    "_get_placeholder_filename",
+    // Overridden by Odoo's own addons, so part of the API in practice
+    "new",
+    "get_base_url",
+    "copy_translations",
+    "_access_domain",
+    "_add_inherited_fields",
+    "_add_missing_default_values",
+    "_add_precomputed_values",
+    "_additional_allowed_keys_properties_definition",
+    "_can_return_content",
+    "_check_access",
+    "_condition_to_sql",
+    "_determine_fields_to_fetch",
+    "_fetch_query",
+    "_field_to_sql",
+    "_flush",
+    "_get_base_lang",
+    "_has_field_access",
+    "_init_column",
+    "_make_access_error_message",
+    "_order_field_to_sql",
+    "_order_to_sql",
+    "_post_model_setup__",
+    "_prepare_create_values",
+    "_read_format",
+    "_read_group_groupby",
+    "_read_group_orderby",
+    "_read_group_postprocess_aggregate",
+    "_read_group_select",
+    "_read_grouping_sets",
+    "_setup_complete",
+    "_update_field_translations",
+    "_valid_field_parameter",
+    "_where_calc",
+];
+
 pub fn full_id(module: &str, id: &str) -> String {
     if id.contains('.') {
         id.to_owned()
@@ -319,6 +443,16 @@ impl<'m> Index<'m> {
         false
     }
 
+    /// Whether a module in `scope` depends on a module that is not indexed.
+    pub fn partial_scope(&self, scope: &Scope) -> bool {
+        self.modules
+            .iter()
+            .enumerate()
+            .filter(|(mi, _)| scope.sees(*mi))
+            .flat_map(|(_, m)| &m.manifest.depends)
+            .any(|d| !self.by_name.contains_key(d.value.as_str()))
+    }
+
     pub fn has_model(&self, model: &str) -> bool {
         self.models.contains_key(model)
     }
@@ -428,6 +562,17 @@ impl<'m> Index<'m> {
             model = info.comodel?;
         }
         Some(model)
+    }
+
+    /// Whether a class of `model` or of a model it inherits, other than `except`, or `BaseModel`
+    /// defines `method`. Modules outside the scope count: an override of a method from a module
+    /// that is not in depends is called only by that module.
+    pub fn has_parent_method(&self, model: &str, method: &str, except: &ClassFact) -> bool {
+        BASE_MODEL_METHODS.contains(&method)
+            || self
+                .chain(model, None)
+                .iter()
+                .any(|(_, c)| !std::ptr::eq(*c, except) && c.methods.iter().any(|m| m == method))
     }
 
     pub fn has_method(&self, model: &str, method: &str, scope: &Scope) -> bool {

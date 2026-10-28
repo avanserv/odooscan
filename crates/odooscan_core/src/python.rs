@@ -231,6 +231,25 @@ fn is_guard(expr: &Expr) -> bool {
     finder.found
 }
 
+/// The methods called as `super().name(...)` or `super(Class, self).name(...)`.
+#[derive(Default)]
+struct SuperCalls<'a> {
+    calls: Vec<(&'a str, TextSize)>,
+}
+
+impl<'a> Visitor<'a> for SuperCalls<'a> {
+    fn visit_expr(&mut self, expr: &'a Expr) {
+        if let Expr::Call(call) = expr
+            && let Expr::Attribute(a) = &*call.func
+            && let Expr::Call(inner) = &*a.value
+            && matches!(&*inner.func, Expr::Name(n) if n.id.as_str() == "super")
+        {
+            self.calls.push((a.attr.as_str(), a.attr.start()));
+        }
+        visitor::walk_expr(self, expr);
+    }
+}
+
 fn body_contains(body: &[Stmt], attr: Option<&str>) -> bool {
     let mut finder = Finder { attr, found: false };
     finder.visit_body(body);
@@ -337,6 +356,11 @@ impl PyVisitor<'_> {
             methods: vec![],
             paths: vec![],
             order_fields: vec![],
+            super_calls: vec![],
+            plain_bases: class
+                .bases()
+                .iter()
+                .any(|b| !matches!(tail_name(b), Some("Model" | "TransientModel" | "AbstractModel"))),
         };
         for stmt in &class.body {
             match stmt {
@@ -349,6 +373,13 @@ impl PyVisitor<'_> {
                 Stmt::FunctionDef(func) => {
                     fact.methods.push(func.name.to_string());
                     self.method_checks(func, &mut fact);
+                    let mut calls = SuperCalls::default();
+                    calls.visit_body(&func.body);
+                    fact.super_calls
+                        .extend(calls.calls.into_iter().map(|(name, at)| Spanned {
+                            value: name.to_owned(),
+                            pos: self.loc.pos(at),
+                        }));
                 }
                 _ => {}
             }
