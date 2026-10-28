@@ -36,6 +36,9 @@ Other options:
 
 The exit status is 1 when anything is reported, and 2 when the settings are invalid.
 
+`oscn explain OD203`, or `oscn explain unresolved-field-path`, prints a rule's page: what it
+reports, why Odoo fails on it, and an example of the fix. The pages are in `docs/rules/`.
+
 ## Configuration
 
 `oscn check` reads the nearest `odooscan.toml`, or `pyproject.toml` with a `[tool.odooscan]`

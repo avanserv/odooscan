@@ -33,7 +33,8 @@ manifest-path = "crates/odooscan/Cargo.toml"
 bindings = "bin"
 strip = true
 # The sdist holds what building the wheel needs: repository tooling and test fixtures stay in the
-# repository.
+# repository, and the rule pages go in, since `oscn explain` embeds them.
+include = [{ path = "docs/rules/*.md", format = "sdist" }]
 exclude = [
     { path = ".*", format = "sdist" },
     { path = ".github/**", format = "sdist" },
