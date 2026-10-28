@@ -107,3 +107,4 @@ module.
 | Code | Name | Reports |
 | --- | --- | --- |
 | [OD601](OD601.md) | `unresolved-js-import` | A JS import names a module or an export no indexed module provides. |
+| [OD602](OD602.md) | `orphan-patch-super` | A patch calls a super method the class it patches does not have. |

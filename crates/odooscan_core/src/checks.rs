@@ -37,7 +37,7 @@ pub fn check_module<'m>(index: &Index<'m>, mi: usize, series: Option<Series>) ->
     let mut out = Out { diags: vec![] };
     manifest_files(module, &mut out);
     same_module_xmlids(module, &mut out);
-    for file in es_modules(index, mi, series) {
+    for (_, file) in es_modules(index, mi, series) {
         if let Some(e) = &file.facts.syntax_error {
             out.push(&file.path, "OD000", e.pos, e.value.clone());
         }
@@ -55,8 +55,9 @@ pub fn check_module<'m>(index: &Index<'m>, mi: usize, series: Option<Series>) ->
         ctx.dependencies(&mut out);
         ctx.python(&mut out);
         ctx.data(&mut out);
-        for file in es_modules(index, mi, series) {
+        for (fi, file) in es_modules(index, mi, series) {
             ctx.js(&mut out, file);
+            ctx.js_patches(&mut out, mi, fi, file);
         }
     }
     out.diags
@@ -68,21 +69,16 @@ fn es_modules<'a, 'm>(
     index: &'a Index<'m>,
     mi: usize,
     series: Option<Series>,
-) -> impl Iterator<Item = &'m SourceFile<JsFacts>> + 'a {
+) -> impl Iterator<Item = (usize, &'m SourceFile<JsFacts>)> + 'a {
     let unannotated = series.is_some_and(|s| s >= Series { major: 17, minor: 0 });
-    index.modules[mi]
-        .js
-        .iter()
-        .enumerate()
-        .filter(move |(fi, f)| {
-            index.js_loaded(mi, *fi)
-                && match f.facts.annotation {
-                    Annotation::Module => true,
-                    Annotation::Ignore => false,
-                    Annotation::None => unannotated,
-                }
-        })
-        .map(|(_, f)| f)
+    index.modules[mi].js.iter().enumerate().filter(move |(fi, f)| {
+        index.js_loaded(mi, *fi)
+            && match f.facts.annotation {
+                Annotation::Module => true,
+                Annotation::Ignore => false,
+                Annotation::None => unannotated,
+            }
+    })
 }
 
 fn manifest_files<'m>(module: &'m Module, out: &mut Out<'m>) {
@@ -328,6 +324,34 @@ impl<'m> Ctx<'_, 'm> {
             n => format!("'{}' does not export '{n}'", name.specifier),
         };
         out.push(path, "OD601", name.name.pos, message);
+    }
+
+    /// A patch of a class from a module outside the index, such as an Enterprise one, may add
+    /// the member a `super` reads.
+    fn js_patches(&self, out: &mut Out<'m>, mi: usize, fi: usize, file: &'m SourceFile<JsFacts>) {
+        if self.partial {
+            return;
+        }
+        let here = self.index.js_target(mi, fi);
+        for (pi, patch) in file.facts.patches.iter().enumerate() {
+            let Some((t, class)) = self.index.js_class(here, &patch.target, 0) else {
+                continue;
+            };
+            let Some(members) = self.index.js_members(t, class, (mi, fi, pi)) else {
+                continue;
+            };
+            for read in patch.supers.iter().filter(|s| !members.contains(s.value.as_str())) {
+                out.push(
+                    &file.path,
+                    "OD602",
+                    read.pos,
+                    format!(
+                        "neither {} nor its parents have '{}', so super.{}() fails",
+                        class.name, read.value, read.value
+                    ),
+                );
+            }
+        }
     }
 
     fn class(&self, out: &mut Out<'m>, path: &'m Path, class: &ClassFact) {
