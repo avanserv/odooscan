@@ -47,7 +47,7 @@ pub struct Report {
 }
 
 pub fn scan(opts: &ScanOptions) -> Report {
-    let discovery = project::load(&opts.paths, &opts.addons_paths);
+    let discovery = project::load(&opts.paths, &opts.addons_paths, opts.default_series);
     let mut notices = discovery.notices;
     let modules = discovery.modules;
     let index = index::Index::build(&modules);
