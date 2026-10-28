@@ -1,6 +1,8 @@
 //! What one pass over a file learns: the facts the index needs and the diagnostics local rules raise.
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
+use std::path::PathBuf;
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Pos {
     pub line: u32,
     pub col: u32,
@@ -12,11 +14,21 @@ pub struct Spanned<T> {
     pub pos: Pos,
 }
 
-#[derive(Debug)]
+/// A point on the path of a data flow. `path` is none for a point in the finding's own file.
+#[derive(Clone, Debug)]
+pub struct Step {
+    pub path: Option<PathBuf>,
+    pub pos: Pos,
+    pub label: String,
+}
+
+#[derive(Clone, Debug)]
 pub struct RawDiag {
     pub code: &'static str,
     pub pos: Pos,
     pub message: String,
+    /// The path a data flow takes from its source to the finding.
+    pub flow: Vec<Step>,
 }
 
 impl RawDiag {
@@ -25,7 +37,13 @@ impl RawDiag {
             code,
             pos,
             message: message.into(),
+            flow: vec![],
         }
+    }
+
+    pub fn with_flow(mut self, flow: Vec<Step>) -> Self {
+        self.flow = flow;
+        self
     }
 }
 

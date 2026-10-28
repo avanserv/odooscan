@@ -32,5 +32,20 @@ expression: "serde_json::to_string_pretty(&report).unwrap()"
       "path": "bad_sale/models/sale_order.py"
     },
     "severity": "info"
+  },
+  {
+    "check_name": "OD701",
+    "content": {
+      "body": "[OD701 sql-injection-flow](https://avanserv.github.io/odooscan/rules/OD701/)\n\n- bad_sale/controllers/main.py:11:9 route parameter 'term'\n- bad_sale/controllers/main.py:12:9 query\n- bad_sale/controllers/main.py:14:9 cr.execute()"
+    },
+    "description": "OD701: route parameter 'term' reaches the query of cr.execute() through 'query'",
+    "fingerprint": "cfb59e88ca8eeb63",
+    "location": {
+      "lines": {
+        "begin": 14
+      },
+      "path": "bad_sale/controllers/main.py"
+    },
+    "severity": "critical"
   }
 ]

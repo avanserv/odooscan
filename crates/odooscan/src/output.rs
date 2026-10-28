@@ -80,15 +80,26 @@ pub fn sarif(diags: &[&Diagnostic], rel: &dyn Fn(&Path) -> String) -> serde_json
                 Severity::Warning => "warning",
                 Severity::Info => "note",
             };
-            json!({
+            let mut result = json!({
                 "ruleId": d.code,
                 "level": level,
                 "message": {"text": d.message},
-                "locations": [{"physicalLocation": {
-                    "artifactLocation": {"uri": rel(&d.path)},
-                    "region": {"startLine": d.line, "startColumn": d.column},
-                }}],
-            })
+                "locations": [{"physicalLocation": physical(rel(&d.path), d.line, d.column)}],
+            });
+            if !d.flow.is_empty() {
+                let steps: Vec<_> = d
+                    .flow
+                    .iter()
+                    .map(|s| {
+                        json!({"location": {
+                            "physicalLocation": physical(rel(&s.path), s.line, s.column),
+                            "message": {"text": s.label},
+                        }})
+                    })
+                    .collect();
+                result["codeFlows"] = json!([{"threadFlows": [{"locations": steps}]}]);
+            }
+            result
         })
         .collect();
     json!({
@@ -96,6 +107,21 @@ pub fn sarif(diags: &[&Diagnostic], rel: &dyn Fn(&Path) -> String) -> serde_json
         "version": "2.1.0",
         "runs": [{"tool": {"driver": {"name": "odooscan", "version": env!("CARGO_PKG_VERSION"), "rules": rules}}, "results": results}],
     })
+}
+
+fn physical(uri: String, line: u32, column: u32) -> serde_json::Value {
+    json!({"artifactLocation": {"uri": uri}, "region": {"startLine": line, "startColumn": column}})
+}
+
+/// The steps of a data flow, one `path:line:column label` line each, after a blank line.
+fn flow_lines(d: &Diagnostic, rel: &dyn Fn(&Path) -> String, bullet: &str) -> String {
+    if d.flow.is_empty() {
+        return String::new();
+    }
+    d.flow
+        .iter()
+        .map(|s| format!("\n{bullet}{}:{}:{} {}", rel(&s.path), s.line, s.column, s.label))
+        .fold("\n".to_owned(), |acc, l| acc + &l)
 }
 
 /// Workflow commands, which GitHub turns into annotations on the pull request without the
@@ -115,7 +141,12 @@ pub fn print_github(out: &mut impl Write, diags: &[&Diagnostic], rel: &dyn Fn(&P
             d.line,
             d.column,
             escape_property(&title),
-            escape_data(&format!("{}\n\nSee {}", d.message, help_url(d.code)))
+            escape_data(&format!(
+                "{}{}\n\nSee {}",
+                d.message,
+                flow_lines(d, rel, "  "),
+                help_url(d.code)
+            ))
         );
     }
 }
@@ -152,7 +183,7 @@ pub fn gitlab(diags: &[&Diagnostic], rel: &dyn Fn(&Path) -> String) -> serde_jso
                 "fingerprint": format!("{:016x}", fnv1a(&[&base.to_string(), &nth.to_string()])),
                 "severity": severity,
                 "location": {"path": path, "lines": {"begin": d.line}},
-                "content": {"body": format!("[{} {}]({})", d.code, rule(d.code).name, help_url(d.code))},
+                "content": {"body": format!("[{} {}]({}){}", d.code, rule(d.code).name, help_url(d.code), flow_lines(d, rel, "- "))},
             })
         })
         .collect();
@@ -172,6 +203,8 @@ fn fnv1a(parts: &[&str]) -> u64 {
 mod tests {
     use std::path::PathBuf;
 
+    use odooscan_core::FlowStep;
+
     use super::*;
 
     fn diags() -> Vec<Diagnostic> {
@@ -182,7 +215,26 @@ mod tests {
             line,
             column: 5,
             message: message.to_owned(),
+            flow: vec![],
         };
+        let step = |line, label: &str| FlowStep {
+            path: PathBuf::from("bad_sale/controllers/main.py"),
+            line,
+            column: 9,
+            label: label.to_owned(),
+        };
+        let mut flow = at(
+            "OD701",
+            Severity::Error,
+            14,
+            "route parameter 'term' reaches the query of cr.execute() through 'query'",
+        );
+        flow.path = PathBuf::from("bad_sale/controllers/main.py");
+        flow.flow = vec![
+            step(11, "route parameter 'term'"),
+            step(12, "query"),
+            step(14, "cr.execute()"),
+        ];
         vec![
             at(
                 "OD203",
@@ -191,6 +243,7 @@ mod tests {
                 "'partner_id.cde': res.partner has no field 'cde'",
             ),
             at("OD111", Severity::Info, 12, "route with auth='public' calls sudo()"),
+            flow,
         ]
     }
 

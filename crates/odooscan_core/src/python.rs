@@ -7,6 +7,7 @@ use rustc_hash::FxHashMap;
 
 use crate::domain;
 use crate::facts::{ClassFact, DomainFact, FieldFact, ModelKind, Pos, PyFacts, RawDiag, Spanned, XmlRef};
+use crate::taint::{self, Params};
 
 const FIELD_TYPES: &[&str] = &[
     "Boolean",
@@ -217,7 +218,7 @@ impl<'a> Visitor<'a> for GuardFinder {
 }
 
 /// A block that leaves the function or the loop when its guard fails.
-fn exits(body: &[Stmt]) -> bool {
+pub(crate) fn exits(body: &[Stmt]) -> bool {
     matches!(body.last(), Some(Stmt::Return(_) | Stmt::Raise(_) | Stmt::Continue(_)))
 }
 
@@ -301,6 +302,7 @@ pub fn analyze(src: &str) -> PyFacts {
         kinds: FxHashMap::default(),
         guarded: 0,
         class_models: vec![],
+        model_body: vec![],
     };
     match parse_module(src) {
         Ok(parsed) => v.visit_body(&parsed.syntax().body),
@@ -321,6 +323,8 @@ struct PyVisitor<'a> {
     guarded: u32,
     /// The model of each enclosing class, None for a mixin or a class that is no model.
     class_models: Vec<Option<String>>,
+    /// For each enclosing class or function, whether it is the body of a model class.
+    model_body: Vec<bool>,
 }
 
 impl PyVisitor<'_> {
@@ -592,6 +596,25 @@ impl PyVisitor<'_> {
         }
     }
 
+    /// Routes take their parameters from the request, and public model methods from RPC callers,
+    /// unless `@api.private` keeps them from RPC.
+    fn flows(&mut self, func: &ast::StmtFunctionDef) {
+        let decorated = |name: &str| {
+            func.decorator_list.iter().any(|d| match &d.expression {
+                Expr::Call(call) => tail_name(&call.func) == Some(name),
+                e => tail_name(e) == Some(name),
+            })
+        };
+        let params = if decorated("route") {
+            Params::Route
+        } else if self.model_body.last() == Some(&true) && !func.name.starts_with('_') && !decorated("private") {
+            Params::Rpc
+        } else {
+            Params::None
+        };
+        self.facts.diags.extend(taint::function(func, params, self.loc));
+    }
+
     fn route_checks(&mut self, func: &ast::StmtFunctionDef) {
         for decorator in &func.decorator_list {
             let Expr::Call(call) = &decorator.expression else {
@@ -777,13 +800,22 @@ impl<'a> Visitor<'a> for PyVisitor<'_> {
                     .as_ref()
                     .filter(|f| f.kind != ModelKind::Abstract)
                     .map(|f| f.model.clone());
+                self.model_body.push(fact.is_some());
                 self.facts.classes.extend(fact);
                 self.class_models.push(model);
                 visitor::walk_stmt(self, stmt);
                 self.class_models.pop();
+                self.model_body.pop();
                 return;
             }
-            Stmt::FunctionDef(func) => self.route_checks(func),
+            Stmt::FunctionDef(func) => {
+                self.route_checks(func);
+                self.flows(func);
+                self.model_body.push(false);
+                visitor::walk_stmt(self, stmt);
+                self.model_body.pop();
+                return;
+            }
             Stmt::If(i) => {
                 self.guarded(&i.test, |v| v.visit_body(&i.body));
                 for clause in &i.elif_else_clauses {

@@ -113,3 +113,31 @@ module.
 | [OD605](OD605.md) | `unknown-template` | A component or a t-inherit names a template no indexed bundle defines. |
 | [OD606](OD606.md) | `unmatched-template-locator` | A template locates an element its parent templates do not have. |
 | [OD607](OD607.md) | `private-rpc-method` | orm.call() names a private method, which Odoo refuses to call over RPC. |
+
+## OD7: data flows
+
+Values a user controls, followed through one function to the calls that must not receive them.
+
+The sources are the parameters of a controller method behind `@route`; the parameters of a public
+model method (no leading `_`, no `@api.private`), which any user with access to the model can call
+over RPC; and the request: `request.params`, `request.get_json_data()`,
+`request.get_http_params()`, and the `args`, `form`, `values`, `files`, `cookies`, `headers`, `data`
+and JSON of `request.httprequest`.
+
+A value stays tainted through assignments, formatting, concatenation, f-strings, string methods,
+items, attributes, collections, comprehensions and module functions such as `json.loads()`. Records
+do not carry it: what a recordset method such as `browse()` or `search()` returns is not tainted.
+Both branches of an `if` are followed, a branch that returns or raises adds nothing after it, and
+a loop body is read twice. A value passed to another method is not followed into it.
+
+The flow ends at a sanitizer: `int()`, `float()`, `bool()`, `len()`, `SQL.identifier()`,
+`escape()`, `html_escape()`, `html_sanitize()` and `plaintext2html()`; at `assert x in (...)` or
+`if x not in allowed: raise`; and at an intersection with values the code chose, such as
+`set(vals) & allowed`.
+
+| Code | Name | Reports |
+| --- | --- | --- |
+| [OD701](OD701.md) | `sql-injection-flow` | Data a user controls reaches the text of an SQL query. |
+| [OD702](OD702.md) | `code-injection-flow` | Data a user controls reaches safe_eval(), eval() or exec(). |
+| [OD703](OD703.md) | `markup-injection-flow` | Data a user controls is wrapped in Markup() without escaping. |
+| [OD704](OD704.md) | `sudo-mass-assignment` | A mapping a user controls is written as superuser, so the user picks the fields. |

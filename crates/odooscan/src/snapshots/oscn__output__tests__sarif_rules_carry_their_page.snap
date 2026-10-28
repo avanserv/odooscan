@@ -46,6 +46,84 @@ expression: "serde_json::to_string_pretty(&report).unwrap()"
             "text": "route with auth='public' calls sudo()"
           },
           "ruleId": "OD111"
+        },
+        {
+          "codeFlows": [
+            {
+              "threadFlows": [
+                {
+                  "locations": [
+                    {
+                      "location": {
+                        "message": {
+                          "text": "route parameter 'term'"
+                        },
+                        "physicalLocation": {
+                          "artifactLocation": {
+                            "uri": "bad_sale/controllers/main.py"
+                          },
+                          "region": {
+                            "startColumn": 9,
+                            "startLine": 11
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "location": {
+                        "message": {
+                          "text": "query"
+                        },
+                        "physicalLocation": {
+                          "artifactLocation": {
+                            "uri": "bad_sale/controllers/main.py"
+                          },
+                          "region": {
+                            "startColumn": 9,
+                            "startLine": 12
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "location": {
+                        "message": {
+                          "text": "cr.execute()"
+                        },
+                        "physicalLocation": {
+                          "artifactLocation": {
+                            "uri": "bad_sale/controllers/main.py"
+                          },
+                          "region": {
+                            "startColumn": 9,
+                            "startLine": 14
+                          }
+                        }
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          ],
+          "level": "error",
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "bad_sale/controllers/main.py"
+                },
+                "region": {
+                  "startColumn": 5,
+                  "startLine": 14
+                }
+              }
+            }
+          ],
+          "message": {
+            "text": "route parameter 'term' reaches the query of cr.execute() through 'query'"
+          },
+          "ruleId": "OD701"
         }
       ],
       "tool": {
