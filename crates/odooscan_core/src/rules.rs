@@ -90,7 +90,7 @@ rules! {
     "OD205" "field-type-changed" Correctness Warning None, true, "An inherited field is redefined with another type.";
     "OD206" "unknown-env-model" Correctness Warning None, true, "env[...] names a model no indexed module defines.";
     "OD207" "related-type-mismatch" Correctness Error None, true, "A related field has another type than the field it relates to.";
-    "OD208" "invalid-one2many-inverse" Correctness Error None, true, "A One2many's inverse is not a Many2one back to its model.";
+    "OD208" "invalid-one2many-inverse" Correctness Error None, true, "A One2many's inverse field is not a Many2one.";
     "OD209" "model-redefined" Correctness Error None, true, "A new _name replaces a model that a module in depends already defines.";
     "OD210" "unknown-domain-field" Correctness Error None, true, "A literal domain or group_by names a field its model does not have.";
     "OD211" "orphan-super" Correctness Error None, true, "super() calls a method no parent class defines.";
@@ -129,5 +129,64 @@ mod tests {
         assert_eq!(od401.severity_for(Series::parse("18.0")), Severity::Warning);
         assert_eq!(od401.severity_for(Series::parse("20.0")), Severity::Info);
         assert_eq!(od401.severity_for(None), Severity::Warning);
+    }
+
+    fn pages() -> std::path::PathBuf {
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/rules")
+    }
+
+    /// The row a rule's page must carry under its heading, rendered from the registry.
+    fn facts_row(r: &Rule) -> String {
+        let since = |spec: &str| spec.strip_prefix(">=").unwrap_or(spec).to_owned();
+        let mut severity = format!("{:?}", r.severity);
+        for (_, spec, s) in SEVERITY_BY_SERIES.iter().filter(|(code, ..)| *code == r.code) {
+            severity += &format!(", {s:?} from {}", since(spec));
+        }
+        let series = r
+            .series
+            .map_or_else(|| "all".to_owned(), |s| format!("{} and later", since(s)));
+        let index = if r.needs_index { "yes" } else { "no" };
+        format!("| {:?} | {severity} | {series} | {index} |", r.category)
+    }
+
+    fn page_errors(r: &Rule, text: &str) -> Vec<String> {
+        let mut errors = vec![];
+        let heading = format!("# {} {}", r.code, r.name);
+        if text.lines().next() != Some(heading.as_str()) {
+            errors.push(format!("{}: the page must open with `{heading}`", r.code));
+        }
+        let row = text.lines().skip_while(|l| !l.starts_with("| Category |")).nth(2);
+        let expected = facts_row(r);
+        if row != Some(expected.as_str()) {
+            errors.push(format!("{}: the facts row must read `{expected}`, not {row:?}", r.code));
+        }
+        errors
+    }
+
+    #[test]
+    fn every_rule_has_a_page_that_matches_it() {
+        let index = std::fs::read_to_string(pages().join("index.md")).expect("docs/rules/index.md");
+        let mut errors = vec![];
+        for r in RULES {
+            match std::fs::read_to_string(pages().join(format!("{}.md", r.code))) {
+                Ok(text) => errors.extend(page_errors(r, &text)),
+                Err(_) => errors.push(format!("{}: docs/rules/{}.md is missing", r.code, r.code)),
+            }
+            if !index.contains(&format!("[{0}]({0}.md)", r.code)) {
+                errors.push(format!("{}: docs/rules/index.md does not link to the page", r.code));
+            }
+        }
+        assert!(errors.is_empty(), "{}", errors.join("\n"));
+    }
+
+    #[test]
+    fn every_page_names_a_registered_rule() {
+        let stray: Vec<_> = std::fs::read_dir(pages())
+            .expect("docs/rules")
+            .filter_map(|e| e.ok()?.file_name().into_string().ok())
+            .filter_map(|name| name.strip_suffix(".md").map(str::to_owned))
+            .filter(|stem| stem != "index" && !RULES.iter().any(|r| r.code == stem))
+            .collect();
+        assert!(stray.is_empty(), "pages for no registered rule: {stray:?}");
     }
 }
