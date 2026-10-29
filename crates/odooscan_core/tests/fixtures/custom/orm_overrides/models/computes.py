@@ -409,3 +409,26 @@ class ResPartnerChildHints(models.Model):
                     partner.eldest_child = child.name
             else:
                 partner.eldest_child = False
+
+
+class ResPartnerQueueLabel(models.Model):
+    _inherit = "res.partner"
+
+    queue_label = fields.Char(compute="_compute_queue_label")
+
+    @api.depends("handle")
+    def _compute_queue_label(self):
+        for partner in self:
+            attempts = 0
+            while True:
+                attempts += 1
+                if attempts < 3 and not partner.handle:
+                    continue
+                self._fill_queue_label()
+                break
+            partner.queue_label = partner.handle
+            return
+
+    def _fill_queue_label(self):
+        for partner in self:
+            partner.queue_label = partner.handle or False
