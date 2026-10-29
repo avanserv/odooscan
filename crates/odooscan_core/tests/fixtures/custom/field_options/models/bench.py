@@ -110,3 +110,10 @@ class GreenhouseBin(models.Model):
 class GreenhouseBinStamp(models.Model):
     _name = "greenhouse.bin"
     _inherit = ["greenhouse.stamp", "greenhouse.bin"]
+
+
+class GreenhouseLedger(models.AbstractModel):
+    _name = "greenhouse.ledger"
+    _description = "Greenhouse ledger"
+
+    _table_query = fields.Char()

@@ -92,3 +92,10 @@ class ModernShelf(models.Model):
     def _compute_display_name(self):
         for shelf in self:
             shelf.display_name = shelf.caption
+
+
+class ModernLedger(models.AbstractModel):
+    _name = "modern.ledger"
+    _description = "Modern ledger"
+
+    _table_query = fields.Char()

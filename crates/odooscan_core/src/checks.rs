@@ -123,10 +123,10 @@ fn private_rpc<'m>(out: &mut Out<'m>, file: &'m SourceFile<JsFacts>) {
     }
 }
 
-/// Attributes every record has besides the methods of `BaseModel`.
-const RECORD_ATTRS: &[&str] = &["env", "ids", "pool"];
+/// The record attributes `env`, `ids` and `pool`, and the class attribute `_table_query`.
+const MODEL_ATTRS: &[&str] = &["env", "ids", "pool", "_table_query"];
 
-/// Methods of `BaseModel` that only some series have, by the range of series that has them. 18.0
+/// Members of `BaseModel` that only some series have, by the range of series that has them. 18.0
 /// deprecates `check_access_rights` and `check_access_rule` for `check_access` and `has_access`
 /// (`odoo/models.py:4503-4530`). The others are in 18.0 `odoo/models.py` or 20.0 `odoo/orm`, not
 /// both. Every series was read for `_table_query`, which came in saas~13.5, and for
@@ -287,7 +287,7 @@ fn shadowed_member(name: &str, series: Option<Series>) -> Option<String> {
     if range.is_some_and(|(spec, _)| !series.is_some_and(|s| series::matches(spec, s))) {
         return None;
     }
-    if RECORD_ATTRS.contains(&name) {
+    if MODEL_ATTRS.contains(&name) {
         Some(format!("attribute {name}"))
     } else if BASE_MODEL_METHODS.contains(&name) && !UNPLACED_MEMBERS.contains(&name) {
         Some(format!("method {name}()"))
@@ -2973,5 +2973,11 @@ mod tests {
         assert!(!shadows("_condition_to_sql", "19.0") && !shadows("_condition_to_sql", "20.0"));
         assert!(!shadows("_name_search", "16.0") && !shadows("copied", "18.0"));
         assert!(shadowed_member("has_access", None).is_none() && shadowed_member("copy", None).is_some());
+        let eighteen = Series::parse("18.0");
+        assert_eq!(
+            shadowed_member("_table_query", eighteen).as_deref(),
+            Some("attribute _table_query")
+        );
+        assert_eq!(shadowed_member("copy", eighteen).as_deref(), Some("method copy()"));
     }
 }

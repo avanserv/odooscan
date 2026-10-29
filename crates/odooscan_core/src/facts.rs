@@ -146,7 +146,7 @@ pub struct ClassFact {
     pub inherits_unknown: bool,
     pub fields: Vec<FieldFact>,
     /// Methods the class defines, and `_check_company_domain`, `_table_query` and `_table_sql`
-    /// when it assigns them.
+    /// when it assigns them anything but a field.
     pub methods: Vec<String>,
     /// The undotted names given to `@api.onchange` and `@api.constrains`.
     pub paths: Vec<Spanned<String>>,
