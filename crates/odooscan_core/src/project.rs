@@ -8,7 +8,7 @@ use crate::facts::{DataFacts, JsFacts, PyFacts, TemplateFacts};
 use crate::manifest::{self, Manifest};
 use crate::series::Series;
 use crate::suppress::Suppressions;
-use crate::{csvdata, js, owl, python, xml};
+use crate::{csvdata, js, owl, python, sql, xml};
 
 const MANIFESTS: &[&str] = &["__manifest__.py", "__openerp__.py"];
 
@@ -39,6 +39,8 @@ pub struct Module {
     pub js: Vec<SourceFile<JsFacts>>,
     /// Owl templates: the XML files under `static/src`.
     pub templates: Vec<SourceFile<TemplateFacts>>,
+    /// The views the SQL files the manifest loads create.
+    pub sql_views: Vec<String>,
 }
 
 fn manifest_in(dir: &Path) -> Option<PathBuf> {
@@ -187,6 +189,7 @@ fn read_module(name: String, dir: PathBuf, checked: bool) -> Option<Module> {
         data: vec![],
         js: vec![],
         templates: vec![],
+        sql_views: vec![],
     })
 }
 
@@ -253,6 +256,18 @@ fn parse_module_files(module: &mut Module) {
         .sort_by_key(|f| (f.rank.unwrap_or(usize::MAX), f.rel.clone()));
     module.js = parse_static_files(&module.dir, "js", checked, js::analyze);
     module.templates = parse_static_files(&module.dir, "xml", checked, owl::analyze);
+    module.sql_views = sql_views(module);
+}
+
+/// The views the SQL files of a module's manifest create by name.
+fn sql_views(module: &Module) -> Vec<String> {
+    let texts = module
+        .manifest
+        .sql_files()
+        .filter_map(|file| std::fs::read_to_string(module.dir.join(normalize(file))).ok());
+    texts
+        .flat_map(|text| sql::created_views(&text).into_iter().flatten())
+        .collect()
 }
 
 fn parse_static_files<T: Send>(

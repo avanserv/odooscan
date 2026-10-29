@@ -6,11 +6,11 @@ use ruff_text_size::{Ranged, TextSize};
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::facts::{
-    ClassFact, DomainFact, FieldFact, ModelKind, OptionValue, Pos, PyFacts, RawDiag, Receiver, Spanned, SqlColumn,
-    XmlRef,
+    ClassFact, DefinitionSource, DomainFact, FieldFact, ModelKind, OptionValue, Pos, PyFacts, RawDiag, Receiver,
+    Spanned, SqlColumn, SqlView, XmlRef,
 };
 use crate::sql::{
-    self, CursorUse, QueryVars, Write, odoo_cursor, query_source, query_text, self_cursor, source_offset,
+    self, CursorUse, QueryVars, Write, odoo_cursor, query_head, query_source, query_text, self_cursor, source_offset,
 };
 use crate::taint::{self, Params};
 use crate::{domain, method_body, module_state};
@@ -380,6 +380,36 @@ fn dotted_name(kind: &str, path: &str) -> String {
     )
 }
 
+/// Whether a class attribute is a call of a name that ends in `Constraint`, `Index` or
+/// `UniqueIndex`, as `models.Constraint(...)` and an imported `Index(...)` are.
+fn is_table_object(value: &Expr) -> bool {
+    value
+        .as_call_expr()
+        .is_some_and(|c| matches!(tail_name(&c.func), Some("Constraint" | "Index" | "UniqueIndex")))
+}
+
+/// The query a `SQL()` or an `execute()` call is given, whatever runs it.
+fn run_query(call: &ast::ExprCall) -> Option<&Expr> {
+    matches!(tail_name(&call.func), Some("SQL" | "execute"))
+        .then(|| call.arguments.args.first())
+        .flatten()
+}
+
+/// The calls of a function body, those of the functions it nests among them.
+#[derive(Default)]
+struct Calls<'a> {
+    calls: Vec<&'a ast::ExprCall>,
+}
+
+impl<'a> Visitor<'a> for Calls<'a> {
+    fn visit_expr(&mut self, expr: &'a Expr) {
+        if let Expr::Call(call) = expr {
+            self.calls.push(call);
+        }
+        visitor::walk_expr(self, expr);
+    }
+}
+
 fn is_delegate(value: &Expr) -> bool {
     field_call(value)
         .and_then(|(_, call)| keyword(call, "delegate"))
@@ -477,6 +507,7 @@ pub fn analyze(src: &str) -> PyFacts {
         query_vars: None,
         read_queries: FxHashSet::default(),
         self_cursors: vec![],
+        in_view_maker: false,
     };
     v.visit_body(body);
     v.facts.diags.extend(module_state::check(body, &loc));
@@ -500,6 +531,8 @@ struct PyVisitor<'a, 'ast> {
     read_queries: FxHashSet<TextSize>,
     /// Whether each enclosing class holds Odoo's cursor as `self.cr`.
     self_cursors: Vec<bool>,
+    /// Whether the code is in the `init()` or `_auto_init()` of a model, which creates its view.
+    in_view_maker: bool,
 }
 
 impl<'ast> PyVisitor<'_, 'ast> {
@@ -542,6 +575,8 @@ impl<'ast> PyVisitor<'_, 'ast> {
             table: None,
             attrs: vec![],
             unassigned_computes: vec![],
+            views: vec![],
+            definitions: vec![],
             plain_bases: class
                 .bases()
                 .iter()
@@ -555,18 +590,7 @@ impl<'ast> PyVisitor<'_, 'ast> {
                     value: Some(value),
                     ..
                 }) => self.class_attrs(std::slice::from_ref(&**target), value, &mut fact, &mut name),
-                Stmt::FunctionDef(func) => {
-                    fact.methods.push(func.name.to_string());
-                    let mut calls = SuperCalls::default();
-                    calls.visit_body(&func.body);
-                    self.method_checks(func, &mut fact);
-                    self.override_checks(func, &calls.calls);
-                    fact.super_calls
-                        .extend(calls.calls.into_iter().map(|(name, at)| Spanned {
-                            value: name.to_owned(),
-                            pos: self.loc.pos(at),
-                        }));
-                }
+                Stmt::FunctionDef(func) => self.method_fact(func, &mut fact),
                 _ => {}
             }
         }
@@ -578,6 +602,24 @@ impl<'ast> PyVisitor<'_, 'ast> {
         };
         fact.new_model = name.is_some_and(|n| !fact.inherit.iter().any(|i| i.value == n));
         Some(fact)
+    }
+
+    /// What a method adds to its class: its name, the `super()` calls it makes, and for `init()`
+    /// the views it creates.
+    fn method_fact(&mut self, func: &ast::StmtFunctionDef, fact: &mut ClassFact) {
+        fact.methods.push(func.name.to_string());
+        if func.name.as_str() == "init" {
+            fact.views = self.init_views(func);
+        }
+        let mut calls = SuperCalls::default();
+        calls.visit_body(&func.body);
+        self.method_checks(func, fact);
+        self.override_checks(func, &calls.calls);
+        fact.super_calls
+            .extend(calls.calls.into_iter().map(|(name, at)| Spanned {
+                value: name.to_owned(),
+                pos: self.loc.pos(at),
+            }));
     }
 
     fn class_attrs(&mut self, targets: &[Expr], value: &Expr, fact: &mut ClassFact, name: &mut Option<String>) {
@@ -600,26 +642,87 @@ impl<'ast> PyVisitor<'_, 'ast> {
         }
     }
 
-    /// Any other class attribute: one that shapes the table, a company domain, `_sql_constraints`,
-    /// or else a field.
+    /// Any other class attribute: one that shapes the table, a company domain, a table query,
+    /// `_sql_constraints`, a constraint or an index, or else a field.
     fn attr_or_field(&mut self, target: &ast::ExprName, value: &Expr, fact: &mut ClassFact) {
         match target.id.as_str() {
             "_table" => fact.table = Some(option_value(value)),
-            "_parent_store" | "_auto" | "_log_access" | "_table_query" => {
+            "_parent_store" | "_auto" | "_log_access" | "_register" => {
                 let attr = Spanned {
                     value: option_value(value),
                     pos: self.loc.at(target),
                 };
                 fact.attrs.push((target.id.to_string(), attr));
             }
-            "_check_company_domain" => fact.methods.push(target.id.to_string()),
-            "_sql_constraints" => self.diag(
-                "OD110",
-                target,
-                "_sql_constraints is ignored; declare models.Constraint, models.Index or models.UniqueIndex attributes instead",
-            ),
+            "_check_company_domain" | "_table_query" | "_table_sql" => fact.methods.push(target.id.to_string()),
+            "_sql_constraints" => {
+                self.diag(
+                    "OD110",
+                    target,
+                    "_sql_constraints is ignored; declare models.Constraint, models.Index or models.UniqueIndex attributes instead",
+                );
+                self.sql_constraints(value, fact);
+            }
+            _ if is_table_object(value) => {
+                if let Some(definition) = value.as_call_expr().and_then(|c| c.arguments.args.first()) {
+                    self.definition(DefinitionSource::TableObject, definition, fact);
+                }
+            }
             _ => self.class_field(target, value, fact),
         }
+    }
+
+    /// The definition of each `(name, definition, message)` entry of a literal `_sql_constraints`.
+    fn sql_constraints(&self, value: &Expr, fact: &mut ClassFact) {
+        let entries = match value {
+            Expr::List(l) => &l.elts,
+            Expr::Tuple(t) => &t.elts,
+            _ => return,
+        };
+        for entry in entries {
+            if let Expr::Tuple(t) = entry
+                && let Some(definition) = t.elts.get(1)
+            {
+                self.definition(DefinitionSource::SqlConstraints, definition, fact);
+            }
+        }
+    }
+
+    /// The columns a literal constraint or index definition names, each where the source spells it.
+    fn definition(&self, source: DefinitionSource, definition: &Expr, fact: &mut ClassFact) {
+        let Some(columns) = str_lit(definition).and_then(sql::definition_columns) else {
+            return;
+        };
+        for (name, at) in columns {
+            let pos = source_offset(definition, at).map_or_else(|| self.loc.at(definition), |o| self.loc.pos(o));
+            fact.definitions.push((source, Spanned { value: name, pos }));
+        }
+    }
+
+    /// The views `init()` creates with a literal `CREATE VIEW` it gives `SQL()` or `execute()`,
+    /// directly or through a name it binds once. A literal read twice counts once.
+    fn init_views(&self, func: &ast::StmtFunctionDef) -> Vec<SqlView> {
+        let vars = QueryVars::of(func);
+        let mut calls = Calls::default();
+        calls.visit_body(&func.body);
+        let mut seen = FxHashSet::default();
+        let mut views = vec![];
+        for call in calls.calls {
+            let Some(source) = run_query(call).map(|q| vars.value(q)).and_then(query_source) else {
+                continue;
+            };
+            if !seen.insert(source.literal.start()) {
+                continue;
+            }
+            if let Some(view) = sql::view(&source.text) {
+                views.push(SqlView {
+                    table: view.table,
+                    names: view.names,
+                    pos: self.loc.at(source.literal),
+                });
+            }
+        }
+        views
     }
 
     /// `_inherit = _name` extends the model the class names.
@@ -1037,6 +1140,22 @@ impl<'ast> PyVisitor<'_, 'ast> {
         self.id_refs(call, expr);
         self.sql_columns(call);
         self.added_columns(call);
+        self.created_views(call);
+    }
+
+    /// The names of the views a `CREATE VIEW` creates, where `SQL()` spells it out or an
+    /// `execute()` runs it, whichever cursor that is, when the literal head of the query spells
+    /// them; a name it does not spell outside the `init()` or `_auto_init()` of a model may be any.
+    fn created_views(&mut self, call: &'ast ast::ExprCall) {
+        let query = run_query(call).map(|arg| self.query_vars.as_ref().map_or(arg, |v| v.value(arg)));
+        let names = query.and_then(query_head).map(|head| sql::created_views(&head));
+        for name in names.unwrap_or_default() {
+            match name {
+                Some(table) if !self.facts.created_views.contains(&table) => self.facts.created_views.push(table),
+                None if !self.in_view_maker => self.facts.creates_any_view = true,
+                _ => {}
+            }
+        }
     }
 
     /// The columns a `create_column()` call names with literals, or a literal `ALTER TABLE` adds
@@ -1048,12 +1167,8 @@ impl<'ast> PyVisitor<'_, 'ast> {
                 (Some(table), Some(column)) => vec![(table.to_owned(), column.to_owned())],
                 _ => vec![],
             },
-            func if matches!(tail_name(func), Some("SQL" | "execute")) => {
-                let query = call
-                    .arguments
-                    .args
-                    .first()
-                    .map(|arg| self.query_vars.as_ref().map_or(arg, |v| v.value(arg)));
+            _ if run_query(call).is_some() => {
+                let query = run_query(call).map(|arg| self.query_vars.as_ref().map_or(arg, |v| v.value(arg)));
                 query
                     .and_then(query_text)
                     .map(|text| sql::added_columns(&text))
@@ -1293,6 +1408,27 @@ impl<'ast> PyVisitor<'_, 'ast> {
             );
         }
     }
+
+    fn visit_function(&mut self, func: &'ast ast::StmtFunctionDef, stmt: &'ast Stmt) {
+        self.route_checks(func);
+        self.rollback_checks(func);
+        self.flows(func);
+        let outermost = self.query_vars.is_none();
+        if outermost {
+            self.query_vars = Some(QueryVars::of(func));
+        }
+        let in_model = matches!(self.owners.last(), Some(Some(Receiver::Model(_))));
+        let maker = in_model && matches!(func.name.as_str(), "init" | "_auto_init");
+        let in_view_maker = self.in_view_maker;
+        self.in_view_maker |= maker;
+        self.owners.push(None);
+        visitor::walk_stmt(self, stmt);
+        self.owners.pop();
+        self.in_view_maker = in_view_maker;
+        if outermost {
+            self.query_vars = None;
+        }
+    }
 }
 
 impl<'ast> Visitor<'ast> for PyVisitor<'_, 'ast> {
@@ -1336,22 +1472,7 @@ impl<'ast> Visitor<'ast> for PyVisitor<'_, 'ast> {
                 self.owners.pop();
                 return;
             }
-            Stmt::FunctionDef(func) => {
-                self.route_checks(func);
-                self.rollback_checks(func);
-                self.flows(func);
-                let outermost = self.query_vars.is_none();
-                if outermost {
-                    self.query_vars = Some(QueryVars::of(func));
-                }
-                self.owners.push(None);
-                visitor::walk_stmt(self, stmt);
-                self.owners.pop();
-                if outermost {
-                    self.query_vars = None;
-                }
-                return;
-            }
+            Stmt::FunctionDef(func) => return self.visit_function(func, stmt),
             Stmt::If(i) => {
                 self.guarded(&i.test, |v| v.visit_body(&i.body));
                 for clause in &i.elif_else_clauses {
@@ -1619,7 +1740,7 @@ mod tests {
                 "t.g z.g 23:34",
             ]
         );
-        assert!(facts.classes[0].attr("_table_query").is_some());
+        assert_eq!(facts.classes[0].methods, ["_table_query", "f"]);
     }
 
     /// The table and column of each query column a source reads, in order.
@@ -1699,6 +1820,69 @@ mod tests {
                 pair("x_box", "ref"),
                 pair("x_box", "label")
             ]
+        );
+    }
+
+    #[test]
+    fn reads_the_views_init_creates_once_each() {
+        let src = "class X(models.Model):\n    _name = 'x'\n    _auto = False\n\n    def init(self):\n        \
+                   tools.drop_view_if_exists(self.env.cr, self._table)\n        \
+                   query = 'CREATE VIEW x AS (SELECT 1 AS id, 2 AS total)'\n        self.env.cr.execute(query)\n        \
+                   self.env.cr.execute(SQL('CREATE OR REPLACE VIEW %s AS SELECT * FROM y', SQL.identifier(self._table)))\n        \
+                   self.env.cr.execute('SELECT 1')\n\n    \
+                   def refresh(self):\n        self.env.cr.execute('CREATE VIEW z AS SELECT 1 AS id')\n";
+        let facts = analyze(src);
+        let views: Vec<String> = facts.classes[0]
+            .views
+            .iter()
+            .map(|v| format!("{:?} {:?} {}", v.table, v.names, v.pos.line))
+            .collect();
+        assert_eq!(views, ["Some(\"x\") Some([\"id\", \"total\"]) 7", "None None 9"]);
+        assert_eq!(facts.created_views, ["x", "z"]);
+    }
+
+    #[test]
+    fn reads_the_columns_of_literal_definitions_by_source() {
+        let src = "class X(models.Model):\n    _name = 'x'\n    \
+                   _sql_constraints = [\n        ('a_uniq', 'unique(a)', 'A is unique'),\n        \
+                   ('b_check', 'CHECK (b > %s)' % LIMIT, 'B is large'),\n        ('c_check', \"CHECK(c\\n > 0)\", ''),\n    ]\n    \
+                   _d_uniq = models.UniqueIndex('(d) WHERE e IS NOT NULL')\n    \
+                   _f_check = models.Constraint('CHECK (f > 0)', 'F is positive')\n    \
+                   _g_index = models.Index(lambda registry: '(g)')\n    _h_index = Index('(h)')\n";
+        let facts = analyze(src);
+        let found: Vec<String> = facts.classes[0]
+            .definitions
+            .iter()
+            .map(|(source, c)| format!("{source:?} {} {}:{}", c.value, c.pos.line, c.pos.col))
+            .collect();
+        assert_eq!(
+            found,
+            [
+                "SqlConstraints a 4:28",
+                "SqlConstraints c 6:21",
+                "TableObject d 8:36",
+                "TableObject e 8:45",
+                "TableObject f 9:42",
+                "TableObject h 11:24",
+            ]
+        );
+        assert!(facts.classes[0].fields.is_empty());
+    }
+
+    #[test]
+    fn reads_the_views_a_query_head_names_and_whether_one_may_be_any() {
+        let src = "def hook(env):\n    \
+                   env.cr.execute(f\"CREATE OR REPLACE VIEW a AS ({query})\")\n    \
+                   env.cr.execute(\"CREATE VIEW public.b AS \" + query)\n    \
+                   env.cr.execute(SQL(\"CREATE VIEW c AS \" + query))\n    \
+                   env.cr.execute(\"CREATE VIEW d AS {}\".format(query))\n\n\
+                   class X(models.Model):\n    _name = 'x'\n\n    def init(self):\n        \
+                   self.env.cr.execute(SQL('CREATE VIEW %s AS SELECT 1', SQL.identifier(self._table)))\n";
+        let facts = analyze(src);
+        assert_eq!(facts.created_views, ["a", "b", "c", "d"]);
+        assert!(!facts.creates_any_view);
+        assert!(
+            analyze("def hook(env, name):\n    env.cr.execute(f'CREATE VIEW {name} AS SELECT 1')\n").creates_any_view
         );
     }
 }

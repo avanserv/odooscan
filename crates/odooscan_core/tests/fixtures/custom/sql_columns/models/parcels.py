@@ -163,6 +163,7 @@ class ParcelBeacon(models.Model):
     _name = "parcel.beacon"
     _description = "Parcel beacon"
     _log_access = False
+    _sql_constraints = [("signal_stamp", "CHECK(signal > 0 OR write_date IS NULL)", "A beacon signal is positive.")]
 
     signal = fields.Integer()
 

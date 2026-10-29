@@ -1945,6 +1945,12 @@
       "count": 1
     },
     {
+      "path": "addons/purchase_stock/report/vendor_delay_report.py",
+      "code": "OD225",
+      "message": "vendor.delay.report.on_time_rate is stored, but the view vendor_delay_report selects no column on_time_rate for it; select one AS on_time_rate in init()",
+      "count": 1
+    },
+    {
       "path": "addons/sale/controllers/portal.py",
       "code": "OD111",
       "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",

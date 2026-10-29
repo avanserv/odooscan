@@ -85,6 +85,9 @@ Models, fields and methods checked against every module in the dependency graph.
 | [OD222](OD222.md) | `check-company-without-company` | A field sets check_company to a comodel without company_id. |
 | [OD223](OD223.md) | `compute-leaves-field-unassigned` | A compute method leaves a non-stored readonly field unassigned on some records. |
 | [OD224](OD224.md) | `sql-unknown-column` | A literal SQL query names a column its model's table does not have. |
+| [OD225](OD225.md) | `sql-view-missing-column` | The SQL view of a model selects no column for one of its stored fields. |
+| [OD226](OD226.md) | `sql-view-not-created` | A model sets _auto = False, and nothing creates its SQL view. |
+| [OD227](OD227.md) | `sql-definition-unknown-column` | An SQL constraint or index names a column its model's table does not have. |
 
 ## OD3: XML ids, views and data
 

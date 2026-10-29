@@ -11,6 +11,8 @@ pub struct Manifest {
     pub version: Option<String>,
     pub depends: Vec<Spanned<String>>,
     pub data: Vec<Spanned<String>>,
+    /// The files of `init_xml` and `update_xml`, which Odoo loads as data before 19.0.
+    pub old_data: Vec<String>,
     pub demo: Vec<Spanned<String>>,
     pub category: Option<String>,
     pub installable: bool,
@@ -25,11 +27,19 @@ impl Manifest {
         self.version.as_deref().and_then(Series::from_module_version)
     }
 
+    /// The SQL files Odoo runs when it loads the data of the module.
+    pub fn sql_files(&self) -> impl Iterator<Item = &str> {
+        let data = self.data.iter().map(|f| f.value.as_str());
+        data.chain(self.old_data.iter().map(String::as_str))
+            .filter(|f| f.ends_with(".sql"))
+    }
+
     fn set(&mut self, loc: &Locator, key: &str, value: &Expr) {
         match key {
             "version" => self.version = str_lit(value).map(str::to_owned),
             "depends" => self.depends = list(loc, value),
             "data" => self.data = list(loc, value),
+            "init_xml" | "update_xml" => self.old_data.extend(list(loc, value).into_iter().map(|f| f.value)),
             "demo" => self.demo = list(loc, value),
             "category" => self.category = str_lit(value).map(str::to_owned),
             "installable" => self.installable = !matches!(value, Expr::BooleanLiteral(b) if !b.value),
@@ -116,5 +126,12 @@ mod tests {
         )
         .unwrap();
         assert_eq!(m.assets, ["x/static/src/**/*", "x/static/src/b.js"]);
+    }
+
+    #[test]
+    fn lists_the_sql_files_of_every_data_key() {
+        let m =
+            parse(r#"{"data": ["a.xml", "a.sql"], "init_xml": ["b.sql"], "update_xml": ["c.sql", "c.csv"]}"#).unwrap();
+        assert_eq!(m.sql_files().collect::<Vec<_>>(), ["a.sql", "b.sql", "c.sql"]);
     }
 }

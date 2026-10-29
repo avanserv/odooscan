@@ -33,7 +33,7 @@ class GreenhouseReading(models.Model):
 class GreenhouseReport(models.Model):
     _name = "greenhouse.report"
     _description = "Greenhouse report"
-    _auto = False
+    _auto = False  # odooscan: ignore[OD226]
 
     author_id = fields.Many2one("res.partner", string="Created by")
 
