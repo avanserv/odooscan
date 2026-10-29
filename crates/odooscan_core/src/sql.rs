@@ -8,7 +8,7 @@ use ruff_python_ast::{self as ast, BoolOp, Expr, Operator, Stmt};
 use ruff_text_size::TextSize;
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use crate::python::{SAME_MODEL, is_cursor, str_lit, tail_name};
+use crate::python::{SAME_MODEL, exits, is_cursor, str_lit, tail_name};
 
 /// ORM methods that drop cached values; from 16.0 the public ones flush pending writes first.
 const INVALIDATIONS: &[&str] = &[
@@ -35,7 +35,7 @@ pub(crate) struct Write<'a> {
 }
 
 /// What a name the function binds holds, as far as cursors go.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 enum Held {
     /// The cursor the function was given, or a value read from it.
     Given,
@@ -45,6 +45,62 @@ enum Held {
     Env,
     /// What a context manager yields, which may be either.
     Either,
+    /// `None` or `False`, no cursor at all; code tests such a name before it uses it, so at a meet
+    /// the other path decides.
+    Unset,
+}
+
+impl Held {
+    /// What a name holds after two paths that bound it to `self` and to `other`: an own cursor or
+    /// environment only when both paths may hold one.
+    fn meet(self, other: Self) -> Self {
+        match (self, other) {
+            (Self::Unset, held) | (held, Self::Unset) => held,
+            (Self::Either, held) | (held, Self::Either) => held,
+            (Self::Cursor, Self::Cursor) => Self::Cursor,
+            (Self::Env, Self::Env) => Self::Env,
+            _ => Self::Given,
+        }
+    }
+}
+
+/// A name, what it holds, and whether the value comes from a `.cursor()` call.
+type Bound<'a> = (&'a str, Held, bool);
+
+/// What two paths leave in a name, `opened` taken from the path that is not unset.
+fn meet((held, opened): (Held, bool), (other, other_opened): (Held, bool)) -> (Held, bool) {
+    match (held, other) {
+        (Held::Unset, _) => (other, other_opened),
+        (_, Held::Unset) => (held, opened),
+        _ => (held.meet(other), opened && other_opened),
+    }
+}
+
+/// A function the scanned one defines, the frames on the paths reaching its `def`, and the length
+/// of `bound` then.
+type Def<'a> = (&'a Stmt, Vec<Vec<Bound<'a>>>, usize);
+
+/// A loop being visited: the length of the innermost frame before it, and the bindings since then
+/// on the paths leaving its body by `break` and by `continue`, wherever they sit in it.
+#[derive(Default)]
+struct Loop<'a> {
+    start: usize,
+    breaks: Vec<Vec<Bound<'a>>>,
+    continues: Vec<Vec<Bound<'a>>>,
+}
+
+/// How many findings and bindings a scan holds, to drop those of a run of a loop body that the
+/// next run, from a narrower loop head, replaces.
+struct Mark {
+    rollbacks: usize,
+    commits: bool,
+    own_commits: usize,
+    invalidates: bool,
+    created: usize,
+    writes: usize,
+    own_methods: usize,
+    defs: usize,
+    bound: usize,
 }
 
 /// What a function body does with cursors, with or without the functions and lambdas it defines.
@@ -65,9 +121,15 @@ pub(crate) struct CursorUse<'a> {
     /// The methods it calls on `self` or `cls`.
     pub own_methods: Vec<&'a str>,
     vars: QueryVars<'a>,
-    /// The names each function binds, innermost last; a later binding shadows an earlier one. The
-    /// flag says the value comes from a `.cursor()` call, not from the guess `Held` may hold.
-    scopes: Vec<Vec<(&'a str, Held, bool)>>,
+    /// The names each function binds on the paths reaching the statement visited, innermost last;
+    /// a later binding shadows an earlier one. The flag says the value comes from a `.cursor()`
+    /// call, not from the guess `Held` may hold.
+    scopes: Vec<Vec<Bound<'a>>>,
+    /// Every binding of the visited function's own frame in source order: a closure may run after
+    /// any of those that follow its `def`.
+    bound: Vec<Bound<'a>>,
+    defs: Vec<Def<'a>>,
+    loops: Vec<Loop<'a>>,
     /// Whether each enclosing block ends by raising or exiting.
     leaving: Vec<bool>,
     read_only: u32,
@@ -106,7 +168,9 @@ fn tests_read_only(test: &Expr) -> bool {
 }
 
 impl<'a> CursorUse<'a> {
-    fn new(nested: bool, func: &'a ast::StmtFunctionDef, scopes: Vec<Vec<(&'a str, Held, bool)>>) -> Self {
+    fn new(nested: bool, func: &'a ast::StmtFunctionDef, mut scopes: Vec<Vec<Bound<'a>>>) -> Self {
+        let params = func.parameters.iter().map(|p| (p.name().as_str(), Held::Given, false));
+        scopes.push(params.collect());
         Self {
             nested,
             rollbacks: vec![],
@@ -117,6 +181,9 @@ impl<'a> CursorUse<'a> {
             writes: vec![],
             own_methods: vec![],
             vars: QueryVars::of(func),
+            bound: vec![],
+            defs: vec![],
+            loops: vec![],
             scopes,
             leaving: vec![],
             read_only: 0,
@@ -124,12 +191,9 @@ impl<'a> CursorUse<'a> {
     }
 
     /// What the function does itself; each function it nests is scanned on its own, with the scan
-    /// of the function that encloses it. A closure reads a name when it runs, so every binding of
-    /// the enclosing function counts, wherever it stands.
+    /// of the function that encloses it.
     pub(crate) fn scan(func: &'a ast::StmtFunctionDef, enclosing: Option<&CursorUse<'a>>) -> Self {
-        let mut scopes = enclosing.map(|e| e.scopes.clone()).unwrap_or_default();
-        let params = func.parameters.iter().map(|p| (p.name().as_str(), Held::Given, false));
-        scopes.push(params.collect());
+        let scopes = enclosing.map(|e| e.closure_scopes(func)).unwrap_or_default();
         let mut found = Self::new(false, func, scopes);
         found.visit_body(&func.body);
         found
@@ -138,9 +202,45 @@ impl<'a> CursorUse<'a> {
     /// What the function and the functions and lambdas it defines do, for code that hands its work
     /// to a closure.
     pub(crate) fn scan_nested(func: &'a ast::StmtFunctionDef) -> Self {
-        let mut found = Self::new(true, func, vec![vec![]]);
+        let mut found = Self::new(true, func, vec![]);
         found.visit_body(&func.body);
+        found.visit_closures();
         found
+    }
+
+    /// The frames a function the scanned one defines sees: those on the paths reaching its `def`,
+    /// the bindings that follow the `def` shadowing them, since the closure may run after any. A
+    /// function no `def` of the body defines, a method of a class in it, sees those at its end.
+    fn closure_scopes(&self, func: &ast::StmtFunctionDef) -> Vec<Vec<Bound<'a>>> {
+        let def = self
+            .defs
+            .iter()
+            .find(|(stmt, ..)| matches!(stmt, Stmt::FunctionDef(f) if std::ptr::eq(f, func)));
+        let Some((_, scopes, mark)) = def else {
+            return self.scopes.clone();
+        };
+        let mut scopes = scopes.clone();
+        if let Some(own) = scopes.last_mut() {
+            own.extend_from_slice(&self.bound[*mark..]);
+        }
+        scopes
+    }
+
+    /// Visits each function the visited one defines, once the whole body has given its bindings,
+    /// then the functions each of them defines.
+    fn visit_closures(&mut self) {
+        let stmts: Vec<&'a Stmt> = self.defs.iter().map(|(stmt, ..)| *stmt).collect();
+        for stmt in stmts {
+            let Stmt::FunctionDef(func) = stmt else { continue };
+            let scopes = self.closure_scopes(func);
+            let scopes = std::mem::replace(&mut self.scopes, scopes);
+            let (defs, bound) = (std::mem::take(&mut self.defs), std::mem::take(&mut self.bound));
+            self.nest(Some(&*func.parameters), |s| {
+                visitor::walk_stmt(s, stmt);
+                s.visit_closures();
+            });
+            (self.defs, self.bound, self.scopes) = (defs, bound, scopes);
+        }
     }
 
     /// Whether `call` commits a cursor the function opens with a `.cursor()` call.
@@ -148,9 +248,13 @@ impl<'a> CursorUse<'a> {
         self.own_commits.iter().any(|own| std::ptr::eq(*own, call))
     }
 
-    /// Whether the function adds, with `create_column()`, the columns a write sets, or a column of
-    /// its table when the text does not tell which it sets: no field of the registry reads them yet.
+    /// Whether the function adds, with `create_column()`, the columns an `UPDATE` sets, or a column
+    /// of its table when the text does not tell which it sets: no field of the registry reads them
+    /// yet. An `INSERT` or a `DELETE` changes whole rows, which records in the cache may hold.
     pub(crate) fn adds_columns_of(&self, write: &Write) -> bool {
+        if write.verb != "UPDATE" {
+            return false;
+        }
         let added: Vec<Option<&str>> = self
             .created
             .iter()
@@ -186,7 +290,9 @@ impl<'a> CursorUse<'a> {
     /// With `opened`, only a cursor a `.cursor()` call returns counts, not a name `Held` guesses.
     fn owns_cursor(&self, expr: &Expr, opened: bool) -> bool {
         match expr {
-            Expr::Name(n) => matches!(self.held(n.id.as_str()), Some((Held::Cursor | Held::Either, o)) if o || !opened),
+            Expr::Name(n) => {
+                matches!(self.held(n.id.as_str()), Some((Held::Cursor | Held::Either | Held::Unset, o)) if o || !opened)
+            }
             Expr::Attribute(a) => is_cursor(expr) && self.owns_env(&a.value, opened),
             Expr::Call(c) => matches!(&*c.func, Expr::Attribute(a) if a.attr.as_str() == "cursor"),
             _ => false,
@@ -227,9 +333,12 @@ impl<'a> CursorUse<'a> {
         }
     }
 
+    /// A statement binds into the innermost frame, which is the visited function's own, since a
+    /// nested function is visited after the body that defines it, and a `lambda` binds no name.
     fn bind(&mut self, target: &'a Expr, held: Held, opened: bool) {
         if let (Expr::Name(n), Some(scope)) = (target, self.scopes.last_mut()) {
             scope.push((n.id.as_str(), held, opened));
+            self.bound.push((n.id.as_str(), held, opened));
         }
     }
 
@@ -240,6 +349,8 @@ impl<'a> CursorUse<'a> {
             (Held::Given, false)
         } else if self.own_env(value) {
             (Held::Env, self.owns_env(value, true))
+        } else if value.is_none_literal_expr() || matches!(value, Expr::BooleanLiteral(b) if !b.value) {
+            (Held::Unset, false)
         } else {
             (Held::Cursor, false)
         };
@@ -338,16 +449,151 @@ impl<'a> CursorUse<'a> {
         }
     }
 
-    /// The body of `if <cursor>.readonly:` holds no rollback to report.
+    /// Each arm runs from the bindings before the `if`, and one that returns, raises, exits, breaks
+    /// or continues does not reach the statement after it. The body of `if <cursor>.readonly:`
+    /// holds no rollback to report.
     fn branch(&mut self, i: &'a ast::StmtIf) {
         self.visit_expr(&i.test);
         let read_only = u32::from(tests_read_only(&i.test));
         self.read_only += read_only;
-        self.visit_body(&i.body);
+        let start = self.frame_len();
+        let mut paths: Vec<_> = self.path(start, &i.body).into_iter().collect();
         self.read_only -= read_only;
         for clause in &i.elif_else_clauses {
-            self.visit_elif_else_clause(clause);
+            if let Some(test) = &clause.test {
+                self.visit_expr(test);
+            }
+            paths.extend(self.path(start, &clause.body));
         }
+        if i.elif_else_clauses.last().is_none_or(|c| c.test.is_some()) {
+            paths.push(vec![]);
+        }
+        self.merge(&paths);
+    }
+
+    /// Each run of a loop body starts from the loop head: the meet of the bindings before the loop
+    /// and of those at the end of a run and at each `continue`, narrowed until it holds still.
+    /// Only the run from the final head counts. A `break` leaves with the bindings it sees; any
+    /// other way out leaves from the head, through the `else`, except from `while True:`, which
+    /// only a `break` leaves.
+    fn repeat(&mut self, body: &'a [Stmt], orelse: &'a [Stmt], always: bool) {
+        let start = self.frame_len();
+        let mut head = vec![];
+        let mut paths = loop {
+            let mark = self.mark();
+            self.loops.push(Loop {
+                start,
+                breaks: vec![],
+                continues: vec![],
+            });
+            self.extend_frame(&head);
+            let end = self.path(start, body);
+            let Loop { breaks, continues, .. } = self.loops.pop().unwrap_or_default();
+            let mut runs = vec![vec![], head.clone()];
+            runs.extend(end);
+            runs.extend(continues);
+            let next = self.met(&runs);
+            if next == head {
+                break breaks;
+            }
+            self.undo(mark);
+            head = next;
+        };
+        self.extend_frame(&head);
+        let past = self.path(start, orelse);
+        if !always {
+            paths.extend(past);
+        }
+        self.merge(&paths);
+    }
+
+    /// Hands the loop the bindings since it began, on a `break` or a `continue` in its body or in
+    /// a block within it, though not in a nested loop's body, which hands them to that loop.
+    fn jump(&mut self, breaks: bool) {
+        let (Some(lp), Some(frame)) = (self.loops.last_mut(), self.scopes.last()) else {
+            return;
+        };
+        let path = frame.get(lp.start..).unwrap_or_default().to_vec();
+        if breaks { &mut lp.breaks } else { &mut lp.continues }.push(path);
+    }
+
+    fn mark(&self) -> Mark {
+        Mark {
+            rollbacks: self.rollbacks.len(),
+            commits: self.commits,
+            own_commits: self.own_commits.len(),
+            invalidates: self.invalidates,
+            created: self.created.len(),
+            writes: self.writes.len(),
+            own_methods: self.own_methods.len(),
+            defs: self.defs.len(),
+            bound: self.bound.len(),
+        }
+    }
+
+    fn undo(&mut self, mark: Mark) {
+        self.rollbacks.truncate(mark.rollbacks);
+        self.commits = mark.commits;
+        self.own_commits.truncate(mark.own_commits);
+        self.invalidates = mark.invalidates;
+        self.created.truncate(mark.created);
+        self.writes.truncate(mark.writes);
+        self.own_methods.truncate(mark.own_methods);
+        self.defs.truncate(mark.defs);
+        self.bound.truncate(mark.bound);
+    }
+
+    fn frame_len(&self) -> usize {
+        self.scopes.last().map_or(0, Vec::len)
+    }
+
+    fn extend_frame(&mut self, bindings: &[Bound<'a>]) {
+        if let Some(frame) = self.scopes.last_mut() {
+            frame.extend_from_slice(bindings);
+        }
+    }
+
+    /// Visits a block and takes back the bindings the innermost frame gained since `start`, the
+    /// path the statement after it sees unless the block does not get there.
+    fn path(&mut self, start: usize, body: &'a [Stmt]) -> Option<Vec<Bound<'a>>> {
+        self.visit_body(body);
+        let added = self.scopes.last_mut()?.split_off(start);
+        let ends = exits(body) || leaves(body) || matches!(body.last(), Some(Stmt::Break(_)));
+        (!ends).then_some(added)
+    }
+
+    fn merge(&mut self, paths: &[Vec<Bound<'a>>]) {
+        let merged = self.met(paths);
+        self.extend_frame(&merged);
+    }
+
+    /// Binds each name a path rebinds to the meet of what the paths leave in it, an empty path
+    /// keeping the bindings of the innermost frame. A path on which the frame never bound the name
+    /// adds nothing: Python makes it local, so it is unbound there.
+    fn met(&self, paths: &[Vec<Bound<'a>>]) -> Vec<Bound<'a>> {
+        let frame = self.scopes.last().map_or(&[][..], Vec::as_slice);
+        let last = |bindings: &[Bound<'a>], name: &str| {
+            bindings
+                .iter()
+                .rev()
+                .find(|(bound, ..)| *bound == name)
+                .map(|(_, held, opened)| (*held, *opened))
+        };
+        let mut names: Vec<&'a str> = vec![];
+        for &(name, ..) in paths.iter().flatten() {
+            if !names.contains(&name) {
+                names.push(name);
+            }
+        }
+        let mut merged = vec![];
+        for name in names {
+            let before = last(frame, name);
+            let reaching = paths.iter().filter_map(|path| last(path, name).or(before));
+            if let Some((held, opened)) = reaching.reduce(meet) {
+                merged.push((name, held, opened));
+            }
+        }
+        merged
     }
 }
 
@@ -362,11 +608,21 @@ impl<'a> Visitor<'a> for CursorUse<'a> {
     fn visit_stmt(&mut self, stmt: &'a Stmt) {
         match stmt {
             Stmt::ClassDef(_) => return,
-            Stmt::FunctionDef(f) if self.nested => {
-                return self.nest(Some(&*f.parameters), |s| visitor::walk_stmt(s, stmt));
-            }
-            Stmt::FunctionDef(_) => return,
+            Stmt::FunctionDef(_) => return self.defs.push((stmt, self.scopes.clone(), self.bound.len())),
             Stmt::If(i) => return self.branch(i),
+            Stmt::For(f) => {
+                self.visit_expr(&f.target);
+                self.visit_expr(&f.iter);
+                return self.repeat(&f.body, &f.orelse, false);
+            }
+            Stmt::While(w) => {
+                self.visit_expr(&w.test);
+                return self.repeat(
+                    &w.body,
+                    &w.orelse,
+                    matches!(&*w.test, Expr::BooleanLiteral(b) if b.value),
+                );
+            }
             Stmt::Assign(a) => a.targets.iter().for_each(|t| self.assign(t, &a.value)),
             Stmt::AnnAssign(ast::StmtAnnAssign {
                 target,
@@ -374,6 +630,7 @@ impl<'a> Visitor<'a> for CursorUse<'a> {
                 ..
             }) => self.assign(target, value),
             Stmt::With(w) => self.with(w),
+            Stmt::Break(_) | Stmt::Continue(_) => self.jump(stmt.is_break_stmt()),
             _ => {}
         }
         visitor::walk_stmt(self, stmt);
@@ -2208,7 +2465,12 @@ mod tests {
 
     /// What the scan of a function whose body is `body` finds, through `check`.
     fn scanned<T>(body: &str, nested: bool, check: impl FnOnce(&CursorUse) -> T) -> T {
-        let src = format!("def f(self, cr):\n    {}\n", body.replace('\n', "\n    "));
+        scanned_with("self, cr", body, nested, check)
+    }
+
+    /// What the scan finds of a function with the parameters `params` and the body `body`.
+    fn scanned_with<T>(params: &str, body: &str, nested: bool, check: impl FnOnce(&CursorUse) -> T) -> T {
+        let src = format!("def f({params}):\n    {}\n", body.replace('\n', "\n    "));
         let parsed = parse_module(&src).expect("valid Python");
         let Stmt::FunctionDef(func) = &parsed.syntax().body[0] else {
             panic!("not a function")
@@ -2413,6 +2675,134 @@ mod tests {
             "create_column(cr, table, 'c', 'int4')\ncr.execute('UPDATE t SET c = 1')"
         ));
         assert!(!covered("cr.execute('UPDATE t SET c = 1')"));
+        for added in ["'c'", "c"] {
+            for write in ["DELETE FROM t", "INSERT INTO t (c) VALUES (1)"] {
+                let body = format!("create_column(cr, 't', {added}, 'int4')\ncr.execute('{write}')");
+                assert!(!covered(&body), "{body}");
+            }
+        }
+    }
+
+    #[test]
+    fn meets_what_two_paths_hold() {
+        use Held::{Cursor, Either, Env, Given, Unset};
+        assert_eq!(Either.meet(Cursor), Cursor);
+        assert_eq!(Unset.meet(Env), Env);
+        assert_eq!(Given.meet(Unset), Given);
+        assert_eq!(meet((Unset, false), (Cursor, true)), (Cursor, true));
+        assert_eq!(meet((Cursor, true), (Cursor, false)), (Cursor, false));
+        assert_eq!(Env.meet(Either), Env);
+        assert_eq!(Either.meet(Either), Either);
+        assert_eq!(Cursor.meet(Cursor), Cursor);
+        assert_eq!(Env.meet(Env), Env);
+        assert_eq!(Cursor.meet(Env), Given);
+        assert_eq!(Given.meet(Either), Given);
+        assert_eq!(Cursor.meet(Given), Given);
+    }
+
+    #[test]
+    fn an_own_environment_holds_only_on_the_paths_that_build_it() {
+        let writes = |body: &str| scanned(body, true, |uses| uses.writes.len());
+        let switch = "self = self.with_env(self.env(cr=registry.cursor()))";
+        let update = "self.env.cr.execute('UPDATE a SET b = 1')";
+        for body in [
+            format!("if new:\n    {switch}\n{update}"),
+            format!("if new:\n    {switch}\nelif other:\n    pass\nelse:\n    {switch}\n{update}"),
+            format!("if a:\n    if b:\n        {switch}\n    else:\n        return\n{update}"),
+            format!("for x in y:\n    {switch}\n{update}"),
+            format!("for x in y:\n    {switch}\n    break\n{update}"),
+            format!("while x:\n    {switch}\n{update}"),
+            format!("while x:\n    if a:\n        {switch}\n        continue\n    {update}"),
+            format!("for x in y:\n    if a:\n        {switch}\n        break\n{update}"),
+            format!("while True:\n    if a:\n        {switch}\n        continue\n    break\n{update}"),
+            format!("while True:\n    if a:\n        {switch}\n        continue\n    if b:\n        break\n{update}"),
+            format!(
+                "{switch}\nwhile True:\n    for x in y:\n        pass\n    else:\n        self = records\n        break\n{update}"
+            ),
+            format!("if new:\n    {switch}\ndef g():\n    {update}"),
+        ] {
+            assert_eq!(writes(&body), 1, "{body}");
+        }
+        for body in [
+            format!("if new:\n    {switch}\n    {update}"),
+            format!("if new:\n    {switch}\nelse:\n    {switch}\n{update}"),
+            format!("if new:\n    {switch}\nelif other:\n    raise E()\nelse:\n    return\n{update}"),
+            format!(
+                "if a:\n    if b:\n        {switch}\n    else:\n        {switch}\nelse:\n    sys.exit(1)\n{update}"
+            ),
+            format!("for x in y:\n    {switch}\nelse:\n    {switch}\n{update}"),
+            format!("for x in y:\n    {switch}\n    {update}"),
+            format!("def g():\n    if new:\n        {switch}\n    {update}"),
+            format!("while True:\n    if a:\n        {switch}\n        break\n{update}"),
+            format!("while True:\n    {switch}\n    if done:\n        break\n{update}"),
+            format!("while True:\n    try:\n        {switch}\n        break\n    except E:\n        time.sleep(1)\n{update}"),
+            format!("while True:\n    with lock:\n        {switch}\n        break\n{update}"),
+            format!("while True:\n    match x:\n        case 1:\n            {switch}\n            break\n{update}"),
+            format!("while True:\n    {switch}\n    for x in y:\n        break\n    else:\n        break\n{update}"),
+            format!("while True:\n    for x in y:\n        break\n    {switch}\n    break\n{update}"),
+            format!("while True:\n    if a:\n        self = records\n        continue\n    {switch}\n    break\n{update}"),
+            format!("for x in y:\n    if a:\n        {switch}\n        break\nelse:\n    return\n{update}"),
+            format!("def g():\n    {update}\n{switch}"),
+            format!("if new:\n    {switch}\n    def g():\n        {update}\n    g()\n    return"),
+            "env = None\nif new:\n    env = api.Environment(self.pool.cursor(), uid, {})\nif env:\n    env.cr.execute('UPDATE a SET b = 1')".to_owned(),
+        ] {
+            assert_eq!(writes(&body), 0, "{body}");
+        }
+    }
+
+    #[test]
+    fn an_own_cursor_holds_only_on_the_paths_that_open_it() {
+        let commits = |body: &str| scanned_with("self", body, false, |uses| uses.commits);
+        for body in [
+            "if new:\n    cr = self.pool.cursor()\ncr.commit()",
+            "if new:\n    cr = self.pool.cursor()\nelse:\n    cr = registry.cursor()\ncr.commit()",
+            "if new:\n    cr = self.pool.cursor()\nelse:\n    return\ncr.commit()",
+            "if new:\n    cr = self.pool.cursor()\nelse:\n    cr = None\ncr.commit()",
+            "cr = None\nif new:\n    cr = self.pool.cursor()\ncr.commit()",
+            "for x in y:\n    cr = self.pool.cursor()\n    break\ncr.commit()",
+            "while True:\n    try:\n        cr = self.pool.cursor()\n        break\n    except E:\n        time.sleep(1)\ncr.commit()",
+            "cr = False\nif apart:\n    cr = self.pool.cursor()\nif cr:\n    cr.commit()",
+            "cr = self.pool.cursor()\nwhile x:\n    cr.commit()\n    cr = registry.cursor()",
+        ] {
+            assert!(!commits(body), "{body}");
+        }
+        for body in [
+            "cr = self.env.cr\nif new:\n    cr = self.pool.cursor()\ncr.commit()",
+            "cr = None\ncr.commit()",
+            "cr = self.env.cr\nfor x in y:\n    cr = self.pool.cursor()\ncr.commit()",
+            "cr = self.pool.cursor()\nfor rec in self:\n    if rec.x:\n        cr = self.env.cr\n        break\ncr.commit()",
+            "cr = self.pool.cursor()\nfor rec in self:\n    if rec.x:\n        cr = self.env.cr\n        continue\ncr.commit()",
+            "cr = self.pool.cursor()\nwhile True:\n    if not self._x_batch(cr):\n        break\n    cr = self.env.cr\ncr.commit()",
+            "cr = self.pool.cursor()\nfor x in y:\n    cr.commit()\n    cr = self.env.cr",
+            "cr = self.pool.cursor()\nwhile True:\n    a = 1\n    if a:\n        break\n    b = 2\n    if b:\n        cr = self.env.cr\ncr.commit()",
+        ] {
+            assert!(commits(body), "{body}");
+        }
+        assert_eq!(
+            reported_rollbacks(
+                "if new:\n    self = self.with_env(self.env(cr=registry.cursor()))\nself.env.cr.rollback()"
+            ),
+            1
+        );
+        let body = "if new:\n    cr = self.pool.cursor()\n    def step():\n        cr.commit()\n    step()\n    return";
+        assert!(!closure_scanned(body, |uses| uses.commits));
+    }
+
+    #[test]
+    fn a_closure_sees_the_paths_reaching_its_def_and_the_bindings_after_it() {
+        let commits = |body: &str| closure_scanned(body, |uses| uses.commits);
+        for body in [
+            "cr = self.env.cr\nif new:\n    cr = self.pool.cursor()\ndef step():\n    cr.commit()",
+            "cr = self.pool.cursor()\ndef step():\n    cr.commit()\ncr = self.env.cr",
+        ] {
+            assert!(commits(body), "{body}");
+        }
+        for body in [
+            "if new:\n    cr = self.pool.cursor()\nelse:\n    cr = registry.cursor()\ndef step():\n    cr.commit()",
+            "cr = self.env.cr\ndef step():\n    cr.commit()\ncr = self.pool.cursor()",
+        ] {
+            assert!(!commits(body), "{body}");
+        }
     }
 
     #[test]
