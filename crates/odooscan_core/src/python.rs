@@ -413,6 +413,12 @@ fn run_query(call: &ast::ExprCall) -> Option<&Expr> {
         .flatten()
 }
 
+/// The query `call` is given, read through the name it is bound to when the function binds it
+/// once.
+fn resolved_query<'a>(call: &'a ast::ExprCall, vars: Option<&QueryVars<'a>>) -> Option<&'a Expr> {
+    run_query(call).map(|arg| vars.map_or(arg, |v| v.value(arg)))
+}
+
 /// The value that fills the first gap of a query given to `call`, as the name of the view it
 /// creates does: the first value of an f-string or a `+` when the text after it starts no name,
 /// the first value of `%` or `.format()`, or else the first parameter of the call.
@@ -826,7 +832,7 @@ impl<'ast> PyVisitor<'_, 'ast> {
         let mut seen = FxHashSet::default();
         let mut views = vec![];
         for call in calls.calls {
-            let Some(source) = run_query(call).map(|q| vars.value(q)).and_then(query_source) else {
+            let Some(source) = resolved_query(call, Some(&vars)).and_then(query_source) else {
                 continue;
             };
             if !seen.insert(source.literal.start()) {
@@ -1271,7 +1277,7 @@ impl<'ast> PyVisitor<'_, 'ast> {
     /// them. A name that is `self._table` whole in a model class is the view of the class's model;
     /// another name it does not spell outside the `init()` or `_auto_init()` of a class may be any.
     fn created_views(&mut self, call: &'ast ast::ExprCall) {
-        let Some(query) = run_query(call).map(|arg| self.query_vars.as_ref().map_or(arg, |v| v.value(arg))) else {
+        let Some(query) = resolved_query(call, self.query_vars.as_ref()) else {
             return;
         };
         let created = query_head(query).map(|head| sql::created_views(&head));
@@ -1305,14 +1311,10 @@ impl<'ast> PyVisitor<'_, 'ast> {
                 (Some(table), Some(column)) => vec![(table.to_owned(), column.to_owned())],
                 _ => vec![],
             },
-            _ if run_query(call).is_some() => {
-                let query = run_query(call).map(|arg| self.query_vars.as_ref().map_or(arg, |v| v.value(arg)));
-                query
-                    .and_then(query_text)
-                    .map(|text| sql::added_columns(&text))
-                    .unwrap_or_default()
-            }
-            _ => vec![],
+            _ => resolved_query(call, self.query_vars.as_ref())
+                .and_then(query_text)
+                .map(|text| sql::added_columns(&text))
+                .unwrap_or_default(),
         };
         for column in added {
             if !self.facts.added_columns.contains(&column) {
