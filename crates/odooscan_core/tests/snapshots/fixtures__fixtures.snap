@@ -294,6 +294,15 @@ custom/sql_columns/models/constraints.py:8:36: OD227 total_weight: parcel_box ha
 custom/sql_columns/models/constraints.py:9:38: OD227 tag_ids: parcel_box has no such column, since parcel.box.tag_ids is a Many2many, which has no column; drop it from the definition
 custom/sql_columns/models/constraints.py:10:34: OD227 display_name: parcel_box has no such column, since parcel.box.display_name is computed by the ORM, not stored; drop it from the definition
 custom/sql_columns/models/constraints.py:27:52: OD227 name: parcel_locker has no such column, since name is a field of parcel.depot, which parcel.locker reaches through _inherits; declare the definition on parcel.depot
+custom/sql_columns/models/delegations.py:24:33: OD227 name: parcel_stand has no such column, since name is a field of parcel.depot, which parcel.stand reaches through _inherits; declare the definition on parcel.depot
+custom/sql_columns/models/delegations.py:28:52: OD224 s.name: parcel_stand has no such column, since name is a field of parcel.depot, which parcel.stand reaches through _inherits; join parcel_depot on x_host_id
+custom/sql_columns/models/delegations.py:28:60: OD224 s.bogus: parcel_stand has no such column, since parcel.stand has no field bogus; name the column of a stored field of parcel.stand
+custom/sql_columns/models/delegations.py:44:39: OD224 b.x_host_id: parcel_booth has no such column, since parcel.booth has no field x_host_id; name the column of a stored field of parcel.booth
+custom/sql_columns/models/delegations.py:44:52: OD224 b.x_old_id: parcel_booth has no such column, since parcel.booth has no field x_old_id; name the column of a stored field of parcel.booth
+custom/sql_columns/models/delegations.py:44:84: OD224 b.name: parcel_booth has no such column, since name is a field of parcel.depot, which parcel.booth reaches through _inherits; join parcel_depot on x_booth_depot_id
+custom/sql_columns/models/delegations.py:80:39: OD224 s.x_shop_depot_id: parcel_shop has no such column, since parcel.shop.x_shop_depot_id is not stored; set store=True on the field, or read it through the ORM
+custom/sql_columns/models/delegations.py:91:39: OD224 a.name: parcel_annex has no such column, since name is a field of parcel.box, which parcel.annex reaches through _inherits; join parcel_box on x_annex_box_id
+custom/sql_columns/models/delegations.py:103:39: OD224 o.name: parcel_outlet has no such column, since name is a field of parcel.depot, which parcel.outlet reaches through _inherits; join parcel_depot on x_outlet_depot_id
 custom/sql_columns/models/parcels.py:76:5: OD226 _auto = False leaves parcel.report without a table, and nothing creates the view parcel_report; create it in init(), or drop _auto = False
 custom/sql_columns/models/parcels.py:168:63: OD227 write_date: parcel_beacon has no such column, since parcel.beacon.write_date is not created, as parcel.beacon sets _log_access to False; drop it from the definition, or log access on the model
 custom/sql_columns/models/parcels.py:207:62: OD224 t.channel: parcel_tracker has no such column, since parcel.tracker.channel is not stored; set store=True on the field, or read it through the ORM

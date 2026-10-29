@@ -2526,23 +2526,24 @@ impl<'m> Ctx<'_, 'm> {
     }
 
     /// What the table of `model` holds for `name`. Of the fields Odoo adds without a definition,
-    /// `id`, the log columns where `logs_access` says so, `parent_path` under `_parent_store` and
-    /// the fields `_inherits` names are present, and `display_name`, and `__last_update` up to
-    /// 16.0, are not stored. Present too are fields whose column depends on the series or on
-    /// `attachment`.
+    /// `id`, the log columns where `logs_access` says so and `parent_path` under `_parent_store`
+    /// are present, and `display_name`, and `__last_update` up to 16.0, are not stored. Present too
+    /// are fields whose column depends on the series or on `attachment`, and an undefined name the
+    /// merged `_inherits` may name, which Odoo creates or refuses the model over.
     fn column(&self, model: &'m str, name: &str) -> Column<'m> {
-        let delegates = |c: &ClassFact| c.inherits.iter().any(|(_, field)| field == name);
         if self.index.implicit_column(model, name)
             || self.index.log_column(name) && self.logs_access(model)
             || name == "parent_path" && self.some_class(model, sets_parent_store)
-            || self.some_class(model, delegates)
         {
             return Column::Present;
         }
         let mut defs = self.index.merged_fields(model, self.scope);
         defs.retain(|d| d.2.name == name);
         if defs.is_empty() {
-            return self.undefined(name);
+            return match self.undefined(name) {
+                Column::Missing if self.inherits_entry(model, name) != Some(false) => Column::Present,
+                lack => lack,
+            };
         }
         self.merge(model, defs)
             .map_or(Column::Present, |field| stored_column(&field))
@@ -2589,14 +2590,19 @@ impl<'m> Ctx<'_, 'm> {
         !unlogged_at_introduction || self.some_class(model, |c| c.attr("_log_access").is_some() && !unlogged(c))
     }
 
-    /// The model `model` delegates to through `_inherits` that has the field `name`, with the field
-    /// that delegates to it.
+    /// The model `model` delegates to that has the field `name`, with the field that delegates to
+    /// it, among the `_inherits` entries and `delegate=True` fields of the classes it merges: the
+    /// first whose field the merged `_inherits` may still name, else the first.
     fn delegated_field(&self, model: &str, name: &str) -> Option<(&'m str, &'m str)> {
-        let classes = self.index.classes(model).iter().filter(|(mi, _)| self.scope.sees(*mi));
-        classes
+        let classes = self.index.merged_classes(model, self.scope);
+        let pairs: Vec<(&'m str, &'m str)> = classes
+            .iter()
             .flat_map(|(_, c)| &c.inherits)
-            .find(|(parent, _)| !self.index.field_defs(parent, name, None).is_empty())
+            .filter(|(parent, _)| !self.index.field_defs(parent, name, None).is_empty())
             .map(|(parent, via)| (parent.as_str(), via.as_str()))
+            .collect();
+        let holds = |&&(_, via): &&(&str, &str)| self.inherits_entry(model, via) != Some(false);
+        pairs.iter().find(holds).or(pairs.first()).copied()
     }
 }
 
