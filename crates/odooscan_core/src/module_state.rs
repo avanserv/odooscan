@@ -49,7 +49,7 @@ pub(crate) fn check(body: &[Stmt], loc: &Locator) -> (Vec<ImportPatch>, Vec<RawD
 }
 
 /// The statements that run at import: the module body, into `if` and `try` blocks.
-fn top_level(body: &[Stmt]) -> Vec<&Stmt> {
+pub(crate) fn top_level(body: &[Stmt]) -> Vec<&Stmt> {
     let mut stmts = vec![];
     for stmt in body {
         stmts.push(stmt);
@@ -77,7 +77,7 @@ fn top_level(body: &[Stmt]) -> Vec<&Stmt> {
 
 /// The names an import of `odoo`, or of a module under it, binds, each with the dotted path of
 /// what it names.
-fn odoo_names<'a>(top: &[&'a Stmt]) -> Vec<(&'a str, String)> {
+pub(crate) fn odoo_names<'a>(top: &[&'a Stmt]) -> Vec<(&'a str, String)> {
     let from_odoo = |module: &str| module == "odoo" || module.starts_with("odoo.");
     let mut names = vec![];
     for stmt in top {
@@ -101,7 +101,7 @@ fn odoo_names<'a>(top: &[&'a Stmt]) -> Vec<(&'a str, String)> {
 }
 
 /// The name an attribute or item chain starts from.
-fn root(expr: &Expr) -> Option<&str> {
+pub(crate) fn root(expr: &Expr) -> Option<&str> {
     match expr {
         Expr::Name(n) => Some(n.id.as_str()),
         Expr::Attribute(a) => root(&a.value),

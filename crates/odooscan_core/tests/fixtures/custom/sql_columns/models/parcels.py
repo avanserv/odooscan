@@ -180,3 +180,60 @@ class ParcelCrate(models.Model, ParcelTrackingMixin):
     _description = "Parcel crate"
 
     name = fields.Char()
+
+
+class ParcelTracker(models.Model):
+    _name = "parcel.tracker"
+    _description = "Parcel tracker"
+
+    signal = fields.Float(compute="_compute_readings")
+    battery = fields.Float(compute="_compute_readings")
+    firmware = fields.Char(compute="_compute_readings")
+    channel = fields.Char(compute="_compute_readings")
+
+    def init(self):
+        self.env.cr.execute(
+            """
+            ALTER TABLE parcel_tracker
+                ADD COLUMN IF NOT EXISTS signal numeric -- read from the gateway's (nightly; hourly) report
+                , ADD COLUMN IF NOT EXISTS battery numeric;
+            -- where the firmware lives
+            ALTER TABLE parcel_tracker ADD COLUMN IF NOT EXISTS firmware varchar
+            """
+        )
+
+    def _compute_readings(self):
+        self.env.cr.execute(
+            "SELECT t.id, t.signal, t.battery, t.firmware, t.channel FROM parcel_tracker t WHERE t.id IN %s",
+            [tuple(self.ids)],
+        )
+        rows = {row[0]: row[1:] for row in self.env.cr.fetchall()}
+        for tracker in self:
+            readings = rows.get(tracker.id, (0, 0, False, False))
+            tracker.signal, tracker.battery, tracker.firmware, tracker.channel = readings
+
+
+class ParcelRelay(models.Model):
+    _name = "parcel.relay"
+    _description = "Parcel relay"
+    _log_access = False
+
+    name = fields.Char()
+
+
+class ParcelRelayHops(models.Model):
+    _inherit = "parcel.relay"
+
+    hops = fields.Integer()
+
+
+class ParcelAntenna(models.Model):
+    _name = "parcel.antenna"
+    _description = "Parcel antenna"
+
+    name = fields.Char()
+
+
+class ParcelAntennaQuiet(models.Model):
+    _inherit = "parcel.antenna"
+    _log_access = False

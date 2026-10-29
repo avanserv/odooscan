@@ -1,4 +1,5 @@
 import psycopg2
+from psycopg2 import sql
 
 from odoo import models
 from odoo.tools import SQL
@@ -124,3 +125,13 @@ class ParcelBoxQueries(models.Model):
     def x_box_seals(self):
         self.env.cr.execute("SELECT b.seal_code, b.seal_ref FROM parcel_box b")
         return self.env.cr.fetchall()
+
+    def x_relays_and_antennas(self):
+        cr = self.env.cr
+        cr.execute("SELECT r.name, r.write_date FROM parcel_relay r")
+        cr.execute("SELECT a.name, a.create_date FROM parcel_antenna a")
+        cr.execute("SELECT b.name, b.__last_update FROM parcel_box b")
+
+    def x_remote_boxes(self, remote):
+        remote.execute(sql.SQL("SELECT b.remote_code FROM parcel_box b"))
+        self.env.cr.execute(sql.SQL("SELECT b.local_code FROM parcel_box b"))

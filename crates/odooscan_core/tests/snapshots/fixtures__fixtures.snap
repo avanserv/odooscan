@@ -183,6 +183,8 @@ custom/legacy14/models/badge.py:9:73: OD213 'partner_id' is required, so Odoo re
 custom/legacy14/models/badge.py:10:58: OD218 'country_id' has delegate=True, so it must be required with ondelete 'cascade' or 'restrict'; give it ondelete="cascade"
 custom/legacy14/models/badge.py:10:88: OD213 'country_id' is required, so Odoo refuses ondelete='set null'; use 'restrict' or 'cascade'
 custom/legacy14/models/badge.py:12:30: OD220 'ref' has the label 'ID' of field 'id' of legacy.badge, so Odoo logs a warning and users cannot tell them apart; give it another string
+custom/legacy14/models/ledger.py:16:47: OD224 l.create_date: legacy_ledger has no such column, since legacy.ledger.create_date is not created, as legacy.ledger sets _log_access to False; drop it from the query, or log access on the model
+custom/legacy14/models/ledger.py:16:62: OD224 l.__last_update: legacy_ledger has no such column, since legacy.ledger.__last_update is computed by the ORM, not stored; read it through the ORM
 custom/legacy14/models/res_partner.py:7:43: OD216 'type' is required, so Odoo refuses ondelete 'set null' for the selection_add value 'site'; give it 'cascade', 'set default' or a function
 custom/legacy14/models/res_partner.py:11:34: OD219 'stage' sets tracking, but res.partner does not inherit mail.thread, so Odoo ignores it and logs a warning; inherit mail.thread or remove tracking
 custom/legacy14/models/res_partner.py:22:9: OD223 _compute_initials() can leave 'initials' unassigned on a record, so reading it raises ValueError; assign it on every path through the loop, False when there is no value
@@ -291,21 +293,25 @@ custom/sql_columns/models/constraints.py:10:34: OD227 display_name: parcel_box h
 custom/sql_columns/models/constraints.py:27:52: OD227 name: parcel_locker has no such column, since name is a field of parcel.depot, which parcel.locker reaches through _inherits; declare the definition on parcel.depot
 custom/sql_columns/models/parcels.py:76:5: OD226 _auto = False leaves parcel.report without a table, and nothing creates the view parcel_report; create it in init(), or drop _auto = False
 custom/sql_columns/models/parcels.py:168:63: OD227 write_date: parcel_beacon has no such column, since parcel.beacon.write_date is not created, as parcel.beacon sets _log_access to False; drop it from the definition, or log access on the model
-custom/sql_columns/models/queries.py:11:27: OD224 b.weight_uom: parcel_box has no such column, since parcel.box has no field weight_uom; use weight_uom_id
-custom/sql_columns/models/queries.py:16:48: OD224 parcel_box.label: parcel_box has no such column, since parcel.box has no field label; name the column of a stored field of parcel.box
-custom/sql_columns/models/queries.py:22:22: OD224 b.total_weight: parcel_box has no such column, since parcel.box.total_weight is not stored; set store=True on the field, or read it through the ORM
-custom/sql_columns/models/queries.py:22:38: OD224 b.item_ids: parcel_box has no such column, since parcel.box.item_ids is a One2many; join the table of its comodel on its inverse field
-custom/sql_columns/models/queries.py:22:50: OD224 b.tag_ids: parcel_box has no such column, since parcel.box.tag_ids is a Many2many; join its relation table
-custom/sql_columns/models/queries.py:22:61: OD224 l.name: parcel_locker has no such column, since name is a field of parcel.depot, which parcel.locker reaches through _inherits; join parcel_depot on depot_id
-custom/sql_columns/models/queries.py:32:17: OD224 d.capacity: parcel_depot has no such column, since parcel.depot has no field capacity; name the column of a stored field of parcel.depot
-custom/sql_columns/models/queries.py:39:105: OD224 EXCLUDED.title: parcel_box has no such column, since parcel.box has no field title; name the column of a stored field of parcel.box
-custom/sql_columns/models/queries.py:45:53: OD224 b.volume: parcel_box has no such column, since parcel.box has no field volume; name the column of a stored field of parcel.box
-custom/sql_columns/models/queries.py:51:81: OD224 b.pickup_code: parcel_box has no such column, since parcel.box.pickup_code is not stored; set store=True on the field, or read it through the ORM
-custom/sql_columns/models/queries.py:98:39: OD224 b.display_name: parcel_box has no such column, since parcel.box.display_name is computed by the ORM, not stored; read it through the ORM
-custom/sql_columns/models/queries.py:102:27: OD224 b.code: parcel_box has no such column, since parcel.box has no field code; name the column of a stored field of parcel.box
-custom/sql_columns/models/queries.py:115:34: OD224 b.shelf: parcel_box has no such column, since parcel.box has no field shelf; name the column of a stored field of parcel.box
-custom/sql_columns/models/queries.py:120:38: OD224 s.occupancy: parcel_shelf has no such column, since parcel.shelf.occupancy is not stored; set store=True on the field, or read it through the ORM
-custom/sql_columns/models/queries.py:121:46: OD224 c.create_date: parcel_beacon has no such column, since parcel.beacon.create_date is not created, as parcel.beacon sets _log_access to False; drop it from the query, or log access on the model
+custom/sql_columns/models/parcels.py:207:62: OD224 t.channel: parcel_tracker has no such column, since parcel.tracker.channel is not stored; set store=True on the field, or read it through the ORM
+custom/sql_columns/models/queries.py:12:27: OD224 b.weight_uom: parcel_box has no such column, since parcel.box has no field weight_uom; use weight_uom_id
+custom/sql_columns/models/queries.py:17:48: OD224 parcel_box.label: parcel_box has no such column, since parcel.box has no field label; name the column of a stored field of parcel.box
+custom/sql_columns/models/queries.py:23:22: OD224 b.total_weight: parcel_box has no such column, since parcel.box.total_weight is not stored; set store=True on the field, or read it through the ORM
+custom/sql_columns/models/queries.py:23:38: OD224 b.item_ids: parcel_box has no such column, since parcel.box.item_ids is a One2many; join the table of its comodel on its inverse field
+custom/sql_columns/models/queries.py:23:50: OD224 b.tag_ids: parcel_box has no such column, since parcel.box.tag_ids is a Many2many; join its relation table
+custom/sql_columns/models/queries.py:23:61: OD224 l.name: parcel_locker has no such column, since name is a field of parcel.depot, which parcel.locker reaches through _inherits; join parcel_depot on depot_id
+custom/sql_columns/models/queries.py:33:17: OD224 d.capacity: parcel_depot has no such column, since parcel.depot has no field capacity; name the column of a stored field of parcel.depot
+custom/sql_columns/models/queries.py:40:105: OD224 EXCLUDED.title: parcel_box has no such column, since parcel.box has no field title; name the column of a stored field of parcel.box
+custom/sql_columns/models/queries.py:46:53: OD224 b.volume: parcel_box has no such column, since parcel.box has no field volume; name the column of a stored field of parcel.box
+custom/sql_columns/models/queries.py:52:81: OD224 b.pickup_code: parcel_box has no such column, since parcel.box.pickup_code is not stored; set store=True on the field, or read it through the ORM
+custom/sql_columns/models/queries.py:99:39: OD224 b.display_name: parcel_box has no such column, since parcel.box.display_name is computed by the ORM, not stored; read it through the ORM
+custom/sql_columns/models/queries.py:103:27: OD224 b.code: parcel_box has no such column, since parcel.box has no field code; name the column of a stored field of parcel.box
+custom/sql_columns/models/queries.py:116:34: OD224 b.shelf: parcel_box has no such column, since parcel.box has no field shelf; name the column of a stored field of parcel.box
+custom/sql_columns/models/queries.py:121:38: OD224 s.occupancy: parcel_shelf has no such column, since parcel.shelf.occupancy is not stored; set store=True on the field, or read it through the ORM
+custom/sql_columns/models/queries.py:122:46: OD224 c.create_date: parcel_beacon has no such column, since parcel.beacon.create_date is not created, as parcel.beacon sets _log_access to False; drop it from the query, or log access on the model
+custom/sql_columns/models/queries.py:131:38: OD224 r.write_date: parcel_relay has no such column, since parcel.relay.write_date is not created, as parcel.relay sets _log_access to False; drop it from the query, or log access on the model
+custom/sql_columns/models/queries.py:133:38: OD224 b.__last_update: parcel_box has no such column, since parcel.box has no field __last_update; name the column of a stored field of parcel.box
+custom/sql_columns/models/queries.py:137:47: OD224 b.local_code: parcel_box has no such column, since parcel.box has no field local_code; name the column of a stored field of parcel.box
 custom/sql_columns/models/views.py:14:5: OD225 parcel.summary.heaviest is stored, but the view parcel_summary selects no column heaviest for it; select one AS heaviest in init()
 custom/sql_columns/models/views.py:39:53: OD224 s.heaviest: parcel_summary has no such column, since the view init() creates for parcel.summary selects none; name a column the view selects
 custom/sql_columns/models/views.py:48:5: OD225 parcel.summary.volume is stored, but the view parcel_summary selects no column volume for it; select one AS volume in init()
@@ -316,3 +322,4 @@ custom/sql_objects/models/pallets.py:13:45: OD227 slot: freight_pallet has no su
 custom/sql_objects/models/pallets.py:14:64: OD227 bin: freight_pallet has no such column, since freight.pallet has no field bin; name the column of a stored field of freight.pallet
 custom/sql_view_builders/models/builders.py:8:29: OD225 the view parcel_manifest of parcel.manifest selects no column weight_total, which the stored field parcel.manifest.weight_total of sql_columns needs; select one AS weight_total
 custom/supers/models/supers.py:29:24: OD211 no parent class of bad.super defines '_prepare_gone', so this super() call fails
+custom/unversioned_logs/models/probes.py:39:39: OD224 s.create_uid: drift_sensor has no such column, since drift.sensor.create_uid is not created, as drift.sensor sets _log_access to False; drop it from the query, or log access on the model
