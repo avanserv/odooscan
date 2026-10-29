@@ -136,6 +136,9 @@ pub struct ClassFact {
     pub new_model: bool,
     pub kind: ModelKind,
     pub inherit: Vec<Spanned<String>>,
+    /// `_inherit` is neither `_name`, a string, nor a list or tuple of strings only, so which models
+    /// it lists, and in which order, is unknown.
+    pub inherit_unknown: bool,
     /// `_inherits` and `delegate=True` fields: parent model to delegating field.
     pub inherits: Vec<(String, String)>,
     /// The `_inherits` entries whose key and field are literals: parent model to delegating field,
