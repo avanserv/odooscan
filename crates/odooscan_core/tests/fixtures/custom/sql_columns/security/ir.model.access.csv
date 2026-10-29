@@ -64,3 +64,4 @@ access_parcel_lagoon,parcel.lagoon,model_parcel_lagoon,base.group_user,1,1,1,1
 access_parcel_shop,parcel.shop,model_parcel_shop,base.group_user,1,1,1,1
 access_parcel_annex,parcel.annex,model_parcel_annex,base.group_user,1,1,1,1
 access_parcel_outlet,parcel.outlet,model_parcel_outlet,base.group_user,1,1,1,1
+access_parcel_ramp,parcel.ramp,model_parcel_ramp,base.group_user,1,1,1,1
