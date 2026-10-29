@@ -65,3 +65,78 @@ class GardenTag(models.Model):
 class GardenTagPartner(models.Model):
     _inherit = "garden.tag"
     _inherits = {"res.partner": "partner_id"}
+
+
+class GardenOwned(models.AbstractModel):
+    _name = "garden.owned"
+    _description = "Owned garden item"
+    _inherits = {"res.partner": "partner_id", "res.country": "country_id"}
+
+    partner_id = fields.Many2one("res.partner", required=True)
+    country_id = fields.Many2one("res.country", required=True)
+
+
+class GardenBench(models.Model):
+    _name = "garden.bench"
+    _inherit = ["garden.owned"]
+    _description = "Garden bench"
+
+    partner_id = fields.Many2one(delegate=True)
+    country_id = fields.Many2one(ondelete="set null")
+
+
+class GardenPost(models.Model):
+    _name = "garden.post"
+    _description = "Garden post"
+    _inherits = {"res.partner": "partner_id"}
+
+    partner_id = fields.Many2one("res.partner", required=True, ondelete="set null")
+    country_id = fields.Many2one("res.country", delegate=True, required=True, ondelete="set null")
+    home_country_id = fields.Many2one("res.country", delegate=False, required=True, ondelete="set null")
+    parent_country_id = fields.Many2one("res.country", delegate=None, required=True, ondelete="set null")
+
+
+class GardenHeld(models.AbstractModel):
+    _name = "garden.held"
+    _description = "Held garden item"
+    _inherits = {"res.partner": "partner_id"}
+
+    partner_id = fields.Many2one("res.partner", required=True, ondelete="cascade")
+
+
+class GardenLeased(models.AbstractModel):
+    _name = "garden.leased"
+    _description = "Leased garden item"
+    _inherits = {"res.partner": "tenant_id"}
+
+    tenant_id = fields.Many2one("res.partner", required=True, ondelete="cascade")
+
+
+class GardenShed(models.AbstractModel):
+    _name = "garden.shed"
+    _inherit = ["garden.held"]
+    _description = "Garden shed"
+    _inherits = {"res.partner": "owner_id"}
+
+    owner_id = fields.Many2one("res.partner", required=True, ondelete="cascade")
+    partner_id = fields.Many2one(ondelete="set null")
+
+
+class GardenHut(models.AbstractModel):
+    _name = "garden.hut"
+    _inherit = ["garden.held", "garden.leased"]
+    _description = "Garden hut"
+
+    partner_id = fields.Many2one(ondelete="set null")
+
+
+CRATE_PARENTS = {"res.partner": "partner_id"}
+
+
+class GardenCrate(models.AbstractModel):
+    _name = "garden.crate"
+    _description = "Garden crate"
+    _inherits = CRATE_PARENTS
+
+    partner_id = fields.Many2one("res.partner", required=True, ondelete="set null")
+    country_id = fields.Many2one("res.country", delegate=True)

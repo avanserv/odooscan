@@ -25,6 +25,8 @@ class ParcelBox(models.Model):
     handling_note = fields.Char(company_dependent=True, store=False)
     preview_image = fields.Image(compute="_compute_preview_image")
     pickup_code = fields.Char(compute="_compute_pickup_code", inverse="_inverse_pickup_code")
+    seal_code = fields.Char(compute=None)
+    seal_ref = fields.Char(related=False)
 
     def _compute_pickup_code(self):
         for box in self:

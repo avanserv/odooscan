@@ -39,14 +39,15 @@ pub struct Rule {
 pub const SUPERSEDED: &[(&str, &str)] = &[("OD101", "OD701")];
 
 /// Severities that replace a rule's own from some series on, as (code, series range, severity).
-/// From 20.0, `ir.access` rows only grant access, so a model meant for the superuser alone has none,
-/// and Odoo refuses a model whose `_inherits` field is not required with ondelete 'cascade' or
-/// 'restrict' instead of fixing it. From 18.0, a `check_company` field of `res.company`, of a model
-/// with `company_id` or `company_ids`, or that is company-dependent, gets the domain its comodel's
-/// `_check_company_domain` gives, which by default names a `company_id` the comodel may lack.
+/// From 20.0, `ir.access` rows only grant access, so a model meant for the superuser alone has
+/// none. From saas~18.3, Odoo refuses a model whose `_inherits` field is not required with ondelete
+/// 'cascade' or 'restrict' instead of fixing it. From 18.0, a `check_company` field of
+/// `res.company`, of a model with `company_id` or `company_ids`, or that is company-dependent, gets
+/// the domain its comodel's `_check_company_domain` gives, which by default names a `company_id`
+/// the comodel may lack.
 const SEVERITY_BY_SERIES: &[(&str, &str, Severity)] = &[
     ("OD401", ">=20.0", Severity::Info),
-    ("OD218", ">=20.0", Severity::Error),
+    ("OD218", ">=saas~18.3", Severity::Error),
     ("OD222", ">=18.0", Severity::Error),
 ];
 
@@ -211,10 +212,12 @@ mod tests {
     }
 
     #[test]
-    fn delegation_rule_is_an_error_from_20() {
+    fn delegation_rule_is_an_error_from_saas_18_3() {
         let od218 = rule("OD218");
         assert_eq!(od218.severity_for(Series::parse("18.0")), Severity::Warning);
-        assert_eq!(od218.severity_for(Series::parse("19.0")), Severity::Warning);
+        assert_eq!(od218.severity_for(Series::parse("saas~18.2")), Severity::Warning);
+        assert_eq!(od218.severity_for(Series::parse("saas~18.3")), Severity::Error);
+        assert_eq!(od218.severity_for(Series::parse("19.0")), Severity::Error);
         assert_eq!(od218.severity_for(Series::parse("20.0")), Severity::Error);
         assert_eq!(od218.severity_for(None), Severity::Warning);
     }

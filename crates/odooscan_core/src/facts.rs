@@ -87,6 +87,8 @@ pub enum OptionValue {
     Tuple(Vec<String>),
     /// A dict with string keys; a value other than a string literal is none.
     Dict(Vec<(String, Option<String>)>),
+    /// `None` or a zero number, which Python takes as false.
+    Falsy,
     /// An expression whose value only a run tells.
     Other,
 }
@@ -134,8 +136,12 @@ pub struct ClassFact {
     pub inherit: Vec<Spanned<String>>,
     /// `_inherits` and `delegate=True` fields: parent model to delegating field.
     pub inherits: Vec<(String, String)>,
-    /// The delegating fields the `_inherits` dict names, at their entry.
-    pub delegations: Vec<Spanned<String>>,
+    /// The `_inherits` entries whose key and field are literals: parent model to delegating field,
+    /// at the entry.
+    pub delegations: Vec<(String, Spanned<String>)>,
+    /// `_inherits` is not a dict, or has an entry that is not two string literals, so which fields
+    /// it names is unknown.
+    pub inherits_unknown: bool,
     pub fields: Vec<FieldFact>,
     /// Methods the class defines, and `_check_company_domain`, `_table_query` and `_table_sql`
     /// when it assigns them.

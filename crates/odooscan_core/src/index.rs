@@ -991,10 +991,16 @@ impl<'m> Index<'m> {
             .collect()
     }
 
+    /// Every class in scope of `model` and of the models it inherits by `_inherit`, `base` included:
+    /// the classes the registry merges into the model.
+    pub fn merged_classes(&self, model: &str, scope: &Scope) -> Vec<(usize, &'m ClassFact)> {
+        self.chain(model, Some(scope), false)
+    }
+
     /// Every in-scope field definition the registry merges into the fields of `model`: those of its
     /// classes and of the models it inherits by `_inherit`.
     pub fn merged_fields(&self, model: &str, scope: &Scope) -> Vec<FieldDef<'m>> {
-        self.chain(model, Some(scope), false)
+        self.merged_classes(model, scope)
             .into_iter()
             .flat_map(|(mi, c)| c.fields.iter().map(move |f| (mi, c, f)))
             .collect()

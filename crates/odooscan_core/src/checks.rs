@@ -1054,6 +1054,17 @@ enum Merged<'m> {
     Unknown,
 }
 
+/// The first series that refuses a required Many2one's 'set null' only after `_inherits_check` has
+/// replaced a delegating field's `ondelete` (`saas~14.4`).
+const LATE_SET_NULL_CHECK: Series = Series { major: 14, minor: 4 };
+
+/// The first series that refuses an `_inherits` field that is not required with ondelete 'cascade'
+/// or 'restrict', and a `delegate=True` field no entry names (`saas~18.3`).
+const REFUSED_DELEGATION: Series = Series { major: 18, minor: 3 };
+
+/// An `_inherits` entry of a class: its module, the class, the parent model and the field.
+type Entry<'m> = (usize, &'m ClassFact, &'m str, &'m Spanned<String>);
+
 /// A field of a model as the registry builds it in scope: the definitions it merges, from the last
 /// one that changes the field's type.
 struct Field<'m> {
@@ -1102,13 +1113,14 @@ impl<'m> Field<'m> {
     }
 
     /// Whether the field has a column, or for a Many2many a table: a related or computed one has
-    /// none unless `store=True`.
+    /// none unless `store=True`. Odoo reads `related` and `compute` for their truth, so
+    /// `compute=None` leaves the field stored.
     fn stored(&self) -> Option<bool> {
         match self.get("store") {
             Merged::Known(OptionValue::Bool(b)) => Some(*b),
-            Merged::Unset => match (self.get("related"), self.get("compute")) {
-                (Merged::Unset, Merged::Unset) => Some(true),
-                (Merged::Unknown, _) | (_, Merged::Unknown) => None,
+            Merged::Unset => match (truth(self.get("related")), truth(self.get("compute"))) {
+                (Some(false), Some(false)) => Some(true),
+                (None, _) | (_, None) => None,
                 _ => Some(false),
             },
             _ => None,
@@ -1297,7 +1309,7 @@ impl<'m> Ctx<'_, 'm> {
                 self.view_not_created(out, &file.path, class);
                 self.view_id(out, &file.path, class, fields);
                 self.definitions(out, &file.path, class);
-                for entry in &class.delegations {
+                for (_, entry) in &class.delegations {
                     self.delegation(out, &file.path, class, entry);
                 }
             }
@@ -1398,19 +1410,24 @@ impl<'m> Ctx<'_, 'm> {
         Some(Field { model, defs, before })
     }
 
-    /// Whether the registry certainly merges definition `a` of a field of `model` before `b`. The
-    /// classes of `model` come after those of the models they inherit, unless one of them lists
-    /// another model before its own in `_inherit`, which puts that model after the classes loaded
-    /// before it. Among them, a dependency's come first, then in each module the class that
-    /// introduces the model, then the others of one file in order; files load in the order of the
-    /// imports, which is not indexed.
+    /// Whether the registry certainly merges definition `a` of a field of `model` before `b`.
     fn before(&self, model: &str, a: &FieldDef<'m>, b: &FieldDef<'m>) -> bool {
+        self.merges_before(model, (a.0, a.1, a.2.pos), (b.0, b.1, b.2.pos))
+    }
+
+    /// Whether the registry certainly merges what module `a.0`'s class `a.1` gives `model` at `a.2`
+    /// before what `b` gives. The classes of `model` come after those of the models they inherit,
+    /// unless one of them lists another model before its own in `_inherit`, which puts that model
+    /// after the classes loaded before it. Among them, a dependency's come first, then in each
+    /// module the class that introduces the model, then the others of one file in order; files load
+    /// in the order of the imports, which is not indexed.
+    fn merges_before(&self, model: &str, a: (usize, &ClassFact, Pos), b: (usize, &ClassFact, Pos)) -> bool {
         match (a.1.model == model, b.1.model == model) {
             (_, false) => false,
             (false, true) => !self.inherits_ahead(model),
             _ if a.0 != b.0 => self.index.reaches(b.0, a.0) && !self.index.reaches(a.0, b.0),
             _ if a.1.new_model != b.1.new_model => a.1.new_model,
-            _ => self.in_one_file(a.0, a.1, b.1) && a.2.pos < b.2.pos,
+            _ => self.in_one_file(a.0, a.1, b.1) && a.2 < b.2,
         }
     }
 
@@ -1485,8 +1502,10 @@ impl<'m> Ctx<'_, 'm> {
         if field.get("related") != Merged::Unset || !self.reported_at(field, own, sets) {
             return;
         }
+        // The rewrite test walks the inherit chain, so it runs only on a field that needs it.
         if field.is("required", &OptionValue::Bool(true))
             && field.is("ondelete", &OptionValue::Str("set null".to_owned()))
+            && !self.ondelete_rewritten(field, &own.name)
         {
             let at = match own.option("ondelete") {
                 Some(o) => o.pos,
@@ -1500,13 +1519,24 @@ impl<'m> Ctx<'_, 'm> {
         }
     }
 
-    /// A `delegate=True` field that no `_inherits` entry names. Until 20.0, Odoo forces it required
-    /// with a warning, and fails on an unset ondelete, which it reads before giving it a default.
-    /// 20.0 refuses such a field whatever its attributes, which this rule does not report.
+    /// Whether Odoo may replace the field's `ondelete` with 'cascade' before it holds 'set null'
+    /// against `required`, as it does when the field delegates by `delegate` or an `_inherits`
+    /// entry. Until saas~14.3 it holds it first, in `setup_base`; from saas~14.4 it rewrites it in
+    /// `_inherits_check`, until saas~18.3 refuses the field.
+    fn ondelete_rewritten(&self, field: &Field<'m>, name: &str) -> bool {
+        let rewrites = |s: Series| LATE_SET_NULL_CHECK <= s && s < REFUSED_DELEGATION;
+        self.series.is_some_and(rewrites)
+            && (may_delegate(field) || self.inherits_entry(field.model, name) != Some(false))
+    }
+
+    /// A `delegate=True` field that no `_inherits` entry names. Before saas~18.3, Odoo forces it
+    /// required with a warning, and fails on an unset ondelete, which it reads before giving it a
+    /// default. From saas~18.3 Odoo refuses such a field whatever its attributes, which this rule
+    /// does not report.
     fn delegate_field(&self, out: &mut Out<'m>, path: &'m Path, field: &Field<'m>, own: &FieldFact) {
         const OPTIONS: [&str; 3] = ["delegate", "required", "ondelete"];
         let sets = |f: &FieldFact| OPTIONS.iter().any(|o| f.option(o).is_some());
-        let refused = self.series.is_some_and(|s| s >= Series { major: 20, minor: 0 });
+        let refused = self.series.is_some_and(|s| s >= REFUSED_DELEGATION);
         if refused || !self.lone_delegate(field, &own.name) || !self.reported_at(field, own, sets) {
             return;
         }
@@ -1527,25 +1557,57 @@ impl<'m> Ctx<'_, 'm> {
         out.push(path, "OD218", at, message);
     }
 
-    /// Whether the field delegates with `delegate=True` alone: not related, and named by no
-    /// `_inherits` entry of a class of its model in scope.
+    /// Whether the field delegates with `delegate=True` alone: not related, and certainly named by
+    /// no `_inherits` entry of its model.
     fn lone_delegate(&self, field: &Field<'m>, name: &str) -> bool {
-        let names = |c: &ClassFact| c.delegations.iter().any(|d| d.value == name);
         field.is("delegate", &OptionValue::Bool(true))
             && field.get("related") == Merged::Unset
-            && !self
-                .index
-                .classes(field.model)
-                .iter()
-                .any(|(mi, c)| self.scope.sees(*mi) && names(c))
+            && self.inherits_entry(field.model, name) == Some(false)
+    }
+
+    /// Whether the `_inherits` of `model` names the field `name`, None when unknown: a class gives
+    /// one that is not literal, or the last classes giving a parent model disagree on whether its
+    /// field is `name`. Odoo merges the `_inherits` of the classes the model merges, those of the
+    /// models it inherits included, key by key, a later class replacing the field of a parent.
+    fn inherits_entry(&self, model: &str, name: &str) -> Option<bool> {
+        let classes = self.index.merged_classes(model, self.scope);
+        if classes.iter().any(|(_, c)| c.inherits_unknown) {
+            return None;
+        }
+        let entries: Vec<Entry<'m>> = classes
+            .iter()
+            .flat_map(|&(mi, c)| c.delegations.iter().map(move |(parent, f)| (mi, c, parent.as_str(), f)))
+            .collect();
+        let parents = entries.iter().filter(|e| e.3.value == name).map(|e| e.2);
+        let named: Vec<Option<bool>> = parents.map(|p| self.names_parent(model, &entries, p, name)).collect();
+        if named.contains(&Some(true)) {
+            Some(true)
+        } else {
+            (!named.contains(&None)).then_some(false)
+        }
+    }
+
+    /// Whether the last entries for `parent` name the field `name`, None when only some do.
+    fn names_parent(&self, model: &str, entries: &[Entry<'m>], parent: &str, name: &str) -> Option<bool> {
+        let at = |e: &Entry<'m>| (e.0, e.1, e.3.pos);
+        let keyed: Vec<&Entry<'m>> = entries.iter().filter(|e| e.2 == parent).collect();
+        let last = keyed
+            .iter()
+            .filter(|a| !keyed.iter().any(|b| self.merges_before(model, at(a), at(b))));
+        let names: Vec<bool> = last.map(|e| e.3.value == name).collect();
+        match (names.contains(&true), names.contains(&false)) {
+            (true, false) => Some(true),
+            (true, true) => None,
+            (false, _) => Some(false),
+        }
     }
 
     /// Odoo wants the Many2one an `_inherits` entry names required, with ondelete 'cascade' or
-    /// 'restrict'. 18.0 warns and forces both, an unset ondelete included; 20.0 refuses the model.
-    /// A missing field, or one of another type, is left alone, and an entry repeated in another
-    /// class of the model in this module is reported at the first.
+    /// 'restrict'. 18.0 warns and forces both, an unset ondelete included; saas~18.3 refuses the
+    /// model. A missing field, or one of another type, is left alone, and an entry repeated in
+    /// another class of the model in this module is reported at the first.
     fn delegation(&self, out: &mut Out<'m>, path: &'m Path, class: &'m ClassFact, entry: &Spanned<String>) {
-        let names = |c: &ClassFact| c.delegations.iter().any(|d| d.value == entry.value);
+        let names = |c: &ClassFact| c.delegations.iter().any(|(_, d)| d.value == entry.value);
         if !self.first_class(class, names) {
             return;
         }
@@ -1987,6 +2049,25 @@ fn kept_on_delete(field: &Field) -> Option<bool> {
             Some(matches!(policy.to_lowercase().as_str(), "cascade" | "restrict"))
         }
         _ => None,
+    }
+}
+
+/// Whether the field may delegate by `delegate`, which Odoo reads for its truth: a literal tells,
+/// and any other value may.
+fn may_delegate(field: &Field) -> bool {
+    truth(field.get("delegate")) != Some(false)
+}
+
+/// The truth Python gives an attribute, for one whose default is false; None when only a run
+/// tells.
+fn truth(merged: Merged) -> Option<bool> {
+    match merged {
+        Merged::Unset | Merged::Known(OptionValue::Falsy) => Some(false),
+        Merged::Known(OptionValue::Bool(b)) => Some(*b),
+        Merged::Known(OptionValue::Str(s)) => Some(!s.is_empty()),
+        Merged::Known(OptionValue::Strs(v) | OptionValue::Tuple(v)) => Some(!v.is_empty()),
+        Merged::Known(OptionValue::Dict(d)) => Some(!d.is_empty()),
+        Merged::Known(OptionValue::Other) | Merged::Unknown => None,
     }
 }
 

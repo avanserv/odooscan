@@ -120,3 +120,7 @@ class ParcelBoxQueries(models.Model):
         cr.execute("SELECT s.code, s.occupancy FROM parcel_shelf s")
         cr.execute("SELECT c.id, c.signal, c.create_date FROM parcel_beacon c")
         cr.execute("SELECT u.login, u.password FROM res_users u")
+
+    def x_box_seals(self):
+        self.env.cr.execute("SELECT b.seal_code, b.seal_ref FROM parcel_box b")
+        return self.env.cr.fetchall()
