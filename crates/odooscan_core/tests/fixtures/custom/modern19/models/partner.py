@@ -33,3 +33,9 @@ class ResPartnerBatchCreate(models.Model):
         for vals in vals_list:
             vals.setdefault("ref", vals.get("name"))
         return super().create(vals_list)
+
+
+class ResPartnerKiosk(models.Model):
+    _inherit = "res.partner"
+
+    type = fields.Selection((("contact", "Contact"), ("invoice", "Invoice")), selection_add=[("kiosk",)])

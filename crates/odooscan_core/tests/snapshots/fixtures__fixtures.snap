@@ -186,6 +186,7 @@ custom/modern19/models/partner.py:6:5: OD110 _sql_constraints is ignored; declar
 custom/modern19/models/partner.py:9:9: OD109 self._cr is deprecated; use self.env.cr
 custom/modern19/models/partner.py:9:9: OD122 UPDATE on res_partner bypasses the ORM, so records this transaction already read keep stale values; call flush_model() before the query and invalidate_model() after it (flush() and invalidate_cache() before 16.0)
 custom/modern19/models/partner.py:22:5: OD118 @api.model on create() passes a list of dicts, so reading vals as one dict fails; decorate it with @api.model_create_multi and loop over the list
+custom/modern19/models/partner.py:41:93: OD216 'type' is required, so Odoo refuses ondelete 'set null' for the selection_add value 'kiosk'; give it 'cascade', 'set default' or a function
 custom/modern20/models/res_partner.py:14:33: OD219 'note' sets tracking, but modern.note does not inherit mail.thread, so Odoo ignores it and logs a warning; inherit mail.thread or remove tracking
 custom/modern20/models/res_partner.py:38:30: OD220 'ref' has the label 'ID' of field 'id' of modern.ticket, so Odoo logs a warning and users cannot tell them apart; give it another string
 custom/orm_overrides/models/caches.py:7:21: OD120 'lang' in an ormcache key is not a parameter of _greeting_for(), so every call raises NameError; key on a parameter or on self
@@ -209,6 +210,8 @@ custom/registry_fields/models/money.py:37:18: OD114 'id': a compute method canno
 custom/registry_fields/models/money.py:42:18: OD114 'partner_id.id': a compute method cannot depend on 'id', so importing this file raises; depend on 'partner_id'
 custom/registry_fields/models/res_partner.py:7:43: OD216 'type' is required, so Odoo refuses ondelete 'set null' for the selection_add value 'site'; give it 'cascade', 'set default' or a function
 custom/registry_fields/models/res_partner.py:13:43: OD216 'type' is required, so Odoo refuses ondelete 'set null' for the selection_add value 'depot'; give it 'cascade', 'set default' or a function
+custom/registry_fields/models/res_partner.py:46:93: OD216 'type' is required, so Odoo refuses ondelete 'set null' for the selection_add values 'site', 'locker'; give each 'cascade', 'set default' or a function
+custom/registry_fields/models/res_partner.py:58:43: OD216 'type' is required, so Odoo refuses ondelete 'set null' for the selection_add value 'locker'; give it 'cascade', 'set default' or a function
 custom/registry_fields/models/shipment.py:11:17: OD205 'reference' is a Many2one field elsewhere and is redefined here as Char
 custom/registry_fields/models/shipment.py:13:19: OD205 'carrier_ids' is a Many2one field elsewhere and is redefined here as Many2many
 custom/registry_fields/models/shipment.py:24:17: OD205 'reference' is a Char field elsewhere and is redefined here as Many2one

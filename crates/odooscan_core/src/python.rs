@@ -184,8 +184,8 @@ fn option_value(expr: &Expr) -> OptionValue {
     match expr {
         Expr::StringLiteral(s) => OptionValue::Str(s.value.to_str().to_owned()),
         Expr::BooleanLiteral(b) => OptionValue::Bool(b.value),
-        Expr::List(l) => first_strings(&l.elts),
-        Expr::Tuple(t) => first_strings(&t.elts),
+        Expr::List(l) => first_strings(&l.elts).map_or(OptionValue::Other, OptionValue::Strs),
+        Expr::Tuple(t) => first_strings(&t.elts).map_or(OptionValue::Other, OptionValue::Tuple),
         Expr::Dict(d) => d
             .items
             .iter()
@@ -202,7 +202,7 @@ fn option_value(expr: &Expr) -> OptionValue {
 }
 
 /// `["a", "b"]`, or the values of `[("a", "A"), ("b",)]`.
-fn first_strings(elts: &[Expr]) -> OptionValue {
+fn first_strings(elts: &[Expr]) -> Option<Vec<String>> {
     fn first(e: &Expr) -> Option<&str> {
         match e {
             Expr::Tuple(t) => t.elts.first().and_then(str_lit),
@@ -210,10 +210,7 @@ fn first_strings(elts: &[Expr]) -> OptionValue {
             e => str_lit(e),
         }
     }
-    elts.iter()
-        .map(|e| first(e).map(str::to_owned))
-        .collect::<Option<Vec<_>>>()
-        .map_or(OptionValue::Other, OptionValue::Strs)
+    elts.iter().map(|e| first(e).map(str::to_owned)).collect()
 }
 
 /// The methods a field names by a string: its compute, inverse and search, the method a
@@ -1554,6 +1551,10 @@ mod tests {
         assert_eq!(
             option(&f, "selection"),
             Some(OptionValue::Strs(vec!["a".into(), "b".into()]))
+        );
+        assert_eq!(
+            option(&field("fields.Selection((('a', 'A'),))"), "selection"),
+            Some(OptionValue::Tuple(vec!["a".into()]))
         );
         assert_eq!(option(&f, "required"), Some(OptionValue::Bool(true)));
         assert_eq!(
