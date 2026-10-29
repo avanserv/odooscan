@@ -6,7 +6,7 @@ use ruff_python_ast::helpers::any_over_expr;
 use ruff_python_ast::visitor::{self, Visitor};
 use ruff_python_ast::{self as ast, Expr, Stmt};
 
-use crate::facts::RawDiag;
+use crate::facts::{ImportPatch, RawDiag};
 use crate::python::{Locator, str_lit, tail_name};
 
 /// Calls that build a dict, a list or a set.
@@ -34,11 +34,18 @@ const MUTATORS: &[&str] = &[
     "__delitem__",
 ];
 
-pub(crate) fn check(body: &[Stmt], loc: &Locator) -> Vec<RawDiag> {
+/// Packages of an addon that hold its model classes in Odoo's layout, which tell a model class
+/// the index cannot look up.
+const MODEL_PACKAGES: &[&str] = &["models", "wizard", "wizards", "report"];
+
+/// The model classes of the ORM itself, under `odoo.models` or, from 19.0, `odoo.orm`.
+const ORM_MODELS: &[&str] = &["BaseModel", "AbstractModel", "Model", "TransientModel"];
+
+/// The patches OD123 reports, which `checks.rs` words with the index's answer, and the OD124
+/// diagnostics.
+pub(crate) fn check(body: &[Stmt], loc: &Locator) -> (Vec<ImportPatch>, Vec<RawDiag>) {
     let top = top_level(body);
-    let mut diags = patches(&top, loc);
-    diags.extend(filled_caches(body, &top, loc));
-    diags
+    (patches(&top, loc), filled_caches(body, &top, loc))
 }
 
 /// The statements that run at import: the module body, into `if` and `try` blocks.
@@ -135,30 +142,56 @@ fn setattr_target(expr: &Expr) -> Option<(&Expr, &str)> {
     Some((object, call.arguments.args.get(1).and_then(str_lit).unwrap_or("...")))
 }
 
-/// The fix for a patch on `object`, whose dotted path from `odoo` is `path`: a model class is
-/// changed by inheriting the model, another class by a subclass, and a module needs no patch.
-fn fix(object: &Expr, path: &str) -> String {
-    let class = path
+/// Whether the class a dotted path names is a model class by where it lives: in a model package of
+/// an addon, or among the ORM's own model classes.
+fn model_path(path: &str) -> bool {
+    match path.split('.').collect::<Vec<_>>().as_slice() {
+        ["odoo", "addons", _, package, _, ..] => MODEL_PACKAGES.contains(package),
+        ["odoo", "models" | "orm", .., class] => ORM_MODELS.contains(class),
+        _ => false,
+    }
+}
+
+/// The fix for a patch: a model class is changed by inheriting the model, another class by a
+/// subclass, and a module needs no patch. `model` is the index's answer for the class, which the
+/// path stands in for when the index has none.
+fn fix(patch: &ImportPatch, model: Option<bool>) -> String {
+    let class = patch
+        .path
         .rsplit('.')
         .next()
         .is_some_and(|last| last.starts_with(|c: char| c.is_ascii_uppercase()));
-    if class && path.contains(".models.") {
+    if class && model.unwrap_or_else(|| model_path(&patch.path)) {
         "inherit the model in a class of this module and override it there, which applies only where the module is installed".to_owned()
     } else if class {
         format!(
             "subclass {} in this module and use the subclass where it needs the change",
-            dotted(object)
+            patch.object
         )
     } else {
         "keep the value in this module and import it from there".to_owned()
     }
 }
 
-/// OD123 on each attribute an import-time statement sets on what the file imports from `odoo`,
-/// but a docstring and a module named under `odoo.addons`, which change no behaviour.
-fn patches(top: &[&Stmt], loc: &Locator) -> Vec<RawDiag> {
+/// OD123 on a patch, `model` as `fix` takes it.
+pub(crate) fn diag(patch: &ImportPatch, model: Option<bool>) -> RawDiag {
+    RawDiag::new(
+        "OD123",
+        patch.pos,
+        format!(
+            "setting {}.{} at import changes it in every database the server runs, whether this module is installed there or not; {}",
+            patch.object,
+            patch.attr,
+            fix(patch, model)
+        ),
+    )
+}
+
+/// The attributes import-time statements set on what the file imports from `odoo`, but a
+/// docstring and a module named under `odoo.addons`, which change no behaviour.
+fn patches(top: &[&Stmt], loc: &Locator) -> Vec<ImportPatch> {
     let odoo = odoo_names(top);
-    let mut diags = vec![];
+    let mut found = vec![];
     for stmt in top {
         let Some((object, attr)) = set_attribute(stmt) else {
             continue;
@@ -175,17 +208,14 @@ fn patches(top: &[&Stmt], loc: &Locator) -> Vec<RawDiag> {
         if attr == "__doc__" || path == "odoo.addons" {
             continue;
         }
-        diags.push(RawDiag::new(
-            "OD123",
-            loc.at(*stmt),
-            format!(
-                "setting {}.{attr} at import changes it in every database the server runs, whether this module is installed there or not; {}",
-                dotted(object),
-                fix(object, &path)
-            ),
-        ));
+        found.push(ImportPatch {
+            pos: loc.at(*stmt),
+            object: dotted(object),
+            attr: attr.to_owned(),
+            path,
+        });
     }
-    diags
+    found
 }
 
 /// Whether a value is a new dict, list or set: a display, a comprehension, or a call that builds
@@ -353,10 +383,13 @@ mod tests {
     use ruff_python_parser::parse_module;
 
     use super::*;
+    use crate::facts::Pos;
 
+    /// OD123 as the path words it, then OD124.
     fn diags(src: &str) -> Vec<RawDiag> {
         let parsed = parse_module(src).expect("valid Python");
-        check(&parsed.syntax().body, &Locator::new(src))
+        let (patches, caches) = check(&parsed.syntax().body, &Locator::new(src));
+        patches.iter().map(|p| diag(p, None)).chain(caches).collect()
     }
 
     fn codes(src: &str) -> Vec<(&'static str, u32)> {
@@ -384,7 +417,7 @@ mod tests {
     fn tells_a_model_class_another_class_and_a_module_apart() {
         let src = "from odoo import models, fields\nfrom odoo.tools import misc\n\
                    from odoo.addons.sale.models.sale_order import SaleOrder as Order\n\
-                   models.BaseModel.x = 1\nOrder.x = 1\nfields.Field.x = 1\nmisc.x = 1\n";
+                   models.BaseModel.x = 1\nOrder.x = 1\nfields.Field.x = 1\nmisc.x = 1\nmodels.MetaModel.x = 1\n";
         let fixes: Vec<String> = diags(src)
             .into_iter()
             .map(|d| d.message.split("; ").nth(1).unwrap_or_default().to_owned())
@@ -393,6 +426,50 @@ mod tests {
         assert!(fixes[1].starts_with("inherit the model"), "{}", fixes[1]);
         assert!(fixes[2].starts_with("subclass fields.Field"), "{}", fixes[2]);
         assert!(fixes[3].starts_with("keep the value"), "{}", fixes[3]);
+        assert!(fixes[4].starts_with("subclass models.MetaModel"), "{}", fixes[4]);
+    }
+
+    #[test]
+    fn tells_a_model_class_by_its_package_or_as_the_orm_s_own() {
+        for path in [
+            "odoo.addons.sale.models.sale_order.SaleOrder",
+            "odoo.addons.sale.wizard.sale_make_invoice.SaleAdvance",
+            "odoo.addons.sale.wizards.SaleAdvance",
+            "odoo.addons.sale.report.sale_report.SaleReport",
+            "odoo.models.BaseModel",
+            "odoo.models.AbstractModel",
+            "odoo.models.Model",
+            "odoo.models.TransientModel",
+            "odoo.orm.models.BaseModel",
+        ] {
+            assert!(model_path(path), "{path}");
+        }
+        for path in [
+            "odoo.models.MetaModel",
+            "odoo.addons.sale.controllers.portal.CustomerPortal",
+            "odoo.addons.sale.SaleOrder",
+            "odoo.addons.models.SaleOrder",
+            "odoo.fields.Model",
+        ] {
+            assert!(!model_path(path), "{path}");
+        }
+    }
+
+    #[test]
+    fn the_index_answer_overrides_the_path() {
+        let patch = |path: &str| ImportPatch {
+            pos: Pos::default(),
+            object: "Label".to_owned(),
+            attr: "x".to_owned(),
+            path: path.to_owned(),
+        };
+        let wizard = patch("odoo.addons.base.wizard.x_label.Label");
+        let controller = patch("odoo.addons.base.controllers.main.Label");
+        assert!(fix(&wizard, None).starts_with("inherit the model"));
+        assert!(fix(&wizard, Some(false)).starts_with("subclass Label"));
+        assert!(fix(&controller, None).starts_with("subclass Label"));
+        assert!(fix(&controller, Some(true)).starts_with("inherit the model"));
+        assert!(fix(&patch("odoo.addons.base.models.res_partner"), Some(true)).starts_with("keep the value"));
     }
 
     #[test]

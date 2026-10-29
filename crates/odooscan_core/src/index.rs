@@ -175,6 +175,15 @@ pub fn full_id(module: &str, id: &str) -> String {
     }
 }
 
+/// The addon, the files that may define the class, and the class of a dotted path
+/// `odoo.addons.<addon>.<a>...<z>.<Class>`: `<a>/.../<z>.py` and `<a>/.../<z>/__init__.py`.
+fn class_file(path: &str) -> Option<(&str, [String; 2], &str)> {
+    let (addon, rest) = path.strip_prefix("odoo.addons.")?.split_once('.')?;
+    let (module, class) = rest.rsplit_once('.')?;
+    let dir = module.replace('.', "/");
+    Some((addon, [format!("{dir}.py"), format!("{dir}/__init__.py")], class))
+}
+
 fn model_xmlid(model: &str) -> String {
     format!("model_{}", model.replace('.', "_"))
 }
@@ -926,6 +935,16 @@ impl<'m> Index<'m> {
             .any(|d| !self.by_name.contains_key(d.value.as_str()))
     }
 
+    /// Whether the class a dotted path such as `odoo.addons.sale.models.sale_order.SaleOrder` names
+    /// is a model class of the file the path imports it from, none when that addon or file is not
+    /// indexed. A class without facts there is no model, since the parser keeps facts only for those.
+    pub fn model_class(&self, path: &str) -> Option<bool> {
+        let (addon, files, class) = class_file(path)?;
+        let module = &self.modules[*self.by_name.get(addon)?];
+        let file = module.python.iter().find(|f| files.contains(&f.rel))?;
+        Some(file.facts.classes.iter().any(|c| c.class_name == class))
+    }
+
     pub fn has_model(&self, model: &str) -> bool {
         self.models.contains_key(model)
     }
@@ -1427,4 +1446,24 @@ fn method_flows(modules: &[Module]) -> MethodFlows<'_> {
         }
     }
     flows
+}
+
+#[cfg(test)]
+mod tests {
+    use super::class_file;
+
+    #[test]
+    fn maps_a_class_path_to_its_files() {
+        let files = |dir: &str| [format!("{dir}.py"), format!("{dir}/__init__.py")];
+        assert_eq!(
+            class_file("odoo.addons.sale.models.sale_order.SaleOrder"),
+            Some(("sale", files("models/sale_order"), "SaleOrder"))
+        );
+        assert_eq!(
+            class_file("odoo.addons.base.wizard.LabelWizard"),
+            Some(("base", files("wizard"), "LabelWizard"))
+        );
+        assert_eq!(class_file("odoo.addons.base.LabelWizard"), None);
+        assert_eq!(class_file("odoo.models.BaseModel"), None);
+    }
 }

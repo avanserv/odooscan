@@ -63,3 +63,25 @@ fn default_series_reads_a_seriesless_auto_install_list() {
     assert!(!reported(None));
     assert!(reported(Series::parse("12.0")));
 }
+
+#[test]
+fn import_patches_without_base_take_the_advice_of_the_path() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+    let report = scan(&ScanOptions {
+        paths: vec![root.join("custom")],
+        addons_paths: vec![],
+        default_series: None,
+    });
+    let advice: Vec<(u32, bool)> = report
+        .diagnostics
+        .iter()
+        .filter(|d| d.code == "OD123" && d.path.ends_with("class_patches.py"))
+        .map(|d| (d.line, d.message.contains("; inherit the model")))
+        .collect();
+    // Unlike the scan with base, LabelFormat takes the advice of its wizard package, and
+    // LabelPrinter and LabelQueue that of their services package.
+    assert_eq!(
+        advice,
+        [(8, true), (9, true), (12, true), (13, false), (17, false), (18, false)]
+    );
+}

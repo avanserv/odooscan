@@ -39,8 +39,8 @@ pub(crate) struct Write<'a> {
 enum Held {
     /// The cursor the function was given, or a value read from it.
     Given,
-    /// A cursor the function opens, or a value that is no cursor at all.
-    Cursor,
+    /// A cursor the function opens, or any value that is no cursor at all.
+    Own,
     /// An environment, or records, on a cursor the function opens.
     Env,
     /// What a context manager yields, which may be either.
@@ -57,7 +57,7 @@ impl Held {
         match (self, other) {
             (Self::Unset, held) | (held, Self::Unset) => held,
             (Self::Either, held) | (held, Self::Either) => held,
-            (Self::Cursor, Self::Cursor) => Self::Cursor,
+            (Self::Own, Self::Own) => Self::Own,
             (Self::Env, Self::Env) => Self::Env,
             _ => Self::Given,
         }
@@ -291,7 +291,7 @@ impl<'a> CursorUse<'a> {
     fn owns_cursor(&self, expr: &Expr, opened: bool) -> bool {
         match expr {
             Expr::Name(n) => {
-                matches!(self.held(n.id.as_str()), Some((Held::Cursor | Held::Either | Held::Unset, o)) if o || !opened)
+                matches!(self.held(n.id.as_str()), Some((Held::Own | Held::Either | Held::Unset, o)) if o || !opened)
             }
             Expr::Attribute(a) => is_cursor(expr) && self.owns_env(&a.value, opened),
             Expr::Call(c) => matches!(&*c.func, Expr::Attribute(a) if a.attr.as_str() == "cursor"),
@@ -344,7 +344,7 @@ impl<'a> CursorUse<'a> {
 
     fn assign(&mut self, target: &'a Expr, value: &Expr) {
         let (held, opened) = if self.own_cursor(value) {
-            (Held::Cursor, self.owns_cursor(value, true))
+            (Held::Own, self.owns_cursor(value, true))
         } else if is_cursor(value) {
             (Held::Given, false)
         } else if self.own_env(value) {
@@ -352,7 +352,7 @@ impl<'a> CursorUse<'a> {
         } else if value.is_none_literal_expr() || matches!(value, Expr::BooleanLiteral(b) if !b.value) {
             (Held::Unset, false)
         } else {
-            (Held::Cursor, false)
+            (Held::Own, false)
         };
         self.bind(target, held, opened);
     }
@@ -2685,19 +2685,19 @@ mod tests {
 
     #[test]
     fn meets_what_two_paths_hold() {
-        use Held::{Cursor, Either, Env, Given, Unset};
-        assert_eq!(Either.meet(Cursor), Cursor);
+        use Held::{Either, Env, Given, Own, Unset};
+        assert_eq!(Either.meet(Own), Own);
         assert_eq!(Unset.meet(Env), Env);
         assert_eq!(Given.meet(Unset), Given);
-        assert_eq!(meet((Unset, false), (Cursor, true)), (Cursor, true));
-        assert_eq!(meet((Cursor, true), (Cursor, false)), (Cursor, false));
+        assert_eq!(meet((Unset, false), (Own, true)), (Own, true));
+        assert_eq!(meet((Own, true), (Own, false)), (Own, false));
         assert_eq!(Env.meet(Either), Env);
         assert_eq!(Either.meet(Either), Either);
-        assert_eq!(Cursor.meet(Cursor), Cursor);
+        assert_eq!(Own.meet(Own), Own);
         assert_eq!(Env.meet(Env), Env);
-        assert_eq!(Cursor.meet(Env), Given);
+        assert_eq!(Own.meet(Env), Given);
         assert_eq!(Given.meet(Either), Given);
-        assert_eq!(Cursor.meet(Given), Given);
+        assert_eq!(Own.meet(Given), Given);
     }
 
     #[test]
