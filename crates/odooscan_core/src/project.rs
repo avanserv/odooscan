@@ -5,7 +5,7 @@ use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::facts::{DataFacts, JsFacts, PyFacts, TemplateFacts};
-use crate::manifest::{self, Manifest};
+use crate::manifest::{self, Manifest, normalize};
 use crate::series::Series;
 use crate::suppress::Suppressions;
 use crate::{csvdata, js, owl, python, sql, xml};
@@ -19,7 +19,8 @@ pub struct SourceFile<T> {
     pub path: PathBuf,
     /// Path relative to the module directory, with `/` separators, as the manifest writes it.
     pub rel: String,
-    /// Load position among the manifest's data then demo files; `None` when Odoo never loads it.
+    /// Load position among the files the manifest loads in the module's series, as
+    /// `Manifest::loaded_files` orders them; `None` when Odoo never loads it.
     pub rank: Option<usize>,
     pub facts: T,
     pub suppressions: Suppressions,
@@ -123,10 +124,6 @@ fn static_files(dir: &Path, extension: &str) -> Vec<PathBuf> {
         .collect()
 }
 
-fn normalize(rel: &str) -> String {
-    rel.trim_start_matches("./").replace('\\', "/")
-}
-
 pub struct Discovery {
     pub modules: Vec<Module>,
     pub notices: Vec<String>,
@@ -195,15 +192,19 @@ fn read_module(name: String, dir: PathBuf, checked: bool) -> Option<Module> {
     })
 }
 
+/// Each file the manifest loads in `series` by its first load position, where a reference to an
+/// id it defines can first fail; Odoo loads a file again at each later place it is listed.
+fn ranks(manifest: &Manifest, series: Option<Series>) -> FxHashMap<String, usize> {
+    let mut ranks = FxHashMap::default();
+    for (i, file) in manifest.loaded_files(series).enumerate() {
+        ranks.entry(normalize(file)).or_insert(i);
+    }
+    ranks
+}
+
 fn parse_module_files(module: &mut Module, default_series: Option<Series>) {
-    let ranks: FxHashMap<String, usize> = module
-        .manifest
-        .data
-        .iter()
-        .chain(&module.manifest.demo)
-        .enumerate()
-        .map(|(i, f)| (normalize(&f.value), i))
-        .collect();
+    let series = module.series.or(default_series);
+    let ranks = ranks(&module.manifest, series);
     let files = module_files(&module.dir);
     let checked = module.checked;
     let parsed: Vec<_> = files
@@ -258,7 +259,7 @@ fn parse_module_files(module: &mut Module, default_series: Option<Series>) {
         .sort_by_key(|f| (f.rank.unwrap_or(usize::MAX), f.rel.clone()));
     module.js = parse_static_files(&module.dir, "js", checked, js::analyze);
     module.templates = parse_static_files(&module.dir, "xml", checked, owl::analyze);
-    module.sql_views = sql_views(module, module.series.or(default_series));
+    module.sql_views = sql_views(module, series);
 }
 
 /// The views the SQL files that a module's manifest loads in `series` create by name.
@@ -295,4 +296,18 @@ fn parse_static_files<T: Send>(
         .collect();
     files.sort_by(|a, b| a.rel.cmp(&b.rel));
     files
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ranks_a_file_listed_twice_at_its_first_place() {
+        let m = manifest::parse(r#"{"init_xml": ["./a.xml"], "data": ["b.xml", "a.xml"], "demo": ["c.xml"]}"#).unwrap();
+        let ranks = ranks(&m, Series::parse("14.0"));
+        assert_eq!(ranks.get("a.xml"), Some(&0));
+        assert_eq!(ranks.get("b.xml"), Some(&1));
+        assert_eq!(ranks.get("c.xml"), Some(&3));
+    }
 }

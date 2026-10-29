@@ -12,6 +12,7 @@ use crate::index::{
     BASE_MODEL_METHODS, Export, FieldDef, FieldInfo, Index, JsSpec, RELATIONAL_TYPES, Scope, Status, ViewTree, full_id,
     js_module_path, located,
 };
+use crate::manifest;
 use crate::project::{Module, SourceFile};
 use crate::series::{self, Series};
 use crate::xml::{LOCATOR, UNKNOWN_CONTEXT};
@@ -43,7 +44,8 @@ pub fn check_module<'m>(index: &Index<'m>, mi: usize, series: Option<Series>) ->
     let module = &index.modules[mi];
     let mut out = Out { diags: vec![] };
     manifest_files(module, &mut out);
-    same_module_xmlids(module, &mut out);
+    unloaded_files(module, series, &mut out);
+    same_module_xmlids(module, series, &mut out);
     shadowed_members(module, series, &mut out);
     legacy_hook_rollbacks(module, series, &mut out);
     cache_key_names(module, series, &mut out);
@@ -307,37 +309,54 @@ fn manifest_files<'m>(module: &'m Module, out: &mut Out<'m>) {
             );
         }
     }
-    let mentioned: FxHashSet<&str> = module
-        .python
-        .iter()
-        .flat_map(|f| &f.facts.file_mentions)
-        .map(String::as_str)
-        .collect();
-    for file in &module.data {
+}
+
+fn unloaded_files<'m>(module: &'m Module, series: Option<Series>, out: &mut Out<'m>) {
+    let mentioned = |in_manifest: bool| -> FxHashSet<&str> {
+        let files = module
+            .python
+            .iter()
+            .filter(|f| (f.path == module.manifest_path) == in_manifest);
+        files.flat_map(|f| &f.facts.file_mentions).map(String::as_str).collect()
+    };
+    let (in_code, in_manifest) = (mentioned(false), mentioned(true));
+    for file in module.data.iter().filter(|f| f.rank.is_none() && f.facts.is_data) {
         let top = file.rel.split('/').next().unwrap_or_default();
         let base = file.rel.rsplit('/').next().unwrap_or_default();
+        let ignored = module.manifest.ignored_key(&file.rel, series);
         // Chart templates and files named in Python code are loaded by that code.
-        let python_loaded = mentioned.contains(base) || file.rel.starts_with("data/template/");
-        if file.rank.is_none()
-            && file.facts.is_data
-            && file.rel.contains('/')
-            && !UNLISTED_DIRS.contains(&top)
-            && !python_loaded
-        {
+        let code_loaded = in_code.contains(base) || file.rel.starts_with("data/template/");
+        // A file listed under a legacy key was meant to load, wherever it sits. The manifest names
+        // the files of keys such as `other_files` too, which the module loads itself.
+        let unlisted = ignored.is_none()
+            && (!file.rel.contains('/') || UNLISTED_DIRS.contains(&top) || in_manifest.contains(base));
+        if !code_loaded && !unlisted {
             out.push(
                 &file.path,
                 "OD502",
                 Pos { line: 1, col: 1 },
-                format!(
-                    "'{}' is not in the manifest's data or demo, so Odoo never loads it",
-                    file.rel
-                ),
+                unloaded(&file.rel, ignored, series),
             );
         }
     }
 }
 
-fn same_module_xmlids<'m>(module: &'m Module, out: &mut Out<'m>) {
+/// OD502's message for a data file Odoo never loads, listed under `ignored` or under no key.
+fn unloaded(rel: &str, ignored: Option<&str>, series: Option<Series>) -> String {
+    if let Some(key) = ignored {
+        let to = if key == "demo_xml" { "demo" } else { "data" };
+        return format!("'{rel}' is listed under {key}, which Odoo ignores in this series; move it to {to}");
+    }
+    let keys: Vec<_> = manifest::loaded_keys(series).collect();
+    let keys = match keys.split_last() {
+        Some((last, [])) => (*last).to_owned(),
+        Some((last, rest)) => format!("{} or {last}", rest.join(", ")),
+        None => String::new(),
+    };
+    format!("'{rel}' is not in the manifest's {keys}, so Odoo never loads it")
+}
+
+fn same_module_xmlids<'m>(module: &'m Module, series: Option<Series>, out: &mut Out<'m>) {
     // base_data.sql creates base's bootstrap records before any data file loads.
     let bootstrapped = module.name == "base";
     let first_def = first_defs(module, out);
@@ -350,7 +369,7 @@ fn same_module_xmlids<'m>(module: &'m Module, out: &mut Out<'m>) {
                 && !bootstrapped
                 && !registry_id(module, &id)
             {
-                let place = load_place(module, def_rank, rank);
+                let place = load_place(module, series, def_rank, rank);
                 out.push(
                     &file.path,
                     "OD308",
@@ -403,12 +422,12 @@ fn registry_id(module: &Module, id: &str) -> bool {
     })
 }
 
-fn load_place(module: &Module, def_rank: usize, rank: usize) -> String {
+fn load_place(module: &Module, series: Option<Series>, def_rank: usize, rank: usize) -> String {
     if def_rank == rank {
         return "further down this file".to_owned();
     }
-    let file = module.manifest.data.iter().chain(&module.manifest.demo).nth(def_rank);
-    format!("in {}", file.map_or("", |f| f.value.as_str()))
+    let file = module.manifest.loaded_files(series).nth(def_rank);
+    format!("in {}", file.unwrap_or_default())
 }
 
 struct Ctx<'a, 'm> {

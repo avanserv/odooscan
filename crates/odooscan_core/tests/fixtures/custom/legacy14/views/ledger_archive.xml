@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="action_ledger_archive" model="ir.actions.act_window">
+        <field name="name">Archived ledgers</field>
+        <field name="res_model">legacy.ledger</field>
+    </record>
+</odoo>

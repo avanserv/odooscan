@@ -14,6 +14,29 @@ const INIT_XML_BACK: Series = Series { major: 19, minor: 0 };
 /// The first series that loads the files of `data` alone again (`20.0`).
 const INIT_XML_GONE: Series = Series { major: 20, minor: 0 };
 
+/// The keys Odoo loads a module's data from, in its load order.
+const DATA_KEYS: [&str; 3] = ["init_xml", "update_xml", "data"];
+
+/// The keys Odoo loads a module's demo data from, in its load order, after the data keys.
+const DEMO_KEYS: [&str; 2] = ["demo_xml", "demo"];
+
+/// Whether Odoo loads the files listed under `key` in `series`. An unknown series reads every key.
+fn reads(key: &str, series: Option<Series>) -> bool {
+    match series {
+        Some(s) if s >= DATA_ONLY => match key {
+            "data" | "demo" => true,
+            "init_xml" => (INIT_XML_BACK..INIT_XML_GONE).contains(&s),
+            _ => false,
+        },
+        _ => true,
+    }
+}
+
+/// The keys Odoo loads a module's files from in `series`, in its load order.
+pub fn loaded_keys(series: Option<Series>) -> impl Iterator<Item = &'static str> {
+    DATA_KEYS.into_iter().chain(DEMO_KEYS).filter(move |k| reads(k, series))
+}
+
 /// The `auto_install` key as written: `True` waits on every depend. The index reads `Listed` by series,
 /// as only from `saas~12.4` does Odoo take a list for the depends it waits on.
 #[derive(Debug, Default, PartialEq, Eq)]
@@ -47,6 +70,7 @@ pub struct Manifest {
     pub data: Vec<Spanned<String>>,
     pub init_xml: Vec<String>,
     pub update_xml: Vec<String>,
+    pub demo_xml: Vec<String>,
     pub demo: Vec<Spanned<String>>,
     pub category: Option<String>,
     pub installable: bool,
@@ -60,17 +84,48 @@ impl Manifest {
         self.version.as_deref().and_then(Series::from_module_version)
     }
 
-    /// The SQL files Odoo runs when it loads the data of the module in `series`: those of `data`,
-    /// and of the legacy keys the series still reads. An unknown series reads every key.
+    /// The files Odoo loads for the module in `series`, in its load order: those of the data keys
+    /// the series reads, then those of its demo keys. A file listed twice appears at each place.
+    pub fn loaded_files(&self, series: Option<Series>) -> impl Iterator<Item = &str> {
+        self.read_files(&DATA_KEYS, series)
+            .chain(self.read_files(&DEMO_KEYS, series))
+    }
+
+    /// The SQL files Odoo runs when it loads the data of the module in `series`, in load order.
     pub fn sql_files(&self, series: Option<Series>) -> impl Iterator<Item = &str> {
-        let (init_xml, update_xml) = match series {
-            Some(s) if s >= DATA_ONLY => ((INIT_XML_BACK..INIT_XML_GONE).contains(&s), false),
-            _ => (true, true),
+        self.read_files(&DATA_KEYS, series).filter(|f| f.ends_with(".sql"))
+    }
+
+    /// The legacy key listing `file`, a path relative to the module, that Odoo ignores in `series`,
+    /// when no key it reads lists the file too.
+    pub fn ignored_key(&self, file: &str, series: Option<Series>) -> Option<&'static str> {
+        let lists = |key: &str| self.listed(key).any(|f| normalize(f) == file);
+        let keys = DATA_KEYS.into_iter().chain(DEMO_KEYS);
+        if keys.clone().any(|k| reads(k, series) && lists(k)) {
+            return None;
+        }
+        keys.filter(|k| !reads(k, series)).find(|k| lists(k))
+    }
+
+    fn read_files(&self, keys: &'static [&'static str], series: Option<Series>) -> impl Iterator<Item = &str> {
+        keys.iter()
+            .filter(move |k| reads(k, series))
+            .flat_map(|k| self.listed(k))
+    }
+
+    fn listed(&self, key: &str) -> impl Iterator<Item = &str> {
+        let (spanned, plain): (&[Spanned<String>], &[String]) = match key {
+            "data" => (&self.data, &[]),
+            "demo" => (&self.demo, &[]),
+            "init_xml" => (&[], &self.init_xml),
+            "update_xml" => (&[], &self.update_xml),
+            "demo_xml" => (&[], &self.demo_xml),
+            _ => (&[], &[]),
         };
-        let data = self.data.iter().map(|f| f.value.as_str());
-        let init_xml = self.init_xml.iter().filter(move |_| init_xml).map(String::as_str);
-        let update_xml = self.update_xml.iter().filter(move |_| update_xml).map(String::as_str);
-        data.chain(init_xml).chain(update_xml).filter(|f| f.ends_with(".sql"))
+        spanned
+            .iter()
+            .map(|f| f.value.as_str())
+            .chain(plain.iter().map(String::as_str))
     }
 
     fn set(&mut self, loc: &Locator, key: &str, value: &Expr) {
@@ -78,7 +133,7 @@ impl Manifest {
             "version" => self.version = str_lit(value).map(str::to_owned),
             "depends" => self.depends = list(loc, value),
             "data" => self.data = list(loc, value),
-            "init_xml" | "update_xml" => self.set_legacy(key, list(loc, value).into_iter().map(|f| f.value).collect()),
+            "init_xml" | "update_xml" | "demo_xml" => self.set_legacy(key, names(loc, value)),
             "demo" => self.demo = list(loc, value),
             "category" => self.category = str_lit(value).map(str::to_owned),
             "installable" => self.installable = !matches!(value, Expr::BooleanLiteral(b) if !b.value),
@@ -89,10 +144,11 @@ impl Manifest {
     }
 
     fn set_legacy(&mut self, key: &str, files: Vec<String>) {
-        if key == "init_xml" {
-            self.init_xml = files;
-        } else {
-            self.update_xml = files;
+        match key {
+            "init_xml" => self.init_xml = files,
+            "update_xml" => self.update_xml = files,
+            "demo_xml" => self.demo_xml = files,
+            _ => {}
         }
     }
 }
@@ -115,6 +171,16 @@ pub fn parse(src: &str) -> Option<Manifest> {
         m.set(&loc, key, &item.value);
     }
     Some(m)
+}
+
+/// `rel`, relative to the module, in the one form the manifest's entries and the files on disk
+/// compare in: without a leading `./`, with `/` separators.
+pub fn normalize(rel: &str) -> String {
+    rel.trim_start_matches("./").replace('\\', "/")
+}
+
+fn names(loc: &Locator, e: &Expr) -> Vec<String> {
+    list(loc, e).into_iter().map(|f| f.value).collect()
 }
 
 fn list(loc: &Locator, e: &Expr) -> Vec<Spanned<String>> {
@@ -194,16 +260,56 @@ mod tests {
     }
 
     #[test]
+    fn lists_the_files_a_series_loads_in_load_order() {
+        let m = parse(
+            r#"{"data": ["d.xml"], "init_xml": ["i.xml"], "update_xml": ["u.xml"],
+                "demo": ["e.xml"], "demo_xml": ["x.xml"]}"#,
+        )
+        .unwrap();
+        let files = |series: Option<&str>| m.loaded_files(series.and_then(Series::parse)).collect::<Vec<_>>();
+        assert_eq!(files(Some("14.0")), ["i.xml", "u.xml", "d.xml", "x.xml", "e.xml"]);
+        assert_eq!(files(Some("saas~15.1")), ["i.xml", "u.xml", "d.xml", "x.xml", "e.xml"]);
+        assert_eq!(files(Some("saas~15.2")), ["d.xml", "e.xml"]);
+        assert_eq!(files(Some("17.0")), ["d.xml", "e.xml"]);
+        assert_eq!(files(Some("19.0")), ["i.xml", "d.xml", "e.xml"]);
+        assert_eq!(files(Some("20.0")), ["d.xml", "e.xml"]);
+        assert_eq!(files(None), ["i.xml", "u.xml", "d.xml", "x.xml", "e.xml"]);
+    }
+
+    #[test]
     fn lists_the_sql_files_of_the_data_keys_a_series_reads() {
-        let m =
-            parse(r#"{"data": ["a.xml", "a.sql"], "init_xml": ["b.sql"], "update_xml": ["c.sql", "c.csv"]}"#).unwrap();
+        let m = parse(
+            r#"{"data": ["a.xml", "a.sql"], "init_xml": ["b.sql"], "update_xml": ["c.sql", "c.csv"],
+                "demo": ["e.sql"]}"#,
+        )
+        .unwrap();
         let files = |series: Option<&str>| m.sql_files(series.and_then(Series::parse)).collect::<Vec<_>>();
-        assert_eq!(files(Some("14.0")), ["a.sql", "b.sql", "c.sql"]);
-        assert_eq!(files(Some("saas~15.1")), ["a.sql", "b.sql", "c.sql"]);
+        assert_eq!(files(Some("14.0")), ["b.sql", "c.sql", "a.sql"]);
+        assert_eq!(files(Some("saas~15.1")), ["b.sql", "c.sql", "a.sql"]);
         assert_eq!(files(Some("saas~15.2")), ["a.sql"]);
         assert_eq!(files(Some("17.0")), ["a.sql"]);
-        assert_eq!(files(Some("19.0")), ["a.sql", "b.sql"]);
+        assert_eq!(files(Some("19.0")), ["b.sql", "a.sql"]);
         assert_eq!(files(Some("20.0")), ["a.sql"]);
-        assert_eq!(files(None), ["a.sql", "b.sql", "c.sql"]);
+        assert_eq!(files(None), ["b.sql", "c.sql", "a.sql"]);
+    }
+
+    #[test]
+    fn names_the_ignored_key_listing_a_file() {
+        let m = parse(
+            r#"{"data": ["views/both.xml"], "init_xml": ["./views/init.xml", "views/both.xml"],
+                "update_xml": ["views/update.xml"], "demo_xml": ["demo/demo.xml"]}"#,
+        )
+        .unwrap();
+        let key = |file: &str, series: Option<&str>| m.ignored_key(file, series.and_then(Series::parse));
+        assert_eq!(key("views/init.xml", Some("17.0")), Some("init_xml"));
+        assert_eq!(key("views/init.xml", Some("19.0")), None);
+        assert_eq!(key("views/init.xml", Some("20.0")), Some("init_xml"));
+        assert_eq!(key("views/update.xml", Some("19.0")), Some("update_xml"));
+        assert_eq!(key("demo/demo.xml", Some("saas~15.2")), Some("demo_xml"));
+        assert_eq!(key("views/both.xml", Some("17.0")), None);
+        assert_eq!(key("views/update.xml", Some("14.0")), None);
+        assert_eq!(key("views/update.xml", None), None);
+        assert_eq!(key("views/other.xml", Some("17.0")), None);
+        assert_eq!(m.listed("other_files").count(), 0);
     }
 }
