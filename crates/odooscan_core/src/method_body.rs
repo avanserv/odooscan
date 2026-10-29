@@ -239,6 +239,16 @@ fn always_true(test: &Expr) -> bool {
     }
 }
 
+/// The body and `else` of a `for` or `while`, and whether it is a `while` that only a `break`
+/// leaves.
+fn loop_parts(stmt: &Stmt) -> Option<(&[Stmt], &[Stmt], bool)> {
+    match stmt {
+        Stmt::For(f) => Some((&f.body, &f.orelse, false)),
+        Stmt::While(w) => Some((&w.body, &w.orelse, always_true(&w.test))),
+        _ => None,
+    }
+}
+
 fn only_loop_over_self(body: &[Stmt]) -> Option<(&str, &ast::StmtFor)> {
     let mut loops = body.iter().filter_map(|stmt| match stmt {
         Stmt::For(f) if !f.is_async && is_name(&f.iter, "self") => Some(f),
@@ -471,12 +481,13 @@ fn side<'s>(i: &'s ast::StmtIf, body: Flow, clauses: &[Flow]) -> Option<Side<'s>
 /// How statements jump before a call of a method of `self`, which may assign the field on every
 /// record: each block is walked up to the first statement that fills, that call, a `raise`, or a
 /// compound statement making one on every path. A `break` or `continue` in a loop among them stays
-/// in it.
+/// in it, and only a `return` or a `raise` there reaches the walk around the loop.
 struct Exits {
     /// In the loop over `self` itself, where a `break` leaves it and a `continue` ends the
     /// iteration; in a nested loop, both only skip the rest of its body.
     outer: bool,
-    /// Inside a loop among the walked statements, where a `break` or `continue` stays.
+    /// Inside a loop among the walked statements, where a `break` or `continue` stays; not inside a
+    /// `while True:`, whose own `break` is tracked.
     in_loop: bool,
     /// A path leaves the loop over `self`.
     leaves: bool,
@@ -518,7 +529,7 @@ impl Exits {
     /// A `raise` fills, since Odoo reports the exception anyway. A `with` fills when its body
     /// does, unless it swallows the exceptions that may skip the call; an `if` with an `elif` or
     /// `else`, a `try` or a `match` fills when every path through it does, as `branches` and
-    /// `handled` read them.
+    /// `handled` read them, and a loop as `looped` does.
     fn fills(&mut self, stmt: &Stmt) -> bool {
         match stmt {
             Stmt::Expr(e) => matches!(&*e.value, Expr::Call(c) if calls_self_method(c)),
@@ -533,9 +544,7 @@ impl Exits {
             }
             Stmt::Try(t) => self.tried(t),
             Stmt::Match(m) => self.every(m.cases.iter().map(|c| &c.body[..])),
-            Stmt::For(ast::StmtFor { body, orelse, .. }) | Stmt::While(ast::StmtWhile { body, orelse, .. }) => {
-                self.looped(body, orelse)
-            }
+            Stmt::For(_) | Stmt::While(_) => self.looped(stmt),
             _ => {
                 self.record_jump(stmt);
                 false
@@ -558,13 +567,26 @@ impl Exits {
         (filled && !early) || self.body(&t.finalbody) || filled
     }
 
-    /// A loop may run no iteration, so it never fills.
-    fn looped(&mut self, body: &[Stmt], orelse: &[Stmt]) -> bool {
-        let in_loop = std::mem::replace(&mut self.in_loop, true);
-        self.body(body);
-        self.in_loop = in_loop;
+    /// A loop that is not `endless` may run no iteration, so it never fills. An endless one, which
+    /// only its own `break` leaves, fills when its body fills before any such `break`, walked as
+    /// `breaks_unfilled` walks it; a `continue` there restarts the body, which then fills first.
+    fn looped(&mut self, stmt: &Stmt) -> bool {
+        let Some((body, orelse, endless)) = loop_parts(stmt) else {
+            return false;
+        };
+        let saved = (
+            self.outer,
+            self.in_loop,
+            std::mem::take(&mut self.skips),
+            std::mem::take(&mut self.breaks),
+        );
+        self.outer = false;
+        self.in_loop = !endless;
+        let filled = self.body(body);
+        let breaks = self.breaks;
+        (self.outer, self.in_loop, self.skips, self.breaks) = saved;
         self.body(orelse);
-        false
+        endless && filled && !breaks
     }
 
     /// Whether there is a body and each fills, walking every one.
@@ -709,10 +731,8 @@ impl<'a> Paths<'a> {
     /// A `for` whose body assigns does so when its iterable is not empty, so it pairs as
     /// `if items:` would.
     fn nested_loop<'s>(&self, stmt: &'s Stmt, sides: &mut Vec<Side<'s>>) -> Flow {
-        let (body, orelse, endless) = match stmt {
-            Stmt::For(f) => (&f.body, &f.orelse, false),
-            Stmt::While(w) => (&w.body, &w.orelse, always_true(&w.test)),
-            _ => return Flow::Open,
+        let Some((body, orelse, endless)) = loop_parts(stmt) else {
+            return Flow::Open;
         };
         let inner = Paths { nested: true, ..*self };
         let looped = if endless && !Exits::breaks_unfilled(body) {
@@ -1209,6 +1229,12 @@ mod tests {
             "while True:\n    if rec.c:\n        continue\n    if rec.d:\n        rec.f = 1\n        break\n    self._fill_f()\n    break\nrec.f = 1\nreturn",
             "while True:\n    if rec.c:\n        continue\n    with rec.lock():\n        if rec.d:\n            rec.f = 1\n            break\n        self._fill_f()\n    break\nrec.f = 1\nreturn",
             "while rec.a:\n    if rec.c:\n        continue\n    self._fill_f()\n    break\nrec.f = 1\nreturn",
+            "rec.f = 1\nwhile True:\n    if rec.d:\n        break\n    self._fill_f()\n    break\nreturn",
+            "rec.f = 1\nwhile True:\n    if rec.d:\n        return\n    self._fill_f()\n    break",
+            "rec.f = 1\nwhile True:\n    try:\n        self._fill_f()\n    except ValueError:\n        break\n    break\nreturn",
+            "rec.f = 1\nwhile True:\n    if rec.c:\n        continue\n    else:\n        self._fill_f()\n    break\nreturn",
+            "rec.f = 1\nwhile rec.a:\n    self._fill_f()\n    break\nreturn",
+            "rec.f = 1\nfor line in rec.line_ids:\n    self._fill_f()\n    break\nreturn",
         ];
         for stmts in reported {
             assert!(unassigned(&format!("for rec in self:\n{}", indent(stmts))), "{stmts}");
@@ -1240,6 +1266,12 @@ mod tests {
             "for line in rec.line_ids:\n    with rec.lock():\n        if not line.a:\n            continue\n        self._fill_f()\n    return\nrec.f = 1",
             "while True:\n    if rec.c:\n        continue\n    self._fill_f()\n    break\nrec.f = 1\nreturn",
             "while 1:\n    if rec.c:\n        continue\n    self._fill_f()\n    if rec.d:\n        rec.f = 1\n        break\n    break\nrec.f = 1\nreturn",
+            "rec.f = 1\nwhile True:\n    self._fill_f()\n    break\nreturn",
+            "rec.f = 1\nwhile True:\n    self._fill_f()\n    break\nbreak",
+            "rec.f = 1\nwhile True:\n    if rec.c:\n        continue\n    self._fill_f()\n    break\nreturn",
+            "rec.f = 1\nwhile True:\n    for line in rec.line_ids:\n        if line.a:\n            break\n    self._fill_f()\n    break\nreturn",
+            "rec.f = 1\nwhile True:\n    self._fill_f()\nreturn",
+            "while True:\n    if rec.c:\n        continue\n    while True:\n        self._fill_f()\n        break\n    break\nrec.f = 1\nreturn",
         ];
         for stmts in assigned {
             assert!(!unassigned(&format!("for rec in self:\n{}", indent(stmts))), "{stmts}");
