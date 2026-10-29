@@ -34,7 +34,8 @@ cargo-machete fails otherwise.
 
 A rule is registered in `crates/odooscan_core/src/rules.rs` with its code, series range, severity
 and category, and raised from the file that owns its facts: `python.rs`, `xml.rs`, `csvdata.rs`,
-`js.rs`, `owl.rs`, `manifest.rs`, or `checks.rs` when it needs the index.
+`js.rs`, `owl.rs`, `manifest.rs`, or `checks.rs` when it needs the index or the module's series,
+from facts the parser leaves to it, as OD116, OD120 and OD121 do for the series.
 
 Every rule comes with its page, `docs/rules/<code>.md`, and a row in `docs/rules/index.md`. A
 test holds each page's heading and facts table to the registry. The page's failing example must

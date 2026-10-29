@@ -179,6 +179,7 @@ custom/legacy16/models/res_partner.py:12:5: OD117 @api.model on create() makes O
 custom/legacy16/models/res_partner.py:22:40: OD220 'opened_on' has the label 'Created on' of field 'create_date' of res.partner, so Odoo logs a warning and users cannot tell them apart; give it another string
 custom/legacy16/models/res_partner.py:23:41: OD220 'touched_on' has the label 'Last Modified on' of field '__last_update' of res.partner, so Odoo logs a warning and users cannot tell them apart; give it another string
 custom/legacy16/models/res_partner.py:31:40: OD220 'turned_on' has the label 'Last Modified on' of field '__last_update' of legacy.turnstile, so Odoo logs a warning and users cannot tell them apart; give it another string
+custom/legacy16/models/res_partner.py:37:21: OD120 'time' in an ormcache key is not a parameter of _quarter_hour_rates(), so every call raises NameError; key on a parameter or on self
 custom/model_attributes/models/bed.py:7:20: OD203 'parent_bed_id': garden.bed has no field 'parent_bed_id'
 custom/model_attributes/models/bed.py:8:18: OD203 'folded': garden.bed has no field 'folded'
 custom/model_attributes/models/bed.py:9:20: OD203 'x_active': garden.bed has no field 'x_active'
@@ -215,11 +216,13 @@ custom/modern19/models/partner.py:41:93: OD216 'type' is required, so Odoo refus
 custom/modern19/models/partner.py:47:33: OD218 _inherits delegates to 'partner_id', which must be required with ondelete 'cascade' or 'restrict'; give it ondelete="cascade"
 custom/modern19/models/partner.py:49:73: OD213 'partner_id' is required, so Odoo refuses ondelete='set null'; use 'restrict' or 'cascade'
 custom/modern19/models/partner.py:63:30: OD220 'ref' has the label 'ID' of field 'id' of modern.seal, so Odoo logs a warning and users cannot tell them apart; give it another string
+custom/modern19/models/partner.py:69:21: OD120 'time' in an ormcache key is not a parameter of _quarter_hour_rates(), so every call raises NameError; key on a parameter or on self
 custom/modern20/models/res_partner.py:10:96: OD203 'x_parent_model': res.partner has no field 'x_parent_model'
 custom/modern20/models/res_partner.py:17:33: OD219 'note' sets tracking, but modern.note does not inherit mail.thread, so Odoo ignores it and logs a warning; inherit mail.thread or remove tracking
 custom/modern20/models/res_partner.py:41:30: OD220 'ref' has the label 'ID' of field 'id' of modern.ticket, so Odoo logs a warning and users cannot tell them apart; give it another string
 custom/orm_overrides/models/caches.py:7:21: OD120 'lang' in an ormcache key is not a parameter of _greeting_for(), so every call raises NameError; key on a parameter or on self
 custom/orm_overrides/models/caches.py:11:29: OD120 'country' in an ormcache key is not a parameter of _country_label(), so every call raises NameError; key on a parameter or on self
+custom/orm_overrides/models/caches.py:31:21: OD120 'method' in an ormcache key is not a parameter of _named_by_method(), so every call raises NameError; key on a parameter or on self
 custom/orm_overrides/models/computes.py:40:9: OD223 _compute_initials() can leave 'initials' unassigned on a record, so reading it raises ValueError; assign it on every path through the loop, False when there is no value
 custom/orm_overrides/models/computes.py:46:9: OD223 _compute_badge() can leave 'badge' unassigned on a record, so reading it raises ValueError; assign it on every path through the loop, False when there is no value
 custom/orm_overrides/models/computes.py:160:9: OD223 _compute_pen_name() can leave 'pen_name' unassigned on a record, so reading it raises ValueError; assign it on every path through the loop, False when there is no value
@@ -228,6 +231,11 @@ custom/orm_overrides/models/computes.py:200:9: OD223 _compute_name_hint() can le
 custom/orm_overrides/models/computes.py:208:9: OD223 _compute_family_tag() can leave 'family_tag' unassigned on a record, so reading it raises ValueError; assign it on every path through the loop, False when there is no value
 custom/orm_overrides/models/computes.py:216:9: OD223 _compute_first_letter() can leave 'first_letter' unassigned on a record, so reading it raises ValueError; assign it on every path through the loop, False when there is no value
 custom/orm_overrides/models/computes.py:223:9: OD223 _compute_country_hint() can leave 'country_hint' unassigned on a record, so reading it raises ValueError; assign it on every path through the loop, False when there is no value
+custom/orm_overrides/models/computes.py:283:9: OD223 _compute_rank() can leave 'rank' unassigned on a record, so reading it raises ValueError; assign it on every path through the loop, False when there is no value
+custom/orm_overrides/models/computes.py:299:9: OD223 _compute_zone_hint() can leave 'zone_hint' unassigned on a record, so reading it raises ValueError; assign it on every path through the loop, False when there is no value
+custom/orm_overrides/models/computes.py:305:9: OD223 _compute_sector_hint() can leave 'sector_hint' unassigned on a record, so reading it raises ValueError; assign it on every path through the loop, False when there is no value
+custom/orm_overrides/models/computes.py:347:9: OD223 _compute_tier() can leave 'tier' unassigned on a record, so reading it raises ValueError; assign it on every path through the loop, False when there is no value
+custom/orm_overrides/models/computes.py:365:9: OD223 _compute_area_hint() can leave 'area_hint' unassigned on a record, so reading it raises ValueError; assign it on every path through the loop, False when there is no value
 custom/orm_overrides/models/overrides.py:7:9: OD119 write() calls super() but returns nothing, so callers get None instead of True; return what super().write() returns
 custom/orm_overrides/models/overrides.py:14:9: OD119 copy() calls super() but returns nothing, so callers get None instead of the new records; return what super().copy() returns
 custom/orm_overrides/models/overrides.py:24:5: OD117 @api.model on create() makes Odoo call it once per record; decorate it with @api.model_create_multi and take a list of dicts

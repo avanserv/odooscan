@@ -1,4 +1,4 @@
-from odoo import api, fields, models
+from odoo import api, fields, models, tools
 
 
 class ResPartner(models.Model):
@@ -61,3 +61,15 @@ class ModernSeal(models.AbstractModel):
     _description = "Seal"
 
     ref = fields.Char(string="ID")
+
+
+class ResPartnerCachedRates(models.Model):
+    _inherit = "res.partner"
+
+    @tools.ormcache("int(time.monotonic() // 900)")
+    def _quarter_hour_rates(self):
+        return {}
+
+    @tools.ormcache("method.__name__")
+    def _named_by_method(self):
+        return self._name

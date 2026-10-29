@@ -259,3 +259,127 @@ class ResPartnerAudience(models.Model):
                 partner.youngest_child = child.name
             if not partner.child_ids:
                 partner.youngest_child = False
+
+
+class ResPartnerHints(models.Model):
+    _inherit = "res.partner"
+
+    score = fields.Integer(compute="_compute_score")
+    rank = fields.Integer(compute="_compute_rank")
+    region_hint = fields.Char(compute="_compute_region_hint")
+    zone_hint = fields.Char(compute="_compute_zone_hint")
+    sector_hint = fields.Char(compute="_compute_sector_hint")
+
+    @api.depends("handle")
+    def _compute_score(self):
+        for partner in self:
+            try:
+                partner.score = 0
+                partner.score = len(partner.handle) * int(partner.handle[-1])
+            except (TypeError, ValueError):
+                pass
+
+    @api.depends("handle")
+    def _compute_rank(self):
+        for partner in self:
+            try:
+                rank = int(partner.handle)
+                partner.rank = 0
+                partner.rank = rank // 10
+            except (TypeError, ValueError):
+                pass
+
+    @api.depends("country_id")
+    def _compute_region_hint(self):
+        for partner in self:
+            if partner.country_id:
+                partner.region_hint = partner.country_id.code
+
+    @api.depends("country_id")
+    def _compute_zone_hint(self):
+        for partner in self:
+            if partner.country_id:
+                partner.zone_hint = partner.country_id.name
+
+    @api.depends("type")
+    def _compute_sector_hint(self):
+        for partner in self:
+            if partner.type == "invoice":
+                partner.sector_hint = "billing"
+
+
+class ResPartnerHintFallbacks(models.Model):
+    _inherit = "res.partner"
+
+    def _compute_region_hint(self):
+        super()._compute_region_hint()
+        for partner in self.filtered(lambda p: not p.country_id):
+            partner.region_hint = False
+
+    def _compute_zone_hint(self):
+        for partner in self.filtered(lambda p: not p.country_id):
+            partner.zone_hint = False
+
+
+class ResCompanySectorHint(models.Model):
+    _inherit = "res.company"
+
+    def _compute_sector_hint(self):
+        return None
+
+
+class ResCompanySectorHintFallback(models.Model):
+    _inherit = "res.company"
+
+    def _compute_sector_hint(self):
+        return super()._compute_sector_hint()
+
+
+class ResPartnerTierHints(models.Model):
+    _inherit = "res.partner"
+
+    tier = fields.Selection([("silver", "Silver"), ("gold", "Gold")], compute="_compute_tier")
+    grade = fields.Integer(compute="_compute_grade")
+    area_hint = fields.Char(compute="_compute_area_hint")
+    district_hint = fields.Char(compute="_compute_district_hint")
+
+    @api.depends("handle")
+    def _compute_tier(self):
+        for partner in self:
+            try:
+                partner.tier = "archived"
+                partner.tier = "gold" if int(partner.handle) > 9 else "silver"
+            except (TypeError, ValueError):
+                pass
+
+    @api.depends("handle")
+    def _compute_grade(self):
+        for partner in self:
+            try:
+                partner.grade = 1
+                partner.grade = int(partner.handle)
+            except (TypeError, ValueError):
+                pass
+
+    @api.depends("country_id")
+    def _compute_area_hint(self):
+        for partner in self:
+            if partner.country_id:
+                partner.area_hint = partner.country_id.code
+
+    @api.depends("country_id")
+    def _compute_district_hint(self):
+        for partner in self:
+            if partner.country_id:
+                partner.district_hint = partner.country_id.name
+
+
+class ResPartnerAreaHintFallback(models.Model):
+    _inherit = "res.partner"
+
+    def _compute_area_hint(self):
+        for partner in self.filtered(lambda p: not p.country_id):
+            partner.area_hint = False
+
+    def _refresh_area_hint(self):
+        super()._compute_area_hint()

@@ -581,6 +581,7 @@ impl<'ast> PyVisitor<'_, 'ast> {
             order_fields: vec![],
             rec_names_search: vec![],
             super_calls: vec![],
+            extended: vec![],
             table: None,
             attrs: vec![],
             unassigned_computes: vec![],
@@ -613,8 +614,8 @@ impl<'ast> PyVisitor<'_, 'ast> {
         Some(fact)
     }
 
-    /// What a method adds to its class: its name, the `super()` calls it makes, and for `init()`
-    /// the views it creates.
+    /// What a method adds to its class: its name, the `super()` calls it makes, whether it calls
+    /// the method it overrides through `super()`, and for `init()` the views it creates.
     fn method_fact(&mut self, func: &ast::StmtFunctionDef, fact: &mut ClassFact) {
         fact.methods.push(func.name.to_string());
         if func.name.as_str() == "init" {
@@ -624,6 +625,9 @@ impl<'ast> PyVisitor<'_, 'ast> {
         calls.visit_body(&func.body);
         self.method_checks(func, fact);
         self.override_checks(func, &calls.calls);
+        if calls.calls.iter().any(|(name, _)| *name == func.name.as_str()) {
+            fact.extended.push(func.name.to_string());
+        }
         fact.super_calls
             .extend(calls.calls.into_iter().map(|(name, at)| Spanned {
                 value: name.to_owned(),
@@ -979,7 +983,8 @@ impl<'ast> PyVisitor<'_, 'ast> {
     }
 
     /// OD120: Odoo evaluates each key in a lambda that takes the method's parameters, unless the
-    /// legacy `skiparg` keys on the arguments instead.
+    /// legacy `skiparg` keys on the arguments instead. The globals of the lambda depend on the
+    /// series, so `checks.rs` decides.
     fn cache_key_checks(&mut self, func: &ast::StmtFunctionDef, call: &ast::ExprCall) {
         if !matches!(tail_name(&call.func), Some("ormcache" | "ormcache_context")) || keyword(call, "skiparg").is_some()
         {
@@ -988,14 +993,12 @@ impl<'ast> PyVisitor<'_, 'ast> {
         let params: Vec<&str> = func.parameters.iter().map(|p| p.name().as_str()).collect();
         for key in call.arguments.args.iter().filter_map(Expr::as_string_literal_expr) {
             for name in method_body::unknown_key_names(key.value.to_str(), &params).unwrap_or_default() {
-                self.diag(
-                    "OD120",
-                    key,
-                    format!(
-                        "'{name}' in an ormcache key is not a parameter of {}(), so every call raises NameError; key on a parameter or on self",
-                        func.name
-                    ),
+                let message = format!(
+                    "'{name}' in an ormcache key is not a parameter of {}(), so every call raises NameError; key on a parameter or on self",
+                    func.name
                 );
+                let diag = RawDiag::new("OD120", self.loc.at(key), message);
+                self.facts.cache_key_names.push((name, diag));
             }
         }
     }
@@ -1008,7 +1011,7 @@ impl<'ast> PyVisitor<'_, 'ast> {
             let Some(func) = compute_method(class, field) else {
                 continue;
             };
-            if !method_body::leaves_unassigned(&func.body, &field.name) {
+            if !method_body::leaves_unassigned(&func.body, &field.name, &field.ftype) {
                 continue;
             }
             match unassigned.iter_mut().find(|(f, _)| std::ptr::eq(*f, func)) {
