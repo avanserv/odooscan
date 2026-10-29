@@ -65,7 +65,7 @@ class ParcelLocker(models.Model):
 class ParcelKiosk(models.Model):
     _name = "parcel.kiosk"
     _description = "Parcel kiosk"
-    _inherits = {"parcel.depot": "host_depot_id"}
+    _inherits = {"parcel.depot": "x_host_depot_id"}
 
     screen = fields.Char()
 

@@ -49,10 +49,10 @@ class ParcelBoxQueries(models.Model):
         self.env.cr.execute(
             """
             SELECT b.id, b.create_uid, b.write_date, b.label_image, b.handling_fee, d.parent_path,
-                   k.host_depot_id, l.code, b.preview_image, b.handling_note, b.pickup_code
+                   k.x_host_depot_id, l.code, b.preview_image, b.handling_note, b.pickup_code
               FROM parcel_box b
               JOIN parcel_depot d ON d.id = b.depot_id
-              JOIN parcel_kiosk k ON k.host_depot_id = d.id
+              JOIN parcel_kiosk k ON k.x_host_depot_id = d.id
               JOIN parcel_locker l ON l.depot_id = d.id
              WHERE EXTRACT(year FROM b.create_date) = %s
                AND b.name IS DISTINCT FROM d.name
