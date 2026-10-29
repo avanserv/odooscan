@@ -1,0 +1,10 @@
+<odoo>
+    <record id="bulletin_banner" model="ir.ui.view">
+        <field name="inherit_id" ref="web_bulletin.bulletin"/>
+        <field name="arch" type="xml">
+            <xpath expr="//body" position="inside">
+                <div class="banner"/>
+            </xpath>
+        </field>
+    </record>
+</odoo>

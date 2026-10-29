@@ -63,6 +63,60 @@
         </field>
     </record>
 
+    <record id="tack_header" model="ir.ui.view">
+        <field name="inherit_id" ref="web_tack.tack"/>
+        <field name="arch" type="xml">
+            <xpath expr="//body" position="inside">
+                <div class="tacks-header"/>
+            </xpath>
+        </field>
+    </record>
+
+    <record id="thumbtack_header" model="ir.ui.view">
+        <field name="inherit_id" ref="web_thumbtack.thumbtack"/>
+        <field name="arch" type="xml">
+            <xpath expr="//body" position="inside">
+                <div class="thumbtacks-header"/>
+            </xpath>
+        </field>
+    </record>
+
+    <record id="sticker_header" model="ir.ui.view">
+        <field name="inherit_id" ref="web_sticker.sticker"/>
+        <field name="arch" type="xml">
+            <xpath expr="//body" position="inside">
+                <div class="stickers-header"/>
+            </xpath>
+        </field>
+    </record>
+
+    <record id="easel_header" model="ir.ui.view">
+        <field name="inherit_id" ref="web_easel.easel"/>
+        <field name="arch" type="xml">
+            <xpath expr="//body" position="inside">
+                <div class="easel-header"/>
+            </xpath>
+        </field>
+    </record>
+
+    <record id="sketch_header" model="ir.ui.view">
+        <field name="inherit_id" ref="web_sketch.sketch"/>
+        <field name="arch" type="xml">
+            <xpath expr="//body" position="inside">
+                <div class="sketch-header"/>
+            </xpath>
+        </field>
+    </record>
+
+    <record id="ribbon_header" model="ir.ui.view">
+        <field name="inherit_id" ref="web_ribbon.ribbon"/>
+        <field name="arch" type="xml">
+            <xpath expr="//body" position="inside">
+                <div class="ribbon-header"/>
+            </xpath>
+        </field>
+    </record>
+
     <record id="partner_teal" model="res.partner">
         <field name="name">Teal Studio</field>
         <field name="web_color">teal</field>

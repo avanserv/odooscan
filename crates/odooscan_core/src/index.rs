@@ -5,7 +5,9 @@ use crate::facts::{
     Annotation, ArchElement, ClassFact, FieldFact, FlowSummary, Heritage, JsClass, ModelKind, OptionValue, PyFacts,
     Receiver, ViewFact,
 };
+use crate::manifest::AutoInstall;
 use crate::project::{Module, SourceFile};
+use crate::series::Series;
 
 /// Fields every model has without declaring them.
 const MAGIC_FIELDS: &[&str] = &[
@@ -406,28 +408,76 @@ fn js_paths(modules: &[Module]) -> FxHashMap<String, JsTarget> {
     paths
 }
 
-/// `base`, and the modules that auto-install once their depends are, when those are all such modules.
+/// The first series that reads a list-form `auto_install` as its triggers (`saas~12.4`).
+const LISTED_TRIGGERS: Series = Series { major: 12, minor: 4 };
+
+/// `base`, and what Odoo always installs with it: each auto-install module whose triggers (see
+/// `triggers` for how a series reads them) are all such modules and whose depends closure is indexed,
+/// with that closure dragged in.
+/// `default_series` stands in for a manifest version without a series, as it does for the checks.
 /// The manifest `countries` key is ignored on purpose, because Odoo creates a database without reading it.
-fn always_installed(modules: &[Module], by_name: &FxHashMap<&str, usize>) -> Vec<bool> {
+fn always_installed(modules: &[Module], by_name: &FxHashMap<&str, usize>, default_series: Option<Series>) -> Vec<bool> {
     let mut always: Vec<bool> = modules.iter().map(|m| m.name == "base").collect();
     loop {
-        let next: Vec<usize> = (0..modules.len())
-            .filter(|&mi| !always[mi] && modules[mi].manifest.auto_install)
-            .filter(|&mi| {
-                modules[mi]
-                    .manifest
-                    .depends
-                    .iter()
-                    .all(|d| by_name.get(d.value.as_str()).is_some_and(|&di| always[di]))
-            })
+        let installed = |name: &str| by_name.get(name).is_some_and(|&di| always[di]);
+        let ready: Vec<usize> = (0..modules.len())
+            .filter(|&mi| !always[mi])
+            .filter(|&mi| triggers(&modules[mi], default_series).is_some_and(|t| t.into_iter().all(installed)))
             .collect();
-        if next.is_empty() {
+        let mut grew = false;
+        for mi in ready {
+            // Odoo cannot load a module whose depends closure is incomplete, so nothing joins through it.
+            let (closure, complete) = depends_closure(modules, by_name, [mi]);
+            if complete {
+                always.iter_mut().zip(closure).for_each(|(a, c)| *a |= c);
+                grew = true;
+            }
+        }
+        if !grew {
             return always;
         }
-        for mi in next {
-            always[mi] = true;
+    }
+}
+
+/// The depends whose install auto-installs `module`, or `None` when nothing does. From `saas~12.4` a list
+/// names the triggers, and one naming a module outside `depends` fails the manifest. Before `saas~12.4`,
+/// database creation fails on a list, and `update_list` keeps only whether the value is truthy, so `must_install`
+/// waits on every depend for a non-empty list, like `True`, and `[]` is off.
+fn triggers(module: &Module, default_series: Option<Series>) -> Option<Vec<&str>> {
+    let depends: Vec<&str> = module.manifest.depends.iter().map(|d| d.value.as_str()).collect();
+    match &module.manifest.auto_install {
+        AutoInstall::Off => None,
+        AutoInstall::Depends => Some(depends),
+        AutoInstall::Listed(names) if module.series.or(default_series).is_none_or(|s| s >= LISTED_TRIGGERS) => names
+            .iter()
+            .map(String::as_str)
+            .map(|n| depends.contains(&n).then_some(n))
+            .collect(),
+        AutoInstall::Listed(names) => (!names.is_empty()).then_some(depends),
+    }
+}
+
+/// The modules `seeds` reach through `depends`, and whether every depend on the way is indexed.
+fn depends_closure(
+    modules: &[Module],
+    by_name: &FxHashMap<&str, usize>,
+    seeds: impl IntoIterator<Item = usize>,
+) -> (Vec<bool>, bool) {
+    let mut reached = vec![false; modules.len()];
+    let mut complete = true;
+    let mut stack: Vec<usize> = seeds.into_iter().collect();
+    while let Some(mi) = stack.pop() {
+        if std::mem::replace(&mut reached[mi], true) {
+            continue;
+        }
+        for d in &modules[mi].manifest.depends {
+            match by_name.get(d.value.as_str()) {
+                Some(&di) => stack.push(di),
+                None => complete = false,
+            }
         }
     }
+    (reached, complete)
 }
 
 /// Files of a kind, as (module, index among the module's files of that kind).
@@ -572,7 +622,7 @@ pub struct Index<'m> {
 }
 
 impl<'m> Index<'m> {
-    pub fn build(modules: &'m [Module]) -> Self {
+    pub fn build(modules: &'m [Module], default_series: Option<Series>) -> Self {
         let by_name: FxHashMap<&str, usize> = modules.iter().enumerate().map(|(i, m)| (m.name.as_str(), i)).collect();
         let mut models: Models<'m> = FxHashMap::default();
         let mut xmlids: XmlIds = FxHashMap::default();
@@ -602,7 +652,7 @@ impl<'m> Index<'m> {
             js_paths: js_paths(modules),
             js_loaded,
             templates_loaded,
-            always_installed: always_installed(modules, &by_name),
+            always_installed: always_installed(modules, &by_name, default_series),
             by_name,
             patched: FxHashMap::default(),
             template_bases: FxHashSet::default(),
@@ -825,21 +875,8 @@ impl<'m> Index<'m> {
     /// The modules `module` may use. Every always-installed module is seeded with it, as Odoo
     /// installs those wherever `base` is; they are closed under `depends`, so they add no others.
     pub fn scope(&self, module: usize) -> Scope {
-        let mut visible = vec![false; self.modules.len()];
-        let mut stack = vec![module];
-        stack.extend((0..self.modules.len()).filter(|&mi| self.always_installed[mi]));
-        while let Some(m) = stack.pop() {
-            if std::mem::replace(&mut visible[m], true) {
-                continue;
-            }
-            stack.extend(
-                self.modules[m]
-                    .manifest
-                    .depends
-                    .iter()
-                    .filter_map(|d| self.by_name.get(d.value.as_str())),
-            );
-        }
+        let always = (0..self.modules.len()).filter(|&mi| self.always_installed[mi]);
+        let (visible, _) = depends_closure(self.modules, &self.by_name, std::iter::once(module).chain(always));
         Scope { visible }
     }
 

@@ -1,0 +1,9 @@
+<odoo>
+    <template id="ribbon">
+        <html>
+            <body>
+                <div id="bow"/>
+            </body>
+        </html>
+    </template>
+</odoo>

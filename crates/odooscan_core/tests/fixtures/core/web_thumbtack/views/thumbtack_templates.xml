@@ -1,0 +1,9 @@
+<odoo>
+    <template id="thumbtack">
+        <html>
+            <body>
+                <div id="thumbs"/>
+            </body>
+        </html>
+    </template>
+</odoo>

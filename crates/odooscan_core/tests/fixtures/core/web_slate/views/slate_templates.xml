@@ -1,0 +1,9 @@
+<odoo>
+    <template id="slate">
+        <html>
+            <body>
+                <div id="chalk"/>
+            </body>
+        </html>
+    </template>
+</odoo>

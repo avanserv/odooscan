@@ -1,0 +1,9 @@
+<odoo>
+    <template id="tack">
+        <html>
+            <body>
+                <div id="tacks"/>
+            </body>
+        </html>
+    </template>
+</odoo>
