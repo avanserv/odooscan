@@ -875,7 +875,7 @@ impl<'m> Index<'m> {
     /// The modules `module` may use. Every always-installed module is seeded with it, as Odoo
     /// installs those wherever `base` is; they are closed under `depends`, so they add no others.
     pub fn scope(&self, module: usize) -> Scope {
-        let always = (0..self.modules.len()).filter(|&mi| self.always_installed[mi]);
+        let always = (0..self.modules.len()).filter(|&mi| self.always_installed(mi));
         let (visible, _) = depends_closure(self.modules, &self.by_name, std::iter::once(module).chain(always));
         Scope { visible }
     }
@@ -1215,7 +1215,10 @@ impl<'m> Index<'m> {
     }
 
     /// Whether a client may call `method` on `model`: a method of `BaseModel`, or of a class of the
-    /// model or of a model it inherits, in scope or in a module that is always installed.
+    /// model or of a model it inherits, in scope or in a module that is always installed. The
+    /// scoped walk skips a class outside the scope with its `_inherit`, so a mixin of an
+    /// always-installed module that only such a class adds is found only by the unscoped walk;
+    /// without the always-installed arm it would be `Hidden` under a module the caller has.
     pub fn rpc_method(&self, model: &str, method: &str, scope: &Scope) -> Status<'m> {
         if BASE_MODEL_METHODS.contains(&method) || self.has_method(model, method, scope) {
             return Status::Visible;
