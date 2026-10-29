@@ -383,3 +383,29 @@ class ResPartnerAreaHintFallback(models.Model):
 
     def _refresh_area_hint(self):
         super()._compute_area_hint()
+
+
+class ResPartnerChildHints(models.Model):
+    _inherit = "res.partner"
+
+    named_child = fields.Char(compute="_compute_named_child")
+    eldest_child = fields.Char(compute="_compute_eldest_child")
+
+    @api.depends("child_ids.name")
+    def _compute_named_child(self):
+        for partner in self:
+            for child in partner.child_ids:
+                if not child.name:
+                    continue
+                partner.named_child = child.name
+            if not partner.child_ids:
+                partner.named_child = False
+
+    @api.depends("child_ids.name")
+    def _compute_eldest_child(self):
+        for partner in self:
+            if partner.child_ids:
+                for child in partner.child_ids:
+                    partner.eldest_child = child.name
+            else:
+                partner.eldest_child = False

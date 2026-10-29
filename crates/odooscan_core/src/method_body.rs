@@ -365,13 +365,16 @@ impl<'a> Visitor<'a> for FieldUses<'_> {
 /// so that paths join to the worst of them.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 enum Flow {
-    /// Every path calls a method of `self`, which may assign it on every record, so leaving the
-    /// loop over `self` after that skips none.
+    /// Every path calls a method of `self`, which may assign it on every record, or goes on to the
+    /// next iteration or raises, so leaving the loop over `self` after that skips none.
     Filled,
     /// Every path assigns it, or leaves by an exception that Odoo reports anyway.
     Assigned,
     /// No path leaves, and one goes on without assigning it.
     Open,
+    /// In a nested loop, a path starts its next iteration by a `continue` without assigning it,
+    /// so a loop that assigns in its body may still end without the field.
+    Continued,
     /// A path ends the iteration, or the nested loop it is in, without assigning it.
     Escaped,
     /// A path leaves the loop over `self` from any depth, by a `return` or by a `break` after the
@@ -392,17 +395,17 @@ fn same(x: &Expr, y: &Expr) -> bool {
 fn complementary(a: &Expr, b: &Expr) -> bool {
     let negates =
         |x: &Expr, y: &Expr| matches!(x, Expr::UnaryOp(u) if u.op == ast::UnaryOp::Not && same(&u.operand, y));
-    negates(a, b) || negates(b, a) || compared(a, b, true)
+    negates(a, b) || negates(b, a) || same_comparison(a, b, true)
 }
 
 fn equivalent(a: &Expr, b: &Expr) -> bool {
-    same(a, b) || compared(a, b, false)
+    same(a, b) || same_comparison(a, b, false)
 }
 
 /// Whether two one-operator comparisons take the same operands under the same operator, or the
 /// negated one when `negated`. The operands of `==`, `!=`, `is` and `is not` may come in either
 /// order.
-fn compared(a: &Expr, b: &Expr, negated: bool) -> bool {
+fn same_comparison(a: &Expr, b: &Expr, negated: bool) -> bool {
     let (Expr::Compare(x), Expr::Compare(y)) = (a, b) else {
         return false;
     };
@@ -414,8 +417,8 @@ fn compared(a: &Expr, b: &Expr, negated: bool) -> bool {
     *q == op && ((same(xl, yl) && same(xr, yr)) || (symmetric && same(xl, yr) && same(xr, yl)))
 }
 
-/// A statement that assigns the field, ending as `flow`, on the paths where `test` is `holds`, and
-/// goes on without it on the others.
+/// A statement that, on the paths where `test` evaluates to `holds`, ends as `flow`, and elsewhere
+/// goes on.
 #[derive(Clone, Copy)]
 struct Side<'s> {
     test: &'s Expr,
@@ -465,39 +468,119 @@ fn side<'s>(i: &'s ast::StmtIf, body: Flow, clauses: &[Flow]) -> Option<Side<'s>
     })
 }
 
-/// Whether statements leave the loop over `self`: by a `return`, or by a `break` when `breaks`
-/// holds and the `break` is not in the body of a loop among them. A block stops at a call of a
-/// method of `self`, which may assign the field on every record.
+/// How statements jump before a call of a method of `self`, which may assign the field on every
+/// record: each block is walked up to the first statement that fills, that call, a `raise`, or a
+/// compound statement making one on every path. A `break` or `continue` in a loop among them stays
+/// in it.
 struct Exits {
-    breaks: bool,
-    found: bool,
+    /// In the loop over `self` itself, where a `break` leaves it and a `continue` ends the
+    /// iteration; in a nested loop, both only skip the rest of its body.
+    outer: bool,
+    /// Inside a loop among the walked statements, where a `break` or `continue` stays.
+    in_loop: bool,
+    /// A path leaves the loop over `self`.
+    leaves: bool,
+    /// A path goes on in the loop it is in without reaching the rest.
+    skips: bool,
+    /// A path stops by a `continue` of the loop over `self` or a `raise` instead of filling, which
+    /// matters only to a `finally` around it, since that still runs.
+    ends: bool,
 }
 
-fn fills(stmt: &Stmt) -> bool {
-    matches!(stmt, Stmt::Expr(e) if matches!(&*e.value, Expr::Call(c) if calls_self_method(c)))
-}
-
-impl<'a> Visitor<'a> for Exits {
-    fn visit_body(&mut self, body: &'a [Stmt]) {
-        body.iter().take_while(|s| !fills(s)).for_each(|s| self.visit_stmt(s));
-    }
-
-    fn visit_stmt(&mut self, stmt: &'a Stmt) {
-        match stmt {
-            Stmt::FunctionDef(_) | Stmt::ClassDef(_) => {}
-            Stmt::Return(_) => self.found = true,
-            Stmt::Break(_) => self.found |= self.breaks,
-            Stmt::For(ast::StmtFor { body, orelse, .. }) | Stmt::While(ast::StmtWhile { body, orelse, .. }) => {
-                let breaks = std::mem::replace(&mut self.breaks, false);
-                self.visit_body(body);
-                self.breaks = breaks;
-                self.visit_body(orelse);
-            }
-            _ => visitor::walk_stmt(self, stmt),
+impl Exits {
+    fn new(nested: bool) -> Self {
+        Self {
+            outer: !nested,
+            in_loop: false,
+            leaves: false,
+            skips: false,
+            ends: false,
         }
     }
 
-    fn visit_expr(&mut self, _: &'a Expr) {}
+    /// Whether a statement of `stmts` fills.
+    fn body(&mut self, stmts: &[Stmt]) -> bool {
+        stmts.iter().any(|s| self.fills(s))
+    }
+
+    /// A `raise` fills, since Odoo reports the exception anyway. A `with` fills when its body
+    /// does, unless it swallows the exceptions that may skip the call; an `if` with an `elif` or
+    /// `else`, a `try` or a `match` fills when every path through it does, as `branches` and
+    /// `handled` read them.
+    fn fills(&mut self, stmt: &Stmt) -> bool {
+        match stmt {
+            Stmt::Expr(e) => matches!(&*e.value, Expr::Call(c) if calls_self_method(c)),
+            Stmt::Raise(_) => {
+                self.ends = true;
+                true
+            }
+            Stmt::With(w) => self.body(&w.body) && !suppresses(w),
+            Stmt::If(i) => {
+                let body = self.body(&i.body);
+                self.every(i.elif_else_clauses.iter().map(|c| &c.body[..])) && body
+            }
+            Stmt::Try(t) => self.tried(t),
+            Stmt::Match(m) => self.every(m.cases.iter().map(|c| &c.body[..])),
+            Stmt::For(ast::StmtFor { body, orelse, .. }) | Stmt::While(ast::StmtWhile { body, orelse, .. }) => {
+                self.looped(body, orelse)
+            }
+            _ => {
+                self.record_jump(stmt);
+                false
+            }
+        }
+    }
+
+    /// A `try` fills when its body or `else` does and so does each handler, or when its `finally`
+    /// does. The `finally` still runs after a path that ends early, so its jumps count then.
+    fn tried(&mut self, t: &ast::StmtTry) -> bool {
+        let outer = (std::mem::take(&mut self.skips), std::mem::take(&mut self.ends));
+        let main = self.body(&t.body) || self.body(&t.orelse);
+        let handlers = self.every(t.handlers.iter().map(|h| match h {
+            ast::ExceptHandler::ExceptHandler(h) => &h.body[..],
+        }));
+        let filled = main && (handlers || t.handlers.is_empty());
+        let early = self.skips || self.ends;
+        self.skips |= outer.0;
+        self.ends |= outer.1;
+        (filled && !early) || self.body(&t.finalbody) || filled
+    }
+
+    /// A loop may run no iteration, so it never fills.
+    fn looped(&mut self, body: &[Stmt], orelse: &[Stmt]) -> bool {
+        let in_loop = std::mem::replace(&mut self.in_loop, true);
+        self.body(body);
+        self.in_loop = in_loop;
+        self.body(orelse);
+        false
+    }
+
+    /// Whether there is a body and each fills, walking every one.
+    fn every<'b>(&mut self, bodies: impl Iterator<Item = &'b [Stmt]>) -> bool {
+        bodies.fold(None, |all, body| Some(self.body(body) && all.unwrap_or(true))) == Some(true)
+    }
+
+    fn record_jump(&mut self, stmt: &Stmt) {
+        match stmt {
+            Stmt::Return(_) => self.leaves = true,
+            Stmt::Break(_) if !self.in_loop => {
+                self.leaves |= self.outer;
+                self.skips = true;
+            }
+            Stmt::Continue(_) if !self.in_loop && self.outer => self.ends = true,
+            Stmt::Continue(_) if !self.in_loop => self.skips = true,
+            _ => {}
+        }
+    }
+}
+
+/// Whether a `with` runs its body under `contextlib.suppress`, which swallows the exceptions it
+/// names.
+fn suppresses(w: &ast::StmtWith) -> bool {
+    w.items.iter().any(|item| {
+        matches!(&item.context_expr, Expr::Call(c)
+            if is_name(&c.func, "suppress") || matches!(&*c.func, Expr::Attribute(a) if a.attr.as_str() == "suppress"))
+    })
 }
 
 #[derive(Clone, Copy)]
@@ -506,6 +589,8 @@ struct Paths<'a> {
     field: &'a str,
     /// In a loop nested in the loop over `self`, where `continue` only starts its next iteration.
     nested: bool,
+    /// In a `try` whose `finally` may jump, which still runs after a `continue` or a `raise`.
+    jumping_finally: bool,
     ftype: &'a str,
 }
 
@@ -515,61 +600,97 @@ impl<'a> Paths<'a> {
             record,
             field,
             nested: false,
+            jumping_finally: false,
             ftype,
+        }
+    }
+
+    /// No later statement can make a block that may `continue` a nested loop better than
+    /// `Continued`.
+    fn block(&self, stmts: &[Stmt]) -> Flow {
+        match self.steps(stmts, &mut vec![]) {
+            (flow, true) => flow.max(Flow::Continued),
+            (flow, false) => flow,
         }
     }
 
     /// The first statement that assigns the field or leaves decides, but a later exit still leaves
     /// the loop over `self`: after the assignment, or in a nested loop after a `break` that only
-    /// leaves that loop.
-    fn block(&self, stmts: &[Stmt]) -> Flow {
+    /// leaves that loop. The flow sums up the paths that do not `continue` a nested loop, and the
+    /// block returns, beside its flow, whether such a statement occurred.
+    fn steps<'s>(&self, stmts: &'s [Stmt], sides: &mut Vec<Side<'s>>) -> (Flow, bool) {
         #[cfg(test)]
-        tests::BLOCKS.with(|walks| walks.set(walks.get() + 1));
-        let mut sides = vec![];
+        tests::BLOCK_WALKS.with(|walks| walks.set(walks.get() + 1));
+        let mut continued = false;
         for (n, stmt) in stmts.iter().enumerate() {
-            match self.stmt(stmt, &mut sides) {
-                Flow::Open => {}
-                flow @ (Flow::Assigned | Flow::Escaped) => return self.exits([&stmts[n + 1..]], flow),
-                flow => return flow,
-            }
+            let (flow, continues) = self.stmt(stmt, sides);
+            continued |= continues || flow == Flow::Continued;
+            let flow = match flow {
+                Flow::Open | Flow::Continued => continue,
+                flow @ (Flow::Assigned | Flow::Escaped) => self.after(&stmts[n + 1..], flow),
+                flow => flow,
+            };
+            return (flow, continued);
         }
-        Flow::Open
+        (Flow::Open, continued)
     }
 
     /// In a nested loop, a `break` only leaves that loop.
     fn exits<'s>(&self, rest: impl IntoIterator<Item = &'s [Stmt]>, flow: Flow) -> Flow {
-        let mut exits = Exits {
-            breaks: !self.nested,
-            found: false,
-        };
-        rest.into_iter().for_each(|stmts| exits.visit_body(stmts));
-        if exits.found { Flow::Left } else { flow }
+        let mut exits = Exits::new(self.nested);
+        rest.into_iter().for_each(|stmts| {
+            exits.body(stmts);
+        });
+        if exits.leaves { Flow::Left } else { flow }
     }
 
-    /// How one statement ends for the field, by its kind: compound statements combine the blocks
-    /// they hold, `raise` counts as assigning, and the others assign the field or go on. `sides`
-    /// holds the statements before it in its block that assign on one side of a test.
-    fn stmt<'s>(&self, stmt: &'s Stmt, sides: &mut Vec<Side<'s>>) -> Flow {
-        match stmt {
+    /// How a statement ending as `flow` ends with `rest`, the statements after it in its block:
+    /// `Left` when a path through `rest` leaves the loop over `self`, and after an assignment
+    /// `Filled` when every path through `rest` fills before any jump. Under a `finally` that may
+    /// jump, a path ending the iteration by a `continue` or a `raise` does not fill.
+    fn after(&self, rest: &[Stmt], flow: Flow) -> Flow {
+        let mut exits = Exits::new(self.nested);
+        let filled = exits.body(rest) && !exits.skips && !(self.jumping_finally && exits.ends);
+        match flow {
+            _ if exits.leaves => Flow::Left,
+            Flow::Assigned if filled => Flow::Filled,
+            flow => flow,
+        }
+    }
+
+    /// How one statement ends for the field, by its kind, as `steps` sums up a block: compound
+    /// statements combine the blocks they hold, `raise` counts as assigning, and the others assign
+    /// the field or go on. `sides` holds the statements before it in its block that assign on one
+    /// side of a test.
+    fn stmt<'s>(&self, stmt: &'s Stmt, sides: &mut Vec<Side<'s>>) -> (Flow, bool) {
+        let flow = match stmt {
+            Stmt::Continue(_) | Stmt::Break(_) | Stmt::Return(_) => return self.jump(stmt),
+            Stmt::If(i) => return self.branches(i, sides),
+            Stmt::Try(t) => return self.handled(t, sides),
+            Stmt::With(w) => return self.within(w, sides),
             Stmt::Raise(_) => Flow::Assigned,
-            Stmt::Continue(_) | Stmt::Break(_) | Stmt::Return(_) => self.jump(stmt),
-            Stmt::If(i) => self.branches(i, sides),
-            Stmt::Try(t) => self.handled(t),
-            Stmt::With(w) => self.block(&w.body),
             Stmt::For(_) | Stmt::While(_) => self.nested_loop(stmt, sides),
             Stmt::Match(m) => join(m.cases.iter().map(|c| self.block(&c.body))),
             _ => self.assigned(stmt),
+        };
+        (flow, false)
+    }
+
+    /// A `return` leaves the method from any depth, and in a nested loop a `continue` only starts
+    /// its next iteration, so no path goes on past it.
+    fn jump(&self, stmt: &Stmt) -> (Flow, bool) {
+        match stmt {
+            Stmt::Return(_) => (Flow::Left, false),
+            Stmt::Continue(_) if self.nested => (Flow::Filled, true),
+            _ => (Flow::Escaped, false),
         }
     }
 
-    /// A `return` leaves the method from any depth, and in a nested loop `continue` only starts
-    /// its next iteration.
-    fn jump(&self, stmt: &Stmt) -> Flow {
-        match stmt {
-            Stmt::Return(_) => Flow::Left,
-            Stmt::Continue(_) if self.nested => Flow::Open,
-            _ => Flow::Escaped,
-        }
+    /// Under `contextlib.suppress`, an exception may skip the write of a side, so the body pairs
+    /// only within itself.
+    fn within<'s>(&self, w: &'s ast::StmtWith, sides: &mut Vec<Side<'s>>) -> (Flow, bool) {
+        let mut own = vec![];
+        self.steps(&w.body, if suppresses(w) { &mut own } else { sides })
     }
 
     /// A `for` whose body assigns does so when its iterable is not empty, so it pairs as
@@ -598,7 +719,8 @@ impl<'a> Paths<'a> {
     /// A nested loop may run no iteration, and its `else` runs unless a `break` leaves it, so the
     /// body only counts when every `break` assigns first: then the `else` decides, or for an
     /// endless `while`, which only a `break` leaves, the body. A `break` that does not assign is
-    /// taken to go on after the loop, and a `return` leaves the method from any depth.
+    /// taken to go on after the loop, as is a body that may `continue`, and a `return` leaves the
+    /// method from any depth.
     fn after_loop(&self, looped: Flow, orelse: &[Stmt], endless: bool) -> Flow {
         match looped {
             Flow::Left => Flow::Left,
@@ -611,31 +733,79 @@ impl<'a> Paths<'a> {
 
     /// A chain with an `elif` but no `else` is taken to cover every case, as a `match` is. An
     /// open `if` whose body or lone `else` assigns pairs with one of `sides` to cover every path.
-    fn branches<'s>(&self, i: &'s ast::StmtIf, sides: &mut Vec<Side<'s>>) -> Flow {
-        let body = self.block(&i.body);
-        let clauses: Vec<_> = i.elif_else_clauses.iter().map(|c| self.block(&c.body)).collect();
+    /// No path through its body has the test false, nor through a lone `else` true, so each starts
+    /// with a side on those paths that a statement pairing with the test covers.
+    fn branches<'s>(&self, i: &'s ast::StmtIf, sides: &mut Vec<Side<'s>>) -> (Flow, bool) {
+        let guard = |holds| {
+            vec![Side {
+                test: &i.test,
+                holds,
+                flow: Flow::Filled,
+            }]
+        };
+        let (body, mut continued) = self.steps(&i.body, &mut guard(false));
+        let lone_else = matches!(&*i.elif_else_clauses, [c] if c.test.is_none());
+        let clauses: Vec<_> = (i.elif_else_clauses.iter())
+            .map(|c| {
+                let (flow, continues) = self.steps(&c.body, &mut if lone_else { guard(true) } else { vec![] });
+                continued |= continues;
+                flow
+            })
+            .collect();
         let fallthrough = i.elif_else_clauses.is_empty().then_some(Flow::Open);
         let flow = join(std::iter::once(body).chain(clauses.iter().copied()).chain(fallthrough));
         match side(i, body, &clauses) {
-            Some(side) if flow == Flow::Open => pair(side, sides),
-            _ => flow,
+            Some(side) if flow == Flow::Open => (pair(side, sides), continued),
+            _ => (flow, continued),
         }
     }
 
     /// The body then its `else`, or a handler, runs before the `finally`. A body that first writes
-    /// the field a constant its type takes enters its handlers with it assigned.
-    fn handled(&self, t: &ast::StmtTry) -> Flow {
-        let main = match self.block(&t.body) {
-            Flow::Open => self.block(&t.orelse),
-            Flow::Assigned => self.exits([&t.orelse[..]], Flow::Assigned),
+    /// the field a constant its type takes enters its handlers with it assigned. The body and
+    /// `else` pair with `sides` only when no handler goes on unassigned, since an exception may
+    /// skip the write of a side. A `continue` of a nested loop in the body skips the `else`, and
+    /// is still one after a `finally` that goes on.
+    fn handled<'s>(&self, t: &'s ast::StmtTry, sides: &mut Vec<Side<'s>>) -> (Flow, bool) {
+        let finally = self.block(&t.finalbody);
+        let tried = Paths {
+            jumping_finally: self.jumping_finally || finally > Flow::Open,
+            ..*self
+        };
+        let handlers = tried.excepts(t);
+        let mut own = vec![];
+        let sides = if handlers.iter().all(|&(h, continues)| h <= Flow::Assigned && !continues) {
+            sides
+        } else {
+            &mut own
+        };
+        let (body, mut continued) = tried.steps(&t.body, sides);
+        let main = match body {
+            Flow::Open => {
+                let (flow, continues) = tried.steps(&t.orelse, sides);
+                continued |= continues;
+                flow
+            }
+            Flow::Assigned => tried.exits([&t.orelse[..]], Flow::Assigned),
             flow => flow,
         };
+        continued |= handlers.iter().any(|&(_, continues)| continues);
+        let flow = join(std::iter::once(main).chain(handlers.iter().map(|&(h, _)| h)));
+        match finally {
+            Flow::Open => (flow, continued),
+            _ if continued => (self.finally(t, flow.max(Flow::Continued), finally), false),
+            _ => (self.finally(t, flow, finally), false),
+        }
+    }
+
+    /// How each handler of `t` ends, as `steps` sums it up.
+    fn excepts(&self, t: &ast::StmtTry) -> Vec<(Flow, bool)> {
         let first = self.writes_first(&t.body);
-        let handlers = t.handlers.iter().map(|h| match h {
-            ast::ExceptHandler::ExceptHandler(h) if first => self.exits([&h.body[..]], Flow::Assigned),
-            ast::ExceptHandler::ExceptHandler(h) => self.block(&h.body),
-        });
-        self.finally(t, join(std::iter::once(main).chain(handlers)))
+        (t.handlers.iter())
+            .map(|h| match h {
+                ast::ExceptHandler::ExceptHandler(h) if first => (self.exits([&h.body[..]], Flow::Assigned), false),
+                ast::ExceptHandler::ExceptHandler(h) => self.steps(&h.body, &mut vec![]),
+            })
+            .collect()
     }
 
     /// Whether statements write the field, after nothing but `pass` and constants bound to names,
@@ -669,11 +839,10 @@ impl<'a> Paths<'a> {
         }
     }
 
-    /// A `finally` runs after every path `tried` sums up, so an exit before a `finally` that
-    /// assigns, or one in a `finally` after paths that assign, leaves the loop over `self` after
-    /// the assignment, unless every path tried calls a method of `self` first.
-    fn finally(&self, t: &ast::StmtTry, tried: Flow) -> Flow {
-        let finally = self.block(&t.finalbody);
+    /// A `finally` ending as `finally` runs after every path `tried` sums up, so an exit before a
+    /// `finally` that assigns, or one in a `finally` after paths that assign, leaves the loop over
+    /// `self` after the assignment, unless every path tried calls a method of `self` first.
+    fn finally(&self, t: &ast::StmtTry, tried: Flow, finally: Flow) -> Flow {
         let handlers = t.handlers.iter().map(|h| match h {
             ast::ExceptHandler::ExceptHandler(h) => &h.body[..],
         });
@@ -726,7 +895,7 @@ mod tests {
 
     thread_local! {
         /// How many blocks `Paths` walked on this thread.
-        pub(super) static BLOCKS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+        pub(super) static BLOCK_WALKS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
     }
 
     /// The body of the one function `src` defines.
@@ -864,6 +1033,7 @@ mod tests {
             "for line in rec.line_ids:\n    if line.a:\n        break\nelse:\n    rec.f = 1",
             "while rec.a:\n    rec.f = 1\n    break",
             "while True:\n    if rec.a:\n        break\n    rec.f = 1\n    break",
+            "for line in rec.line_ids:\n    try:\n        if not line.a:\n            continue\n        v = int(line.a)\n    except ValueError:\n        raise\n    else:\n        break\nelse:\n    rec.f = 1",
         ];
         for stmts in reported {
             assert!(unassigned(&format!("for rec in self:\n{}", indent(stmts))), "{stmts}");
@@ -873,6 +1043,10 @@ mod tests {
             "for line in rec.line_ids:\n    if not line.a:\n        continue\n    rec.f = 1\n    break\nelse:\n    rec.f = 2",
             "while True:\n    rec.f = 1\n    break",
             "while 1:\n    if rec.a:\n        continue\n    rec.f = 1\n    break",
+            "for line in rec.line_ids:\n    try:\n        if not line.a:\n            continue\n        rec.f = int(line.a)\n    except ValueError:\n        raise\n    break\nelse:\n    rec.f = False",
+            "for line in rec.line_ids:\n    with rec.lock():\n        if not line.a:\n            continue\n        rec.f = int(line.a)\n    break\nelse:\n    rec.f = False",
+            "for line in rec.line_ids:\n    if not line.a:\n        continue\n    else:\n        rec.f = line.a\n    break\nelse:\n    rec.f = False",
+            "for line in rec.line_ids:\n    try:\n        rec.f = int(line.a)\n    except ValueError:\n        continue\n    break\nelse:\n    rec.f = False",
         ];
         for stmts in assigned {
             assert!(!unassigned(&format!("for rec in self:\n{}", indent(stmts))), "{stmts}");
@@ -919,6 +1093,9 @@ mod tests {
             "if rec.a:\n    pass\nelse:\n    rec.f = 1\nif not rec.a:\n    rec.f = 2",
             "if rec.a:\n    pass\nelse:\n    rec.f = 1\nif rec.a:\n    pass\nelse:\n    rec.f = 2",
             "if rec.a:\n    pass\nelse:\n    rec.f = 1\nif rec.b:\n    rec.f = 2",
+            "try:\n    if rec.a:\n        rec.f = int(rec.b)\nexcept ValueError:\n    pass\nif not rec.a:\n    rec.f = 2",
+            "with contextlib.suppress(ValueError):\n    if rec.a:\n        rec.f = int(rec.b)\nif not rec.a:\n    rec.f = 2",
+            "with suppress(ValueError):\n    if rec.a:\n        rec.f = int(rec.b)\nif not rec.a:\n    rec.f = 2",
         ];
         for stmts in reported {
             assert!(unassigned(&format!("for rec in self:\n{}", indent(stmts))), "{stmts}");
@@ -935,6 +1112,10 @@ mod tests {
             "if rec.a:\n    rec.f = 1\nif rec.a:\n    pass\nelse:\n    rec.f = 2",
             "if rec.t == 'a':\n    pass\nelse:\n    rec.f = 1\nif 'a' == rec.t:\n    rec.f = 2",
             "if not rec.a:\n    v = 1\nelse:\n    v = 2\nif rec.a:\n    rec.f = v\nif not rec.a:\n    rec.f = 2",
+            "with rec.lock():\n    if rec.a:\n        rec.f = 1\nif not rec.a:\n    rec.f = 2",
+            "if rec.a:\n    rec.f = 1\nwith rec.lock():\n    if not rec.a:\n        rec.f = 2",
+            "try:\n    if rec.a:\n        rec.f = int(rec.b)\nexcept ValueError:\n    raise\nif not rec.a:\n    rec.f = 2",
+            "try:\n    v = int(rec.b)\nexcept ValueError:\n    raise\nelse:\n    if rec.a:\n        rec.f = v\nif not rec.a:\n    rec.f = 2",
         ];
         for stmts in assigned {
             assert!(!unassigned(&format!("for rec in self:\n{}", indent(stmts))), "{stmts}");
@@ -949,6 +1130,9 @@ mod tests {
             format!("{loops}\nif rec.line_ids:\n    rec.f = False"),
             "for line in rec.line_ids:\n    if line.a:\n        rec.f = 1\nif not rec.line_ids:\n    rec.f = False"
                 .to_owned(),
+            "for line in rec.line_ids:\n    if not line.a:\n        continue\n    rec.f = line.a\nif not rec.line_ids:\n    rec.f = False"
+                .to_owned(),
+            format!("if rec.other_ids:\n{}else:\n    rec.f = False", indent(loops)),
         ];
         for stmts in reported {
             assert!(unassigned(&format!("for rec in self:\n{}", indent(&stmts))), "{stmts}");
@@ -958,6 +1142,10 @@ mod tests {
             format!("if not rec.line_ids:\n    rec.f = False\n{loops}"),
             format!("{loops}\nif rec.line_ids:\n    pass\nelse:\n    rec.f = False"),
             "for line in rec.line_ids:\n    pass\nif rec.line_ids:\n    rec.f = 1\nif not rec.line_ids:\n    rec.f = 2"
+                .to_owned(),
+            format!("if rec.line_ids:\n{}else:\n    rec.f = False", indent(loops)),
+            format!("if not rec.line_ids:\n    rec.f = False\nelse:\n{}", indent(loops)),
+            "for line in rec.line_ids:\n    if not line.a:\n        continue\n    rec.f = line.a\n    break\nelse:\n    rec.f = False"
                 .to_owned(),
         ];
         for stmts in assigned {
@@ -983,6 +1171,20 @@ mod tests {
             "rec._fill_f()\nreturn",
             "rec.f = 1\nif rec.a:\n    self._fill_f()\nreturn",
             "for line in rec.line_ids:\n    if line.a:\n        break\n    return\nrec.f = 1",
+            "rec.f = 1\nwith rec.lock():\n    if rec.a:\n        return\n    self._fill_f()\nreturn",
+            "while True:\n    rec.f = 1\n    if rec.a:\n        break\n    self._fill_f()\n    break\nreturn",
+            "for line in rec.line_ids:\n    rec.f = 1\n    if line.a:\n        continue\n    self._fill_f()\nif not rec.line_ids:\n    self._fill_f()\nreturn",
+            "if rec.a:\n    rec.f = 1\n    self._fill_f()\nreturn",
+            "rec.f = 1\ntry:\n    self._fill_f()\nexcept ValueError:\n    pass\nreturn",
+            "for line in rec.line_ids:\n    try:\n        if not line.a:\n            continue\n        v = int(line.a)\n    except ValueError:\n        raise\n    else:\n        return\nrec.f = 1",
+            "for line in rec.line_ids:\n    try:\n        if not line.a:\n            continue\n        rec.f = 1\n    except ValueError:\n        raise\n    else:\n        return\nelse:\n    rec.f = 2",
+            "try:\n    rec.f = 1\n    if rec.c:\n        continue\n    self._fill_f()\nfinally:\n    return",
+            "try:\n    rec.f = 1\n    if rec.c:\n        raise ValueError()\n    self._fill_f()\nfinally:\n    return",
+            "try:\n    try:\n        rec.f = 1\n        if rec.c:\n            continue\n        self._fill_f()\n    finally:\n        pass\nfinally:\n    return",
+            "rec.f = 1\ntry:\n    if rec.c:\n        continue\n    self._fill_f()\nfinally:\n    return",
+            "rec.f = 1\ntry:\n    if rec.c:\n        raise ValueError()\n    self._fill_f()\nfinally:\n    return",
+            "rec.f = 1\ntry:\n    if rec.c:\n        continue\n    self._fill_f()\nexcept ValueError:\n    raise\nfinally:\n    return",
+            "rec.f = 1\nwith contextlib.suppress(ValueError):\n    self._fill_f()\nreturn",
         ];
         for stmts in reported {
             assert!(unassigned(&format!("for rec in self:\n{}", indent(stmts))), "{stmts}");
@@ -1001,6 +1203,17 @@ mod tests {
             "for line in rec.line_ids:\n    try:\n        rec.f = 1\n    finally:\n        break\nelse:\n    rec.f = 2",
             "rec.f = 1\nself._fill_f()\nreturn",
             "try:\n    self._fill_f()\nfinally:\n    return",
+            "rec.f = 1\nwith rec.lock():\n    self._fill_f()\nreturn",
+            "if rec.a:\n    rec.f = 1\n    self._fill_f()\nelse:\n    self._fill_f()\nreturn",
+            "rec.f = 1\ntry:\n    self._fill_f()\nexcept ValueError:\n    self._fill_f()\nreturn",
+            "try:\n    rec.f = 1\n    self._fill_f()\nexcept ValueError:\n    raise\nelse:\n    return",
+            "rec.f = 1\nmatch rec.a:\n    case 1:\n        self._fill_f()\n    case _:\n        self._fill_f()\nreturn",
+            "with rec.lock():\n    rec.f = 1\n    if rec.c:\n        continue\n    self._fill_f()\nreturn",
+            "try:\n    rec.f = 1\n    if rec.c:\n        continue\n    self._fill_f()\nfinally:\n    pass\nreturn",
+            "rec.f = 1\ntry:\n    self._fill_f()\nexcept ValueError:\n    raise\nreturn",
+            "rec.f = 1\ntry:\n    self._fill_f()\nexcept ValueError:\n    raise\nelse:\n    return",
+            "rec.f = 1\nif rec.a:\n    raise ValueError()\nelse:\n    self._fill_f()\nreturn",
+            "for line in rec.line_ids:\n    with rec.lock():\n        if not line.a:\n            continue\n        self._fill_f()\n    return\nrec.f = 1",
         ];
         for stmts in assigned {
             assert!(!unassigned(&format!("for rec in self:\n{}", indent(stmts))), "{stmts}");
@@ -1065,9 +1278,9 @@ mod tests {
             }
         }
         let depth = 18;
-        BLOCKS.with(|walks| walks.set(0));
+        BLOCK_WALKS.with(|walks| walks.set(0));
         assert!(unassigned(&format!("for rec in self:\n{}", indent(&nest(depth)))));
-        let walks = BLOCKS.with(std::cell::Cell::get);
+        let walks = BLOCK_WALKS.with(std::cell::Cell::get);
         assert!(walks <= 3 * depth, "{walks} walks");
     }
 
