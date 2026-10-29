@@ -1231,24 +1231,18 @@ impl<'m> Index<'m> {
     }
 
     /// Whether a client may call `method` on `model`: a method of `BaseModel`, or of a class of the
-    /// model or of a model it inherits or delegates to, in scope or in a module that is always
-    /// installed. Odoo does not reach a delegated parent's methods, so counting them lets OD604 miss
-    /// a call Odoo refuses. The scoped walk skips a class outside the scope with its `_inherit`, so
-    /// a mixin of an always-installed module that only such a class adds is found only by the
-    /// unscoped walk; without the always-installed arm it would be `Hidden` under a module the
-    /// caller has.
+    /// model or of a model it inherits by `_inherit`, in scope or in a module that is always
+    /// installed. A parent it delegates to does not count, since RPC looks the name up on the
+    /// model's class, which gets the parent's fields, not its methods. The scoped walk skips a class
+    /// outside the scope with its `_inherit`, so a mixin of an always-installed module that only
+    /// such a class adds is found only by the unscoped walk; without the always-installed arm it
+    /// would be `Hidden` under a module the caller has.
     pub fn rpc_method(&self, model: &str, method: &str, scope: &Scope) -> Status<'m> {
-        if BASE_MODEL_METHODS.contains(&method)
-            || BASE_METHODS.contains(&method)
-            || self
-                .chain(model, Some(scope), true)
-                .iter()
-                .any(|(_, c)| c.methods.iter().any(|m| m == method))
-        {
+        if BASE_MODEL_METHODS.contains(&method) || self.has_method(model, method, scope) {
             return Status::Visible;
         }
         let defining: Vec<usize> = self
-            .chain(model, None, true)
+            .chain_classes(model)
             .iter()
             .filter(|(_, c)| c.methods.iter().any(|m| m == method))
             .map(|(mi, _)| *mi)

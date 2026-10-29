@@ -8,5 +8,7 @@ export class PartnerCard {
         await this.orm.call(this.props.resModel, "write", []);
         await this.orm.call("res.partner", "_compute_display_name", []);
         await this.orm.call(this.props.resModel, "_onchange_partner", []);
+        await this.orm.call("form.card", "action_print_card", []);
+        await this.orm.call("form.card.sleeve", "action_print_card", []);
     }
 }
