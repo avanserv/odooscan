@@ -407,6 +407,7 @@ fn js_paths(modules: &[Module]) -> FxHashMap<String, JsTarget> {
 }
 
 /// `base`, and the modules that auto-install once their depends are, when those are all such modules.
+/// The manifest `countries` key is ignored on purpose, because Odoo creates a database without reading it.
 fn always_installed(modules: &[Module], by_name: &FxHashMap<&str, usize>) -> Vec<bool> {
     let mut always: Vec<bool> = modules.iter().map(|m| m.name == "base").collect();
     loop {

@@ -36,6 +36,15 @@
         </field>
     </record>
 
+    <record id="flags_badge" model="ir.ui.view">
+        <field name="inherit_id" ref="web_flags.flags"/>
+        <field name="arch" type="xml">
+            <xpath expr="//body/div[@id='pennant']" position="inside">
+                <div class="badge"/>
+            </xpath>
+        </field>
+    </record>
+
     <record id="digest_footer" model="ir.ui.view">
         <field name="inherit_id" ref="mail_digest.digest"/>
         <field name="arch" type="xml">
