@@ -11,3 +11,9 @@ class WebTheme(models.Model):
     _name = "web.theme"
 
     name = fields.Char()
+
+
+class WebPalette(models.Model):
+    _name = "web.palette"
+
+    name = fields.Char()

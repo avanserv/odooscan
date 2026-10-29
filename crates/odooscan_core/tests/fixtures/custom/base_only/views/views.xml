@@ -117,6 +117,15 @@
         </field>
     </record>
 
+    <record id="layout_sidebar" model="ir.ui.view">
+        <field name="inherit_id" ref="web.layout"/>
+        <field name="arch" type="xml">
+            <xpath expr="//body/div[@id='sidebar']" position="inside">
+                <div class="menu"/>
+            </xpath>
+        </field>
+    </record>
+
     <record id="partner_teal" model="res.partner">
         <field name="name">Teal Studio</field>
         <field name="web_color">teal</field>
