@@ -2539,6 +2539,12 @@
       "count": 1
     },
     {
+      "path": "addons/website_sale/models/product_product.py",
+      "code": "OD211",
+      "message": "no parent class of product.product defines '_prepare_variant_values', so this super() call fails",
+      "count": 1
+    },
+    {
       "path": "addons/website_sale_autocomplete/controllers/main.py",
       "code": "OD111",
       "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",

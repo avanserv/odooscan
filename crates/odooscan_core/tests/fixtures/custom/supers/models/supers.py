@@ -1,4 +1,4 @@
-from odoo import models
+from odoo import fields, models
 
 
 class PlainMixin:
@@ -41,3 +41,34 @@ class SuperMixin(models.AbstractModel):
 
     def _hook(self):
         return super()._hook()
+
+
+class SuperTrace(models.AbstractModel):
+    _name = "bad.super.trace"
+    _description = "Super trace"
+
+    def _trace(self):
+        return 1
+
+
+class SuperParent(models.Model):
+    _name = "bad.super.parent"
+    _description = "Super parent"
+
+    def _stamp(self):
+        return 1
+
+
+class SuperChild(models.Model):
+    _name = "bad.super.child"
+    _description = "Super child"
+    _inherit = ["bad.super.trace"]
+    _inherits = {"bad.super.parent": "parent_id"}
+
+    parent_id = fields.Many2one("bad.super.parent", required=True, ondelete="cascade")
+
+    def _trace(self):
+        return super()._trace()
+
+    def _stamp(self):
+        return super()._stamp()

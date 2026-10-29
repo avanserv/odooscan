@@ -364,4 +364,5 @@ custom/sql_objects/models/pallets.py:14:64: OD227 bin: freight_pallet has no suc
 custom/sql_view_builders/models/builders.py:8:29: OD225 the view parcel_manifest of parcel.manifest selects no column weight_total, which the stored field parcel.manifest.weight_total of sql_columns needs; select one AS weight_total
 custom/sql_view_users/models/summary.py:7:5: OD226 _auto = False leaves drawer.summary without a table, and nothing creates the view drawer_summary; create it in init(), or drop _auto = False
 custom/supers/models/supers.py:29:24: OD211 no parent class of bad.super defines '_prepare_gone', so this super() call fails
+custom/supers/models/supers.py:74:24: OD211 no parent class of bad.super.child defines '_stamp', so this super() call fails
 custom/unversioned_logs/models/probes.py:39:39: OD224 s.create_uid: drift_sensor has no such column, since drift.sensor.create_uid is not created, as drift.sensor sets _log_access to False; drop it from the query, or log access on the model
