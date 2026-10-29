@@ -43,3 +43,5 @@ access_parcel_box_country,parcel.box.country,model_parcel_box_country,base.group
 access_parcel_tracker,parcel.tracker,model_parcel_tracker,base.group_user,1,1,1,1
 access_parcel_relay,parcel.relay,model_parcel_relay,base.group_user,1,1,1,1
 access_parcel_antenna,parcel.antenna,model_parcel_antenna,base.group_user,1,1,1,1
+access_parcel_trip,parcel.trip,model_parcel_trip,base.group_user,1,0,0,0
+access_parcel_rack,parcel.rack,model_parcel_rack,base.group_user,1,0,0,0

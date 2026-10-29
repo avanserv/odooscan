@@ -208,3 +208,35 @@ class ParcelBoxCountry(models.Model):
 
     parcel_box_id = fields.Many2one("parcel.box", readonly=True)
     res_country_id = fields.Many2one("res.country", readonly=True)
+
+
+class ParcelTrip(models.Model):
+    _name = "parcel.trip"
+    _description = "Parcel trip"
+    _auto = False
+
+    leg_count = fields.Integer()
+
+    def _create_view(self):
+        tools.drop_view_if_exists(self.env.cr, self._table)
+        self.env.cr.execute(
+            SQL("CREATE VIEW %s AS (SELECT 1 AS id, 0 AS leg_count)", SQL.identifier(self._table))
+        )
+
+
+class ParcelRackViewBuilder:
+    def init(self):
+        self.env.cr.execute(
+            SQL("CREATE OR REPLACE VIEW %s AS (SELECT 1 AS id, 0 AS slot_count)", SQL.identifier(self._x_rack_view()))
+        )
+
+
+class ParcelRack(models.Model, ParcelRackViewBuilder):
+    _name = "parcel.rack"
+    _description = "Parcel rack"
+    _auto = False
+
+    slot_count = fields.Integer()
+
+    def _x_rack_view(self):
+        return self._table

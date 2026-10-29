@@ -2636,17 +2636,19 @@ impl<'m> Ctx<'_, 'm> {
     }
 
     /// Whether something may give `model` the relation `table`: a class of it or of a model it
-    /// inherits, in any indexed module, defines `init()` or `_auto_init()`, sets a table query or
-    /// has a plain Python base; another model, or a Many2many in scope, has that table; an indexed
-    /// module creates a view of that name in Python or SQL; or a module in scope creates a view it
-    /// names at runtime. `table_models` leaves out an abstract model.
+    /// inherits, in any indexed module, defines `init()` or `_auto_init()`, sets a table query,
+    /// creates a view whose whole name is `self._table` or has a plain Python base; another model,
+    /// or a Many2many in scope, has that table; an indexed module creates a view of that name in
+    /// Python or SQL; or this module, not a dependency, creates a view it names at runtime.
+    /// `table_models` leaves out an abstract model.
     fn view_made(&self, model: &str, table: &str) -> bool {
-        let creates = |c: &ClassFact| c.plain_bases || c.methods.iter().any(|m| VIEW_MAKERS.contains(&m.as_str()));
+        let creates =
+            |c: &ClassFact| c.plain_bases || c.own_view || c.methods.iter().any(|m| VIEW_MAKERS.contains(&m.as_str()));
         self.index.chain_classes(model).iter().any(|(_, c)| creates(c))
             || self.index.table_models(table) != [model]
             || self.index.relation_table(table, self.scope)
             || self.index.creates_view(table)
-            || self.index.creates_any_view(self.scope)
+            || self.module.python.iter().any(|f| f.facts.creates_any_view)
     }
 
     /// The view the `init()` of `model` creates, when its text spells the names of the columns. The

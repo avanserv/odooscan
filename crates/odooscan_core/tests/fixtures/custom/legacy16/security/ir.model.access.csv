@@ -1,2 +1,3 @@
 id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
 access_legacy_turnstile,legacy.turnstile,model_legacy_turnstile,base.group_user,1,1,1,1
+access_legacy_gauge,legacy.gauge,model_legacy_gauge,base.group_user,1,0,0,0
