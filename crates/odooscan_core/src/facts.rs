@@ -201,6 +201,15 @@ impl ClassFact {
     pub fn attr(&self, name: &str) -> Option<&Spanned<OptionValue>> {
         self.attrs.iter().find(|(n, _)| n == name).map(|(_, v)| v)
     }
+
+    /// Whether Odoo adds the class to the registry. Odoo tests the truth of `_register` in the
+    /// class's own body only, so a subclass that leaves it unset is registered; only `False`,
+    /// `None` and zero count here as false.
+    pub fn registered(&self) -> bool {
+        !self
+            .attr("_register")
+            .is_some_and(|r| matches!(r.value, OptionValue::Bool(false) | OptionValue::Falsy))
+    }
 }
 
 /// The methods a call can run: those of a model, or of the same Python class in the file.

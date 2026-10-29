@@ -178,13 +178,26 @@ class ParcelBerth(models.Model):
     crane_count = fields.Integer()
 
 
-class ParcelViewTemplate(models.Model):  # odooscan: ignore[OD401]
+class ParcelViewTemplate(models.Model):
     _name = "parcel.view.template"
     _description = "Parcel view template"
     _register = False
     _auto = False
 
     shown_count = fields.Integer()
+
+
+class ParcelStampBase(models.Model):
+    _name = "parcel.stamp.base"
+    _description = "Parcel stamp template"
+    _register = False
+
+    code = fields.Char()
+
+
+class ParcelStamp(ParcelStampBase):
+    _name = "parcel.stamp"
+    _description = "Parcel stamp"
 
 
 class ParcelBoxCountry(models.Model):

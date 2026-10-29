@@ -312,6 +312,7 @@ custom/sql_columns/models/queries.py:122:46: OD224 c.create_date: parcel_beacon 
 custom/sql_columns/models/queries.py:131:38: OD224 r.write_date: parcel_relay has no such column, since parcel.relay.write_date is not created, as parcel.relay sets _log_access to False; drop it from the query, or log access on the model
 custom/sql_columns/models/queries.py:133:38: OD224 b.__last_update: parcel_box has no such column, since parcel.box has no field __last_update; name the column of a stored field of parcel.box
 custom/sql_columns/models/queries.py:137:47: OD224 b.local_code: parcel_box has no such column, since parcel.box has no field local_code; name the column of a stored field of parcel.box
+custom/sql_columns/models/view_sources.py:198:7: OD401 model 'parcel.stamp' has no ir.model.access rule, so only the superuser can use it
 custom/sql_columns/models/views.py:14:5: OD225 parcel.summary.heaviest is stored, but the view parcel_summary selects no column heaviest for it; select one AS heaviest in init()
 custom/sql_columns/models/views.py:39:53: OD224 s.heaviest: parcel_summary has no such column, since the view init() creates for parcel.summary selects none; name a column the view selects
 custom/sql_columns/models/views.py:48:5: OD225 parcel.summary.volume is stored, but the view parcel_summary selects no column volume for it; select one AS volume in init()
