@@ -23,6 +23,8 @@ class GardenBed(models.Model):
     res_id = fields.Many2oneReference(model_field="res_model")
     owner_id = fields.Many2oneReference(model_field="owner_model")
     parent_res_id = fields.Many2oneReference(related="parent_id.res_id", model_field="parent_model")
+    parent_ref_id = fields.Many2oneReference(related="parent_id.res_id", model_field="res_model")
+    parent_link_id = fields.Many2oneReference(related="parent_id.res_id")
 
     def _selection_exposures(self):
         return [("sun", "Sun"), ("shade", "Shade")]
