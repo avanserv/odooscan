@@ -48,12 +48,16 @@ enum Held {
 }
 
 /// What a function body does with cursors, with or without the functions and lambdas it defines.
-/// Calls on a cursor the function opens, a transaction of its own, are left out.
+/// Rollbacks and queries on a cursor the function opens, a transaction of its own, are left out;
+/// commits on a cursor it opens with a `.cursor()` call are kept apart, for `opened()`.
 pub(crate) struct CursorUse<'a> {
     nested: bool,
     /// Rollbacks the code goes on after, outside a test of whether the cursor is read-only.
     pub rollbacks: Vec<&'a ast::ExprCall>,
+    /// Whether it commits a cursor it did not open with a `.cursor()` call.
     pub commits: bool,
+    /// The commits on cursors it opens with a `.cursor()` call.
+    own_commits: Vec<&'a ast::ExprCall>,
     pub invalidates: bool,
     /// The table and the column of each `create_column()` call, when they are literals.
     created: Vec<(Option<&'a str>, Option<&'a str>)>,
@@ -61,8 +65,9 @@ pub(crate) struct CursorUse<'a> {
     /// The methods it calls on `self` or `cls`.
     pub own_methods: Vec<&'a str>,
     vars: QueryVars<'a>,
-    /// The names each function binds, innermost last; a later binding shadows an earlier one.
-    scopes: Vec<Vec<(&'a str, Held)>>,
+    /// The names each function binds, innermost last; a later binding shadows an earlier one. The
+    /// flag says the value comes from a `.cursor()` call, not from the guess `Held` may hold.
+    scopes: Vec<Vec<(&'a str, Held, bool)>>,
     /// Whether each enclosing block ends by raising or exiting.
     leaving: Vec<bool>,
     read_only: u32,
@@ -101,25 +106,31 @@ fn tests_read_only(test: &Expr) -> bool {
 }
 
 impl<'a> CursorUse<'a> {
-    fn new(nested: bool, func: &'a ast::StmtFunctionDef) -> Self {
+    fn new(nested: bool, func: &'a ast::StmtFunctionDef, scopes: Vec<Vec<(&'a str, Held, bool)>>) -> Self {
         Self {
             nested,
             rollbacks: vec![],
             commits: false,
+            own_commits: vec![],
             invalidates: false,
             created: vec![],
             writes: vec![],
             own_methods: vec![],
             vars: QueryVars::of(func),
-            scopes: vec![vec![]],
+            scopes,
             leaving: vec![],
             read_only: 0,
         }
     }
 
-    /// What the function does itself; each function it nests is scanned on its own.
-    pub(crate) fn scan(func: &'a ast::StmtFunctionDef) -> Self {
-        let mut found = Self::new(false, func);
+    /// What the function does itself; each function it nests is scanned on its own, with the scan
+    /// of the function that encloses it. A closure reads a name when it runs, so every binding of
+    /// the enclosing function counts, wherever it stands.
+    pub(crate) fn scan(func: &'a ast::StmtFunctionDef, enclosing: Option<&CursorUse<'a>>) -> Self {
+        let mut scopes = enclosing.map(|e| e.scopes.clone()).unwrap_or_default();
+        let params = func.parameters.iter().map(|p| (p.name().as_str(), Held::Given, false));
+        scopes.push(params.collect());
+        let mut found = Self::new(false, func, scopes);
         found.visit_body(&func.body);
         found
     }
@@ -127,9 +138,14 @@ impl<'a> CursorUse<'a> {
     /// What the function and the functions and lambdas it defines do, for code that hands its work
     /// to a closure.
     pub(crate) fn scan_nested(func: &'a ast::StmtFunctionDef) -> Self {
-        let mut found = Self::new(true, func);
+        let mut found = Self::new(true, func, vec![vec![]]);
         found.visit_body(&func.body);
         found
+    }
+
+    /// Whether `call` commits a cursor the function opens with a `.cursor()` call.
+    pub(crate) fn opened(&self, call: &ast::ExprCall) -> bool {
+        self.own_commits.iter().any(|own| std::ptr::eq(*own, call))
     }
 
     /// Whether the function adds, with `create_column()`, the columns a write sets, or a column of
@@ -148,74 +164,86 @@ impl<'a> CursorUse<'a> {
         }
     }
 
-    fn held(&self, name: &str) -> Option<Held> {
+    fn held(&self, name: &str) -> Option<(Held, bool)> {
         self.scopes
             .iter()
             .rev()
             .flat_map(|scope| scope.iter().rev())
-            .find(|(bound, _)| *bound == name)
-            .map(|(_, held)| *held)
+            .find(|(bound, ..)| *bound == name)
+            .map(|(_, held, opened)| (*held, *opened))
     }
 
-    /// A cursor the function opens: a name it binds to one, or the cursor of an environment on one.
+    /// A cursor the function opens: a `.cursor()` call, a name it binds to one, or the cursor of an
+    /// environment on one.
     fn own_cursor(&self, expr: &Expr) -> bool {
+        self.owns_cursor(expr, false)
+    }
+
+    fn own_env(&self, expr: &Expr) -> bool {
+        self.owns_env(expr, false)
+    }
+
+    /// With `opened`, only a cursor a `.cursor()` call returns counts, not a name `Held` guesses.
+    fn owns_cursor(&self, expr: &Expr, opened: bool) -> bool {
         match expr {
-            Expr::Name(n) => matches!(self.held(n.id.as_str()), Some(Held::Cursor | Held::Either)),
-            Expr::Attribute(a) => is_cursor(expr) && self.own_env(&a.value),
+            Expr::Name(n) => matches!(self.held(n.id.as_str()), Some((Held::Cursor | Held::Either, o)) if o || !opened),
+            Expr::Attribute(a) => is_cursor(expr) && self.owns_env(&a.value, opened),
+            Expr::Call(c) => matches!(&*c.func, Expr::Attribute(a) if a.attr.as_str() == "cursor"),
             _ => false,
         }
     }
 
     /// An environment on a cursor the function opens, or records or an environment taken from one.
-    fn own_env(&self, expr: &Expr) -> bool {
+    fn owns_env(&self, expr: &Expr, opened: bool) -> bool {
         match expr {
-            Expr::Name(n) => matches!(self.held(n.id.as_str()), Some(Held::Env | Held::Either)),
-            Expr::Attribute(a) => a.attr.as_str() == "env" && self.own_env(&a.value),
-            Expr::Subscript(s) => self.own_env(&s.value),
-            Expr::Call(c) => self.own_env_call(c),
+            Expr::Name(n) if opened => matches!(self.held(n.id.as_str()), Some((Held::Env, true))),
+            Expr::Name(n) => matches!(self.held(n.id.as_str()), Some((Held::Env | Held::Either, _))),
+            Expr::Attribute(a) => a.attr.as_str() == "env" && self.owns_env(&a.value, opened),
+            Expr::Subscript(s) => self.owns_env(&s.value, opened),
+            Expr::Call(c) => self.owns_env_call(c, opened),
             _ => false,
         }
     }
 
     /// `api.Environment(cr, ...)` or `env(cr=cr)` on an own cursor, `with_env()` of an own
     /// environment, and records an own environment returns.
-    fn own_env_call(&self, call: &ast::ExprCall) -> bool {
+    fn owns_env_call(&self, call: &ast::ExprCall, opened: bool) -> bool {
         match &*call.func {
             Expr::Attribute(a) if a.attr.as_str() == "with_env" => {
-                call.arguments.args.first().is_some_and(|e| self.own_env(e))
+                call.arguments.args.first().is_some_and(|e| self.owns_env(e, opened))
             }
             Expr::Attribute(a)
                 if SAME_MODEL.contains(&a.attr.as_str()) || matches!(a.attr.as_str(), "browse" | "search") =>
             {
-                self.own_env(&a.value)
+                self.owns_env(&a.value, opened)
             }
             func if matches!(tail_name(func), Some("Environment" | "env")) => {
                 match call.arguments.find_argument_value("cr", 0) {
-                    Some(cursor) => self.own_cursor(cursor),
-                    None => self.own_env(func),
+                    Some(cursor) => self.owns_cursor(cursor, opened),
+                    None => self.owns_env(func, opened),
                 }
             }
             _ => false,
         }
     }
 
-    fn bind(&mut self, target: &'a Expr, held: Held) {
+    fn bind(&mut self, target: &'a Expr, held: Held, opened: bool) {
         if let (Expr::Name(n), Some(scope)) = (target, self.scopes.last_mut()) {
-            scope.push((n.id.as_str(), held));
+            scope.push((n.id.as_str(), held, opened));
         }
     }
 
     fn assign(&mut self, target: &'a Expr, value: &Expr) {
-        let held = if self.own_cursor(value) {
-            Held::Cursor
+        let (held, opened) = if self.own_cursor(value) {
+            (Held::Cursor, self.owns_cursor(value, true))
         } else if is_cursor(value) {
-            Held::Given
+            (Held::Given, false)
         } else if self.own_env(value) {
-            Held::Env
+            (Held::Env, self.owns_env(value, true))
         } else {
-            Held::Cursor
+            (Held::Cursor, false)
         };
-        self.bind(target, held);
+        self.bind(target, held, opened);
     }
 
     /// Visits a nested function or lambda, whose parameters hide the names the function binds.
@@ -223,7 +251,7 @@ impl<'a> CursorUse<'a> {
         let params = parameters
             .into_iter()
             .flat_map(|p| p.iter())
-            .map(|p| (p.name().as_str(), Held::Given));
+            .map(|p| (p.name().as_str(), Held::Given, false));
         self.scopes.push(params.collect());
         walk(self);
         self.scopes.pop();
@@ -259,6 +287,7 @@ impl<'a> CursorUse<'a> {
         let own = self.own_cursor(receiver);
         match method {
             "rollback" if !own => self.rollback(call),
+            "commit" if self.owns_cursor(receiver, true) => self.own_commits.push(call),
             "commit" => self.commits = true,
             "execute" if !own => self.write(call),
             _ => {}
@@ -303,7 +332,8 @@ impl<'a> CursorUse<'a> {
         for item in &w.items {
             if let Some(name) = &item.optional_vars {
                 let given = is_cursor(&item.context_expr) && !self.own_cursor(&item.context_expr);
-                self.bind(name, if given { Held::Given } else { Held::Either });
+                let opened = self.owns_cursor(&item.context_expr, true);
+                self.bind(name, if given { Held::Given } else { Held::Either }, opened);
             }
         }
     }
@@ -2186,8 +2216,43 @@ mod tests {
         let uses = if nested {
             CursorUse::scan_nested(func)
         } else {
-            CursorUse::scan(func)
+            CursorUse::scan(func, None)
         };
+        check(&uses)
+    }
+
+    /// The first function the body defines, at any depth of its blocks.
+    struct FirstDef<'a>(Option<&'a ast::StmtFunctionDef>);
+
+    impl<'a> Visitor<'a> for FirstDef<'a> {
+        fn visit_stmt(&mut self, stmt: &'a Stmt) {
+            match stmt {
+                Stmt::FunctionDef(f) if self.0.is_none() => self.0 = Some(f),
+                _ => visitor::walk_stmt(self, stmt),
+            }
+        }
+    }
+
+    /// What the scan of the innermost function `body` defines finds, following the first `def` of
+    /// each level, with each level scanned around the next as `PyVisitor` does.
+    fn closure_scanned<T>(body: &str, check: impl FnOnce(&CursorUse) -> T) -> T {
+        let src = format!("def f(self, cr):\n    {}\n", body.replace('\n', "\n    "));
+        let parsed = parse_module(&src).expect("valid Python");
+        let Stmt::FunctionDef(outer) = &parsed.syntax().body[0] else {
+            panic!("not a function")
+        };
+        let mut func = outer;
+        let mut uses = CursorUse::scan(func, None);
+        let mut depth = 0;
+        loop {
+            let mut first = FirstDef(None);
+            first.visit_body(&func.body);
+            let Some(inner) = first.0 else { break };
+            uses = CursorUse::scan(inner, Some(&uses));
+            func = inner;
+            depth += 1;
+        }
+        assert!(depth > 0, "no nested function in {body}");
         check(&uses)
     }
 
@@ -2230,6 +2295,7 @@ mod tests {
             "new_cr = registry.cursor()\nenv = api.Environment(new_cr, 1, {})\nenv['x'].sudo().env.cr.rollback()",
             "new_cr = registry.cursor()\ncr = api.Environment(new_cr, 1, {}).cr\ncr.rollback()",
             "new_cr = registry.cursor()\nenv = self.env(cr=new_cr)\nenv(user=1).cr.rollback()",
+            "env = api.Environment(self.pool.cursor(), uid, {})\nenv.cr.rollback()",
         ] {
             assert_eq!(reported_rollbacks(body), 0, "{body}");
         }
@@ -2240,6 +2306,69 @@ mod tests {
             "self.env.cr.rollback()\nwith self.pool.cursor() as cr:\n    self = self.with_env(self.env(cr=cr))",
         ] {
             assert_eq!(reported_rollbacks(body), 1, "{body}");
+        }
+    }
+
+    #[test]
+    fn a_closure_sees_the_cursors_the_enclosing_function_opens() {
+        for body in [
+            "with self.pool.cursor() as cr:\n    def step():\n        cr.rollback()\n        cr.commit()",
+            "def step():\n    env.cr.rollback()\nnew_cr = registry.cursor()\nenv = api.Environment(new_cr, 1, {})",
+            "with self.pool.cursor() as cr:\n    def outer():\n        def step():\n            cr.rollback()",
+        ] {
+            closure_scanned(body, |uses| {
+                assert!(uses.rollbacks.is_empty() && !uses.commits, "{body}");
+            });
+        }
+        for body in [
+            "with self.pool.cursor() as cr:\n    def step(cr):\n        cr.rollback()\n        cr.commit()",
+            "with self.pool.cursor() as cr:\n    def step():\n        self.env.cr.rollback()\n        self.env.cr.commit()",
+            "def step():\n    cr.rollback()\n    cr.commit()",
+        ] {
+            closure_scanned(body, |uses| {
+                assert!(uses.rollbacks.len() == 1 && uses.commits, "{body}");
+            });
+        }
+        let body = "cr = new_cr or self.env.cr\ndef step():\n    cr.commit()";
+        assert!(closure_scanned(body, |uses| uses.commits));
+    }
+
+    #[test]
+    fn keeps_apart_commits_on_cursors_the_function_opens() {
+        let src = "def f(self):\n    with self.pool.cursor() as cr:\n        cr.commit()\n    self.env.cr.commit()\n";
+        let parsed = parse_module(src).expect("valid Python");
+        let Stmt::FunctionDef(func) = &parsed.syntax().body[0] else {
+            panic!("not a function")
+        };
+        let uses = CursorUse::scan(func, None);
+        let call = |i: usize| {
+            let stmt = match i {
+                0 => &func.body[0].as_with_stmt().expect("a with").body[0],
+                _ => &func.body[1],
+            };
+            let Stmt::Expr(e) = stmt else { panic!("not a call") };
+            e.value.as_call_expr().expect("a call")
+        };
+        assert!(uses.opened(call(0)));
+        assert!(!uses.opened(call(1)));
+        assert!(uses.commits);
+        let commits = |body: &str| scanned(body, false, |uses| uses.commits);
+        for body in [
+            "with self.pool.cursor() as cr:\n    cr.commit()",
+            "cr = self.env.registry.cursor()\ncr.commit()",
+            "with odoo.sql_db.db_connect(name).cursor() as cr:\n    cr.commit()",
+            "with self.pool.cursor() as log_cr:\n    env = api.Environment(log_cr, 1, {})\n    env.cr.commit()",
+            "with self.pool.cursor() as new_cr:\n    self = self.with_env(self.env(cr=new_cr))\n    self.env.cr.commit()",
+        ] {
+            assert!(!commits(body), "{body}");
+        }
+        for body in [
+            "new_cr = None\ncr = new_cr or self.env.cr\ncr.commit()",
+            "new_cr = None\ncr = new_cr if new_cr else self.env.cr\ncr.commit()",
+            "new_cr = None\nenv = self.env(cr=new_cr or self.env.cr)\nenv.cr.commit()",
+            "with self.env.cr as cr:\n    cr.commit()",
+        ] {
+            assert!(commits(body), "{body}");
         }
     }
 

@@ -515,6 +515,7 @@ pub fn analyze(src: &str) -> PyFacts {
         query_vars: None,
         read_queries: FxHashSet::default(),
         self_cursors: vec![],
+        cursor_uses: vec![],
         in_view_maker: false,
     };
     v.visit_body(body);
@@ -539,6 +540,8 @@ struct PyVisitor<'a, 'ast> {
     read_queries: FxHashSet<TextSize>,
     /// Whether each enclosing class holds Odoo's cursor as `self.cr`.
     self_cursors: Vec<bool>,
+    /// What each enclosing function does with cursors, innermost last.
+    cursor_uses: Vec<CursorUse<'ast>>,
     /// Whether the code is in the `init()` or `_auto_init()` of a model, which creates its view.
     in_view_maker: bool,
 }
@@ -1143,7 +1146,7 @@ impl<'ast> PyVisitor<'_, 'ast> {
         let formatted = call.arguments.args.first().is_some_and(is_formatted_string);
         match &*call.func {
             Expr::Attribute(a) if is_cursor(&a.value) && matches!(a.attr.as_str(), "execute" | "commit") => {
-                self.cursor_call(a.attr.as_str(), expr, formatted);
+                self.cursor_call(a.attr.as_str(), call, expr, formatted);
             }
             func if matches!(tail_name(func), Some("_" | "_lt")) && formatted => {
                 self.diag(
@@ -1295,14 +1298,17 @@ impl<'ast> PyVisitor<'_, 'ast> {
         }
     }
 
-    fn cursor_call(&mut self, method: &str, expr: &Expr, formatted: bool) {
+    /// A commit on a cursor the function opens with a `.cursor()` call ends a transaction of its
+    /// own, not the request's.
+    fn cursor_call(&mut self, method: &str, call: &ast::ExprCall, expr: &Expr, formatted: bool) {
+        let own = self.cursor_uses.last().is_some_and(|uses| uses.opened(call));
         match method {
             "execute" if formatted => self.diag(
                 "OD101",
                 expr,
                 "query built by string formatting; pass parameters separately or build it with odoo.tools.SQL",
             ),
-            "commit" => self.diag(
+            "commit" if !own => self.diag(
                 "OD103",
                 expr,
                 "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
@@ -1311,16 +1317,15 @@ impl<'ast> PyVisitor<'_, 'ast> {
         }
     }
 
-    /// OD121 on each rollback of a cursor the function was given, unless it commits one too, which
+    /// OD121 on each rollback of a cursor the function did not open, unless it also makes a commit
     /// OD103 reports, or Odoo calls it once the request has failed: `ir.http._handle_error()`, and
     /// `_handle_exception()` before 16.0, whose findings wait for the series of the module.
-    fn rollback_checks(&mut self, func: &ast::StmtFunctionDef) {
+    fn rollback_checks(&mut self, func: &ast::StmtFunctionDef, uses: &CursorUse) {
         let ir_http = matches!(self.owners.last(), Some(Some(Receiver::Model(m))) if m == "ir.http");
         let name = func.name.as_str();
         if ir_http && name == "_handle_error" {
             return;
         }
-        let uses = CursorUse::scan(func);
         if uses.commits {
             return;
         }
@@ -1429,7 +1434,8 @@ impl<'ast> PyVisitor<'_, 'ast> {
 
     fn visit_function(&mut self, func: &'ast ast::StmtFunctionDef, stmt: &'ast Stmt) {
         self.route_checks(func);
-        self.rollback_checks(func);
+        let uses = CursorUse::scan(func, self.cursor_uses.last());
+        self.rollback_checks(func, &uses);
         self.flows(func);
         let outermost = self.query_vars.is_none();
         if outermost {
@@ -1440,7 +1446,9 @@ impl<'ast> PyVisitor<'_, 'ast> {
         let in_view_maker = self.in_view_maker;
         self.in_view_maker |= maker;
         self.owners.push(None);
+        self.cursor_uses.push(uses);
         visitor::walk_stmt(self, stmt);
+        self.cursor_uses.pop();
         self.owners.pop();
         self.in_view_maker = in_view_maker;
         if outermost {

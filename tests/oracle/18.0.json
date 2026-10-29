@@ -217,12 +217,6 @@
       "count": 2
     },
     {
-      "path": "addons/bus/models/bus.py",
-      "code": "OD103",
-      "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
-      "count": 1
-    },
-    {
       "path": "addons/bus/models/bus_presence.py",
       "code": "OD103",
       "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
@@ -1145,12 +1139,6 @@
       "code": "OD103",
       "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
       "count": 2
-    },
-    {
-      "path": "addons/l10n_ro_edi/models/res_company.py",
-      "code": "OD103",
-      "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
-      "count": 1
     },
     {
       "path": "addons/l10n_ro_efactura_synchronize/models/account_move.py",
@@ -2104,12 +2092,6 @@
       "path": "addons/stock/models/stock_move.py",
       "code": "OD301",
       "message": "module stock defines no XML id 'stock.group_stock_tracking_lot'",
-      "count": 1
-    },
-    {
-      "path": "addons/stock/models/stock_orderpoint.py",
-      "code": "OD103",
-      "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
       "count": 1
     },
     {
