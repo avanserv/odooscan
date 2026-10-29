@@ -162,3 +162,25 @@ class ResPartner(models.Model):
                 self.cr.execute("UPDATE res_partner SET x_rank = 18 WHERE x_rank IS NULL")
 
         Batch(self.env.cr).reset()
+
+    def x_rank_query_extended(self):
+        query = "UPDATE res_partner SET x_rank = 19"
+        query += " WHERE x_rank IS NULL"
+        self.env.cr.execute(query)
+
+    def x_rank_query_rebound(self):
+        query = "UPDATE res_partner SET x_rank = 20"
+        if self.env.context.get("x_all_ranks"):
+            query = "UPDATE res_partner SET x_rank = 21"
+        self.env.cr.execute(query)
+
+    def x_purge_notes_counted(self):
+        self.env.cr.execute(
+            "WITH gone AS (DELETE FROM x_partner_note WHERE partner_id = %s RETURNING id) SELECT count(*) FROM gone",
+            [self.id],
+        )
+
+    def x_lock_ranked(self):
+        self.env.cr.execute(
+            "WITH locked AS (SELECT id FROM res_partner WHERE x_rank > 0 FOR UPDATE SKIP LOCKED) SELECT id FROM locked"
+        )

@@ -6,7 +6,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::facts::{
     Annotation, ClassFact, DomainFact, FieldFact, JsFacts, JsName, ModelKind, OptionValue, OrmCall, Pos, RawDiag,
-    RecordFact, Spanned, ViewFact, XmlRef,
+    RecordFact, Spanned, SqlColumn, ViewFact, XmlRef,
 };
 use crate::flows;
 use crate::index::{
@@ -394,6 +394,7 @@ impl<'m> Ctx<'_, 'm> {
                 self.class(out, path, class);
             }
             if !UPGRADE_DIRS.contains(&file.rel.split('/').next().unwrap_or_default()) {
+                self.sql_columns(out, path, &file.facts.sql_columns);
                 for r in &file.facts.xml_refs {
                     self.py_ref(out, path, r, true);
                 }
@@ -1593,15 +1594,27 @@ impl<'m> Ctx<'_, 'm> {
         out.push(path, "OD217", at.pos, message);
     }
 
-    /// Whether every class of `model` in scope leaves it a table with `_parent_store`: none is
-    /// abstract, or sets `_auto` or `_parent_store` to anything but True.
+    /// Whether every class of `model` in scope leaves it a table with `_parent_store`: it has a
+    /// table, and none sets `_parent_store` to anything but True.
     fn parent_store_table(&self, model: &str) -> bool {
-        let set = |c: &ClassFact, name: &str| c.attr(name).is_none_or(|a| a.value == OptionValue::Bool(true));
-        let kept = |c: &ClassFact| c.kind != ModelKind::Abstract && set(c, "_auto") && set(c, "_parent_store");
+        self.has_table(model) && self.every_class(model, |c| true_or_unset(c, "_parent_store"))
+    }
+
+    /// Whether every class of `model` in scope leaves it a table Odoo builds from its fields: none
+    /// is abstract, or sets `_auto` to anything but True.
+    fn has_table(&self, model: &str) -> bool {
+        self.every_class(model, |c| c.kind != ModelKind::Abstract && true_or_unset(c, "_auto"))
+    }
+
+    fn every_class(&self, model: &str, keeps: impl Fn(&ClassFact) -> bool) -> bool {
         self.index
             .classes(model)
             .iter()
-            .all(|(mi, c)| !self.scope.sees(*mi) || kept(c))
+            .all(|(mi, c)| !self.scope.sees(*mi) || keeps(c))
+    }
+
+    fn some_class(&self, model: &str, picks: impl Fn(&ClassFact) -> bool) -> bool {
+        !self.every_class(model, |c| !picks(c))
     }
 
     /// The table Odoo names a Many2many's relation after when it gives none: both tables, sorted.
@@ -2011,6 +2024,181 @@ fn selection_values<'m>(def: &'m FieldFact, values: &mut FxHashSet<&'m str>) -> 
         }
     }
     Some(def.option("selection").is_some())
+}
+
+fn sets_parent_store(class: &ClassFact) -> bool {
+    class
+        .attr("_parent_store")
+        .is_some_and(|a| a.value != OptionValue::Bool(false))
+}
+
+fn true_or_unset(class: &ClassFact, attr: &str) -> bool {
+    class.attr(attr).is_none_or(|a| a.value == OptionValue::Bool(true))
+}
+
+/// What the table of a model holds for a name, as far as its stored fields tell.
+enum Column<'m> {
+    /// A column, or a field whose column the rule cannot tell.
+    Present,
+    Missing,
+    NotStored,
+    /// A field every model has, which the ORM computes, such as `display_name`.
+    Computed,
+    /// A log column of a model that does not log access.
+    Unlogged,
+    X2many(&'m str),
+}
+
+/// OD224 on a qualified column a literal query names on the table of a model, which no stored
+/// field of the model provides. The rule does not run for a module whose scope is partial, nor in
+/// upgrade scripts, and reads only tables `column_model` accepts.
+impl<'m> Ctx<'_, 'm> {
+    fn sql_columns(&self, out: &mut Out<'m>, path: &'m Path, columns: &[SqlColumn]) {
+        if self.partial {
+            return;
+        }
+        for column in columns {
+            if let Some(message) = self.unknown_column(column) {
+                out.push(path, "OD224", column.pos, message);
+            }
+        }
+    }
+
+    /// The model whose stored fields make up `table`: the one model whose table it may be, which is
+    /// introduced in scope, takes that table there, has no plain Python base, and has a table Odoo
+    /// builds from its fields rather than an SQL view or a `_table_query`.
+    fn column_model(&self, table: &str) -> Option<&'m str> {
+        let &[model] = self.index.table_models(table) else {
+            return None;
+        };
+        let table_query =
+            |c: &ClassFact| c.attr("_table_query").is_some() || c.methods.iter().any(|m| m == "_table_query");
+        let readable = self.index.table(model, self.scope).as_deref() == Some(table)
+            && self.index.introduced(model, self.scope)
+            && !self.index.plain_bases(model, self.scope)
+            && self.has_table(model)
+            && !self.some_class(model, table_query);
+        readable.then_some(model)
+    }
+
+    /// The message on a column no field gives, unless a module adds it by hand.
+    fn unknown_column(&self, column: &SqlColumn) -> Option<String> {
+        let model = self.column_model(&column.table)?;
+        let name = column.column.as_str();
+        let found = self.column(model, name);
+        if matches!(found, Column::Present) || self.index.hand_made_column(model, &column.table, name, self.scope) {
+            return None;
+        }
+        let head = format!("{}: {} has no such column", column.text, column.table);
+        let fix = match found {
+            Column::Missing => return self.missing_column(model, column, &head),
+            Column::NotStored => "is not stored; set store=True on the field, or read it through the ORM".to_owned(),
+            Column::Computed => "is computed by the ORM, not stored; read it through the ORM".to_owned(),
+            Column::Unlogged => format!(
+                "is not created, as {model} sets _log_access to False; drop it from the query, or log access on the model"
+            ),
+            Column::X2many("One2many") => {
+                "is a One2many; join the table of its comodel on its inverse field".to_owned()
+            }
+            Column::X2many(ftype) => format!("is a {ftype}; join its relation table"),
+            Column::Present => return None,
+        };
+        Some(format!("{head}, since {model}.{name} {fix}"))
+    }
+
+    /// What the table of `model` holds for `name`. Of the fields Odoo adds without a definition,
+    /// `id`, the log columns unless every class sets `_log_access` to False, `parent_path` under
+    /// `_parent_store` and the fields `_inherits` names are present, and `display_name` is not
+    /// stored. Present too are fields whose column depends on the series or on `attachment`.
+    fn column(&self, model: &'m str, name: &str) -> Column<'m> {
+        let delegates = |c: &ClassFact| c.inherits.iter().any(|(_, field)| field == name);
+        if self.index.implicit_column(model, name)
+            || self.index.log_column(name) && self.logs_access(model)
+            || name == "parent_path" && self.some_class(model, sets_parent_store)
+            || self.some_class(model, delegates)
+        {
+            return Column::Present;
+        }
+        let mut defs = self.index.merged_fields(model, self.scope);
+        defs.retain(|d| d.2.name == name);
+        if defs.is_empty() {
+            return self.undefined(name);
+        }
+        self.merge(model, defs)
+            .map_or(Column::Present, |field| stored_column(&field))
+    }
+
+    /// What a name no field of the model defines is: a log column the model leaves out, a field the
+    /// ORM computes, or nothing.
+    fn undefined(&self, name: &str) -> Column<'m> {
+        if self.index.log_column(name) {
+            Column::Unlogged
+        } else if self.index.magic_field(name) {
+            Column::Computed
+        } else {
+            Column::Missing
+        }
+    }
+
+    /// Whether Odoo gives the table of `model` its log columns: unless every class in scope sets
+    /// `_log_access` to False.
+    fn logs_access(&self, model: &str) -> bool {
+        self.some_class(model, |c| {
+            c.attr("_log_access")
+                .is_none_or(|a| a.value != OptionValue::Bool(false))
+        })
+    }
+
+    /// The message on a name no field of `model` in scope has, unless a module outside the scope
+    /// defines it.
+    fn missing_column(&self, model: &'m str, column: &SqlColumn, head: &str) -> Option<String> {
+        let name = column.column.as_str();
+        if self.index.defines_field(model, name) {
+            return None;
+        }
+        if let Some((parent, via)) = self.delegated_field(model, name) {
+            let parent_table = self
+                .index
+                .table(parent, self.scope)
+                .unwrap_or_else(|| parent.replace('.', "_"));
+            return Some(format!(
+                "{head}, since {name} is a field of {parent}, which {model} reaches through _inherits; join {parent_table} on {via}"
+            ));
+        }
+        let suggested = format!("{name}_id");
+        let fix = match self.column(model, &suggested) {
+            Column::Present if self.index.defines_field(model, &suggested) => format!("use {suggested}"),
+            _ => format!("name the column of a stored field of {model}"),
+        };
+        Some(format!("{head}, since {model} has no field {name}; {fix}"))
+    }
+
+    /// The model `model` delegates to through `_inherits` that has the field `name`, with the field
+    /// that delegates to it.
+    fn delegated_field(&self, model: &str, name: &str) -> Option<(&'m str, &'m str)> {
+        let classes = self.index.classes(model).iter().filter(|(mi, _)| self.scope.sees(*mi));
+        classes
+            .flat_map(|(_, c)| &c.inherits)
+            .find(|(parent, _)| !self.index.field_defs(parent, name, None).is_empty())
+            .map(|(parent, via)| (parent.as_str(), via.as_str()))
+    }
+}
+
+/// Whether a merged field has a column: x2many fields and fields not stored have none, and the
+/// column of a Binary or a company-dependent field depends on `attachment` or on the series.
+fn stored_column<'m>(field: &Field<'m>) -> Column<'m> {
+    let ftype = field.defs.first().map_or("", |d| d.2.ftype.as_str());
+    let company_dependent = !matches!(
+        field.get("company_dependent"),
+        Merged::Unset | Merged::Known(OptionValue::Bool(false))
+    );
+    match ftype {
+        "One2many" | "Many2many" => Column::X2many(ftype),
+        "Binary" | "Image" => Column::Present,
+        _ if company_dependent => Column::Present,
+        _ if field.stored() == Some(false) => Column::NotStored,
+        _ => Column::Present,
+    }
 }
 
 #[cfg(test)]

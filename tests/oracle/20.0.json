@@ -367,6 +367,12 @@
       "count": 1
     },
     {
+      "path": "addons/gamification/models/gamification_karma_tracking.py",
+      "code": "OD122",
+      "message": "INSERT on gamification_karma_tracking bypasses the ORM, so records this transaction already read keep stale values; call flush_model() before the query and invalidate_model() after it (flush() and invalidate_cache() before 16.0)",
+      "count": 1
+    },
+    {
       "path": "addons/google_calendar/controllers/main.py",
       "code": "OD103",
       "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
@@ -1519,6 +1525,12 @@
       "count": 1
     },
     {
+      "path": "addons/mail/models/discuss/mail_guest.py",
+      "code": "OD122",
+      "message": "UPDATE on mail_guest bypasses the ORM, so records this transaction already read keep stale values; call flush_model() before the query and invalidate_model() after it (flush() and invalidate_cache() before 16.0)",
+      "count": 1
+    },
+    {
       "path": "addons/mail/models/fetchmail.py",
       "code": "OD103",
       "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
@@ -2611,6 +2623,12 @@
       "count": 1
     },
     {
+      "path": "addons/website/models/website_visitor.py",
+      "code": "OD122",
+      "message": "UPDATE on website_visitor bypasses the ORM, so records this transaction already read keep stale values; call flush_model() before the query and invalidate_model() after it (flush() and invalidate_cache() before 16.0)",
+      "count": 1
+    },
+    {
       "path": "addons/website/static/src/components/burger_menu/burger_menu.js",
       "code": "OD602",
       "message": "neither BurgerMenu nor its parents have '_onMenuClicked', so super._onMenuClicked() fails",
@@ -2626,6 +2644,12 @@
       "path": "addons/website_crm_iap_reveal/models/crm_reveal_rule.py",
       "code": "OD103",
       "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
+      "count": 1
+    },
+    {
+      "path": "addons/website_crm_iap_reveal/models/crm_reveal_view.py",
+      "code": "OD122",
+      "message": "INSERT on crm_reveal_view bypasses the ORM, so records this transaction already read keep stale values; call flush_model() before the query and invalidate_model() after it (flush() and invalidate_cache() before 16.0)",
       "count": 1
     },
     {

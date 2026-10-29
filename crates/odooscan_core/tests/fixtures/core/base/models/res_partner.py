@@ -39,6 +39,19 @@ class ResPartner(models.Model):
             partner.short_name = (partner.name or "")[:12]
 
 
+class ResUsers(models.Model):
+    _name = "res.users"
+
+    login = fields.Char()
+    password = fields.Char(compute="_x_blank_secret", inverse="_x_keep_secret")
+
+    def _x_blank_secret(self):
+        self.update({"password": None})
+
+    def _x_keep_secret(self):
+        pass
+
+
 class ResGroups(models.Model):
     _name = "res.groups"
 
