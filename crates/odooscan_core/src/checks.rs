@@ -1391,8 +1391,9 @@ fn super_overrides(module: &Module) -> FxHashSet<(&str, &str)> {
     overrides.collect()
 }
 
-/// OD223 at each compute method of the class that can leave a field unassigned that raises then,
-/// unless a class of the module overrides it with a `super()` call, which may fill the rest.
+/// OD223 at each compute method of the class that can leave a field unassigned, naming the fields
+/// Odoo raises on. A method that a class of the module overrides with a `super()` call is skipped,
+/// since the override may assign the rest.
 fn unassigned_computes<'m>(
     out: &mut Out<'m>,
     path: &'m Path,

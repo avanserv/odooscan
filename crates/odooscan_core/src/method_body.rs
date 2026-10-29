@@ -1,6 +1,7 @@
-//! What a method body does with its arguments and its records, for the rules `python.rs` raises on
-//! ORM overrides, compute methods and caches. A predicate that meets code it cannot follow answers
-//! so that the rule stays silent.
+//! What a method body does with its arguments and its records, for the rules on ORM overrides,
+//! compute methods and caches: `python.rs` raises those that one file decides, and `checks.rs`
+//! those whose outcome depends on the module's series or on every merged definition of a field. A
+//! predicate that meets code it cannot follow answers so that the rule stays silent.
 
 use ruff_python_ast::comparable::ComparableExpr;
 use ruff_python_ast::helpers::{Truthiness, is_constant};
