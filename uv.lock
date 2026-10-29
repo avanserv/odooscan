@@ -7,6 +7,14 @@ resolution-markers = [
 ]
 
 [[package]]
+name = "avanserv-zensical-theme"
+version = "0.1.0"
+source = { git = "https://github.com/avanserv/zensical-theme?rev=v0.1.0#7430155684b03a3a861d1d2705664115c14c51ee" }
+dependencies = [
+    { name = "zensical" },
+]
+
+[[package]]
 name = "click"
 version = "8.5.0"
 source = { registry = "https://pypi.org/simple" }
@@ -209,13 +217,17 @@ source = { editable = "." }
 
 [package.dev-dependencies]
 docs = [
+    { name = "avanserv-zensical-theme", marker = "python_full_version >= '3.11'" },
     { name = "zensical", marker = "python_full_version >= '3.11'" },
 ]
 
 [package.metadata]
 
 [package.metadata.requires-dev]
-docs = [{ name = "zensical", marker = "python_full_version >= '3.11'", specifier = ">=0.0.68" }]
+docs = [
+    { name = "avanserv-zensical-theme", marker = "python_full_version >= '3.11'", git = "https://github.com/avanserv/zensical-theme?rev=v0.1.0" },
+    { name = "zensical", marker = "python_full_version >= '3.11'", specifier = ">=0.0.68" },
+]
 
 [[package]]
 name = "pathspec"
