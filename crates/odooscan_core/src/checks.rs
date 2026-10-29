@@ -127,7 +127,10 @@ const RECORD_ATTRS: &[&str] = &["env", "ids", "pool"];
 /// Methods of `BaseModel` that only some series have, by the range of series that has them. 18.0
 /// deprecates `check_access_rights` and `check_access_rule` for `check_access` and `has_access`
 /// (`odoo/models.py:4503-4530`). The others are in 18.0 `odoo/models.py` or 20.0 `odoo/orm`, not
-/// both; 19.0 is not checked, so it falls in neither range.
+/// both. Every series was read for `_table_query`, which came in saas~13.5, and for
+/// `_condition_to_sql`, which came in saas~17.1 and left `BaseModel` for `Field`, where a model
+/// field does not shadow it, in saas~18.4. For the other names 19.0 was not read, so it matches
+/// `>=18.0` but neither `>=20.0` nor `<=18.0`.
 const MEMBER_SERIES: &[(&str, &[&str])] = &[
     (">=18.0", &["check_access", "has_access"]),
     (
@@ -150,7 +153,6 @@ const MEMBER_SERIES: &[(&str, &[&str])] = &[
             "check_access_rule",
             "_filter_access_rules",
             "check_field_access_rights",
-            "_table_query",
             "_where_calc",
             "_setup_complete",
             "copy_translations",
@@ -159,6 +161,8 @@ const MEMBER_SERIES: &[(&str, &[&str])] = &[
             "_add_inherited_fields",
         ],
     ),
+    (">=13.5,<20.0", &["_table_query"]),
+    (">=17.1,<18.4", &["_condition_to_sql"]),
 ];
 
 /// Methods of `BaseModel` that neither 18.0 nor 20.0 has, so the series that do are not known.
@@ -1870,9 +1874,10 @@ impl<'m> Ctx<'_, 'm> {
         out.push(path, "OD220", pos_of(own, "string"), message);
     }
 
-    /// A field's label: a non-empty literal `string`, else the label of the field Odoo adds under
-    /// that name, `magic`, else unless related one derived from its name, with the definition of
-    /// this module that decides it, the last one, if any.
+    /// A field's label: a non-empty literal `string`, else `magic`, the label of the field Odoo
+    /// adds under that name, else one derived from its name unless the field is related. It comes
+    /// with the last definition of this module that decides it, if any. None when the magic field's
+    /// merge is `Unknown`, even if the field sets a literal `string`.
     fn label(&self, name: &'m str, field: &Field<'m>, magic: Option<&str>) -> Option<Label<'m>> {
         let magic = match magic.map(|text| magic_base(name, field, text)) {
             Some(MagicBase::Unknown) => return None,
@@ -2645,6 +2650,12 @@ mod tests {
         assert!(!shadows("has_access", "17.0") && shadows("has_access", "18.0"));
         assert!(!shadows("_read_grouping_sets", "19.0") && shadows("_read_grouping_sets", "20.0"));
         assert!(shadows("toggle_active", "18.0") && !shadows("toggle_active", "20.0"));
+        assert!(!shadows("_table_query", "saas~13.4") && shadows("_table_query", "saas~13.5"));
+        assert!(shadows("_table_query", "19.0") && shadows("_table_query", "saas~19.4"));
+        assert!(!shadows("_table_query", "20.0"));
+        assert!(!shadows("_condition_to_sql", "17.0") && shadows("_condition_to_sql", "saas~17.1"));
+        assert!(shadows("_condition_to_sql", "saas~18.3") && !shadows("_condition_to_sql", "saas~18.4"));
+        assert!(!shadows("_condition_to_sql", "19.0") && !shadows("_condition_to_sql", "20.0"));
         assert!(!shadows("_name_search", "16.0") && !shadows("copied", "18.0"));
         assert!(shadowed_member("has_access", None).is_none() && shadowed_member("copy", None).is_some());
     }
