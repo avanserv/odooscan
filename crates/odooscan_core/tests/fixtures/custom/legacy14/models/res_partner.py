@@ -15,3 +15,11 @@ class ResPartner(models.Model):
     def _compute_total(self):
         for partner in self:
             partner.total = len(partner.child_ids)
+
+    initials = fields.Char(compute="_compute_initials")
+
+    @api.depends("name")
+    def _compute_initials(self):
+        for partner in self:
+            if partner.name:
+                partner.initials = partner.name[:2]

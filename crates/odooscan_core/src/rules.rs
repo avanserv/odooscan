@@ -101,6 +101,10 @@ rules! {
     "OD114" "depends-on-id" Correctness Error None, false, "@api.depends names the field id, which Odoo refuses.";
     "OD115" "dotted-onchange-constrains" Correctness Warning None, false, "@api.onchange or @api.constrains names a dotted path, which Odoo ignores.";
     "OD116" "field-shadows-model-member" Correctness Error None, false, "A field is named like a method or an attribute every model has.";
+    "OD117" "create-not-batched" Deprecation Warning Some(">=16.0,<19.0"), false, "create() is decorated with @api.model, so Odoo calls it once per record.";
+    "OD118" "create-reads-dict" Correctness Error Some(">=19.0"), false, "create() under @api.model reads its argument as one dict, but receives a list of them.";
+    "OD119" "override-drops-result" Correctness Error None, false, "A create(), write() or copy() override calls super() but returns nothing.";
+    "OD120" "ormcache-unknown-name" Correctness Error None, false, "An ormcache key names something that is not a parameter of the method.";
     "OD201" "unknown-model" Correctness Error None, true, "The model is not defined by any indexed module.";
     "OD202" "model-not-in-depends" Correctness Error None, true, "The model comes from a module missing from depends.";
     "OD203" "unresolved-field-path" Correctness Error None, true, "A field path does not resolve on its model.";
@@ -123,6 +127,7 @@ rules! {
     "OD220" "duplicate-field-label" Correctness Warning None, true, "Two fields of a model have the same label.";
     "OD221" "self-dependency-not-recursive" Correctness Warning Some(">=15.0"), true, "A computed field depends on itself through other records without recursive=True.";
     "OD222" "check-company-without-company" Correctness Warning Some(">=13.0"), true, "A field sets check_company to a comodel without company_id.";
+    "OD223" "compute-leaves-field-unassigned" Correctness Error Some(">=14.0"), true, "A compute method leaves a non-stored readonly field unassigned on some records.";
     "OD301" "unresolved-xmlid" Correctness Error None, true, "The XML id is not defined by its module.";
     "OD302" "xmlid-not-in-depends" Correctness Error None, true, "The XML id comes from a module missing from depends.";
     "OD303" "duplicate-xmlid" Correctness Warning None, false, "The same XML id is defined twice in one file.";
@@ -237,9 +242,11 @@ mod tests {
         for (_, spec, s) in SEVERITY_BY_SERIES.iter().filter(|(code, ..)| *code == r.code) {
             severity += &format!(", {s:?} from {}", since(spec));
         }
-        let series = r
-            .series
-            .map_or_else(|| "all".to_owned(), |s| format!("{} and later", since(s)));
+        let range = |spec: &str| match spec.split_once(",<") {
+            Some((from, before)) => format!("{} and later, before {before}", since(from)),
+            None => format!("{} and later", since(spec)),
+        };
+        let series = r.series.map_or_else(|| "all".to_owned(), range);
         let index = if r.needs_index { "yes" } else { "no" };
         format!("| {:?} | {severity} | {series} | {index} |", r.category)
     }

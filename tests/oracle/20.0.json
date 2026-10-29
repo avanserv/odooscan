@@ -415,6 +415,12 @@
       "count": 1
     },
     {
+      "path": "addons/hr_skills/models/hr_resume_line.py",
+      "code": "OD223",
+      "message": "_compute_color() can leave 'color' unassigned on a record, so reading it raises ValueError; assign it on every path through the loop, False when there is no value",
+      "count": 1
+    },
+    {
       "path": "addons/hr_work_entry/static/src/components/domain_count_field/domain_count_field.js",
       "code": "OD602",
       "message": "neither ListRenderer nor its parents have 'getCellTitle', so super.getCellTitle() fails",
@@ -2809,6 +2815,12 @@
       "count": 1
     },
     {
+      "path": "addons/website_slides/models/slide_slide.py",
+      "code": "OD223",
+      "message": "_compute_vimeo_id() can leave 'vimeo_id' unassigned on a record, so reading it raises ValueError; assign it on every path through the loop, False when there is no value",
+      "count": 1
+    },
+    {
       "path": "odoo/addons/base/data/res_users_demo.xml",
       "code": "OD303",
       "message": "XML id 'partner_demo' is already defined earlier in this file",
@@ -2920,6 +2932,12 @@
       "path": "odoo/addons/test_base/models/test_domain_expression.py",
       "code": "OD210",
       "message": "'is_company': test_orm.domain_expression.partner has no field 'is_company'",
+      "count": 1
+    },
+    {
+      "path": "odoo/addons/test_base/models/test_orm.py",
+      "code": "OD223",
+      "message": "_compute_bar() can leave 'bar' unassigned on a record, so reading it raises ValueError; assign it on every path through the loop, False when there is no value",
       "count": 1
     },
     {

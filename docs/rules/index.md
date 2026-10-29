@@ -46,6 +46,10 @@ Python code checked on its own: security, deprecated APIs and ORM mistakes visib
 | [OD114](OD114.md) | `depends-on-id` | @api.depends names the field id, which Odoo refuses. |
 | [OD115](OD115.md) | `dotted-onchange-constrains` | @api.onchange or @api.constrains names a dotted path, which Odoo ignores. |
 | [OD116](OD116.md) | `field-shadows-model-member` | A field is named like a method or an attribute every model has. |
+| [OD117](OD117.md) | `create-not-batched` | create() is decorated with @api.model, so Odoo calls it once per record. |
+| [OD118](OD118.md) | `create-reads-dict` | create() under @api.model reads its argument as one dict, but receives a list of them. |
+| [OD119](OD119.md) | `override-drops-result` | A create(), write() or copy() override calls super() but returns nothing. |
+| [OD120](OD120.md) | `ormcache-unknown-name` | An ormcache key names something that is not a parameter of the method. |
 
 ## OD2: models and fields
 
@@ -75,6 +79,7 @@ Models, fields and methods checked against every module in the dependency graph.
 | [OD220](OD220.md) | `duplicate-field-label` | Two fields of a model have the same label. |
 | [OD221](OD221.md) | `self-dependency-not-recursive` | A computed field depends on itself through other records without recursive=True. |
 | [OD222](OD222.md) | `check-company-without-company` | A field sets check_company to a comodel without company_id. |
+| [OD223](OD223.md) | `compute-leaves-field-unassigned` | A compute method leaves a non-stored readonly field unassigned on some records. |
 
 ## OD3: XML ids, views and data
 

@@ -710,6 +710,7 @@ dependencies = [
  "roxmltree",
  "ruff_python_ast",
  "ruff_python_parser",
+ "ruff_python_stdlib",
  "ruff_source_file",
  "ruff_text_size",
  "rustc-hash",
@@ -1177,6 +1178,15 @@ dependencies = [
  "thin-vec",
  "unicode-ident",
  "unicode-normalization",
+]
+
+[[package]]
+name = "ruff_python_stdlib"
+version = "0.0.19"
+source = "git+https://github.com/astral-sh/ruff?tag=0.17.2#30516b42ab972ffa2569e5efcfee81135da466d3"
+dependencies = [
+ "bitflags",
+ "unicode-ident",
 ]
 
 [[package]]

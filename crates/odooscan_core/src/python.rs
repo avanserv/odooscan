@@ -5,11 +5,11 @@ use ruff_source_file::LineIndex;
 use ruff_text_size::{Ranged, TextSize};
 use rustc_hash::FxHashMap;
 
-use crate::domain;
 use crate::facts::{
     ClassFact, DomainFact, FieldFact, ModelKind, OptionValue, Pos, PyFacts, RawDiag, Receiver, Spanned, XmlRef,
 };
 use crate::taint::{self, Params};
+use crate::{domain, method_body};
 
 const FIELD_TYPES: &[&str] = &[
     "Boolean",
@@ -382,6 +382,31 @@ fn is_delegate(value: &Expr) -> bool {
         .is_some_and(|d| matches!(d, Expr::BooleanLiteral(b) if b.value))
 }
 
+fn is_api(expr: &Expr, name: &str) -> bool {
+    matches!(expr, Expr::Attribute(a) if a.attr.as_str() == name && tail_name(&a.value) == Some("api"))
+}
+
+/// What an ORM method returns to its callers, for the OD119 message.
+fn orm_result(method: &str) -> &'static str {
+    match method {
+        "write" => "True",
+        _ => "the new records",
+    }
+}
+
+/// The method of the class that computes the field, unless it calls super(), whose implementation
+/// may assign the field.
+fn compute_method<'c>(class: &'c ast::StmtClassDef, field: &FieldFact) -> Option<&'c ast::StmtFunctionDef> {
+    let Some(OptionValue::Str(name)) = field.option("compute").map(|o| &o.value) else {
+        return None;
+    };
+    let func = class.body.iter().rev().find_map(|stmt| match stmt {
+        Stmt::FunctionDef(f) if f.name.as_str() == name => Some(f),
+        _ => None,
+    })?;
+    (!body_contains(&func.body, None)).then_some(func)
+}
+
 pub fn analyze(src: &str) -> PyFacts {
     let loc = Locator::new(src);
     let mut v = PyVisitor {
@@ -454,6 +479,7 @@ impl PyVisitor<'_> {
             super_calls: vec![],
             table: None,
             attrs: vec![],
+            unassigned_computes: vec![],
             plain_bases: class
                 .bases()
                 .iter()
@@ -469,9 +495,10 @@ impl PyVisitor<'_> {
                 }) => self.class_attrs(std::slice::from_ref(&**target), value, &mut fact, &mut name),
                 Stmt::FunctionDef(func) => {
                     fact.methods.push(func.name.to_string());
-                    self.method_checks(func, &mut fact);
                     let mut calls = SuperCalls::default();
                     calls.visit_body(&func.body);
+                    self.method_checks(func, &mut fact);
+                    self.override_checks(func, &calls.calls);
                     fact.super_calls
                         .extend(calls.calls.into_iter().map(|(name, at)| Spanned {
                             value: name.to_owned(),
@@ -481,6 +508,7 @@ impl PyVisitor<'_> {
                 _ => {}
             }
         }
+        fact.unassigned_computes = self.unassigned_computes(class, &fact);
         fact.model = match (&name, fact.inherit.first()) {
             (Some(n), _) => n.clone(),
             (None, Some(first)) => first.value.clone(),
@@ -724,12 +752,110 @@ impl PyVisitor<'_> {
         }
     }
 
+    /// OD119 on an override whose result never reaches its callers, and OD117 and OD118 on a
+    /// `create` that takes one dict at a time.
+    fn override_checks(&mut self, func: &ast::StmtFunctionDef, supers: &[(&str, TextSize)]) {
+        let name = func.name.as_str();
+        if matches!(name, "create" | "write" | "copy")
+            && supers.iter().any(|(called, _)| *called == name)
+            && !method_body::returns_value(&func.body)
+        {
+            self.diag(
+                "OD119",
+                &func.name,
+                format!(
+                    "{name}() calls super() but returns nothing, so callers get None instead of {}; return what super().{name}() returns",
+                    orm_result(name)
+                ),
+            );
+        }
+        if name == "create" {
+            self.create_decorator_checks(func);
+        }
+    }
+
+    fn create_decorator_checks(&mut self, func: &ast::StmtFunctionDef) {
+        let Some(decorator) = func.decorator_list.iter().find(|d| is_api(&d.expression, "model")) else {
+            return;
+        };
+        self.diag(
+            "OD117",
+            decorator,
+            "@api.model on create() makes Odoo call it once per record; decorate it with @api.model_create_multi and take a list of dicts",
+        );
+        let params = &func.parameters;
+        if let Some(vals) = params.posonlyargs.iter().chain(&params.args).nth(1)
+            && method_body::reads_as_dict(&func.body, vals.parameter.name.as_str())
+        {
+            self.diag(
+                "OD118",
+                decorator,
+                format!(
+                    "@api.model on create() passes a list of dicts, so reading {} as one dict fails; decorate it with @api.model_create_multi and loop over the list",
+                    vals.parameter.name
+                ),
+            );
+        }
+    }
+
+    /// OD120: Odoo evaluates each key in a lambda that takes the method's parameters, unless the
+    /// legacy `skiparg` keys on the arguments instead.
+    fn cache_key_checks(&mut self, func: &ast::StmtFunctionDef, call: &ast::ExprCall) {
+        if !matches!(tail_name(&call.func), Some("ormcache" | "ormcache_context")) || keyword(call, "skiparg").is_some()
+        {
+            return;
+        }
+        let params: Vec<&str> = func.parameters.iter().map(|p| p.name().as_str()).collect();
+        for key in call.arguments.args.iter().filter_map(Expr::as_string_literal_expr) {
+            for name in method_body::unknown_key_names(key.value.to_str(), &params).unwrap_or_default() {
+                self.diag(
+                    "OD120",
+                    key,
+                    format!(
+                        "'{name}' in an ormcache key is not a parameter of {}(), so every call raises NameError; key on a parameter or on self",
+                        func.name
+                    ),
+                );
+            }
+        }
+    }
+
+    /// The compute methods of the class that can leave a field they compute unassigned on a record,
+    /// with those fields; `checks.rs` keeps the fields that raise once every definition is merged.
+    fn unassigned_computes(&self, class: &ast::StmtClassDef, fact: &ClassFact) -> Vec<(Spanned<String>, Vec<String>)> {
+        let mut unassigned: Vec<(&ast::StmtFunctionDef, Vec<String>)> = vec![];
+        for field in &fact.fields {
+            let Some(func) = compute_method(class, field) else {
+                continue;
+            };
+            if !method_body::leaves_unassigned(&func.body, &field.name) {
+                continue;
+            }
+            match unassigned.iter_mut().find(|(f, _)| std::ptr::eq(*f, func)) {
+                Some((_, fields)) if !fields.contains(&field.name) => fields.push(field.name.clone()),
+                Some(_) => {}
+                None => unassigned.push((func, vec![field.name.clone()])),
+            }
+        }
+        let at = |func: &ast::StmtFunctionDef| Spanned {
+            value: func.name.to_string(),
+            pos: self.loc.at(&func.name),
+        };
+        unassigned
+            .into_iter()
+            .map(|(func, fields)| (at(func), fields))
+            .collect()
+    }
+
     fn decorator_checks(&mut self, func: &ast::StmtFunctionDef, fact: &mut ClassFact) {
         for decorator in &func.decorator_list {
             match &decorator.expression {
-                Expr::Call(call) => self.decorator_paths(func.name.as_str(), call, fact),
+                Expr::Call(call) => {
+                    self.decorator_paths(func.name.as_str(), call, fact);
+                    self.cache_key_checks(func, call);
+                }
                 Expr::Attribute(a)
-                    if matches!(a.attr.as_str(), "multi" | "one") && tail_name(&a.value) == Some("api") =>
+                    if is_api(&decorator.expression, "multi") || is_api(&decorator.expression, "one") =>
                 {
                     self.diag(
                         "OD107",

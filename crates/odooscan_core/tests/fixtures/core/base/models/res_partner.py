@@ -32,6 +32,11 @@ class ResPartner(models.Model):
     country_id = fields.Many2one("res.country")
     parent_id = fields.Many2one("res.partner")
     child_ids = fields.One2many("res.partner", "parent_id")
+    short_name = fields.Char(compute="_compute_short_name", store=True, readonly=False)
+
+    def _compute_short_name(self):
+        for partner in self:
+            partner.short_name = (partner.name or "")[:12]
 
 
 class ResGroups(models.Model):

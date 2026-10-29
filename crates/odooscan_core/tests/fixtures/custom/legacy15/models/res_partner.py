@@ -19,3 +19,12 @@ class ResPartner(models.Model):
 class ResPartnerSearch(models.Model):
     _inherit = "res.partner"
     _rec_names_search = ["name", "nickname"]
+
+
+class ResPartnerCreate(models.Model):
+    _inherit = "res.partner"
+
+    @api.model
+    def create(self, vals):
+        vals.setdefault("ref", vals.get("name"))
+        return super().create(vals)
