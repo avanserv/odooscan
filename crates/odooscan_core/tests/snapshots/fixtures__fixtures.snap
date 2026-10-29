@@ -239,6 +239,8 @@ custom/model_attributes/models/label.py:100:58: OD218 'country_id' has delegate=
 custom/model_attributes/models/label.py:101:94: OD213 'home_country_id' is required, so Odoo refuses ondelete='set null'; use 'restrict' or 'cascade'
 custom/model_attributes/models/label.py:102:95: OD213 'parent_country_id' is required, so Odoo refuses ondelete='set null'; use 'restrict' or 'cascade'
 custom/model_attributes/models/label.py:128:43: OD213 'partner_id' is required, so Odoo refuses ondelete='set null'; use 'restrict' or 'cascade'
+custom/model_attributes/models/label.py:139:42: OD213 'tenant_id' is required, so Odoo refuses ondelete='set null'; use 'restrict' or 'cascade'
+custom/model_attributes/models/label.py:162:42: OD218 'tenant_id' has delegate=True, so it must be required with ondelete 'cascade' or 'restrict'; give it required=True
 custom/model_attributes/models/plot.py:12:19: OD115 'partner_id.country_id': @api.onchange takes field names of the model, not paths, so Odoo ignores it; name 'partner_id' instead
 custom/model_attributes/models/plot.py:20:21: OD115 'partner_id.nickname': @api.constrains takes field names of the model, not paths, so Odoo ignores it; name 'partner_id' instead
 custom/model_attributes/models/zone.py:9:5: OD217 garden.zone sets _parent_store but has no parent_path field, which Odoo logs as an error; add parent_path = fields.Char(index=True)
@@ -325,6 +327,7 @@ custom/sql_columns/models/delegations.py:46:52: OD224 b.x_old_id: parcel_booth h
 custom/sql_columns/models/delegations.py:46:84: OD224 b.name: parcel_booth has no such column, since name is a field of parcel.depot, which parcel.booth reaches through _inherits; join parcel_depot on x_booth_depot_id
 custom/sql_columns/models/delegations.py:67:33: OD227 x_site_id: parcel_post has no such column, since parcel.post has no field x_site_id; name the column of a stored field of parcel.post
 custom/sql_columns/models/delegations.py:71:52: OD224 p.x_site_id: parcel_post has no such column, since parcel.post has no field x_site_id; name the column of a stored field of parcel.post
+custom/sql_columns/models/delegations.py:71:65: OD224 p.name: parcel_post has no such column, since name is a field of parcel.depot, which parcel.post reaches through _inherits; join parcel_depot on x_host_id
 custom/sql_columns/models/delegations.py:105:54: OD224 w.x_host_id: parcel_wharf has no such column, since parcel.wharf has no field x_host_id; name the column of a stored field of parcel.wharf
 custom/sql_columns/models/delegations.py:105:67: OD224 w.x_site_id: parcel_wharf has no such column, since parcel.wharf has no field x_site_id; name the column of a stored field of parcel.wharf
 custom/sql_columns/models/delegations.py:254:55: OD224 p.x_cleat_id: parcel_pontoon has no such column, since parcel.pontoon has no field x_cleat_id; name the column of a stored field of parcel.pontoon

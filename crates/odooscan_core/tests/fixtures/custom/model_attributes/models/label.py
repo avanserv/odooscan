@@ -128,12 +128,15 @@ class GardenShed(models.AbstractModel):
     partner_id = fields.Many2one(ondelete="set null")
 
 
+# garden.held is listed first, so its entry wins: partner_id delegates and Odoo rewrites its
+# ondelete, while tenant_id delegates nothing and Odoo refuses set null on it.
 class GardenHut(models.AbstractModel):
     _name = "garden.hut"
     _inherit = ["garden.held", "garden.leased"]
     _description = "Garden hut"
 
     partner_id = fields.Many2one(ondelete="set null")
+    tenant_id = fields.Many2one(ondelete="set null")
 
 
 CRATE_PARENTS = {"res.partner": "partner_id"}
@@ -146,3 +149,14 @@ class GardenCrate(models.AbstractModel):
 
     partner_id = fields.Many2one("res.partner", required=True, ondelete="set null")
     country_id = fields.Many2one("res.country", delegate=True)
+
+
+# The entry of garden.held wins here too, so the merged _inherits names partner_id and not
+# tenant_id, and OD218 holds tenant_id to the rule for a lone delegate=True field.
+class GardenBarn(models.AbstractModel):
+    _name = "garden.barn"
+    _inherit = ["garden.held", "garden.leased"]
+    _description = "Garden barn"
+
+    partner_id = fields.Many2one(delegate=True)
+    tenant_id = fields.Many2one(delegate=True, required=False)
