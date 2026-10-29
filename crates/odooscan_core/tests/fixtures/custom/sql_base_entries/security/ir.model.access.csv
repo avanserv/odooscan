@@ -1,0 +1,4 @@
+id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
+access_buoy_depot,buoy.depot,model_buoy_depot,base.group_user,1,1,1,1
+access_buoy_float,buoy.float,model_buoy_float,base.group_user,1,1,1,1
+access_buoy_raft,buoy.raft,model_buoy_raft,base.group_user,1,1,1,1

@@ -1190,7 +1190,6 @@ type Entry<'m> = (usize, &'m ClassFact, &'m str, &'m Spanned<String>);
 /// The models the classes of one model list in `_inherit`, for `Ctx::entry_before_in`.
 struct Listed<'m> {
     parents: Vec<Parent<'m>>,
-    base: Vec<(usize, &'m ClassFact)>,
 }
 
 /// An entry of `_inherit`: the class listing it, its position, the parent model and the classes
@@ -1203,13 +1202,10 @@ struct Parent<'m> {
 }
 
 impl<'m> Listed<'m> {
-    /// The one entry whose parent merges `class`. None when `class` is one of `base`, which every
-    /// model merges, or no entry or several merge it, as for a class reached through two parents.
+    /// The one entry whose parent merges `class`. None when no entry or several merge it, as for a
+    /// class reached through two parents, or one of `base` under two, since every model merges it.
     fn through(&self, class: &ClassFact) -> Option<&Parent<'m>> {
         let has = |classes: &[(usize, &ClassFact)]| classes.iter().any(|(_, c)| std::ptr::eq(*c, class));
-        if has(&self.base) {
-            return None;
-        }
         let mut hits = self.parents.iter().filter(|p| has(&p.merges));
         let first = hits.next()?;
         hits.next().is_none().then_some(first)
@@ -1720,7 +1716,6 @@ impl<'m> Ctx<'_, 'm> {
         });
         Some(Listed {
             parents: parents.collect(),
-            base: self.index.merged_classes("base", self.scope),
         })
     }
 
