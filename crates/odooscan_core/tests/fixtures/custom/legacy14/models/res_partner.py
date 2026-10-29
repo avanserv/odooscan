@@ -23,3 +23,13 @@ class ResPartner(models.Model):
         for partner in self:
             if partner.name:
                 partner.initials = partner.name[:2]
+
+
+class ResPartnerStamp(models.Model):
+    _inherit = "res.partner"
+
+    create_date = fields.Datetime(index=True)
+    opened_on = fields.Datetime(string="Created on")
+    stamped_on = fields.Datetime(string="Create Date")
+    __last_update = fields.Datetime(string="Touched")
+    touched_on = fields.Datetime(string="Last Modified on")

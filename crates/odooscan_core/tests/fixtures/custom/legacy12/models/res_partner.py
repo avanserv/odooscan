@@ -13,3 +13,10 @@ class ResPartner(models.Model):
     parent_balance = fields.Monetary(related="parent_id.balance")
     company_id = fields.Many2one("res.company")
     home_country_id = fields.Many2one("res.country", check_company=True)
+
+
+class ResPartnerStamp(models.Model):
+    _inherit = "res.partner"
+
+    create_date = fields.Datetime(copy=False)
+    stamped_on = fields.Datetime(string="Create Date")

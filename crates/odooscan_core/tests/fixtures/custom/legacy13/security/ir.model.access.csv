@@ -1,0 +1,3 @@
+id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
+access_legacy_stamp,legacy.stamp,model_legacy_stamp,base.group_user,1,1,1,1
+access_legacy_ledger,legacy.ledger,model_legacy_ledger,base.group_user,1,1,1,1
