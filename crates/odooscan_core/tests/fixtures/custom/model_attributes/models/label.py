@@ -34,6 +34,7 @@ class GardenMarker(models.Model):
     _inherits = {"res.partner": "partner_id"}
 
     partner_id = fields.Many2one("res.partner", required=REQUIRED, ondelete="cascade")
+    marker_label = fields.Char(compute="_compute_short_name")
 
 
 class GardenKit(models.Model):
@@ -75,6 +76,10 @@ class GardenOwned(models.AbstractModel):
     partner_id = fields.Many2one("res.partner", required=True)
     country_id = fields.Many2one("res.country", required=True)
 
+    def _compute_bench_plaque(self):
+        for item in self:
+            item.bench_plaque = item.name
+
 
 class GardenBench(models.Model):
     _name = "garden.bench"
@@ -83,6 +88,7 @@ class GardenBench(models.Model):
 
     partner_id = fields.Many2one(delegate=True)
     country_id = fields.Many2one(ondelete="set null")
+    bench_plaque = fields.Char(compute="_compute_bench_plaque")
 
 
 class GardenPost(models.Model):

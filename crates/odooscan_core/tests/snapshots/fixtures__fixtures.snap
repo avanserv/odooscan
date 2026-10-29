@@ -213,17 +213,18 @@ custom/model_attributes/models/bed.py:24:53: OD203 'owner_model': garden.bed has
 custom/model_attributes/models/bed.py:25:86: OD203 'parent_model': garden.bed has no field 'parent_model'
 custom/model_attributes/models/label.py:9:33: OD218 _inherits delegates to 'partner_id', which must be required with ondelete 'cascade' or 'restrict'; give it ondelete="cascade"
 custom/model_attributes/models/label.py:9:62: OD218 _inherits delegates to 'country_id', which must be required with ondelete 'cascade' or 'restrict'; give it required=True
-custom/model_attributes/models/label.py:44:58: OD218 'country_id' has delegate=True and no ondelete, so Odoo fails with AttributeError when it sets up the registry; give it ondelete="cascade"
-custom/model_attributes/models/label.py:47:54: OD218 'view_id' has delegate=True, so it must be required with ondelete 'cascade' or 'restrict'; give it required=True, ondelete="cascade"
-custom/model_attributes/models/label.py:54:59: OD218 'partner_id' has delegate=True and no ondelete, so Odoo fails with AttributeError when it sets up the registry; give it required=True, ondelete="cascade"
-custom/model_attributes/models/label.py:60:33: OD218 _inherits delegates to 'partner_id', which must be required with ondelete 'cascade' or 'restrict'; give it ondelete="cascade"
-custom/model_attributes/models/label.py:73:33: OD218 _inherits delegates to 'partner_id', which must be required with ondelete 'cascade' or 'restrict'; give it ondelete="cascade"
-custom/model_attributes/models/label.py:73:62: OD218 _inherits delegates to 'country_id', which must be required with ondelete 'cascade' or 'restrict'; give it ondelete="cascade"
-custom/model_attributes/models/label.py:91:33: OD218 _inherits delegates to 'partner_id', which must be required with ondelete 'cascade' or 'restrict'; give it ondelete="cascade"
-custom/model_attributes/models/label.py:94:58: OD218 'country_id' has delegate=True, so it must be required with ondelete 'cascade' or 'restrict'; give it ondelete="cascade"
-custom/model_attributes/models/label.py:95:94: OD213 'home_country_id' is required, so Odoo refuses ondelete='set null'; use 'restrict' or 'cascade'
-custom/model_attributes/models/label.py:96:95: OD213 'parent_country_id' is required, so Odoo refuses ondelete='set null'; use 'restrict' or 'cascade'
-custom/model_attributes/models/label.py:122:43: OD213 'partner_id' is required, so Odoo refuses ondelete='set null'; use 'restrict' or 'cascade'
+custom/model_attributes/models/label.py:37:40: OD204 garden.marker has no method '_compute_short_name'
+custom/model_attributes/models/label.py:45:58: OD218 'country_id' has delegate=True and no ondelete, so Odoo fails with AttributeError when it sets up the registry; give it ondelete="cascade"
+custom/model_attributes/models/label.py:48:54: OD218 'view_id' has delegate=True, so it must be required with ondelete 'cascade' or 'restrict'; give it required=True, ondelete="cascade"
+custom/model_attributes/models/label.py:55:59: OD218 'partner_id' has delegate=True and no ondelete, so Odoo fails with AttributeError when it sets up the registry; give it required=True, ondelete="cascade"
+custom/model_attributes/models/label.py:61:33: OD218 _inherits delegates to 'partner_id', which must be required with ondelete 'cascade' or 'restrict'; give it ondelete="cascade"
+custom/model_attributes/models/label.py:74:33: OD218 _inherits delegates to 'partner_id', which must be required with ondelete 'cascade' or 'restrict'; give it ondelete="cascade"
+custom/model_attributes/models/label.py:74:62: OD218 _inherits delegates to 'country_id', which must be required with ondelete 'cascade' or 'restrict'; give it ondelete="cascade"
+custom/model_attributes/models/label.py:97:33: OD218 _inherits delegates to 'partner_id', which must be required with ondelete 'cascade' or 'restrict'; give it ondelete="cascade"
+custom/model_attributes/models/label.py:100:58: OD218 'country_id' has delegate=True, so it must be required with ondelete 'cascade' or 'restrict'; give it ondelete="cascade"
+custom/model_attributes/models/label.py:101:94: OD213 'home_country_id' is required, so Odoo refuses ondelete='set null'; use 'restrict' or 'cascade'
+custom/model_attributes/models/label.py:102:95: OD213 'parent_country_id' is required, so Odoo refuses ondelete='set null'; use 'restrict' or 'cascade'
+custom/model_attributes/models/label.py:128:43: OD213 'partner_id' is required, so Odoo refuses ondelete='set null'; use 'restrict' or 'cascade'
 custom/model_attributes/models/plot.py:12:19: OD115 'partner_id.country_id': @api.onchange takes field names of the model, not paths, so Odoo ignores it; name 'partner_id' instead
 custom/model_attributes/models/plot.py:20:21: OD115 'partner_id.nickname': @api.constrains takes field names of the model, not paths, so Odoo ignores it; name 'partner_id' instead
 custom/model_attributes/models/zone.py:9:5: OD217 garden.zone sets _parent_store but has no parent_path field, which Odoo logs as an error; add parent_path = fields.Char(index=True)
