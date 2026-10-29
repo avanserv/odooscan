@@ -1196,8 +1196,13 @@ impl<'m> Field<'m> {
     /// `**kwargs` without naming the option may set it, and an option given as an expression that
     /// only a run can evaluate is unknown, so either makes the value unknown.
     fn get(&self, name: &str) -> Merged<'m> {
+        self.get_where(name, |_| true)
+    }
+
+    /// The value of `get` among the definitions `keep` picks.
+    fn get_where(&self, name: &str, keep: impl Fn(&FieldDef<'m>) -> bool) -> Merged<'m> {
         let mut merged = Merged::Unset;
-        for i in self.last(|d| d.2.splat || d.2.option(name).is_some()) {
+        for i in self.last(|d| keep(d) && (d.2.splat || d.2.option(name).is_some())) {
             let def: &'m FieldFact = self.defs[i].2;
             let value = match def.option(name) {
                 Some(o) if o.value != OptionValue::Other => &o.value,
@@ -1329,9 +1334,10 @@ fn unlogged(class: &ClassFact) -> bool {
 
 /// What becomes of the field Odoo adds to a model under a name that indexed classes define too.
 enum MagicBase<'a> {
-    /// Classes of the model merge into it, so its label stands unless one sets `string`.
-    Kept(&'a str),
-    /// Odoo does not add its own field, so the definitions decide the label.
+    /// The definitions `After` picks merge into it, so its label stands unless one sets `string`.
+    Kept(&'a str, After),
+    /// Odoo does not add its own field, or from saas~18.1 merges `display_name` first, so the
+    /// definitions decide the label.
     Replaced,
     /// Odoo adds its own field over every definition and merges none, so its label stands.
     Fixed(&'a str),
@@ -1339,17 +1345,22 @@ enum MagicBase<'a> {
     Unknown,
 }
 
-/// What becomes of the field Odoo adds as `name`, labelled `text`, given the definitions of
-/// `field`, from saas~14.4: Odoo adds `id` over whatever the introducing class defines, and any
-/// other field only when that class does not define it.
-fn introduced_magic<'a>(name: &str, field: &Field, text: &'a str) -> MagicBase<'a> {
-    let introducer = |d: &FieldDef| d.1.model == field.model && d.1.new_model;
-    if name != "id" && field.defs.iter().any(introducer) {
-        MagicBase::Replaced
-    } else if field.defs.iter().any(|d| d.1.model != field.model) {
-        MagicBase::Unknown
-    } else {
-        MagicBase::Kept(text)
+/// The definitions that merge after the field Odoo adds.
+#[derive(Clone, Copy)]
+enum After {
+    /// All of them: Odoo's field merges before every class.
+    Every,
+    /// Those of the classes of the model that do not introduce it: Odoo adds the field to the
+    /// introducing class, which merges after the models it inherits.
+    Extensions,
+}
+
+impl After {
+    fn keeps(self, field: &Field, def: &FieldDef) -> bool {
+        match self {
+            After::Every => true,
+            After::Extensions => def.1.model == field.model && !def.1.new_model,
+        }
     }
 }
 
@@ -2038,9 +2049,10 @@ impl<'m> Ctx<'_, 'm> {
     /// A field's label: a non-empty literal `string`, else `magic`, the label of the field Odoo
     /// adds under that name, else one derived from its name unless the field is related. It comes
     /// with the last definition of this module that decides it, if any. A `Fixed` magic field
-    /// keeps its label even over a literal `string`, and an `Unknown` one has none.
+    /// keeps its label even over a literal `string`, a `Kept` one reads `string` only from the
+    /// definitions merged after it, and an `Unknown` one has none.
     fn label(&self, name: &'m str, field: &Field<'m>, magic: Option<&str>) -> Option<Label<'m>> {
-        let magic = match magic.map(|text| self.magic_base(name, field, text)) {
+        let (magic, after) = match magic.map(|text| self.magic_base(name, field, text)) {
             Some(MagicBase::Unknown) => return None,
             Some(MagicBase::Fixed(text)) => {
                 return Some(Label {
@@ -2049,12 +2061,13 @@ impl<'m> Ctx<'_, 'm> {
                     here: None,
                 });
             }
-            Some(MagicBase::Kept(text)) => Some(text),
-            Some(MagicBase::Replaced) | None => None,
+            Some(MagicBase::Kept(text, after)) => (Some(text), after),
+            Some(MagicBase::Replaced) | None => (None, After::Every),
         };
-        let (text, deciders) = match (field.get("string"), magic) {
+        let keep = |d: &FieldDef<'m>| after.keeps(field, d);
+        let (text, deciders) = match (field.get_where("string", keep), magic) {
             (Merged::Known(OptionValue::Str(s)), _) if !s.is_empty() => {
-                (s.clone(), field.last(|d| d.2.option("string").is_some()))
+                (s.clone(), field.last(|d| keep(d) && d.2.option("string").is_some()))
             }
             (Merged::Unset, Some(text)) => (text.to_owned(), vec![]),
             (Merged::Unset, None) if field.get("related") == Merged::Unset => {
@@ -2062,14 +2075,20 @@ impl<'m> Ctx<'_, 'm> {
             }
             _ => return None,
         };
+        let here = self.decided_here(field, deciders);
+        Some(Label { text, name, here })
+    }
+
+    /// The last of `deciders`, definitions of `field`, that this module gives the field's model,
+    /// with its load key.
+    fn decided_here(&self, field: &Field<'m>, deciders: Vec<usize>) -> Option<(&'m FieldFact, (usize, Pos))> {
         let me = self.index.by_name[self.module.name.as_str()];
-        let here = deciders
+        deciders
             .into_iter()
             .map(|i| &field.defs[i])
             .filter(|d| d.0 == me && d.1.model == field.model)
             .map(|d| (d.2, self.load_key(d)))
-            .max_by_key(|(_, key)| *key);
-        Some(Label { text, name, here })
+            .max_by_key(|(_, key)| *key)
     }
 
     /// What becomes of the field Odoo adds as `name`, labelled `text`, given the definitions of
@@ -2083,7 +2102,7 @@ impl<'m> Ctx<'_, 'm> {
             _ if name == "__last_update" || (early && name == "id") => MagicBase::Fixed(text),
             MagicEra::Setup => MagicBase::Replaced,
             MagicEra::RegistryMerge => self.registry_magic(name, field, text),
-            MagicEra::Metaclass | MagicEra::Base => introduced_magic(name, field, text),
+            MagicEra::Metaclass | MagicEra::Base => self.introduced_magic(era, name, field, text),
         }
     }
 
@@ -2097,9 +2116,33 @@ impl<'m> Ctx<'_, 'm> {
         if field.defs.iter().any(|d| d.1.model != model) {
             MagicBase::Unknown
         } else if name == "display_name" || self.index.merged_classes(model, self.scope).iter().any(logs) {
-            MagicBase::Kept(text)
+            MagicBase::Kept(text, After::Every)
         } else {
             MagicBase::Replaced
+        }
+    }
+
+    /// What becomes of the field Odoo adds as `name`, labelled `text`, given the definitions of
+    /// `field`, from saas~14.4. The field Odoo adds as `id` sets no `string`, and from saas~18.1
+    /// `BaseModel` defines `id` and `display_name` before every class, so any definition's `string`
+    /// stands. The metaclass adds any other field to the introducing class only when that class
+    /// does not define it, and a model listed before the model's own in `_inherit` merges after it.
+    fn introduced_magic<'a>(&self, era: MagicEra, name: &str, field: &Field, text: &'a str) -> MagicBase<'a> {
+        let model = field.model;
+        let introducer = |d: &FieldDef| d.1.model == model && d.1.new_model;
+        if name == "id" {
+            MagicBase::Kept(text, After::Every)
+        } else if field.defs.iter().any(introducer) {
+            // From saas~18.1 this covers `display_name` too: `BaseModel`'s merges first, and the
+            // introducer's definition gives the same label unless it is related without `string`,
+            // which then stays unknown; deciding it there reports a pair with a mixin's field.
+            MagicBase::Replaced
+        } else if name == "display_name" && era == MagicEra::Base {
+            MagicBase::Kept(text, After::Every)
+        } else if field.defs.iter().any(|d| d.1.model != model) && self.inherits_ahead(model) {
+            MagicBase::Unknown
+        } else {
+            MagicBase::Kept(text, After::Extensions)
         }
     }
 

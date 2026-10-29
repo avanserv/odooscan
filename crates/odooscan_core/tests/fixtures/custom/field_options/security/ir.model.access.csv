@@ -14,3 +14,5 @@ access_greenhouse_site_line,greenhouse.site.line,model_greenhouse_site_line,base
 access_greenhouse_network,greenhouse.network,model_greenhouse_network,base.group_user,1,1,1,1
 access_greenhouse_shelf,greenhouse.shelf,model_greenhouse_shelf,base.group_user,1,1,1,1
 access_greenhouse_tray,greenhouse.tray,model_greenhouse_tray,base.group_user,1,1,1,1
+access_greenhouse_pot,greenhouse.pot,model_greenhouse_pot,base.group_user,1,1,1,1
+access_greenhouse_bin,greenhouse.bin,model_greenhouse_bin,base.group_user,1,1,1,1

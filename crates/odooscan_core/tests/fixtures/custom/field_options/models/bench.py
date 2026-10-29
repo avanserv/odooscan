@@ -67,3 +67,46 @@ class GreenhouseLabelMixin(models.AbstractModel):
     _description = "Greenhouse label mixin"
 
     ref = fields.Char(string="ID")
+
+
+class GreenhouseSeal(models.AbstractModel):
+    _name = "greenhouse.seal"
+    _description = "Greenhouse seal"
+
+    id = fields.Id(string="Seal key")
+    write_date = fields.Datetime(index=True)
+    create_date = fields.Datetime(string="Sealed")
+    write_uid = fields.Many2one("res.users")
+    display_name = fields.Char(string="Seal name")
+
+
+class GreenhousePot(models.Model):
+    _name = "greenhouse.pot"
+    _description = "Greenhouse pot"
+    _inherit = ["greenhouse.seal"]
+
+    watered_on = fields.Datetime(string="Last Updated on")
+    opened_on = fields.Datetime(string="Created on")
+    sealed_on = fields.Datetime(string="Sealed")
+    key_ref = fields.Char(string="Seal key")
+    potter_id = fields.Many2one("res.users", string="Potted by")
+    seal_name = fields.Char(string="Seal name")
+    shown_as = fields.Char(string="Display Name")
+
+
+class GreenhousePotAudit(models.Model):
+    _inherit = "greenhouse.pot"
+
+    write_uid = fields.Many2one("res.users", string="Potted by")
+
+
+class GreenhouseBin(models.Model):
+    _name = "greenhouse.bin"
+    _description = "Greenhouse bin"
+
+    emptied_on = fields.Datetime(string="Last Updated on")
+
+
+class GreenhouseBinStamp(models.Model):
+    _name = "greenhouse.bin"
+    _inherit = ["greenhouse.stamp", "greenhouse.bin"]

@@ -149,6 +149,11 @@ custom/field_options/models/bench.py:10:34: OD220 'planted_on' has the label 'Cr
 custom/field_options/models/bench.py:44:38: OD220 'common_name' has the label 'Name' of field 'name' of res.partner, so Odoo logs a warning and users cannot tell them apart; give it another string
 custom/field_options/models/bench.py:60:40: OD220 'filled_on' has the label 'Create Date' of field 'create_date' of greenhouse.tray, so Odoo logs a warning and users cannot tell them apart; give it another string
 custom/field_options/models/bench.py:62:5: OD116 field '_condition_to_sql' replaces the method _condition_to_sql() of BaseModel on this model, so callers get the field instead; rename it
+custom/field_options/models/bench.py:88:41: OD220 'watered_on' has the label 'Last Updated on' of field 'write_date' of greenhouse.pot, so Odoo logs a warning and users cannot tell them apart; give it another string
+custom/field_options/models/bench.py:89:40: OD220 'opened_on' has the label 'Created on' of field 'create_date' of greenhouse.pot, so Odoo logs a warning and users cannot tell them apart; give it another string
+custom/field_options/models/bench.py:91:34: OD220 'key_ref' has the label 'Seal key' of field 'id' of greenhouse.pot, so Odoo logs a warning and users cannot tell them apart; give it another string
+custom/field_options/models/bench.py:94:35: OD220 'shown_as' has the label 'Display Name' of field 'display_name' of greenhouse.pot, so Odoo logs a warning and users cannot tell them apart; give it another string
+custom/field_options/models/bench.py:100:53: OD220 'write_uid' has the label 'Potted by' of field 'potter_id' of greenhouse.pot, so Odoo logs a warning and users cannot tell them apart; give it another string
 custom/field_options/models/plant.py:17:5: OD116 field 'copy' replaces the method copy() of BaseModel on this model, so callers get the field instead; rename it
 custom/field_options/models/plant.py:18:5: OD116 field 'env' replaces the attribute env of BaseModel on this model, so callers get the field instead; rename it
 custom/field_options/models/plant.py:26:31: OD221 'child_ids.total' makes 'total' depend on itself on other records, so Odoo logs a warning; declare 'total' with recursive=True
@@ -244,6 +249,11 @@ custom/modern20/models/meter.py:7:5: OD226 _auto = False leaves modern.meter wit
 custom/modern20/models/res_partner.py:10:96: OD203 'x_parent_model': res.partner has no field 'x_parent_model'
 custom/modern20/models/res_partner.py:17:33: OD219 'note' sets tracking, but modern.note does not inherit mail.thread, so Odoo ignores it and logs a warning; inherit mail.thread or remove tracking
 custom/modern20/models/res_partner.py:41:30: OD220 'ref' has the label 'ID' of field 'id' of modern.ticket, so Odoo logs a warning and users cannot tell them apart; give it another string
+custom/modern20/models/res_partner.py:73:41: OD220 'touched_on' has the label 'Last Updated on' of field 'write_date' of modern.desk, so Odoo logs a warning and users cannot tell them apart; give it another string
+custom/modern20/models/res_partner.py:74:40: OD220 'opened_on' has the label 'Created on' of field 'create_date' of modern.desk, so Odoo logs a warning and users cannot tell them apart; give it another string
+custom/modern20/models/res_partner.py:75:35: OD220 'shown_as' has the label 'Stamp name' of field 'display_name' of modern.desk, so Odoo logs a warning and users cannot tell them apart; give it another string
+custom/modern20/models/res_partner.py:82:34: OD220 'caption' has the label 'Display Name' of field 'display_name' of modern.tag, so Odoo logs a warning and users cannot tell them apart; give it another string
+custom/modern20/models/res_partner.py:90:20: OD220 'display_name' has the label 'Display Name' of field 'caption' of modern.shelf, so Odoo logs a warning and users cannot tell them apart; give it another string
 custom/modern20/models/tariff.py:13:45: OD212 Monetary field 'amount' takes its currency from 'x_tariff_currency_id', which modern.tariff does not have
 custom/modern20/models/tariff.py:16:39: OD224 t.code: modern_tariff has no such column, since modern.tariff has no field code; name the column of a stored field of modern.tariff
 custom/orm_overrides/models/caches.py:7:21: OD120 'lang' in an ormcache key is not a parameter of _greeting_for(), so every call raises NameError; key on a parameter or on self
