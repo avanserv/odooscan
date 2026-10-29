@@ -161,7 +161,8 @@ pub struct ClassFact {
     pub super_calls: Vec<Spanned<String>>,
     /// Methods of the class that call the method they override through `super()`.
     pub extended: Vec<String>,
-    /// A base class is a plain Python class, whose methods only Python knows.
+    /// A base class is a plain Python class, whose methods only Python knows: any base but
+    /// `Model`, `TransientModel`, `AbstractModel` and `CachedModel`.
     pub plain_bases: bool,
     /// The value of `_table`, when the class sets it.
     pub table: Option<OptionValue>,
