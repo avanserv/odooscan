@@ -13,6 +13,12 @@
       "count": 1
     },
     {
+      "path": "addons/account/models/account_account_tag.py",
+      "code": "OD122",
+      "message": "UPDATE on account_account_tag bypasses the ORM, so records this transaction already read keep stale values; call flush_model() before the query and invalidate_model() after it (flush() and invalidate_cache() before 16.0)",
+      "count": 1
+    },
+    {
       "path": "addons/account/models/account_bank_statement.py",
       "code": "OD101",
       "message": "query built by string formatting; pass parameters separately or build it with odoo.tools.SQL",
@@ -40,6 +46,18 @@
       "path": "addons/account/models/account_lock_exception.py",
       "code": "OD105",
       "message": "copy() override never calls super(), so other modules' overrides and the ORM itself are skipped",
+      "count": 1
+    },
+    {
+      "path": "addons/account/models/ir_module.py",
+      "code": "OD124",
+      "message": "TEMPLATE_REGISTER is filled at runtime but lives in the Python process, so every database the server runs shares it and each worker fills its own copy; cache on a model method with tools.ormcache, which Odoo keeps per database and clears in every worker",
+      "count": 1
+    },
+    {
+      "path": "addons/account/models/partner.py",
+      "code": "OD122",
+      "message": "UPDATE on res_partner bypasses the ORM, so records this transaction already read keep stale values; call flush_model() before the query and invalidate_model() after it (flush() and invalidate_cache() before 16.0)",
       "count": 1
     },
     {
@@ -121,9 +139,21 @@
       "count": 1
     },
     {
+      "path": "addons/attachment_indexation/models/ir_attachment.py",
+      "code": "OD124",
+      "message": "index_content_cache is filled at runtime but lives in the Python process, so every database the server runs shares it and each worker fills its own copy; cache on a model method with tools.ormcache, which Odoo keeps per database and clears in every worker",
+      "count": 1
+    },
+    {
       "path": "addons/auth_oauth/controllers/main.py",
       "code": "OD103",
       "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
+      "count": 1
+    },
+    {
+      "path": "addons/auth_passkey/models/auth_passkey_key.py",
+      "code": "OD122",
+      "message": "UPDATE on auth_passkey_key bypasses the ORM, so records this transaction already read keep stale values; call flush_model() before the query and invalidate_model() after it (flush() and invalidate_cache() before 16.0)",
       "count": 1
     },
     {
@@ -187,6 +217,18 @@
       "count": 1
     },
     {
+      "path": "addons/base_sparse_field/models/fields.py",
+      "code": "OD123",
+      "message": "setting fields.Field.sparse at import changes it in every database the server runs, whether this module is installed there or not; subclass fields.Field in this module and use the subclass where it needs the change",
+      "count": 1
+    },
+    {
+      "path": "addons/base_sparse_field/models/fields.py",
+      "code": "OD123",
+      "message": "setting fields.Serialized at import changes it in every database the server runs, whether this module is installed there or not; keep the value in this module and import it from there",
+      "count": 1
+    },
+    {
       "path": "addons/board/models/board.py",
       "code": "OD105",
       "message": "create() override never calls super(), so other modules' overrides and the ORM itself are skipped",
@@ -202,6 +244,12 @@
       "path": "addons/bus/models/bus.py",
       "code": "OD401",
       "message": "model 'bus.bus' has no ir.model.access rule, so only the superuser can use it",
+      "count": 1
+    },
+    {
+      "path": "addons/bus/session_helpers.py",
+      "code": "OD124",
+      "message": "_stat_by_sid is filled at runtime but lives in the Python process, so every database the server runs shares it and each worker fills its own copy; cache on a model method with tools.ormcache, which Odoo keeps per database and clears in every worker",
       "count": 1
     },
     {
@@ -232,6 +280,12 @@
       "path": "addons/cloud_storage/controllers/rtc.py",
       "code": "OD112",
       "message": "csrf=False lets other sites submit this form on the user's behalf",
+      "count": 1
+    },
+    {
+      "path": "addons/cloud_storage_migration/models/ir_attachment.py",
+      "code": "OD122",
+      "message": "UPDATE on ir_config_parameter bypasses the ORM, so records this transaction already read keep stale values; call flush_model() before the query and invalidate_model() after it (flush() and invalidate_cache() before 16.0)",
       "count": 1
     },
     {
@@ -1447,6 +1501,12 @@
       "count": 1
     },
     {
+      "path": "addons/mail/controllers/thread.py",
+      "code": "OD122",
+      "message": "UPDATE on mail_canned_response bypasses the ORM, so records this transaction already read keep stale values; call flush_model() before the query and invalidate_model() after it (flush() and invalidate_cache() before 16.0)",
+      "count": 1
+    },
+    {
       "path": "addons/mail/data/discuss_channel_data.xml",
       "code": "OD303",
       "message": "XML id 'mail.channel_admin' is already defined earlier in this file",
@@ -2287,6 +2347,12 @@
       "count": 1
     },
     {
+      "path": "addons/sale_pdf_quote_builder/controllers/quotation_document.py",
+      "code": "OD121",
+      "message": "rolling back discards the whole transaction, the caller's work included, while the code carries on; raise an exception so that Odoo rolls back, or run the step that may fail under self.env.cr.savepoint()",
+      "count": 2
+    },
+    {
       "path": "addons/sale_service/static/src/components/so_line_create_button/so_line_create_button.js",
       "code": "OD604",
       "message": "method 'get_first_service_line' of sale.order comes from module sale_project, which is not in depends",
@@ -2461,6 +2527,12 @@
       "count": 1
     },
     {
+      "path": "addons/test_translation_mode/tools/translate.py",
+      "code": "OD123",
+      "message": "setting TranslationImporter._load at import changes it in every database the server runs, whether this module is installed there or not; subclass TranslationImporter in this module and use the subclass where it needs the change",
+      "count": 1
+    },
+    {
       "path": "addons/test_website/controllers/main.py",
       "code": "OD111",
       "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
@@ -2518,6 +2590,24 @@
       "path": "addons/website/controllers/model_page.py",
       "code": "OD111",
       "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
+      "count": 1
+    },
+    {
+      "path": "addons/website/models/base_partner_merge.py",
+      "code": "OD122",
+      "message": "UPDATE on website_visitor bypasses the ORM, so records this transaction already read keep stale values; call flush_model() before the query and invalidate_model() after it (flush() and invalidate_cache() before 16.0)",
+      "count": 1
+    },
+    {
+      "path": "addons/website/models/ir_module_module.py",
+      "code": "OD122",
+      "message": "UPDATE on website_menu bypasses the ORM, so records this transaction already read keep stale values; call flush_model() before the query and invalidate_model() after it (flush() and invalidate_cache() before 16.0)",
+      "count": 1
+    },
+    {
+      "path": "addons/website/models/website_form.py",
+      "code": "OD122",
+      "message": "UPDATE on ir_model_fields bypasses the ORM, so records this transaction already read keep stale values; call flush_model() before the query and invalidate_model() after it (flush() and invalidate_cache() before 16.0)",
       "count": 1
     },
     {
@@ -2851,6 +2941,36 @@
       "count": 4
     },
     {
+      "path": "odoo/addons/base/models/ir_cron.py",
+      "code": "OD121",
+      "message": "rolling back discards the whole transaction, the caller's work included, while the code carries on; raise an exception so that Odoo rolls back, or run the step that may fail under self.env.cr.savepoint()",
+      "count": 1
+    },
+    {
+      "path": "odoo/addons/base/models/ir_cron.py",
+      "code": "OD122",
+      "message": "DELETE on ir_cron_trigger bypasses the ORM, so records this transaction already read keep stale values; call flush_model() before the query and invalidate_model() after it (flush() and invalidate_cache() before 16.0)",
+      "count": 1
+    },
+    {
+      "path": "odoo/addons/base/models/ir_cron.py",
+      "code": "OD122",
+      "message": "INSERT on ir_cron_trigger bypasses the ORM, so records this transaction already read keep stale values; call flush_model() before the query and invalidate_model() after it (flush() and invalidate_cache() before 16.0)",
+      "count": 1
+    },
+    {
+      "path": "odoo/addons/base/models/ir_cron.py",
+      "code": "OD122",
+      "message": "UPDATE on ir_cron bypasses the ORM, so records this transaction already read keep stale values; call flush_model() before the query and invalidate_model() after it (flush() and invalidate_cache() before 16.0)",
+      "count": 2
+    },
+    {
+      "path": "odoo/addons/base/models/ir_model.py",
+      "code": "OD122",
+      "message": "DELETE on ir_attachment bypasses the ORM, so records this transaction already read keep stale values; call flush_model() before the query and invalidate_model() after it (flush() and invalidate_cache() before 16.0)",
+      "count": 1
+    },
+    {
       "path": "odoo/addons/base/models/ir_model.py",
       "code": "OD401",
       "message": "model 'ir.model.inherit' has no ir.model.access rule, so only the superuser can use it",
@@ -2887,6 +3007,12 @@
       "count": 1
     },
     {
+      "path": "odoo/addons/base/models/res_device.py",
+      "code": "OD122",
+      "message": "INSERT on res_device_log bypasses the ORM, so records this transaction already read keep stale values; call flush_model() before the query and invalidate_model() after it (flush() and invalidate_cache() before 16.0)",
+      "count": 1
+    },
+    {
       "path": "odoo/addons/base/populate/common.xml",
       "code": "OD502",
       "message": "'populate/common.xml' is not in the manifest's data or demo, so Odoo never loads it",
@@ -2915,6 +3041,18 @@
       "code": "OD103",
       "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
       "count": 2
+    },
+    {
+      "path": "odoo/addons/base/wizard/base_partner_merge.py",
+      "code": "OD122",
+      "message": "UPDATE on ir_default bypasses the ORM, so records this transaction already read keep stale values; call flush_model() before the query and invalidate_model() after it (flush() and invalidate_cache() before 16.0)",
+      "count": 1
+    },
+    {
+      "path": "odoo/addons/base/wizard/base_partner_merge.py",
+      "code": "OD122",
+      "message": "UPDATE on res_partner bypasses the ORM, so records this transaction already read keep stale values; call flush_model() before the query and invalidate_model() after it (flush() and invalidate_cache() before 16.0)",
+      "count": 1
     },
     {
       "path": "odoo/addons/test_base/models/test_acl.py",

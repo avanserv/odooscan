@@ -45,6 +45,7 @@ pub fn check_module<'m>(index: &Index<'m>, mi: usize, series: Option<Series>) ->
     manifest_files(module, &mut out);
     same_module_xmlids(module, &mut out);
     shadowed_members(module, series, &mut out);
+    legacy_hook_rollbacks(module, series, &mut out);
     for (_, file) in es_modules(index, mi, series) {
         if let Some(e) = &file.facts.syntax_error {
             out.push(&file.path, "OD000", e.pos, e.value.clone());
@@ -177,6 +178,17 @@ fn shadowed_members<'m>(module: &'m Module, series: Option<Series>, out: &mut Ou
                 );
                 out.push(&file.path, "OD116", field.name_pos, message);
             }
+        }
+    }
+}
+
+/// From 16.0 Odoo no longer calls `ir.http._handle_exception()`, so its rollbacks are reported as
+/// any other's.
+fn legacy_hook_rollbacks<'m>(module: &'m Module, series: Option<Series>, out: &mut Out<'m>) {
+    if series.is_some_and(|s| s >= Series { major: 16, minor: 0 }) {
+        for file in &module.python {
+            let found = file.facts.legacy_hook_rollbacks.iter().cloned();
+            out.diags.extend(found.map(|d| (file.path.as_path(), d)));
         }
     }
 }
