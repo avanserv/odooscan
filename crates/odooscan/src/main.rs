@@ -96,11 +96,7 @@ impl Settings {
     fn resolve(args: &CheckArgs, cwd: &Path) -> Result<Self, String> {
         let loaded = config::load(args.config.as_deref(), cwd)?;
         let (file, dir) = loaded.map_or_else(|| (Config::default(), cwd.to_path_buf()), |l| (l.config, l.dir));
-        let odoo_version = match (args.odoo_version, &file.odoo_version) {
-            (Some(s), _) => Some(s),
-            (None, Some(v)) => Some(parse_series(v)?),
-            (None, None) => None,
-        };
+        let odoo_version = default_series(args.odoo_version, file.odoo_version.as_deref())?;
         // A pattern applies where it is written: flags from here, the file from its directory.
         let exclude = if args.exclude.is_empty() {
             Exclude::new(&dir, &file.exclude)?
@@ -115,7 +111,7 @@ impl Settings {
         Ok(Self {
             scan: ScanOptions {
                 paths: args.paths.clone(),
-                addons_paths: or(&args.addons_path, file.addons_path),
+                addons_paths: addons_paths(&or(&args.addons_path, file.addons_path))?,
                 default_series: odoo_version,
             },
             select: or(&args.select, file.select),
@@ -133,6 +129,23 @@ impl Settings {
 
 fn or<T: Clone>(flag: &[T], file: Vec<T>) -> Vec<T> {
     if flag.is_empty() { file } else { flag.to_vec() }
+}
+
+fn default_series(flag: Option<Series>, file: Option<&str>) -> Result<Option<Series>, String> {
+    match (flag, file) {
+        (Some(s), _) => Ok(Some(s)),
+        (None, Some(v)) => parse_series(v).map(Some),
+        (None, None) => Ok(None),
+    }
+}
+
+/// Indexing around a missing entry would report every module behind it as absent.
+fn addons_paths(entries: &[PathBuf]) -> Result<Vec<PathBuf>, String> {
+    let paths: Vec<PathBuf> = entries.iter().map(|p| config::expand_home(p)).collect();
+    match paths.iter().find(|p| !p.is_dir()) {
+        Some(p) => Err(format!("addons path {}: no such directory", p.display())),
+        None => Ok(paths),
+    }
 }
 
 fn parse_series(s: &str) -> Result<Series, String> {

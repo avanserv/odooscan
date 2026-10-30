@@ -15,4 +15,5 @@ baseline = "odooscan-baseline.json"
 
 Paths in the file are relative to it, and so are anchored `exclude` patterns (those with a slash
 before the end, such as `/legacy`). An unanchored one, such as `migrations/`, matches at any depth.
-Excluded files are still indexed: they only go unreported.
+Excluded files are still indexed: they only go unreported. An `addons-path` entry may start with
+`~`, and `oscn` exits with status 2 when one is not a directory.
