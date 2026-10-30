@@ -1078,8 +1078,9 @@ impl<'m> Field<'m> {
         picked.iter().copied().filter(open).collect()
     }
 
-    /// The value the last definitions that set the attribute agree on. One that unpacks `**kwargs`
-    /// may set anything, and an expression only a run evaluates, so either makes it unknown.
+    /// The value the last definitions that set the option agree on. A definition that unpacks
+    /// `**kwargs` without naming the option may set it, and an option given as an expression that
+    /// only a run can evaluate is unknown, so either makes the value unknown.
     fn get(&self, name: &str) -> Merged<'m> {
         let mut merged = Merged::Unset;
         for i in self.last(|d| d.2.splat || d.2.option(name).is_some()) {
@@ -1270,8 +1271,9 @@ fn unassigned_message(method: &str, fields: &[&str]) -> String {
 
 /// Model and field definitions Odoo refuses, ignores or logs as wrong when it loads the registry,
 /// or that fail once used. Each rule reads every definition merged into the model, so none runs
-/// where a module in scope depends on one that is not indexed, on a model whose introducing class
-/// is out of scope, or on one with a plain Python base class, whose fields only Python knows.
+/// where a module in scope depends on a module that is not indexed. None runs on a model whose
+/// class with `_name` is out of scope, or where a class of it, or of a model it inherits or
+/// delegates to, has a plain Python base class, whose fields only Python knows.
 impl<'m> Ctx<'_, 'm> {
     fn registry(&self, out: &mut Out<'m>) {
         if self.partial {
@@ -1646,12 +1648,12 @@ impl<'m> Ctx<'_, 'm> {
     }
 
     fn long_relation(&self, out: &mut Out<'m>, path: &'m Path, field: &Field<'m>, own: &FieldFact) {
-        let (relation, at, derived) = match field.get("relation") {
+        let (relation, at) = match field.get("relation") {
             Merged::Known(OptionValue::Str(r)) if self.reported_at(field, own, |f| f.option("relation").is_some()) => {
-                (r.clone(), pos_of(own, "relation"), false)
+                (r.clone(), pos_of(own, "relation"))
             }
             Merged::Unset if self.introduces(field, own) => match self.implicit_relation(field) {
-                Some(r) => (r, own.pos, true),
+                Some(r) => (r, own.pos),
                 None => return,
             },
             _ => return,
@@ -1659,13 +1661,8 @@ impl<'m> Ctx<'_, 'm> {
         if relation.len() <= PG_NAME_MAX {
             return;
         }
-        let fix = if derived {
-            "; name a shorter one with relation="
-        } else {
-            ""
-        };
         let message = format!(
-            "relation table '{relation}' of '{}' is {} characters long, and PostgreSQL allows {PG_NAME_MAX}{fix}",
+            "relation table '{relation}' of '{}' is {} characters long, and PostgreSQL allows {PG_NAME_MAX}; name a shorter one with relation=",
             own.name,
             relation.len()
         );

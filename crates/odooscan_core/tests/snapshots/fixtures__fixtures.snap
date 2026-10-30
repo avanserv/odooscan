@@ -200,7 +200,7 @@ custom/orm_overrides/models/overrides.py:24:5: OD117 @api.model on create() make
 custom/project_fork/models/task.py:4:7: OD209 module project already defines model 'project.task', and this class replaces it; extend it with _inherit = 'project.task'
 custom/registry_fields/models/links.py:7:71: OD213 'owner_id' is required, so Odoo refuses ondelete='set null'; use 'restrict' or 'cascade'
 custom/registry_fields/models/links.py:11:19: OD214 'follower_ids' and 'watcher_ids' are Many2many fields of registry.invoice to the same comodel without relation, so Odoo gives both the same table; set relation on one
-custom/registry_fields/models/links.py:14:33: OD215 relation table 'registry_invoice_partners_notified_about_each_payment_reminder_rel' of 'notified_ids' is 66 characters long, and PostgreSQL allows 63
+custom/registry_fields/models/links.py:14:33: OD215 relation table 'registry_invoice_partners_notified_about_each_payment_reminder_rel' of 'notified_ids' is 66 characters long, and PostgreSQL allows 63; name a shorter one with relation=
 custom/registry_fields/models/links.py:27:44: OD213 'approver_id' is required, so Odoo refuses ondelete='set null'; use 'restrict' or 'cascade'
 custom/registry_fields/models/links.py:36:20: OD215 relation table 'registry_inspection_checklist_registry_inspection_checklist_template_rel' of 'template_ids' is 72 characters long, and PostgreSQL allows 63; name a shorter one with relation=
 custom/registry_fields/models/money.py:29:14: OD212 Monetary field 'amount' has no currency: registry.invoice has no currency_id, and the field names no currency_field
