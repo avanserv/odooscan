@@ -526,6 +526,10 @@ pub fn analyze(src: &str) -> PyFacts {
         self_cursors: vec![],
         cursor_uses: vec![],
         in_view_maker: false,
+        odoo_names: module_state::odoo_names(&module_state::top_level(body))
+            .into_iter()
+            .map(|(local, _)| local)
+            .collect(),
     };
     v.visit_body(body);
     let (patches, diags) = module_state::check(body, &loc);
@@ -555,6 +559,8 @@ struct PyVisitor<'a, 'ast> {
     cursor_uses: Vec<CursorUse<'ast>>,
     /// Whether the code is in the `init()` or `_auto_init()` of a model, which creates its view.
     in_view_maker: bool,
+    /// The names the file's imports from `odoo` bind at import.
+    odoo_names: Vec<&'ast str>,
 }
 
 impl<'ast> PyVisitor<'_, 'ast> {
@@ -1213,19 +1219,26 @@ impl<'ast> PyVisitor<'_, 'ast> {
         }
     }
 
-    /// The query a call spells out or runs, unless it runs a `SQL()` value, which is read where it
-    /// is built.
+    /// The query a call spells out or runs, unless it runs an Odoo `SQL()` value, which is read
+    /// where it is built. Another `SQL()`, such as psycopg2's, is read only where an Odoo cursor
+    /// runs it, since it may build a query for another database.
     fn sql_query(&self, call: &'ast ast::ExprCall) -> Option<&'ast Expr> {
         let arg = call.arguments.args.first()?;
         match &*call.func {
-            func if tail_name(func) == Some("SQL") => Some(arg),
+            func if self.odoo_sql(func) => Some(arg),
             Expr::Attribute(a) if self.runs_query(a) => {
                 let value = self.query_vars.as_ref().map_or(arg, |v| v.value(arg));
-                let built = matches!(value, Expr::Call(c) if tail_name(&c.func) == Some("SQL"));
+                let built = matches!(value, Expr::Call(c) if self.odoo_sql(&c.func));
                 (!built).then_some(value)
             }
             _ => None,
         }
+    }
+
+    /// Whether a call builds Odoo's `SQL`: its name starts from one an import of `odoo` binds, as
+    /// `SQL`, `tools.SQL` or `odoo.tools.SQL` do and psycopg2's `sql.SQL` does not.
+    fn odoo_sql(&self, func: &Expr) -> bool {
+        tail_name(func) == Some("SQL") && module_state::root(func).is_some_and(|name| self.odoo_names.contains(&name))
     }
 
     /// `<cursor>.execute` on Odoo's database, or `<env>.execute_query`, which run the query they
@@ -1814,6 +1827,22 @@ mod tests {
             ]
         );
         assert_eq!(facts.classes[0].methods, ["_table_query", "f"]);
+    }
+
+    #[test]
+    fn reads_odoo_sql_where_it_is_built_and_psycopg2_sql_where_an_odoo_cursor_runs_it() {
+        let odoo = "from odoo import tools\nfrom odoo.tools import sql\nimport odoo\n\n\
+                    def f():\n    \
+                    tools.SQL('SELECT a.x FROM t a')\n    \
+                    sql.SQL('SELECT b.x FROM t b')\n    \
+                    odoo.tools.SQL('SELECT c.x FROM t c')\n";
+        assert_eq!(read_columns(odoo), ["t.x", "t.x", "t.x"]);
+        let psycopg2 = "from psycopg2 import sql\n\n\
+                        def f(env, remote):\n    \
+                        sql.SQL('SELECT d.x FROM t d')\n    \
+                        remote.execute(sql.SQL('SELECT e.x FROM t e'))\n    \
+                        env.cr.execute(sql.SQL('SELECT f.y FROM t f'))\n";
+        assert_eq!(read_columns(psycopg2), ["t.y"]);
     }
 
     /// The table and column of each query column a source reads, in order.

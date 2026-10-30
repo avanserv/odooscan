@@ -1320,6 +1320,12 @@ fn has_last_update(series: Option<Series>) -> bool {
     series.is_some_and(|s| s < NO_LAST_UPDATE)
 }
 
+fn unlogged(class: &ClassFact) -> bool {
+    class
+        .attr("_log_access")
+        .is_some_and(|a| a.value == OptionValue::Bool(false))
+}
+
 /// What becomes of the field Odoo adds to a model under a name that indexed classes define too.
 enum MagicBase<'a> {
     /// Classes of the model merge into it, so its label stands unless one sets `string`.
@@ -2519,9 +2525,10 @@ impl<'m> Ctx<'_, 'm> {
     }
 
     /// What the table of `model` holds for `name`. Of the fields Odoo adds without a definition,
-    /// `id`, the log columns unless every class sets `_log_access` to False, `parent_path` under
-    /// `_parent_store` and the fields `_inherits` names are present, and `display_name` is not
-    /// stored. Present too are fields whose column depends on the series or on `attachment`.
+    /// `id`, the log columns where `logs_access` says so, `parent_path` under `_parent_store` and
+    /// the fields `_inherits` names are present, and `display_name`, and `__last_update` up to
+    /// 16.0, are not stored. Present too are fields whose column depends on the series or on
+    /// `attachment`.
     fn column(&self, model: &'m str, name: &str) -> Column<'m> {
         let delegates = |c: &ClassFact| c.inherits.iter().any(|(_, field)| field == name);
         if self.index.implicit_column(model, name)
@@ -2541,24 +2548,44 @@ impl<'m> Ctx<'_, 'm> {
     }
 
     /// What a name no field of the model defines is: a log column the model leaves out, a field the
-    /// ORM computes, or nothing.
+    /// ORM computes, or nothing, which `__last_update` is after 16.0 or in an unknown series.
     fn undefined(&self, name: &str) -> Column<'m> {
         if self.index.log_column(name) {
             Column::Unlogged
-        } else if self.index.magic_field(name) {
+        } else if self.index.magic_field(name) && (name != "__last_update" || has_last_update(self.series)) {
             Column::Computed
         } else {
             Column::Missing
         }
     }
 
-    /// Whether Odoo gives the table of `model` its log columns: unless every class in scope sets
-    /// `_log_access` to False.
+    /// Whether Odoo gives the table of `model` its log columns. From saas~14.4 the metaclass adds
+    /// them only to the class that introduces the model, so they are there unless every such class
+    /// in scope sets `_log_access` to False. Before, classes merge into one whose last setting wins,
+    /// and Odoo never drops a column, so they are missing only when the module introducing the
+    /// model sets False and no class sets anything else. An unknown series misses them only when
+    /// both rules agree, so no era reports a column its series has.
     fn logs_access(&self, model: &str) -> bool {
-        self.some_class(model, |c| {
-            c.attr("_log_access")
-                .is_none_or(|a| a.value != OptionValue::Bool(false))
-        })
+        if self.series.is_none() {
+            return self.introduced_logs_access(model) || self.merged_logs_access(model);
+        }
+        match magic_era(self.series) {
+            MagicEra::RegistryMerge | MagicEra::Setup => self.merged_logs_access(model),
+            MagicEra::Metaclass | MagicEra::Base => self.introduced_logs_access(model),
+        }
+    }
+
+    fn introduced_logs_access(&self, model: &str) -> bool {
+        !self.some_class(model, |c| c.new_model) || self.some_class(model, |c| c.new_model && !unlogged(c))
+    }
+
+    fn merged_logs_access(&self, model: &str) -> bool {
+        let classes = self.index.classes(model);
+        let introducing = |mi: usize| classes.iter().any(|(m, c)| *m == mi && c.new_model);
+        let unlogged_at_introduction = classes
+            .iter()
+            .any(|(mi, c)| self.scope.sees(*mi) && introducing(*mi) && unlogged(c));
+        !unlogged_at_introduction || self.some_class(model, |c| c.attr("_log_access").is_some() && !unlogged(c))
     }
 
     /// The model `model` delegates to through `_inherits` that has the field `name`, with the field

@@ -928,10 +928,36 @@ pub(crate) fn set_columns(text: &str) -> Option<Vec<&str>> {
     }
 }
 
-/// The table and the column each `ADD [COLUMN] [IF NOT EXISTS] <name>` of an
-/// `ALTER TABLE [IF EXISTS] [ONLY] <table>` query adds, with plain or double-quoted names. Empty
-/// for another query, or a table followed by anything that may continue it, such as a schema.
+/// The table and the column each `ADD [COLUMN] [IF NOT EXISTS] <name>` adds, over every
+/// `ALTER TABLE` statement of the text, with plain or double-quoted names.
 pub(crate) fn added_columns(text: &str) -> Vec<(String, String)> {
+    statements(text).into_iter().flat_map(statement_added_columns).collect()
+}
+
+/// The statements of a text, cut at each `;` outside `'...'` literals, quoted names and comments,
+/// though not dollar-quoted or `E'...'` ones. The text after a quote that never closes stays in the
+/// last one.
+fn statements(text: &str) -> Vec<&str> {
+    let (mut statements, mut start, mut rest) = (vec![], text, text);
+    loop {
+        rest = skip_blank(rest);
+        let Some(token) = token(rest) else {
+            statements.push(start);
+            return statements;
+        };
+        let after = &rest[token.len()..];
+        if token == ";" {
+            statements.push(&start[..start.len() - rest.len()]);
+            start = after;
+        }
+        rest = after;
+    }
+}
+
+/// The table and the columns one `ALTER TABLE [IF EXISTS] [ONLY] <table>` statement adds. Empty
+/// unless the statement opens with `ALTER TABLE`, or when no blank follows the table name, which
+/// the text after it may continue, as `.` does for a schema.
+fn statement_added_columns(text: &str) -> Vec<(String, String)> {
     let mut rest = text;
     if !(expect(&mut rest, "ALTER") && expect(&mut rest, "TABLE")) {
         return vec![];
@@ -999,12 +1025,21 @@ fn skip_alias(rest: &mut &str) -> bool {
     next.is_some_and(|w| w.eq_ignore_ascii_case("SET"))
 }
 
-/// Skips the value of a `SET` assignment: whether a comma follows it, with the text after the
-/// comma. None where the value stops being readable: an f-string value or unbalanced brackets or
-/// quotes.
+/// Skips the value of a `SET` assignment or an `ALTER TABLE` action, and the comments in it:
+/// whether a comma follows it, with the text after the comma. None where the value stops being
+/// readable: an f-string value, in a comment too, since the comment may end inside it, or
+/// unbalanced brackets or quotes.
 fn skip_value(text: &str) -> Option<(bool, &str)> {
     let (mut depth, mut rest) = (0u32, text);
-    while !rest.is_empty() {
+    loop {
+        let after = skip_blank(rest);
+        if rest[..rest.len() - after.len()].contains('{') {
+            return None;
+        }
+        rest = after;
+        if rest.is_empty() {
+            break;
+        }
         let token = token(rest)?;
         rest = &rest[token.len()..];
         if depth == 0 && (token == "," || AFTER_SET.iter().any(|k| token.eq_ignore_ascii_case(k))) {
@@ -2912,11 +2947,17 @@ mod tests {
         );
         assert_eq!(columns("UPDATE t x SET a = %s FROM u WHERE b, c").as_deref(), Some("a"));
         assert_eq!(columns("UPDATE t SET a = 1 RETURNING id, b").as_deref(), Some("a"));
+        assert_eq!(
+            columns("UPDATE t SET a = 1, -- not where it ends\n b = 2 /* nor from */ WHERE id = 1").as_deref(),
+            Some("a b")
+        );
+        assert_eq!(columns("UPDATE t SET a = 1 -- where\n, b = 2").as_deref(), Some("a b"));
         for text in [
             "DELETE FROM t",
             "UPDATE t SET (a, b) = (1, 2)",
             "UPDATE t SET %s = 1",
             "UPDATE t SET a = {",
+            "UPDATE t SET a = 1 -- {",
             "UPDATE t SET a = (1",
             "UPDATE t SET a = 'x",
             "UPDATE t SET a",
@@ -3236,6 +3277,25 @@ mod tests {
                  ADD \"Label\" text"
             ),
             [pair("Box", "code"), pair("Box", "weight"), pair("Box", "Label")]
+        );
+        assert_eq!(
+            added(
+                "ALTER TABLE box -- read from the depot's (old; new) labels\n\
+                 ADD COLUMN code varchar -- where the depot's (old; new) printer reads it\n\
+                 , /* where; ( ' */ ADD COLUMN label varchar;\n\
+                 -- the crate too\n\
+                 ALTER TABLE crate ADD COLUMN weight numeric; ALTER TABLE \"x;y\" ADD COLUMN note text"
+            ),
+            [
+                pair("box", "code"),
+                pair("box", "label"),
+                pair("crate", "weight"),
+                pair("x;y", "note")
+            ]
+        );
+        assert_eq!(
+            statements("SELECT ';' -- ;\n; SELECT 2"),
+            ["SELECT ';' -- ;\n", " SELECT 2"]
         );
         assert!(added("ALTER TABLE public.box ADD COLUMN code varchar, ADD COLUMN label varchar").is_empty());
         assert!(added("ALTER TABLE box_%s ADD COLUMN code varchar, ADD COLUMN label varchar").is_empty());

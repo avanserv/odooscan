@@ -40,3 +40,6 @@ access_parcel_bay,parcel.bay,model_parcel_bay,base.group_user,1,0,0,0
 access_parcel_pier,parcel.pier,model_parcel_pier,base.group_user,1,0,0,0
 access_parcel_berth,parcel.berth,model_parcel_berth,base.group_user,1,0,0,0
 access_parcel_box_country,parcel.box.country,model_parcel_box_country,base.group_user,1,0,0,0
+access_parcel_tracker,parcel.tracker,model_parcel_tracker,base.group_user,1,1,1,1
+access_parcel_relay,parcel.relay,model_parcel_relay,base.group_user,1,1,1,1
+access_parcel_antenna,parcel.antenna,model_parcel_antenna,base.group_user,1,1,1,1
