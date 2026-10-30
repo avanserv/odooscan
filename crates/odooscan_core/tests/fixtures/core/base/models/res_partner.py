@@ -4,6 +4,9 @@ from odoo import fields, models
 class Base(models.AbstractModel):
     _name = "base"
 
+    def _get_default_calendar_view(self):
+        return None
+
 
 class ResCountry(models.Model):
     _name = "res.country"
@@ -77,6 +80,16 @@ class IrActionsActWindow(models.Model):
     res_model = fields.Char()
     domain = fields.Char()
     context = fields.Char()
+    view_id = fields.Many2one("ir.ui.view")
+    view_ids = fields.One2many("ir.actions.act_window.view", "act_window_id")
+
+
+class IrActionsActWindowView(models.Model):
+    _name = "ir.actions.act_window.view"
+
+    view_mode = fields.Char()
+    view_id = fields.Many2one("ir.ui.view")
+    act_window_id = fields.Many2one("ir.actions.act_window")
 
 
 class IrModelAccess(models.Model):

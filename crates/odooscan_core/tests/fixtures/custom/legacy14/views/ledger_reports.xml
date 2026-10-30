@@ -14,4 +14,17 @@
             </field>
         </field>
     </record>
+
+    <act_window id="action_ledger_list" name="Ledger list" res_model="legacy.ledger" view_mode="tree,form"/>
+    <act_window id="action_ledger_typo" name="Ledger typo" res_model="legacy.ledgr"/>
+
+    <record id="action_ledger_default" model="ir.actions.act_window">
+        <field name="name">Ledger default</field>
+        <field name="res_model">legacy.ledger</field>
+        <field name="view_mode">gantt</field>
+    </record>
+
+    <act_window id="action_ledger_view" name="Ledger view" res_model="legacy.ledger" view_mode="gantt" view_id="view_ledger_form"/>
+    <act_window id="action_ledger_ref" name="Ledger ref" res_model="legacy.ledger" view_mode="gantt"
+                context="{'gantt_view_ref': 'legacy14.view_ledger_form'}"/>
 </odoo>

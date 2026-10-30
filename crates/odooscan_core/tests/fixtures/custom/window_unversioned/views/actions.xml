@@ -1,0 +1,7 @@
+<odoo>
+    <record id="action_loose" model="ir.actions.act_window">
+        <field name="name">action_loose</field>
+        <field name="res_model">window.loose</field>
+        <field name="view_mode">calendar</field>
+    </record>
+</odoo>

@@ -1,0 +1,7 @@
+<odoo>
+    <record id="action_slots" model="ir.actions.act_window">
+        <field name="name">action_slots</field>
+        <field name="res_model">window.slot</field>
+        <field name="view_mode">gantt</field>
+    </record>
+</odoo>

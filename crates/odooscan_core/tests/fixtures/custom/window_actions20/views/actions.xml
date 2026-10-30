@@ -1,0 +1,7 @@
+<odoo>
+    <record id="action_days" model="ir.actions.act_window">
+        <field name="name">action_days</field>
+        <field name="res_model">window.day</field>
+        <field name="view_mode">calendar</field>
+    </record>
+</odoo>

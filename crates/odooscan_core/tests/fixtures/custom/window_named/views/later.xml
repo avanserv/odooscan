@@ -1,0 +1,5 @@
+<odoo>
+    <record id="action_view_id_later" model="ir.actions.act_window">
+        <field name="view_id" ref="window_actions.view_shown_gantt"/>
+    </record>
+</odoo>

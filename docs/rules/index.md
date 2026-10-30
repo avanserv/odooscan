@@ -118,6 +118,7 @@ XML ids, views and data records, within a file and across the dependency graph.
 | [OD315](OD315.md) | `invalid-modifier` | A view modifier is not an expression Odoo reads. |
 | [OD316](OD316.md) | `unknown-modifier-name` | A view modifier names a field its model does not have. |
 | [OD317](OD317.md) | `modifier-field-not-in-view` | A view modifier reads a field the view does not show. |
+| [OD318](OD318.md) | `view-mode-without-view` | A window action lists a view type its model has no view for. |
 
 ## OD4: access
 

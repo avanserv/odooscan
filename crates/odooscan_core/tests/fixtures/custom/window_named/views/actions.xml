@@ -1,0 +1,108 @@
+<odoo>
+    <record id="action_view_id" model="ir.actions.act_window">
+        <field name="name">action_view_id</field>
+        <field name="res_model">window.plain</field>
+        <field name="view_mode">gantt</field>
+        <field name="view_id" ref="window_actions.view_shown_gantt"/>
+    </record>
+
+    <record id="action_view_id_eval" model="ir.actions.act_window">
+        <field name="name">action_view_id_eval</field>
+        <field name="res_model">window.plain</field>
+        <field name="view_mode">gantt</field>
+        <field name="view_id" eval="ref('window_actions.view_shown_gantt')"/>
+    </record>
+
+    <record id="action_view_id_cleared" model="ir.actions.act_window">
+        <field name="name">action_view_id_cleared</field>
+        <field name="res_model">window.plain</field>
+        <field name="view_mode">gantt</field>
+        <field name="view_id" eval="False"/>
+    </record>
+
+    <record id="action_view_id_later" model="ir.actions.act_window">
+        <field name="name">action_view_id_later</field>
+        <field name="res_model">window.plain</field>
+        <field name="view_mode">gantt</field>
+    </record>
+
+    <record id="action_view_ids" model="ir.actions.act_window">
+        <field name="name">action_view_ids</field>
+        <field name="res_model">window.plain</field>
+        <field name="view_mode">gantt,map</field>
+        <field name="view_ids" eval="[(5, 0, 0), (0, 0, {'view_mode': 'gantt', 'view_id': ref('window_actions.view_shown_gantt')})]"/>
+    </record>
+
+    <record id="action_rows" model="ir.actions.act_window">
+        <field name="name">action_rows</field>
+        <field name="res_model">window.plain</field>
+        <field name="view_mode">gantt,map</field>
+    </record>
+
+    <record id="row_gantt" model="ir.actions.act_window.view">
+        <field name="view_mode">gantt</field>
+        <field name="view_id" ref="window_actions.view_shown_gantt"/>
+        <field name="act_window_id" ref="action_rows"/>
+    </record>
+
+    <record id="action_view_ids_hidden" model="ir.actions.act_window">
+        <field name="name">action_view_ids_hidden</field>
+        <field name="res_model">window.plain</field>
+        <field name="view_mode">gantt</field>
+        <field name="view_ids" eval="[(6, 0, [ref('row_gantt')])]"/>
+    </record>
+
+    <record id="action_row_without_view" model="ir.actions.act_window">
+        <field name="name">action_row_without_view</field>
+        <field name="res_model">window.plain</field>
+        <field name="view_mode">gantt</field>
+    </record>
+
+    <record id="row_without_view" model="ir.actions.act_window.view">
+        <field name="view_mode">gantt</field>
+        <field name="act_window_id" ref="action_row_without_view"/>
+    </record>
+
+    <record id="action_context_ref" model="ir.actions.act_window">
+        <field name="name">action_context_ref</field>
+        <field name="res_model">window.plain</field>
+        <field name="view_mode">gantt,map</field>
+        <field name="context">{'gantt_view_ref': 'window_actions.view_shown_gantt'}</field>
+    </record>
+
+    <record id="action_context_eval" model="ir.actions.act_window">
+        <field name="name">action_context_eval</field>
+        <field name="res_model">window.plain</field>
+        <field name="view_mode">gantt</field>
+        <field name="context" eval="{'gantt_view_ref': 'window_actions.view_shown_gantt'}"/>
+    </record>
+
+    <record id="row_of_dependency" model="ir.actions.act_window.view">
+        <field name="view_mode">gantt</field>
+        <field name="view_id" ref="window_actions.view_shown_gantt"/>
+        <field name="act_window_id" ref="window_actions.action_named_later"/>
+    </record>
+
+    <record id="action_nested_row" model="ir.actions.act_window">
+        <field name="name">action_nested_row</field>
+        <field name="res_model">window.plain</field>
+        <field name="view_mode">gantt,map</field>
+        <field name="view_ids">
+            <record id="row_nested" model="ir.actions.act_window.view">
+                <field name="view_mode">gantt</field>
+                <field name="view_id" ref="window_actions.view_shown_gantt"/>
+            </record>
+        </field>
+    </record>
+
+    <record id="action_nested_row_without_view" model="ir.actions.act_window">
+        <field name="name">action_nested_row_without_view</field>
+        <field name="res_model">window.plain</field>
+        <field name="view_mode">gantt</field>
+        <field name="view_ids">
+            <record id="row_nested_without_view" model="ir.actions.act_window.view">
+                <field name="view_mode">gantt</field>
+            </record>
+        </field>
+    </record>
+</odoo>
