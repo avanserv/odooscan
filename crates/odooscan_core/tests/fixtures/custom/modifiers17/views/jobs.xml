@@ -1,0 +1,48 @@
+<odoo>
+    <record id="job_form" model="ir.ui.view">
+        <field name="name">modifier.job.form</field>
+        <field name="model">modifier.job</field>
+        <field name="arch" type="xml">
+            <form>
+                <field name="name" invisible="state == 'done'"/>
+                <field name="name" invisible="active_id or active_ids or active_model"/>
+                <field name="name" readonly="note"/>
+            </form>
+        </field>
+    </record>
+
+    <record id="job_form_note" model="ir.ui.view">
+        <field name="name">modifier.job.form.note</field>
+        <field name="model">modifier.job</field>
+        <field name="inherit_id" ref="job_form"/>
+        <field name="arch" type="xml">
+            <field name="name" position="after">
+                <field name="note"/>
+                <field name="name" required="note"/>
+            </field>
+        </field>
+    </record>
+
+    <record id="job_tree" model="ir.ui.view">
+        <field name="name">modifier.job.tree</field>
+        <field name="model">modifier.job</field>
+        <field name="arch" type="xml">
+            <tree>
+                <groupby name="user_id">
+                    <button type="object" name="unlink" invisible="not parent.user_id"/>
+                </groupby>
+                <field name="name" invisible="user_id"/>
+            </tree>
+        </field>
+    </record>
+
+    <record id="job_calendar" model="ir.ui.view">
+        <field name="name">modifier.job.calendar</field>
+        <field name="model">modifier.job</field>
+        <field name="arch" type="xml">
+            <calendar date_start="start">
+                <field name="name" invisible="start"/>
+            </calendar>
+        </field>
+    </record>
+</odoo>

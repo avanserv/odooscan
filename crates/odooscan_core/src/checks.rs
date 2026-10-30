@@ -5,18 +5,18 @@ use std::path::Path;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::facts::{
-    Annotation, ClassFact, DefinitionSource, DomainFact, FieldFact, FunctionCall, JsFacts, JsName, ModelKind,
-    OptionValue, OrmCall, Pos, RawDiag, RecordFact, Spanned, SqlColumn, SqlView, ViewFact, XmlRef,
+    Annotation, ArchElement, ArchModifier, ClassFact, DefinitionSource, DomainFact, FieldFact, FunctionCall, JsFacts,
+    JsName, ModelKind, OptionValue, OrmCall, Pos, RawDiag, RecordFact, Spanned, SqlColumn, SqlView, ViewFact, XmlRef,
 };
 use crate::index::{
     BASE_MODEL_METHODS, Export, FieldDef, FieldInfo, Index, JsSpec, RELATIONAL_TYPES, Scope, Status, ViewTree, full_id,
     js_module_path, located,
 };
-use crate::manifest;
 use crate::project::{Module, SourceFile};
+use crate::rules::rule;
 use crate::series::{self, Series};
 use crate::xml::{LOCATOR, QWEB, UNKNOWN_CONTEXT};
-use crate::{flows, module_state};
+use crate::{flows, manifest, modifier, module_state};
 
 /// Directories of upgrade scripts, which name XML ids of past versions.
 const UPGRADE_DIRS: &[&str] = &["migrations", "upgrades"];
@@ -29,6 +29,25 @@ const PG_NAME_MAX: usize = 63;
 
 /// Directories whose XML and CSV files are not meant to be listed in the manifest.
 const UNLISTED_DIRS: &[&str] = &["tests", "i18n", "migrations", "upgrades", "doc", "docs", "examples"];
+
+/// Names 17.0 lets a modifier read with a deprecation warning, and saas~17.1 no longer does.
+const ACTIVE_NAMES: &[&str] = &["active_id", "active_ids", "active_model"];
+const ACTIVE_NAMES_UNTIL: Series = Series { major: 17, minor: 1 };
+
+/// View types whose arch elements list every field the view has. The others also take fields from
+/// attributes, as a calendar does from `date_start`.
+const VIEW_FIELD_KINDS: &[&str] = &["form", "tree", "kanban"];
+
+/// A name a modifier reads, with the view it sits in and the field it must find on `owner`.
+struct ModifierName<'a> {
+    model: &'a str,
+    view: &'a ViewFact,
+    kind: &'a str,
+    attr: &'a str,
+    name: &'a str,
+    owner: String,
+    field: &'a str,
+}
 
 pub struct Out<'m> {
     pub diags: Vec<(&'m Path, RawDiag)>,
@@ -948,7 +967,7 @@ impl<'m> Ctx<'_, 'm> {
                 self.xml_ref(out, path, r);
             }
             for view in &file.facts.views {
-                self.view(out, path, view);
+                self.view(out, path, view, &mut trees);
                 self.locators(out, path, view, &mut trees);
                 self.qweb_calls(out, path, view);
             }
@@ -1035,7 +1054,7 @@ impl<'m> Ctx<'_, 'm> {
         }
     }
 
-    fn view(&self, out: &mut Out<'m>, path: &'m Path, view: &ViewFact) {
+    fn view(&self, out: &mut Out<'m>, path: &'m Path, view: &ViewFact, trees: &mut FxHashMap<String, ViewTree<'m>>) {
         let model = match (&view.model, &view.inherit) {
             (Some(m), _) => {
                 self.model_ref(out, path, m, None);
@@ -1047,6 +1066,7 @@ impl<'m> Ctx<'_, 'm> {
         let Some(model) = model else { return };
         self.view_domains(out, path, model, view);
         self.buttons(out, path, model, view);
+        self.modifiers(out, path, model, view, trees);
         for field in view
             .fields
             .iter()
@@ -1090,14 +1110,19 @@ impl<'m> Ctx<'_, 'm> {
         }
     }
 
-    /// Odoo checks a button on the model at its arch position, unless the tree is QWeb, whose
-    /// buttons are plain HTML. A root the index cannot read may be QWeb.
-    fn buttons(&self, out: &mut Out<'m>, path: &'m Path, model: &str, view: &ViewFact) {
+    /// The type of the tree a view belongs to, unless it is QWeb, whose attributes are plain HTML. A
+    /// root the index cannot read may be QWeb.
+    fn arch_kind<'a>(&'a self, view: &'a ViewFact) -> Option<&'a str> {
         let kind = match view.inherit.as_deref() {
             Some(parent) => self.index.view_kind(full_id(&self.module.name, parent)),
             None => view.kind.as_deref(),
         };
-        if kind.is_none_or(|k| k == QWEB) {
+        kind.filter(|k| *k != QWEB)
+    }
+
+    /// Odoo checks a button on the model at its arch position.
+    fn buttons(&self, out: &mut Out<'m>, path: &'m Path, model: &str, view: &ViewFact) {
+        if self.arch_kind(view).is_none() {
             return;
         }
         for button in &view.buttons {
@@ -1125,15 +1150,20 @@ impl<'m> Ctx<'_, 'm> {
         }
     }
 
+    /// Whether the scan sees every class that could add to `model`. A model that is not visible is
+    /// OD201's or OD202's.
+    fn sees_whole_model(&self, model: &str) -> bool {
+        !self.partial
+            && !self.dynamic
+            && matches!(self.index.model_status(model, self.scope, None), Status::Visible)
+            && !self.index.hidden_parents(model, self.scope)
+            && !self.index.unindexed_parent(model, self.scope)
+    }
+
     /// Why `model` lacks the method a data file calls, when the scan sees every class that could
-    /// define it. A model that is not visible is OD201's or OD202's.
+    /// define it.
     fn method_gap(&self, model: &str, method: &str) -> Option<String> {
-        if self.partial
-            || self.dynamic
-            || !matches!(self.index.model_status(model, self.scope, None), Status::Visible)
-            || self.index.hidden_parents(model, self.scope)
-            || self.index.unindexed_parent(model, self.scope)
-        {
+        if !self.sees_whole_model(model) {
             return None;
         }
         match self.index.data_method(model, method, self.scope) {
@@ -1162,12 +1192,9 @@ impl<'m> Ctx<'_, 'm> {
         if !self.index.views.visible(&parent, |m| self.scope.sees(m)) {
             return;
         }
-        let Some(root) = self.index.views.root(parent) else {
+        let Some(tree) = self.view_tree(parent, trees) else {
             return;
         };
-        let tree = trees
-            .entry(root.clone())
-            .or_insert_with(|| self.index.views.tree(root, self.index.modules, |m| self.scope.sees(m)));
         for locator in &view.locators {
             let e = located(&locator.value, &self.module.name);
             if tree.visible.contains(&e) {
@@ -1180,6 +1207,143 @@ impl<'m> Ctx<'_, 'm> {
             };
             out.push(path, "OD310", locator.pos, message);
         }
+    }
+
+    /// The tree of views `id` belongs to, or None when the elements of some view on the way to its
+    /// root are unknown.
+    fn view_tree<'t>(&self, id: String, trees: &'t mut FxHashMap<String, ViewTree<'m>>) -> Option<&'t ViewTree<'m>> {
+        let root = self.index.views.root(id)?;
+        let tree = trees
+            .entry(root.clone())
+            .or_insert_with(|| self.index.views.tree(root, self.index.modules, |m| self.scope.sees(m)));
+        Some(tree)
+    }
+
+    /// Odoo validates modifiers on every view but a QWeb one. The gate comes first so that a series
+    /// without them, whose attributes mean something else, parses nothing.
+    fn modifiers(
+        &self,
+        out: &mut Out<'m>,
+        path: &'m Path,
+        model: &str,
+        view: &ViewFact,
+        trees: &mut FxHashMap<String, ViewTree<'m>>,
+    ) {
+        if !rule("OD315").applies_to(self.series) {
+            return;
+        }
+        let Some(kind) = self.arch_kind(view) else { return };
+        for m in &view.modifiers {
+            match modifier::names(&m.value.value) {
+                Ok(names) => {
+                    for name in &names {
+                        let Some(name) = self.modifier_name(model, view, kind, m, name) else {
+                            continue;
+                        };
+                        if let Some((code, message)) = self.modifier_finding(&name, trees) {
+                            out.push(path, code, m.value.pos, message);
+                        }
+                    }
+                }
+                Err(why) => out.push(
+                    path,
+                    "OD315",
+                    m.value.pos,
+                    format!("invalid {} expression: {why}", m.attr),
+                ),
+            }
+        }
+    }
+
+    /// Resolves a name to the field it reads, unless that field is out of the scan's reach. Each
+    /// `parent.` leaves a subview; Odoo ignores what leaves the outermost one.
+    fn modifier_name<'a>(
+        &self,
+        model: &'a str,
+        view: &'a ViewFact,
+        kind: &'a str,
+        m: &'a ArchModifier,
+        name: &'a str,
+    ) -> Option<ModifierName<'a>> {
+        self.arch_model(model, &m.path)?;
+        let mut steps: Vec<String> = m.path.iter().filter(|s| !s.starts_with(LOCATOR)).cloned().collect();
+        let mut field = name;
+        while let Some(rest) = field.strip_prefix("parent.") {
+            steps.pop()?;
+            field = rest;
+        }
+        let owner = self.arch_model(model, &steps)?;
+        let active = ACTIVE_NAMES.contains(&field) && self.series.is_some_and(|s| s < ACTIVE_NAMES_UNTIL);
+        (field != "id" && !active && self.sees_whole_model(&owner)).then_some(ModifierName {
+            model,
+            view,
+            kind,
+            attr: m.attr,
+            name,
+            owner,
+            field,
+        })
+    }
+
+    /// A field outside `depends` stays silent: an `auto_install` module may bring it wherever the
+    /// view is installed.
+    fn modifier_finding(
+        &self,
+        n: &ModifierName,
+        trees: &mut FxHashMap<String, ViewTree<'m>>,
+    ) -> Option<(&'static str, String)> {
+        match self.index.field(&n.owner, n.field, self.scope) {
+            Ok(_) => self.absent_field(n, trees).map(|message| ("OD317", message)),
+            Err(None) => self.unknown_name(n, trees).map(|message| ("OD316", message)),
+            Err(Some(_)) => None,
+        }
+    }
+
+    /// Only a dotted name after `parent.` gets here with a dot, and Odoo refuses those whatever the
+    /// path would reach.
+    fn unknown_name(&self, n: &ModifierName, trees: &mut FxHashMap<String, ViewTree<'m>>) -> Option<String> {
+        if self.anchored_in_subview(n, trees)? {
+            return None;
+        }
+        let why = if n.field.contains('.') {
+            "Odoo refuses a composed field".to_owned()
+        } else {
+            format!("{} has no field '{}'", n.owner, n.field)
+        };
+        Some(format!("{} names '{}': {why}", n.attr, n.name))
+    }
+
+    /// Whether an extension's element may have landed in a subview of the tree, where the name
+    /// would be a field of the comodel: a spec on a plain element can match inside one. None when
+    /// the tree is unknown.
+    fn anchored_in_subview(&self, n: &ModifierName, trees: &mut FxHashMap<String, ViewTree<'m>>) -> Option<bool> {
+        let Some(parent) = n.view.inherit.as_deref() else {
+            return Some(false);
+        };
+        let tree = self.view_tree(full_id(&self.module.name, parent), trees)?;
+        Some(tree.subviews.iter().any(|subview| {
+            self.arch_model(n.model, subview)
+                .is_none_or(|comodel| !matches!(self.index.field(&comodel, n.field, self.scope), Err(None)))
+        }))
+    }
+
+    /// Before saas~17.3 Odoo refuses a modifier on a field the view lacks. Any element of the tree
+    /// counts, in a module outside the scope too, since the check cannot tell what is installed.
+    fn absent_field(&self, n: &ModifierName, trees: &mut FxHashMap<String, ViewTree<'m>>) -> Option<String> {
+        if !rule("OD317").applies_to(self.series) || !VIEW_FIELD_KINDS.contains(&n.kind) {
+            return None;
+        }
+        let start = n.view.inherit.as_deref().or(n.view.id.as_deref())?;
+        let tree = self.view_tree(full_id(&self.module.name, start), trees)?;
+        let shown = ["field", "groupby"].into_iter().any(|tag| {
+            let element = ArchElement {
+                tag: tag.to_owned(),
+                attr: "name".to_owned(),
+                value: n.field.to_owned(),
+            };
+            tree.visible.contains(&element) || tree.hidden.contains_key(&element)
+        });
+        (!shown).then(|| format!("{} reads field '{}', which the view does not show", n.attr, n.field))
     }
 
     /// Whether the view renders on the server. The tree's root decides, since a kanban arch runs

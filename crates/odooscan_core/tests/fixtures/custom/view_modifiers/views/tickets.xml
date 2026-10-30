@@ -1,0 +1,64 @@
+<odoo>
+    <record id="ticket_form" model="ir.ui.view">
+        <field name="name">modifier.ticket.form</field>
+        <field name="model">modifier.ticket</field>
+        <field name="arch" type="xml">
+            <form>
+                <field name="name" invisible="state == 'done' and"/>
+                <field name="name" readonly="stat == 'done'"/>
+                <field name="name" required="[s for s in state]"/>
+                <field name="name" invisible="true and state == 'done'"/>
+                <field name="name" invisible="TRUE"/>
+                <field name="name" invisible="state == %(base.action_partner)d"/>
+                <field name="name" invisible="len(name) %% 2"/>
+                <field name="name" invisible="context.get('hide') and uid and not id"/>
+                <field name="name" invisible="parent.stat"/>
+                <field name="state"/>
+                <field name="line_ids">
+                    <list>
+                        <field name="quantity"/>
+                        <field name="name" column_invisible="parent.stat == 'done'"/>
+                        <field name="name" column_invisible="parent.state.x"/>
+                        <field name="name" readonly="parent.state == 'done' and quantity"/>
+                        <field name="name" readonly="state"/>
+                        <button type="object" name="unlink"/>
+                    </list>
+                </field>
+            </form>
+        </field>
+    </record>
+
+    <record id="line_list" model="ir.ui.view">
+        <field name="name">modifier.line.list</field>
+        <field name="model">modifier.line</field>
+        <field name="arch" type="xml">
+            <list>
+                <field name="ticket_id"/>
+            </list>
+        </field>
+    </record>
+
+    <record id="line_list_form" model="ir.ui.view">
+        <field name="name">modifier.line.list.form</field>
+        <field name="model">modifier.line</field>
+        <field name="inherit_id" ref="line_list"/>
+        <field name="arch" type="xml">
+            <xpath expr="//list" position="inside">
+                <field name="ticket_id">
+                    <form/>
+                </field>
+            </xpath>
+        </field>
+    </record>
+
+    <record id="line_list_unknown" model="ir.ui.view">
+        <field name="name">modifier.line.list.unknown</field>
+        <field name="model">modifier.line</field>
+        <field name="inherit_id" ref="line_list"/>
+        <field name="arch" type="xml">
+            <field name="ticket_id" position="after">
+                <field name="name" invisible="nowhere"/>
+            </field>
+        </field>
+    </record>
+</odoo>

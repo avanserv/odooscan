@@ -4,7 +4,7 @@
         <field name="model">button.plain</field>
         <field name="arch" type="xml">
             <form>
-                <button type="object" name="action_hook"/>
+                <button type="object" name="action_hook" invisible="hooked"/>
             </form>
         </field>
     </record>
@@ -14,7 +14,7 @@
         <field name="model">button.ghosted</field>
         <field name="arch" type="xml">
             <form>
-                <button type="object" name="action_ghost"/>
+                <button type="object" name="action_ghost" invisible="ghosted"/>
             </form>
         </field>
     </record>

@@ -5,8 +5,8 @@ use roxmltree::{Document, Node, ParsingOptions};
 
 use crate::domain;
 use crate::facts::{
-    AccessRow, ArchButton, ArchDomain, ArchElement, ArchField, DataFacts, DomainFact, FunctionCall, Lines, Pos,
-    RawDiag, RecordFact, Spanned, ViewFact, XmlDef, XmlRef,
+    AccessRow, ArchButton, ArchDomain, ArchElement, ArchField, ArchModifier, DataFacts, DomainFact, FunctionCall,
+    Lines, Pos, RawDiag, RecordFact, Spanned, ViewFact, XmlDef, XmlRef,
 };
 
 /// A `False` second argument makes `ref()` return nothing for an unknown id instead of failing.
@@ -38,6 +38,9 @@ static ACTION_REF: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"%\(([\w.]+)\)
 
 /// Tags under which a `<field>` opens a subview on the field's comodel.
 const SUBVIEWS: &[&str] = &["list", "tree", "form", "kanban", "graph", "pivot", "calendar", "search"];
+
+/// Attributes Odoo reads as Python expressions on the records of an arch.
+const MODIFIERS: [&str; 4] = ["column_invisible", "invisible", "readonly", "required"];
 
 /// Tags a spec may locate in the main view or in the subview of any x2many field.
 const AMBIGUOUS_SPECS: &[&str] = &["list", "tree", "kanban", "column"];
@@ -372,8 +375,10 @@ impl Walker<'_> {
         let pos = self.pos(node);
         let tag = node.tag_name().name();
         arch_element(node, pos, view);
+        view.subviews.extend(spec_subview(tag, path));
         view.calls.extend(t_call(node, self.lines));
         self.arch_button(node, path, view);
+        self.arch_modifiers(node, path, view);
         self.arch_attrs(node, pos);
         self.groups(node);
         self.arch_tag(node, tag, pos);
@@ -393,7 +398,10 @@ impl Walker<'_> {
             _ if AMBIGUOUS_SPECS.contains(&tag) && node.has_attribute("position") => {
                 path.push(UNKNOWN_CONTEXT.to_owned())
             }
-            "groupby" => path.extend(node.attribute("name").map(str::to_owned)),
+            "groupby" => {
+                path.extend(node.attribute("name").map(str::to_owned));
+                view.subviews.extend((path.len() > depth).then(|| path.clone()));
+            }
             _ => {}
         }
         for child in node.children().filter(Node::is_element) {
@@ -418,6 +426,24 @@ impl Walker<'_> {
                 method,
             });
         }
+    }
+
+    /// The attributes of a `position` node or an xpath locate an element, so they are no modifiers.
+    fn arch_modifiers(&self, node: Node, path: &[String], view: &mut ViewFact) {
+        let found: Vec<(&'static str, Spanned<String>)> = if node.has_tag_name("attribute") {
+            spec_modifier(node, self.lines).into_iter().collect()
+        } else if node.has_attribute("position") || node.has_tag_name("xpath") {
+            vec![]
+        } else {
+            let read = |attr| Some((attr, attr_value(node, attr, self.lines)?));
+            MODIFIERS.into_iter().filter_map(read).collect()
+        };
+        let parsed = found.into_iter().filter(|(_, value)| !constant_modifier(&value.value));
+        view.modifiers.extend(parsed.map(|(attr, value)| ArchModifier {
+            path: path.to_vec(),
+            attr,
+            value,
+        }));
     }
 
     fn arch_attrs(&mut self, node: Node, pos: Pos) {
@@ -476,6 +502,7 @@ impl Walker<'_> {
         for child in node.children().filter(Node::is_element) {
             if SUBVIEWS.contains(&child.tag_name().name()) {
                 path.push(name.to_owned());
+                view.subviews.push(path.clone());
                 self.arch(child, path, view);
                 path.pop();
             } else {
@@ -491,6 +518,28 @@ fn attr_value(node: Node, name: &str, lines: &Lines) -> Option<Spanned<String>> 
         value: attr.value().to_owned(),
         pos: lines.pos(attr.range_value().start),
     })
+}
+
+/// The expression an `<attribute>` spec gives a modifier: its text, or an `add`, which Odoo joins to
+/// the value it finds by `and` or `or`, so it reads alone. Any other separator splits the value at
+/// places only that value tells.
+fn spec_modifier(node: Node, lines: &Lines) -> Option<(&'static str, Spanned<String>)> {
+    let attr = MODIFIERS.into_iter().find(|a| node.attribute("name") == Some(a))?;
+    let joined = matches!(node.attribute("separator").map(str::trim), Some("and" | "or"));
+    let value = match node.has_attribute("add") {
+        true if joined => attr_value(node, "add", lines)?,
+        true => return None,
+        false => spec_text(node, lines)?,
+    };
+    Some((attr, value))
+}
+
+/// Empty attributes are no expression, and Odoo takes these before it parses, in any case.
+fn constant_modifier(value: &str) -> bool {
+    value.is_empty()
+        || ["0", "1", "true", "false"]
+            .iter()
+            .any(|c| value.eq_ignore_ascii_case(c))
 }
 
 fn identifier(name: &str) -> bool {
@@ -558,19 +607,23 @@ fn renamed(node: Node) -> Option<ArchElement> {
 /// `<attribute name="t-call">` spec. An empty, numeric, formatted or path target names no template
 /// a scan can look up: Odoo reads digits as a view id, and `{{ }}` and `#{}` only at render time.
 pub fn t_call(node: Node, lines: &Lines) -> Option<Spanned<String>> {
-    let (value, offset) = match node.attribute_node("t-call") {
-        Some(attr) => (attr.value(), attr.range_value().start),
-        None if node.has_tag_name("attribute") && node.attribute("name") == Some("t-call") => {
-            let text = node.first_child().filter(Node::is_text)?;
-            let raw = text.text()?;
-            let value = raw.trim();
-            (value, text.range().start + (raw.len() - raw.trim_start().len()))
-        }
-        None => return None,
+    let target = if node.has_attribute("t-call") {
+        attr_value(node, "t-call", lines)?
+    } else if node.has_tag_name("attribute") && node.attribute("name") == Some("t-call") {
+        spec_text(node, lines)?
+    } else {
+        return None;
     };
-    literal_target(value).then(|| Spanned {
-        value: value.to_owned(),
-        pos: lines.pos(offset),
+    literal_target(&target.value).then_some(target)
+}
+
+/// The text of a spec, trimmed, at its first character.
+fn spec_text(node: Node, lines: &Lines) -> Option<Spanned<String>> {
+    let text = node.first_child().filter(Node::is_text)?;
+    let raw = text.text()?;
+    Some(Spanned {
+        value: raw.trim().to_owned(),
+        pos: lines.pos(text.range().start + (raw.len() - raw.trim_start().len())),
     })
 }
 
@@ -607,6 +660,14 @@ fn xpath_locators(expr: &str, pos: Pos) -> Vec<Spanned<ArchElement>> {
             pos,
         })
         .collect()
+}
+
+/// Where a subview tag opens when `path` ends on a locator: in that field, which the spec gives a
+/// subview. Fields, domains and buttons in it keep the locator's own position.
+fn spec_subview(tag: &str, path: &[String]) -> Option<Vec<String>> {
+    let field = path.last()?.strip_prefix(LOCATOR)?;
+    let opened = path.iter().map(String::as_str).chain([field]);
+    SUBVIEWS.contains(&tag).then(|| opened.map(str::to_owned).collect())
 }
 
 /// Extends `path` with where an xpath's target sits: the subviews it reaches into and the field it
@@ -705,6 +766,108 @@ mod tests {
         ] {
             assert_eq!(buttons(&format!("<form>{button}</form>")), [], "{button}");
         }
+    }
+
+    fn modifiers(arch: &str) -> Vec<(Vec<String>, &'static str, String, u32, u32)> {
+        let facts = analyze(&format!(
+            "<odoo><record id=\"x\" model=\"ir.ui.view\">\n<field name=\"arch\" type=\"xml\">{arch}</field></record></odoo>"
+        ));
+        let read = |m: &ArchModifier| {
+            let pos = m.value.pos;
+            (m.path.clone(), m.attr, m.value.value.clone(), pos.line, pos.col)
+        };
+        facts.views[0].modifiers.iter().map(read).collect()
+    }
+
+    fn values(arch: &str) -> Vec<String> {
+        modifiers(arch).into_iter().map(|m| m.2).collect()
+    }
+
+    #[test]
+    fn reads_each_modifier_at_its_value_and_arch_position() {
+        let arch =
+            r#"<form><field name="l"><list><field name="a" column_invisible="b" required="c"/></list></field></form>"#;
+        let found = modifiers(arch);
+        assert_eq!(
+            found[0],
+            (vec!["l".to_owned()], "column_invisible", "b".to_owned(), 2, 93)
+        );
+        assert_eq!(found[1].1, "required");
+        let grouped = r#"<list><groupby name="g"><button readonly="a"/></groupby></list>"#;
+        assert_eq!(modifiers(grouped)[0].0, ["g"]);
+    }
+
+    #[test]
+    fn skips_the_values_odoo_takes_before_it_parses() {
+        for value in ["", "0", "1", "true", "false", "TRUE", "False"] {
+            assert_eq!(values(&format!(r#"<form invisible="{value}"/>"#)), [""; 0], "{value}");
+        }
+        assert_eq!(values(r#"<form invisible=" "/>"#), [" "]);
+    }
+
+    #[test]
+    fn an_attribute_of_a_spec_locates_and_is_no_modifier() {
+        assert_eq!(values(r#"<field name="a" invisible="b" position="after"/>"#), [""; 0]);
+        assert_eq!(values(r#"<xpath expr="//a" invisible="b" position="after"/>"#), [""; 0]);
+        let inserted = r#"<field name="a" position="after"><field name="b" invisible="c"/></field>"#;
+        assert_eq!(values(inserted), ["c"]);
+    }
+
+    #[test]
+    fn reads_an_attribute_spec_at_its_text_with_its_target() {
+        let spec =
+            "<field name=\"a\" position=\"attributes\"><attribute name=\"invisible\">\n  b\n</attribute></field>";
+        assert_eq!(
+            modifiers(spec),
+            [(vec!["~a".to_owned()], "invisible", "b".to_owned(), 3, 3)]
+        );
+        assert_eq!(values(r#"<attribute name="string">b</attribute>"#), [""; 0]);
+    }
+
+    #[test]
+    fn reads_an_add_joined_by_and_or_or() {
+        for separator in ["and", " or "] {
+            let spec = format!(r#"<attribute name="invisible" add="b" separator="{separator}"/>"#);
+            assert_eq!(values(&spec), ["b"]);
+        }
+        assert_eq!(values(r#"<attribute name="invisible" add="b"/>"#), [""; 0]);
+        assert_eq!(
+            values(r#"<attribute name="invisible" add="b" separator=","/>"#),
+            [""; 0]
+        );
+        assert_eq!(
+            values(r#"<attribute name="invisible" remove="b" separator="or"/>"#),
+            [""; 0]
+        );
+        assert_eq!(
+            values(r#"<attribute name="invisible" separator="or">b</attribute>"#),
+            ["b"]
+        );
+    }
+
+    fn subviews(arch: &str) -> Vec<Vec<String>> {
+        let facts = analyze(&format!(
+            r#"<odoo><record id="x" model="ir.ui.view"><field name="arch" type="xml">{arch}</field></record></odoo>"#
+        ));
+        facts.views[0].subviews.clone()
+    }
+
+    #[test]
+    fn records_where_subviews_open() {
+        let arch = r#"<form><field name="a"><list><field name="b"><form/></field></list><form/></field></form>"#;
+        assert_eq!(subviews(arch), [vec!["a"], vec!["a", "b"], vec!["a"]]);
+    }
+
+    #[test]
+    fn records_a_subview_a_spec_adds_past_its_locator() {
+        let spec = r#"<field name="a" position="inside"><list/></field>"#;
+        assert_eq!(subviews(spec), [vec!["~a", "a"]]);
+        let xpath = r#"<xpath expr="//field[@name='b']//field[@name='a']" position="inside"><form/></xpath>"#;
+        assert_eq!(subviews(xpath), [vec!["b", "~a", "a"]]);
+        assert_eq!(
+            subviews(r#"<field name="a" position="after"><field name="b"/></field>"#),
+            [[""; 0]; 0]
+        );
     }
 
     #[test]

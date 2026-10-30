@@ -1,0 +1,31 @@
+<odoo>
+    <record id="ticket_page" model="ir.ui.view">
+        <field name="name">modifier.ticket.page</field>
+        <field name="type">qweb</field>
+        <field name="model">modifier.ticket</field>
+        <field name="arch" type="xml">
+            <div invisible="stat ==" readonly="stat"/>
+        </field>
+    </record>
+
+    <record id="ticket_page_extension" model="ir.ui.view">
+        <field name="name">modifier.ticket.page.extension</field>
+        <field name="model">modifier.ticket</field>
+        <field name="inherit_id" ref="ticket_page"/>
+        <field name="arch" type="xml">
+            <xpath expr="//div" position="inside">
+                <span invisible="stat ==" readonly="stat"/>
+            </xpath>
+        </field>
+    </record>
+
+    <record id="ticket_snippet" model="ir.ui.view">
+        <field name="name">modifier.ticket.snippet</field>
+        <field name="model">modifier.ticket</field>
+        <field name="arch" type="xml">
+            <t>
+                <div invisible="stat ==" readonly="stat"/>
+            </t>
+        </field>
+    </record>
+</odoo>
