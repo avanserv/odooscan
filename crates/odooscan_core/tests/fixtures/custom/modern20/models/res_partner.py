@@ -36,3 +36,12 @@ class ModernTicket(models.AbstractModel):
 
     stage = fields.Char(tracking=True)
     ref = fields.Char(string="ID")
+
+
+class ResPartnerLevel(models.Model):
+    _inherit = "res.partner"
+
+    x_level = fields.Integer(init_storage="_x_fill_level")
+
+    def _x_fill_level(self):
+        self.env.cr.execute("UPDATE res_partner SET x_level = 1 WHERE x_level IS NULL")

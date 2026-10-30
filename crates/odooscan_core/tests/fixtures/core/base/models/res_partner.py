@@ -80,3 +80,11 @@ class IrModel(models.Model):
     _name = "ir.model"
 
     model = fields.Char()
+
+
+class IrHttp(models.AbstractModel):
+    _name = "ir.http"
+
+    @classmethod
+    def _handle_error(cls, exception):
+        return exception

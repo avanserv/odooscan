@@ -50,6 +50,10 @@ Python code checked on its own: security, deprecated APIs and ORM mistakes visib
 | [OD118](OD118.md) | `create-reads-dict` | create() under @api.model reads its argument as one dict, but receives a list of them. |
 | [OD119](OD119.md) | `override-drops-result` | A create(), write() or copy() override calls super() but returns nothing. |
 | [OD120](OD120.md) | `ormcache-unknown-name` | An ormcache key names something that is not a parameter of the method. |
+| [OD121](OD121.md) | `cursor-rollback` | Business code rolls back the cursor, discarding the caller's work with its own. |
+| [OD122](OD122.md) | `sql-write-without-invalidation` | An SQL write runs without invalidating the cache, so the ORM keeps stale values. |
+| [OD123](OD123.md) | `patch-at-import` | Code run at import patches Odoo, for every database the server runs. |
+| [OD124](OD124.md) | `module-level-cache` | A module-level dict, list or set filled at runtime is shared by every database. |
 
 ## OD2: models and fields
 

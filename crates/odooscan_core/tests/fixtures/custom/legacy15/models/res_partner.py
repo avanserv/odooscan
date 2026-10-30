@@ -1,4 +1,4 @@
-from odoo import api, fields, models
+from odoo import api, fields, http, models
 
 
 class ResPartner(models.Model):
@@ -28,3 +28,12 @@ class ResPartnerCreate(models.Model):
     def create(self, vals):
         vals.setdefault("ref", vals.get("name"))
         return super().create(vals)
+
+
+class IrHttp(models.AbstractModel):
+    _inherit = "ir.http"
+
+    @classmethod
+    def _handle_exception(cls, exception):
+        http.request.env.cr.rollback()
+        return exception

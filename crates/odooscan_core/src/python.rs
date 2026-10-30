@@ -8,8 +8,9 @@ use rustc_hash::FxHashMap;
 use crate::facts::{
     ClassFact, DomainFact, FieldFact, ModelKind, OptionValue, Pos, PyFacts, RawDiag, Receiver, Spanned, XmlRef,
 };
+use crate::sql::{CursorUse, Write};
 use crate::taint::{self, Params};
-use crate::{domain, method_body};
+use crate::{domain, method_body, module_state};
 
 const FIELD_TYPES: &[&str] = &[
     "Boolean",
@@ -103,7 +104,7 @@ fn keyword<'a>(call: &'a ast::ExprCall, name: &str) -> Option<&'a Expr> {
         .map(|k| &k.value)
 }
 
-fn is_cursor(expr: &Expr) -> bool {
+pub(crate) fn is_cursor(expr: &Expr) -> bool {
     matches!(tail_name(expr), Some("cr" | "_cr"))
 }
 
@@ -407,6 +408,49 @@ fn compute_method<'c>(class: &'c ast::StmtClassDef, field: &FieldFact) -> Option
     (!body_contains(&func.body, None)).then_some(func)
 }
 
+/// Each method a field of the class names as its `option`, with the field.
+fn field_methods<'f>(fact: &'f ClassFact, option: &str) -> Vec<(&'f str, &'f str)> {
+    fact.fields
+        .iter()
+        .filter_map(|field| match field.option(option).map(|o| &o.value) {
+            Some(OptionValue::Str(method)) => Some((method.as_str(), field.name.as_str())),
+            _ => None,
+        })
+        .collect()
+}
+
+/// The table of the model a class defines or extends, unless `_table` is set to something other
+/// than a literal.
+fn model_table(fact: &ClassFact) -> Option<String> {
+    match &fact.table {
+        Some(OptionValue::Str(table)) => Some(table.clone()),
+        Some(_) => None,
+        None => Some(fact.model.replace('.', "_")),
+    }
+}
+
+/// Methods that write while no record of the table can be cached: those Odoo runs when it sets up
+/// tables and reflects them in `ir.model`, its `@api.autovacuum` jobs, and the `init_storage`
+/// methods `storage` names.
+fn cache_free(func: &ast::StmtFunctionDef, storage: &[(&str, &str)]) -> bool {
+    let name = func.name.as_str();
+    matches!(name, "init" | "_auto_init" | "_init_column")
+        || name.starts_with("_reflect_")
+        || storage.iter().any(|(method, _)| *method == name)
+        || func.decorator_list.iter().any(|d| is_api(&d.expression, "autovacuum"))
+}
+
+/// Whether a write stores, in the model's own table, only the columns of `fields`, those whose
+/// `inverse` the method is: the values the cache already holds.
+fn stores_inverse(write: &Write, table: Option<&str>, fields: &[&str]) -> bool {
+    !fields.is_empty()
+        && table == Some(write.table.as_str())
+        && write
+            .columns
+            .as_ref()
+            .is_some_and(|columns| columns.iter().all(|c| fields.contains(&c.as_str())))
+}
+
 pub fn analyze(src: &str) -> PyFacts {
     let loc = Locator::new(src);
     let mut v = PyVisitor {
@@ -418,7 +462,11 @@ pub fn analyze(src: &str) -> PyFacts {
         owners: vec![],
     };
     match parse_module(src) {
-        Ok(parsed) => v.visit_body(&parsed.syntax().body),
+        Ok(parsed) => {
+            let body = &parsed.syntax().body;
+            v.visit_body(body);
+            v.facts.diags.extend(module_state::check(body, &loc));
+        }
         Err(e) => v
             .facts
             .diags
@@ -1033,6 +1081,79 @@ impl PyVisitor<'_> {
         }
     }
 
+    /// OD121 on each rollback of a cursor the function was given, unless it commits one too, which
+    /// OD103 reports, or Odoo calls it once the request has failed: `ir.http._handle_error()`, and
+    /// `_handle_exception()` before 16.0, whose findings wait for the series of the module.
+    fn rollback_checks(&mut self, func: &ast::StmtFunctionDef) {
+        let ir_http = matches!(self.owners.last(), Some(Some(Receiver::Model(m))) if m == "ir.http");
+        let name = func.name.as_str();
+        if ir_http && name == "_handle_error" {
+            return;
+        }
+        let uses = CursorUse::scan(&func.body);
+        if uses.commits {
+            return;
+        }
+        let diags = uses.rollbacks.iter().map(|call| {
+            RawDiag::new(
+                "OD121",
+                self.loc.at(*call),
+                "rolling back discards the whole transaction, the caller's work included, while the code carries on; raise an exception so that Odoo rolls back, or run the step that may fail under self.env.cr.savepoint()",
+            )
+        });
+        if ir_http && name == "_handle_exception" {
+            self.facts.legacy_hook_rollbacks.extend(diags);
+        } else {
+            self.facts.diags.extend(diags);
+        }
+    }
+
+    /// OD122 on each literal write statement a method of the class runs without invalidating the
+    /// cache itself or through another method of the class.
+    fn sql_write_checks(&mut self, class: &ast::StmtClassDef, fact: Option<&ClassFact>) {
+        let methods: Vec<(&ast::StmtFunctionDef, CursorUse)> = class
+            .body
+            .iter()
+            .filter_map(Stmt::as_function_def_stmt)
+            .map(|f| (f, CursorUse::scan_nested(&f.body)))
+            .collect();
+        let invalidating: Vec<&str> = methods
+            .iter()
+            .filter(|(_, uses)| uses.invalidates)
+            .map(|(f, _)| f.name.as_str())
+            .collect();
+        let storage = fact.map(|f| field_methods(f, "init_storage")).unwrap_or_default();
+        let inverses = fact.map(|f| field_methods(f, "inverse")).unwrap_or_default();
+        let table = fact.and_then(model_table);
+        for (func, uses) in &methods {
+            if cache_free(func, &storage)
+                || uses.invalidates
+                || uses.own_methods.iter().any(|m| invalidating.contains(m))
+            {
+                continue;
+            }
+            let fields: Vec<&str> = inverses
+                .iter()
+                .filter(|(m, _)| *m == func.name.as_str())
+                .map(|(_, f)| *f)
+                .collect();
+            let stale = uses
+                .writes
+                .iter()
+                .filter(|w| !uses.adds_columns_of(w) && !stores_inverse(w, table.as_deref(), &fields));
+            for write in stale {
+                self.diag(
+                    "OD122",
+                    write.call,
+                    format!(
+                        "{} on {} bypasses the ORM, so records this transaction already read keep stale values; call flush_model() before the query and invalidate_model() after it (flush() and invalidate_cache() before 16.0)",
+                        write.verb, write.table
+                    ),
+                );
+            }
+        }
+    }
+
     fn env_model(&mut self, sub: &ast::ExprSubscript) {
         if tail_name(&sub.value) == Some("env")
             && self.guarded == 0
@@ -1099,6 +1220,7 @@ impl<'a> Visitor<'a> for PyVisitor<'_> {
         match stmt {
             Stmt::ClassDef(class) => {
                 let fact = self.class_fact(class);
+                self.sql_write_checks(class, fact.as_ref());
                 let model = fact
                     .as_ref()
                     .filter(|f| f.kind != ModelKind::Abstract)
@@ -1117,6 +1239,7 @@ impl<'a> Visitor<'a> for PyVisitor<'_> {
             }
             Stmt::FunctionDef(func) => {
                 self.route_checks(func);
+                self.rollback_checks(func);
                 self.flows(func);
                 self.owners.push(None);
                 visitor::walk_stmt(self, stmt);

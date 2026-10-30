@@ -105,6 +105,10 @@ rules! {
     "OD118" "create-reads-dict" Correctness Error Some(">=19.0"), false, "create() under @api.model reads its argument as one dict, but receives a list of them.";
     "OD119" "override-drops-result" Correctness Error None, false, "A create(), write() or copy() override calls super() but returns nothing.";
     "OD120" "ormcache-unknown-name" Correctness Error None, false, "An ormcache key names something that is not a parameter of the method.";
+    "OD121" "cursor-rollback" Correctness Warning None, false, "Business code rolls back the cursor, discarding the caller's work with its own.";
+    "OD122" "sql-write-without-invalidation" Correctness Warning None, false, "An SQL write runs without invalidating the cache, so the ORM keeps stale values.";
+    "OD123" "patch-at-import" Correctness Warning None, false, "Code run at import patches Odoo, for every database the server runs.";
+    "OD124" "module-level-cache" Correctness Warning None, false, "A module-level dict, list or set filled at runtime is shared by every database.";
     "OD201" "unknown-model" Correctness Error None, true, "The model is not defined by any indexed module.";
     "OD202" "model-not-in-depends" Correctness Error None, true, "The model comes from a module missing from depends.";
     "OD203" "unresolved-field-path" Correctness Error None, true, "A field path does not resolve on its model.";

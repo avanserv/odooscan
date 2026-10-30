@@ -242,6 +242,9 @@ pub struct PyFacts {
     /// Functions whose parameters or calls carry data a caller or callee may have from a user.
     pub flows: Vec<FlowSummary>,
     pub diags: Vec<RawDiag>,
+    /// OD121 on the rollbacks of `ir.http._handle_exception()`, Odoo's hook for a failed request
+    /// only before 16.0, which the series of the module decides.
+    pub legacy_hook_rollbacks: Vec<RawDiag>,
 }
 
 #[derive(Debug)]
