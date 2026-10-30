@@ -149,6 +149,40 @@ fn leaves(body: &[Stmt]) -> bool {
     }
 }
 
+/// A block that leaves on every branch of its last statement, so no path reaches the statement
+/// after it. A `with` counts through its own last statement, as a manager that swallows the
+/// exception is not modelled.
+fn ends(body: &[Stmt]) -> bool {
+    match body.last() {
+        Some(Stmt::Break(_)) => true,
+        Some(Stmt::With(w)) => ends(&w.body),
+        Some(Stmt::If(i)) => {
+            i.elif_else_clauses.last().is_some_and(|c| c.test.is_none())
+                && ends(&i.body)
+                && i.elif_else_clauses.iter().all(|c| ends(&c.body))
+        }
+        Some(Stmt::Match(m)) => match_ends(m),
+        Some(Stmt::Try(t)) => try_ends(t),
+        _ => exits(body) || leaves(body),
+    }
+}
+
+/// A value no case matches falls through, so the last case must match anything.
+fn match_ends(m: &ast::StmtMatch) -> bool {
+    let catch_all =
+        |c: &ast::MatchCase| c.guard.is_none() && matches!(&c.pattern, ast::Pattern::MatchAs(p) if p.pattern.is_none());
+    m.cases.last().is_some_and(catch_all) && m.cases.iter().all(|c| ends(&c.body))
+}
+
+/// The `else` runs only when the body ends normally, and an exception it raises leaves anyway.
+fn try_ends(t: &ast::StmtTry) -> bool {
+    let handled = t.handlers.iter().all(|h| match h {
+        ast::ExceptHandler::ExceptHandler(h) => ends(&h.body),
+    });
+    // A jump records its bindings before the `finally` runs, so one that rebinds keeps the path.
+    ends(&t.finalbody) || t.finalbody.is_empty() && handled && (ends(&t.body) || ends(&t.orelse))
+}
+
 fn is_exit(func: &Expr) -> bool {
     match func {
         Expr::Name(n) => n.id.as_str() == "exit",
@@ -450,8 +484,8 @@ impl<'a> CursorUse<'a> {
     }
 
     /// Each arm runs from the bindings before the `if`, and one that returns, raises, exits, breaks
-    /// or continues does not reach the statement after it. The body of `if <cursor>.readonly:`
-    /// holds no rollback to report.
+    /// or continues, itself or on every branch of a block it ends with, does not reach the
+    /// statement after it. The body of `if <cursor>.readonly:` holds no rollback to report.
     fn branch(&mut self, i: &'a ast::StmtIf) {
         self.visit_expr(&i.test);
         let read_only = u32::from(tests_read_only(&i.test));
@@ -554,12 +588,12 @@ impl<'a> CursorUse<'a> {
     }
 
     /// Visits a block and takes back the bindings the innermost frame gained since `start`, the
-    /// path the statement after it sees unless the block does not get there.
+    /// path the statement after it sees unless every branch of its last statement leaves, as
+    /// `ends` reads it.
     fn path(&mut self, start: usize, body: &'a [Stmt]) -> Option<Vec<Bound<'a>>> {
         self.visit_body(body);
         let added = self.scopes.last_mut()?.split_off(start);
-        let ends = exits(body) || leaves(body) || matches!(body.last(), Some(Stmt::Break(_)));
-        (!ends).then_some(added)
+        (!ends(body)).then_some(added)
     }
 
     fn merge(&mut self, paths: &[Vec<Bound<'a>>]) {
@@ -2912,6 +2946,48 @@ mod tests {
         );
         let body = "if new:\n    cr = self.pool.cursor()\n    def step():\n        cr.commit()\n    step()\n    return";
         assert!(!closure_scanned(body, |uses| uses.commits));
+    }
+
+    #[test]
+    fn a_block_whose_every_branch_leaves_ends_the_path() {
+        let commits = |body: &str| scanned_with("self", body, false, |uses| uses.commits);
+        let looped = |tail: &str| {
+            format!(
+                "cr = self.pool.cursor()\nfor x in y:\n    cr.commit()\n    {}",
+                tail.replace('\n', "\n    ")
+            )
+        };
+        for tail in [
+            "with lock:\n    cr = self.env.cr\n    break",
+            "match x.type:\n    case 'contact':\n        continue\n    case _:\n        cr = self.env.cr\n        break",
+            "if a:\n    cr = self.env.cr\n    break\nelse:\n    continue",
+            "cr = self.env.cr\nif a:\n    break\nelif b:\n    return\nelse:\n    raise E()",
+            "cr = self.env.cr\nwith lock:\n    if a:\n        break\n    else:\n        return",
+            "try:\n    cr = self.env.cr\n    break\nexcept E:\n    raise",
+            "cr = self.env.cr\ntry:\n    a = 1\nexcept E:\n    return\nelse:\n    break",
+            "cr = self.env.cr\ntry:\n    a = 1\nfinally:\n    break",
+            "cr = self.env.cr\nmatch x:\n    case 1:\n        break\n    case other:\n        return",
+        ] {
+            let body = looped(tail);
+            assert!(!commits(&body), "{body}");
+        }
+        let body = "cr = self.pool.cursor()\nif a:\n    cr = self.env.cr\n    with lock:\n        return\ncr.commit()";
+        assert!(!commits(body), "{body}");
+        for tail in [
+            "cr = self.env.cr\nwith lock:\n    a = 1",
+            "cr = self.env.cr\nif a:\n    break",
+            "cr = self.env.cr\nif a:\n    break\nelif b:\n    a = 1\nelse:\n    return",
+            "cr = self.env.cr\nmatch x:\n    case 1:\n        break",
+            "cr = self.env.cr\nmatch x:\n    case _ if a:\n        break",
+            "cr = self.env.cr\nmatch x:\n    case 1:\n        a = 1\n    case _:\n        break",
+            "cr = self.env.cr\ntry:\n    break\nexcept E:\n    a = 1",
+            "cr = self.env.cr\ntry:\n    a = 1\nexcept E:\n    return",
+            "if a:\n    cr = self.env.cr\nelse:\n    break",
+            "try:\n    continue\nfinally:\n    cr = self.env.cr",
+        ] {
+            let body = looped(tail);
+            assert!(commits(&body), "{body}");
+        }
     }
 
     #[test]

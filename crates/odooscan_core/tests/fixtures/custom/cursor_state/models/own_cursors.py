@@ -1,4 +1,8 @@
+import threading
+
 from odoo import api, models
+
+_SYNC_LOCK = threading.Lock()
 
 
 class ResPartner(models.Model):
@@ -100,3 +104,41 @@ class ResPartner(models.Model):
         self._x_push_to_crm()
         if cr:
             cr.commit()
+
+    def x_sync_until_locked(self):
+        cr = self.pool.cursor()
+        while True:
+            cr.commit()
+            with _SYNC_LOCK:
+                cr = self.env.cr
+                break
+
+    def x_sync_until_contact_matched(self):
+        cr = self.pool.cursor()
+        for partner in self:
+            cr.commit()
+            match partner.type:
+                case "contact":
+                    continue
+                case _:
+                    cr = self.env.cr
+                    break
+
+    def x_sync_until_company(self):
+        cr = self.pool.cursor()
+        for partner in self:
+            cr.commit()
+            if partner.is_company:
+                cr = self.env.cr
+                break
+            else:
+                continue
+
+    def x_sync_while_companies(self):
+        cr = self.pool.cursor()
+        for partner in self:
+            cr.commit()
+            if partner.is_company:
+                cr = self.env.cr
+            else:
+                break
