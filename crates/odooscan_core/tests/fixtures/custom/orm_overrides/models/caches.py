@@ -23,3 +23,11 @@ class ResPartner(models.Model):
     @tools.ormcache("self.env.context.get('lang'")
     def _broken_key(self):
         return self.env.lang
+
+    @tools.ormcache("int(time.monotonic() // 900)")
+    def _quarter_hour_rates(self):
+        return {}
+
+    @tools.ormcache("method.__name__")
+    def _named_by_method(self):
+        return self._name

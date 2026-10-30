@@ -46,6 +46,7 @@ pub fn check_module<'m>(index: &Index<'m>, mi: usize, series: Option<Series>) ->
     same_module_xmlids(module, &mut out);
     shadowed_members(module, series, &mut out);
     legacy_hook_rollbacks(module, series, &mut out);
+    cache_key_names(module, series, &mut out);
     for (_, file) in es_modules(index, mi, series) {
         if let Some(e) = &file.facts.syntax_error {
             out.push(&file.path, "OD000", e.pos, e.value.clone());
@@ -165,6 +166,55 @@ const MEMBER_SERIES: &[(&str, &[&str])] = &[
     (">=17.1,<18.4", &["_condition_to_sql"]),
 ];
 
+/// The names Odoo's cache module binds at run time, by the range of series that has them, read on
+/// every branch from 10.0 to saas~19.4, so no row reaches before 10.0. Before 19.0 Odoo evaluates
+/// an `ormcache` key with the globals of that module (18.0 `odoo/tools/cache.py:90,148`), so a key
+/// may read them; from 19.0 it gives the key only `method` (19.0 `odoo/tools/cache.py:136-138`).
+const CACHE_KEY_GLOBALS: &[(&str, &[&str])] = &[
+    (
+        ">=10.0,<19.0",
+        &[
+            "defaultdict",
+            "decorator",
+            "logging",
+            "unsafe_eval",
+            "_logger",
+            "ormcache_counter",
+            "STAT",
+            "ormcache",
+            "ormcache_context",
+            "log_ormcache_stats",
+            "get_cache_key_counter",
+        ],
+    ),
+    (">=10.0,<13.1", &["formatargspec", "getargspec"]),
+    (">=10.0,<16.4", &["ormcache_multi", "dummy_cache"]),
+    (">=10.0,<18.2", &["cache"]),
+    (">=11.0,<12.1", &["pycompat"]),
+    (">=13.1,<19.0", &["signature"]),
+    (">=13.4,<18.3", &["Counter"]),
+    (">=16.2,<19.0", &["Parameter"]),
+    (">=16.4,<18.1", &["warnings"]),
+    (">=17.2,<19.0", &["time"]),
+    (">=18.1,<19.0", &["annotations", "typing"]),
+    // saas~18.1 drops the import of `warnings`, and saas~18.2 brings it back to deprecate `skiparg`.
+    (">=18.2,<19.0", &["warnings"]),
+    (
+        ">=18.3,<19.0",
+        &[
+            "Mapping",
+            "Collection",
+            "chain",
+            "signal",
+            "sys",
+            "threading",
+            "OrmCacheStatsLogger",
+            "get_cache_size",
+        ],
+    ),
+    (">=19.0", &["method"]),
+];
+
 /// Methods of `BaseModel` that neither 18.0 nor 20.0 has, so the series that do are not known.
 /// The other methods are in both, and when they came is not known either, so they count in every
 /// series: `grouped`, `fetch` and `search_fetch` among them.
@@ -195,6 +245,26 @@ fn legacy_hook_rollbacks<'m>(module: &'m Module, series: Option<Series>, out: &m
             out.diags.extend(found.map(|d| (file.path.as_path(), d)));
         }
     }
+}
+
+/// OD120 on the names an `ormcache` key reads that Odoo's cache module does not bind either.
+fn cache_key_names<'m>(module: &'m Module, series: Option<Series>, out: &mut Out<'m>) {
+    for file in &module.python {
+        let found = file
+            .facts
+            .cache_key_names
+            .iter()
+            .filter(|(name, _)| !cache_global(name, series));
+        out.diags.extend(found.map(|(_, d)| (file.path.as_path(), d.clone())));
+    }
+}
+
+/// Whether a key may read `name` as a global of Odoo's cache module in `series`. A module of
+/// unknown series may run on any, so it may read the names of every series.
+fn cache_global(name: &str, series: Option<Series>) -> bool {
+    CACHE_KEY_GLOBALS
+        .iter()
+        .any(|(spec, names)| names.contains(&name) && series.is_none_or(|s| series::matches(spec, s)))
 }
 
 /// The member of `BaseModel` in `series` that a field called `name` replaces, as the message
@@ -1313,9 +1383,25 @@ fn raises_unassigned(field: &Field, method: &str) -> bool {
         && field.is("compute", &OptionValue::Str(method.to_owned()))
 }
 
-/// OD223 at each compute method of the class that can leave a field unassigned that raises then.
-fn unassigned_computes<'m>(out: &mut Out<'m>, path: &'m Path, class: &ClassFact, fields: &ModelFields<'m>) {
-    for (method, names) in &class.unassigned_computes {
+/// The methods, by model, that a class of the module overrides with a `super()` call. The order
+/// of the files that import them is not indexed, so any class may come after the one it extends.
+fn super_overrides(module: &Module) -> FxHashSet<(&str, &str)> {
+    let classes = module.python.iter().flat_map(|f| &f.facts.classes);
+    let overrides = classes.flat_map(|c| c.extended.iter().map(|m| (c.model.as_str(), m.as_str())));
+    overrides.collect()
+}
+
+/// OD223 at each compute method of the class that can leave a field unassigned that raises then,
+/// unless a class of the module overrides it with a `super()` call, which may fill the rest.
+fn unassigned_computes<'m>(
+    out: &mut Out<'m>,
+    path: &'m Path,
+    class: &ClassFact,
+    fields: &ModelFields<'m>,
+    overrides: &FxHashSet<(&str, &str)>,
+) {
+    let extended = |(method, _): &&(Spanned<String>, _)| overrides.contains(&(&*class.model, &*method.value));
+    for (method, names) in class.unassigned_computes.iter().filter(|c| !extended(c)) {
         let raises = |name: &&str| {
             fields
                 .fields
@@ -1354,6 +1440,7 @@ impl<'m> Ctx<'_, 'm> {
         };
         let mut models: FxHashMap<&'m str, ModelFields<'m>> = FxHashMap::default();
         let mut reported_self_dependencies = FxHashSet::default();
+        let overrides = super_overrides(self.module);
         for file in &self.module.python {
             for class in file.facts.classes.iter().filter(checked) {
                 let model = class.model.as_str();
@@ -1362,7 +1449,7 @@ impl<'m> Ctx<'_, 'm> {
                     self.registry_field(out, &file.path, fields, own);
                 }
                 self.self_dependencies(out, &file.path, class, fields, &mut reported_self_dependencies);
-                unassigned_computes(out, &file.path, class, fields);
+                unassigned_computes(out, &file.path, class, fields, &overrides);
                 self.parent_store(out, &file.path, class);
                 self.view_not_created(out, &file.path, class);
                 self.view_id(out, &file.path, class, fields);
@@ -2717,7 +2804,7 @@ fn has_certain_column(field: &Field) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{MagicEra, applies, derived_label, has_last_update, magic_era, shadowed_member};
+    use super::{MagicEra, applies, cache_global, derived_label, has_last_update, magic_era, shadowed_member};
     use crate::facts::DefinitionSource;
     use crate::series::Series;
 
@@ -2754,6 +2841,32 @@ mod tests {
         assert_eq!(magic_era(None), MagicEra::Metaclass);
         assert!(has_last_update(Series::parse("16.0")) && !has_last_update(Series::parse("saas~16.1")));
         assert!(!has_last_update(None));
+    }
+
+    /// Each bound of `CACHE_KEY_GLOBALS` with the series on either side of it.
+    #[test]
+    fn cache_keys_read_the_globals_of_the_series() {
+        let global = |name: &str, series: &str| cache_global(name, Series::parse(series));
+        assert!(!global("time", "saas~17.1") && global("time", "saas~17.2") && !global("time", "19.0"));
+        assert!(global("warnings", "18.0") && !global("warnings", "saas~18.1") && global("warnings", "saas~18.2"));
+        assert!(!global("warnings", "saas~16.3") && global("warnings", "saas~16.4") && !global("warnings", "19.0"));
+        assert!(!global("Counter", "saas~13.3") && global("Counter", "saas~13.4"));
+        assert!(global("Counter", "saas~18.2") && !global("Counter", "saas~18.3"));
+        assert!(!global("method", "saas~18.4") && global("method", "19.0") && global("method", "20.0"));
+        assert!(global("ormcache", "saas~18.4") && !global("ormcache", "19.0"));
+        assert!(global("getargspec", "13.0") && !global("getargspec", "saas~13.1"));
+        assert!(!global("signature", "13.0") && global("signature", "saas~13.1") && !global("signature", "19.0"));
+        assert!(!global("pycompat", "10.0") && global("pycompat", "11.0"));
+        assert!(global("pycompat", "12.0") && !global("pycompat", "saas~12.1"));
+        assert!(global("dummy_cache", "saas~16.3") && !global("dummy_cache", "saas~16.4"));
+        assert!(global("cache", "saas~18.1") && !global("cache", "saas~18.2"));
+        assert!(!global("Parameter", "saas~16.1") && global("Parameter", "saas~16.2"));
+        assert!(global("Parameter", "saas~18.4") && !global("Parameter", "19.0"));
+        assert!(!global("typing", "18.0") && global("typing", "saas~18.1") && !global("typing", "19.0"));
+        assert!(!global("threading", "saas~18.2") && global("threading", "saas~18.3"));
+        assert!(global("threading", "saas~18.4") && !global("threading", "19.0"));
+        assert!(!global("_logger", "9.0") && global("_logger", "10.0") && !global("getargspec", "9.0"));
+        assert!(cache_global("time", None) && cache_global("method", None) && !cache_global("lang", None));
     }
 
     #[test]

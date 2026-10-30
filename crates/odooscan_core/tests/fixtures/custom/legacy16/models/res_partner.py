@@ -1,4 +1,4 @@
-from odoo import api, fields, models
+from odoo import api, fields, models, tools
 
 
 class ResPartner(models.Model):
@@ -29,3 +29,15 @@ class LegacyTurnstile(models.Model):
 
     __last_update = fields.Datetime(string="Turned")
     turned_on = fields.Datetime(string="Last Modified on")
+
+
+class ResPartnerCachedRates(models.Model):
+    _inherit = "res.partner"
+
+    @tools.ormcache("int(time.monotonic() // 900)")
+    def _quarter_hour_rates(self):
+        return {}
+
+    @tools.ormcache("len(Counter(codes))")
+    def _distinct_code_count(self, codes):
+        return len(set(codes))

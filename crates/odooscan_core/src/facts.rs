@@ -157,6 +157,8 @@ pub struct ClassFact {
     pub rec_names_search: Vec<Spanned<String>>,
     /// Methods the class's methods call through `super()`.
     pub super_calls: Vec<Spanned<String>>,
+    /// Methods of the class that call the method they override through `super()`.
+    pub extended: Vec<String>,
     /// A base class is a plain Python class, whose methods only Python knows.
     pub plain_bases: bool,
     /// The value of `_table`, when the class sets it.
@@ -300,6 +302,9 @@ pub struct PyFacts {
     /// OD121 on the rollbacks of `ir.http._handle_exception()`, Odoo's hook for a failed request
     /// only before 16.0, which the series of the module decides.
     pub legacy_hook_rollbacks: Vec<RawDiag>,
+    /// OD120 on each name an `ormcache` key reads that the method does not bind, keyed by the name:
+    /// `checks.rs` drops those that Odoo's cache module defines in the module's series.
+    pub cache_key_names: Vec<(String, RawDiag)>,
 }
 
 #[derive(Debug)]

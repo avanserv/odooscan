@@ -3,6 +3,7 @@
 //! so that the rule stays silent.
 
 use ruff_python_ast::comparable::ComparableExpr;
+use ruff_python_ast::helpers::{Truthiness, is_constant};
 use ruff_python_ast::visitor::{self, Visitor};
 use ruff_python_ast::{self as ast, CmpOp, Expr, ExprContext, Stmt};
 use ruff_python_parser::parse_expression;
@@ -177,8 +178,9 @@ impl<'a> Visitor<'a> for KeyNames {
 /// Whether a compute method can leave `field` unassigned on a record of `self`. Its one
 /// `for record in self:` loop must hold every write to the field, each on `record`; the method
 /// must never read the field nor write it by a name built at runtime, and a path through the loop
-/// body must skip it or leave the loop.
-pub(crate) fn leaves_unassigned(body: &[Stmt], field: &str) -> bool {
+/// body must skip it or leave the loop. `ftype` is the field's type, such as `Char`, which decides
+/// the constants it takes without raising.
+pub(crate) fn leaves_unassigned(body: &[Stmt], field: &str, ftype: &str) -> bool {
     let Some((record, records_loop)) = only_loop_over_self(body) else {
         return false;
     };
@@ -187,7 +189,7 @@ pub(crate) fn leaves_unassigned(body: &[Stmt], field: &str) -> bool {
     if whole.reads || whole.dynamic || whole.writes != in_loop.record_writes || calls_self(body) {
         return false;
     }
-    Paths::new(record, field).block(&records_loop.body) > Flow::Assigned
+    Paths::new(record, field, ftype).block(&records_loop.body) > Flow::Assigned
 }
 
 /// Whether a statement outside the loop over `self` calls a method of `self` or passes it on, so
@@ -503,14 +505,16 @@ struct Paths<'a> {
     field: &'a str,
     /// In a loop nested in the loop over `self`, where `continue` only starts its next iteration.
     nested: bool,
+    ftype: &'a str,
 }
 
 impl<'a> Paths<'a> {
-    fn new(record: &'a str, field: &'a str) -> Self {
+    fn new(record: &'a str, field: &'a str, ftype: &'a str) -> Self {
         Self {
             record,
             field,
             nested: false,
+            ftype,
         }
     }
 
@@ -617,17 +621,51 @@ impl<'a> Paths<'a> {
         }
     }
 
-    /// The body then its `else`, or a handler, runs before the `finally`.
+    /// The body then its `else`, or a handler, runs before the `finally`. A body that first writes
+    /// the field a constant its type takes enters its handlers with it assigned.
     fn handled(&self, t: &ast::StmtTry) -> Flow {
         let main = match self.block(&t.body) {
             Flow::Open => self.block(&t.orelse),
             Flow::Assigned => self.exits([&t.orelse[..]], Flow::Assigned),
             flow => flow,
         };
+        let first = self.writes_first(&t.body);
         let handlers = t.handlers.iter().map(|h| match h {
+            ast::ExceptHandler::ExceptHandler(h) if first => self.exits([&h.body[..]], Flow::Assigned),
             ast::ExceptHandler::ExceptHandler(h) => self.block(&h.body),
         });
         self.finally(t, join(std::iter::once(main).chain(handlers)))
+    }
+
+    /// Whether statements write the field, after nothing but `pass` and constants bound to names,
+    /// with a constant its type takes. A chained or unpacking target may raise before it writes
+    /// the field.
+    fn writes_first(&self, stmts: &[Stmt]) -> bool {
+        let mut rest = stmts.iter().skip_while(|s| match s {
+            Stmt::Pass(_) => true,
+            Stmt::Assign(a) => is_constant(&a.value) && a.targets.iter().all(Expr::is_name_expr),
+            _ => false,
+        });
+        matches!(rest.next(), Some(Stmt::Assign(a))
+            if matches!(&a.targets[..], [t @ Expr::Attribute(_)] if self.writes(t)) && self.takes(&a.value))
+    }
+
+    /// Whether the field takes a constant without raising. Odoo converts the value before it
+    /// stores it: a `Selection` raises `ValueError` on a value outside its list, and a `One2many`
+    /// or `Many2many` on any falsy value but `False` and `None`.
+    fn takes(&self, value: &Expr) -> bool {
+        let numbers = matches!(self.ftype, "Integer" | "Float" | "Monetary" | "Many2one");
+        let real = |e: &Expr| matches!(e, Expr::NumberLiteral(n) if !matches!(n.value, ast::Number::Complex { .. }));
+        match value {
+            Expr::NoneLiteral(_) | Expr::BooleanLiteral(ast::ExprBooleanLiteral { value: false, .. }) => true,
+            Expr::UnaryOp(u) if u.op == ast::UnaryOp::USub && numbers => real(&u.operand),
+            value if numbers && real(value) => true,
+            value => {
+                !matches!(self.ftype, "One2many" | "Many2many")
+                    && is_constant(value)
+                    && Truthiness::from_expr(value, |_| false).into_bool() == Some(false)
+            }
+        }
     }
 
     /// A `finally` runs after every path `tried` sums up, so an exit before a `finally` that
@@ -708,8 +746,12 @@ mod tests {
     }
 
     fn unassigned(body: &str) -> bool {
+        unassigned_as(body, "Char")
+    }
+
+    fn unassigned_as(body: &str, ftype: &str) -> bool {
         let src = format!("def _compute_f(self):\n{}", indent(body));
-        with_body(&src, |body| leaves_unassigned(body, "f"))
+        with_body(&src, |body| leaves_unassigned(body, "f", ftype))
     }
 
     fn indent(body: &str) -> String {
@@ -962,6 +1004,46 @@ mod tests {
         for stmts in assigned {
             assert!(!unassigned(&format!("for rec in self:\n{}", indent(stmts))), "{stmts}");
         }
+    }
+
+    #[test]
+    fn a_handler_after_a_constant_write_finds_the_field_assigned() {
+        let handled = |first: &str, handler: &str| {
+            format!("try:\n{first}    rec.f = int(rec.a)\nexcept ValueError:\n    {handler}")
+        };
+        let assigned = [
+            handled("    rec.f = False\n", "pass"),
+            handled("    pass\n    rec.f = 0\n", "pass"),
+            handled("    v = 0\n    rec.f = 0\n", "pass"),
+            handled("    rec.f = False\n", "continue"),
+            handled("    rec.f = None\n", "pass"),
+            handled("    rec.f = ''\n", "pass"),
+        ];
+        for stmts in assigned {
+            assert!(!unassigned(&format!("for rec in self:\n{}", indent(&stmts))), "{stmts}");
+        }
+        let reported = [
+            handled("    v = int(rec.a)\n    rec.f = 0\n", "pass"),
+            handled("    rec.g = False\n    rec.f = 0\n", "pass"),
+            handled("    rec.f = False\n", "return"),
+            handled("    rec.f = False\n", "break"),
+            handled("    rec.f = 'archived'\n", "pass"),
+            handled("    rec.f = 5\n", "pass"),
+            handled("    rec.f, rec.g = (0,)\n", "pass"),
+            handled("    rec.f, rec.g = ()\n", "pass"),
+            handled("    rec.g = rec.f = 0\n", "pass"),
+        ];
+        for stmts in reported {
+            assert!(unassigned(&format!("for rec in self:\n{}", indent(&stmts))), "{stmts}");
+        }
+        let typed = |first: &str, ftype: &str| {
+            unassigned_as(&format!("for rec in self:\n{}", indent(&handled(first, "pass"))), ftype)
+        };
+        let numbered = |first: &str| typed(first, "Integer");
+        assert!(!numbered("    rec.f = 5\n") && !numbered("    rec.f = 2.5\n") && !numbered("    rec.f = -1\n"));
+        assert!(numbered("    rec.f = 'archived'\n") && numbered("    rec.f = 1j\n") && numbered("    rec.f = -1j\n"));
+        assert!(!typed("    rec.f = False\n", "Many2many") && !typed("    rec.f = None\n", "One2many"));
+        assert!(typed("    rec.f = 0\n", "Many2many") && typed("    rec.f = ''\n", "One2many"));
     }
 
     /// Walking a body twice would take 2^depth walks here.
