@@ -766,8 +766,8 @@ impl<'ast> PyVisitor<'_, 'ast> {
         }
     }
 
-    /// Any other class attribute: one that shapes the table, a company domain, a table query,
-    /// `_sql_constraints`, a constraint or an index, or else a field.
+    /// Any other class attribute: one that shapes the table, a company domain or a table query
+    /// that is not a field, `_sql_constraints`, a constraint or an index, or else a field.
     fn attr_or_field(&mut self, target: &ast::ExprName, value: &Expr, fact: &mut ClassFact) {
         match target.id.as_str() {
             "_table" => fact.table = Some(option_value(value)),
@@ -778,7 +778,11 @@ impl<'ast> PyVisitor<'_, 'ast> {
                 };
                 fact.attrs.push((target.id.to_string(), attr));
             }
-            "_check_company_domain" | "_table_query" | "_table_sql" => fact.methods.push(target.id.to_string()),
+            // Odoo registers a field under any attribute name, so a field so named replaces the
+            // attribute or method and gives the model no table: `_auto_init` reads `_auto` alone.
+            "_check_company_domain" | "_table_query" | "_table_sql" if field_call(value).is_none() => {
+                fact.methods.push(target.id.to_string());
+            }
             "_sql_constraints" => {
                 self.diag(
                     "OD110",
@@ -1911,7 +1915,8 @@ mod tests {
     fn reads_log_access_and_an_assigned_company_domain() {
         let facts = analyze(
             "class X(models.Model):\n    _name = 'x'\n    _log_access = False\n    \
-             _check_company_domain = models.check_company_domain_parent_of\n",
+             _check_company_domain = models.check_company_domain_parent_of\n\n\
+             class Y(models.AbstractModel):\n    _name = 'y'\n    _table_query = fields.Char()\n",
         );
         let class = &facts.classes[0];
         assert_eq!(
@@ -1919,6 +1924,9 @@ mod tests {
             Some(&OptionValue::Bool(false))
         );
         assert_eq!(class.methods, ["_check_company_domain"]);
+        let ledger = &facts.classes[1];
+        let names: Vec<&str> = ledger.fields.iter().map(|f| f.name.as_str()).collect();
+        assert!(names == ["_table_query"] && ledger.methods.is_empty());
     }
 
     #[test]

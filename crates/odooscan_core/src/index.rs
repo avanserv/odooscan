@@ -122,7 +122,6 @@ pub(crate) const BASE_MODEL_METHODS: &[&str] = &[
     // Model setup and lifecycle
     "init",
     "_auto_init",
-    "_table_query",
     "_register_hook",
     "_unregister_hook",
     "_validate_fields",

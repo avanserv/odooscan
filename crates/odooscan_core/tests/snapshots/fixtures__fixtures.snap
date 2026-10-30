@@ -154,6 +154,7 @@ custom/field_options/models/bench.py:89:40: OD220 'opened_on' has the label 'Cre
 custom/field_options/models/bench.py:91:34: OD220 'key_ref' has the label 'Seal key' of field 'id' of greenhouse.pot, so Odoo logs a warning and users cannot tell them apart; give it another string
 custom/field_options/models/bench.py:94:35: OD220 'shown_as' has the label 'Display Name' of field 'display_name' of greenhouse.pot, so Odoo logs a warning and users cannot tell them apart; give it another string
 custom/field_options/models/bench.py:100:53: OD220 'write_uid' has the label 'Potted by' of field 'potter_id' of greenhouse.pot, so Odoo logs a warning and users cannot tell them apart; give it another string
+custom/field_options/models/bench.py:119:5: OD116 field '_table_query' replaces the attribute _table_query of BaseModel on this model, so callers get the field instead; rename it
 custom/field_options/models/plant.py:17:5: OD116 field 'copy' replaces the method copy() of BaseModel on this model, so callers get the field instead; rename it
 custom/field_options/models/plant.py:18:5: OD116 field 'env' replaces the attribute env of BaseModel on this model, so callers get the field instead; rename it
 custom/field_options/models/plant.py:26:31: OD221 'child_ids.total' makes 'total' depend on itself on other records, so Odoo logs a warning; declare 'total' with recursive=True
