@@ -48,3 +48,9 @@ class ResPartnerLevel(models.Model):
 
     def _x_fill_level(self):
         self.env.cr.execute("UPDATE res_partner SET x_level = 1 WHERE x_level IS NULL")
+
+
+class ResPartnerQuery(models.Model):
+    _inherit = "res.partner"
+
+    _condition_to_sql = fields.Char()

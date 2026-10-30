@@ -42,3 +42,21 @@ class ResPartner(models.Model):
     _inherit = "res.partner"
 
     common_name = fields.Char(string="Name")
+
+
+class GreenhouseStamp(models.AbstractModel):
+    _name = "greenhouse.stamp"
+    _description = "Greenhouse stamp"
+
+    write_date = fields.Datetime(string="Stamped")
+
+
+class GreenhouseTray(models.Model):
+    _name = "greenhouse.tray"
+    _description = "Greenhouse tray"
+    _inherit = ["greenhouse.stamp"]
+
+    create_date = fields.Datetime()
+    filled_on = fields.Datetime(string="Create Date")
+    checked_on = fields.Datetime(string="Stamped")
+    _condition_to_sql = fields.Char()
