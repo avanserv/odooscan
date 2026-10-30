@@ -1172,9 +1172,30 @@ enum Merged<'m> {
     Unknown,
 }
 
-/// The first series that refuses a required Many2one's 'set null' only after `_inherits_check` has
-/// replaced a delegating field's `ondelete` (`saas~14.4`).
-const LATE_SET_NULL_CHECK: Series = Series { major: 14, minor: 4 };
+/// The first series whose Many2one setup gives an empty `ondelete` its default, and refuses a
+/// required field's 'set null', only after `_inherits_check` (`saas~14.4`). The check can then meet
+/// a delegating field with no `ondelete`, and has replaced its 'set null' before the refusal.
+const LATE_MANY2ONE_SETUP: Series = Series { major: 14, minor: 4 };
+
+/// The first series whose Many2one setup fills an empty `ondelete` before `_inherits_check` reads
+/// it (`saas~12.2`).
+const EARLY_ONDELETE_DEFAULT: Series = Series { major: 12, minor: 2 };
+
+/// The first series that refuses ondelete 'restrict' on a Many2one to one of
+/// `NO_RESTRICT_COMODELS` (`saas~13.1`).
+const REFUSED_IR_RESTRICT: Series = Series { major: 13, minor: 1 };
+
+/// The comodels Odoo keeps ondelete 'restrict' from, since uninstalling a module deletes their
+/// records.
+const NO_RESTRICT_COMODELS: [&str; 7] = [
+    "ir.model",
+    "ir.model.data",
+    "ir.model.fields",
+    "ir.model.fields.selection",
+    "ir.model.relation",
+    "ir.model.constraint",
+    "ir.module.module",
+];
 
 /// The first series whose field setup no longer merges a definition with the field of a model
 /// class in the registry (`saas~12.5`).
@@ -1820,15 +1841,41 @@ impl<'m> Ctx<'_, 'm> {
     /// entry. Until saas~14.3 it holds it first, in `setup_base`; from saas~14.4 it rewrites it in
     /// `_inherits_check`, until saas~18.3 refuses the field.
     fn ondelete_rewritten(&self, field: &Field<'m>, name: &str) -> bool {
-        let rewrites = |s: Series| LATE_SET_NULL_CHECK <= s && s < REFUSED_DELEGATION;
-        self.series.is_some_and(rewrites)
-            && (may_delegate(field) || self.inherits_entry(field.model, name) != Some(false))
+        self.late_ondelete() && (may_delegate(field) || self.inherits_entry(field.model, name) != Some(false))
+    }
+
+    /// Whether `_inherits_check` reads a Many2one's `ondelete` before its setup gives the default:
+    /// from saas~14.4, until saas~18.3 refuses such a field outright.
+    fn late_ondelete(&self) -> bool {
+        self.series
+            .is_some_and(|s| LATE_MANY2ONE_SETUP <= s && s < REFUSED_DELEGATION)
+    }
+
+    /// Whether the field's setup fills an empty `ondelete`, by the truth of the value, with one
+    /// Odoo accepts before `_inherits_check` reads it, so that `required=True` is all the field
+    /// lacks: saas~12.2 until saas~14.3.
+    fn ondelete_defaulted(&self, field: &Field<'m>) -> bool {
+        self.series
+            .is_some_and(|s| EARLY_ONDELETE_DEFAULT <= s && s < LATE_MANY2ONE_SETUP)
+            && !self.default_refused(field)
+    }
+
+    /// Whether the 'restrict' a required field would get by default is refused for its comodel.
+    /// A transient model's required field to such a comodel gets 'cascade' instead.
+    fn default_refused(&self, field: &Field<'m>) -> bool {
+        let refusing = |c: &&str| NO_RESTRICT_COMODELS.contains(c);
+        self.series.is_some_and(|s| s >= REFUSED_IR_RESTRICT)
+            && matches!(field.get("comodel_name"), Merged::Known(OptionValue::Str(c)) if refusing(&c.as_str()))
+            && self
+                .index
+                .kind(field.model, self.scope)
+                .is_some_and(|kind| kind != ModelKind::Transient)
     }
 
     /// A `delegate=True` field that no `_inherits` entry names. Before saas~18.3, Odoo forces it
-    /// required with a warning, and fails on an unset ondelete, which it reads before giving it a
-    /// default. From saas~18.3 Odoo refuses such a field whatever its attributes, which this rule
-    /// does not report.
+    /// required with a warning, and from saas~14.4 fails on a field with no ondelete, reading it
+    /// before giving it a default: OD228 reports that, and OD218 the rest. From saas~18.3 Odoo
+    /// refuses such a field whatever its attributes, which neither rule reports.
     fn delegate_field(&self, out: &mut Out<'m>, path: &'m Path, field: &Field<'m>, own: &FieldFact) {
         const OPTIONS: [&str; 3] = ["delegate", "required", "ondelete"];
         let sets = |f: &FieldFact| OPTIONS.iter().any(|o| f.option(o).is_some());
@@ -1836,21 +1883,22 @@ impl<'m> Ctx<'_, 'm> {
         if refused || !self.lone_delegate(field, &own.name) || !self.reported_at(field, own, sets) {
             return;
         }
-        let Some(fix) = delegation_fix(field) else {
+        let Some(fix) = delegation_fix(field, self.ondelete_defaulted(field)) else {
             return;
         };
         let at = OPTIONS.iter().find_map(|o| own.option(o)).map_or(own.pos, |o| o.pos);
         let name = &own.name;
-        let message = if field.get("ondelete") == Merged::Unset {
-            format!(
+        if self.late_ondelete() && no_ondelete(field) {
+            let message = format!(
                 "'{name}' has delegate=True and no ondelete, so Odoo fails with AttributeError when it sets up the registry; give it {fix}"
-            )
+            );
+            out.push(path, "OD228", at, message);
         } else {
-            format!(
+            let message = format!(
                 "'{name}' has delegate=True, so it must be required with ondelete 'cascade' or 'restrict'; give it {fix}"
-            )
-        };
-        out.push(path, "OD218", at, message);
+            );
+            out.push(path, "OD218", at, message);
+        }
     }
 
     /// Whether the field delegates with `delegate=True` alone: not related, and certainly named by
@@ -1900,9 +1948,10 @@ impl<'m> Ctx<'_, 'm> {
     }
 
     /// Odoo wants the Many2one an `_inherits` entry names required, with ondelete 'cascade' or
-    /// 'restrict'. 18.0 warns and forces both, an unset ondelete included; saas~18.3 refuses the
-    /// model. A missing field, or one of another type, is left alone, and an entry repeated in
-    /// another class of the model in this module is reported at the first.
+    /// 'restrict'. 18.0 warns and forces both, an unset ondelete included, which saas~12.2 until
+    /// saas~14.3 fill first; saas~18.3 refuses the model. A missing field, or one of another type,
+    /// is left alone, and an entry repeated in another class of the model in this module is
+    /// reported at the first.
     fn delegation(&self, out: &mut Out<'m>, path: &'m Path, class: &'m ClassFact, entry: &Spanned<String>) {
         let names = |c: &ClassFact| c.delegations.iter().any(|(_, d)| d.value == entry.value);
         if !self.first_class(class, names) {
@@ -1914,7 +1963,7 @@ impl<'m> Ctx<'_, 'm> {
         if field.defs[0].2.ftype != "Many2one" {
             return;
         }
-        if let Some(fix) = delegation_fix(&field) {
+        if let Some(fix) = delegation_fix(&field, self.ondelete_defaulted(&field)) {
             let message = format!(
                 "_inherits delegates to '{}', which must be required with ondelete 'cascade' or 'restrict'; give it {fix}",
                 entry.value
@@ -2419,10 +2468,21 @@ fn required(field: &Field) -> Option<bool> {
     }
 }
 
+/// Whether the field gives no ondelete: unset, or a false literal other than `""`, which unlike the
+/// others has the `.lower()` Odoo calls on the value.
+fn no_ondelete(field: &Field) -> bool {
+    matches!(
+        field.get("ondelete"),
+        Merged::Unset | Merged::Known(OptionValue::Falsy | OptionValue::Bool(false))
+    )
+}
+
 /// Whether the field's ondelete keeps the records it points to from going away under it.
 fn kept_on_delete(field: &Field) -> Option<bool> {
+    if no_ondelete(field) {
+        return Some(false);
+    }
     match field.get("ondelete") {
-        Merged::Unset => Some(false),
         Merged::Known(OptionValue::Str(policy)) => {
             Some(matches!(policy.to_lowercase().as_str(), "cascade" | "restrict"))
         }
@@ -2450,13 +2510,14 @@ fn truth(merged: Merged) -> Option<bool> {
 }
 
 /// What a delegating field lacks of `required=True` and ondelete 'cascade' or 'restrict', or None
-/// when it lacks neither. An attribute that is not a literal is not named.
-fn delegation_fix(field: &Field) -> Option<String> {
+/// when it lacks neither. An attribute that is not a literal is not named, nor is an ondelete that
+/// is false when `defaulted`: Odoo then picks one from `required`.
+fn delegation_fix(field: &Field, defaulted: bool) -> Option<String> {
     let mut fix = vec![];
     if required(field) == Some(false) {
         fix.push("required=True");
     }
-    if kept_on_delete(field) == Some(false) {
+    if kept_on_delete(field) == Some(false) && !(defaulted && truth(field.get("ondelete")) == Some(false)) {
         fix.push("ondelete=\"cascade\"");
     }
     (!fix.is_empty()).then(|| fix.join(", "))

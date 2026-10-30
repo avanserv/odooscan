@@ -50,3 +50,10 @@ class DriftProbeMonogram(models.Model):
         for probe in self:
             if probe.name:
                 probe.monogram = probe.name[0]
+
+
+class DriftBeacon(models.AbstractModel):
+    _name = "drift.beacon"
+    _description = "Drift beacon"
+
+    country_id = fields.Many2one("res.country", delegate=True, required=True)

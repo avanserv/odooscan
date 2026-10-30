@@ -83,6 +83,24 @@ fn unassigned_compute_waits_for_a_known_series() {
 }
 
 #[test]
+fn delegate_without_ondelete_waits_for_a_known_series() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+    let code = |default_series| {
+        scan(&ScanOptions {
+            paths: vec![root.join("custom")],
+            addons_paths: vec![root.join("core")],
+            default_series,
+        })
+        .diagnostics
+        .iter()
+        .find(|d| d.path.ends_with("unversioned_logs/models/probes.py") && d.line == 59)
+        .map(|d| d.code)
+    };
+    assert_eq!(code(None), Some("OD218"));
+    assert_eq!(code(Series::parse("18.0")), Some("OD228"));
+}
+
+#[test]
 fn company_check_severity_follows_the_module_series() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
     let report = scan(&ScanOptions {
