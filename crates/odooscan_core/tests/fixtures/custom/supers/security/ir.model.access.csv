@@ -1,2 +1,4 @@
 id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
 access_bad_super,bad.super,model_bad_super,base.group_user,1,0,0,0
+access_bad_super_parent,bad.super.parent,model_bad_super_parent,base.group_user,1,0,0,0
+access_bad_super_child,bad.super.child,model_bad_super_child,base.group_user,1,0,0,0

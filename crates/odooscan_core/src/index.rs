@@ -1189,13 +1189,15 @@ impl<'m> Index<'m> {
         Some(model)
     }
 
-    /// Whether a class of `model` or of a model it inherits, other than `except`, or `BaseModel`
-    /// defines `method`. Modules outside the scope count: an override of a method from a module
-    /// that is not in depends is called only by that module.
+    /// Whether `BaseModel` or a class other than `except`, of `model` or of a model it inherits by
+    /// `_inherit`, defines `method`. A parent it delegates to does not count, since `super()`
+    /// follows the class bases, which Odoo builds from `_inherit` and `base`. Modules outside the
+    /// scope count: an override of a method from a module that is not in depends is called only by
+    /// that module.
     pub fn has_parent_method(&self, model: &str, method: &str, except: &ClassFact) -> bool {
         BASE_MODEL_METHODS.contains(&method)
             || self
-                .chain(model, None, true)
+                .chain_classes(model)
                 .iter()
                 .any(|(_, c)| !std::ptr::eq(*c, except) && c.methods.iter().any(|m| m == method))
     }
