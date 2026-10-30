@@ -220,7 +220,7 @@ fn parse_module_files(module: &mut Module, default_series: Option<Series>) {
             };
             Some(match path.extension().and_then(|e| e.to_str()) {
                 Some("py") => Ok(SourceFile {
-                    facts: python::analyze(&text),
+                    facts: python::analyze(&text, series),
                     path,
                     rel,
                     rank,

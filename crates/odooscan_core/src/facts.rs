@@ -131,8 +131,10 @@ pub struct ClassFact {
     pub pos: Pos,
     /// The Python name of the class.
     pub class_name: String,
+    /// `_name`, else the name Odoo gives the class in the module's series, from `_inherit` and the
+    /// class name.
     pub model: String,
-    /// The class declares `_name` and that name is not among its `_inherit`.
+    /// The model is not among the class's `_inherit`, so the class defines it.
     pub new_model: bool,
     pub kind: ModelKind,
     pub inherit: Vec<Spanned<String>>,
@@ -301,7 +303,8 @@ pub struct SqlColumn {
 #[derive(Debug, Default)]
 pub struct PyFacts {
     pub classes: Vec<ClassFact>,
-    /// A class names its model with an expression, so models and their ids are built at runtime.
+    /// A class names its model with an expression, so models and their ids are built at runtime,
+    /// or lacks `_name` in a module of unknown series and is named apart before and from saas~18.1.
     pub dynamic_models: bool,
     /// Literal model names in `env['x']` outside code guarded by a test that the model exists.
     pub env_models: Vec<Spanned<String>>,

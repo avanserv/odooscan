@@ -9,6 +9,7 @@ use crate::facts::{
     ClassFact, DefinitionSource, DomainFact, FieldFact, ModelKind, OptionValue, Pos, PyFacts, RawDiag, Receiver,
     Spanned, SqlColumn, SqlView, XmlRef,
 };
+use crate::series::Series;
 use crate::sql::{
     self, Created, CursorUse, QueryVars, Write, odoo_cursor, query_head, query_source, query_text, self_cursor,
     source_offset,
@@ -588,7 +589,8 @@ fn stores_inverse(write: &Write, table: Option<&str>, fields: &[&str]) -> bool {
             .is_some_and(|columns| columns.iter().all(|c| fields.contains(&c.as_str())))
 }
 
-pub fn analyze(src: &str) -> PyFacts {
+/// The facts of a Python file of a module of `series`, which names a class without `_name`.
+pub fn analyze(src: &str, series: Option<Series>) -> PyFacts {
     let loc = Locator::new(src);
     let parsed = match parse_module(src) {
         Ok(parsed) => parsed,
@@ -603,6 +605,7 @@ pub fn analyze(src: &str) -> PyFacts {
     let body = &parsed.syntax().body;
     let mut v = PyVisitor {
         loc: &loc,
+        series,
         facts: PyFacts::default(),
         kinds: FxHashMap::default(),
         guarded: 0,
@@ -626,8 +629,59 @@ pub fn analyze(src: &str) -> PyFacts {
     v.facts
 }
 
+/// The first series that names a class without `_name` after the class, dotted, whenever
+/// `_inherit` is not one string (`saas~18.1`).
+const DOTTED_CLASS_NAME: Series = Series { major: 18, minor: 1 };
+
+/// What a class body says about the name of its model.
+#[derive(Default)]
+struct Naming {
+    /// The class assigns `_name`, a literal or not.
+    named: bool,
+    /// `_name` when it is a literal.
+    name: Option<String>,
+    inherit: InheritShape,
+}
+
+/// The form of `_inherit`, which decides the name of a class without `_name`.
+#[derive(Clone, Copy, Default)]
+enum InheritShape {
+    #[default]
+    Other,
+    Str,
+    /// A list or tuple, by its element count, literal or not.
+    List(usize),
+}
+
+impl InheritShape {
+    fn of(value: &Expr) -> Self {
+        match value {
+            Expr::StringLiteral(_) => Self::Str,
+            Expr::List(l) => Self::List(l.elts.len()),
+            Expr::Tuple(t) => Self::List(t.elts.len()),
+            _ => Self::Other,
+        }
+    }
+}
+
+/// The name Odoo gives a class without `_name` from saas~18.1: a dot before each ASCII capital that
+/// follows a character other than `_`, then lowercased, so `ResPartner` names `res.partner`.
+fn dotted(class_name: &str) -> String {
+    let mut out = String::with_capacity(class_name.len() + 4);
+    let mut prev = None;
+    for c in class_name.chars() {
+        if c.is_ascii_uppercase() && prev.is_some_and(|p| p != '_') {
+            out.push('.');
+        }
+        out.push(c);
+        prev = Some(c);
+    }
+    out.to_lowercase()
+}
+
 struct PyVisitor<'a, 'ast> {
     loc: &'a Locator<'a>,
+    series: Option<Series>,
     facts: PyFacts,
     /// Model classes of the file by Python class name.
     kinds: FxHashMap<String, ModelKind>,
@@ -676,7 +730,7 @@ impl<'ast> PyVisitor<'_, 'ast> {
         if let Some(kind) = kind {
             self.kinds.insert(class.name.to_string(), kind);
         }
-        let mut name: Option<String> = None;
+        let mut naming = Naming::default();
         let mut fact = ClassFact {
             pos: self.loc.at(&class.name),
             class_name: class.name.to_string(),
@@ -706,24 +760,47 @@ impl<'ast> PyVisitor<'_, 'ast> {
         };
         for stmt in &class.body {
             match stmt {
-                Stmt::Assign(assign) => self.class_attrs(&assign.targets, &assign.value, &mut fact, &mut name),
+                Stmt::Assign(assign) => self.class_attrs(&assign.targets, &assign.value, &mut fact, &mut naming),
                 Stmt::AnnAssign(ast::StmtAnnAssign {
                     target,
                     value: Some(value),
                     ..
-                }) => self.class_attrs(std::slice::from_ref(&**target), value, &mut fact, &mut name),
+                }) => self.class_attrs(std::slice::from_ref(&**target), value, &mut fact, &mut naming),
                 Stmt::FunctionDef(func) => self.method_fact(func, &mut fact),
                 _ => {}
             }
         }
         fact.unassigned_computes = self.unassigned_computes(class, &fact);
-        fact.model = match (&name, fact.inherit.first()) {
-            (Some(n), _) => n.clone(),
-            (None, Some(first)) => first.value.clone(),
-            (None, None) => return None,
-        };
-        fact.new_model = name.is_some_and(|n| !fact.inherit.iter().any(|i| i.value == n));
+        fact.model = self.model_name(class.name.as_str(), &naming, &fact)?;
+        fact.new_model = !fact.inherit.iter().any(|i| i.value == fact.model);
         Some(fact)
+    }
+
+    /// The model a class names: its `_name`, else the one Odoo derives in the module's series from
+    /// `_inherit` and the class name. An unknown series reads it as before saas~18.1, and a class
+    /// that the two readings name apart makes the file's models dynamic. A list with a non-literal
+    /// entry hides the name before saas~18.1 and whether the model is new from it, so the class
+    /// extends its first literal entry.
+    fn model_name(&mut self, class_name: &str, naming: &Naming, fact: &ClassFact) -> Option<String> {
+        let first = || fact.inherit.first().map(|i| i.value.clone());
+        let count = match naming.inherit {
+            _ if naming.named => return naming.name.clone().or_else(first),
+            InheritShape::List(count) if count > 0 && !fact.inherit_unknown => count,
+            _ => return first(),
+        };
+        let earlier = if count == 1 {
+            first()
+        } else {
+            Some(class_name.to_owned())
+        };
+        match self.series {
+            Some(series) if series >= DOTTED_CLASS_NAME => Some(dotted(class_name)),
+            Some(_) => earlier,
+            None => {
+                self.facts.dynamic_models |= earlier.as_deref() != Some(dotted(class_name).as_str());
+                earlier
+            }
+        }
     }
 
     /// What a method adds to its class: its name, the `super()` calls it makes, whether it calls
@@ -747,14 +824,15 @@ impl<'ast> PyVisitor<'_, 'ast> {
             }));
     }
 
-    fn class_attrs(&mut self, targets: &[Expr], value: &Expr, fact: &mut ClassFact, name: &mut Option<String>) {
+    fn class_attrs(&mut self, targets: &[Expr], value: &Expr, fact: &mut ClassFact, naming: &mut Naming) {
         for target in targets.iter().filter_map(Expr::as_name_expr) {
             match target.id.as_str() {
                 "_name" => {
-                    *name = str_lit(value).map(str::to_owned);
-                    self.facts.dynamic_models |= name.is_none();
+                    naming.named = true;
+                    naming.name = str_lit(value).map(str::to_owned);
+                    self.facts.dynamic_models |= naming.name.is_none();
                 }
-                "_inherit" => self.inherit(value, fact, name.as_deref()),
+                "_inherit" => naming.inherit = self.inherit(value, fact, naming.name.as_deref()),
                 "_order" | "_rec_name" | "_parent_name" | "_fold_name" | "_active_name" => {
                     self.order_fields(value, fact);
                 }
@@ -855,7 +933,7 @@ impl<'ast> PyVisitor<'_, 'ast> {
     }
 
     /// `_inherit = _name` extends the model the class names.
-    fn inherit(&mut self, value: &Expr, fact: &mut ClassFact, name: Option<&str>) {
+    fn inherit(&mut self, value: &Expr, fact: &mut ClassFact, name: Option<&str>) -> InheritShape {
         let literal = |elts: &[Expr]| elts.iter().all(Expr::is_string_literal_expr);
         fact.inherit_unknown = match value {
             Expr::Name(n) => n.id.as_str() != "_name" || name.is_none(),
@@ -871,6 +949,7 @@ impl<'ast> PyVisitor<'_, 'ast> {
             }],
             _ => strings(value).into_iter().map(|s| self.spanned(s)).collect(),
         };
+        InheritShape::of(value)
     }
 
     /// A `delegate=True` field may come before the dict, which adds to the pairs it gave.
@@ -1676,7 +1755,7 @@ mod tests {
 
     fn field(src: &str) -> FieldFact {
         let src = format!("class X(models.Model):\n    _name = 'x'\n    f = {src}\n");
-        let mut facts = analyze(&src);
+        let mut facts = analyze(&src, None);
         facts.classes.remove(0).fields.remove(0)
     }
 
@@ -1775,6 +1854,7 @@ mod tests {
         let facts = analyze(
             "class X(models.Model):\n    _name = 'x'\n    _order = 'sequence desc, id'\n    _parent_name = 'up_id'\n    \
              _fold_name = 'folded'\n    _active_name = 'x_active'\n    _rec_names_search = ['name', 'partner_id.ref']\n",
+            None,
         );
         let values = |v: &[Spanned<String>]| v.iter().map(|s| s.value.clone()).collect::<Vec<_>>();
         let class = &facts.classes[0];
@@ -1791,6 +1871,7 @@ mod tests {
             "class X(models.Model):\n    _name = 'x'\n    company_id = fields.Many2one('res.company', delegate=True)\n    \
              _inherits = {'res.partner': 'partner_id', 'res.company': 'company_id'}\n    _parent_store = True\n    \
              _auto = AUTO\n",
+            None,
         );
         let class = &facts.classes[0];
         assert_eq!(
@@ -1820,9 +1901,10 @@ mod tests {
     #[test]
     fn reads_register_from_the_own_body() {
         let registered = |body: &str| {
-            let facts = analyze(&format!(
-                "class X(models.Model):\n    _name = 'x'\n{body}\n\nclass Y(X):\n    _name = 'y'\n"
-            ));
+            let facts = analyze(
+                &format!("class X(models.Model):\n    _name = 'x'\n{body}\n\nclass Y(X):\n    _name = 'y'\n"),
+                None,
+            );
             let [x, y] = &facts.classes[..] else {
                 panic!("expected two classes, got {:?}", facts.classes);
             };
@@ -1839,21 +1921,22 @@ mod tests {
     #[test]
     fn counts_cached_model_as_a_model_base() {
         for base in ["models.CachedModel", "CachedModel"] {
-            let facts = analyze(&format!("class X({base}):\n    _name = 'x'\n"));
+            let facts = analyze(&format!("class X({base}):\n    _name = 'x'\n"), None);
             let class = &facts.classes[0];
             assert_eq!(class.kind, ModelKind::Model, "{base}");
             assert!(!class.plain_bases, "{base}");
         }
-        let facts = analyze("class X(models.CachedModel, Layout):\n    _name = 'x'\n");
+        let facts = analyze("class X(models.CachedModel, Layout):\n    _name = 'x'\n", None);
         assert!(facts.classes[0].plain_bases);
     }
 
     #[test]
     fn marks_an_inherits_with_a_non_literal_entry_unknown() {
         for value in ["PARENTS", "{'res.partner': FIELD}", "{**PARENTS}"] {
-            let facts = analyze(&format!(
-                "class X(models.Model):\n    _name = 'x'\n    _inherits = {value}\n"
-            ));
+            let facts = analyze(
+                &format!("class X(models.Model):\n    _name = 'x'\n    _inherits = {value}\n"),
+                None,
+            );
             assert!(facts.classes[0].inherits_unknown, "{value}");
         }
     }
@@ -1861,9 +1944,10 @@ mod tests {
     #[test]
     fn marks_an_inherit_with_a_non_literal_entry_unknown() {
         let unknown = |value: &str| {
-            let facts = analyze(&format!(
-                "class X(models.Model):\n    _name = 'x'\n    _inherit = {value}\n"
-            ));
+            let facts = analyze(
+                &format!("class X(models.Model):\n    _name = 'x'\n    _inherit = {value}\n"),
+                None,
+            );
             facts.classes[0].inherit_unknown
         };
         for value in [
@@ -1881,6 +1965,80 @@ mod tests {
     }
 
     #[test]
+    fn names_a_class_without_name_as_its_series_does() {
+        let named = |body: &str, series: Option<&str>| {
+            let src = format!("class ResPartnerX(models.Model):\n{body}\n");
+            let facts = analyze(&src, series.and_then(Series::parse));
+            let class = facts.classes.first();
+            class.map(|c| (c.model.clone(), c.new_model, facts.dynamic_models))
+        };
+        let model = |name: &str, new: bool, dynamic: bool| Some((name.to_owned(), new, dynamic));
+        let extended = model("a", false, false);
+        let derived = model("res.partner.x", true, false);
+        let verbatim = model("ResPartnerX", true, false);
+        let named_x = model("x", true, false);
+        // Both readings name it after the class, so an unknown series needs no runtime models.
+        let own = model("res.partner.x", false, false);
+        let cases = [
+            ("    _inherit = 'a'", [&extended, &extended, &extended, &extended]),
+            (
+                "    _inherit = ['a']",
+                [&extended, &derived, &derived, &model("a", false, true)],
+            ),
+            (
+                "    _inherit = ('a',)",
+                [&extended, &derived, &derived, &model("a", false, true)],
+            ),
+            (
+                "    _inherit = ['a', 'b']",
+                [&verbatim, &derived, &derived, &model("ResPartnerX", true, true)],
+            ),
+            ("    _inherit = ('a', B)", [&extended, &extended, &extended, &extended]),
+            (
+                "    _inherit = ['a', *MIXINS]",
+                [&extended, &extended, &extended, &extended],
+            ),
+            ("    _inherit = [PARENT]", [&None, &None, &None, &None]),
+            ("    _inherit = []", [&None, &None, &None, &None]),
+            ("    _inherit = PARENTS", [&None, &None, &None, &None]),
+            (
+                "    _name = 'x'\n    _inherit = ['a', 'b']",
+                [&named_x, &named_x, &named_x, &named_x],
+            ),
+            (
+                "    _inherit = ['res.partner.x', 'b']",
+                [
+                    &verbatim,
+                    &model("res.partner.x", false, false),
+                    &model("res.partner.x", false, false),
+                    &model("ResPartnerX", true, true),
+                ],
+            ),
+            ("    _inherit = ['res.partner.x']", [&own; 4]),
+        ];
+        for (body, expected) in cases {
+            for (series, want) in [Some("18.0"), Some("saas~18.1"), Some("20.0"), None]
+                .into_iter()
+                .zip(expected)
+            {
+                assert_eq!(&named(body, series), want, "{body} at {series:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn derives_a_model_name_from_a_class_name() {
+        for (class, model) in [
+            ("ResPartner", "res.partner"),
+            ("IrConfig_parameter", "ir.config_parameter"),
+            ("EG", "e.g"),
+            ("_Foo", "_foo"),
+        ] {
+            assert_eq!(dotted(class), model, "{class}");
+        }
+    }
+
+    #[test]
     fn records_where_a_field_is_named() {
         let f = field("fields.Boolean()");
         assert_eq!((f.name_pos.line, f.name_pos.col), (3, 5));
@@ -1889,7 +2047,7 @@ mod tests {
 
     #[test]
     fn reads_the_table() {
-        let facts = analyze("class X(models.Model):\n    _name = 'x'\n    _table = 'x_data'\n");
+        let facts = analyze("class X(models.Model):\n    _name = 'x'\n    _table = 'x_data'\n", None);
         assert_eq!(facts.classes[0].table, Some(OptionValue::Str("x_data".into())));
     }
 
@@ -1898,6 +2056,7 @@ mod tests {
         let facts = analyze(
             "class X(models.Model):\n    _name = 'x'\n\n    @api.depends('id', 'partner_id.id', 'identity')\n    \
              def _compute_y(self):\n        pass\n\n    @api.onchange('id')\n    def _onchange_id(self):\n        pass\n",
+            None,
         );
         let codes: Vec<_> = facts.diags.iter().map(|d| (d.code, d.pos.col)).collect();
         assert_eq!(codes, [("OD114", 18), ("OD114", 24)]);
@@ -1910,6 +2069,7 @@ mod tests {
              def _onchange_partner(self):\n        pass\n\n    @api.constrains('line_ids.qty')\n    \
              def _check_qty(self):\n        pass\n\n    @api.depends('partner_id.name')\n    \
              def _compute_label(self):\n        pass\n",
+            None,
         );
         let codes: Vec<_> = facts.diags.iter().map(|d| (d.code, d.pos.line)).collect();
         assert_eq!(codes, [("OD115", 4), ("OD115", 8)]);
@@ -1923,6 +2083,7 @@ mod tests {
             "class X(models.Model):\n    _name = 'x'\n\n    @api.depends('child_ids.total', 'qty')\n    \
              def _compute_total(self):\n        pass\n\n    @api.onchange('qty')\n    \
              def _onchange_qty(self):\n        pass\n",
+            None,
         );
         let class = &facts.classes[0];
         let depends: Vec<_> = class
@@ -1948,6 +2109,7 @@ mod tests {
             "class X(models.Model):\n    _name = 'x'\n    _log_access = False\n    \
              _check_company_domain = models.check_company_domain_parent_of\n\n\
              class Y(models.AbstractModel):\n    _name = 'y'\n    _table_query = fields.Char()\n",
+            None,
         );
         let class = &facts.classes[0];
         assert_eq!(
@@ -1974,7 +2136,7 @@ mod tests {
                    def g(cr, registry):\n    cr.execute('SELECT w.e FROM t w')\n    \
                    other = psycopg2.connect(dsn).cursor()\n    other.execute('SELECT y.f FROM t y')\n    \
                    with registry.cursor() as new_cr:\n        new_cr.execute('SELECT z.g FROM t z WHERE %s' % w)\n";
-        let facts = analyze(src);
+        let facts = analyze(src, None);
         let found: Vec<String> = facts
             .sql_columns
             .iter()
@@ -2012,7 +2174,7 @@ mod tests {
 
     /// The table and column of each query column a source reads, in order.
     fn read_columns(src: &str) -> Vec<String> {
-        analyze(src)
+        analyze(src, None)
             .sql_columns
             .iter()
             .map(|c| format!("{}.{}", c.table, c.column))
@@ -2080,7 +2242,7 @@ mod tests {
                    cr.execute('CREATE INDEX x_idx ON x_box (code)')\n";
         let pair = |t: &str, c: &str| (t.to_owned(), c.to_owned());
         assert_eq!(
-            analyze(src).added_columns,
+            analyze(src, None).added_columns,
             [
                 pair("res_users", "totp_secret"),
                 pair("x_box", "code"),
@@ -2098,7 +2260,7 @@ mod tests {
                    self.env.cr.execute(SQL('CREATE OR REPLACE VIEW %s AS SELECT * FROM y', SQL.identifier(self._table)))\n        \
                    self.env.cr.execute('SELECT 1')\n\n    \
                    def refresh(self):\n        self.env.cr.execute('CREATE VIEW z AS SELECT 1 AS id')\n";
-        let facts = analyze(src);
+        let facts = analyze(src, None);
         let views: Vec<String> = facts.classes[0]
             .views
             .iter()
@@ -2116,7 +2278,7 @@ mod tests {
                    _d_uniq = models.UniqueIndex('(d) WHERE e IS NOT NULL')\n    \
                    _f_check = models.Constraint('CHECK (f > 0)', 'F is positive')\n    \
                    _g_index = models.Index(lambda registry: '(g)')\n    _h_index = Index('(h)')\n";
-        let facts = analyze(src);
+        let facts = analyze(src, None);
         let found: Vec<String> = facts.classes[0]
             .definitions
             .iter()
@@ -2148,7 +2310,7 @@ mod tests {
             "self.env.cr.execute('CREATE VIEW %s AS SELECT 1', (AsIs(self._table),))",
             "self.env.cr.execute('CREATE VIEW ' + self._table + ' AS SELECT 1')",
         ] {
-            let facts = analyze(&model(call));
+            let facts = analyze(&model(call), None);
             assert!(facts.classes[0].own_view && !facts.creates_any_view, "{call}");
         }
         for src in [
@@ -2164,12 +2326,12 @@ mod tests {
              self.env.cr.execute(SQL('CREATE VIEW %s', SQL.identifier(self._table)))\n"
                 .to_owned(),
         ] {
-            let facts = analyze(&src);
+            let facts = analyze(&src, None);
             assert!(facts.creates_any_view && facts.classes.iter().all(|c| !c.own_view), "{src}");
         }
         let builder = "class X:\n    def init(self):\n        \
                        self.env.cr.execute(SQL('CREATE VIEW %s', SQL.identifier(self._x_name())))\n";
-        assert!(!analyze(builder).creates_any_view);
+        assert!(!analyze(builder, None).creates_any_view);
     }
 
     #[test]
@@ -2182,11 +2344,15 @@ mod tests {
                    env.cr.execute(\"CREATE OR REPLACE VIEW e\" + \" AS (SELECT 1)\")\n\n\
                    class X(models.Model):\n    _name = 'x'\n\n    def init(self):\n        \
                    self.env.cr.execute(SQL('CREATE VIEW %s AS SELECT 1', SQL.identifier(self._table)))\n";
-        let facts = analyze(src);
+        let facts = analyze(src, None);
         assert_eq!(facts.created_views, ["a", "b", "c", "d", "e"]);
         assert!(!facts.creates_any_view);
         assert!(
-            analyze("def hook(env, name):\n    env.cr.execute(f'CREATE VIEW {name} AS SELECT 1')\n").creates_any_view
+            analyze(
+                "def hook(env, name):\n    env.cr.execute(f'CREATE VIEW {name} AS SELECT 1')\n",
+                None
+            )
+            .creates_any_view
         );
     }
 }
