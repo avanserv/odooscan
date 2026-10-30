@@ -101,6 +101,27 @@ custom/legacy13/models/res_partner.py:7:72: OD213 'holder_id' is required, so Od
 custom/legacy13/models/res_partner.py:9:18: OD214 'origin_ids' and 'market_ids' are Many2many fields of res.partner to the same comodel without relation, so Odoo gives both the same table; set relation on one
 custom/legacy14/models/res_partner.py:7:43: OD216 'type' is required, so Odoo refuses ondelete 'set null' for the selection_add value 'site'; give it 'cascade', 'set default' or a function
 custom/legacy15/models/res_partner.py:9:22: OD212 Monetary field 'parent_balance' has no currency: res.partner has no currency_id, and the field names no currency_field
+custom/legacy16/models/res_partner.py:6:34: OD203 'nickname': res.partner has no field 'nickname'
+custom/model_attributes/models/bed.py:7:20: OD203 'parent_bed_id': garden.bed has no field 'parent_bed_id'
+custom/model_attributes/models/bed.py:8:18: OD203 'folded': garden.bed has no field 'folded'
+custom/model_attributes/models/bed.py:9:20: OD203 'x_active': garden.bed has no field 'x_active'
+custom/model_attributes/models/bed.py:10:53: OD203 'code': garden.bed has no field 'code'
+custom/model_attributes/models/bed.py:15:61: OD204 garden.bed has no method '_expand_stages'
+custom/model_attributes/models/bed.py:17:39: OD204 garden.bed has no method '_selection_soils'
+custom/model_attributes/models/bed.py:18:29: OD204 garden.bed has no method '_selection_sizes'
+custom/model_attributes/models/bed.py:20:31: OD204 garden.bed has no method '_selection_origins'
+custom/model_attributes/models/bed.py:24:53: OD203 'owner_model': garden.bed has no field 'owner_model'
+custom/model_attributes/models/label.py:9:33: OD218 _inherits delegates to 'partner_id', which must be required with ondelete 'cascade' or 'restrict'; give it ondelete="cascade"
+custom/model_attributes/models/label.py:9:62: OD218 _inherits delegates to 'country_id', which must be required with ondelete 'cascade' or 'restrict'; give it required=True
+custom/model_attributes/models/label.py:44:58: OD218 'country_id' has delegate=True and no ondelete, so Odoo fails with AttributeError when it sets up the registry; give it ondelete="cascade"
+custom/model_attributes/models/label.py:47:54: OD218 'view_id' has delegate=True, so it must be required with ondelete 'cascade' or 'restrict'; give it required=True, ondelete="cascade"
+custom/model_attributes/models/label.py:54:59: OD218 'partner_id' has delegate=True and no ondelete, so Odoo fails with AttributeError when it sets up the registry; give it required=True, ondelete="cascade"
+custom/model_attributes/models/label.py:60:33: OD218 _inherits delegates to 'partner_id', which must be required with ondelete 'cascade' or 'restrict'; give it ondelete="cascade"
+custom/model_attributes/models/plot.py:12:19: OD115 'partner_id.country_id': @api.onchange takes field names of the model, not paths, so Odoo ignores it; name 'partner_id' instead
+custom/model_attributes/models/plot.py:20:21: OD115 'partner_id.nickname': @api.constrains takes field names of the model, not paths, so Odoo ignores it; name 'partner_id' instead
+custom/model_attributes/models/zone.py:9:5: OD217 garden.zone sets _parent_store but has no parent_path field, which Odoo logs as an error; add parent_path = fields.Char(index=True)
+custom/model_attributes/models/zone.py:22:5: OD217 garden.area sets _parent_store but its parent_path field has no index, which Odoo logs as an error; add index=True to it
+custom/model_attributes/models/zone.py:31:5: OD217 garden.terrace sets _parent_store but its parent_path field has no index, which Odoo logs as an error; add index=True to it
 custom/modern19/models/partner.py:6:5: OD110 _sql_constraints is ignored; declare models.Constraint, models.Index or models.UniqueIndex attributes instead
 custom/modern19/models/partner.py:9:9: OD109 self._cr is deprecated; use self.env.cr
 custom/project_fork/models/task.py:4:7: OD209 module project already defines model 'project.task', and this class replaces it; extend it with _inherit = 'project.task'

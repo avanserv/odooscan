@@ -44,6 +44,7 @@ Python code checked on its own: security, deprecated APIs and ORM mistakes visib
 | [OD112](OD112.md) | `csrf-disabled` | An HTTP route disables CSRF protection. |
 | [OD113](OD113.md) | `fields-view-get-removed` | fields_view_get() is removed; override _get_view() or get_views(). |
 | [OD114](OD114.md) | `depends-on-id` | @api.depends names the field id, which Odoo refuses. |
+| [OD115](OD115.md) | `dotted-onchange-constrains` | @api.onchange or @api.constrains names a dotted path, which Odoo ignores. |
 
 ## OD2: models and fields
 
@@ -54,7 +55,7 @@ Models, fields and methods checked against every module in the dependency graph.
 | [OD201](OD201.md) | `unknown-model` | The model is not defined by any indexed module. |
 | [OD202](OD202.md) | `model-not-in-depends` | The model comes from a module missing from depends. |
 | [OD203](OD203.md) | `unresolved-field-path` | A field path does not resolve on its model. |
-| [OD204](OD204.md) | `missing-method` | compute, inverse or search names a method the model does not have. |
+| [OD204](OD204.md) | `missing-method` | compute, inverse, search, selection or group_expand names a method the model does not have. |
 | [OD205](OD205.md) | `field-type-changed` | An inherited field is redefined with another type. |
 | [OD206](OD206.md) | `unknown-env-model` | env[...] names a model no indexed module defines. |
 | [OD207](OD207.md) | `related-type-mismatch` | A related field has another type than the field it relates to. |
@@ -67,6 +68,8 @@ Models, fields and methods checked against every module in the dependency graph.
 | [OD214](OD214.md) | `many2many-table-clash` | Two Many2many fields of a model to one comodel get the same table. |
 | [OD215](OD215.md) | `many2many-table-too-long` | A Many2many's relation table name is longer than PostgreSQL allows. |
 | [OD216](OD216.md) | `selection-add-without-ondelete` | selection_add leaves a value of a required Selection with ondelete 'set null'. |
+| [OD217](OD217.md) | `parent-store-without-path` | A model sets _parent_store without an indexed parent_path field. |
+| [OD218](OD218.md) | `delegation-field-not-required` | A field that delegates to a parent model is not required with ondelete cascade or restrict. |
 
 ## OD3: XML ids, views and data
 

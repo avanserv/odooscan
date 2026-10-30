@@ -502,7 +502,11 @@ impl<'m> Ctx<'_, 'm> {
         for field in &class.fields {
             self.field(out, path, class, field);
         }
-        let paths = class.paths.iter().chain(&class.order_fields);
+        let paths = class
+            .paths
+            .iter()
+            .chain(&class.order_fields)
+            .chain(self.rec_names_search(class));
         for p in paths.filter(|_| class.kind != ModelKind::Abstract) {
             self.path(out, path, "OD203", &class.model, p);
         }
@@ -521,6 +525,15 @@ impl<'m> Ctx<'_, 'm> {
                     class.model
                 ),
             );
+        }
+    }
+
+    /// `_rec_names_search` is read from 16.0 on.
+    fn rec_names_search<'c>(&self, class: &'c ClassFact) -> &'c [Spanned<String>] {
+        if self.series.is_some_and(|s| s >= Series { major: 16, minor: 0 }) {
+            &class.rec_names_search
+        } else {
+            &[]
         }
     }
 
@@ -596,6 +609,7 @@ impl<'m> Ctx<'_, 'm> {
             self.path(out, path, "OD203", &class.model, related);
             self.related_type(out, path, class, field, related);
         }
+        self.model_field(out, path, class, field);
         if let (Some(comodel), Some(inverse)) = (&field.comodel, &field.inverse_name)
             && index.has_model(&comodel.value)
         {
@@ -607,17 +621,7 @@ impl<'m> Ctx<'_, 'm> {
                 self.path(out, path, "OD210", &comodel.value, f);
             }
         }
-        // Odoo replaces the compute and inverse of a related field with its own.
-        for method in field.methods.iter().filter(|_| field.related.is_none()) {
-            if !index.has_method(&class.model, &method.value, self.scope) {
-                out.push(
-                    path,
-                    "OD204",
-                    method.pos,
-                    format!("{} has no method '{}'", class.model, method.value),
-                );
-            }
-        }
+        self.missing_methods(out, path, class, field);
         if let Some(t) = self.other_type(class, field) {
             out.push(
                 path,
@@ -628,6 +632,39 @@ impl<'m> Ctx<'_, 'm> {
                     field.name, field.ftype
                 ),
             );
+        }
+    }
+
+    /// Odoo replaces the compute and inverse of a related field with its own, and a plain Python
+    /// base class may hold methods only Python knows.
+    fn missing_methods(&self, out: &mut Out<'m>, path: &'m Path, class: &ClassFact, field: &FieldFact) {
+        if field.related.is_some() || self.index.plain_bases(&class.model, self.scope) {
+            return;
+        }
+        for method in &field.methods {
+            if !self.index.has_method(&class.model, &method.value, self.scope) {
+                let message = format!("{} has no method '{}'", class.model, method.value);
+                out.push(path, "OD204", method.pos, message);
+            }
+        }
+    }
+
+    /// A Many2oneReference reads its record's model from the Char field `model_field` names, which
+    /// in a mixin is a field of the models that inherit it.
+    fn model_field(&self, out: &mut Out<'m>, path: &'m Path, class: &ClassFact, field: &FieldFact) {
+        if field.ftype != "Many2oneReference" || field.related.is_some() || class.kind == ModelKind::Abstract {
+            return;
+        }
+        if let Some(Spanned {
+            value: OptionValue::Str(name),
+            pos,
+        }) = field.option("model_field")
+        {
+            let name = Spanned {
+                value: name.clone(),
+                pos: *pos,
+            };
+            self.path(out, path, "OD203", &class.model, &name);
         }
     }
 
@@ -1023,10 +1060,10 @@ fn set_null_values<'m>(own: &'m FieldFact, added: &'m [String], known: &FxHashSe
     Some(values)
 }
 
-/// Field definitions Odoo refuses when it sets up the registry. Each rule reads every definition
-/// merged into the field, so none runs where a module in scope depends on one that is not indexed,
-/// on a model whose introducing class is out of scope, or on one with a plain Python base class,
-/// whose fields only Python knows.
+/// Model and field definitions Odoo refuses or logs as wrong when it sets up the registry or
+/// creates the tables. Each rule reads every definition merged into the model, so none runs where
+/// a module in scope depends on one that is not indexed, on a model whose introducing class is out
+/// of scope, or on one with a plain Python base class, whose fields only Python knows.
 impl<'m> Ctx<'_, 'm> {
     fn registry(&self, out: &mut Out<'m>) {
         if self.partial {
@@ -1041,6 +1078,10 @@ impl<'m> Ctx<'_, 'm> {
                 for own in class.fields.iter().filter(typed) {
                     self.registry_field(out, &file.path, &class.model, own);
                 }
+                self.parent_store(out, &file.path, class);
+                for entry in &class.delegations {
+                    self.delegation(out, &file.path, class, entry);
+                }
             }
         }
     }
@@ -1054,7 +1095,10 @@ impl<'m> Ctx<'_, 'm> {
         };
         match own.ftype.as_str() {
             "Monetary" => self.monetary(out, path, &field, own),
-            "Many2one" => self.required_set_null(out, path, &field, own),
+            "Many2one" => {
+                self.required_set_null(out, path, &field, own);
+                self.delegate_field(out, path, &field, own);
+            }
             "Many2many" if field.stored() == Some(true) => {
                 self.long_relation(out, path, &field, own);
                 self.relation_clash(out, path, &field, own);
@@ -1195,6 +1239,124 @@ impl<'m> Ctx<'_, 'm> {
         }
     }
 
+    /// A `delegate=True` field that no `_inherits` entry names. Until 20.0, Odoo forces it required
+    /// with a warning, and fails on an unset ondelete, which it reads before giving it a default.
+    /// 20.0 refuses such a field whatever its attributes, which this rule does not report.
+    fn delegate_field(&self, out: &mut Out<'m>, path: &'m Path, field: &Field<'m>, own: &FieldFact) {
+        const OPTIONS: [&str; 3] = ["delegate", "required", "ondelete"];
+        let sets = |f: &FieldFact| OPTIONS.iter().any(|o| f.option(o).is_some());
+        let refused = self.series.is_some_and(|s| s >= Series { major: 20, minor: 0 });
+        if refused || !self.lone_delegate(field, &own.name) || !self.reported_at(field, own, sets) {
+            return;
+        }
+        let Some(fix) = delegation_fix(field) else {
+            return;
+        };
+        let at = OPTIONS.iter().find_map(|o| own.option(o)).map_or(own.pos, |o| o.pos);
+        let name = &own.name;
+        let message = if field.get("ondelete") == Merged::Unset {
+            format!(
+                "'{name}' has delegate=True and no ondelete, so Odoo fails with AttributeError when it sets up the registry; give it {fix}"
+            )
+        } else {
+            format!(
+                "'{name}' has delegate=True, so it must be required with ondelete 'cascade' or 'restrict'; give it {fix}"
+            )
+        };
+        out.push(path, "OD218", at, message);
+    }
+
+    /// Whether the field delegates with `delegate=True` alone: not related, and named by no
+    /// `_inherits` entry of a class of its model in scope.
+    fn lone_delegate(&self, field: &Field<'m>, name: &str) -> bool {
+        let names = |c: &ClassFact| c.delegations.iter().any(|d| d.value == name);
+        field.is("delegate", &OptionValue::Bool(true))
+            && field.get("related") == Merged::Unset
+            && !self
+                .index
+                .classes(field.model)
+                .iter()
+                .any(|(mi, c)| self.scope.sees(*mi) && names(c))
+    }
+
+    /// Odoo wants the Many2one an `_inherits` entry names required, with ondelete 'cascade' or
+    /// 'restrict'. 18.0 warns and forces both, an unset ondelete included; 20.0 refuses the model.
+    /// A missing field, or one of another type, is left alone, and an entry repeated in another
+    /// class of the model in this module is reported at the first.
+    fn delegation(&self, out: &mut Out<'m>, path: &'m Path, class: &'m ClassFact, entry: &Spanned<String>) {
+        let names = |c: &ClassFact| c.delegations.iter().any(|d| d.value == entry.value);
+        if !self.first_class(class, names) {
+            return;
+        }
+        let Some(field) = self.merged(&class.model, &entry.value) else {
+            return;
+        };
+        if field.defs[0].2.ftype != "Many2one" {
+            return;
+        }
+        if let Some(fix) = delegation_fix(&field) {
+            let message = format!(
+                "_inherits delegates to '{}', which must be required with ondelete 'cascade' or 'restrict'; give it {fix}",
+                entry.value
+            );
+            out.push(path, "OD218", entry.pos, message);
+        }
+    }
+
+    /// Whether `class` is the first class of its model in this module that `picks`, by the module's
+    /// file list and then by position, so that a model is reported once per module.
+    fn first_class(&self, class: &ClassFact, picks: impl Fn(&ClassFact) -> bool) -> bool {
+        let me = self.index.by_name[self.module.name.as_str()];
+        let file = |c: &ClassFact| {
+            let has = |x: &ClassFact| std::ptr::eq(x, c);
+            self.module.python.iter().position(|f| f.facts.classes.iter().any(has))
+        };
+        self.index
+            .classes(&class.model)
+            .iter()
+            .filter(|(mi, c)| *mi == me && picks(c))
+            .min_by_key(|(_, c)| (file(c), c.pos))
+            .is_some_and(|(_, c)| std::ptr::eq(*c, class))
+    }
+
+    /// Odoo logs an error when it creates the table of a model with `_parent_store` and no indexed
+    /// `parent_path` field. A model without a table of its own, or with a class that sets either
+    /// attribute otherwise, is left alone, and one set in several classes of this module is reported
+    /// at the first.
+    fn parent_store(&self, out: &mut Out<'m>, path: &'m Path, class: &'m ClassFact) {
+        let sets = |c: &ClassFact| c.attr("_parent_store").is_some();
+        let Some(at) = class
+            .attr("_parent_store")
+            .filter(|_| self.first_class(class, sets) && self.parent_store_table(&class.model))
+        else {
+            return;
+        };
+        let model = class.model.as_str();
+        let message = match self.index.field(model, "parent_path", self.scope) {
+            Err(_) => format!(
+                "{model} sets _parent_store but has no parent_path field, which Odoo logs as an error; add parent_path = fields.Char(index=True)"
+            ),
+            Ok(_) => match self.merged(model, "parent_path").map(|f| f.get("index")) {
+                Some(Merged::Unset | Merged::Known(OptionValue::Bool(false))) => format!(
+                    "{model} sets _parent_store but its parent_path field has no index, which Odoo logs as an error; add index=True to it"
+                ),
+                _ => return,
+            },
+        };
+        out.push(path, "OD217", at.pos, message);
+    }
+
+    /// Whether every class of `model` in scope leaves it a table with `_parent_store`: none is
+    /// abstract, or sets `_auto` or `_parent_store` to anything but True.
+    fn parent_store_table(&self, model: &str) -> bool {
+        let set = |c: &ClassFact, name: &str| c.attr(name).is_none_or(|a| a.value == OptionValue::Bool(true));
+        let kept = |c: &ClassFact| c.kind != ModelKind::Abstract && set(c, "_auto") && set(c, "_parent_store");
+        self.index
+            .classes(model)
+            .iter()
+            .all(|(mi, c)| !self.scope.sees(*mi) || kept(c))
+    }
+
     /// The table Odoo names a Many2many's relation after when it gives none: both tables, sorted.
     /// None when a table is unknown, or both are the same, which Odoo refuses on its own.
     fn implicit_relation(&self, field: &Field<'m>) -> Option<String> {
@@ -1325,6 +1487,39 @@ impl<'m> Ctx<'_, 'm> {
         );
         out.push(path, "OD216", *pos, message);
     }
+}
+
+/// Whether the field is required, when a literal tells.
+fn required(field: &Field) -> Option<bool> {
+    match field.get("required") {
+        Merged::Unset => Some(false),
+        Merged::Known(OptionValue::Bool(b)) => Some(*b),
+        _ => None,
+    }
+}
+
+/// Whether the field's ondelete keeps the records it points to from going away under it.
+fn kept_on_delete(field: &Field) -> Option<bool> {
+    match field.get("ondelete") {
+        Merged::Unset => Some(false),
+        Merged::Known(OptionValue::Str(policy)) => {
+            Some(matches!(policy.to_lowercase().as_str(), "cascade" | "restrict"))
+        }
+        _ => None,
+    }
+}
+
+/// What a delegating field lacks of `required=True` and ondelete 'cascade' or 'restrict', or None
+/// when it lacks neither. An attribute that is not a literal is not named.
+fn delegation_fix(field: &Field) -> Option<String> {
+    let mut fix = vec![];
+    if required(field) == Some(false) {
+        fix.push("required=True");
+    }
+    if kept_on_delete(field) == Some(false) {
+        fix.push("ondelete=\"cascade\"");
+    }
+    (!fix.is_empty()).then(|| fix.join(", "))
 }
 
 /// The values the field has before its definition `at`, or None when a definition computes them,
