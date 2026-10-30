@@ -63,6 +63,8 @@ class IrUiView(models.Model):
 
     name = fields.Char()
     model = fields.Char()
+    type = fields.Char()
+    key = fields.Char()
     arch = fields.Text()
     inherit_id = fields.Many2one("ir.ui.view")
 

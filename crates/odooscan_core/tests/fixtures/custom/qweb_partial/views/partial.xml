@@ -1,0 +1,7 @@
+<odoo>
+    <template id="page">
+        <t t-call="ghost_enterprise.layout"/>
+        <t t-call="ghost_block"/>
+        <t t-call="web.layot"/>
+    </template>
+</odoo>

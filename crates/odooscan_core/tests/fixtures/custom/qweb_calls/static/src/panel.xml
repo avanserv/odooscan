@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<templates xml:space="preserve">
+    <t t-name="qweb_calls.Panel">
+        <t t-call="qweb_calls.PanelBody"/>
+        <t t-call="web.FormController"/>
+        <t t-call="qweb_calls.Absent"/>
+        <t t-call="qweb_outside.Panel"/>
+        <t t-call="{{ props.template }}"/>
+    </t>
+    <t t-name="qweb_calls.PanelBody">
+        <div/>
+    </t>
+</templates>
