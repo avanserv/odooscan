@@ -84,6 +84,9 @@ custom/bad_sale/views/views.xml:34:9: OD309 res.partner has no field 'email'
 custom/bad_sale/views/views.xml:36:5: OD303 XML id 'partner_demo' is already defined earlier in this file
 custom/bad_sale/views/views.xml:49:9: OD307 t-raw renders unescaped HTML; use t-out and wrap trusted HTML in Markup
 custom/bad_sale/views/views.xml:53:9: OD306 view_mode 'tree' is renamed 'list'
+custom/base_only/data/project.project.csv:1:1: OD202 model 'project.project' comes from module project; add it to depends
+custom/base_only/data/tasks.xml:2:5: OD202 model 'project.task' comes from module project; add it to depends
+custom/base_only/data/tasks.xml:8:5: OD202 model 'project.task' comes from module project; add it to depends
 custom/base_only/models/res_partner.py:17:16: OD202 model 'registry.invoice' comes from module registry_fields; add it to depends
 custom/base_only/models/web_palette.py:4:7: OD209 module web already defines model 'web.palette', and this class replaces it; extend it with _inherit = 'web.palette'
 custom/base_only/views/views.xml:12:9: OD301 module web defines no XML id 'web.no_such_layout'
@@ -300,6 +303,7 @@ custom/orm_overrides/models/computes.py:395:9: OD223 _compute_named_child() can 
 custom/orm_overrides/models/overrides.py:7:9: OD119 write() calls super() but returns nothing, so callers get None instead of True; return what super().write() returns
 custom/orm_overrides/models/overrides.py:14:9: OD119 copy() calls super() but returns nothing, so callers get None instead of the new records; return what super().copy() returns
 custom/orm_overrides/models/overrides.py:24:5: OD117 @api.model on create() makes Odoo call it once per record; decorate it with @api.model_create_multi and take a list of dicts
+custom/project_fork/data/projects.xml:7:9: OD309 field 'allow_timesheets' of project.project comes from module hr_timesheet, which is not in depends
 custom/project_fork/models/task.py:4:7: OD209 module project already defines model 'project.task', and this class replaces it; extend it with _inherit = 'project.task'
 custom/registry_fields/models/links.py:7:71: OD213 'owner_id' is required, so Odoo refuses ondelete='set null'; use 'restrict' or 'cascade'
 custom/registry_fields/models/links.py:11:19: OD214 'follower_ids' and 'watcher_ids' are Many2many fields of registry.invoice to the same comodel without relation, so Odoo gives both the same table; set relation on one
