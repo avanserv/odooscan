@@ -273,6 +273,7 @@ custom/orm_overrides/models/computes.py:299:9: OD223 _compute_zone_hint() can le
 custom/orm_overrides/models/computes.py:305:9: OD223 _compute_sector_hint() can leave 'sector_hint' unassigned on a record, so reading it raises ValueError; assign it on every path through the loop, False when there is no value
 custom/orm_overrides/models/computes.py:347:9: OD223 _compute_tier() can leave 'tier' unassigned on a record, so reading it raises ValueError; assign it on every path through the loop, False when there is no value
 custom/orm_overrides/models/computes.py:365:9: OD223 _compute_area_hint() can leave 'area_hint' unassigned on a record, so reading it raises ValueError; assign it on every path through the loop, False when there is no value
+custom/orm_overrides/models/computes.py:395:9: OD223 _compute_named_child() can leave 'named_child' unassigned on a record, so reading it raises ValueError; assign it on every path through the loop, False when there is no value
 custom/orm_overrides/models/overrides.py:7:9: OD119 write() calls super() but returns nothing, so callers get None instead of True; return what super().write() returns
 custom/orm_overrides/models/overrides.py:14:9: OD119 copy() calls super() but returns nothing, so callers get None instead of the new records; return what super().copy() returns
 custom/orm_overrides/models/overrides.py:24:5: OD117 @api.model on create() makes Odoo call it once per record; decorate it with @api.model_create_multi and take a list of dicts
