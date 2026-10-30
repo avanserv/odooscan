@@ -505,7 +505,8 @@ impl Scope {
 
 pub enum Status<'m> {
     Visible,
-    /// Defined only by modules outside the scope; the first one is named.
+    /// Defined only by modules outside the scope. A model names the module that introduces it,
+    /// anything else its first definer.
     Hidden(&'m str),
     Missing,
 }
@@ -885,11 +886,24 @@ impl<'m> Index<'m> {
         };
         if others().any(|(mi, _)| scope.sees(*mi)) {
             Status::Visible
-        } else if let Some((mi, _)) = others().next() {
-            Status::Hidden(&self.modules[*mi].name)
+        } else if let Some((first, _)) = others().next() {
+            let mi = self.introducer(others()).unwrap_or(*first);
+            Status::Hidden(&self.modules[mi].name)
         } else {
             Status::Missing
         }
+    }
+
+    /// The module of the class that introduces the model with `_name`, the first in load order.
+    /// Independent introducers keep index order, since Odoo's tie order between them is unknown.
+    fn introducer<'c>(&self, classes: impl Iterator<Item = &'c (usize, &'m ClassFact)>) -> Option<usize>
+    where
+        'm: 'c,
+    {
+        classes
+            .filter(|(_, c)| c.new_model)
+            .map(|(mi, _)| *mi)
+            .reduce(|first, mi| if self.reaches(first, mi) { mi } else { first })
     }
 
     /// Every class of `model` and of the models it inherits from, `base` included.
