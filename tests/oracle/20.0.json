@@ -235,12 +235,6 @@
       "count": 1
     },
     {
-      "path": "addons/bus/bus_dispatcher.py",
-      "code": "OD103",
-      "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
-      "count": 1
-    },
-    {
       "path": "addons/bus/models/bus.py",
       "code": "OD401",
       "message": "model 'bus.bus' has no ir.model.access rule, so only the superuser can use it",
@@ -1417,12 +1411,6 @@
       "count": 3
     },
     {
-      "path": "addons/l10n_ro_edi/models/res_company.py",
-      "code": "OD103",
-      "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
-      "count": 1
-    },
-    {
       "path": "addons/l10n_rs_edi/models/account_move_send.py",
       "code": "OD103",
       "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
@@ -2452,12 +2440,6 @@
       "path": "addons/stock/models/stock_move.py",
       "code": "OD301",
       "message": "module stock defines no XML id 'stock.group_stock_tracking_lot'",
-      "count": 1
-    },
-    {
-      "path": "addons/stock/models/stock_orderpoint.py",
-      "code": "OD103",
-      "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
       "count": 1
     },
     {
