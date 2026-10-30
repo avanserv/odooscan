@@ -342,7 +342,7 @@ custom/sql_columns/models/queries.py:23:61: OD224 l.name: parcel_locker has no s
 custom/sql_columns/models/queries.py:33:17: OD224 d.capacity: parcel_depot has no such column, since parcel.depot has no field capacity; name the column of a stored field of parcel.depot
 custom/sql_columns/models/queries.py:40:105: OD224 EXCLUDED.title: parcel_box has no such column, since parcel.box has no field title; name the column of a stored field of parcel.box
 custom/sql_columns/models/queries.py:46:53: OD224 b.volume: parcel_box has no such column, since parcel.box has no field volume; name the column of a stored field of parcel.box
-custom/sql_columns/models/queries.py:52:81: OD224 b.pickup_code: parcel_box has no such column, since parcel.box.pickup_code is not stored; set store=True on the field, or read it through the ORM
+custom/sql_columns/models/queries.py:52:83: OD224 b.pickup_code: parcel_box has no such column, since parcel.box.pickup_code is not stored; set store=True on the field, or read it through the ORM
 custom/sql_columns/models/queries.py:99:39: OD224 b.display_name: parcel_box has no such column, since parcel.box.display_name is computed by the ORM, not stored; read it through the ORM
 custom/sql_columns/models/queries.py:103:27: OD224 b.code: parcel_box has no such column, since parcel.box has no field code; name the column of a stored field of parcel.box
 custom/sql_columns/models/queries.py:116:34: OD224 b.shelf: parcel_box has no such column, since parcel.box has no field shelf; name the column of a stored field of parcel.box
