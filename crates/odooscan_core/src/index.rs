@@ -1201,10 +1201,13 @@ impl<'m> Index<'m> {
                 .any(|(_, c)| !std::ptr::eq(*c, except) && c.methods.iter().any(|m| m == method))
     }
 
+    /// Whether a class in scope of `model` or of a model it inherits by `_inherit` defines `method`.
+    /// A parent it delegates to does not count, since Odoo looks the method up on the model's
+    /// records, which get the parent's fields, not its methods.
     pub fn has_method(&self, model: &str, method: &str, scope: &Scope) -> bool {
         BASE_METHODS.contains(&method)
             || self
-                .chain(model, Some(scope), true)
+                .merged_classes(model, scope)
                 .iter()
                 .any(|(_, c)| c.methods.iter().any(|m| m == method))
     }
@@ -1229,12 +1232,20 @@ impl<'m> Index<'m> {
     }
 
     /// Whether a client may call `method` on `model`: a method of `BaseModel`, or of a class of the
-    /// model or of a model it inherits, in scope or in a module that is always installed. The
-    /// scoped walk skips a class outside the scope with its `_inherit`, so a mixin of an
-    /// always-installed module that only such a class adds is found only by the unscoped walk;
-    /// without the always-installed arm it would be `Hidden` under a module the caller has.
+    /// model or of a model it inherits or delegates to, in scope or in a module that is always
+    /// installed. Odoo does not reach a delegated parent's methods, so counting them lets OD604 miss
+    /// a call Odoo refuses. The scoped walk skips a class outside the scope with its `_inherit`, so
+    /// a mixin of an always-installed module that only such a class adds is found only by the
+    /// unscoped walk; without the always-installed arm it would be `Hidden` under a module the
+    /// caller has.
     pub fn rpc_method(&self, model: &str, method: &str, scope: &Scope) -> Status<'m> {
-        if BASE_MODEL_METHODS.contains(&method) || self.has_method(model, method, scope) {
+        if BASE_MODEL_METHODS.contains(&method)
+            || BASE_METHODS.contains(&method)
+            || self
+                .chain(model, Some(scope), true)
+                .iter()
+                .any(|(_, c)| c.methods.iter().any(|m| m == method))
+        {
             return Status::Visible;
         }
         let defining: Vec<usize> = self
