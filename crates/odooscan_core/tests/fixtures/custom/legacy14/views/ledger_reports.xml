@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="action_ledger_report" model="ir.actions.act_window">
+        <field name="name">Ledger report</field>
+        <field name="res_model">legacy.ledger</field>
+    </record>
+
+    <record id="view_ledger_form_report" model="ir.ui.view">
+        <field name="model">legacy.ledger</field>
+        <field name="inherit_id" ref="view_ledger_form"/>
+        <field name="arch" type="xml">
+            <field name="name" position="attributes">
+                <attribute name="readonly">1</attribute>
+            </field>
+        </field>
+    </record>
+</odoo>

@@ -150,7 +150,7 @@ rules! {
     "OD401" "model-without-access" Security Warning None, true, "A new model has no ir.model.access rule.";
     "OD402" "public-write-access" Security Warning None, false, "Public or portal users get write, create or unlink access.";
     "OD501" "manifest-data-missing" Correctness Error None, false, "A file listed in the manifest does not exist.";
-    "OD502" "data-file-not-loaded" Quality Warning None, false, "A data file is not listed in the manifest, so Odoo never loads it.";
+    "OD502" "data-file-not-loaded" Quality Warning None, false, "A data file is listed under no manifest key Odoo reads, so Odoo never loads it.";
     "OD503" "unknown-dependency" Correctness Error None, true, "A module in depends is not on the addons path.";
     "OD504" "circular-dependency" Correctness Error None, true, "A module in depends depends back on this module.";
     "OD601" "unresolved-js-import" Correctness Error None, true, "A JS import names a module or an export no indexed module provides.";

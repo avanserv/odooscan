@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="action_ledger" model="ir.actions.act_window">
+        <field name="name">Ledgers</field>
+        <field name="res_model">legacy.ledger</field>
+    </record>
+
+    <menuitem id="menu_ledger_root" name="Ledgers"/>
+</odoo>

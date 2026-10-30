@@ -125,7 +125,7 @@ The manifest and the dependency graph: listed files, unlisted files and dependen
 | Code | Name | Reports |
 | --- | --- | --- |
 | [OD501](OD501.md) | `manifest-data-missing` | A file listed in the manifest does not exist. |
-| [OD502](OD502.md) | `data-file-not-loaded` | A data file is not listed in the manifest, so Odoo never loads it. |
+| [OD502](OD502.md) | `data-file-not-loaded` | A data file is listed under no manifest key Odoo reads, so Odoo never loads it. |
 | [OD503](OD503.md) | `unknown-dependency` | A module in depends is not on the addons path. |
 | [OD504](OD504.md) | `circular-dependency` | A module in depends depends back on this module. |
 

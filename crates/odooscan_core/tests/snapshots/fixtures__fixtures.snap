@@ -197,6 +197,9 @@ custom/legacy14/models/res_partner.py:11:34: OD219 'stage' sets tracking, but re
 custom/legacy14/models/res_partner.py:22:9: OD223 _compute_initials() can leave 'initials' unassigned on a record, so reading it raises ValueError; assign it on every path through the loop, False when there is no value
 custom/legacy14/models/res_partner.py:33:41: OD220 'stamped_on' has the label 'Create Date' of field 'create_date' of res.partner, so Odoo logs a warning and users cannot tell them apart; give it another string
 custom/legacy14/models/res_partner.py:35:41: OD220 'touched_on' has the label 'Last Modified on' of field '__last_update' of res.partner, so Odoo logs a warning and users cannot tell them apart; give it another string
+custom/legacy14/views/ledger_archive.xml:1:1: OD502 'views/ledger_archive.xml' is not in the manifest's init_xml, update_xml, data, demo_xml or demo, so Odoo never loads it
+custom/legacy14/views/ledger_views.xml:8:17: OD304 'x_opening_balance': legacy.ledger has no field 'x_opening_balance'
+custom/legacy14/views/ledger_views.xml:9:17: OD308 'action_ledger_report' is defined in views/ledger_reports.xml, which loads after this reference
 custom/legacy15/models/card.py:7:33: OD218 _inherits delegates to 'partner_id', which must be required with ondelete 'cascade' or 'restrict'; give it ondelete="cascade"
 custom/legacy15/models/card.py:10:58: OD218 'country_id' has delegate=True, so it must be required with ondelete 'cascade' or 'restrict'; give it ondelete="cascade"
 custom/legacy15/models/res_partner.py:9:22: OD212 Monetary field 'parent_balance' has no currency: res.partner has no currency_id, and the field names no currency_field
@@ -208,6 +211,9 @@ custom/legacy16/models/res_partner.py:22:40: OD220 'opened_on' has the label 'Cr
 custom/legacy16/models/res_partner.py:23:41: OD220 'touched_on' has the label 'Last Modified on' of field '__last_update' of res.partner, so Odoo logs a warning and users cannot tell them apart; give it another string
 custom/legacy16/models/res_partner.py:31:40: OD220 'turned_on' has the label 'Last Modified on' of field '__last_update' of legacy.turnstile, so Odoo logs a warning and users cannot tell them apart; give it another string
 custom/legacy16/models/res_partner.py:37:21: OD120 'time' in an ormcache key is not a parameter of _quarter_hour_rates(), so every call raises NameError; key on a parameter or on self
+custom/legacy17/partner_tagline_views.xml:1:1: OD502 'partner_tagline_views.xml' is listed under update_xml, which Odoo ignores in this series; move it to data
+custom/legacy17/views/partner_motto_views.xml:1:1: OD502 'views/partner_motto_views.xml' is listed under update_xml, which Odoo ignores in this series; move it to data
+custom/legacy17/views/partner_nickname_views.xml:1:1: OD502 'views/partner_nickname_views.xml' is listed under init_xml, which Odoo ignores in this series; move it to data
 custom/model_attributes/models/bed.py:7:20: OD203 'parent_bed_id': garden.bed has no field 'parent_bed_id'
 custom/model_attributes/models/bed.py:8:18: OD203 'folded': garden.bed has no field 'folded'
 custom/model_attributes/models/bed.py:9:20: OD203 'x_active': garden.bed has no field 'x_active'
