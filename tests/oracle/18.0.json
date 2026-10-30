@@ -2515,6 +2515,12 @@
       "count": 1
     },
     {
+      "path": "addons/website_slides/models/slide_slide.py",
+      "code": "OD223",
+      "message": "_compute_vimeo_id() can leave 'vimeo_id' unassigned on a record, so reading it raises ValueError; assign it on every path through the loop, False when there is no value",
+      "count": 1
+    },
+    {
       "path": "odoo/addons/base/controllers/rpc.py",
       "code": "OD112",
       "message": "csrf=False lets other sites submit this form on the user's behalf",
@@ -2561,6 +2567,12 @@
       "code": "OD103",
       "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
       "count": 2
+    },
+    {
+      "path": "odoo/addons/base/models/ir_module.py",
+      "code": "OD223",
+      "message": "_get_icon_image() can leave 'icon_flag' unassigned on a record, so reading it raises ValueError; assign it on every path through the loop, False when there is no value",
+      "count": 1
     },
     {
       "path": "odoo/addons/base/models/ir_qweb_fields.py",
@@ -2693,6 +2705,12 @@
       "code": "OD112",
       "message": "csrf=False lets other sites submit this form on the user's behalf",
       "count": 4
+    },
+    {
+      "path": "odoo/addons/test_new_api/models/test_new_api.py",
+      "code": "OD223",
+      "message": "_compute_bar() can leave 'bar' unassigned on a record, so reading it raises ValueError; assign it on every path through the loop, False when there is no value",
+      "count": 1
     },
     {
       "path": "odoo/addons/test_read_group/models.py",

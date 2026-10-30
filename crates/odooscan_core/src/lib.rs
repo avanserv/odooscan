@@ -6,6 +6,7 @@ mod flows;
 mod index;
 mod js;
 mod manifest;
+mod method_body;
 mod owl;
 mod project;
 mod python;

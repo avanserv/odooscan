@@ -153,6 +153,9 @@ pub struct ClassFact {
     pub table: Option<OptionValue>,
     /// `_parent_store`, `_auto` and `_log_access`, when the class sets them.
     pub attrs: Vec<(String, Spanned<OptionValue>)>,
+    /// Compute methods, at their name, with the fields of the class they compute and can leave
+    /// unassigned on a record.
+    pub unassigned_computes: Vec<(Spanned<String>, Vec<String>)>,
 }
 
 impl ClassFact {

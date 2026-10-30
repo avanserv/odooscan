@@ -1,4 +1,4 @@
-from odoo import fields, models
+from odoo import api, fields, models
 
 
 class ResPartner(models.Model):
@@ -14,3 +14,22 @@ class ModernNote(models.AbstractModel):
     _description = "Tracked note"
 
     note = fields.Char(tracking=True)
+
+
+class ResPartnerCreate(models.Model):
+    _inherit = "res.partner"
+
+    @api.model
+    def create(self, vals):
+        vals.setdefault("ref", vals.get("name"))
+        return super().create(vals)
+
+
+class ResPartnerBatchCreate(models.Model):
+    _inherit = "res.partner"
+
+    @api.model
+    def create(self, vals_list):
+        for vals in vals_list:
+            vals.setdefault("ref", vals.get("name"))
+        return super().create(vals_list)

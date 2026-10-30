@@ -1,4 +1,4 @@
-from odoo import fields, models
+from odoo import api, fields, models
 
 
 class ResPartner(models.Model):
@@ -11,3 +11,10 @@ class ResPartner(models.Model):
     company_id = fields.Many2one("res.company")
     home_country_id = fields.Many2one("res.country", check_company=True)
     stage = fields.Char(tracking=True)
+    initials = fields.Char(compute="_compute_initials")
+
+    @api.depends("name")
+    def _compute_initials(self):
+        for partner in self:
+            if partner.name:
+                partner.initials = partner.name[:2]

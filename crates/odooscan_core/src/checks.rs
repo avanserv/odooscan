@@ -1213,6 +1213,46 @@ fn set_null_values<'m>(own: &'m FieldFact, added: &'m [String], known: &FxHashSe
     Some(values)
 }
 
+/// Whether Odoo raises on a record that `method` leaves without a value of the field: it does for
+/// a field it neither stores nor lets users write, as every definition merged into it sets, and
+/// gives the others False. A related field gets Odoo's own compute method.
+fn raises_unassigned(field: &Field, method: &str) -> bool {
+    let readonly = match field.get("readonly") {
+        Merged::Unset => field.get("inverse") == Merged::Unset,
+        merged => merged == Merged::Known(&OptionValue::Bool(true)),
+    };
+    readonly
+        && field.stored() == Some(false)
+        && field.get("related") == Merged::Unset
+        && field.is("compute", &OptionValue::Str(method.to_owned()))
+}
+
+/// OD223 at each compute method of the class that can leave a field unassigned that raises then.
+fn unassigned_computes<'m>(out: &mut Out<'m>, path: &'m Path, class: &ClassFact, fields: &ModelFields<'m>) {
+    for (method, names) in &class.unassigned_computes {
+        let raises = |name: &&str| {
+            fields
+                .fields
+                .get(name)
+                .is_some_and(|f| raises_unassigned(f, &method.value))
+        };
+        let raising: Vec<&str> = names.iter().map(String::as_str).filter(raises).collect();
+        if !raising.is_empty() {
+            out.push(path, "OD223", method.pos, unassigned_message(&method.value, &raising));
+        }
+    }
+}
+
+fn unassigned_message(method: &str, fields: &[&str]) -> String {
+    let (names, it) = match fields {
+        [field] => (format!("'{field}'"), "it"),
+        _ => (format!("'{}'", fields.join("', '")), "them"),
+    };
+    format!(
+        "{method}() can leave {names} unassigned on a record, so reading {it} raises ValueError; assign {it} on every path through the loop, False when there is no value"
+    )
+}
+
 /// Model and field definitions Odoo refuses, ignores or logs as wrong when it loads the registry,
 /// or that fail once used. Each rule reads every definition merged into the model, so none runs
 /// where a module in scope depends on one that is not indexed, on a model whose introducing class
@@ -1235,6 +1275,7 @@ impl<'m> Ctx<'_, 'm> {
                     self.registry_field(out, &file.path, fields, own);
                 }
                 self.self_dependencies(out, &file.path, class, fields, &mut reported_self_dependencies);
+                unassigned_computes(out, &file.path, class, fields);
                 self.parent_store(out, &file.path, class);
                 for entry in &class.delegations {
                     self.delegation(out, &file.path, class, entry);

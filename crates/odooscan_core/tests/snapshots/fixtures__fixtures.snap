@@ -115,9 +115,11 @@ custom/legacy13/models/res_partner.py:9:18: OD214 'origin_ids' and 'market_ids' 
 custom/legacy13/models/res_partner.py:12:68: OD222 'home_country_id' has check_company=True, but res.country has no company_id field to check; remove check_company
 custom/legacy14/models/res_partner.py:7:43: OD216 'type' is required, so Odoo refuses ondelete 'set null' for the selection_add value 'site'; give it 'cascade', 'set default' or a function
 custom/legacy14/models/res_partner.py:11:34: OD219 'stage' sets tracking, but res.partner does not inherit mail.thread, so Odoo ignores it and logs a warning; inherit mail.thread or remove tracking
+custom/legacy14/models/res_partner.py:22:9: OD223 _compute_initials() can leave 'initials' unassigned on a record, so reading it raises ValueError; assign it on every path through the loop, False when there is no value
 custom/legacy15/models/res_partner.py:9:22: OD212 Monetary field 'parent_balance' has no currency: res.partner has no currency_id, and the field names no currency_field
 custom/legacy15/models/res_partner.py:13:18: OD221 'child_ids.total' makes 'total' depend on itself on other records, so Odoo logs a warning; declare 'total' with recursive=True
 custom/legacy16/models/res_partner.py:6:34: OD203 'nickname': res.partner has no field 'nickname'
+custom/legacy16/models/res_partner.py:12:5: OD117 @api.model on create() makes Odoo call it once per record; decorate it with @api.model_create_multi and take a list of dicts
 custom/model_attributes/models/bed.py:7:20: OD203 'parent_bed_id': garden.bed has no field 'parent_bed_id'
 custom/model_attributes/models/bed.py:8:18: OD203 'folded': garden.bed has no field 'folded'
 custom/model_attributes/models/bed.py:9:20: OD203 'x_active': garden.bed has no field 'x_active'
@@ -140,8 +142,17 @@ custom/model_attributes/models/zone.py:22:5: OD217 garden.area sets _parent_stor
 custom/model_attributes/models/zone.py:31:5: OD217 garden.terrace sets _parent_store but its parent_path field has no index, which Odoo logs as an error; add index=True to it
 custom/modern19/models/partner.py:6:5: OD110 _sql_constraints is ignored; declare models.Constraint, models.Index or models.UniqueIndex attributes instead
 custom/modern19/models/partner.py:9:9: OD109 self._cr is deprecated; use self.env.cr
+custom/modern19/models/partner.py:22:5: OD118 @api.model on create() passes a list of dicts, so reading vals as one dict fails; decorate it with @api.model_create_multi and loop over the list
 custom/modern20/models/res_partner.py:14:33: OD219 'note' sets tracking, but modern.note does not inherit mail.thread, so Odoo ignores it and logs a warning; inherit mail.thread or remove tracking
 custom/modern20/models/res_partner.py:38:30: OD220 'ref' has the label 'ID' of field 'id' of modern.ticket, so Odoo logs a warning and users cannot tell them apart; give it another string
+custom/orm_overrides/models/caches.py:7:21: OD120 'lang' in an ormcache key is not a parameter of _greeting_for(), so every call raises NameError; key on a parameter or on self
+custom/orm_overrides/models/caches.py:11:29: OD120 'country' in an ormcache key is not a parameter of _country_label(), so every call raises NameError; key on a parameter or on self
+custom/orm_overrides/models/computes.py:40:9: OD223 _compute_initials() can leave 'initials' unassigned on a record, so reading it raises ValueError; assign it on every path through the loop, False when there is no value
+custom/orm_overrides/models/computes.py:46:9: OD223 _compute_badge() can leave 'badge' unassigned on a record, so reading it raises ValueError; assign it on every path through the loop, False when there is no value
+custom/orm_overrides/models/computes.py:160:9: OD223 _compute_pen_name() can leave 'pen_name' unassigned on a record, so reading it raises ValueError; assign it on every path through the loop, False when there is no value
+custom/orm_overrides/models/overrides.py:7:9: OD119 write() calls super() but returns nothing, so callers get None instead of True; return what super().write() returns
+custom/orm_overrides/models/overrides.py:14:9: OD119 copy() calls super() but returns nothing, so callers get None instead of the new records; return what super().copy() returns
+custom/orm_overrides/models/overrides.py:24:5: OD117 @api.model on create() makes Odoo call it once per record; decorate it with @api.model_create_multi and take a list of dicts
 custom/project_fork/models/task.py:4:7: OD209 module project already defines model 'project.task', and this class replaces it; extend it with _inherit = 'project.task'
 custom/registry_fields/models/links.py:7:71: OD213 'owner_id' is required, so Odoo refuses ondelete='set null'; use 'restrict' or 'cascade'
 custom/registry_fields/models/links.py:11:19: OD214 'follower_ids' and 'watcher_ids' are Many2many fields of registry.invoice to the same comodel without relation, so Odoo gives both the same table; set relation on one
