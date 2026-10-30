@@ -45,3 +45,10 @@ access_parcel_relay,parcel.relay,model_parcel_relay,base.group_user,1,1,1,1
 access_parcel_antenna,parcel.antenna,model_parcel_antenna,base.group_user,1,1,1,1
 access_parcel_trip,parcel.trip,model_parcel_trip,base.group_user,1,0,0,0
 access_parcel_rack,parcel.rack,model_parcel_rack,base.group_user,1,0,0,0
+access_parcel_stand,parcel.stand,model_parcel_stand,base.group_user,1,1,1,1
+access_parcel_booth,parcel.booth,model_parcel_booth,base.group_user,1,1,1,1
+access_parcel_counter,parcel.counter,model_parcel_counter,base.group_user,1,1,1,1
+access_parcel_post,parcel.post,model_parcel_post,base.group_user,1,1,1,1
+access_parcel_shop,parcel.shop,model_parcel_shop,base.group_user,1,1,1,1
+access_parcel_annex,parcel.annex,model_parcel_annex,base.group_user,1,1,1,1
+access_parcel_outlet,parcel.outlet,model_parcel_outlet,base.group_user,1,1,1,1
