@@ -129,6 +129,8 @@ pub struct DomainFact {
 #[derive(Debug)]
 pub struct ClassFact {
     pub pos: Pos,
+    /// The Python name of the class.
+    pub class_name: String,
     pub model: String,
     /// The class declares `_name` and that name is not among its `_inherit`.
     pub new_model: bool,
@@ -259,6 +261,18 @@ pub struct FlowSummary {
     pub edges: Vec<FlowEdge>,
 }
 
+/// An attribute an import-time statement sets on what the file imports from `odoo`.
+#[derive(Debug)]
+pub struct ImportPatch {
+    pub pos: Pos,
+    /// The object as written, `name...` when an item or a call breaks the chain.
+    pub object: String,
+    /// `...` when the code computes it.
+    pub attr: String,
+    /// The object's dotted path from `odoo`, such as `odoo.addons.sale.models.sale_order.SaleOrder`.
+    pub path: String,
+}
+
 /// A `table.column` or `alias.column` reference of a literal query, on the table the query binds.
 #[derive(Debug)]
 pub struct SqlColumn {
@@ -305,6 +319,9 @@ pub struct PyFacts {
     /// OD120 on each name an `ormcache` key reads that the method does not bind, keyed by the name:
     /// `checks.rs` drops those that Odoo's cache module defines in the module's series.
     pub cache_key_names: Vec<(String, RawDiag)>,
+    /// What OD123 reports, whose advice depends on whether the index knows the object as a model
+    /// class.
+    pub import_patches: Vec<ImportPatch>,
 }
 
 #[derive(Debug)]

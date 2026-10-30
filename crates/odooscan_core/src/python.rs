@@ -519,7 +519,9 @@ pub fn analyze(src: &str) -> PyFacts {
         in_view_maker: false,
     };
     v.visit_body(body);
-    v.facts.diags.extend(module_state::check(body, &loc));
+    let (patches, diags) = module_state::check(body, &loc);
+    v.facts.import_patches = patches;
+    v.facts.diags.extend(diags);
     v.facts
 }
 
@@ -570,6 +572,7 @@ impl<'ast> PyVisitor<'_, 'ast> {
         let mut name: Option<String> = None;
         let mut fact = ClassFact {
             pos: self.loc.at(&class.name),
+            class_name: class.name.to_string(),
             model: String::new(),
             new_model: false,
             kind: kind.unwrap_or(ModelKind::Model),

@@ -8,7 +8,6 @@ use crate::facts::{
     Annotation, ClassFact, DefinitionSource, DomainFact, FieldFact, JsFacts, JsName, ModelKind, OptionValue, OrmCall,
     Pos, RawDiag, RecordFact, Spanned, SqlColumn, SqlView, ViewFact, XmlRef,
 };
-use crate::flows;
 use crate::index::{
     BASE_MODEL_METHODS, Export, FieldDef, FieldInfo, Index, JsSpec, RELATIONAL_TYPES, Scope, Status, ViewTree, full_id,
     js_module_path, located,
@@ -16,6 +15,7 @@ use crate::index::{
 use crate::project::{Module, SourceFile};
 use crate::series::{self, Series};
 use crate::xml::{LOCATOR, UNKNOWN_CONTEXT};
+use crate::{flows, module_state};
 
 /// Directories of upgrade scripts, which name XML ids of past versions.
 const UPGRADE_DIRS: &[&str] = &["migrations", "upgrades"];
@@ -47,6 +47,7 @@ pub fn check_module<'m>(index: &Index<'m>, mi: usize, series: Option<Series>) ->
     shadowed_members(module, series, &mut out);
     legacy_hook_rollbacks(module, series, &mut out);
     cache_key_names(module, series, &mut out);
+    import_patches(index, module, &mut out);
     for (_, file) in es_modules(index, mi, series) {
         if let Some(e) = &file.facts.syntax_error {
             out.push(&file.path, "OD000", e.pos, e.value.clone());
@@ -256,6 +257,18 @@ fn cache_key_names<'m>(module: &'m Module, series: Option<Series>, out: &mut Out
             .iter()
             .filter(|(name, _)| !cache_global(name, series));
         out.diags.extend(found.map(|(_, d)| (file.path.as_path(), d.clone())));
+    }
+}
+
+/// OD123 on each patch at import, with the advice for a model class when the index, or failing it
+/// the path, tells one.
+fn import_patches<'m>(index: &Index<'m>, module: &'m Module, out: &mut Out<'m>) {
+    for file in &module.python {
+        let found = file.facts.import_patches.iter();
+        out.diags.extend(found.map(|p| {
+            let diag = module_state::diag(p, index.model_class(&p.path));
+            (file.path.as_path(), diag)
+        }));
     }
 }
 
