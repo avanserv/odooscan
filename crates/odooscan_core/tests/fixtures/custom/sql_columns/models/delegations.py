@@ -68,7 +68,7 @@ class ParcelPost(models.Model):
     ]
 
     def x_post_columns(self):
-        self.env.cr.execute("SELECT p.x_host_id, p.x_site_id FROM parcel_post p")
+        self.env.cr.execute("SELECT p.x_host_id, p.x_site_id, p.name FROM parcel_post p")
         return self.env.cr.fetchall()
 
 
