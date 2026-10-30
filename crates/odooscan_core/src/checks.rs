@@ -1731,7 +1731,7 @@ impl<'m> Ctx<'_, 'm> {
     fn selection_add(&self, out: &mut Out<'m>, path: &'m Path, field: &Field<'m>, at: usize) {
         let own = field.defs[at].2;
         let Some(Spanned {
-            value: OptionValue::Strs(added),
+            value: OptionValue::Strs(added) | OptionValue::Tuple(added),
             pos,
         }) = own.option("selection_add")
         else {
@@ -1740,7 +1740,8 @@ impl<'m> Ctx<'_, 'm> {
         if field.get("related") != Merged::Unset || !field.is("required", &OptionValue::Bool(true)) {
             return;
         }
-        let Some(known) = earlier_values(field, at) else {
+        let tuples = self.series.is_some_and(|s| s >= Series { major: 19, minor: 0 });
+        let Some(known) = earlier_values(field, at, tuples) else {
             return;
         };
         let Some(set_null) = set_null_values(own, added, &known).filter(|v| !v.is_empty()) else {
@@ -2005,36 +2006,72 @@ fn delegation_fix(field: &Field) -> Option<String> {
     (!fix.is_empty()).then(|| fix.join(", "))
 }
 
-/// The values the field has before its definition `at`, or None when a definition computes them,
-/// or one that sets them may come before or after it.
-fn earlier_values<'m>(field: &Field<'m>, at: usize) -> Option<FxHashSet<&'m str>> {
+/// The values the field has before its definition `at` applies its `selection_add`, or None when a
+/// definition computes them, or one that sets them may come before or after it or the last
+/// `selection` list. Odoo replaces the values with each `selection` list it meets, the definition's
+/// own included, and ignores the `selection_add` of a lone definition from 15.0. `tuples` tells
+/// whether the series takes a tuple as a `selection` list.
+fn earlier_values<'m>(field: &Field<'m>, at: usize, tuples: bool) -> Option<FxHashSet<&'m str>> {
+    if let Some(own) = field.defs[at].2.option("selection") {
+        let own = listed(&own.value, tuples)?;
+        return (field.defs.len() > 1).then(|| own.iter().map(String::as_str).collect());
+    }
+    let setters = earlier_setters(field, at)?;
+    let base = last_list(field, &setters)?;
     let mut values = FxHashSet::default();
-    let mut based = false;
+    for i in setters.into_iter().filter(|&i| i == base || field.before[base][i]) {
+        selection_values(field.defs[i].2, tuples, &mut values)?;
+    }
+    Some(values)
+}
+
+/// The definitions that set the field's values before its definition `at`, or None when one may
+/// also come after it, or one unpacks `**kwargs`.
+fn earlier_setters(field: &Field, at: usize) -> Option<Vec<usize>> {
+    let mut setters = vec![];
     for i in (0..field.defs.len()).filter(|&i| i != at && !field.before[at][i]) {
-        let def: &'m FieldFact = field.defs[i].2;
+        let def = field.defs[i].2;
         let sets = def.option("selection").is_some() || def.option("selection_add").is_some();
         if def.splat || (sets && !field.before[i][at]) {
             return None;
         }
         if sets {
-            based |= selection_values(def, &mut values)?;
+            setters.push(i);
         }
     }
-    based.then_some(values)
+    Some(setters)
 }
 
-/// Adds the values of a definition's `selection` and `selection_add`, and tells whether it sets
-/// `selection`. None when one is not a literal list.
-fn selection_values<'m>(def: &'m FieldFact, values: &mut FxHashSet<&'m str>) -> Option<bool> {
-    for name in ["selection", "selection_add"] {
+/// The setter whose `selection` list Odoo applies last, so that only it and the `selection_add` of
+/// the setters after it count. None when no setter has a list, or no setter with a list is known
+/// to come after every other setter.
+fn last_list(field: &Field, setters: &[usize]) -> Option<usize> {
+    let lists = |i: usize| field.defs[i].2.option("selection").is_some();
+    let applied_last = |b: usize| {
+        let placed = |s: usize| s == b || field.before[s][b] || (field.before[b][s] && !lists(s));
+        setters.iter().all(|&s| placed(s))
+    };
+    setters.iter().copied().find(|&b| lists(b) && applied_last(b))
+}
+
+/// Adds the values of a definition's `selection` and `selection_add`. None when one is not a
+/// literal list, or `selection` is a tuple and not `tuples`.
+fn selection_values<'m>(def: &'m FieldFact, tuples: bool, values: &mut FxHashSet<&'m str>) -> Option<()> {
+    for (name, tuples) in [("selection", tuples), ("selection_add", true)] {
         if let Some(option) = def.option(name) {
-            let OptionValue::Strs(added) = &option.value else {
-                return None;
-            };
-            values.extend(added.iter().map(String::as_str));
+            values.extend(listed(&option.value, tuples)?.iter().map(String::as_str));
         }
     }
-    Some(def.option("selection").is_some())
+    Some(())
+}
+
+/// The values a literal list gives, or a literal tuple when `tuples`.
+fn listed(value: &OptionValue, tuples: bool) -> Option<&[String]> {
+    match value {
+        OptionValue::Strs(values) => Some(values),
+        OptionValue::Tuple(values) if tuples => Some(values),
+        _ => None,
+    }
 }
 
 fn sets_parent_store(class: &ClassFact) -> bool {
