@@ -41,3 +41,9 @@ class ResPartnerCachedRates(models.Model):
     @tools.ormcache("len(Counter(codes))")
     def _distinct_code_count(self, codes):
         return len(set(codes))
+
+
+class ResPartnerHome(models.Model):
+    _inherit = "res.partner"
+
+    home_country_id = fields.Many2one("res.country", check_company=True)

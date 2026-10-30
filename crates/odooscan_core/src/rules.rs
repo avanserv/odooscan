@@ -41,14 +41,13 @@ pub const SUPERSEDED: &[(&str, &str)] = &[("OD101", "OD701")];
 /// Severities that replace a rule's own from some series on, as (code, series range, severity).
 /// From 20.0, `ir.access` rows only grant access, so a model meant for the superuser alone has
 /// none. From saas~18.3, Odoo refuses a model whose `_inherits` field is not required with ondelete
-/// 'cascade' or 'restrict' instead of fixing it. From 18.0, a `check_company` field of
-/// `res.company`, of a model with `company_id` or `company_ids`, or that is company-dependent, gets
-/// the domain its comodel's `_check_company_domain` gives, which by default names a `company_id`
-/// the comodel may lack.
+/// 'cascade' or 'restrict' instead of fixing it. From saas~16.4, a `check_company` field gets the
+/// domain its comodel's `_check_company_domain` gives, which by default names a `company_id` the
+/// comodel may lack.
 const SEVERITY_BY_SERIES: &[(&str, &str, Severity)] = &[
     ("OD401", ">=20.0", Severity::Info),
     ("OD218", ">=saas~18.3", Severity::Error),
-    ("OD222", ">=18.0", Severity::Error),
+    ("OD222", ">=saas~16.4", Severity::Error),
 ];
 
 impl Rule {
@@ -233,9 +232,11 @@ mod tests {
     }
 
     #[test]
-    fn company_check_rule_is_an_error_from_18() {
+    fn company_check_rule_is_an_error_from_saas_16_4() {
         let od222 = rule("OD222");
-        assert_eq!(od222.severity_for(Series::parse("17.0")), Severity::Warning);
+        assert_eq!(od222.severity_for(Series::parse("saas~16.3")), Severity::Warning);
+        assert_eq!(od222.severity_for(Series::parse("saas~16.4")), Severity::Error);
+        assert_eq!(od222.severity_for(Series::parse("17.0")), Severity::Error);
         assert_eq!(od222.severity_for(Series::parse("18.0")), Severity::Error);
         assert_eq!(od222.severity_for(Series::parse("20.0")), Severity::Error);
         assert_eq!(od222.severity_for(None), Severity::Warning);

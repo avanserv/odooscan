@@ -212,6 +212,9 @@ custom/legacy16/models/res_partner.py:22:40: OD220 'opened_on' has the label 'Cr
 custom/legacy16/models/res_partner.py:23:41: OD220 'touched_on' has the label 'Last Modified on' of field '__last_update' of res.partner, so Odoo logs a warning and users cannot tell them apart; give it another string
 custom/legacy16/models/res_partner.py:31:40: OD220 'turned_on' has the label 'Last Modified on' of field '__last_update' of legacy.turnstile, so Odoo logs a warning and users cannot tell them apart; give it another string
 custom/legacy16/models/res_partner.py:37:21: OD120 'time' in an ormcache key is not a parameter of _quarter_hour_rates(), so every call raises NameError; key on a parameter or on self
+custom/legacy16/models/res_partner.py:49:68: OD222 'home_country_id' has check_company=True, but res.country has no company_id field to check; remove check_company
+custom/legacy17/models/res_partner.py:7:68: OD222 'home_country_id' has check_company=True, but res.country has no company_id field to check; remove check_company
+custom/legacy17/models/res_partner.py:13:68: OD222 'home_country_id' has check_company=True, but res.country has no company_id field to check; remove check_company
 custom/legacy17/partner_tagline_views.xml:1:1: OD502 'partner_tagline_views.xml' is listed under update_xml, which Odoo ignores in this series; move it to data
 custom/legacy17/views/partner_motto_views.xml:1:1: OD502 'views/partner_motto_views.xml' is listed under update_xml, which Odoo ignores in this series; move it to data
 custom/legacy17/views/partner_nickname_views.xml:1:1: OD502 'views/partner_nickname_views.xml' is listed under init_xml, which Odoo ignores in this series; move it to data
