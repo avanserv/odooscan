@@ -173,3 +173,89 @@ class ResPartner(models.Model):
         for partner in self:
             if partner.name:
                 partner.banner = partner.name.upper()
+
+
+class ResPartnerAudience(models.Model):
+    _inherit = "res.partner"
+
+    audience = fields.Char(compute="_compute_audience")
+    name_hint = fields.Char(compute="_compute_name_hint")
+    family_tag = fields.Char(compute="_compute_family_tag")
+    first_letter = fields.Char(compute="_compute_first_letter")
+    country_hint = fields.Char(compute="_compute_country_hint")
+    welcome_line = fields.Char(compute="_compute_welcome_line")
+    channel = fields.Char(compute="_compute_channel")
+    last_name = fields.Char(compute="_compute_last_name")
+    youngest_child = fields.Char(compute="_compute_youngest_child")
+
+    @api.depends("type")
+    def _compute_audience(self):
+        for partner in self:
+            if partner.type == "contact":
+                partner.audience = "people"
+            if partner.type == "invoice":
+                partner.audience = "accounting"
+
+    @api.depends("name")
+    def _compute_name_hint(self):
+        for partner in self:
+            if partner.name:
+                partner.name_hint = partner.name.split()[0]
+            if partner.name:
+                partner.name_hint = partner.name.lower()
+
+    @api.depends("child_ids.name", "child_ids.country_id")
+    def _compute_family_tag(self):
+        for partner in self:
+            for relative in partner.child_ids.filtered("name"):
+                partner.family_tag = relative.name
+            for relative in partner.child_ids.filtered("country_id"):
+                partner.family_tag = relative.country_id.code
+
+    @api.depends("name", "parent_id")
+    def _compute_first_letter(self):
+        for partner in self:
+            partner.first_letter = (partner.name or "?")[:1]
+            if not partner.parent_id:
+                return
+
+    @api.depends("country_id")
+    def _compute_country_hint(self):
+        for partner in self:
+            partner.country_hint = partner.country_id.code or ""
+            if not partner.country_id:
+                break
+
+    @api.depends("name")
+    def _compute_welcome_line(self):
+        for partner in self:
+            if partner.name:
+                partner.welcome_line = f"Welcome, {partner.name}"
+            if not partner.name:
+                partner.welcome_line = "Welcome"
+
+    @api.depends("type")
+    def _compute_channel(self):
+        for partner in self:
+            if partner.type == "contact":
+                partner.channel = "phone"
+            if partner.type != "contact":
+                partner.channel = "post"
+
+    @api.depends("name")
+    def _compute_last_name(self):
+        for partner in self:
+            if partner.name:
+                last = partner.name.rpartition(" ")[2]
+            else:
+                partner.last_name = False
+            if partner.name:
+                partner.last_name = last
+
+    @api.depends("child_ids.name")
+    def _compute_youngest_child(self):
+        for partner in self:
+            for child in partner.child_ids:
+                partner.youngest_child = child.name
+            if not partner.child_ids:
+                partner.youngest_child = False

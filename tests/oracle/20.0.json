@@ -2953,6 +2953,12 @@
       "count": 1
     },
     {
+      "path": "odoo/addons/base/models/ir_actions.py",
+      "code": "OD223",
+      "message": "_compute_value_field_to_show() can leave 'value_field_to_show' unassigned on a record, so reading it raises ValueError; assign it on every path through the loop, False when there is no value",
+      "count": 1
+    },
+    {
       "path": "odoo/addons/base/models/ir_attachment.py",
       "code": "OD103",
       "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
