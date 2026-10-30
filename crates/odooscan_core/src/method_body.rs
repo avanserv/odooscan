@@ -482,6 +482,8 @@ struct Exits {
     leaves: bool,
     /// A path goes on in the loop it is in without reaching the rest.
     skips: bool,
+    /// A path leaves the loop it is in by a `break`.
+    breaks: bool,
     /// A path stops by a `continue` of the loop over `self` or a `raise` instead of filling, which
     /// matters only to a `finally` around it, since that still runs.
     ends: bool,
@@ -494,8 +496,18 @@ impl Exits {
             in_loop: false,
             leaves: false,
             skips: false,
+            breaks: false,
             ends: false,
         }
+    }
+
+    /// Whether `body`, the body of a nested loop, may `break` before or within its first statement
+    /// that fills. `steps` joins a branch that assigns and then breaks into the path that goes on,
+    /// which a later call then fills.
+    fn breaks_unfilled(body: &[Stmt]) -> bool {
+        let mut exits = Exits::new(true);
+        exits.body(body);
+        exits.breaks
     }
 
     /// Whether a statement of `stmts` fills.
@@ -566,6 +578,7 @@ impl Exits {
             Stmt::Break(_) if !self.in_loop => {
                 self.leaves |= self.outer;
                 self.skips = true;
+                self.breaks = true;
             }
             Stmt::Continue(_) if !self.in_loop && self.outer => self.ends = true,
             Stmt::Continue(_) if !self.in_loop => self.skips = true,
@@ -701,7 +714,12 @@ impl<'a> Paths<'a> {
             Stmt::While(w) => (&w.body, &w.orelse, always_true(&w.test)),
             _ => return Flow::Open,
         };
-        let looped = Paths { nested: true, ..*self }.block(body);
+        let inner = Paths { nested: true, ..*self };
+        let looped = if endless && !Exits::breaks_unfilled(body) {
+            inner.steps(body, &mut vec![]).0
+        } else {
+            inner.block(body)
+        };
         let flow = self.after_loop(looped, orelse, endless);
         match stmt {
             Stmt::For(f) if flow == Flow::Open && looped <= Flow::Assigned => pair(
@@ -718,9 +736,11 @@ impl<'a> Paths<'a> {
 
     /// A nested loop may run no iteration, and its `else` runs unless a `break` leaves it, so the
     /// body only counts when every `break` assigns first: then the `else` decides, or for an
-    /// endless `while`, which only a `break` leaves, the body. A `break` that does not assign is
-    /// taken to go on after the loop, as is a body that may `continue`, and a `return` leaves the
-    /// method from any depth.
+    /// endless `while`, which only a `break` leaves, the body. A `continue` there only starts the
+    /// next iteration, so the paths that do not `continue` decide, unless a `break` may come before
+    /// the first statement that fills. A `break` that does not assign is taken to go on after the loop,
+    /// as is the body of any other loop that may `continue`, and a `return` leaves the method from
+    /// any depth.
     fn after_loop(&self, looped: Flow, orelse: &[Stmt], endless: bool) -> Flow {
         match looped {
             Flow::Left => Flow::Left,
@@ -1185,6 +1205,10 @@ mod tests {
             "rec.f = 1\ntry:\n    if rec.c:\n        raise ValueError()\n    self._fill_f()\nfinally:\n    return",
             "rec.f = 1\ntry:\n    if rec.c:\n        continue\n    self._fill_f()\nexcept ValueError:\n    raise\nfinally:\n    return",
             "rec.f = 1\nwith contextlib.suppress(ValueError):\n    self._fill_f()\nreturn",
+            "while True:\n    if rec.c:\n        continue\n    if rec.d:\n        break\n    self._fill_f()\n    break\nrec.f = 1\nreturn",
+            "while True:\n    if rec.c:\n        continue\n    if rec.d:\n        rec.f = 1\n        break\n    self._fill_f()\n    break\nrec.f = 1\nreturn",
+            "while True:\n    if rec.c:\n        continue\n    with rec.lock():\n        if rec.d:\n            rec.f = 1\n            break\n        self._fill_f()\n    break\nrec.f = 1\nreturn",
+            "while rec.a:\n    if rec.c:\n        continue\n    self._fill_f()\n    break\nrec.f = 1\nreturn",
         ];
         for stmts in reported {
             assert!(unassigned(&format!("for rec in self:\n{}", indent(stmts))), "{stmts}");
@@ -1214,6 +1238,8 @@ mod tests {
             "rec.f = 1\ntry:\n    self._fill_f()\nexcept ValueError:\n    raise\nelse:\n    return",
             "rec.f = 1\nif rec.a:\n    raise ValueError()\nelse:\n    self._fill_f()\nreturn",
             "for line in rec.line_ids:\n    with rec.lock():\n        if not line.a:\n            continue\n        self._fill_f()\n    return\nrec.f = 1",
+            "while True:\n    if rec.c:\n        continue\n    self._fill_f()\n    break\nrec.f = 1\nreturn",
+            "while 1:\n    if rec.c:\n        continue\n    self._fill_f()\n    if rec.d:\n        rec.f = 1\n        break\n    break\nrec.f = 1\nreturn",
         ];
         for stmts in assigned {
             assert!(!unassigned(&format!("for rec in self:\n{}", indent(stmts))), "{stmts}");
