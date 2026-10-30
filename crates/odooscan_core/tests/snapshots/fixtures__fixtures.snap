@@ -238,6 +238,8 @@ custom/modern19/models/partner.py:69:21: OD120 'time' in an ormcache key is not 
 custom/modern20/models/res_partner.py:10:96: OD203 'x_parent_model': res.partner has no field 'x_parent_model'
 custom/modern20/models/res_partner.py:17:33: OD219 'note' sets tracking, but modern.note does not inherit mail.thread, so Odoo ignores it and logs a warning; inherit mail.thread or remove tracking
 custom/modern20/models/res_partner.py:41:30: OD220 'ref' has the label 'ID' of field 'id' of modern.ticket, so Odoo logs a warning and users cannot tell them apart; give it another string
+custom/modern20/models/tariff.py:13:45: OD212 Monetary field 'amount' takes its currency from 'x_tariff_currency_id', which modern.tariff does not have
+custom/modern20/models/tariff.py:16:39: OD224 t.code: modern_tariff has no such column, since modern.tariff has no field code; name the column of a stored field of modern.tariff
 custom/orm_overrides/models/caches.py:7:21: OD120 'lang' in an ormcache key is not a parameter of _greeting_for(), so every call raises NameError; key on a parameter or on self
 custom/orm_overrides/models/caches.py:11:29: OD120 'country' in an ormcache key is not a parameter of _country_label(), so every call raises NameError; key on a parameter or on self
 custom/orm_overrides/models/caches.py:31:21: OD120 'method' in an ormcache key is not a parameter of _named_by_method(), so every call raises NameError; key on a parameter or on self

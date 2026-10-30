@@ -57,7 +57,10 @@ Python code checked on its own: security, deprecated APIs and ORM mistakes visib
 
 ## OD2: models and fields
 
-Models, fields and methods checked against every module in the dependency graph.
+Models, fields and methods checked against every module in the dependency graph. A model class has
+`Model`, `TransientModel`, `AbstractModel` or, from 20.0, `CachedModel` among its bases, and any
+other base is a plain Python base class, which the rules whose page says so skip, since only Python
+knows its fields and methods.
 
 | Code | Name | Reports |
 | --- | --- | --- |

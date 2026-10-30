@@ -337,15 +337,24 @@ fn body_contains(body: &[Stmt], attr: Option<&str>) -> bool {
     finder.found
 }
 
+/// The kind of an ORM model base class by its name. `CachedModel`, from 20.0, is a `Model` that
+/// caches some fields of its records.
+fn orm_kind(name: &str) -> Option<ModelKind> {
+    match name {
+        "Model" | "CachedModel" => Some(ModelKind::Model),
+        "TransientModel" => Some(ModelKind::Transient),
+        "AbstractModel" => Some(ModelKind::Abstract),
+        _ => None,
+    }
+}
+
 /// The kind of the ORM base class, or of a model class `kinds` names earlier in the file.
 fn model_kind(class: &ast::StmtClassDef, kinds: &FxHashMap<String, ModelKind>) -> Option<ModelKind> {
-    class.bases().iter().find_map(|b| match tail_name(b) {
-        Some("Model") => Some(ModelKind::Model),
-        Some("TransientModel") => Some(ModelKind::Transient),
-        Some("AbstractModel") => Some(ModelKind::Abstract),
-        Some(name) => kinds.get(name).copied(),
-        None => None,
-    })
+    class
+        .bases()
+        .iter()
+        .filter_map(tail_name)
+        .find_map(|name| orm_kind(name).or_else(|| kinds.get(name).copied()))
 }
 
 fn declares_model(class: &ast::StmtClassDef) -> bool {
@@ -593,10 +602,7 @@ impl<'ast> PyVisitor<'_, 'ast> {
             unassigned_computes: vec![],
             views: vec![],
             definitions: vec![],
-            plain_bases: class
-                .bases()
-                .iter()
-                .any(|b| !matches!(tail_name(b), Some("Model" | "TransientModel" | "AbstractModel"))),
+            plain_bases: class.bases().iter().any(|b| tail_name(b).and_then(orm_kind).is_none()),
         };
         for stmt in &class.body {
             match stmt {
@@ -1676,6 +1682,18 @@ mod tests {
                 ("res.partner".to_owned(), "partner_id".to_owned())
             ]
         );
+    }
+
+    #[test]
+    fn counts_cached_model_as_a_model_base() {
+        for base in ["models.CachedModel", "CachedModel"] {
+            let facts = analyze(&format!("class X({base}):\n    _name = 'x'\n"));
+            let class = &facts.classes[0];
+            assert_eq!(class.kind, ModelKind::Model, "{base}");
+            assert!(!class.plain_bases, "{base}");
+        }
+        let facts = analyze("class X(models.CachedModel, Layout):\n    _name = 'x'\n");
+        assert!(facts.classes[0].plain_bases);
     }
 
     #[test]

@@ -39,7 +39,7 @@ const MUTATORS: &[&str] = &[
 const MODEL_PACKAGES: &[&str] = &["models", "wizard", "wizards", "report"];
 
 /// The model classes of the ORM itself, under `odoo.models` or, from 19.0, `odoo.orm`.
-const ORM_MODELS: &[&str] = &["BaseModel", "AbstractModel", "Model", "TransientModel"];
+const ORM_MODELS: &[&str] = &["BaseModel", "AbstractModel", "Model", "TransientModel", "CachedModel"];
 
 /// The patches OD123 reports, which `checks.rs` words with the index's answer, and the OD124
 /// diagnostics.
@@ -441,6 +441,8 @@ mod tests {
             "odoo.models.Model",
             "odoo.models.TransientModel",
             "odoo.orm.models.BaseModel",
+            "odoo.models.CachedModel",
+            "odoo.orm.models_cached.CachedModel",
         ] {
             assert!(model_path(path), "{path}");
         }
