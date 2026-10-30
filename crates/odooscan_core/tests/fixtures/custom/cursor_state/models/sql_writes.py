@@ -184,3 +184,30 @@ class ResPartner(models.Model):
         self.env.cr.execute(
             "WITH locked AS (SELECT id FROM res_partner WHERE x_rank > 0 FOR UPDATE SKIP LOCKED) SELECT id FROM locked"
         )
+
+    def x_rank_maybe_apart(self, apart=False):
+        if apart:
+            cr = self.env.registry.cursor()
+            self = self.with_env(self.env(cr=cr))
+            self.env.cr.execute("UPDATE res_partner SET x_rank = 22 WHERE id = %s", [self.id])
+        self.env.cr.execute("UPDATE res_partner SET x_rank = 23 WHERE x_rank = 22")
+
+    def x_rank_only_apart(self, apart=False):
+        if apart:
+            self = self.with_env(self.env(cr=self.env.registry.cursor()))
+        else:
+            return
+        self.env.cr.execute("UPDATE res_partner SET x_rank = 24 WHERE x_rank = 23")
+
+    def x_rank_retried_apart(self, attempts):
+        for _attempt in range(attempts):
+            self = self.with_env(self.env(cr=self.env.registry.cursor()))
+        self.env.cr.execute("UPDATE res_partner SET x_rank = 25 WHERE x_rank = 24")
+
+    def x_add_tier_purge(self):
+        create_column(self.env.cr, "res_partner", "x_tier", "int4")
+        self.env.cr.execute("DELETE FROM res_partner WHERE x_tier IS NULL AND active IS NOT TRUE")
+
+    def x_add_tier_history(self):
+        create_column(self.env.cr, "x_partner_tier", "x_level", "int4")
+        self.env.cr.execute("INSERT INTO x_partner_tier (x_level) VALUES (1)")

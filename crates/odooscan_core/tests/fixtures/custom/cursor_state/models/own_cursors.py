@@ -68,3 +68,35 @@ class ResPartner(models.Model):
         cr = new_cr if new_cr else self.env.cr
         self._x_push_to_crm()
         cr.commit()
+
+    def x_sync_maybe_apart(self, apart=False):
+        cr = self.env.cr
+        if apart:
+            cr = self.pool.cursor()
+        self._x_push_to_crm()
+        cr.commit()
+
+    def x_sync_apart_either_way(self, log=False):
+        if log:
+            cr = self.env.registry.cursor()
+        else:
+            cr = self.pool.cursor()
+        self._x_push_to_crm()
+        cr.commit()
+
+    def x_sync_apart_unless_shared(self):
+        cr = self.pool.cursor()
+        for partner in self:
+            if partner.is_company:
+                cr = self.env.cr
+                break
+        self._x_push_to_crm()
+        cr.commit()
+
+    def x_sync_apart_when_asked(self, apart=False):
+        cr = None
+        if apart:
+            cr = self.pool.cursor()
+        self._x_push_to_crm()
+        if cr:
+            cr.commit()
