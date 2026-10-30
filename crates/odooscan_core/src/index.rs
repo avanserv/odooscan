@@ -398,6 +398,8 @@ pub struct ViewTree<'m> {
     pub root: String,
     pub visible: FxHashSet<ArchElement>,
     pub hidden: FxHashMap<ArchElement, &'m str>,
+    /// The subviews every view of the tree opens, in scope or not, each relative to its own view.
+    pub subviews: Vec<&'m [String]>,
 }
 
 /// `%(id)d` names an action by XML id, which Odoo resolves against the module of the view.
@@ -1593,6 +1595,7 @@ impl<'m> Inheritance<'m> {
             for node in self.nodes.get(id).map(Vec::as_slice).unwrap_or_default() {
                 let module = modules[node.module].name.as_str();
                 let elements = node.fact.elements.iter().map(|e| located(e, module));
+                tree.subviews.extend(node.fact.subviews.iter().map(Vec::as_slice));
                 if sees(node.module) {
                     tree.visible.extend(elements);
                 } else {
