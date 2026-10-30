@@ -296,6 +296,7 @@ custom/registry_fields/models/shipment.py:11:17: OD205 'reference' is a Many2one
 custom/registry_fields/models/shipment.py:13:19: OD205 'carrier_ids' is a Many2one field elsewhere and is redefined here as Many2many
 custom/registry_fields/models/shipment.py:24:17: OD205 'reference' is a Char field elsewhere and is redefined here as Many2one
 custom/registry_fields/models/shipment.py:26:19: OD205 'carrier_ids' is a Many2many field elsewhere and is redefined here as Many2one
+custom/saas133/models/res_partner.py:10:9: OD223 _compute_monogram() can leave 'monogram' unassigned on a record, so reading it raises ValueError; assign it on every path through the loop, False when there is no value
 custom/saas144/models/badge.py:7:33: OD218 _inherits delegates to 'partner_id', which must be required with ondelete 'cascade' or 'restrict'; give it ondelete="cascade"
 custom/saas144/models/badge.py:10:58: OD218 'country_id' has delegate=True, so it must be required with ondelete 'cascade' or 'restrict'; give it ondelete="cascade"
 custom/saas144/models/res_partner.py:8:40: OD220 'opened_on' has the label 'Created on' of field 'create_date' of res.partner, so Odoo logs a warning and users cannot tell them apart; give it another string

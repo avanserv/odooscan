@@ -65,6 +65,23 @@ fn default_series_reads_a_seriesless_auto_install_list() {
 }
 
 #[test]
+fn unassigned_compute_waits_for_a_known_series() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+    let reported = |default_series| {
+        scan(&ScanOptions {
+            paths: vec![root.join("custom")],
+            addons_paths: vec![root.join("core")],
+            default_series,
+        })
+        .diagnostics
+        .iter()
+        .any(|d| d.code == "OD223" && d.path.ends_with("unversioned_logs/models/probes.py"))
+    };
+    assert!(!reported(None));
+    assert!(reported(Series::parse("14.0")));
+}
+
+#[test]
 fn import_patches_without_base_take_the_advice_of_the_path() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
     let report = scan(&ScanOptions {

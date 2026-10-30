@@ -1,4 +1,4 @@
-from odoo import fields, models
+from odoo import api, fields, models
 
 
 class DriftProbe(models.Model):  # odooscan: ignore[OD401]
@@ -38,3 +38,15 @@ class DriftSensor(models.Model):  # odooscan: ignore[OD401]
         self.env.cr.execute("SELECT g.write_date FROM drift_gauge g")
         self.env.cr.execute("SELECT s.create_uid FROM drift_sensor s")
         return self.env.cr.fetchall()
+
+
+class DriftProbeMonogram(models.Model):
+    _inherit = "drift.probe"
+
+    monogram = fields.Char(compute="_compute_monogram")
+
+    @api.depends("name")
+    def _compute_monogram(self):
+        for probe in self:
+            if probe.name:
+                probe.monogram = probe.name[0]

@@ -132,7 +132,7 @@ rules! {
     "OD220" "duplicate-field-label" Correctness Warning None, true, "Two fields of a model have the same label.";
     "OD221" "self-dependency-not-recursive" Correctness Warning Some(">=15.0"), true, "A computed field depends on itself through other records without recursive=True.";
     "OD222" "check-company-without-company" Correctness Warning Some(">=13.0"), true, "A field sets check_company to a comodel without company_id.";
-    "OD223" "compute-leaves-field-unassigned" Correctness Error Some(">=14.0"), true, "A compute method leaves a non-stored readonly field unassigned on some records.";
+    "OD223" "compute-leaves-field-unassigned" Correctness Error Some(">=saas~13.3"), true, "A compute method leaves a non-stored readonly field unassigned on some records.";
     "OD224" "sql-unknown-column" Correctness Error None, true, "A literal SQL query names a column its model's table does not have.";
     "OD225" "sql-view-missing-column" Correctness Error None, true, "The SQL view of a model selects no column for one of its stored fields.";
     "OD226" "sql-view-not-created" Correctness Error None, true, "A model sets _auto = False, and nothing creates its SQL view.";
@@ -220,6 +220,16 @@ mod tests {
         assert_eq!(od218.severity_for(Series::parse("19.0")), Severity::Error);
         assert_eq!(od218.severity_for(Series::parse("20.0")), Severity::Error);
         assert_eq!(od218.severity_for(None), Severity::Warning);
+    }
+
+    #[test]
+    fn unassigned_compute_rule_runs_from_saas_13_3() {
+        let od223 = rule("OD223");
+        assert!(!od223.applies_to(Series::parse("saas~13.2")));
+        assert!(!od223.applies_to(None));
+        assert!(od223.applies_to(Series::parse("saas~13.3")));
+        assert!(od223.applies_to(Series::parse("14.0")));
+        assert!(od223.applies_to(Series::parse("20.0")));
     }
 
     #[test]
