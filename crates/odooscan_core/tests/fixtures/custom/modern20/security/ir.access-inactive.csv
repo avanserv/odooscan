@@ -1,0 +1,3 @@
+id,name,model_id,group_id/id,operation,active
+access_modern_lamp_portal_off,inactive portal,modern.lamp,base.group_portal,cu,0
+access_modern_lamp_portal_on,active portal,modern.lamp,base.group_portal,cu,1

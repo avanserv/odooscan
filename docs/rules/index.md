@@ -127,7 +127,7 @@ Access rights: models no one can reach, and rights granted too widely.
 | Code | Name | Reports |
 | --- | --- | --- |
 | [OD401](OD401.md) | `model-without-access` | A new model has no ir.model.access rule. |
-| [OD402](OD402.md) | `public-write-access` | Public or portal users get write, create or unlink access. |
+| [OD402](OD402.md) | `public-write-access` | An access row gives public or portal users write, create or unlink, through their group or no group. |
 
 ## OD5: manifest and module graph
 

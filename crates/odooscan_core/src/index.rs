@@ -2,8 +2,8 @@ use globset::{GlobBuilder, GlobSetBuilder};
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::facts::{
-    ActionFact, Annotation, ArchElement, ClassFact, FieldFact, FlowSummary, Heritage, JsClass, ModelKind, OptionValue,
-    PyFacts, Receiver, ViewFact,
+    ActionFact, Annotation, ArchElement, ClassFact, DataFacts, FieldFact, FlowSummary, Heritage, JsClass, ModelKind,
+    OptionValue, PyFacts, Receiver, RuleFact, ViewFact,
 };
 use crate::manifest::AutoInstall;
 use crate::project::{Module, SourceFile};
@@ -357,7 +357,9 @@ fn model_xmlid(model: &str) -> String {
 }
 
 type Models<'m> = FxHashMap<&'m str, Vec<(usize, &'m ClassFact)>>;
-type ActionWrites<'m> = FxHashMap<String, Vec<(usize, &'m ActionFact)>>;
+
+/// Every write to a record, by full id, with the module that makes it.
+type Writes<'m, T> = FxHashMap<String, Vec<(usize, &'m T)>>;
 
 /// The modules whose data give a view each `key`.
 type ViewKeys<'m> = FxHashMap<&'m str, Vec<usize>>;
@@ -689,15 +691,20 @@ fn load_order(modules: &[Module], by_name: &FxHashMap<&str, usize>) -> Vec<usize
     order
 }
 
-/// Every write of the files manifests load to each action, by full id, in the order Odoo loads them.
-fn action_writes<'m>(modules: &'m [Module], by_name: &FxHashMap<&str, usize>) -> ActionWrites<'m> {
-    let mut writes: ActionWrites<'m> = FxHashMap::default();
+/// Every write of the files manifests load to each record, in the order Odoo loads them.
+fn record_writes<'m, T>(
+    modules: &'m [Module],
+    by_name: &FxHashMap<&str, usize>,
+    facts: fn(&DataFacts) -> &[T],
+    id: fn(&T) -> Option<&String>,
+) -> Writes<'m, T> {
+    let mut writes: Writes<'m, T> = FxHashMap::default();
     for mi in load_order(modules, by_name) {
         let module = &modules[mi];
         let loaded = module.data.iter().filter(|f| f.rank.is_some());
-        for action in loaded.flat_map(|f| &f.facts.actions) {
-            if let Some(id) = &action.id {
-                writes.entry(full_id(&module.name, id)).or_default().push((mi, action));
+        for write in loaded.flat_map(|f| facts(&f.facts)) {
+            if let Some(id) = id(write) {
+                writes.entry(full_id(&module.name, id)).or_default().push((mi, write));
             }
         }
     }
@@ -831,10 +838,12 @@ pub struct Index<'m> {
     pub views: Inheritance<'m>,
     /// The (model, type) of every view of the files manifests load.
     pub view_types: FxHashSet<(&'m str, &'m str)>,
-    pub action_writes: ActionWrites<'m>,
+    pub action_writes: Writes<'m, ActionFact>,
+    pub rule_writes: Writes<'m, RuleFact>,
     view_keys: ViewKeys<'m>,
     pub templates: Inheritance<'m>,
     pub models_with_access: FxHashSet<String>,
+    model_by_xmlid: FxHashMap<String, &'m str>,
     pub has_base: bool,
     js_paths: FxHashMap<String, JsTarget>,
     js_loaded: Loaded,
@@ -877,10 +886,12 @@ impl<'m> Index<'m> {
             xmlids,
             views: Inheritance::new(views),
             view_types: FxHashSet::default(),
-            action_writes: action_writes(modules, &by_name),
+            action_writes: record_writes(modules, &by_name, |f| &f.actions, |a| a.id.as_ref()),
+            rule_writes: record_writes(modules, &by_name, |f| &f.rules, |r| r.id.as_ref()),
             view_keys,
             templates: Inheritance::new(template_nodes(modules, &templates_loaded)),
             models_with_access,
+            model_by_xmlid,
             js_paths: js_paths(modules),
             js_loaded,
             templates_loaded,
@@ -1193,6 +1204,11 @@ impl<'m> Index<'m> {
         let module = &self.modules[*self.by_name.get(addon)?];
         let file = module.python.iter().find(|f| files.contains(&f.rel))?;
         Some(file.facts.classes.iter().any(|c| c.class_name == class))
+    }
+
+    /// The model of the `ir.model` record Odoo generates under a full XML id.
+    pub fn model_of_xmlid(&self, id: &str) -> Option<&'m str> {
+        self.model_by_xmlid.get(id).copied()
     }
 
     pub fn has_model(&self, model: &str) -> bool {

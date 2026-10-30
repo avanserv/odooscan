@@ -1,0 +1,7 @@
+<odoo>
+    <record id="access_desk_record" model="ir.model.access">
+        <field name="name">record</field>
+        <field name="model_id" ref="model_access_desk"/>
+        <field name="perm_write" eval="True"/>
+    </record>
+</odoo>

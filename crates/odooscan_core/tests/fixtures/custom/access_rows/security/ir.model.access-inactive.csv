@@ -1,0 +1,7 @@
+id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink,active
+access_desk_off_zero,inactive by zero,model_access_desk,,1,1,0,0,0
+access_desk_off_false,inactive by word,model_access_desk,,1,1,0,0,False
+access_desk_off_empty,inactive by empty cell,model_access_desk,,1,1,0,0,
+access_desk_off_portal,inactive portal,model_access_desk,base.group_portal,1,1,0,0,no
+access_desk_on,active,model_access_desk,,1,1,0,0,True
+access_desk_on_portal,active portal,model_access_desk,base.group_portal,1,1,0,0,1

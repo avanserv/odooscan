@@ -4,4 +4,9 @@
         <field name="res_model">window.plain</field>
         <field name="view_mode">gantt</field>
     </record>
+
+    <record id="rule_plain" model="ir.rule">
+        <field name="model_id" search="[('model', '=', 'window.plain')]"/>
+        <field name="domain_force">[('no_hidden_model', '=', 1)]</field>
+    </record>
 </odoo>

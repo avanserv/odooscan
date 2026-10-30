@@ -1,0 +1,6 @@
+<odoo>
+    <record id="rule_partner_replaced" model="ir.rule">
+        <field name="model_id" ref="base.model_res_partner"/>
+        <field name="domain_force">[('no_replaced', '=', 1)]</field>
+    </record>
+</odoo>

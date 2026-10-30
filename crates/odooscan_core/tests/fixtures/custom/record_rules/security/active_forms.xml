@@ -1,0 +1,38 @@
+<odoo>
+    <record id="rule_active_eval" model="ir.rule">
+        <field name="model_id" ref="model_rule_ticket"/>
+        <field name="domain_force">[('no_active_eval', '=', 1)]</field>
+        <field name="active" eval="True"/>
+    </record>
+    <record id="rule_active_one" model="ir.rule">
+        <field name="model_id" ref="model_rule_ticket"/>
+        <field name="domain_force">[('no_active_one', '=', 1)]</field>
+        <field name="active" eval="1"/>
+    </record>
+    <record id="rule_active_text" model="ir.rule">
+        <field name="model_id" ref="model_rule_ticket"/>
+        <field name="domain_force">[('no_active_text', '=', 1)]</field>
+        <field name="active">no</field>
+    </record>
+
+    <record id="rule_active_false" model="ir.rule">
+        <field name="model_id" ref="model_rule_ticket"/>
+        <field name="domain_force">[('no_active_false', '=', 1)]</field>
+        <field name="active" eval="False"/>
+    </record>
+    <record id="rule_active_off" model="ir.rule">
+        <field name="model_id" ref="model_rule_ticket"/>
+        <field name="domain_force">[('no_active_off', '=', 1)]</field>
+        <field name="active">off</field>
+    </record>
+    <record id="rule_active_expression" model="ir.rule">
+        <field name="model_id" ref="model_rule_ticket"/>
+        <field name="domain_force">[('no_active_expression', '=', 1)]</field>
+        <field name="active" eval="not True"/>
+    </record>
+    <record id="rule_active_ref" model="ir.rule">
+        <field name="model_id" ref="model_rule_ticket"/>
+        <field name="domain_force">[('no_active_ref', '=', 1)]</field>
+        <field name="active" ref="rule_active_one"/>
+    </record>
+</odoo>

@@ -6,8 +6,8 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::facts::{
     ActionFact, ActionValue, Annotation, ArchElement, ArchModifier, ClassFact, DefinitionSource, DomainFact, FieldFact,
-    FunctionCall, JsFacts, JsName, ModelKind, OptionValue, OrmCall, Pos, RawDiag, RecordFact, Spanned, SqlColumn,
-    SqlView, ViewFact, XmlRef,
+    FunctionCall, JsFacts, JsName, ModelKind, OptionValue, OrmCall, Pos, RawDiag, RecordFact, RuleFact, Spanned,
+    SqlColumn, SqlView, ViewFact, XmlRef,
 };
 use crate::index::{
     BASE_MODEL_METHODS, Export, FieldDef, FieldInfo, Index, JsSpec, RELATIONAL_TYPES, Scope, Status, ViewTree, full_id,
@@ -62,6 +62,15 @@ const CALENDAR_STOPS: &[&str] = &[
 /// saas-19.1 does not (`:2909`).
 const CALENDAR_STOP_OPTIONAL: Series = Series { major: 19, minor: 1 };
 
+/// The first series that validates a record rule's domain when it writes one
+/// (`odoo/addons/base/models/ir_rule.py:63` on 18.0). 14.0 evaluates it only when a query applies the
+/// rule (`:149`), so only the last write can fail.
+const RULE_DOMAIN_VALIDATED: Series = Series { major: 15, minor: 0 };
+
+/// The first series whose access check reads the rows of a transient model (`6d8688bb124d`; saas-13.1
+/// lets every user through, `odoo/addons/base/models/ir_model.py:1500`).
+const TRANSIENT_ACCESS: Series = Series { major: 13, minor: 2 };
+
 /// A name a modifier reads, with the view it sits in and the field it must find on `owner`.
 struct ModifierName<'a> {
     model: &'a str,
@@ -93,6 +102,7 @@ pub fn check_module<'m>(index: &Index<'m>, mi: usize, series: Option<Series>) ->
     legacy_hook_rollbacks(module, series, &mut out);
     cache_key_names(module, series, &mut out);
     import_patches(index, module, &mut out);
+    global_writes(index, mi, series, &mut out);
     for (_, file) in es_modules(index, mi, series) {
         if let Some(e) = &file.facts.syntax_error {
             out.push(&file.path, "OD000", e.pos, e.value.clone());
@@ -136,6 +146,35 @@ pub fn check_module<'m>(index: &Index<'m>, mi: usize, series: Option<Series>) ->
         ctx.templates(&mut out, mi);
     }
     out.diags
+}
+
+/// Whether Odoo ignores the access rows of a model of this kind.
+fn ignores_access(kind: Option<ModelKind>, series: Option<Series>) -> bool {
+    kind == Some(ModelKind::Transient) && series.is_some_and(|s| s < TRANSIENT_ACCESS)
+}
+
+/// OD402 on the rows that write for every user. Rows without a group are `ir.model.access`'s, so they
+/// name their model by XML id. A row of an id written twice may hold another value in the database.
+fn global_writes<'m>(index: &Index<'m>, mi: usize, series: Option<Series>, out: &mut Out<'m>) {
+    let module = &index.modules[mi];
+    let scope = index.scope(mi);
+    let rewritten = |id: &String| {
+        let defs = index.xmlids.get(&full_id(&module.name, id));
+        defs.is_some_and(|d| d.len() > 1)
+    };
+    for file in module.data.iter().filter(|f| f.rank.is_some()) {
+        for row in file.facts.access.iter().filter(|r| r.global_write) {
+            let model = index.model_of_xmlid(&full_id(&module.name, &row.model));
+            let kind = model.and_then(|m| index.kind(m, &scope));
+            if !row.id.as_ref().is_some_and(rewritten) && !ignores_access(kind, series) {
+                let message = format!(
+                    "no group limits this row, so every user, public and portal included, gets write, create or unlink on {}; name a group",
+                    row.model
+                );
+                out.push(&file.path, "OD402", row.pos, message);
+            }
+        }
+    }
 }
 
 /// The module's scripts that a bundle loads as ES modules: annotated, or from 17.0 on, any script
@@ -762,6 +801,7 @@ impl<'m> Ctx<'_, 'm> {
         if class.new_model
             && class.kind != ModelKind::Abstract
             && class.registered()
+            && !ignores_access(Some(class.kind), self.series)
             && !self.index.models_with_access.contains(class.model.as_str())
         {
             out.push(
@@ -1001,9 +1041,71 @@ impl<'m> Ctx<'_, 'm> {
             for call in &file.facts.functions {
                 self.function_call(out, path, call);
             }
+            for rule in &file.facts.rules {
+                self.rule_domain(out, path, rule);
+            }
             self.domains(out, path, &file.facts.action_domains);
             self.actions(out, path, &file.facts.actions);
         }
+    }
+
+    /// Checks the domain `rule` writes, if the record still holds it when Odoo reads it.
+    fn rule_domain(&self, out: &mut Out<'m>, path: &'m Path, rule: &'m RuleFact) {
+        if rule.fields.is_empty() {
+            return;
+        }
+        let writes = self.rule_state(rule);
+        let holder = |(_, r): &&(usize, &'m RuleFact)| !matches!(r.domain, ActionValue::Unset);
+        let holds = writes
+            .iter()
+            .rev()
+            .find(holder)
+            .is_some_and(|(_, r)| std::ptr::eq(*r, rule));
+        let active = writes.iter().rev().find_map(|(_, r)| r.active);
+        let Some(model) = self.rule_model(&writes).filter(|_| holds && active != Some(false)) else {
+            return;
+        };
+        if self.sees_model(model) {
+            for field in &rule.fields {
+                self.path(out, path, "OD210", model, field);
+            }
+        }
+    }
+
+    /// The writes that decide what Odoo checks. From 15.0, and in an unknown series, it validates each
+    /// write as it loads, on what the modules in scope gave so far. Before, the query reads what the
+    /// whole load left.
+    fn rule_state(&self, rule: &'m RuleFact) -> Vec<(usize, &'m RuleFact)> {
+        let id = rule.id.as_ref().map(|id| full_id(&self.module.name, id));
+        let Some(writes) = id.and_then(|id| self.index.rule_writes.get(&id)) else {
+            return vec![(self.index.by_name[self.module.name.as_str()], rule)];
+        };
+        if self.series.is_some_and(|s| s < RULE_DOMAIN_VALIDATED) {
+            return writes.clone();
+        }
+        let upto = writes.iter().position(|(_, r)| std::ptr::eq(*r, rule));
+        let upto = upto.map_or(writes.len(), |at| at + 1);
+        writes[..upto]
+            .iter()
+            .filter(|(mi, _)| self.scope.sees(*mi))
+            .copied()
+            .collect()
+    }
+
+    /// The model of the last `model_id` of `writes`, whose XML id the module that wrote it resolves.
+    fn rule_model(&self, writes: &[(usize, &'m RuleFact)]) -> Option<&'m str> {
+        let (mi, rule) = writes
+            .iter()
+            .rev()
+            .find(|(_, r)| !matches!(r.model, ActionValue::Unset))?;
+        let ActionValue::Literal(model) = &rule.model else {
+            return None;
+        };
+        if rule.by_name {
+            return Some(&model.value);
+        }
+        self.index
+            .model_of_xmlid(&full_id(&self.index.modules[*mi].name, &model.value))
     }
 
     fn actions(&self, out: &mut Out<'m>, path: &'m Path, actions: &'m [ActionFact]) {
@@ -1274,10 +1376,14 @@ impl<'m> Ctx<'_, 'm> {
     /// Whether the scan sees every class that could add to `model`. A model that is not visible is
     /// OD201's or OD202's.
     fn sees_whole_model(&self, model: &str) -> bool {
+        self.sees_model(model) && !self.index.hidden_parents(model, self.scope)
+    }
+
+    /// What `sees_whole_model` asks, short of the parents a class hides from the scan.
+    fn sees_model(&self, model: &str) -> bool {
         !self.partial
             && !self.dynamic
             && matches!(self.index.model_status(model, self.scope, None), Status::Visible)
-            && !self.index.hidden_parents(model, self.scope)
             && !self.index.unindexed_parent(model, self.scope)
     }
 

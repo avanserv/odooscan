@@ -17,4 +17,9 @@
         <field name="res_model">button.visit</field>
         <field name="view_mode">gantt</field>
     </record>
+
+    <record id="rule_visit" model="ir.rule">
+        <field name="model_id" ref="model_button_visit"/>
+        <field name="domain_force">[('no_partial', '=', 1)]</field>
+    </record>
 </odoo>

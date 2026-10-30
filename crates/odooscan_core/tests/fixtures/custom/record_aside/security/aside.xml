@@ -1,0 +1,5 @@
+<odoo>
+    <record id="record_rules.rule_scoped" model="ir.rule">
+        <field name="active" eval="False"/>
+    </record>
+</odoo>
