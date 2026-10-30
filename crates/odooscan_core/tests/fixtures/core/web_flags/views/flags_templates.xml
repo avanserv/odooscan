@@ -1,0 +1,9 @@
+<odoo>
+    <template id="flags">
+        <html>
+            <body>
+                <div id="pennant"/>
+            </body>
+        </html>
+    </template>
+</odoo>

@@ -86,8 +86,8 @@ custom/bad_sale/views/views.xml:49:9: OD307 t-raw renders unescaped HTML; use t-
 custom/bad_sale/views/views.xml:53:9: OD306 view_mode 'tree' is renamed 'list'
 custom/base_only/models/res_partner.py:17:16: OD202 model 'registry.invoice' comes from module registry_fields; add it to depends
 custom/base_only/views/views.xml:12:9: OD301 module web defines no XML id 'web.no_such_layout'
-custom/base_only/views/views.xml:40:9: OD302 'mail_digest.digest' is defined by module mail_digest; add it to depends
-custom/base_only/views/views.xml:49:9: OD302 'web_pinboard.pinboard' is defined by module web_pinboard; add it to depends
+custom/base_only/views/views.xml:49:9: OD302 'mail_digest.digest' is defined by module mail_digest; add it to depends
+custom/base_only/views/views.xml:58:9: OD302 'web_pinboard.pinboard' is defined by module web_pinboard; add it to depends
 custom/cursor_state/controllers/main.py:13:13: OD121 rolling back discards the whole transaction, the caller's work included, while the code carries on; raise an exception so that Odoo rolls back, or run the step that may fail under self.env.cr.savepoint()
 custom/cursor_state/controllers/main.py:19:9: OD122 UPDATE on res_partner bypasses the ORM, so records this transaction already read keep stale values; call flush_model() before the query and invalidate_model() after it (flush() and invalidate_cache() before 16.0)
 custom/cursor_state/models/caches.py:6:1: OD124 _label_by_partner is filled at runtime but lives in the Python process, so every database the server runs shares it and each worker fills its own copy; cache on a model method with tools.ormcache, which Odoo keeps per database and clears in every worker
