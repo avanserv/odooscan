@@ -7,7 +7,7 @@ use regex::Regex;
 use roxmltree::{Document, Node, ParsingOptions};
 
 use crate::facts::{ArchElement, Lines, OwlTemplate, Spanned, TemplateFacts, ViewFact};
-use crate::xml::spec_tag;
+use crate::xml::{spec_tag, t_call};
 
 /// An xpath step that names its element by an attribute, as in `div[@t-ref='x']`, or by classes,
 /// as in `div[hasclass('a', 'b')]`.
@@ -68,6 +68,8 @@ fn template(node: Node, lines: &Lines) -> Option<OwlTemplate> {
     if !extension {
         elements(node, &mut arch);
     }
+    let body = node.descendants().skip(usize::from(extension));
+    arch.calls.extend(body.filter_map(|n| t_call(n, lines)));
     if inherit.is_none() {
         for n in node.descendants().skip(1).filter(Node::is_element) {
             elements(n, &mut arch);
@@ -231,6 +233,22 @@ mod tests {
         let added: Vec<_> = t[2].arch.elements.iter().map(show).collect();
         assert!(!added.iter().any(|e| e.contains("t-inherit")));
         assert!(added.contains(&"span[hasclass=o_c]".to_owned()));
+    }
+
+    #[test]
+    fn reads_the_calls_of_a_template_and_of_its_specs() {
+        let facts = analyze(
+            r#"<templates>
+    <t t-name="x.A" t-call="x.Root"><t t-call="x.B"/><t t-call="{{ dynamic }}"/></t>
+    <t t-inherit="x.A" t-inherit-mode="extension" t-call="x.Dropped">
+        <xpath expr="//t" position="inside"><t t-call="x.C"/></xpath>
+        <xpath expr="//t" position="attributes"><attribute name="t-call">x.D</attribute></xpath>
+    </t>
+</templates>"#,
+        );
+        let calls = |t: &OwlTemplate| t.arch.calls.iter().map(|c| c.value.clone()).collect::<Vec<_>>();
+        assert_eq!(calls(&facts.templates[0]), ["x.Root", "x.B"]);
+        assert_eq!(calls(&facts.templates[1]), ["x.C", "x.D"]);
     }
 
     #[test]

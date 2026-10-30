@@ -42,6 +42,20 @@ const SUBVIEWS: &[&str] = &["list", "tree", "form", "kanban", "graph", "pivot", 
 /// Tags a spec may locate in the main view or in the subview of any x2many field.
 const AMBIGUOUS_SPECS: &[&str] = &["list", "tree", "kanban", "column"];
 
+/// The view type of a `<template>`, and the type a `t-call` target must have on the server.
+pub const QWEB: &str = "qweb";
+
+/// Arch roots that name no view type: QWeb's own, and those of inheriting specs.
+const UNTYPED_ROOTS: &[&str] = &["t", "data", "xpath"];
+
+/// Models whose `key` names a view. A `website.page` shares its key with the view it delegates to.
+const KEYED_MODELS: &[&str] = &[
+    "ir.ui.view",
+    "theme.ir.ui.view",
+    "website.page",
+    "website.controller.page",
+];
+
 pub fn analyze(text: &str) -> DataFacts {
     let lines = Lines::new(text);
     let mut facts = DataFacts::default();
@@ -197,8 +211,13 @@ impl Walker<'_> {
             id: node.attribute("id").map(str::to_owned),
             inherit: node.attribute("inherit_id").map(str::to_owned),
             has_arch: true,
+            kind: Some(QWEB.to_owned()),
             ..ViewFact::default()
         };
+        self.facts.view_keys.extend(node.attribute("key").map(str::to_owned));
+        // The loader turns the `<template>` itself into the arch's root, which keeps its `t-call`.
+        view.calls
+            .extend(node.descendants().filter_map(|n| t_call(n, self.lines)));
         for n in node.descendants().skip(1).filter(Node::is_element) {
             let pos = self.pos(n);
             arch_element(n, pos, &mut view);
@@ -297,12 +316,20 @@ impl Walker<'_> {
         if model == "ir.ui.view" {
             self.view_field(field, name, view);
         }
+        if name == "key" && KEYED_MODELS.contains(&model) {
+            self.view_key(field);
+        }
         if name == "view_mode" && field.text().is_some_and(|t| t.split(',').any(|m| m.trim() == "tree")) {
             let pos = self.pos(field);
             self.facts
                 .diags
                 .push(RawDiag::new("OD306", pos, "view_mode 'tree' is renamed 'list'"));
         }
+    }
+
+    fn view_key(&mut self, field: Node) {
+        let key = field.text().map(str::trim).filter(|k| !k.is_empty());
+        self.facts.view_keys.extend(key.map(str::to_owned));
     }
 
     fn view_field(&mut self, field: Node, name: &str, view: &mut ViewFact) {
@@ -315,9 +342,15 @@ impl Walker<'_> {
                 });
             }
             "inherit_id" => view.inherit = field.attribute("ref").map(str::to_owned),
+            // A `type` wins over the arch's root wherever the record sets it.
+            "type" => view.kind = field.text().map(|t| t.trim().to_owned()),
             "arch" | "arch_db" => {
                 view.has_arch = true;
                 for root in field.children().filter(Node::is_element) {
+                    let tag = root.tag_name().name();
+                    if view.kind.is_none() && !UNTYPED_ROOTS.contains(&tag) {
+                        view.kind = Some(tag.to_owned());
+                    }
                     self.arch(root, &mut Vec::new(), view);
                 }
             }
@@ -329,6 +362,7 @@ impl Walker<'_> {
         let pos = self.pos(node);
         let tag = node.tag_name().name();
         arch_element(node, pos, view);
+        view.calls.extend(t_call(node, self.lines));
         self.arch_attrs(node, pos);
         self.groups(node);
         self.arch_tag(node, tag, pos);
@@ -478,6 +512,30 @@ fn renamed(node: Node) -> Option<ArchElement> {
     })
 }
 
+/// The template a node calls by a literal name: its `t-call` at the value, or the text of an
+/// `<attribute name="t-call">` spec. An empty, numeric, formatted or path target names no template
+/// a scan can look up: Odoo reads digits as a view id, and `{{ }}` and `#{}` only at render time.
+pub fn t_call(node: Node, lines: &Lines) -> Option<Spanned<String>> {
+    let (value, offset) = match node.attribute_node("t-call") {
+        Some(attr) => (attr.value(), attr.range_value().start),
+        None if node.has_tag_name("attribute") && node.attribute("name") == Some("t-call") => {
+            let text = node.first_child().filter(Node::is_text)?;
+            let raw = text.text()?;
+            let value = raw.trim();
+            (value, text.range().start + (raw.len() - raw.trim_start().len()))
+        }
+        None => return None,
+    };
+    literal_target(value).then(|| Spanned {
+        value: value.to_owned(),
+        pos: lines.pos(offset),
+    })
+}
+
+fn literal_target(value: &str) -> bool {
+    !value.trim().is_empty() && !value.bytes().all(|b| b.is_ascii_digit()) && !value.contains(['{', '/'])
+}
+
 /// The tag of the element a spec locates: its own, or an xpath's last step's.
 pub fn spec_tag<'a>(spec: Node<'a, '_>) -> Option<&'a str> {
     match spec.tag_name().name() {
@@ -523,5 +581,77 @@ fn xpath_steps(expr: &str, path: &mut Vec<String>) {
     }
     if let Some(c) = XPATH_LAST_FIELD.captures(expr.trim()) {
         path.push(format!("{LOCATOR}{}", &c[1]));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn calls(arch: &str) -> Vec<(String, u32, u32)> {
+        let facts = analyze(&format!("<odoo>\n<template id=\"x\">{arch}</template>\n</odoo>"));
+        let view = &facts.views[0];
+        let pos = |c: &Spanned<String>| (c.value.clone(), c.pos.line, c.pos.col);
+        view.calls.iter().map(pos).collect()
+    }
+
+    #[test]
+    fn reads_a_literal_t_call_at_its_value() {
+        assert_eq!(calls(r#"<t t-call="web.layout"/>"#), [("web.layout".to_owned(), 2, 29)]);
+        assert_eq!(calls(r#"<t t-call="local"/>"#), [("local".to_owned(), 2, 29)]);
+    }
+
+    #[test]
+    fn reads_an_attribute_spec_at_its_text() {
+        let spec =
+            "<xpath expr=\"//t\" position=\"attributes\"><attribute name=\"t-call\">\n  a.b\n</attribute></xpath>";
+        assert_eq!(calls(spec), [("a.b".to_owned(), 3, 3)]);
+    }
+
+    #[test]
+    fn skips_targets_only_a_render_can_tell() {
+        for target in ["", "  ", "33", "{{ x }}", "a.#{x}", "a/templates/b.xml"] {
+            assert_eq!(calls(&format!(r#"<t t-call="{target}"/>"#)), [], "{target}");
+        }
+        assert_eq!(calls(r#"<attribute name="t-call"> </attribute>"#), []);
+    }
+
+    #[test]
+    fn a_template_root_calls_too() {
+        let facts = analyze(r#"<odoo><template id="x" t-call="a.b"/></odoo>"#);
+        assert_eq!(facts.views[0].calls[0].value, "a.b");
+    }
+
+    #[test]
+    fn tells_a_view_kind_from_type_then_root() {
+        let kind = |fields: &str| {
+            let facts = analyze(&format!(
+                r#"<odoo><record id="x" model="ir.ui.view">{fields}</record></odoo>"#
+            ));
+            facts.views[0].kind.clone()
+        };
+        let arch = |root: &str| format!(r#"<field name="arch" type="xml"><{root}/></field>"#);
+        assert_eq!(kind(&arch("form")).as_deref(), Some("form"));
+        assert_eq!(kind(&arch("t")), None);
+        assert_eq!(kind(&arch("data")), None);
+        assert_eq!(kind(&arch("xpath")), None);
+        let typed = format!(r#"{}<field name="type">qweb</field>"#, arch("div"));
+        assert_eq!(kind(&typed).as_deref(), Some(QWEB));
+    }
+
+    #[test]
+    fn collects_the_key_of_views_and_pages() {
+        let record = |model: &str| {
+            let text =
+                format!(r#"<odoo><record id="x" model="{model}"><field name="key">a.page</field></record></odoo>"#);
+            analyze(&text).view_keys
+        };
+        assert_eq!(record("website.page"), ["a.page"]);
+        assert_eq!(record("ir.ui.view"), ["a.page"]);
+        assert_eq!(record("theme.ir.ui.view"), ["a.page"]);
+        assert_eq!(record("website.controller.page"), ["a.page"]);
+        assert!(record("res.partner").is_empty());
+        let keyed = analyze(r#"<odoo><template id="x" key="a.b"/></odoo>"#);
+        assert_eq!(keyed.view_keys, ["a.b"]);
     }
 }
