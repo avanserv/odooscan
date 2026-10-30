@@ -112,11 +112,14 @@ custom/cursor_state/models/sql_writes.py:27:9: OD122 UPDATE on res_partner bypas
 custom/cursor_state/models/sql_writes.py:30:9: OD122 UPDATE on res_partner bypasses the ORM, so records this transaction already read keep stale values; call flush_model() before the query and invalidate_model() after it (flush() and invalidate_cache() before 16.0)
 custom/cursor_state/models/sql_writes.py:34:9: OD122 UPDATE on res_partner bypasses the ORM, so records this transaction already read keep stale values; call flush_model() before the query and invalidate_model() after it (flush() and invalidate_cache() before 16.0)
 custom/cursor_state/models/sql_writes.py:38:13: OD122 UPDATE on res_partner bypasses the ORM, so records this transaction already read keep stale values; call flush_model() before the query and invalidate_model() after it (flush() and invalidate_cache() before 16.0)
+custom/cursor_state/models/sql_writes.py:82:9: OD122 UPDATE on res_partner bypasses the ORM, so records this transaction already read keep stale values; call flush_model() before the query and invalidate_model() after it (flush() and invalidate_cache() before 16.0)
+custom/cursor_state/models/sql_writes.py:86:9: OD122 UPDATE on res_partner bypasses the ORM, so records this transaction already read keep stale values; call flush_model() before the query and invalidate_model() after it (flush() and invalidate_cache() before 16.0)
 custom/cursor_state/models/sql_writes.py:116:13: OD122 UPDATE on res_partner bypasses the ORM, so records this transaction already read keep stale values; call flush_model() before the query and invalidate_model() after it (flush() and invalidate_cache() before 16.0)
 custom/cursor_state/models/sql_writes.py:135:9: OD122 UPDATE on res_partner bypasses the ORM, so records this transaction already read keep stale values; call flush_model() before the query and invalidate_model() after it (flush() and invalidate_cache() before 16.0)
 custom/cursor_state/models/sql_writes.py:139:9: OD122 UPDATE on res_partner bypasses the ORM, so records this transaction already read keep stale values; call flush_model() before the query and invalidate_model() after it (flush() and invalidate_cache() before 16.0)
 custom/cursor_state/models/sql_writes.py:153:9: OD122 UPDATE on res_partner bypasses the ORM, so records this transaction already read keep stale values; call flush_model() before the query and invalidate_model() after it (flush() and invalidate_cache() before 16.0)
 custom/cursor_state/models/sql_writes.py:162:17: OD122 UPDATE on res_partner bypasses the ORM, so records this transaction already read keep stale values; call flush_model() before the query and invalidate_model() after it (flush() and invalidate_cache() before 16.0)
+custom/cursor_state/models/sql_writes.py:178:9: OD122 DELETE on x_partner_note bypasses the ORM, so records this transaction already read keep stale values; call flush_model() before the query and invalidate_model() after it (flush() and invalidate_cache() before 16.0)
 custom/cycle_a/__manifest__.py:1:66: OD504 module 'cycle_b' depends back on cycle_a, so Odoo installs neither
 custom/cycle_b/__manifest__.py:1:58: OD504 module 'cycle_a' depends back on cycle_b, so Odoo installs neither
 custom/field_options/models/bench.py:9:19: OD220 'partner_ids' has the label 'Partner' of field 'partner_id' of greenhouse.bench, so Odoo logs a warning and users cannot tell them apart; give it another string
@@ -204,4 +207,19 @@ custom/registry_fields/models/shipment.py:11:17: OD205 'reference' is a Many2one
 custom/registry_fields/models/shipment.py:13:19: OD205 'carrier_ids' is a Many2one field elsewhere and is redefined here as Many2many
 custom/registry_fields/models/shipment.py:24:17: OD205 'reference' is a Char field elsewhere and is redefined here as Many2one
 custom/registry_fields/models/shipment.py:26:19: OD205 'carrier_ids' is a Many2many field elsewhere and is redefined here as Many2one
+custom/sql_columns/models/queries.py:11:27: OD224 b.weight_uom: parcel_box has no such column, since parcel.box has no field weight_uom; use weight_uom_id
+custom/sql_columns/models/queries.py:16:48: OD224 parcel_box.label: parcel_box has no such column, since parcel.box has no field label; name the column of a stored field of parcel.box
+custom/sql_columns/models/queries.py:22:22: OD224 b.total_weight: parcel_box has no such column, since parcel.box.total_weight is not stored; set store=True on the field, or read it through the ORM
+custom/sql_columns/models/queries.py:22:38: OD224 b.item_ids: parcel_box has no such column, since parcel.box.item_ids is a One2many; join the table of its comodel on its inverse field
+custom/sql_columns/models/queries.py:22:50: OD224 b.tag_ids: parcel_box has no such column, since parcel.box.tag_ids is a Many2many; join its relation table
+custom/sql_columns/models/queries.py:22:61: OD224 l.name: parcel_locker has no such column, since name is a field of parcel.depot, which parcel.locker reaches through _inherits; join parcel_depot on depot_id
+custom/sql_columns/models/queries.py:32:17: OD224 d.capacity: parcel_depot has no such column, since parcel.depot has no field capacity; name the column of a stored field of parcel.depot
+custom/sql_columns/models/queries.py:39:105: OD224 EXCLUDED.title: parcel_box has no such column, since parcel.box has no field title; name the column of a stored field of parcel.box
+custom/sql_columns/models/queries.py:45:53: OD224 b.volume: parcel_box has no such column, since parcel.box has no field volume; name the column of a stored field of parcel.box
+custom/sql_columns/models/queries.py:51:81: OD224 b.pickup_code: parcel_box has no such column, since parcel.box.pickup_code is not stored; set store=True on the field, or read it through the ORM
+custom/sql_columns/models/queries.py:98:39: OD224 b.display_name: parcel_box has no such column, since parcel.box.display_name is computed by the ORM, not stored; read it through the ORM
+custom/sql_columns/models/queries.py:102:27: OD224 b.code: parcel_box has no such column, since parcel.box has no field code; name the column of a stored field of parcel.box
+custom/sql_columns/models/queries.py:115:34: OD224 b.shelf: parcel_box has no such column, since parcel.box has no field shelf; name the column of a stored field of parcel.box
+custom/sql_columns/models/queries.py:120:38: OD224 s.occupancy: parcel_shelf has no such column, since parcel.shelf.occupancy is not stored; set store=True on the field, or read it through the ORM
+custom/sql_columns/models/queries.py:121:46: OD224 c.create_date: parcel_beacon has no such column, since parcel.beacon.create_date is not created, as parcel.beacon sets _log_access to False; drop it from the query, or log access on the model
 custom/supers/models/supers.py:29:24: OD211 no parent class of bad.super defines '_prepare_gone', so this super() call fails

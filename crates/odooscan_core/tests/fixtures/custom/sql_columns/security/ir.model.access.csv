@@ -1,0 +1,16 @@
+id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
+access_parcel_depot,parcel.depot,model_parcel_depot,base.group_user,1,1,1,1
+access_parcel_box,parcel.box,model_parcel_box,base.group_user,1,1,1,1
+access_parcel_item,parcel.item,model_parcel_item,base.group_user,1,1,1,1
+access_parcel_locker,parcel.locker,model_parcel_locker,base.group_user,1,1,1,1
+access_parcel_kiosk,parcel.kiosk,model_parcel_kiosk,base.group_user,1,1,1,1
+access_parcel_report,parcel.report,model_parcel_report,base.group_user,1,0,0,0
+access_parcel_stat,parcel.stat,model_parcel_stat,base.group_user,1,0,0,0
+access_parcel_digest,parcel.digest,model_parcel_digest,base.group_user,1,0,0,0
+access_parcel_slot,parcel.slot,model_parcel_slot,base.group_user,1,1,1,1
+access_parcel_route,parcel.route,model_parcel_route,base.group_user,1,1,1,1
+access_parcel_leg,parcel.leg,model_parcel_leg,base.group_user,1,1,1,1
+access_parcel_crate,parcel.crate,model_parcel_crate,base.group_user,1,1,1,1
+access_parcel_scanner,parcel.scanner,model_parcel_scanner,base.group_user,1,1,1,1
+access_parcel_shelf,parcel.shelf,model_parcel_shelf,base.group_user,1,1,1,1
+access_parcel_beacon,parcel.beacon,model_parcel_beacon,base.group_user,1,1,1,1

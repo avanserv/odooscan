@@ -3,12 +3,15 @@ use ruff_python_ast::{self as ast, BoolOp, CmpOp, Expr, Operator, Stmt};
 use ruff_python_parser::parse_module;
 use ruff_source_file::LineIndex;
 use ruff_text_size::{Ranged, TextSize};
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::facts::{
-    ClassFact, DomainFact, FieldFact, ModelKind, OptionValue, Pos, PyFacts, RawDiag, Receiver, Spanned, XmlRef,
+    ClassFact, DomainFact, FieldFact, ModelKind, OptionValue, Pos, PyFacts, RawDiag, Receiver, Spanned, SqlColumn,
+    XmlRef,
 };
-use crate::sql::{CursorUse, Write};
+use crate::sql::{
+    self, CursorUse, QueryVars, Write, odoo_cursor, query_source, query_text, self_cursor, source_offset,
+};
 use crate::taint::{self, Params};
 use crate::{domain, method_body, module_state};
 
@@ -453,6 +456,17 @@ fn stores_inverse(write: &Write, table: Option<&str>, fields: &[&str]) -> bool {
 
 pub fn analyze(src: &str) -> PyFacts {
     let loc = Locator::new(src);
+    let parsed = match parse_module(src) {
+        Ok(parsed) => parsed,
+        Err(e) => {
+            let diag = RawDiag::new("OD000", loc.pos(e.location.start()), e.error.to_string());
+            return PyFacts {
+                diags: vec![diag],
+                ..PyFacts::default()
+            };
+        }
+    };
+    let body = &parsed.syntax().body;
     let mut v = PyVisitor {
         loc: &loc,
         facts: PyFacts::default(),
@@ -460,22 +474,16 @@ pub fn analyze(src: &str) -> PyFacts {
         guarded: 0,
         class_models: vec![],
         owners: vec![],
+        query_vars: None,
+        read_queries: FxHashSet::default(),
+        self_cursors: vec![],
     };
-    match parse_module(src) {
-        Ok(parsed) => {
-            let body = &parsed.syntax().body;
-            v.visit_body(body);
-            v.facts.diags.extend(module_state::check(body, &loc));
-        }
-        Err(e) => v
-            .facts
-            .diags
-            .push(RawDiag::new("OD000", loc.pos(e.location.start()), e.error.to_string())),
-    }
+    v.visit_body(body);
+    v.facts.diags.extend(module_state::check(body, &loc));
     v.facts
 }
 
-struct PyVisitor<'a> {
+struct PyVisitor<'a, 'ast> {
     loc: &'a Locator<'a>,
     facts: PyFacts,
     /// Model classes of the file by Python class name.
@@ -486,9 +494,15 @@ struct PyVisitor<'a> {
     class_models: Vec<Option<String>>,
     /// What `self` is in a method of each enclosing class, none for an enclosing function.
     owners: Vec<Option<Receiver>>,
+    /// The query names of the outermost enclosing function, whose nested functions they count.
+    query_vars: Option<QueryVars<'ast>>,
+    /// Where each query literal `sql_columns` read starts.
+    read_queries: FxHashSet<TextSize>,
+    /// Whether each enclosing class holds Odoo's cursor as `self.cr`.
+    self_cursors: Vec<bool>,
 }
 
-impl PyVisitor<'_> {
+impl<'ast> PyVisitor<'_, 'ast> {
     fn diag(&mut self, code: &'static str, node: &impl Ranged, message: impl Into<String>) {
         let pos = self.loc.at(node);
         self.facts.diags.push(RawDiag::new(code, pos, message));
@@ -591,7 +605,7 @@ impl PyVisitor<'_> {
     fn attr_or_field(&mut self, target: &ast::ExprName, value: &Expr, fact: &mut ClassFact) {
         match target.id.as_str() {
             "_table" => fact.table = Some(option_value(value)),
-            "_parent_store" | "_auto" | "_log_access" => {
+            "_parent_store" | "_auto" | "_log_access" | "_table_query" => {
                 let attr = Spanned {
                     value: option_value(value),
                     pos: self.loc.at(target),
@@ -1004,7 +1018,7 @@ impl PyVisitor<'_> {
         }
     }
 
-    fn call_checks(&mut self, call: &ast::ExprCall, expr: &Expr) {
+    fn call_checks(&mut self, call: &'ast ast::ExprCall, expr: &Expr) {
         let formatted = call.arguments.args.first().is_some_and(is_formatted_string);
         match &*call.func {
             Expr::Attribute(a) if is_cursor(&a.value) && matches!(a.attr.as_str(), "execute" | "commit") => {
@@ -1021,6 +1035,89 @@ impl PyVisitor<'_> {
         }
         self.domain_call(call);
         self.id_refs(call, expr);
+        self.sql_columns(call);
+        self.added_columns(call);
+    }
+
+    /// The columns a `create_column()` call names with literals, or a literal `ALTER TABLE` adds
+    /// where `SQL()` spells it out or a cursor runs it, whichever cursor that is.
+    fn added_columns(&mut self, call: &'ast ast::ExprCall) {
+        let literal = |i: usize| call.arguments.args.get(i).and_then(str_lit);
+        let added = match &*call.func {
+            func if tail_name(func) == Some("create_column") => match (literal(1), literal(2)) {
+                (Some(table), Some(column)) => vec![(table.to_owned(), column.to_owned())],
+                _ => vec![],
+            },
+            func if matches!(tail_name(func), Some("SQL" | "execute")) => {
+                let query = call
+                    .arguments
+                    .args
+                    .first()
+                    .map(|arg| self.query_vars.as_ref().map_or(arg, |v| v.value(arg)));
+                query
+                    .and_then(query_text)
+                    .map(|text| sql::added_columns(&text))
+                    .unwrap_or_default()
+            }
+            _ => vec![],
+        };
+        for column in added {
+            if !self.facts.added_columns.contains(&column) {
+                self.facts.added_columns.push(column);
+            }
+        }
+    }
+
+    /// The query a call spells out or runs, unless it runs a `SQL()` value, which is read where it
+    /// is built.
+    fn sql_query(&self, call: &'ast ast::ExprCall) -> Option<&'ast Expr> {
+        let arg = call.arguments.args.first()?;
+        match &*call.func {
+            func if tail_name(func) == Some("SQL") => Some(arg),
+            Expr::Attribute(a) if self.runs_query(a) => {
+                let value = self.query_vars.as_ref().map_or(arg, |v| v.value(arg));
+                let built = matches!(value, Expr::Call(c) if tail_name(&c.func) == Some("SQL"));
+                (!built).then_some(value)
+            }
+            _ => None,
+        }
+    }
+
+    /// `<cursor>.execute` on Odoo's database, or `<env>.execute_query`, which run the query they
+    /// are given.
+    fn runs_query(&self, method: &'ast ast::ExprAttribute) -> bool {
+        match method.attr.as_str() {
+            "execute" => {
+                let self_cr = self.self_cursors.last().copied().unwrap_or_default();
+                odoo_cursor(&method.value, self.query_vars.as_ref(), self_cr)
+            }
+            "execute_query" => tail_name(&method.value) == Some("env"),
+            _ => false,
+        }
+    }
+
+    /// The qualified columns of the query `SQL()` spells out, or that an Odoo cursor's `execute()` or
+    /// `env.execute_query()` runs from a literal or from a name the function binds once to one.
+    /// A literal run at several calls is read once.
+    fn sql_columns(&mut self, call: &'ast ast::ExprCall) {
+        let Some(source) = self.sql_query(call).and_then(query_source) else {
+            return;
+        };
+        if !self.read_queries.insert(source.literal.start()) {
+            return;
+        }
+        for column in sql::parse(&source.text).map(|q| q.columns).unwrap_or_default() {
+            let pos = match source_offset(source.literal, column.at) {
+                Some(offset) => self.loc.pos(offset),
+                None => self.loc.at(source.literal),
+            };
+            self.facts.sql_columns.push(SqlColumn {
+                table: column.table,
+                column: column.column,
+                text: column.text,
+                pos,
+            });
+        }
     }
 
     fn id_refs(&mut self, call: &ast::ExprCall, expr: &Expr) {
@@ -1090,7 +1187,7 @@ impl PyVisitor<'_> {
         if ir_http && name == "_handle_error" {
             return;
         }
-        let uses = CursorUse::scan(&func.body);
+        let uses = CursorUse::scan(func);
         if uses.commits {
             return;
         }
@@ -1115,7 +1212,7 @@ impl PyVisitor<'_> {
             .body
             .iter()
             .filter_map(Stmt::as_function_def_stmt)
-            .map(|f| (f, CursorUse::scan_nested(&f.body)))
+            .map(|f| (f, CursorUse::scan_nested(f)))
             .collect();
         let invalidating: Vec<&str> = methods
             .iter()
@@ -1164,7 +1261,7 @@ impl PyVisitor<'_> {
         }
     }
 
-    fn guarded(&mut self, guard: &Expr, then: impl FnOnce(&mut Self)) {
+    fn guarded(&mut self, guard: &'ast Expr, then: impl FnOnce(&mut Self)) {
         self.visit_expr(guard);
         let depth = u32::from(is_guard(guard));
         self.guarded += depth;
@@ -1173,7 +1270,7 @@ impl PyVisitor<'_> {
     }
 
     /// Operands of an `and` after a guard run only once it passed.
-    fn and_chain(&mut self, values: &[Expr]) {
+    fn and_chain(&mut self, values: &'ast [Expr]) {
         let mut depth = 0;
         for value in values {
             self.visit_expr(value);
@@ -1198,9 +1295,9 @@ impl PyVisitor<'_> {
     }
 }
 
-impl<'a> Visitor<'a> for PyVisitor<'_> {
+impl<'ast> Visitor<'ast> for PyVisitor<'_, 'ast> {
     /// Statements after `if 'x' not in self.env: return` run only once the guard passed.
-    fn visit_body(&mut self, body: &'a [Stmt]) {
+    fn visit_body(&mut self, body: &'ast [Stmt]) {
         let mut depth = 0;
         for stmt in body {
             self.visit_stmt(stmt);
@@ -1216,7 +1313,7 @@ impl<'a> Visitor<'a> for PyVisitor<'_> {
         self.guarded -= depth;
     }
 
-    fn visit_stmt(&mut self, stmt: &'a Stmt) {
+    fn visit_stmt(&mut self, stmt: &'ast Stmt) {
         match stmt {
             Stmt::ClassDef(class) => {
                 let fact = self.class_fact(class);
@@ -1232,7 +1329,9 @@ impl<'a> Visitor<'a> for PyVisitor<'_> {
                 self.owners.push(Some(owner));
                 self.facts.classes.extend(fact);
                 self.class_models.push(model);
+                self.self_cursors.push(self_cursor(class));
                 visitor::walk_stmt(self, stmt);
+                self.self_cursors.pop();
                 self.class_models.pop();
                 self.owners.pop();
                 return;
@@ -1241,9 +1340,16 @@ impl<'a> Visitor<'a> for PyVisitor<'_> {
                 self.route_checks(func);
                 self.rollback_checks(func);
                 self.flows(func);
+                let outermost = self.query_vars.is_none();
+                if outermost {
+                    self.query_vars = Some(QueryVars::of(func));
+                }
                 self.owners.push(None);
                 visitor::walk_stmt(self, stmt);
                 self.owners.pop();
+                if outermost {
+                    self.query_vars = None;
+                }
                 return;
             }
             Stmt::If(i) => {
@@ -1258,7 +1364,7 @@ impl<'a> Visitor<'a> for PyVisitor<'_> {
         visitor::walk_stmt(self, stmt);
     }
 
-    fn visit_expr(&mut self, expr: &'a Expr) {
+    fn visit_expr(&mut self, expr: &'ast Expr) {
         match expr {
             Expr::StringLiteral(s) => self.file_mention(s),
             Expr::Call(call) => self.call_checks(call, expr),
@@ -1480,5 +1586,119 @@ mod tests {
             Some(&OptionValue::Bool(false))
         );
         assert_eq!(class.methods, ["_check_company_domain"]);
+    }
+
+    #[test]
+    fn finds_the_columns_of_literal_queries_on_odoo_cursors_once_at_the_column_the_source_spells() {
+        let src = "class X(models.Model):\n    _name = 'x'\n    _table_query = 'SELECT 1'\n\n    def f(self):\n        \
+                   query = 'SELECT p.name FROM res_partner p'\n        self.env.cr.execute(query)\n        \
+                   self.env.cr.execute(SQL(\"\"\"\n            SELECT q.ref\n            \
+                   FROM res_partner q\"\"\"))\n        \
+                   self.env.cr.execute('SELECT r.a\\n FROM t r')\n        \
+                   self.env.cr.execute('SELECT s.b ' 'FROM t s')\n        \
+                   self.env.cr.execute(f'SELECT u.c FROM t u WHERE {x}')\n        \
+                   tail = SQL('SELECT v.d FROM t v')\n        self.env.execute_query(tail)\n        \
+                   self._cr.execute(query)\n\n\
+                   def g(cr, registry):\n    cr.execute('SELECT w.e FROM t w')\n    \
+                   other = psycopg2.connect(dsn).cursor()\n    other.execute('SELECT y.f FROM t y')\n    \
+                   with registry.cursor() as new_cr:\n        new_cr.execute('SELECT z.g FROM t z WHERE %s' % w)\n";
+        let facts = analyze(src);
+        let found: Vec<String> = facts
+            .sql_columns
+            .iter()
+            .map(|c| format!("{}.{} {} {}:{}", c.table, c.column, c.text, c.pos.line, c.pos.col))
+            .collect();
+        assert_eq!(
+            found,
+            [
+                "res_partner.name p.name 6:27",
+                "res_partner.ref q.ref 9:22",
+                "t.a r.a 11:29",
+                "t.b s.b 12:29",
+                "t.d v.d 14:30",
+                "t.g z.g 23:34",
+            ]
+        );
+        assert!(facts.classes[0].attr("_table_query").is_some());
+    }
+
+    /// The table and column of each query column a source reads, in order.
+    fn read_columns(src: &str) -> Vec<String> {
+        analyze(src)
+            .sql_columns
+            .iter()
+            .map(|c| format!("{}.{}", c.table, c.column))
+            .collect()
+    }
+
+    #[test]
+    fn reads_queries_on_the_cursors_of_records_environments_requests_and_registries() {
+        let src = "class X(models.Model):\n    _name = 'x'\n\n    \
+                   def f(self, records, partner, other_env, db):\n        \
+                   records.env.cr.execute('SELECT a.records_env FROM t a')\n        \
+                   request.env.cr.execute('SELECT a.request_env FROM t a')\n        \
+                   http.request.cr.execute('SELECT a.http_request FROM t a')\n        \
+                   partner._cr.execute('SELECT a.partner_cr FROM t a')\n        \
+                   self.env(su=True).cr.execute('SELECT a.env_call FROM t a')\n        \
+                   new_env = api.Environment(cr, SUPERUSER_ID, {})\n        \
+                   new_env.cr.execute('SELECT a.new_env FROM t a')\n        \
+                   env2 = self.env\n        env2.cr.execute('SELECT a.env2 FROM t a')\n        \
+                   with Registry(db).cursor() as reg_cr:\n            \
+                   reg_cr.execute('SELECT a.registry FROM t a')\n        \
+                   other_env.cr.execute('SELECT a.param_env FROM t a')\n        \
+                   self.cr.execute('SELECT a.plain_self_cr FROM t a')\n        \
+                   odoo.sql_db.db_connect(db).cursor().execute('SELECT a.db_connect FROM t a')\n\n    \
+                   @classmethod\n    def g(cls):\n        cls._cr.execute('SELECT a.cls_cr FROM t a')\n        \
+                   with contextlib.closing(cls.pool.cursor()) as cr:\n            \
+                   cr.execute('SELECT a.closing FROM t a')\n";
+        assert_eq!(
+            read_columns(src),
+            [
+                "t.records_env",
+                "t.request_env",
+                "t.http_request",
+                "t.partner_cr",
+                "t.env_call",
+                "t.new_env",
+                "t.env2",
+                "t.registry",
+                "t.cls_cr",
+                "t.closing",
+            ]
+        );
+    }
+
+    #[test]
+    fn reads_self_cr_only_in_test_cases_and_classes_that_bind_it_to_odoo_s_cursor() {
+        let src = "class TestX(common.TransactionCase):\n    def test_x(self):\n        \
+                   self.cr.execute('SELECT a.test_case FROM t a')\n\n\
+                   class Job:\n    def __init__(self, env):\n        self.cr = env.cr\n\n    \
+                   def run(self):\n        self.cr.execute('SELECT a.bound FROM t a')\n\n\
+                   class Legacy:\n    def __init__(self, dsn):\n        self.cr = psycopg2.connect(dsn).cursor()\n\n    \
+                   def run(self):\n        self.cr.execute('SELECT a.connector FROM t a')\n\n\
+                   class Plain(unittest.TestCase):\n    def test_y(self):\n        \
+                   self.cr.execute('SELECT a.unit_test FROM t a')\n";
+        assert_eq!(read_columns(src), ["t.test_case", "t.bound"]);
+    }
+
+    #[test]
+    fn finds_the_columns_a_module_adds_with_literals_on_any_cursor() {
+        let src = "def pre_init_hook(cr):\n    \
+                   cr.execute('ALTER TABLE res_users ADD COLUMN IF NOT EXISTS totp_secret varchar')\n    \
+                   query = 'ALTER TABLE x_box ADD COLUMN code varchar'\n    cr.execute(query)\n    \
+                   env.cr.execute(SQL('ALTER TABLE x_box ADD COLUMN ref varchar, ADD COLUMN code varchar'))\n    \
+                   create_column(cr, 'x_box', 'label', 'varchar')\n    \
+                   tools.create_column(cr, table, 'skipped', 'varchar')\n    \
+                   cr.execute('CREATE INDEX x_idx ON x_box (code)')\n";
+        let pair = |t: &str, c: &str| (t.to_owned(), c.to_owned());
+        assert_eq!(
+            analyze(src).added_columns,
+            [
+                pair("res_users", "totp_secret"),
+                pair("x_box", "code"),
+                pair("x_box", "ref"),
+                pair("x_box", "label")
+            ]
+        );
     }
 }

@@ -132,6 +132,7 @@ rules! {
     "OD221" "self-dependency-not-recursive" Correctness Warning Some(">=15.0"), true, "A computed field depends on itself through other records without recursive=True.";
     "OD222" "check-company-without-company" Correctness Warning Some(">=13.0"), true, "A field sets check_company to a comodel without company_id.";
     "OD223" "compute-leaves-field-unassigned" Correctness Error Some(">=14.0"), true, "A compute method leaves a non-stored readonly field unassigned on some records.";
+    "OD224" "sql-unknown-column" Correctness Error None, true, "A literal SQL query names a column its model's table does not have.";
     "OD301" "unresolved-xmlid" Correctness Error None, true, "The XML id is not defined by its module.";
     "OD302" "xmlid-not-in-depends" Correctness Error None, true, "The XML id comes from a module missing from depends.";
     "OD303" "duplicate-xmlid" Correctness Warning None, false, "The same XML id is defined twice in one file.";

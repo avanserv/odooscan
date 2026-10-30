@@ -349,6 +349,12 @@
       "count": 1
     },
     {
+      "path": "addons/gamification/models/gamification_karma_tracking.py",
+      "code": "OD122",
+      "message": "INSERT on gamification_karma_tracking bypasses the ORM, so records this transaction already read keep stale values; call flush_model() before the query and invalidate_model() after it (flush() and invalidate_cache() before 16.0)",
+      "count": 1
+    },
+    {
       "path": "addons/gamification/security/ir.model.access.csv",
       "code": "OD402",
       "message": "base.group_portal gets write, create or unlink on gamification.model_gamification_badge_user; public and portal access should be read-only and go through controllers",
@@ -1327,6 +1333,18 @@
       "count": 1
     },
     {
+      "path": "addons/mail/models/discuss/discuss_channel.py",
+      "code": "OD122",
+      "message": "UPDATE on discuss_channel_member bypasses the ORM, so records this transaction already read keep stale values; call flush_model() before the query and invalidate_model() after it (flush() and invalidate_cache() before 16.0)",
+      "count": 1
+    },
+    {
+      "path": "addons/mail/models/discuss/mail_guest.py",
+      "code": "OD122",
+      "message": "UPDATE on mail_guest bypasses the ORM, so records this transaction already read keep stale values; call flush_model() before the query and invalidate_model() after it (flush() and invalidate_cache() before 16.0)",
+      "count": 1
+    },
+    {
       "path": "addons/mail/models/fetchmail.py",
       "code": "OD103",
       "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
@@ -2227,6 +2245,12 @@
       "count": 1
     },
     {
+      "path": "addons/website/models/website_visitor.py",
+      "code": "OD122",
+      "message": "UPDATE on website_visitor bypasses the ORM, so records this transaction already read keep stale values; call flush_model() before the query and invalidate_model() after it (flush() and invalidate_cache() before 16.0)",
+      "count": 1
+    },
+    {
       "path": "addons/website/static/src/components/burger_menu/burger_menu.js",
       "code": "OD602",
       "message": "neither BurgerMenu nor its parents have '_onMenuClicked', so super._onMenuClicked() fails",
@@ -2368,6 +2392,12 @@
       "path": "addons/website_hr_recruitment/models/hr_job.py",
       "code": "OD211",
       "message": "no parent class of hr.job defines 'set_open', so this super() call fails",
+      "count": 1
+    },
+    {
+      "path": "addons/website_jitsi/controllers/main.py",
+      "code": "OD122",
+      "message": "UPDATE on chat_room bypasses the ORM, so records this transaction already read keep stale values; call flush_model() before the query and invalidate_model() after it (flush() and invalidate_cache() before 16.0)",
       "count": 1
     },
     {

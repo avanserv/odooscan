@@ -18,6 +18,10 @@ const MAGIC_FIELDS: &[&str] = &[
     "__last_update",
 ];
 
+/// The fields of `MAGIC_FIELDS` Odoo creates a column for when the model logs access: the ORM
+/// computes the others.
+const LOG_COLUMNS: &[&str] = &["create_uid", "create_date", "write_uid", "write_date"];
+
 pub const RELATIONAL_TYPES: &[&str] = &["Many2one", "One2many", "Many2many"];
 
 /// Types whose value is not a record of a fixed comodel, so a path cannot continue through them.
@@ -25,6 +29,10 @@ const OPAQUE_TYPES: &[&str] = &["Reference", "Many2oneReference", "Properties", 
 
 /// Fields declared outside the class body, which the extractor cannot see.
 const EXTRA_FIELDS: &[(&str, &str)] = &[("ir.rule", "global")];
+
+/// Columns of fields Odoo does not store that `base` creates in `base_data.sql`, out of the reach
+/// of the literals `added_columns` reads.
+const SQL_MADE_COLUMNS: &[(&str, &str)] = &[("res.users", "password")];
 
 /// BaseModel methods that fields commonly name as compute, search or group_expand.
 const BASE_METHODS: &[&str] = &[
@@ -558,6 +566,8 @@ pub struct Index<'m> {
     template_bases: FxHashSet<ClassKey>,
     /// Flow summaries of model methods, by model and method name.
     method_flows: MethodFlows<'m>,
+    /// The models whose table each table name may be, from any module.
+    table_models: FxHashMap<String, Vec<&'m str>>,
 }
 
 impl<'m> Index<'m> {
@@ -584,7 +594,6 @@ impl<'m> Index<'m> {
         let mut index = Self {
             modules,
             has_base: base.is_some(),
-            models,
             xmlids,
             views: Inheritance::new(views),
             templates: Inheritance::new(template_nodes(modules, &templates_loaded)),
@@ -597,6 +606,8 @@ impl<'m> Index<'m> {
             patched: FxHashMap::default(),
             template_bases: FxHashSet::default(),
             method_flows: method_flows(modules),
+            table_models: table_models(&models),
+            models,
         };
         index.patched = index.patched_classes();
         index.template_bases = index.template_bases();
@@ -980,9 +991,51 @@ impl<'m> Index<'m> {
         }
     }
 
+    /// The models a non-abstract class introduces with `_name` whose table may be `table`, in any
+    /// module.
+    pub fn table_models(&self, table: &str) -> &[&'m str] {
+        self.table_models.get(table).map(Vec::as_slice).unwrap_or_default()
+    }
+
+    /// Whether a class of `model` or of a model it inherits, in any indexed module, defines `field`.
+    pub fn defines_field(&self, model: &str, field: &str) -> bool {
+        self.chain(model, None, false)
+            .iter()
+            .any(|(_, c)| c.fields.iter().any(|f| f.name == field))
+    }
+
+    /// Whether `field` is `id`, which every table of a model has, or a column of `model` that no
+    /// class declares.
+    pub fn implicit_column(&self, model: &str, field: &str) -> bool {
+        field == "id" || EXTRA_FIELDS.contains(&(model, field))
+    }
+
+    /// Whether `field` is a column Odoo adds to the table of a model that logs access.
+    pub fn log_column(&self, field: &str) -> bool {
+        LOG_COLUMNS.contains(&field)
+    }
+
+    /// Whether the `table` of `model` has `column` though no field gives it: a module in scope adds
+    /// it with a literal `ALTER TABLE` or `create_column()`, or `base` creates it in SQL.
+    pub fn hand_made_column(&self, model: &str, table: &str, column: &str, scope: &Scope) -> bool {
+        SQL_MADE_COLUMNS.contains(&(model, column))
+            || self
+                .modules
+                .iter()
+                .enumerate()
+                .filter(|(mi, _)| scope.sees(*mi))
+                .flat_map(|(_, m)| &m.python)
+                .any(|f| f.facts.added_columns.iter().any(|(t, c)| t == table && c == column))
+    }
+
+    /// Whether `field` is one every model has, which the ORM computes when it has no column.
+    pub fn magic_field(&self, field: &str) -> bool {
+        MAGIC_FIELDS.contains(&field)
+    }
+
     /// `Err(Some(module))` when the field exists only outside the scope.
     pub fn field(&self, model: &str, field: &str, scope: &Scope) -> Result<Option<FieldInfo<'m>>, Option<&'m str>> {
-        if MAGIC_FIELDS.contains(&field) || EXTRA_FIELDS.contains(&(model, field)) {
+        if self.magic_field(field) || EXTRA_FIELDS.contains(&(model, field)) {
             return Ok(None);
         }
         let defs = self.field_defs(model, field, Some(scope));
@@ -1227,6 +1280,42 @@ impl PathError<'_> {
             }
         }
     }
+}
+
+/// The tables of the models a non-abstract class introduces with `_name`: each `_table` their
+/// classes set, or else the name with dots made underscores. A model with a `_table` that is no
+/// literal has none.
+fn table_models<'m>(models: &Models<'m>) -> FxHashMap<String, Vec<&'m str>> {
+    let mut by_table: FxHashMap<String, Vec<&'m str>> = FxHashMap::default();
+    for (&model, classes) in models {
+        if !classes
+            .iter()
+            .any(|(_, c)| c.new_model && c.kind != ModelKind::Abstract)
+        {
+            continue;
+        }
+        let set: Option<Vec<&str>> = classes
+            .iter()
+            .filter_map(|(_, c)| c.table.as_ref())
+            .map(|t| match t {
+                OptionValue::Str(t) => Some(t.as_str()),
+                _ => None,
+            })
+            .collect();
+        let Some(mut tables) = set else {
+            continue;
+        };
+        let default = model.replace('.', "_");
+        if tables.is_empty() {
+            tables.push(&default);
+        }
+        tables.sort_unstable();
+        tables.dedup();
+        for table in tables {
+            by_table.entry(table.to_owned()).or_default().push(model);
+        }
+    }
+    by_table
 }
 
 fn method_flows(modules: &[Module]) -> MethodFlows<'_> {

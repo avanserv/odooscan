@@ -151,7 +151,7 @@ pub struct ClassFact {
     pub plain_bases: bool,
     /// The value of `_table`, when the class sets it.
     pub table: Option<OptionValue>,
-    /// `_parent_store`, `_auto` and `_log_access`, when the class sets them.
+    /// `_parent_store`, `_auto`, `_log_access` and `_table_query`, when the class sets them.
     pub attrs: Vec<(String, Spanned<OptionValue>)>,
     /// Compute methods, at their name, with the fields of the class they compute and can leave
     /// unassigned on a record.
@@ -223,6 +223,16 @@ pub struct FlowSummary {
     pub edges: Vec<FlowEdge>,
 }
 
+/// A `table.column` or `alias.column` reference of a literal query, on the table the query binds.
+#[derive(Debug)]
+pub struct SqlColumn {
+    pub table: String,
+    pub column: String,
+    /// The reference as written.
+    pub text: String,
+    pub pos: Pos,
+}
+
 #[derive(Debug, Default)]
 pub struct PyFacts {
     pub classes: Vec<ClassFact>,
@@ -241,6 +251,11 @@ pub struct PyFacts {
     pub file_mentions: Vec<String>,
     /// Functions whose parameters or calls carry data a caller or callee may have from a user.
     pub flows: Vec<FlowSummary>,
+    /// The qualified columns of the queries `SQL()` spells out, and of those an Odoo cursor runs.
+    pub sql_columns: Vec<SqlColumn>,
+    /// The table and the column each literal `ALTER TABLE ... ADD COLUMN` or `create_column()`
+    /// adds by hand, as modules do for a field Odoo does not store.
+    pub added_columns: Vec<(String, String)>,
     pub diags: Vec<RawDiag>,
     /// OD121 on the rollbacks of `ir.http._handle_exception()`, Odoo's hook for a failed request
     /// only before 16.0, which the series of the module decides.

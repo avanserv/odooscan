@@ -25,3 +25,7 @@ class QuietWizard(models.TransientModel):
         if self.env.get("bad.other") is not None:
             self.env["bad.other"].search([])
         return "other_id" in self._fields and self.env["bad.third"]
+
+    def action_x_partner_names(self):
+        self.env.cr.execute("SELECT p.x_bogus FROM res_partner p")
+        return self.env.cr.fetchall()
