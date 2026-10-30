@@ -45,7 +45,8 @@ page in the terminal.
 
 ## Testing
 
-`cargo test` runs a snapshot over `crates/odooscan_core/tests/fixtures`. That fixture is a small
-core (`base`, `mail`, `web`) plus custom modules written to trigger every rule; review changes with
+`cargo test` runs a snapshot over `crates/odooscan_core/tests/fixtures`. That fixture holds custom
+modules written to trigger every rule, and a stand-in for Odoo core that they depend on, whose
+auto-install modules pin down which modules count as always installed; review changes with
 `cargo insta review`. The false-positive oracle is Odoo itself: a scan of core must report exactly
 the findings recorded in `tests/oracle/`, as CONTRIBUTING.md describes.
