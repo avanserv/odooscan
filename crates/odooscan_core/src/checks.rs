@@ -1063,6 +1063,20 @@ enum Merged<'m> {
 /// replaced a delegating field's `ondelete` (`saas~14.4`).
 const LATE_SET_NULL_CHECK: Series = Series { major: 14, minor: 4 };
 
+/// The first series whose field setup no longer merges a definition with the field of a model
+/// class in the registry (`saas~12.5`).
+const SETUP_MAGIC: Series = Series { major: 12, minor: 5 };
+
+/// The first series whose model metaclass adds the magic fields to the class that introduces a
+/// model, rather than the setup of every model (`saas~14.4`).
+const METACLASS_MAGIC: Series = Series { major: 14, minor: 4 };
+
+/// The first series without the `__last_update` field (`saas~16.1`).
+const NO_LAST_UPDATE: Series = Series { major: 16, minor: 1 };
+
+/// The first series whose `BaseModel` defines `id` and `display_name` (`saas~18.1`).
+const BASE_MAGIC: Series = Series { major: 18, minor: 1 };
+
 /// The first series that refuses an `_inherits` field that is not required with ondelete 'cascade'
 /// or 'restrict', and a `delegate=True` field no entry names (`saas~18.3`).
 const REFUSED_DELEGATION: Series = Series { major: 18, minor: 3 };
@@ -1154,11 +1168,13 @@ struct Label<'m> {
     here: Option<(&'m FieldFact, (usize, Pos))>,
 }
 
-/// The fields Odoo adds to a model, with their labels; those after the first two only when the
-/// model logs access. See `Ctx::magic_labels` for the models that get the first two.
+/// The fields Odoo adds to a model, with their labels: the first two, then `__last_update` in the
+/// series that have it, then the rest only when the model logs access. See `Ctx::magic_labels`
+/// for the models that get them.
 const MAGIC_LABELS: &[(&str, &str)] = &[
     ("id", "ID"),
     ("display_name", "Display Name"),
+    ("__last_update", "Last Modified on"),
     ("create_uid", "Created by"),
     ("create_date", "Created on"),
     ("write_uid", "Last Updated by"),
@@ -1187,19 +1203,56 @@ fn derived_label(name: &str) -> String {
     label
 }
 
+/// How Odoo adds the fields of `MAGIC_LABELS`, which decides the models that get them and what a
+/// definition of the same name makes of them.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum MagicEra {
+    /// Setup adds them to every model, and a definition merges with the field of the same name on
+    /// the registry class of each model it inherits.
+    RegistryMerge,
+    /// Setup adds them to every model, but not one that a class of the model or of a model it
+    /// inherits defines.
+    Setup,
+    /// The metaclass adds them to the class that introduces a model that is not abstract.
+    Metaclass,
+    /// `BaseModel` defines `id` and `display_name`, and the metaclass adds the others.
+    Base,
+}
+
+/// The era of `series`. An unknown series takes the metaclass era, which every series from
+/// saas~14.4 through 18.0 shares: it adds no field to an abstract model, so no label is reported
+/// that the series of the module may lack.
+fn magic_era(series: Option<Series>) -> MagicEra {
+    match series {
+        Some(s) if s < SETUP_MAGIC => MagicEra::RegistryMerge,
+        Some(s) if s < METACLASS_MAGIC => MagicEra::Setup,
+        Some(s) if s >= BASE_MAGIC => MagicEra::Base,
+        _ => MagicEra::Metaclass,
+    }
+}
+
+/// Whether Odoo adds `__last_update`. Not for an unknown series, so that no label is reported
+/// against a field the newest series lack.
+fn has_last_update(series: Option<Series>) -> bool {
+    series.is_some_and(|s| s < NO_LAST_UPDATE)
+}
+
 /// What becomes of the field Odoo adds to a model under a name that indexed classes define too.
 enum MagicBase<'a> {
     /// Classes of the model merge into it, so its label stands unless one sets `string`.
     Kept(&'a str),
-    /// The class that introduces the model defines the field, so Odoo does not add its own.
+    /// Odoo does not add its own field, so the definitions decide the label.
     Replaced,
+    /// Odoo adds its own field over every definition and merges none, so its label stands.
+    Fixed(&'a str),
     /// A model it inherits defines the field too, and where Odoo merges that one is not modelled.
     Unknown,
 }
 
 /// What becomes of the field Odoo adds as `name`, labelled `text`, given the definitions of
-/// `field`. Odoo adds `id` over whatever the introducing class defines.
-fn magic_base<'a>(name: &str, field: &Field, text: &'a str) -> MagicBase<'a> {
+/// `field`, from saas~14.4: Odoo adds `id` over whatever the introducing class defines, and any
+/// other field only when that class does not define it.
+fn introduced_magic<'a>(name: &str, field: &Field, text: &'a str) -> MagicBase<'a> {
     let introducer = |d: &FieldDef| d.1.model == field.model && d.1.new_model;
     if name != "id" && field.defs.iter().any(introducer) {
         MagicBase::Replaced
@@ -1876,11 +1929,18 @@ impl<'m> Ctx<'_, 'm> {
 
     /// A field's label: a non-empty literal `string`, else `magic`, the label of the field Odoo
     /// adds under that name, else one derived from its name unless the field is related. It comes
-    /// with the last definition of this module that decides it, if any. None when the magic field's
-    /// merge is `Unknown`, even if the field sets a literal `string`.
+    /// with the last definition of this module that decides it, if any. A `Fixed` magic field
+    /// keeps its label even over a literal `string`, and an `Unknown` one has none.
     fn label(&self, name: &'m str, field: &Field<'m>, magic: Option<&str>) -> Option<Label<'m>> {
-        let magic = match magic.map(|text| magic_base(name, field, text)) {
+        let magic = match magic.map(|text| self.magic_base(name, field, text)) {
             Some(MagicBase::Unknown) => return None,
+            Some(MagicBase::Fixed(text)) => {
+                return Some(Label {
+                    text: text.to_owned(),
+                    name,
+                    here: None,
+                });
+            }
             Some(MagicBase::Kept(text)) => Some(text),
             Some(MagicBase::Replaced) | None => None,
         };
@@ -1904,15 +1964,53 @@ impl<'m> Ctx<'_, 'm> {
         Some(Label { text, name, here })
     }
 
-    /// The fields Odoo adds to `model`, with their labels. Before 20.0 the class that introduces a
-    /// model that is not abstract gets `id` and `display_name`; from 20.0 `BaseModel` defines them,
-    /// so an abstract model has them too. Whether 19.0 has them on an abstract model is not known.
-    fn magic_labels(&self, model: &str) -> &'static [(&'static str, &'static str)] {
-        let on_base = self.series.is_some_and(|s| s >= Series { major: 20, minor: 0 });
-        if !on_base && self.index.kind(model, self.scope) == Some(ModelKind::Abstract) {
-            return &[];
+    /// What becomes of the field Odoo adds as `name`, labelled `text`, given the definitions of
+    /// `field`. Before saas~14.4 setup adds `id` over every definition, and from saas~12.5 no
+    /// other field that a class defines. Python mangles `__last_update` in a class body, so what
+    /// the index records under that name is another field and never changes Odoo's.
+    fn magic_base<'a>(&self, name: &str, field: &Field, text: &'a str) -> MagicBase<'a> {
+        let era = magic_era(self.series);
+        let early = matches!(era, MagicEra::RegistryMerge | MagicEra::Setup);
+        match era {
+            _ if name == "__last_update" || (early && name == "id") => MagicBase::Fixed(text),
+            MagicEra::Setup => MagicBase::Replaced,
+            MagicEra::RegistryMerge => self.registry_magic(name, field, text),
+            MagicEra::Metaclass | MagicEra::Base => introduced_magic(name, field, text),
         }
-        &MAGIC_LABELS[..if self.log_access(model) { MAGIC_LABELS.len() } else { 2 }]
+    }
+
+    /// What becomes of the field Odoo adds as `name` before saas~12.5, where a definition merges
+    /// with the field of the registry class of each model the model inherits: `base` has
+    /// `display_name`, and a model that logs access has the log fields. Where Odoo merges a
+    /// definition of another model's class is not modelled.
+    fn registry_magic<'a>(&self, name: &str, field: &Field, text: &'a str) -> MagicBase<'a> {
+        let model = field.model;
+        let logs = |(_, c): &(usize, &ClassFact)| c.model != model && c.model != "base" && self.log_access(&c.model);
+        if field.defs.iter().any(|d| d.1.model != model) {
+            MagicBase::Unknown
+        } else if name == "display_name" || self.index.merged_classes(model, self.scope).iter().any(logs) {
+            MagicBase::Kept(text)
+        } else {
+            MagicBase::Replaced
+        }
+    }
+
+    /// The fields Odoo adds to `model`, with their labels. Before saas~14.4 every model gets `id`,
+    /// `display_name` and `__last_update`, from saas~14.4 only a model that is not abstract, and
+    /// from saas~18.1, where `BaseModel` defines the first two, every model gets those again.
+    /// `__last_update` stops after 16.0 and is left out for an unknown series (`has_last_update`).
+    fn magic_labels(&self, model: &str) -> Vec<(&'static str, &'static str)> {
+        let era = magic_era(self.series);
+        if era == MagicEra::Metaclass && self.index.kind(model, self.scope) == Some(ModelKind::Abstract) {
+            return vec![];
+        }
+        let (last_update, logs) = (has_last_update(self.series), self.log_access(model));
+        let added = |name: &str| match name {
+            "id" | "display_name" => true,
+            "__last_update" => last_update,
+            _ => logs,
+        };
+        MAGIC_LABELS.iter().copied().filter(|(name, _)| added(name)).collect()
     }
 
     /// Whether Odoo adds the fields that log access to `model`: it has a table of its own, and no
@@ -2619,7 +2717,7 @@ fn has_certain_column(field: &Field) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{applies, derived_label, shadowed_member};
+    use super::{MagicEra, applies, derived_label, has_last_update, magic_era, shadowed_member};
     use crate::facts::DefinitionSource;
     use crate::series::Series;
 
@@ -2641,6 +2739,21 @@ mod tests {
         assert_eq!(derived_label("x_studio_9a_date"), "X Studio 9A Date");
         assert_eq!(derived_label("is_VAT"), "Is Vat");
         assert_eq!(derived_label("id"), "Id");
+    }
+
+    #[test]
+    fn adds_magic_fields_by_series() {
+        let era = |series: &str| magic_era(Series::parse(series));
+        assert_eq!(era("12.0"), MagicEra::RegistryMerge);
+        assert_eq!(era("saas~12.4"), MagicEra::RegistryMerge);
+        assert_eq!(era("saas~12.5"), MagicEra::Setup);
+        assert_eq!(era("saas~14.3"), MagicEra::Setup);
+        assert_eq!(era("saas~14.4"), MagicEra::Metaclass);
+        assert_eq!(era("18.0"), MagicEra::Metaclass);
+        assert_eq!(era("saas~18.1"), MagicEra::Base);
+        assert_eq!(magic_era(None), MagicEra::Metaclass);
+        assert!(has_last_update(Series::parse("16.0")) && !has_last_update(Series::parse("saas~16.1")));
+        assert!(!has_last_update(None));
     }
 
     #[test]

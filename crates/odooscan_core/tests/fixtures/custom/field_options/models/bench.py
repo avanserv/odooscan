@@ -60,3 +60,10 @@ class GreenhouseTray(models.Model):
     filled_on = fields.Datetime(string="Create Date")
     checked_on = fields.Datetime(string="Stamped")
     _condition_to_sql = fields.Char()
+
+
+class GreenhouseLabelMixin(models.AbstractModel):
+    _name = "greenhouse.label.mixin"
+    _description = "Greenhouse label mixin"
+
+    ref = fields.Char(string="ID")

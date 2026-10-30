@@ -48,3 +48,16 @@ class ModernBadge(models.AbstractModel):
 
     partner_id = fields.Many2one("res.partner", required=True, ondelete="set null")
     country_id = fields.Many2one("res.country", delegate=True)
+
+
+class ResPartnerStamp(models.Model):
+    _inherit = "res.partner"
+
+    touched_on = fields.Datetime(string="Last Modified on")
+
+
+class ModernSeal(models.AbstractModel):
+    _name = "modern.seal"
+    _description = "Seal"
+
+    ref = fields.Char(string="ID")
