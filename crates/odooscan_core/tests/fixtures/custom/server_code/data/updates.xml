@@ -1,0 +1,37 @@
+<odoo>
+    <record id="code_replaced" model="ir.cron">
+        <field name="code">model._nope_code_replaces()</field>
+    </record>
+
+    <record id="code_cleared" model="ir.cron">
+        <field name="code"/>
+    </record>
+
+    <record id="code_hidden" model="ir.cron">
+        <field name="code" eval="'pass'"/>
+    </record>
+
+    <record id="code_kept" model="ir.cron">
+        <field name="name">code_kept again</field>
+    </record>
+
+    <record id="state_replaced" model="ir.actions.server">
+        <field name="state">multi</field>
+    </record>
+
+    <record id="state_given" model="ir.actions.server">
+        <field name="state">code</field>
+    </record>
+
+    <record id="model_replaced" model="ir.cron">
+        <field name="model_id" ref="model_server_note"/>
+    </record>
+
+    <record id="model_hidden" model="ir.cron">
+        <field name="model_id" eval="ref('model_server_job') or ref('model_server_note')"/>
+    </record>
+
+    <record id="model_given" model="ir.cron">
+        <field name="model_id" ref="model_server_job"/>
+    </record>
+</odoo>

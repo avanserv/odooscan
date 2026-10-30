@@ -1,0 +1,163 @@
+<odoo>
+    <record id="cron_without_state" model="ir.cron">
+        <field name="name">cron_without_state</field>
+        <field name="model_id" ref="model_server_job"/>
+        <field name="code">model._run_misspelled()</field>
+    </record>
+
+    <record id="cron_with_state" model="ir.cron">
+        <field name="name">cron_with_state</field>
+        <field name="model_id" ref="model_server_job"/>
+        <field name="state">code</field>
+        <field name="code">records.action_opne()</field>
+    </record>
+
+    <record id="server_with_state" model="ir.actions.server">
+        <field name="name">server_with_state</field>
+        <field name="model_id" ref="model_server_job"/>
+        <field name="state">code</field>
+        <field name="code">record.action_clsoe()</field>
+    </record>
+
+    <record id="model_dotted" model="ir.cron">
+        <field name="name">model_dotted</field>
+        <field name="model_id" ref="server_code.model_server_job"/>
+        <field name="code">model._nope_dotted()</field>
+    </record>
+
+    <record id="model_eval" model="ir.cron">
+        <field name="name">model_eval</field>
+        <field name="model_id" eval="ref('model_server_job')"/>
+        <field name="code">model._nope_eval_ref()</field>
+    </record>
+
+    <record id="model_search" model="ir.cron">
+        <field name="name">model_search</field>
+        <field name="model_id" search="[('model', '=', 'server.job')]"/>
+        <field name="code">model._nope_search()</field>
+    </record>
+
+    <record id="known_methods_pass" model="ir.cron">
+        <field name="name">known_methods_pass</field>
+        <field name="model_id" ref="model_server_job"/>
+        <field name="code">
+model._run_daily()
+records.action_close()
+record.write({})
+model.search([])
+model._nope_after_known()
+        </field>
+    </record>
+
+    <record id="empty_attributes_read_the_text" model="ir.cron">
+        <field name="name">empty_attributes_read_the_text</field>
+        <field name="model_id" ref="model_server_job"/>
+        <field name="code" eval="" ref="" search="" file="">model._nope_empty_attributes()</field>
+    </record>
+
+    <record id="cdata_call" model="ir.cron">
+        <field name="name">cdata_call</field>
+        <field name="model_id" ref="model_server_job"/>
+        <field name="code"><![CDATA[
+if 1 < 2:
+    model._nope_cdata()
+]]></field>
+    </record>
+
+    <record id="cdata_first_line_call" model="ir.cron">
+        <field name="name">cdata_first_line_call</field>
+        <field name="model_id" ref="model_server_job"/>
+        <field name="code"><![CDATA[model._nope_cdata_first()]]></field>
+    </record>
+
+    <record id="text_and_cdata" model="ir.cron">
+        <field name="name">text_and_cdata</field>
+        <field name="model_id" ref="model_server_job"/>
+        <field name="code">
+model.action_close()
+<![CDATA[model._nope_text_cdata()]]>
+</field>
+    </record>
+
+    <record id="entity_call" model="ir.cron">
+        <field name="name">entity_call</field>
+        <field name="model_id" ref="model_server_job"/>
+        <field name="code">
+a = 1 &lt; 2
+model._nope_entity()
+        </field>
+    </record>
+
+    <record id="nested_def" model="ir.cron">
+        <field name="name">nested_def</field>
+        <field name="model_id" ref="model_server_job"/>
+        <field name="code">
+def run():
+    model._nope_nested_def()
+run()
+        </field>
+    </record>
+
+    <record id="binder_of_another_name" model="ir.cron">
+        <field name="name">binder_of_another_name</field>
+        <field name="model_id" ref="model_server_job"/>
+        <field name="code">
+for record in records:
+    record._nope_loop()
+model._nope_other_name()
+        </field>
+    </record>
+
+    <record id="try_other_blocks" model="ir.cron">
+        <field name="name">try_other_blocks</field>
+        <field name="model_id" ref="model_server_job"/>
+        <field name="code">
+try:
+    pass
+except UserError:
+    model._nope_except()
+        </field>
+    </record>
+
+    <record id="hidden_method" model="ir.cron">
+        <field name="name">hidden_method</field>
+        <field name="model_id" ref="base.model_res_partner"/>
+        <field name="code">model.action_follow()</field>
+    </record>
+
+    <record id="last_code_of_a_name" model="ir.cron">
+        <field name="name">last_code_of_a_name</field>
+        <field name="model_id" ref="model_server_job"/>
+        <field name="code">model._not_this_code()</field>
+        <field name="code">model._nope_last_code()</field>
+    </record>
+
+    <record id="last_model_of_a_name" model="ir.cron">
+        <field name="name">last_model_of_a_name</field>
+        <field name="model_id" ref="model_server_job"/>
+        <field name="model_id" ref="model_server_note"/>
+        <field name="code">model._run_daily()</field>
+    </record>
+
+    <record id="last_state_of_a_name" model="ir.actions.server">
+        <field name="name">last_state_of_a_name</field>
+        <field name="model_id" ref="model_server_job"/>
+        <field name="state">object_write</field>
+        <field name="state">code</field>
+        <field name="code">model._nope_last_state()</field>
+    </record>
+
+    <record id="nested_parent" model="ir.actions.server">
+        <field name="name">nested_parent</field>
+        <field name="model_id" ref="model_server_job"/>
+        <field name="state">code</field>
+        <field name="child_ids">
+            <record id="nested_call" model="ir.actions.server">
+                <field name="name">nested_call</field>
+                <field name="model_id" ref="model_server_job"/>
+                <field name="state">code</field>
+                <field name="code">model._nope_nested()</field>
+            </record>
+        </field>
+    </record>
+</odoo>

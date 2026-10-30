@@ -1,0 +1,7 @@
+<odoo>
+    <record id="unlisted_cron" model="ir.cron">
+        <field name="name">unlisted_cron</field>
+        <field name="model_id" ref="base.model_res_partner"/>
+        <field name="code">return</field>
+    </record>
+</odoo>

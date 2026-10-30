@@ -14,6 +14,7 @@ mod project;
 mod python;
 pub mod rules;
 pub mod series;
+mod server_code;
 mod sql;
 mod suppress;
 mod taint;

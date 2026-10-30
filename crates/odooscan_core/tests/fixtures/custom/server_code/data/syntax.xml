@@ -1,0 +1,128 @@
+<odoo>
+    <record id="syntax_cron" model="ir.cron">
+        <field name="name">syntax_cron</field>
+        <field name="model_id" ref="model_server_job"/>
+        <field name="code">model._run_daily(</field>
+    </record>
+
+    <record id="syntax_any_state" model="ir.actions.server">
+        <field name="name">syntax_any_state</field>
+        <field name="model_id" ref="model_server_job"/>
+        <field name="state">object_write</field>
+        <field name="code">if</field>
+    </record>
+
+    <record id="syntax_no_state" model="ir.actions.server">
+        <field name="name">syntax_no_state</field>
+        <field name="model_id" ref="model_server_job"/>
+        <field name="code">if</field>
+    </record>
+
+    <record id="syntax_indented" model="ir.cron">
+        <field name="name">syntax_indented</field>
+        <field name="model_id" ref="model_server_job"/>
+        <field name="code">
+            model._run_daily()
+            model.action_close()
+        </field>
+    </record>
+
+    <record id="syntax_at_margin_is_fine" model="ir.cron">
+        <field name="name">syntax_at_margin_is_fine</field>
+        <field name="model_id" ref="model_server_job"/>
+        <field name="code">
+if model:
+    model._run_daily()
+        </field>
+    </record>
+
+    <record id="syntax_return" model="ir.cron">
+        <field name="name">syntax_return</field>
+        <field name="model_id" ref="model_server_job"/>
+        <field name="code">return</field>
+    </record>
+
+    <record id="syntax_yield" model="ir.cron">
+        <field name="name">syntax_yield</field>
+        <field name="model_id" ref="model_server_job"/>
+        <field name="code">yield 1</field>
+    </record>
+
+    <record id="syntax_await" model="ir.cron">
+        <field name="name">syntax_await</field>
+        <field name="model_id" ref="model_server_job"/>
+        <field name="code">await model</field>
+    </record>
+
+    <record id="syntax_break" model="ir.cron">
+        <field name="name">syntax_break</field>
+        <field name="model_id" ref="model_server_job"/>
+        <field name="code">break</field>
+    </record>
+
+    <record id="syntax_continue" model="ir.cron">
+        <field name="name">syntax_continue</field>
+        <field name="model_id" ref="model_server_job"/>
+        <field name="code">continue</field>
+    </record>
+
+    <record id="syntax_return_in_def_is_fine" model="ir.cron">
+        <field name="name">syntax_return_in_def_is_fine</field>
+        <field name="model_id" ref="model_server_job"/>
+        <field name="code">
+def run():
+    return 1
+run()
+        </field>
+    </record>
+
+    <record id="syntax_cdata_first_line" model="ir.cron">
+        <field name="name">syntax_cdata_first_line</field>
+        <field name="model_id" ref="model_server_job"/>
+        <field name="code"><![CDATA[a = (]]></field>
+    </record>
+
+    <record id="syntax_cdata" model="ir.cron">
+        <field name="name">syntax_cdata</field>
+        <field name="model_id" ref="model_server_job"/>
+        <field name="code"><![CDATA[
+a = 1 < 2
+b = (
+]]></field>
+    </record>
+
+    <record id="syntax_entity" model="ir.cron">
+        <field name="name">syntax_entity</field>
+        <field name="model_id" ref="model_server_job"/>
+        <field name="code">
+a = 1 &lt; 2
+  b = 3
+        </field>
+    </record>
+
+    <record id="syntax_first_of_a_name_is_replaced" model="ir.cron">
+        <field name="name">syntax_first_of_a_name_is_replaced</field>
+        <field name="model_id" ref="model_server_job"/>
+        <field name="code">(</field>
+        <field name="code">model._run_daily()</field>
+    </record>
+
+    <record id="syntax_last_of_a_name" model="ir.cron">
+        <field name="name">syntax_last_of_a_name</field>
+        <field name="model_id" ref="model_server_job"/>
+        <field name="code">model._run_daily()</field>
+        <field name="code">)</field>
+    </record>
+
+    <record id="syntax_nested_parent" model="ir.actions.server">
+        <field name="name">syntax_nested_parent</field>
+        <field name="model_id" ref="model_server_job"/>
+        <field name="state">code</field>
+        <field name="child_ids">
+            <record id="syntax_nested" model="ir.actions.server">
+                <field name="name">syntax_nested</field>
+                <field name="code">]</field>
+            </record>
+        </field>
+    </record>
+</odoo>
