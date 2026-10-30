@@ -172,6 +172,7 @@ custom/form_patches/static/src/partner_card.js:6:38: OD603 no indexed module def
 custom/form_patches/static/src/partner_card.js:7:30: OD603 model 'mail.thread' comes from module mail, which is not in depends
 custom/form_patches/static/src/partner_card.js:9:45: OD607 method '_compute_display_name' is private, so the server refuses to call it over RPC
 custom/form_patches/static/src/partner_card.js:10:51: OD607 method '_onchange_partner' is private, so the server refuses to call it over RPC
+custom/form_patches/static/src/partner_card.js:12:50: OD604 model 'form.card.sleeve' has no method 'action_print_card'
 custom/form_patches/static/src/quick_form.js:21:22: OD602 neither QuickForm nor its parents have 'discard', so super.discard() fails
 custom/form_patches/static/src/quick_form_card.js:8:24: OD605 no indexed bundle defines template 'form_patches.QuickFormBadge'
 custom/form_patches/static/src/quick_form_card.xml:14:9: OD606 no <div> with class 'o_form_status' in template web.FormController or the templates that extend it
