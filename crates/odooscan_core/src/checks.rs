@@ -1187,6 +1187,35 @@ const REFUSED_DELEGATION: Series = Series { major: 18, minor: 3 };
 /// An `_inherits` entry of a class: its module, the class, the parent model and the field.
 type Entry<'m> = (usize, &'m ClassFact, &'m str, &'m Spanned<String>);
 
+/// The models the classes of one model list in `_inherit`, for `Ctx::entry_before_in`.
+struct Listed<'m> {
+    parents: Vec<Parent<'m>>,
+    base: Vec<(usize, &'m ClassFact)>,
+}
+
+/// An entry of `_inherit`: the class listing it, its position, the parent model and the classes
+/// that model merges.
+struct Parent<'m> {
+    class: &'m ClassFact,
+    at: usize,
+    model: &'m str,
+    merges: Vec<(usize, &'m ClassFact)>,
+}
+
+impl<'m> Listed<'m> {
+    /// The one entry whose parent merges `class`. None when `class` is one of `base`, which every
+    /// model merges, or no entry or several merge it, as for a class reached through two parents.
+    fn through(&self, class: &ClassFact) -> Option<&Parent<'m>> {
+        let has = |classes: &[(usize, &ClassFact)]| classes.iter().any(|(_, c)| std::ptr::eq(*c, class));
+        if has(&self.base) {
+            return None;
+        }
+        let mut hits = self.parents.iter().filter(|p| has(&p.merges));
+        let first = hits.next()?;
+        hits.next().is_none().then_some(first)
+    }
+}
+
 /// A field of a model as the registry builds it in scope: the definitions it merges, from the last
 /// one that changes the field's type.
 struct Field<'m> {
@@ -1627,6 +1656,74 @@ impl<'m> Ctx<'_, 'm> {
         }
     }
 
+    /// `merges_before` for the `_inherits` entries of `model`, which also orders two classes of
+    /// models it inherits. Odoo merges the `_inherits` of each model one class lists in `_inherit`
+    /// whole, in reverse, so the first listed parent's entries come last. Field definitions do not
+    /// share this order: they merge over Python's method resolution order.
+    fn entry_before(&self, model: &str, a: (usize, &ClassFact, Pos), b: (usize, &ClassFact, Pos)) -> bool {
+        self.entry_before_in(model, a, b, &mut vec![model])
+    }
+
+    /// `entry_before`, having passed through the models in `seen`, `model` among them. Unknown
+    /// between two classes of other models when either has no single parent, or the parents are
+    /// listed by different classes of `model`, whose order in the registry's bases is not indexed.
+    fn entry_before_in<'s>(
+        &self,
+        model: &'s str,
+        a: (usize, &ClassFact, Pos),
+        b: (usize, &ClassFact, Pos),
+        seen: &mut Vec<&'s str>,
+    ) -> bool
+    where
+        'm: 's,
+    {
+        if std::ptr::eq(a.1, b.1) {
+            // One class keeps its own order whichever path merges it.
+            return self.merges_before(&a.1.model, a, b);
+        }
+        if a.1.model == model || b.1.model == model {
+            return self.merges_before(model, a, b);
+        }
+        let Some(listed) = self.listed(model) else {
+            return false;
+        };
+        let (Some(pa), Some(pb)) = (listed.through(a.1), listed.through(b.1)) else {
+            return false;
+        };
+        if pa.model == pb.model {
+            // Defence only: on an `_inherit` cycle, `through` finds two paths first.
+            if seen.contains(&pa.model) {
+                return false;
+            }
+            seen.push(pa.model);
+            return self.entry_before_in(pa.model, a, b, seen);
+        }
+        std::ptr::eq(pa.class, pb.class) && pa.at > pb.at
+    }
+
+    /// The models the in-scope classes of `model` list in `_inherit`, with what each merges. None
+    /// when a class `model` merges lists models that are not literals, which may hide a path.
+    fn listed(&self, model: &str) -> Option<Listed<'m>> {
+        let unknown = |(_, c): &(usize, &ClassFact)| c.inherit_unknown;
+        if self.index.merged_classes(model, self.scope).iter().any(unknown) {
+            return None;
+        }
+        let classes = self.index.classes(model).iter().filter(|(mi, _)| self.scope.sees(*mi));
+        let parents = classes.flat_map(|&(_, class)| {
+            let listed = class.inherit.iter().enumerate().filter(|(_, p)| p.value != model);
+            listed.map(move |(at, p)| Parent {
+                class,
+                at,
+                model: p.value.as_str(),
+                merges: self.index.merged_classes(&p.value, self.scope),
+            })
+        });
+        Some(Listed {
+            parents: parents.collect(),
+            base: self.index.merged_classes("base", self.scope),
+        })
+    }
+
     /// Whether a class of `model` in scope lists another model before `model` in `_inherit`.
     fn inherits_ahead(&self, model: &str) -> bool {
         let ahead = |c: &ClassFact| c.inherit.iter().position(|i| i.value == model).is_some_and(|p| p > 0);
@@ -1789,7 +1886,7 @@ impl<'m> Ctx<'_, 'm> {
         let keyed: Vec<&Entry<'m>> = entries.iter().filter(|e| e.2 == parent).collect();
         let last = keyed
             .iter()
-            .filter(|a| !keyed.iter().any(|b| self.merges_before(model, at(a), at(b))));
+            .filter(|a| !keyed.iter().any(|b| self.entry_before(model, at(a), at(b))));
         let names: Vec<bool> = last.map(|e| e.3.value == name).collect();
         match (names.contains(&true), names.contains(&false)) {
             (true, false) => Some(true),

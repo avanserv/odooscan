@@ -684,6 +684,7 @@ impl<'ast> PyVisitor<'_, 'ast> {
             new_model: false,
             kind: kind.unwrap_or(ModelKind::Model),
             inherit: vec![],
+            inherit_unknown: false,
             inherits: vec![],
             delegations: vec![],
             inherits_unknown: false,
@@ -855,6 +856,14 @@ impl<'ast> PyVisitor<'_, 'ast> {
 
     /// `_inherit = _name` extends the model the class names.
     fn inherit(&mut self, value: &Expr, fact: &mut ClassFact, name: Option<&str>) {
+        let literal = |elts: &[Expr]| elts.iter().all(Expr::is_string_literal_expr);
+        fact.inherit_unknown = match value {
+            Expr::Name(n) => n.id.as_str() != "_name" || name.is_none(),
+            Expr::StringLiteral(_) => false,
+            Expr::List(l) => !literal(&l.elts),
+            Expr::Tuple(t) => !literal(&t.elts),
+            _ => true,
+        };
         fact.inherit = match (value, name) {
             (Expr::Name(n), Some(name)) if n.id.as_str() == "_name" => vec![Spanned {
                 value: name.to_owned(),
@@ -1846,6 +1855,28 @@ mod tests {
                 "class X(models.Model):\n    _name = 'x'\n    _inherits = {value}\n"
             ));
             assert!(facts.classes[0].inherits_unknown, "{value}");
+        }
+    }
+
+    #[test]
+    fn marks_an_inherit_with_a_non_literal_entry_unknown() {
+        let unknown = |value: &str| {
+            let facts = analyze(&format!(
+                "class X(models.Model):\n    _name = 'x'\n    _inherit = {value}\n"
+            ));
+            facts.classes[0].inherit_unknown
+        };
+        for value in [
+            "PARENTS",
+            "['a', PARENT]",
+            "('a', PARENT)",
+            "['a'] + PARENTS",
+            "[*PARENTS]",
+        ] {
+            assert!(unknown(value), "{value}");
+        }
+        for value in ["_name", "'a'", "['a', 'b']", "('a', 'b')", "[]"] {
+            assert!(!unknown(value), "{value}");
         }
     }
 
