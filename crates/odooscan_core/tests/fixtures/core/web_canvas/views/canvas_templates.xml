@@ -1,0 +1,9 @@
+<odoo>
+    <template id="canvas">
+        <html>
+            <body>
+                <div id="easel"/>
+            </body>
+        </html>
+    </template>
+</odoo>

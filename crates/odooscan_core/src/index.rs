@@ -492,7 +492,7 @@ pub struct XmlIdDef {
     pub module: usize,
 }
 
-/// The modules a module may use: itself and its transitive depends, plus `base`.
+/// The modules a module may use: itself, its transitive depends and the always-installed modules.
 pub struct Scope {
     visible: Vec<bool>,
 }
@@ -729,7 +729,7 @@ impl<'m> Index<'m> {
     }
 
     /// Whether Odoo installs `module` with `base`, as it does `web`, so any module may use it.
-    pub fn always_installed(&self, module: usize) -> bool {
+    fn always_installed(&self, module: usize) -> bool {
         self.always_installed[module]
     }
 
@@ -741,18 +741,13 @@ impl<'m> Index<'m> {
         self.templates_loaded.contains(&(module, file))
     }
 
-    /// Whether a module may use what `module` provides: it is in scope or always installed.
-    pub fn usable(&self, scope: &Scope, module: usize) -> bool {
-        scope.sees(module) || self.always_installed(module)
-    }
-
     /// Whether some loaded template file registers `name` in scope.
     pub fn template_status(&self, name: &str, scope: &Scope) -> Status<'m> {
         let mut definers = self.templates.definers(name).peekable();
         let Some(&first) = definers.peek() else {
             return Status::Missing;
         };
-        if definers.any(|m| self.usable(scope, m)) {
+        if definers.any(|m| scope.sees(m)) {
             Status::Visible
         } else {
             Status::Hidden(&self.modules[first].name)
@@ -807,10 +802,12 @@ impl<'m> Index<'m> {
         found
     }
 
+    /// The modules `module` may use. Every always-installed module is seeded with it, as Odoo
+    /// installs those wherever `base` is; they are closed under `depends`, so they add no others.
     pub fn scope(&self, module: usize) -> Scope {
         let mut visible = vec![false; self.modules.len()];
         let mut stack = vec![module];
-        stack.extend(self.by_name.get("base"));
+        stack.extend((0..self.modules.len()).filter(|&mi| self.always_installed[mi]));
         while let Some(m) = stack.pop() {
             if std::mem::replace(&mut visible[m], true) {
                 continue;

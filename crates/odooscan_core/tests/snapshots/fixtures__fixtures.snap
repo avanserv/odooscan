@@ -80,6 +80,9 @@ custom/bad_sale/views/views.xml:34:9: OD309 res.partner has no field 'email'
 custom/bad_sale/views/views.xml:36:5: OD303 XML id 'partner_demo' is already defined earlier in this file
 custom/bad_sale/views/views.xml:49:9: OD307 t-raw renders unescaped HTML; use t-out and wrap trusted HTML in Markup
 custom/bad_sale/views/views.xml:53:9: OD306 view_mode 'tree' is renamed 'list'
+custom/base_only/views/views.xml:12:9: OD301 module web defines no XML id 'web.no_such_layout'
+custom/base_only/views/views.xml:40:9: OD302 'mail_digest.digest' is defined by module mail_digest; add it to depends
+custom/base_only/views/views.xml:49:9: OD302 'web_pinboard.pinboard' is defined by module web_pinboard; add it to depends
 custom/cycle_a/__manifest__.py:1:66: OD504 module 'cycle_b' depends back on cycle_a, so Odoo installs neither
 custom/cycle_b/__manifest__.py:1:58: OD504 module 'cycle_a' depends back on cycle_b, so Odoo installs neither
 custom/form_patches/static/src/partner_card.js:4:45: OD604 model 'res.partner' has no method 'action_unfollow'

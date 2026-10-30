@@ -313,12 +313,6 @@
       "count": 1
     },
     {
-      "path": "addons/google_address_autocomplete/views/res_config_settings_views.xml",
-      "code": "OD302",
-      "message": "'base_setup.res_config_settings_view_form' is defined by module base_setup; add it to depends",
-      "count": 1
-    },
-    {
       "path": "addons/google_calendar/controllers/main.py",
       "code": "OD103",
       "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",

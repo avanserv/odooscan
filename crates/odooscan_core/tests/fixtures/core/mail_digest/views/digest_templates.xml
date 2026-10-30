@@ -1,0 +1,9 @@
+<odoo>
+    <template id="digest">
+        <html>
+            <body>
+                <div id="summary"/>
+            </body>
+        </html>
+    </template>
+</odoo>

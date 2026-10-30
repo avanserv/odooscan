@@ -332,7 +332,7 @@ impl<'m> Ctx<'_, 'm> {
         let module = |mi: usize| &self.index.modules[mi].name;
         let message = match self.index.js_resolve(from, &specifier.value) {
             JsSpec::Missing(mi) => format!("no file of module {} provides '{}'", module(mi), specifier.value),
-            JsSpec::Found(t) if !self.scope.sees(t.module) && !self.index.always_installed(t.module) => format!(
+            JsSpec::Found(t) if !self.scope.sees(t.module) => format!(
                 "'{}' comes from module {}, which is not in depends",
                 specifier.value,
                 module(t.module)
@@ -390,15 +390,7 @@ impl<'m> Ctx<'_, 'm> {
         };
         let message = match self.index.model_status(&model.value, self.scope, None) {
             Status::Visible => return self.orm_method(out, path, call, &model.value),
-            Status::Hidden(m)
-                if !self
-                    .index
-                    .by_name
-                    .get(m)
-                    .is_some_and(|&mi| self.index.always_installed(mi)) =>
-            {
-                format!("model '{}' comes from module {m}, which is not in depends", model.value)
-            }
+            Status::Hidden(m) => format!("model '{}' comes from module {m}, which is not in depends", model.value),
             Status::Missing if !self.dynamic => format!("no indexed module defines model '{}'", model.value),
             _ => return,
         };
@@ -473,7 +465,7 @@ impl<'m> Ctx<'_, 'm> {
             return;
         };
         let tree = trees.entry(root.clone()).or_insert_with(|| {
-            let sees = |m| self.index.usable(self.scope, m);
+            let sees = |m| self.scope.sees(m);
             self.index.templates.tree(root, self.index.modules, sees)
         });
         for locator in &arch.locators {

@@ -1,0 +1,9 @@
+<odoo>
+    <template id="layout">
+        <html>
+            <body>
+                <div id="shell"/>
+            </body>
+        </html>
+    </template>
+</odoo>
