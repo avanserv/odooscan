@@ -1,0 +1,8 @@
+id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
+access_desk_empty,empty cell,model_access_desk,,1,1,0,0
+access_desk_true,spelled true,model_access_desk,,1,0,True,0
+access_desk_yes,spelled yes,model_access_desk,,0,0,0,yes
+access_desk_read,read only,model_access_desk,,1,0,0,0
+access_desk_nothing,no permission,model_access_desk,,0,0,0,0
+access_desk_group,with a group,model_access_desk,base.group_user,1,1,1,1
+access_desk_rewritten,written twice,model_access_desk,,1,1,1,1

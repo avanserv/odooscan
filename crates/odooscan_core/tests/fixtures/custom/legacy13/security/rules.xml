@@ -1,0 +1,6 @@
+<odoo>
+    <record id="rule_ledger_bad" model="ir.rule">
+        <field name="model_id" ref="model_legacy_ledger"/>
+        <field name="domain_force">[('no_legacy_field', '=', 1)]</field>
+    </record>
+</odoo>

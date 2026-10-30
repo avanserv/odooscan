@@ -168,7 +168,7 @@ rules! {
     "OD317" "modifier-field-not-in-view" Correctness Error Some(">=17.0,<saas~17.3"), true, "A view modifier reads a field the view does not show.";
     "OD318" "view-mode-without-view" Correctness Error None, true, "A window action lists a view type its model has no view for.";
     "OD401" "model-without-access" Security Warning None, true, "A new model has no ir.model.access rule.";
-    "OD402" "public-write-access" Security Warning None, false, "Public or portal users get write, create or unlink access.";
+    "OD402" "public-write-access" Security Warning None, false, "An access row gives public or portal users write, create or unlink, through their group or no group.";
     "OD501" "manifest-data-missing" Correctness Error None, false, "A file listed in the manifest does not exist.";
     "OD502" "data-file-not-loaded" Quality Warning None, false, "A data file is listed under no manifest key Odoo reads, so Odoo never loads it.";
     "OD503" "unknown-dependency" Correctness Error None, true, "A module in depends is not on the addons path.";

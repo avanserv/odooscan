@@ -1,0 +1,2 @@
+id,name,model_id,domain_force
+rule_csv_plain,Plain name,rule.ticket,"[('no_csv_plain', '=', 1)]"

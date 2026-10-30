@@ -1,0 +1,19 @@
+<odoo>
+    <record id="record_rules.rule_updated" model="ir.rule">
+        <field name="domain_force">[('no_updated', '=', 1)]</field>
+    </record>
+    <record id="record_rules.rule_replaced" model="ir.rule">
+        <field name="domain_force">[('no_replaced_by_update', '=', 1)]</field>
+    </record>
+    <record id="record_rules.rule_scoped" model="ir.rule">
+        <field name="domain_force">[('no_scoped', '=', 1)]</field>
+    </record>
+    <record id="rule_note" model="ir.rule">
+        <field name="model_id" ref="model_rule_note"/>
+        <field name="domain_force">[('no_note', '=', 1)]</field>
+    </record>
+    <record id="record_rules.rule_moved" model="ir.rule">
+        <field name="model_id" ref="model_rule_note"/>
+        <field name="domain_force">[('no_moved', '=', 1)]</field>
+    </record>
+</odoo>

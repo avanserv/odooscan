@@ -1,0 +1,26 @@
+<odoo>
+    <record id="rule_ledger_bad" model="ir.rule">
+        <field name="model_id" ref="model_legacy_ledger"/>
+        <field name="domain_force">[('no_legacy_field', '=', 1)]</field>
+    </record>
+    <record id="rule_ledger_replaced" model="ir.rule">
+        <field name="model_id" ref="model_legacy_ledger"/>
+        <field name="domain_force">[('no_replaced', '=', 1)]</field>
+    </record>
+    <record id="rule_ledger_replaced_later" model="ir.rule">
+        <field name="model_id" ref="model_legacy_ledger"/>
+        <field name="domain_force">[('no_replaced_later', '=', 1)]</field>
+    </record>
+    <record id="rule_ledger_deactivated" model="ir.rule">
+        <field name="model_id" ref="model_legacy_ledger"/>
+        <field name="domain_force">[('no_deactivated', '=', 1)]</field>
+        <field name="active" eval="True"/>
+    </record>
+    <record id="rule_ledger_deactivated_later" model="ir.rule">
+        <field name="model_id" ref="model_legacy_ledger"/>
+        <field name="domain_force">[('no_deactivated_later', '=', 1)]</field>
+    </record>
+    <record id="rule_ledger_supplied" model="ir.rule">
+        <field name="domain_force">[('no_supplied', '=', 1)]</field>
+    </record>
+</odoo>

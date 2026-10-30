@@ -3,6 +3,8 @@
 use ruff_python_ast::{self as ast, Expr};
 use ruff_python_parser::parse_expression;
 
+use crate::facts::{ActionValue, Spanned};
+
 fn items(expr: &Expr) -> Option<&[Expr]> {
     match expr {
         Expr::List(l) => Some(&l.elts),
@@ -34,6 +36,37 @@ pub fn parse(text: &str) -> Option<Vec<String>> {
     let parsed = parse_expression(text.trim()).ok()?;
     let fields = fields(parsed.expr())?;
     Some(fields.iter().map(|s| s.value.to_str().to_owned()).collect())
+}
+
+/// The field paths of the domain a record rule writes, at that domain.
+pub fn written_fields(domain: &ActionValue) -> Vec<Spanned<String>> {
+    let ActionValue::Literal(text) = domain else {
+        return vec![];
+    };
+    let spanned = |value| Spanned { value, pos: text.pos };
+    parse(&text.value)
+        .unwrap_or_default()
+        .into_iter()
+        .map(spanned)
+        .collect()
+}
+
+/// The name of the model a `search` of `ir.model` finds. Only one term `('model', '=', name)` tells
+/// it without a run.
+pub fn searched_model(search: &str) -> Option<String> {
+    let parsed = parse_expression(search.trim()).ok()?;
+    let [term] = items(parsed.expr())? else {
+        return None;
+    };
+    let [
+        Expr::StringLiteral(field),
+        Expr::StringLiteral(op),
+        Expr::StringLiteral(model),
+    ] = items(term)?
+    else {
+        return None;
+    };
+    (field.value.to_str() == "model" && op.value.to_str() == "=").then(|| model.value.to_str().to_owned())
 }
 
 /// The fields a context's `group_by` key names, without a `:month`-style granularity.
@@ -79,6 +112,52 @@ mod tests {
         assert_eq!(parse("[('state', '=', 'done')] + extra"), None);
         assert_eq!(parse("[(field, '=', 1)]"), None);
         assert_eq!(parse("[*base, ('a', '=', 1)]"), None);
+    }
+
+    #[test]
+    fn unreadable_domains_name_no_field() {
+        for text in [
+            "[('a', '=', %(x)d)]",
+            "[('a', '=', 1)] if x else []",
+            "[('a', '=', 1)] + [('b', '=', 2)]",
+            "dict(a=1)",
+            "[(x.y, '=', 1)]",
+        ] {
+            assert_eq!(parse(text), None, "{text}");
+        }
+    }
+
+    #[test]
+    fn written_fields_sit_at_the_domain() {
+        let pos = crate::facts::Pos { line: 3, col: 4 };
+        let text = Spanned {
+            value: "[('a.b', '=', 1)]".to_owned(),
+            pos,
+        };
+        let fields = written_fields(&ActionValue::Literal(text));
+        assert_eq!((fields[0].value.as_str(), fields[0].pos), ("a.b", pos));
+        assert!(written_fields(&ActionValue::Opaque).is_empty());
+        assert!(written_fields(&ActionValue::Unset).is_empty());
+    }
+
+    #[test]
+    fn reads_the_model_a_search_finds() {
+        assert_eq!(searched_model("[('model', '=', 'a.b')]").as_deref(), Some("a.b"));
+        assert_eq!(
+            searched_model(" [(\"model\", \"=\", \"a.b\")] ").as_deref(),
+            Some("a.b")
+        );
+        for search in [
+            "[('name', '=', 'a.b')]",
+            "[('model', '!=', 'a.b')]",
+            "[('model', 'in', ['a.b'])]",
+            "[('model', '=', name)]",
+            "[('model', '=', 'a.b'), ('name', '=', 'c')]",
+            "[]",
+            "[",
+        ] {
+            assert_eq!(searched_model(search), None, "{search}");
+        }
     }
 
     #[test]

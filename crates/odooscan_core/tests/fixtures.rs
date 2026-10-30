@@ -129,6 +129,23 @@ fn company_check_severity_follows_the_module_series() {
 }
 
 #[test]
+fn a_row_with_no_group_needs_no_base() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+    let report = scan(&ScanOptions {
+        paths: vec![root.join("custom/access_rows")],
+        addons_paths: vec![],
+        default_series: None,
+    });
+    let lines: Vec<u32> = report
+        .diagnostics
+        .iter()
+        .filter(|d| d.code == "OD402" && d.path.ends_with("security/ir.model.access.csv"))
+        .map(|d| d.line)
+        .collect();
+    assert_eq!(lines, [2, 3, 4]);
+}
+
+#[test]
 fn import_patches_without_base_take_the_advice_of_the_path() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
     let report = scan(&ScanOptions {
