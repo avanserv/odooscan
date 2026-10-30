@@ -968,9 +968,9 @@ pub(crate) fn added_columns(text: &str) -> Vec<(String, String)> {
     statements(text).into_iter().flat_map(statement_added_columns).collect()
 }
 
-/// The statements of a text, cut at each `;` outside `'...'` literals, quoted names and comments,
-/// though not dollar-quoted or `E'...'` ones. The text after a quote that never closes stays in the
-/// last one.
+/// The statements of a text, cut at each `;` outside comments and the tokens `lex` reads to a
+/// close: literals of any quoting, quoted names and placeholders. The text from a token that never
+/// closes stays in the last one.
 fn statements(text: &str) -> Vec<&str> {
     let (mut statements, mut start, mut rest) = (vec![], text, text);
     loop {
@@ -1084,27 +1084,24 @@ fn skip_value(text: &str) -> Option<(bool, &str)> {
     (depth == 0).then_some((false, ""))
 }
 
-/// The bracket depth after a token, None past a closing bracket too many or at the `{` that ends
-/// the literal head of an f-string.
+/// The bracket depth after a token, None past a closing bracket too many or at a `{..}` that
+/// `.format()` fills, whose value may hold any comma or bracket.
 fn nest(depth: u32, token: &str) -> Option<u32> {
     match token {
         "(" => Some(depth + 1),
         ")" => depth.checked_sub(1),
-        "{" => None,
+        _ if token.starts_with('{') => None,
         _ => Some(depth),
     }
 }
 
-/// The token a non-empty text starts with: a quoted literal or name, a word, or one character.
-/// None for a quote that never closes.
+/// The token a text starts with, as `lex` reads it, so that statements and values are cut with the
+/// quoting rules the query parser reads. None for an empty text or a token that never closes.
 fn token(text: &str) -> Option<&str> {
-    let first = text.chars().next()?;
-    let len = match first {
-        '\'' | '"' => text[1..].find(first)? + 2,
-        c if is_name_char(c) => text.find(|c: char| !is_name_char(c)).unwrap_or(text.len()),
-        c => c.len_utf8(),
-    };
-    Some(&text[..len])
+    if text.is_empty() {
+        return None;
+    }
+    lex(text, 0).map(|(_, end)| &text[..end])
 }
 
 /// The text of a query given as a literal, `SQL(literal, ...)`, `literal % ...`,
@@ -3119,11 +3116,14 @@ mod tests {
             Some("a b")
         );
         assert_eq!(columns("UPDATE t SET a = 1 -- where\n, b = 2").as_deref(), Some("a b"));
+        assert_eq!(columns("UPDATE t SET a = $$x, y$$, b = 1").as_deref(), Some("a b"));
+        assert_eq!(columns("UPDATE t SET a = E'it\\'s', b = 2").as_deref(), Some("a b"));
         for text in [
             "DELETE FROM t",
             "UPDATE t SET (a, b) = (1, 2)",
             "UPDATE t SET %s = 1",
             "UPDATE t SET a = {",
+            "UPDATE t SET a = {}, b = 1",
             "UPDATE t SET a = 1 -- {",
             "UPDATE t SET a = (1",
             "UPDATE t SET a = 'x",
@@ -3463,6 +3463,31 @@ mod tests {
         assert_eq!(
             statements("SELECT ';' -- ;\n; SELECT 2"),
             ["SELECT ';' -- ;\n", " SELECT 2"]
+        );
+        for text in [
+            "SELECT $$a;b$$",
+            "SELECT $q$a;(b$q$",
+            "SELECT E'it\\'s; x'",
+            "SELECT 'a;b'",
+        ] {
+            assert_eq!(statements(text), [text]);
+        }
+        assert_eq!(statements("SELECT 1; SELECT $$a; b"), ["SELECT 1", " SELECT $$a; b"]);
+        assert_eq!(
+            added("ALTER TABLE t ADD COLUMN a text DEFAULT $$x;y$$, ADD COLUMN b int"),
+            [pair("t", "a"), pair("t", "b")]
+        );
+        assert_eq!(
+            added("ALTER TABLE t ADD a text DEFAULT $$x(y$$, ADD b int"),
+            [pair("t", "a"), pair("t", "b")]
+        );
+        assert_eq!(
+            added("ALTER TABLE t ADD a text DEFAULT E'it\\'s', ADD b int"),
+            [pair("t", "a"), pair("t", "b")]
+        );
+        assert_eq!(
+            added("ALTER TABLE t ADD a text DEFAULT $$x, ADD COLUMN c int$$"),
+            [pair("t", "a")]
         );
         assert!(added("ALTER TABLE public.box ADD COLUMN code varchar, ADD COLUMN label varchar").is_empty());
         assert!(added("ALTER TABLE box_%s ADD COLUMN code varchar, ADD COLUMN label varchar").is_empty());

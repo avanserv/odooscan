@@ -190,6 +190,10 @@ class ParcelTracker(models.Model):
     battery = fields.Float(compute="_compute_readings")
     firmware = fields.Char(compute="_compute_readings")
     channel = fields.Char(compute="_compute_readings")
+    zone = fields.Char(compute="_compute_bays")
+    slot = fields.Char(compute="_compute_bays")
+    bay = fields.Char(compute="_compute_bays")
+    lane = fields.Integer(compute="_compute_bays")
 
     def init(self):
         self.env.cr.execute(
@@ -199,6 +203,14 @@ class ParcelTracker(models.Model):
                 , ADD COLUMN IF NOT EXISTS battery numeric;
             -- where the firmware lives
             ALTER TABLE parcel_tracker ADD COLUMN IF NOT EXISTS firmware varchar
+            """
+        )
+        self.env.cr.execute(
+            """
+            ALTER TABLE parcel_tracker ADD COLUMN IF NOT EXISTS mode text DEFAULT $$idle;off$$, ADD COLUMN zone text;
+            ALTER TABLE parcel_tracker ADD COLUMN IF NOT EXISTS hint text DEFAULT $t$late; (soon$t$, ADD slot text;
+            ALTER TABLE parcel_tracker ADD COLUMN IF NOT EXISTS note text DEFAULT E'it\\'s; late', ADD bay text;
+            ALTER TABLE parcel_tracker ADD COLUMN IF NOT EXISTS memo text DEFAULT $$x, ADD COLUMN lane int$$
             """
         )
 
@@ -211,6 +223,15 @@ class ParcelTracker(models.Model):
         for tracker in self:
             readings = rows.get(tracker.id, (0, 0, False, False))
             tracker.signal, tracker.battery, tracker.firmware, tracker.channel = readings
+
+    def _compute_bays(self):
+        self.env.cr.execute(
+            "SELECT t.id, t.zone, t.slot, t.bay, t.lane FROM parcel_tracker t WHERE t.id IN %s",
+            [tuple(self.ids)],
+        )
+        rows = {row[0]: row[1:] for row in self.env.cr.fetchall()}
+        for tracker in self:
+            tracker.zone, tracker.slot, tracker.bay, tracker.lane = rows.get(tracker.id, (False, False, False, 0))
 
 
 class ParcelRelay(models.Model):

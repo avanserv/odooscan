@@ -320,7 +320,8 @@ custom/sql_columns/models/delegations.py:91:39: OD224 a.name: parcel_annex has n
 custom/sql_columns/models/delegations.py:103:39: OD224 o.name: parcel_outlet has no such column, since name is a field of parcel.depot, which parcel.outlet reaches through _inherits; join parcel_depot on x_outlet_depot_id
 custom/sql_columns/models/parcels.py:76:5: OD226 _auto = False leaves parcel.report without a table, and nothing creates the view parcel_report; create it in init(), or drop _auto = False
 custom/sql_columns/models/parcels.py:168:63: OD227 write_date: parcel_beacon has no such column, since parcel.beacon.write_date is not created, as parcel.beacon sets _log_access to False; drop it from the definition, or log access on the model
-custom/sql_columns/models/parcels.py:207:62: OD224 t.channel: parcel_tracker has no such column, since parcel.tracker.channel is not stored; set store=True on the field, or read it through the ORM
+custom/sql_columns/models/parcels.py:219:62: OD224 t.channel: parcel_tracker has no such column, since parcel.tracker.channel is not stored; set store=True on the field, or read it through the ORM
+custom/sql_columns/models/parcels.py:229:52: OD224 t.lane: parcel_tracker has no such column, since parcel.tracker.lane is not stored; set store=True on the field, or read it through the ORM
 custom/sql_columns/models/queries.py:12:27: OD224 b.weight_uom: parcel_box has no such column, since parcel.box has no field weight_uom; use weight_uom_id
 custom/sql_columns/models/queries.py:17:48: OD224 parcel_box.label: parcel_box has no such column, since parcel.box has no field label; name the column of a stored field of parcel.box
 custom/sql_columns/models/queries.py:23:22: OD224 b.total_weight: parcel_box has no such column, since parcel.box.total_weight is not stored; set store=True on the field, or read it through the ORM
