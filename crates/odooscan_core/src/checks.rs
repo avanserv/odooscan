@@ -5,8 +5,9 @@ use std::path::Path;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::facts::{
-    Annotation, ArchElement, ArchModifier, ClassFact, DefinitionSource, DomainFact, FieldFact, FunctionCall, JsFacts,
-    JsName, ModelKind, OptionValue, OrmCall, Pos, RawDiag, RecordFact, Spanned, SqlColumn, SqlView, ViewFact, XmlRef,
+    ActionFact, ActionValue, Annotation, ArchElement, ArchModifier, ClassFact, DefinitionSource, DomainFact, FieldFact,
+    FunctionCall, JsFacts, JsName, ModelKind, OptionValue, OrmCall, Pos, RawDiag, RecordFact, Spanned, SqlColumn,
+    SqlView, ViewFact, XmlRef,
 };
 use crate::index::{
     BASE_MODEL_METHODS, Export, FieldDef, FieldInfo, Index, JsSpec, RELATIONAL_TYPES, Scope, Status, ViewTree, full_id,
@@ -37,6 +38,29 @@ const ACTIVE_NAMES_UNTIL: Series = Series { major: 17, minor: 1 };
 /// View types whose arch elements list every field the view has. The others also take fields from
 /// attributes, as a calendar does from `date_start`.
 const VIEW_FIELD_KINDS: &[&str] = &["form", "tree", "kanban"];
+
+/// View types Odoo generates for any model. `activity` is `BaseModel`'s in 12.0, which no scan
+/// indexes, and `mail`'s after it.
+const GENERATED_VIEWS: &[&str] = &["form", "search", "list", "tree", "pivot", "kanban", "graph", "activity"];
+
+/// Fields Odoo's generated calendar takes its start from, after the model's `_date_name`.
+const CALENDAR_STARTS: &[&str] = &["date", "date_start", "x_date", "x_date_start"];
+
+/// Fields Odoo's generated calendar takes its end or its duration from.
+const CALENDAR_STOPS: &[&str] = &[
+    "date_stop",
+    "date_end",
+    "x_date_stop",
+    "x_date_end",
+    "date_delay",
+    "planned_hours",
+    "x_date_delay",
+    "x_planned_hours",
+];
+
+/// 19.0 refuses to generate a calendar without a stop (`odoo/addons/base/models/ir_ui_view.py:2898`),
+/// saas-19.1 does not (`:2909`).
+const CALENDAR_STOP_OPTIONAL: Series = Series { major: 19, minor: 1 };
 
 /// A name a modifier reads, with the view it sits in and the field it must find on `owner`.
 struct ModifierName<'a> {
@@ -978,7 +1002,104 @@ impl<'m> Ctx<'_, 'm> {
                 self.function_call(out, path, call);
             }
             self.domains(out, path, &file.facts.action_domains);
+            self.actions(out, path, &file.facts.actions);
         }
+    }
+
+    fn actions(&self, out: &mut Out<'m>, path: &'m Path, actions: &'m [ActionFact]) {
+        for action in actions {
+            if let ActionValue::Literal(model) = &action.model {
+                self.model_ref(out, path, model, None);
+            }
+            if let ActionValue::Literal(mode) = &action.view_mode {
+                self.action_view_mode(out, path, action, mode);
+            }
+        }
+    }
+
+    /// Checks `mode` when Odoo keeps it. Each field holds the last value it was given, so a `view_mode`
+    /// counts only if nothing replaces it, and an update takes its model from what the load left.
+    /// Only `scope` loads ahead of this module: what a module depending on it replaces later does not
+    /// mend a database without that module. A model that stays unknown is out of the scan or an `eval`.
+    fn action_view_mode(&self, out: &mut Out<'m>, path: &'m Path, action: &'m ActionFact, mode: &Spanned<String>) {
+        let own = [(self.index.by_name[self.module.name.as_str()], action)];
+        let id = action.id.as_ref().map(|id| full_id(&self.module.name, id));
+        let writes = id.and_then(|id| self.index.action_writes.get(&id));
+        let writes = writes.map_or(&own[..], Vec::as_slice);
+        let last = |value: fn(&'m ActionFact) -> &'m ActionValue| {
+            let loaded = writes.iter().filter(|(mi, _)| self.scope.sees(*mi));
+            loaded
+                .rev()
+                .map(|(_, a)| value(a))
+                .find(|v| !matches!(v, ActionValue::Unset))
+        };
+        if !last(|a| &a.view_mode).is_some_and(|v| std::ptr::eq(v, &action.view_mode)) {
+            return;
+        }
+        if let Some(ActionValue::Literal(model)) = last(|a| &a.model)
+            && self.sees_whole_model(&model.value)
+        {
+            self.view_mode(out, path, &model.value, mode, writes);
+        }
+    }
+
+    /// A view an action names counts from any indexed module, as one in `view_types` does.
+    fn view_mode(
+        &self,
+        out: &mut Out<'m>,
+        path: &'m Path,
+        model: &str,
+        mode: &Spanned<String>,
+        writes: &[(usize, &ActionFact)],
+    ) {
+        let mut seen = FxHashSet::default();
+        let kinds = mode.value.split(',').map(str::trim).filter(|k| !k.is_empty());
+        for kind in kinds.filter(|k| seen.insert(*k)) {
+            if writes.iter().any(|(_, a)| a.names_view(kind)) {
+                continue;
+            }
+            if let Some(message) = self.view_gap(model, kind) {
+                out.push(path, "OD318", mode.pos, message);
+            }
+        }
+    }
+
+    /// Why opening `model` as `kind` fails. A view counts from any indexed module, in `depends` or
+    /// not, as a bridge module that depends on this one may be what adds it. A default counts in
+    /// scope only: it comes with a module such as `web_gantt`, which nothing else installs.
+    fn view_gap(&self, model: &str, kind: &str) -> Option<String> {
+        if GENERATED_VIEWS.contains(&kind)
+            || self.index.view_types.contains(&(model, kind))
+            || self.index.default_view(model, kind, self.scope)
+        {
+            return None;
+        }
+        if kind == "calendar" {
+            return self.calendar_gap(model);
+        }
+        Some(format!("{model} has no {kind} view, and nothing generates one"))
+    }
+
+    /// What Odoo misses to generate a calendar for `model`. A field only a module outside `depends`
+    /// adds counts, as that module may be installed. A `_date_name` that is no literal may name any.
+    fn calendar_gap(&self, model: &str) -> Option<String> {
+        let mut starts = CALENDAR_STARTS.to_vec();
+        for (_, class) in self.index.merged_classes(model, self.scope) {
+            match class.attr("_date_name").map(|a| &a.value) {
+                Some(OptionValue::Str(name)) => starts.push(name),
+                Some(_) => return None,
+                None => {}
+            }
+        }
+        let has = |field: &&str| !matches!(self.index.field(model, field, self.scope), Err(None));
+        if !starts.iter().any(has) {
+            return Some(format!(
+                "{model} has no calendar view, and no date field to generate one from"
+            ));
+        }
+        let needs_stop = self.series.is_some_and(|s| s < CALENDAR_STOP_OPTIONAL);
+        (needs_stop && !CALENDAR_STOPS.iter().any(has))
+            .then(|| format!("{model} has no calendar view, and no stop or duration field to generate one from"))
     }
 
     fn xml_ref(&self, out: &mut Out<'m>, path: &'m Path, r: &XmlRef) {

@@ -1,0 +1,5 @@
+<odoo>
+    <record id="window_update.action_moved" model="ir.actions.act_window">
+        <field name="res_model">window.shown</field>
+    </record>
+</odoo>

@@ -10,4 +10,10 @@
     </record>
 
     <function model="bad.generated.user" name="action_generated"/>
+
+    <record id="action_partners" model="ir.actions.act_window">
+        <field name="name">action_partners</field>
+        <field name="res_model">res.partner</field>
+        <field name="view_mode">gantt</field>
+    </record>
 </odoo>

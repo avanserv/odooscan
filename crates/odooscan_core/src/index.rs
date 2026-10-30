@@ -2,8 +2,8 @@ use globset::{GlobBuilder, GlobSetBuilder};
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::facts::{
-    Annotation, ArchElement, ClassFact, FieldFact, FlowSummary, Heritage, JsClass, ModelKind, OptionValue, PyFacts,
-    Receiver, ViewFact,
+    ActionFact, Annotation, ArchElement, ClassFact, FieldFact, FlowSummary, Heritage, JsClass, ModelKind, OptionValue,
+    PyFacts, Receiver, ViewFact,
 };
 use crate::manifest::AutoInstall;
 use crate::project::{Module, SourceFile};
@@ -357,6 +357,7 @@ fn model_xmlid(model: &str) -> String {
 }
 
 type Models<'m> = FxHashMap<&'m str, Vec<(usize, &'m ClassFact)>>;
+type ActionWrites<'m> = FxHashMap<String, Vec<(usize, &'m ActionFact)>>;
 
 /// The modules whose data give a view each `key`.
 type ViewKeys<'m> = FxHashMap<&'m str, Vec<usize>>;
@@ -666,6 +667,43 @@ fn depends_closure(
     (reached, complete)
 }
 
+/// Module indices in the order Odoo loads them: by depth in the `depends` graph, then by name. The
+/// passes end at the deepest module, or at the module count when a cycle keeps deepening.
+fn load_order(modules: &[Module], by_name: &FxHashMap<&str, usize>) -> Vec<usize> {
+    let mut depth = vec![0_usize; modules.len()];
+    for _ in modules {
+        let mut grew = false;
+        for (mi, module) in modules.iter().enumerate() {
+            let depends = module.manifest.depends.iter();
+            let below = depends.filter_map(|d| by_name.get(d.value.as_str()));
+            let deepest = below.map(|&d| depth[d] + 1).max().unwrap_or_default();
+            grew |= deepest > depth[mi];
+            depth[mi] = depth[mi].max(deepest);
+        }
+        if !grew {
+            break;
+        }
+    }
+    let mut order: Vec<usize> = (0..modules.len()).collect();
+    order.sort_unstable_by_key(|&mi| (depth[mi], modules[mi].name.as_str()));
+    order
+}
+
+/// Every write of the files manifests load to each action, by full id, in the order Odoo loads them.
+fn action_writes<'m>(modules: &'m [Module], by_name: &FxHashMap<&str, usize>) -> ActionWrites<'m> {
+    let mut writes: ActionWrites<'m> = FxHashMap::default();
+    for mi in load_order(modules, by_name) {
+        let module = &modules[mi];
+        let loaded = module.data.iter().filter(|f| f.rank.is_some());
+        for action in loaded.flat_map(|f| &f.facts.actions) {
+            if let Some(id) = &action.id {
+                writes.entry(full_id(&module.name, id)).or_default().push((mi, action));
+            }
+        }
+    }
+    writes
+}
+
 /// Files of a kind, as (module, index among the module's files of that kind).
 type Loaded = FxHashSet<(usize, usize)>;
 
@@ -791,6 +829,9 @@ pub struct Index<'m> {
     models: Models<'m>,
     pub xmlids: FxHashMap<String, Vec<XmlIdDef>>,
     pub views: Inheritance<'m>,
+    /// The (model, type) of every view of the files manifests load.
+    pub view_types: FxHashSet<(&'m str, &'m str)>,
+    pub action_writes: ActionWrites<'m>,
     view_keys: ViewKeys<'m>,
     pub templates: Inheritance<'m>,
     pub models_with_access: FxHashSet<String>,
@@ -835,6 +876,8 @@ impl<'m> Index<'m> {
             has_base: base.is_some(),
             xmlids,
             views: Inheritance::new(views),
+            view_types: FxHashSet::default(),
+            action_writes: action_writes(modules, &by_name),
             view_keys,
             templates: Inheritance::new(template_nodes(modules, &templates_loaded)),
             models_with_access,
@@ -851,7 +894,23 @@ impl<'m> Index<'m> {
         };
         index.patched = index.patched_classes();
         index.template_bases = index.template_bases();
+        index.view_types = index.view_types();
         index
+    }
+
+    fn view_types(&self) -> FxHashSet<(&'m str, &'m str)> {
+        let mut types = FxHashSet::default();
+        for module in self.modules {
+            let loaded = module.data.iter().filter(|f| f.rank.is_some());
+            for view in loaded.flat_map(|f| &f.facts.views) {
+                let id = view.id.as_ref().map(|id| full_id(&module.name, id));
+                let own_model = view.model.as_ref().map(|m| m.value.as_str());
+                let model = own_model.or_else(|| self.view_model(id.clone()?));
+                let kind = id.and_then(|id| self.view_kind(id)).or(view.kind.as_deref());
+                types.extend(model.zip(kind));
+            }
+        }
+        types
     }
 
     fn template_bases(&self) -> FxHashSet<ClassKey> {
@@ -1457,6 +1516,16 @@ impl<'m> Index<'m> {
             return Status::Visible;
         }
         self.rpc_method(model, method, scope)
+    }
+
+    /// Whether a class in scope of `model` or of a model it inherits gives `kind` a default view. The
+    /// `base` module does not count: its calendar default depends on the fields of the model.
+    pub fn default_view(&self, model: &str, kind: &str, scope: &Scope) -> bool {
+        let method = format!("_get_default_{kind}_view");
+        self.merged_classes(model, scope)
+            .iter()
+            .filter(|(mi, _)| self.modules[*mi].name != "base")
+            .any(|(_, c)| c.methods.contains(&method))
     }
 
     /// Whether a class in scope of `model` or of a model it inherits decorates `method` with
