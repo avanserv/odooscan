@@ -1,0 +1,11 @@
+id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
+access_registry_invoice,registry.invoice,model_registry_invoice,base.group_user,1,1,1,1
+access_registry_ledger,registry.ledger,model_registry_ledger,base.group_user,1,1,1,1
+access_registry_custom,registry.custom,model_registry_custom,base.group_user,1,1,1,1
+access_registry_checklist,registry.inspection.checklist,model_registry_inspection_checklist,base.group_user,1,1,1,1
+access_registry_template,registry.inspection.checklist.template,model_registry_inspection_checklist_template,base.group_user,1,1,1,1
+access_registry_archive,registry.inspection.checklist.archive,model_registry_inspection_checklist_archive,base.group_user,1,1,1,1
+access_registry_shipment,registry.shipment,model_registry_shipment,base.group_user,1,1,1,1
+access_registry_badge,registry.badge,model_registry_badge,base.group_user,1,1,1,1
+access_registry_voucher,registry.voucher,model_registry_voucher,base.group_user,1,1,1,1
+access_registry_parcel,registry.parcel,model_registry_parcel,base.group_user,1,1,1,1

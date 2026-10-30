@@ -11,3 +11,9 @@ class ResPartner(models.Model):
     def _compute_parent_color(self):
         for partner in self:
             partner.parent_color = partner.parent_id.web_color
+
+
+class RegistryInvoice(models.Model):
+    _inherit = "registry.invoice"
+
+    total = fields.Monetary()

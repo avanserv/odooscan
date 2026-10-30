@@ -31,3 +31,5 @@ class RegistryPartner(models.Model):
 class RegistryCountry(models.Model):
     _name = "res.country"
     _inherit = _name
+
+    fee = fields.Monetary()

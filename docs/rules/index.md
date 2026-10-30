@@ -43,6 +43,7 @@ Python code checked on its own: security, deprecated APIs and ORM mistakes visib
 | [OD111](OD111.md) | `public-route-sudo` | A public or auth='none' route escalates with sudo(). |
 | [OD112](OD112.md) | `csrf-disabled` | An HTTP route disables CSRF protection. |
 | [OD113](OD113.md) | `fields-view-get-removed` | fields_view_get() is removed; override _get_view() or get_views(). |
+| [OD114](OD114.md) | `depends-on-id` | @api.depends names the field id, which Odoo refuses. |
 
 ## OD2: models and fields
 
@@ -61,6 +62,11 @@ Models, fields and methods checked against every module in the dependency graph.
 | [OD209](OD209.md) | `model-redefined` | A new _name replaces a model that a module in depends already defines. |
 | [OD210](OD210.md) | `unknown-domain-field` | A literal domain or group_by names a field its model does not have. |
 | [OD211](OD211.md) | `orphan-super` | super() calls a method no parent class defines. |
+| [OD212](OD212.md) | `monetary-without-currency` | A Monetary field's currency field is not a field of its model. |
+| [OD213](OD213.md) | `required-many2one-set-null` | A required Many2one declares ondelete='set null'. |
+| [OD214](OD214.md) | `many2many-table-clash` | Two Many2many fields of a model to one comodel get the same table. |
+| [OD215](OD215.md) | `many2many-table-too-long` | A Many2many's relation table name is longer than PostgreSQL allows. |
+| [OD216](OD216.md) | `selection-add-without-ondelete` | selection_add leaves a value of a required Selection with ondelete 'set null'. |
 
 ## OD3: XML ids, views and data
 

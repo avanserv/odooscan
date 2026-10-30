@@ -80,6 +80,7 @@ custom/bad_sale/views/views.xml:34:9: OD309 res.partner has no field 'email'
 custom/bad_sale/views/views.xml:36:5: OD303 XML id 'partner_demo' is already defined earlier in this file
 custom/bad_sale/views/views.xml:49:9: OD307 t-raw renders unescaped HTML; use t-out and wrap trusted HTML in Markup
 custom/bad_sale/views/views.xml:53:9: OD306 view_mode 'tree' is renamed 'list'
+custom/base_only/models/res_partner.py:17:16: OD202 model 'registry.invoice' comes from module registry_fields; add it to depends
 custom/base_only/views/views.xml:12:9: OD301 module web defines no XML id 'web.no_such_layout'
 custom/base_only/views/views.xml:40:9: OD302 'mail_digest.digest' is defined by module mail_digest; add it to depends
 custom/base_only/views/views.xml:49:9: OD302 'web_pinboard.pinboard' is defined by module web_pinboard; add it to depends
@@ -96,7 +97,27 @@ custom/form_patches/static/src/quick_form_card.js:8:24: OD605 no indexed bundle 
 custom/form_patches/static/src/quick_form_card.xml:14:9: OD606 no <div> with class 'o_form_status' in template web.FormController or the templates that extend it
 custom/form_patches/static/src/quick_form_card.xml:15:9: OD606 <div> with class 'o_mail_chatter' is added by module mail, which is not in depends
 custom/form_patches/static/src/quick_form_card.xml:18:19: OD605 no indexed bundle defines template 'web.FormCompiler'
+custom/legacy13/models/res_partner.py:7:72: OD213 'holder_id' is required, so Odoo refuses ondelete='set null'; use 'restrict' or 'cascade'
+custom/legacy13/models/res_partner.py:9:18: OD214 'origin_ids' and 'market_ids' are Many2many fields of res.partner to the same comodel without relation, so Odoo gives both the same table; set relation on one
+custom/legacy14/models/res_partner.py:7:43: OD216 'type' is required, so Odoo refuses ondelete 'set null' for the selection_add value 'site'; give it 'cascade', 'set default' or a function
+custom/legacy15/models/res_partner.py:9:22: OD212 Monetary field 'parent_balance' has no currency: res.partner has no currency_id, and the field names no currency_field
 custom/modern19/models/partner.py:6:5: OD110 _sql_constraints is ignored; declare models.Constraint, models.Index or models.UniqueIndex attributes instead
 custom/modern19/models/partner.py:9:9: OD109 self._cr is deprecated; use self.env.cr
 custom/project_fork/models/task.py:4:7: OD209 module project already defines model 'project.task', and this class replaces it; extend it with _inherit = 'project.task'
+custom/registry_fields/models/links.py:7:71: OD213 'owner_id' is required, so Odoo refuses ondelete='set null'; use 'restrict' or 'cascade'
+custom/registry_fields/models/links.py:11:19: OD214 'follower_ids' and 'watcher_ids' are Many2many fields of registry.invoice to the same comodel without relation, so Odoo gives both the same table; set relation on one
+custom/registry_fields/models/links.py:14:33: OD215 relation table 'registry_invoice_partners_notified_about_each_payment_reminder_rel' of 'notified_ids' is 66 characters long, and PostgreSQL allows 63
+custom/registry_fields/models/links.py:27:44: OD213 'approver_id' is required, so Odoo refuses ondelete='set null'; use 'restrict' or 'cascade'
+custom/registry_fields/models/links.py:36:20: OD215 relation table 'registry_inspection_checklist_registry_inspection_checklist_template_rel' of 'template_ids' is 72 characters long, and PostgreSQL allows 63; name a shorter one with relation=
+custom/registry_fields/models/money.py:29:14: OD212 Monetary field 'amount' has no currency: registry.invoice has no currency_id, and the field names no currency_field
+custom/registry_fields/models/money.py:30:42: OD212 Monetary field 'tax' takes its currency from 'tax_currency_id', which registry.invoice does not have
+custom/registry_fields/models/money.py:31:22: OD212 Monetary field 'ledger_balance' has no currency: registry.invoice has no currency_id, and the field names no currency_field
+custom/registry_fields/models/money.py:37:18: OD114 'id': a compute method cannot depend on 'id', so importing this file raises; remove it
+custom/registry_fields/models/money.py:42:18: OD114 'partner_id.id': a compute method cannot depend on 'id', so importing this file raises; depend on 'partner_id'
+custom/registry_fields/models/res_partner.py:7:43: OD216 'type' is required, so Odoo refuses ondelete 'set null' for the selection_add value 'site'; give it 'cascade', 'set default' or a function
+custom/registry_fields/models/res_partner.py:13:43: OD216 'type' is required, so Odoo refuses ondelete 'set null' for the selection_add value 'depot'; give it 'cascade', 'set default' or a function
+custom/registry_fields/models/shipment.py:11:17: OD205 'reference' is a Many2one field elsewhere and is redefined here as Char
+custom/registry_fields/models/shipment.py:13:19: OD205 'carrier_ids' is a Many2one field elsewhere and is redefined here as Many2many
+custom/registry_fields/models/shipment.py:24:17: OD205 'reference' is a Char field elsewhere and is redefined here as Many2one
+custom/registry_fields/models/shipment.py:26:19: OD205 'carrier_ids' is a Many2many field elsewhere and is redefined here as Many2one
 custom/supers/models/supers.py:29:24: OD211 no parent class of bad.super defines '_prepare_gone', so this super() call fails
