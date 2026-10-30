@@ -155,9 +155,15 @@ custom/legacy12/views/views.xml:21:9: OD302 'web_slate.slate' is defined by modu
 custom/legacy13/models/res_partner.py:7:72: OD213 'holder_id' is required, so Odoo refuses ondelete='set null'; use 'restrict' or 'cascade'
 custom/legacy13/models/res_partner.py:9:18: OD214 'origin_ids' and 'market_ids' are Many2many fields of res.partner to the same comodel without relation, so Odoo gives both the same table; set relation on one
 custom/legacy13/models/res_partner.py:12:68: OD222 'home_country_id' has check_company=True, but res.country has no company_id field to check; remove check_company
+custom/legacy14/models/badge.py:7:33: OD218 _inherits delegates to 'partner_id', which must be required with ondelete 'cascade' or 'restrict'; give it ondelete="cascade"
+custom/legacy14/models/badge.py:9:73: OD213 'partner_id' is required, so Odoo refuses ondelete='set null'; use 'restrict' or 'cascade'
+custom/legacy14/models/badge.py:10:58: OD218 'country_id' has delegate=True, so it must be required with ondelete 'cascade' or 'restrict'; give it ondelete="cascade"
+custom/legacy14/models/badge.py:10:88: OD213 'country_id' is required, so Odoo refuses ondelete='set null'; use 'restrict' or 'cascade'
 custom/legacy14/models/res_partner.py:7:43: OD216 'type' is required, so Odoo refuses ondelete 'set null' for the selection_add value 'site'; give it 'cascade', 'set default' or a function
 custom/legacy14/models/res_partner.py:11:34: OD219 'stage' sets tracking, but res.partner does not inherit mail.thread, so Odoo ignores it and logs a warning; inherit mail.thread or remove tracking
 custom/legacy14/models/res_partner.py:22:9: OD223 _compute_initials() can leave 'initials' unassigned on a record, so reading it raises ValueError; assign it on every path through the loop, False when there is no value
+custom/legacy15/models/card.py:7:33: OD218 _inherits delegates to 'partner_id', which must be required with ondelete 'cascade' or 'restrict'; give it ondelete="cascade"
+custom/legacy15/models/card.py:10:58: OD218 'country_id' has delegate=True, so it must be required with ondelete 'cascade' or 'restrict'; give it ondelete="cascade"
 custom/legacy15/models/res_partner.py:9:22: OD212 Monetary field 'parent_balance' has no currency: res.partner has no currency_id, and the field names no currency_field
 custom/legacy15/models/res_partner.py:13:18: OD221 'child_ids.total' makes 'total' depend on itself on other records, so Odoo logs a warning; declare 'total' with recursive=True
 custom/legacy16/models/res_partner.py:6:34: OD203 'nickname': res.partner has no field 'nickname'
@@ -177,6 +183,13 @@ custom/model_attributes/models/label.py:44:58: OD218 'country_id' has delegate=T
 custom/model_attributes/models/label.py:47:54: OD218 'view_id' has delegate=True, so it must be required with ondelete 'cascade' or 'restrict'; give it required=True, ondelete="cascade"
 custom/model_attributes/models/label.py:54:59: OD218 'partner_id' has delegate=True and no ondelete, so Odoo fails with AttributeError when it sets up the registry; give it required=True, ondelete="cascade"
 custom/model_attributes/models/label.py:60:33: OD218 _inherits delegates to 'partner_id', which must be required with ondelete 'cascade' or 'restrict'; give it ondelete="cascade"
+custom/model_attributes/models/label.py:73:33: OD218 _inherits delegates to 'partner_id', which must be required with ondelete 'cascade' or 'restrict'; give it ondelete="cascade"
+custom/model_attributes/models/label.py:73:62: OD218 _inherits delegates to 'country_id', which must be required with ondelete 'cascade' or 'restrict'; give it ondelete="cascade"
+custom/model_attributes/models/label.py:91:33: OD218 _inherits delegates to 'partner_id', which must be required with ondelete 'cascade' or 'restrict'; give it ondelete="cascade"
+custom/model_attributes/models/label.py:94:58: OD218 'country_id' has delegate=True, so it must be required with ondelete 'cascade' or 'restrict'; give it ondelete="cascade"
+custom/model_attributes/models/label.py:95:94: OD213 'home_country_id' is required, so Odoo refuses ondelete='set null'; use 'restrict' or 'cascade'
+custom/model_attributes/models/label.py:96:95: OD213 'parent_country_id' is required, so Odoo refuses ondelete='set null'; use 'restrict' or 'cascade'
+custom/model_attributes/models/label.py:122:43: OD213 'partner_id' is required, so Odoo refuses ondelete='set null'; use 'restrict' or 'cascade'
 custom/model_attributes/models/plot.py:12:19: OD115 'partner_id.country_id': @api.onchange takes field names of the model, not paths, so Odoo ignores it; name 'partner_id' instead
 custom/model_attributes/models/plot.py:20:21: OD115 'partner_id.nickname': @api.constrains takes field names of the model, not paths, so Odoo ignores it; name 'partner_id' instead
 custom/model_attributes/models/zone.py:9:5: OD217 garden.zone sets _parent_store but has no parent_path field, which Odoo logs as an error; add parent_path = fields.Char(index=True)
@@ -187,6 +200,8 @@ custom/modern19/models/partner.py:9:9: OD109 self._cr is deprecated; use self.en
 custom/modern19/models/partner.py:9:9: OD122 UPDATE on res_partner bypasses the ORM, so records this transaction already read keep stale values; call flush_model() before the query and invalidate_model() after it (flush() and invalidate_cache() before 16.0)
 custom/modern19/models/partner.py:22:5: OD118 @api.model on create() passes a list of dicts, so reading vals as one dict fails; decorate it with @api.model_create_multi and loop over the list
 custom/modern19/models/partner.py:41:93: OD216 'type' is required, so Odoo refuses ondelete 'set null' for the selection_add value 'kiosk'; give it 'cascade', 'set default' or a function
+custom/modern19/models/partner.py:47:33: OD218 _inherits delegates to 'partner_id', which must be required with ondelete 'cascade' or 'restrict'; give it ondelete="cascade"
+custom/modern19/models/partner.py:49:73: OD213 'partner_id' is required, so Odoo refuses ondelete='set null'; use 'restrict' or 'cascade'
 custom/modern20/models/res_partner.py:14:33: OD219 'note' sets tracking, but modern.note does not inherit mail.thread, so Odoo ignores it and logs a warning; inherit mail.thread or remove tracking
 custom/modern20/models/res_partner.py:38:30: OD220 'ref' has the label 'ID' of field 'id' of modern.ticket, so Odoo logs a warning and users cannot tell them apart; give it another string
 custom/orm_overrides/models/caches.py:7:21: OD120 'lang' in an ormcache key is not a parameter of _greeting_for(), so every call raises NameError; key on a parameter or on self
@@ -216,13 +231,18 @@ custom/registry_fields/models/shipment.py:11:17: OD205 'reference' is a Many2one
 custom/registry_fields/models/shipment.py:13:19: OD205 'carrier_ids' is a Many2one field elsewhere and is redefined here as Many2many
 custom/registry_fields/models/shipment.py:24:17: OD205 'reference' is a Char field elsewhere and is redefined here as Many2one
 custom/registry_fields/models/shipment.py:26:19: OD205 'carrier_ids' is a Many2many field elsewhere and is redefined here as Many2one
+custom/saas144/models/badge.py:7:33: OD218 _inherits delegates to 'partner_id', which must be required with ondelete 'cascade' or 'restrict'; give it ondelete="cascade"
+custom/saas144/models/badge.py:10:58: OD218 'country_id' has delegate=True, so it must be required with ondelete 'cascade' or 'restrict'; give it ondelete="cascade"
+custom/saas183/models/ticket.py:7:33: OD218 _inherits delegates to 'partner_id', which must be required with ondelete 'cascade' or 'restrict'; give it ondelete="cascade"
+custom/saas183/models/ticket.py:9:73: OD213 'partner_id' is required, so Odoo refuses ondelete='set null'; use 'restrict' or 'cascade'
+custom/saas183/models/ticket.py:10:88: OD213 'country_id' is required, so Odoo refuses ondelete='set null'; use 'restrict' or 'cascade'
 custom/sql_columns/models/constraints.py:7:35: OD227 depot: parcel_box has no such column, since parcel.box has no field depot; use depot_id
 custom/sql_columns/models/constraints.py:8:36: OD227 total_weight: parcel_box has no such column, since parcel.box.total_weight is not stored; set store=True on the field, or drop it from the definition
 custom/sql_columns/models/constraints.py:9:38: OD227 tag_ids: parcel_box has no such column, since parcel.box.tag_ids is a Many2many, which has no column; drop it from the definition
 custom/sql_columns/models/constraints.py:10:34: OD227 display_name: parcel_box has no such column, since parcel.box.display_name is computed by the ORM, not stored; drop it from the definition
 custom/sql_columns/models/constraints.py:27:52: OD227 name: parcel_locker has no such column, since name is a field of parcel.depot, which parcel.locker reaches through _inherits; declare the definition on parcel.depot
-custom/sql_columns/models/parcels.py:74:5: OD226 _auto = False leaves parcel.report without a table, and nothing creates the view parcel_report; create it in init(), or drop _auto = False
-custom/sql_columns/models/parcels.py:166:63: OD227 write_date: parcel_beacon has no such column, since parcel.beacon.write_date is not created, as parcel.beacon sets _log_access to False; drop it from the definition, or log access on the model
+custom/sql_columns/models/parcels.py:76:5: OD226 _auto = False leaves parcel.report without a table, and nothing creates the view parcel_report; create it in init(), or drop _auto = False
+custom/sql_columns/models/parcels.py:168:63: OD227 write_date: parcel_beacon has no such column, since parcel.beacon.write_date is not created, as parcel.beacon sets _log_access to False; drop it from the definition, or log access on the model
 custom/sql_columns/models/queries.py:11:27: OD224 b.weight_uom: parcel_box has no such column, since parcel.box has no field weight_uom; use weight_uom_id
 custom/sql_columns/models/queries.py:16:48: OD224 parcel_box.label: parcel_box has no such column, since parcel.box has no field label; name the column of a stored field of parcel.box
 custom/sql_columns/models/queries.py:22:22: OD224 b.total_weight: parcel_box has no such column, since parcel.box.total_weight is not stored; set store=True on the field, or read it through the ORM

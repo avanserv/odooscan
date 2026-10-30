@@ -184,6 +184,8 @@ fn option_value(expr: &Expr) -> OptionValue {
     match expr {
         Expr::StringLiteral(s) => OptionValue::Str(s.value.to_str().to_owned()),
         Expr::BooleanLiteral(b) => OptionValue::Bool(b.value),
+        Expr::NoneLiteral(_) => OptionValue::Falsy,
+        Expr::NumberLiteral(n) => number_value(&n.value),
         Expr::List(l) => first_strings(&l.elts).map_or(OptionValue::Other, OptionValue::Strs),
         Expr::Tuple(t) => first_strings(&t.elts).map_or(OptionValue::Other, OptionValue::Tuple),
         Expr::Dict(d) => d
@@ -199,6 +201,15 @@ fn option_value(expr: &Expr) -> OptionValue {
             .map_or(OptionValue::Other, OptionValue::Dict),
         _ => OptionValue::Other,
     }
+}
+
+fn number_value(n: &ast::Number) -> OptionValue {
+    let zero = match n {
+        ast::Number::Int(i) => i.as_u64() == Some(0),
+        ast::Number::Float(f) => *f == 0.0,
+        ast::Number::Complex { real, imag } => *real == 0.0 && *imag == 0.0,
+    };
+    if zero { OptionValue::Falsy } else { OptionValue::Other }
 }
 
 /// `["a", "b"]`, or the values of `[("a", "A"), ("b",)]`.
@@ -562,6 +573,7 @@ impl<'ast> PyVisitor<'_, 'ast> {
             inherit: vec![],
             inherits: vec![],
             delegations: vec![],
+            inherits_unknown: false,
             fields: vec![],
             methods: vec![],
             paths: vec![],
@@ -735,19 +747,25 @@ impl<'ast> PyVisitor<'_, 'ast> {
 
     /// A `delegate=True` field may come before the dict, which adds to the pairs it gave.
     fn inherits(&mut self, value: &Expr, fact: &mut ClassFact) {
-        let Expr::Dict(d) = value else { return };
+        let Expr::Dict(d) = value else {
+            fact.inherits_unknown = true;
+            return;
+        };
         for pair in str_pairs(d) {
             if !fact.inherits.contains(&pair) {
                 fact.inherits.push(pair);
             }
         }
-        let fields = d
+        let entries: Vec<_> = d
             .items
             .iter()
-            .filter(|i| i.key.as_ref().is_some_and(|k| str_lit(k).is_some()));
-        fact.delegations = fields
-            .filter_map(|i| i.value.as_string_literal_expr())
-            .map(|s| self.spanned(s))
+            .map(|i| Some((str_lit(i.key.as_ref()?)?.to_owned(), i.value.as_string_literal_expr()?)))
+            .collect();
+        fact.inherits_unknown = entries.iter().any(Option::is_none);
+        fact.delegations = entries
+            .into_iter()
+            .flatten()
+            .map(|(parent, field)| (parent, self.spanned(field)))
             .collect();
     }
 
@@ -1514,6 +1532,14 @@ mod tests {
     }
 
     #[test]
+    fn reads_none_and_zero_as_falsy() {
+        let f = field("fields.Many2one('res.partner', delegate=None, required=0, index=1)");
+        assert_eq!(option(&f, "delegate"), Some(OptionValue::Falsy));
+        assert_eq!(option(&f, "required"), Some(OptionValue::Falsy));
+        assert_eq!(option(&f, "index"), Some(OptionValue::Other));
+    }
+
+    #[test]
     fn names_positional_arguments_by_field_type() {
         let f = field("fields.Many2many('res.partner', 'x_partner_rel', 'x_id', string='Partners')");
         assert_eq!(option(&f, "comodel_name"), Some(OptionValue::Str("res.partner".into())));
@@ -1622,9 +1648,13 @@ mod tests {
         let delegations: Vec<_> = class
             .delegations
             .iter()
-            .map(|d| (d.value.as_str(), d.pos.col))
+            .map(|(parent, d)| (parent.as_str(), d.value.as_str(), d.pos.col))
             .collect();
-        assert_eq!(delegations, [("partner_id", 33), ("company_id", 62)]);
+        assert_eq!(
+            delegations,
+            [("res.partner", "partner_id", 33), ("res.company", "company_id", 62)]
+        );
+        assert!(!class.inherits_unknown);
         assert_eq!(
             class.inherits,
             [
@@ -1632,6 +1662,16 @@ mod tests {
                 ("res.partner".to_owned(), "partner_id".to_owned())
             ]
         );
+    }
+
+    #[test]
+    fn marks_an_inherits_with_a_non_literal_entry_unknown() {
+        for value in ["PARENTS", "{'res.partner': FIELD}", "{**PARENTS}"] {
+            let facts = analyze(&format!(
+                "class X(models.Model):\n    _name = 'x'\n    _inherits = {value}\n"
+            ));
+            assert!(facts.classes[0].inherits_unknown, "{value}");
+        }
     }
 
     #[test]

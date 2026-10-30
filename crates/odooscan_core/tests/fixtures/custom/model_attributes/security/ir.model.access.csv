@@ -16,3 +16,5 @@ access_garden_marker,garden.marker,model_garden_marker,base.group_user,1,1,1,1
 access_garden_kit,garden.kit,model_garden_kit,base.group_user,1,1,1,1
 access_garden_tag,garden.tag,model_garden_tag,base.group_user,1,1,1,1
 access_garden_tray,garden.tray,model_garden_tray,base.group_user,1,1,1,1
+access_garden_bench,garden.bench,model_garden_bench,base.group_user,1,1,1,1
+access_garden_post,garden.post,model_garden_post,base.group_user,1,1,1,1

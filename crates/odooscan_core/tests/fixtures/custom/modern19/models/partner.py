@@ -39,3 +39,12 @@ class ResPartnerKiosk(models.Model):
     _inherit = "res.partner"
 
     type = fields.Selection((("contact", "Contact"), ("invoice", "Invoice")), selection_add=[("kiosk",)])
+
+
+class ModernBadge(models.AbstractModel):
+    _name = "modern.badge"
+    _description = "Badge holder"
+    _inherits = {"res.partner": "partner_id"}
+
+    partner_id = fields.Many2one("res.partner", required=True, ondelete="set null")
+    country_id = fields.Many2one("res.country", delegate=True)
