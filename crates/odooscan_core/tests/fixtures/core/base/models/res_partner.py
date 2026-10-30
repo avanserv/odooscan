@@ -133,6 +133,25 @@ class IrModel(models.Model):
     rule_ids = fields.One2many("ir.rule", "model_id")
 
 
+class IrActionsServer(models.Model):
+    _name = "ir.actions.server"
+
+    name = fields.Char()
+    state = fields.Char()
+    code = fields.Text()
+    model_id = fields.Many2one("ir.model")
+    parent_id = fields.Many2one("ir.actions.server")
+    child_ids = fields.One2many("ir.actions.server", "parent_id")
+
+
+class IrCron(models.Model):
+    _name = "ir.cron"
+    _inherits = {"ir.actions.server": "ir_actions_server_id"}
+
+    ir_actions_server_id = fields.Many2one("ir.actions.server", required=True, ondelete="restrict")
+    active = fields.Boolean()
+
+
 class IrHttp(models.AbstractModel):
     _name = "ir.http"
 

@@ -119,6 +119,8 @@ XML ids, views and data records, within a file and across the dependency graph.
 | [OD316](OD316.md) | `unknown-modifier-name` | A view modifier names a field its model does not have. |
 | [OD317](OD317.md) | `modifier-field-not-in-view` | A view modifier reads a field the view does not show. |
 | [OD318](OD318.md) | `view-mode-without-view` | A window action lists a view type its model has no view for. |
+| [OD319](OD319.md) | `python-field-syntax-error` | The code of a server action or a cron is not Python that Odoo compiles. |
+| [OD320](OD320.md) | `unknown-server-code-method` | The code of a server action or a cron calls a method its model does not have. |
 
 ## OD4: access
 

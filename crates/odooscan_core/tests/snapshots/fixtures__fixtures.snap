@@ -203,6 +203,7 @@ custom/form_patches/static/src/quick_form_card.js:8:24: OD605 no indexed bundle 
 custom/form_patches/static/src/quick_form_card.xml:14:9: OD606 no <div> with class 'o_form_status' in template web.FormController or the templates that extend it
 custom/form_patches/static/src/quick_form_card.xml:15:9: OD606 <div> with class 'o_mail_chatter' is added by module mail, which is not in depends
 custom/form_patches/static/src/quick_form_card.xml:18:19: OD605 no indexed bundle defines template 'web.FormCompiler'
+custom/legacy12/data/cron.xml:5:34: OD320 legacy.ledger has no method '_post_legacy'
 custom/legacy12/models/badge.py:7:33: OD218 _inherits delegates to 'partner_id', which must be required with ondelete 'cascade' or 'restrict'; give it ondelete="cascade"
 custom/legacy12/models/badge.py:10:58: OD218 'country_id' has delegate=True, so it must be required with ondelete 'cascade' or 'restrict'; give it ondelete="cascade"
 custom/legacy12/models/ledger.py:17:40: OD220 'opened_on' has the label 'Created on' of field 'create_date' of legacy.ledger, so Odoo logs a warning and users cannot tell them apart; give it another string
@@ -417,6 +418,46 @@ custom/saas183/models/ticket.py:7:33: OD218 _inherits delegates to 'partner_id',
 custom/saas183/models/ticket.py:9:73: OD213 'partner_id' is required, so Odoo refuses ondelete='set null'; use 'restrict' or 'cascade'
 custom/saas183/models/ticket.py:10:88: OD213 'country_id' is required, so Odoo refuses ondelete='set null'; use 'restrict' or 'cascade'
 custom/saas193/models/memo.py:8:34: OD219 'stage' sets tracking, but saas.memo does not inherit mail.thread, so Odoo ignores it and logs a warning; inherit mail.thread or remove tracking
+custom/server_code/data/calls.xml:5:34: OD320 server.job has no method '_run_misspelled'
+custom/server_code/data/calls.xml:12:36: OD320 server.job has no method 'action_opne'
+custom/server_code/data/calls.xml:19:35: OD320 server.job has no method 'action_clsoe'
+custom/server_code/data/calls.xml:25:34: OD320 server.job has no method '_nope_dotted'
+custom/server_code/data/calls.xml:31:34: OD320 server.job has no method '_nope_eval_ref'
+custom/server_code/data/calls.xml:37:34: OD320 server.job has no method '_nope_search'
+custom/server_code/data/calls.xml:48:7: OD320 server.job has no method '_nope_after_known'
+custom/server_code/data/calls.xml:55:67: OD320 server.job has no method '_nope_empty_attributes'
+custom/server_code/data/calls.xml:63:11: OD320 server.job has no method '_nope_cdata'
+custom/server_code/data/calls.xml:70:43: OD320 server.job has no method '_nope_cdata_first'
+custom/server_code/data/calls.xml:78:7: OD320 server.job has no method '_nope_text_cdata'
+custom/server_code/data/calls.xml:87:7: OD320 server.job has no method '_nope_entity'
+custom/server_code/data/calls.xml:96:11: OD320 server.job has no method '_nope_nested_def'
+custom/server_code/data/calls.xml:107:7: OD320 server.job has no method '_nope_other_name'
+custom/server_code/data/calls.xml:118:11: OD320 server.job has no method '_nope_except'
+custom/server_code/data/calls.xml:125:34: OD320 method 'action_follow' of res.partner comes from module mail, which is not in depends
+custom/server_code/data/calls.xml:132:34: OD320 server.job has no method '_nope_last_code'
+custom/server_code/data/calls.xml:139:34: OD320 server.note has no method '_run_daily'
+custom/server_code/data/calls.xml:147:34: OD320 server.job has no method '_nope_last_state'
+custom/server_code/data/calls.xml:159:42: OD320 server.job has no method '_nope_nested'
+custom/server_code/data/first_writes.xml:23:34: OD320 server.job has no method '_nope_code_kept'
+custom/server_code/data/first_writes.xml:36:34: OD320 server.job has no method '_nope_state_given'
+custom/server_code/data/first_writes.xml:53:34: OD320 server.job has no method '_nope_model_given'
+custom/server_code/data/first_writes.xml:59:34: OD320 server.job has no method '_nope_before_extension'
+custom/server_code/data/syntax.xml:5:45: OD319 Odoo refuses this code when it loads the record: unexpected EOF while parsing
+custom/server_code/data/syntax.xml:12:30: OD319 Odoo refuses this code when it loads the record: Expected an expression
+custom/server_code/data/syntax.xml:18:30: OD319 Odoo refuses this code when it loads the record: Expected an expression
+custom/server_code/data/syntax.xml:26:1: OD319 Odoo refuses this code when it loads the record: Unexpected indentation
+custom/server_code/data/syntax.xml:42:28: OD319 Odoo refuses this code when it loads the record: 'return' outside function
+custom/server_code/data/syntax.xml:48:28: OD319 Odoo refuses this code when it loads the record: 'yield' outside function
+custom/server_code/data/syntax.xml:54:28: OD319 Odoo refuses this code when it loads the record: 'await' outside function
+custom/server_code/data/syntax.xml:60:28: OD319 Odoo refuses this code when it loads the record: 'break' outside loop
+custom/server_code/data/syntax.xml:66:28: OD319 Odoo refuses this code when it loads the record: 'continue' not properly in loop
+custom/server_code/data/syntax.xml:82:42: OD319 Odoo refuses this code when it loads the record: unexpected EOF while parsing
+custom/server_code/data/syntax.xml:90:6: OD319 Odoo refuses this code when it loads the record: unexpected EOF while parsing
+custom/server_code/data/syntax.xml:99:1: OD319 Odoo refuses this code when it loads the record: Unexpected indentation
+custom/server_code/data/syntax.xml:114:28: OD319 Odoo refuses this code when it loads the record: Expected a statement
+custom/server_code/data/syntax.xml:124:36: OD319 Odoo refuses this code when it loads the record: Expected a statement
+custom/server_code/data/updates.xml:3:34: OD320 server.job has no method '_nope_code_replaces'
+custom/server_code_extension/data/updates.xml:7:34: OD320 server.job has no method '_nope_extension'
 custom/sql_base_entries/models/buoys.py:35:54: OD224 f.x_base_depot_id: buoy_float has no such column, since buoy.float has no field x_base_depot_id; name the column of a stored field of buoy.float
 custom/sql_columns/models/constraints.py:7:35: OD227 depot: parcel_box has no such column, since parcel.box has no field depot; use depot_id
 custom/sql_columns/models/constraints.py:8:36: OD227 total_weight: parcel_box has no such column, since parcel.box.total_weight is not stored; set store=True on the field, or drop it from the definition

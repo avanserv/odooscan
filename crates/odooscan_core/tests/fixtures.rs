@@ -146,6 +146,17 @@ fn a_row_with_no_group_needs_no_base() {
 }
 
 #[test]
+fn refused_server_code_needs_no_base() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+    let report = scan(&ScanOptions {
+        paths: vec![root.join("custom/server_code")],
+        addons_paths: vec![],
+        default_series: None,
+    });
+    assert!(report.diagnostics.iter().any(|d| d.code == "OD319"));
+}
+
+#[test]
 fn import_patches_without_base_take_the_advice_of_the_path() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
     let report = scan(&ScanOptions {

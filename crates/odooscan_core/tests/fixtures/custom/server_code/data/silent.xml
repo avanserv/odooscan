@@ -1,0 +1,319 @@
+<odoo>
+    <record id="silent_eval" model="ir.cron">
+        <field name="name">silent_eval</field>
+        <field name="model_id" ref="model_server_job"/>
+        <field name="code" eval="'pass'">model._silent_eval()</field>
+    </record>
+
+    <record id="silent_ref" model="ir.cron">
+        <field name="name">silent_ref</field>
+        <field name="model_id" ref="model_server_job"/>
+        <field name="code" ref="cron_without_state">model._silent_ref()</field>
+    </record>
+
+    <record id="silent_search" model="ir.cron">
+        <field name="name">silent_search</field>
+        <field name="model_id" ref="model_server_job"/>
+        <field name="code" search="[('id', '=', 1)]" model="server.job">model._silent_search()</field>
+    </record>
+
+    <record id="silent_file" model="ir.cron">
+        <field name="name">silent_file</field>
+        <field name="model_id" ref="model_server_job"/>
+        <field name="code" file="data/job_code.py">model._silent_file()</field>
+    </record>
+
+    <record id="silent_type" model="ir.cron">
+        <field name="name">silent_type</field>
+        <field name="model_id" ref="model_server_job"/>
+        <field name="code" type="char">model._silent_type()</field>
+    </record>
+
+    <record id="silent_function" model="ir.cron">
+        <field name="name">silent_function</field>
+        <field name="model_id" ref="model_server_job"/>
+        <field name="code"><function model="server.job" name="action_close"><value>model._silent_function()</value></function></field>
+    </record>
+
+    <record id="silent_comment_first" model="ir.cron">
+        <field name="name">silent_comment_first</field>
+        <field name="model_id" ref="model_server_job"/>
+        <field name="code"><!-- Odoo reads no text ahead of this comment. -->model._silent_comment_first()</field>
+    </record>
+
+    <record id="silent_after_comment" model="ir.cron">
+        <field name="name">silent_after_comment</field>
+        <field name="model_id" ref="model_server_job"/>
+        <field name="code">model.action_close()<!-- The text ends here. -->
+model._silent_after_comment()</field>
+    </record>
+
+    <record id="silent_syntax_after_comment" model="ir.cron">
+        <field name="name">silent_syntax_after_comment</field>
+        <field name="model_id" ref="model_server_job"/>
+        <field name="code">model.action_close()<!-- The text ends here. -->(</field>
+    </record>
+
+    <record id="silent_syntax_eval" model="ir.cron">
+        <field name="name">silent_syntax_eval</field>
+        <field name="model_id" ref="model_server_job"/>
+        <field name="code" eval="'pass'">(</field>
+    </record>
+
+    <record id="silent_blank" model="ir.cron">
+        <field name="name">silent_blank</field>
+        <field name="model_id" ref="model_server_job"/>
+        <field name="code">   </field>
+    </record>
+
+    <record id="silent_model_eval" model="ir.cron">
+        <field name="name">silent_model_eval</field>
+        <field name="model_id" eval="ref('model_server_job') or ref('model_server_note')"/>
+        <field name="code">model._silent_model_eval()</field>
+    </record>
+
+    <record id="silent_model_search" model="ir.cron">
+        <field name="name">silent_model_search</field>
+        <field name="model_id" search="[('model', '=', 'server.job'), ('id', '!=', 0)]"/>
+        <field name="code">model._silent_model_search()</field>
+    </record>
+
+    <record id="silent_model_use" model="ir.cron">
+        <field name="name">silent_model_use</field>
+        <field name="model_id" search="[('model', '=', 'server.job')]" use="model"/>
+        <field name="code">model._silent_model_use()</field>
+    </record>
+
+    <record id="silent_no_model" model="ir.cron">
+        <field name="name">silent_no_model</field>
+        <field name="code">model._silent_no_model()</field>
+    </record>
+
+    <record id="silent_state_other" model="ir.actions.server">
+        <field name="name">silent_state_other</field>
+        <field name="model_id" ref="model_server_job"/>
+        <field name="state">object_write</field>
+        <field name="code">model._silent_state_other()</field>
+    </record>
+
+    <record id="silent_state_spaced" model="ir.actions.server">
+        <field name="name">silent_state_spaced</field>
+        <field name="model_id" ref="model_server_job"/>
+        <field name="state"> code </field>
+        <field name="code">model._silent_state_spaced()</field>
+    </record>
+
+    <record id="silent_state_eval" model="ir.actions.server">
+        <field name="name">silent_state_eval</field>
+        <field name="model_id" ref="model_server_job"/>
+        <field name="state" eval="'object_write'">code</field>
+        <field name="code">model._silent_state_eval()</field>
+    </record>
+
+    <record id="silent_state_eval_on_cron" model="ir.cron">
+        <field name="name">silent_state_eval_on_cron</field>
+        <field name="model_id" ref="model_server_job"/>
+        <field name="state" eval="'code'"/>
+        <field name="code">model._silent_cron_state_eval()</field>
+    </record>
+
+    <record id="silent_state_unset" model="ir.actions.server">
+        <field name="name">silent_state_unset</field>
+        <field name="model_id" ref="model_server_job"/>
+        <field name="code">model._silent_state_unset()</field>
+    </record>
+
+    <record id="silent_state_other_on_cron" model="ir.cron">
+        <field name="name">silent_state_other_on_cron</field>
+        <field name="model_id" ref="model_server_job"/>
+        <field name="state">multi</field>
+        <field name="code">model._silent_cron_state_other()</field>
+    </record>
+
+    <record id="silent_assign" model="ir.cron">
+        <field name="name">silent_assign</field>
+        <field name="model_id" ref="model_server_job"/>
+        <field name="code">
+model = env['server.job']
+model._silent_assign()
+        </field>
+    </record>
+
+    <record id="silent_later" model="ir.cron">
+        <field name="name">silent_later</field>
+        <field name="model_id" ref="model_server_job"/>
+        <field name="code">
+model._silent_later()
+model = env['server.job']
+        </field>
+    </record>
+
+    <record id="silent_loop" model="ir.cron">
+        <field name="name">silent_loop</field>
+        <field name="model_id" ref="model_server_job"/>
+        <field name="code">
+for record in records:
+    record._silent_loop()
+        </field>
+    </record>
+
+    <record id="silent_parameter" model="ir.cron">
+        <field name="name">silent_parameter</field>
+        <field name="model_id" ref="model_server_job"/>
+        <field name="code">
+def run(model):
+    model._silent_parameter()
+run(records)
+        </field>
+    </record>
+
+    <record id="silent_comprehension" model="ir.cron">
+        <field name="name">silent_comprehension</field>
+        <field name="model_id" ref="model_server_job"/>
+        <field name="code">
+names = [record._silent_comprehension() for record in records]
+        </field>
+    </record>
+
+    <record id="silent_augmented" model="ir.cron">
+        <field name="name">silent_augmented</field>
+        <field name="model_id" ref="model_server_job"/>
+        <field name="code">
+records |= model
+records._silent_augmented()
+        </field>
+    </record>
+
+    <record id="silent_delete" model="ir.cron">
+        <field name="name">silent_delete</field>
+        <field name="model_id" ref="model_server_job"/>
+        <field name="code">
+del record
+record._silent_delete()
+        </field>
+    </record>
+
+    <record id="silent_walrus" model="ir.cron">
+        <field name="name">silent_walrus</field>
+        <field name="model_id" ref="model_server_job"/>
+        <field name="code">
+(record := records)._silent_walrus()
+record._silent_walrus()
+        </field>
+    </record>
+
+    <record id="silent_with" model="ir.cron">
+        <field name="name">silent_with</field>
+        <field name="model_id" ref="model_server_job"/>
+        <field name="code">
+with records as record:
+    record._silent_with()
+        </field>
+    </record>
+
+    <record id="silent_def" model="ir.cron">
+        <field name="name">silent_def</field>
+        <field name="model_id" ref="model_server_job"/>
+        <field name="code">
+def record():
+    pass
+record._silent_def()
+        </field>
+    </record>
+
+    <record id="silent_class" model="ir.cron">
+        <field name="name">silent_class</field>
+        <field name="model_id" ref="model_server_job"/>
+        <field name="code">
+class record:
+    pass
+record._silent_class()
+        </field>
+    </record>
+
+    <record id="silent_except" model="ir.cron">
+        <field name="name">silent_except</field>
+        <field name="model_id" ref="model_server_job"/>
+        <field name="code">
+try:
+    pass
+except UserError as record:
+    pass
+record._silent_except()
+        </field>
+    </record>
+
+    <record id="silent_import" model="ir.cron">
+        <field name="name">silent_import</field>
+        <field name="model_id" ref="model_server_job"/>
+        <field name="code">
+import record
+record._silent_import()
+        </field>
+    </record>
+
+    <record id="silent_global" model="ir.cron">
+        <field name="name">silent_global</field>
+        <field name="model_id" ref="model_server_job"/>
+        <field name="code">
+global record
+record._silent_global()
+        </field>
+    </record>
+
+    <record id="silent_pattern" model="ir.cron">
+        <field name="name">silent_pattern</field>
+        <field name="model_id" ref="model_server_job"/>
+        <field name="code">
+match records:
+    case record:
+        pass
+record._silent_pattern()
+        </field>
+    </record>
+
+    <record id="silent_type_param" model="ir.cron">
+        <field name="name">silent_type_param</field>
+        <field name="model_id" ref="model_server_job"/>
+        <field name="code">
+def run[record]():
+    pass
+record._silent_type_param()
+        </field>
+    </record>
+
+    <record id="silent_env" model="ir.cron">
+        <field name="name">silent_env</field>
+        <field name="model_id" ref="model_server_job"/>
+        <field name="code">
+env['server.job']._silent_env()
+        </field>
+    </record>
+
+    <record id="silent_sudo" model="ir.cron">
+        <field name="name">silent_sudo</field>
+        <field name="model_id" ref="model_server_job"/>
+        <field name="code">
+model.sudo()._silent_sudo()
+        </field>
+    </record>
+
+    <record id="silent_attribute" model="ir.cron">
+        <field name="name">silent_attribute</field>
+        <field name="model_id" ref="model_server_job"/>
+        <field name="code">
+model.env._silent_attribute()
+        </field>
+    </record>
+
+    <record id="silent_try" model="ir.cron">
+        <field name="name">silent_try</field>
+        <field name="model_id" ref="model_server_job"/>
+        <field name="code">
+try:
+    model._silent_try()
+except AttributeError:
+    pass
+        </field>
+    </record>
+</odoo>

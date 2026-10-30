@@ -22,4 +22,10 @@
         <field name="model_id" ref="model_button_visit"/>
         <field name="domain_force">[('no_partial', '=', 1)]</field>
     </record>
+
+    <record id="cron_visit" model="ir.cron">
+        <field name="name">cron_visit</field>
+        <field name="model_id" ref="model_button_visit"/>
+        <field name="code">model._from_enterprise()</field>
+    </record>
 </odoo>

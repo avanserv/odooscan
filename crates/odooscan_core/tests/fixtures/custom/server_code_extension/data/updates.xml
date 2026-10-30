@@ -1,0 +1,9 @@
+<odoo>
+    <record id="server_code.updated_in_extension" model="ir.cron">
+        <field name="code">model.action_close()</field>
+    </record>
+
+    <record id="server_code.updated_by_extension" model="ir.actions.server">
+        <field name="code">model._nope_extension()</field>
+    </record>
+</odoo>
