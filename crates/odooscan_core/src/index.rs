@@ -997,6 +997,54 @@ impl<'m> Index<'m> {
         self.table_models.get(table).map(Vec::as_slice).unwrap_or_default()
     }
 
+    /// Every class of `model` and of the models it inherits, `base` included, in any indexed module.
+    pub fn chain_classes(&self, model: &str) -> Vec<(usize, &'m ClassFact)> {
+        self.chain(model, None, false)
+    }
+
+    /// Whether an indexed module creates a view named `table`, in Python with a query whose literal
+    /// head names it, or in an SQL file its manifest loads.
+    pub fn creates_view(&self, table: &str) -> bool {
+        self.modules.iter().any(|m| {
+            m.sql_views.iter().any(|v| v == table)
+                || m.python
+                    .iter()
+                    .any(|f| f.facts.created_views.iter().any(|v| v == table))
+        })
+    }
+
+    /// Whether a module in `scope` creates a view whose name it computes outside the `init()` of a
+    /// model, which may be any view.
+    pub fn creates_any_view(&self, scope: &Scope) -> bool {
+        self.modules
+            .iter()
+            .enumerate()
+            .filter(|(mi, _)| scope.sees(*mi))
+            .flat_map(|(_, m)| &m.python)
+            .any(|f| f.facts.creates_any_view)
+    }
+
+    /// Whether a Many2many field of a module in `scope` keeps its rows in `table`, which it names
+    /// with `relation`, or which Odoo names after the tables of its model and comodel.
+    pub fn relation_table(&self, table: &str, scope: &Scope) -> bool {
+        let named = |model: &str, field: &FieldFact| match field.option("relation").map(|r| &r.value) {
+            Some(OptionValue::Str(relation)) => relation == table,
+            Some(_) => false,
+            None => field.comodel.as_ref().is_some_and(|comodel| {
+                let mut tables = [self.table(model, scope), self.table(&comodel.value, scope)];
+                tables.sort();
+                matches!(tables, [Some(a), Some(b)] if format!("{a}_{b}_rel") == table)
+            }),
+        };
+        self.models.values().flatten().any(|(mi, class)| {
+            scope.sees(*mi)
+                && class
+                    .fields
+                    .iter()
+                    .any(|f| f.ftype == "Many2many" && named(&class.model, f))
+        })
+    }
+
     /// Whether a class of `model` or of a model it inherits, in any indexed module, defines `field`.
     pub fn defines_field(&self, model: &str, field: &str) -> bool {
         self.chain(model, None, false)

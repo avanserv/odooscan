@@ -782,6 +782,21 @@ pub(crate) fn query_source(expr: &Expr) -> Option<QuerySource<'_>> {
     }
 }
 
+/// The text a query starts with as far as literals spell it: the text `query_text` reads, or the
+/// head of the left operand of a `+`, before `%` or `.format()` too, with a `{` for the value that
+/// follows. A `SQL()` call is read where it is called.
+pub(crate) fn query_head(expr: &Expr) -> Option<String> {
+    match expr {
+        Expr::BinOp(b) if b.op == Operator::Add => query_head(&b.left).map(|head| head + "{"),
+        Expr::BinOp(b) if b.op == Operator::Mod => query_head(&b.left),
+        Expr::Call(c) => match &*c.func {
+            Expr::Attribute(a) if a.attr.as_str() == "format" => query_head(&a.value),
+            _ => None,
+        },
+        _ => query_text(expr),
+    }
+}
+
 fn literal_source(expr: &Expr) -> Option<QuerySource<'_>> {
     str_lit(expr).map(|text| QuerySource {
         text: text.to_owned(),
@@ -1003,10 +1018,19 @@ struct Scope {
 
 /// The tokens of a query, None for a quote, comment or placeholder that never closes.
 fn tokenize(text: &str) -> Option<Vec<Token>> {
+    let (tokens, whole) = leading_tokens(text);
+    whole.then_some(tokens)
+}
+
+/// The tokens of a text up to the first quote, comment or placeholder that never closes, such as
+/// the `{` that ends the literal head of an f-string, and whether they cover the whole text.
+fn leading_tokens(text: &str) -> (Vec<Token>, bool) {
     let mut tokens = vec![];
     let mut i = 0;
     while i < text.len() {
-        let (kind, end) = lex(text, i)?;
+        let Some((kind, end)) = lex(text, i) else {
+            return (tokens, false);
+        };
         if kind != Kind::Blank {
             let name = token_name(kind, &text[i..end]);
             tokens.push(Token {
@@ -1018,7 +1042,7 @@ fn tokenize(text: &str) -> Option<Vec<Token>> {
         }
         i = end;
     }
-    Some(tokens)
+    (tokens, true)
 }
 
 fn token_name(kind: Kind, text: &str) -> Option<String> {
@@ -1575,6 +1599,577 @@ impl Parser<'_> {
     }
 }
 
+/// Words that may sit between `CREATE` and `VIEW`.
+const VIEW_PREFIXES: &[&str] = &["or", "replace", "temp", "temporary", "recursive", "materialized"];
+
+/// Words that end the select list of a branch, or start the next branch.
+const SELECT_ENDS: &[&str] = &[
+    "from",
+    "into",
+    "where",
+    "group",
+    "having",
+    "window",
+    "order",
+    "limit",
+    "offset",
+    "fetch",
+    "for",
+    "union",
+    "intersect",
+    "except",
+];
+
+/// Words that end no expression they follow, so the name after them is no bare alias, and words
+/// that are no alias themselves.
+const NOT_BARE_ALIASES: &[&str] = &[
+    "all",
+    "and",
+    "any",
+    "array",
+    "as",
+    "asc",
+    "at",
+    "between",
+    "by",
+    "case",
+    "cast",
+    "collate",
+    "current_date",
+    "current_time",
+    "current_timestamp",
+    "desc",
+    "distinct",
+    "else",
+    "end",
+    "escape",
+    "false",
+    "filter",
+    "ilike",
+    "in",
+    "is",
+    "isnull",
+    "like",
+    "localtime",
+    "localtimestamp",
+    "not",
+    "notnull",
+    "null",
+    "or",
+    "over",
+    "similar",
+    "then",
+    "true",
+    "when",
+    "within",
+];
+
+/// Words that end an expression though `NOT_BARE_ALIASES` holds them, as in `CASE ... END total`.
+const OPERAND_ENDS: &[&str] = &["end", "null", "true", "false"];
+
+/// Keywords of constraint and index definitions, which name no column.
+const DEFINITION_WORDS: &[&str] = &[
+    "all",
+    "and",
+    "any",
+    "array",
+    "as",
+    "asc",
+    "asymmetric",
+    "between",
+    "both",
+    "cascade",
+    "case",
+    "check",
+    "collate",
+    "constraint",
+    "current_date",
+    "current_time",
+    "current_timestamp",
+    "current_user",
+    "default",
+    "deferrable",
+    "deferred",
+    "desc",
+    "distinct",
+    "else",
+    "end",
+    "escape",
+    "exclude",
+    "exists",
+    "false",
+    "for",
+    "foreign",
+    "from",
+    "ilike",
+    "immediate",
+    "in",
+    "include",
+    "initially",
+    "is",
+    "isnull",
+    "leading",
+    "like",
+    "localtime",
+    "localtimestamp",
+    "match",
+    "no",
+    "not",
+    "notnull",
+    "null",
+    "nulls",
+    "on",
+    "or",
+    "overlaps",
+    "placing",
+    "primary",
+    "references",
+    "restrict",
+    "session_user",
+    "set",
+    "similar",
+    "some",
+    "symmetric",
+    "tablespace",
+    "then",
+    "trailing",
+    "true",
+    "unique",
+    "using",
+    "valid",
+    "when",
+    "where",
+    "with",
+];
+
+/// Words of a definition that only `DEFINITION_WORDS` before them make keywords, by that word:
+/// `key` is a column of `ir.ui.view`, so only `PRIMARY KEY` and `FOREIGN KEY` make it a keyword.
+const FOLLOWING_WORDS: &[(&str, &[&str])] = &[
+    ("primary", &["key"]),
+    ("foreign", &["key"]),
+    ("no", &["action", "inherit"]),
+    ("is", &["unknown"]),
+    ("not", &["unknown"]),
+    ("with", &["time"]),
+    ("on", &["delete", "update"]),
+    ("match", &["full", "partial", "simple"]),
+    ("nulls", &["first", "last"]),
+    ("similar", &["to"]),
+    ("at", &["time"]),
+];
+
+/// Words of a definition after which a name is no column: an index method, a collation, the table
+/// a foreign key references, the type of a `CAST`, or a tablespace.
+const NAMING_WORDS: &[&str] = &["using", "collate", "references", "as", "tablespace"];
+
+/// A view a `CREATE VIEW` statement creates.
+pub(crate) struct View {
+    /// The view's name, None for a placeholder.
+    pub table: Option<String>,
+    /// The names of its columns, from its column list or else the select list of the first branch
+    /// of its query: None when the text does not spell each one.
+    pub names: Option<Vec<String>>,
+}
+
+/// The view the first `CREATE [OR REPLACE] [MATERIALIZED] VIEW` statement of a text creates. None
+/// when the text has none, leaves a quote or a bracket open, or names a view of another schema.
+pub(crate) fn view(text: &str) -> Option<View> {
+    let tokens = tokenize(text)?;
+    let close = pairs(&tokens, text.as_bytes())?;
+    let reader = Reader {
+        text,
+        tokens: &tokens,
+        close: &close,
+    };
+    let mut start = 0;
+    while start < tokens.len() {
+        if let Some(view) = (reader.keyword(start) == Some("create"))
+            .then(|| reader.create_view(start + 1))
+            .flatten()
+        {
+            return Some(view);
+        }
+        start = reader.statement_end(start) + 1;
+    }
+    None
+}
+
+/// The view each `CREATE [OR REPLACE] [MATERIALIZED] VIEW` statement of a text creates, read up to
+/// its name, so that whatever follows may be unreadable, as in the literal head of an f-string or
+/// of a concatenation: None for a name Python fills in or that the head stops before.
+pub(crate) fn created_views(text: &str) -> Vec<Option<String>> {
+    let (tokens, _) = leading_tokens(text);
+    let reader = Reader {
+        text,
+        tokens: &tokens,
+        close: &[],
+    };
+    (0..tokens.len())
+        .filter(|&k| reader.keyword(k) == Some("create"))
+        .filter_map(|k| reader.created_view(k + 1))
+        .collect()
+}
+
+/// The names of the columns of a view with a column list: those of the list, then PostgreSQL
+/// names the rest after the select items. None when an item it names has no name the text spells,
+/// or the list is longer than the select list.
+fn merged_names(listed: Vec<String>, items: Vec<Option<String>>) -> Option<Vec<String>> {
+    let rest: Vec<String> = items.get(listed.len()..)?.iter().cloned().collect::<Option<_>>()?;
+    Some(listed.into_iter().chain(rest).collect())
+}
+
+/// The columns a constraint or index definition names, such as `name` and `company_id` in
+/// `UNIQUE (name, company_id)`, with their byte offsets. Keywords, calls, casts, typed literals,
+/// qualified names, index methods, collations, operator classes, storage parameters, tablespaces
+/// and the table and columns a foreign key references are no columns. None when a placeholder, a
+/// quote or a bracket is left unread.
+pub(crate) fn definition_columns(text: &str) -> Option<Vec<(String, usize)>> {
+    let tokens = tokenize(text)?;
+    let close = pairs(&tokens, text.as_bytes())?;
+    if tokens.iter().any(|t| t.kind == Kind::Placeholder) {
+        return None;
+    }
+    let reader = Reader {
+        text,
+        tokens: &tokens,
+        close: &close,
+    };
+    let unread = reader.unread();
+    let columns = (0..tokens.len())
+        .filter(|&i| !unread[i] && reader.is_definition_column(i))
+        .filter_map(|i| Some((tokens[i].name.clone()?, tokens[i].start)));
+    Some(columns.collect())
+}
+
+/// Reads a statement's tokens, each bracket with the token that closes it.
+struct Reader<'t> {
+    text: &'t str,
+    tokens: &'t [Token],
+    close: &'t [usize],
+}
+
+impl Reader<'_> {
+    fn keyword(&self, i: usize) -> Option<&str> {
+        let token = self.tokens.get(i)?;
+        (token.kind == Kind::Word).then_some(token.name.as_deref()?)
+    }
+
+    fn kind(&self, i: usize) -> Option<Kind> {
+        self.tokens.get(i).map(|t| t.kind)
+    }
+
+    fn is_char(&self, i: usize, c: u8) -> bool {
+        self.tokens
+            .get(i)
+            .is_some_and(|t| t.kind == Kind::Other && t.end == t.start + 1 && self.text.as_bytes()[t.start] == c)
+    }
+
+    /// The token after token `i` on its level: past the bracket `i` opens.
+    fn next(&self, i: usize) -> usize {
+        if self.kind(i) == Some(Kind::Open) {
+            self.close[i] + 1
+        } else {
+            i + 1
+        }
+    }
+
+    /// The `;` that ends the statement starting at `k`, or the end of the text.
+    fn statement_end(&self, mut k: usize) -> usize {
+        while k < self.tokens.len() && !self.is_char(k, b';') {
+            k = self.next(k);
+        }
+        k
+    }
+
+    /// Where the name of the view a `CREATE` statement creates starts, read after its `CREATE`.
+    /// None when the statement creates no view.
+    fn view_start(&self, mut k: usize) -> Option<usize> {
+        while self.keyword(k).is_some_and(|w| VIEW_PREFIXES.contains(&w)) {
+            k += 1;
+        }
+        (self.keyword(k) == Some("view")).then(|| k + 1 + 3 * usize::from(self.keyword(k + 1) == Some("if")))
+    }
+
+    /// The view of a `CREATE` statement, read after its `CREATE`.
+    fn create_view(&self, k: usize) -> Option<View> {
+        let (table, mut k) = self.view_name(self.view_start(k)?)?;
+        let listed = (self.kind(k) == Some(Kind::Open)).then(|| self.name_list(k));
+        if listed.is_some() {
+            k = self.next(k);
+        }
+        if self.keyword(k) == Some("with") {
+            k = self.next(k + 1);
+        }
+        if self.keyword(k) != Some("as") {
+            return None;
+        }
+        let items = self.query_items(k + 1, self.statement_end(k));
+        let names = match listed {
+            Some(listed) => listed
+                .zip(items)
+                .and_then(|(listed, items)| merged_names(listed, items)),
+            None => items.and_then(|items| items.into_iter().collect()),
+        };
+        Some(View { table, names })
+    }
+
+    /// The name of a view at `k`, None for a placeholder or a name glued to one, and where it ends.
+    /// A `public.` schema is read past; None for a name of another schema.
+    fn view_name(&self, k: usize) -> Option<(Option<String>, usize)> {
+        if self.name(k).as_deref() == Some("public") && self.is_char(k + 1, b'.') {
+            return self.view_name(k + 2);
+        }
+        let token = self.tokens.get(k)?;
+        let mut end = k + 1;
+        while self.tokens.get(end).is_some_and(|t| {
+            t.start == self.tokens[end - 1].end && matches!(t.kind, Kind::Word | Kind::Quoted | Kind::Placeholder)
+        }) {
+            end += 1;
+        }
+        if self.is_char(end, b'.') {
+            return None;
+        }
+        match token.kind {
+            Kind::Word | Kind::Quoted if end == k + 1 => Some((token.name.clone(), end)),
+            Kind::Word | Kind::Quoted | Kind::Placeholder => Some((None, end)),
+            _ => None,
+        }
+    }
+
+    /// The name of the view a `CREATE` statement creates, read after its `CREATE`: None inside
+    /// when Python fills it in or the text ends before it, and None when the statement creates no
+    /// view or one of another schema.
+    fn created_view(&self, k: usize) -> Option<Option<String>> {
+        let start = self.view_start(k)?;
+        if start >= self.tokens.len() {
+            return Some(None);
+        }
+        self.view_name(start).map(|(name, _)| name)
+    }
+
+    /// The names of the bracket at `open` when it lists only names.
+    fn name_list(&self, open: usize) -> Option<Vec<String>> {
+        let items = &self.tokens[open + 1..self.close[open]];
+        let mut names = vec![];
+        for (n, token) in items.iter().enumerate() {
+            let expected = if n % 2 == 0 {
+                matches!(token.kind, Kind::Word | Kind::Quoted)
+            } else {
+                self.is_char(open + 1 + n, b',')
+            };
+            if !expected {
+                return None;
+            }
+            names.extend(token.name.clone().filter(|_| n % 2 == 0));
+        }
+        (items.len() % 2 == 1).then_some(names)
+    }
+
+    /// The items of the select list of the first branch of the query from `k` to `end`, inside
+    /// the brackets that enclose it and past its `WITH` clause, as `select_list` reads them.
+    fn query_items(&self, mut k: usize, mut end: usize) -> Option<Vec<Option<String>>> {
+        loop {
+            k = self.skip_with(k)?;
+            if self.kind(k) != Some(Kind::Open) {
+                break;
+            }
+            end = self.close[k];
+            k += 1;
+        }
+        if self.keyword(k) != Some("select") {
+            return None;
+        }
+        self.select_list(k + 1, end)
+    }
+
+    /// Where the statement after a `WITH` clause at `k` starts, or `k` without one. None when the
+    /// clause does not read as one.
+    fn skip_with(&self, mut k: usize) -> Option<usize> {
+        if self.keyword(k) != Some("with") {
+            return Some(k);
+        }
+        k += 1 + usize::from(self.keyword(k + 1) == Some("recursive"));
+        loop {
+            k += 1;
+            if self.kind(k) == Some(Kind::Open) {
+                k = self.next(k);
+            }
+            if self.keyword(k) != Some("as") {
+                return None;
+            }
+            k += 1;
+            while matches!(self.keyword(k), Some("not" | "materialized")) {
+                k += 1;
+            }
+            if self.kind(k) != Some(Kind::Open) {
+                return None;
+            }
+            k = self.next(k);
+            if !self.is_char(k, b',') {
+                return Some(k);
+            }
+            k += 1;
+        }
+    }
+
+    /// The name of each item of a select list from `k`, after `SELECT`, to `end`, None for an
+    /// item without one. None when an item may give several columns: `*`, `t.*` or a placeholder.
+    fn select_list(&self, mut k: usize, end: usize) -> Option<Vec<Option<String>>> {
+        while let Some(word @ ("all" | "distinct")) = self.keyword(k) {
+            let on = word == "distinct" && self.keyword(k + 1) == Some("on");
+            k = if on { self.next(k + 2) } else { k + 1 };
+        }
+        let mut items = vec![vec![]];
+        while k < end && !self.ends_select(k) {
+            if self.is_char(k, b',') {
+                items.push(vec![]);
+            } else {
+                items.last_mut()?.push(k);
+            }
+            k = self.next(k);
+        }
+        items
+            .iter()
+            .map(|item| self.single_column(item).then(|| self.item_name(item)))
+            .collect()
+    }
+
+    /// Whether a select item gives one column: it is not empty, `*` or `t.*`, and has no
+    /// placeholder outside brackets but its alias.
+    fn single_column(&self, item: &[usize]) -> bool {
+        let Some((&last, rest)) = item.split_last() else {
+            return false;
+        };
+        let star = self.is_char(last, b'*') && rest.last().is_none_or(|&before| self.is_char(before, b'.'));
+        let aliased = rest.last().is_some_and(|&before| self.keyword(before) == Some("as"));
+        let expression = if aliased { rest } else { item };
+        !star && !expression.iter().any(|&i| self.kind(i) == Some(Kind::Placeholder))
+    }
+
+    fn ends_select(&self, k: usize) -> bool {
+        self.keyword(k).is_some_and(|w| SELECT_ENDS.contains(&w)) || self.is_char(k, b';')
+    }
+
+    /// The name PostgreSQL gives the column of a select item: its alias, after `AS` or bare, or the
+    /// column it reads, alone, qualified or cast. None for anything else, such as `*` or a call.
+    fn item_name(&self, item: &[usize]) -> Option<String> {
+        let (&last, rest) = item.split_last()?;
+        if rest.last().is_some_and(|&before| self.keyword(before) == Some("as")) {
+            return self.name(last);
+        }
+        let cast = item
+            .windows(2)
+            .position(|pair| self.is_char(pair[0], b':') && self.is_char(pair[1], b':'));
+        match cast {
+            Some(at) if at + 3 == item.len() && self.kind(last) == Some(Kind::Word) => self.column_name(&item[..at]),
+            Some(_) => None,
+            None => self.column_name(item).or_else(|| self.bare_alias(item)),
+        }
+    }
+
+    /// The column a select item reads when it is a name, alone or qualified.
+    fn column_name(&self, item: &[usize]) -> Option<String> {
+        match *item {
+            [name] => self
+                .name(name)
+                .filter(|n| self.kind(name) == Some(Kind::Quoted) || !NOT_BARE_ALIASES.contains(&n.as_str())),
+            [qualifier, dot, name] if self.name(qualifier).is_some() && self.is_char(dot, b'.') => self.name(name),
+            _ => None,
+        }
+    }
+
+    /// The alias a select item ends in without `AS`, after the expression it names.
+    fn bare_alias(&self, item: &[usize]) -> Option<String> {
+        let &[.., before, last] = item else {
+            return None;
+        };
+        let alias = self.name(last)?;
+        let reserved = |i: usize| self.keyword(i).is_some_and(|w| NOT_BARE_ALIASES.contains(&w));
+        let ends_operand = match self.kind(before)? {
+            Kind::Open | Kind::Literal | Kind::Quoted => true,
+            Kind::Word => !reserved(before) || self.keyword(before).is_some_and(|w| OPERAND_ENDS.contains(&w)),
+            Kind::Other => self.text.as_bytes()[self.tokens[before].start].is_ascii_digit(),
+            _ => false,
+        };
+        (ends_operand && !reserved(last)).then_some(alias)
+    }
+
+    fn name(&self, i: usize) -> Option<String> {
+        let token = self.tokens.get(i)?;
+        matches!(token.kind, Kind::Word | Kind::Quoted)
+            .then(|| token.name.clone())
+            .flatten()
+    }
+
+    /// The tokens of a definition that name no column of the table: the table and the bracket of
+    /// columns a `REFERENCES` names, and the storage parameters in the bracket after `WITH`.
+    fn unread(&self) -> Vec<bool> {
+        let mut unread = vec![false; self.tokens.len()];
+        let mut i = 0;
+        while i < self.tokens.len() {
+            let end = match self.keyword(i) {
+                Some("references") => self.reference_end(i),
+                Some("with") if self.kind(i + 1) == Some(Kind::Open) => self.close[i + 1] + 1,
+                _ => {
+                    i += 1;
+                    continue;
+                }
+            };
+            let end = end.min(self.tokens.len());
+            unread[i + 1..end].iter_mut().for_each(|r| *r = true);
+            i = end;
+        }
+        unread
+    }
+
+    /// Where what the `REFERENCES` at `i` names ends: past its table, qualified or not, and the
+    /// bracket of its columns.
+    fn reference_end(&self, i: usize) -> usize {
+        let mut end = i + 2;
+        while self.is_char(end, b'.') {
+            end += 2;
+        }
+        if self.kind(end) == Some(Kind::Open) {
+            end = self.close[end] + 1;
+        }
+        end
+    }
+
+    /// Whether token `i` of a definition names a column of the table.
+    fn is_definition_column(&self, i: usize) -> bool {
+        let Some(name) = self.name(i) else {
+            return false;
+        };
+        let word = self.kind(i) == Some(Kind::Word);
+        !(word && DEFINITION_WORDS.contains(&name.as_str()))
+            && !self.is_char(i + 1, b'.')
+            && !matches!(self.kind(i + 1), Some(Kind::Open))
+            && !(word && self.kind(i + 1) == Some(Kind::Literal))
+            && i.checked_sub(1)
+                .is_none_or(|before| !self.names_no_column(before, &name))
+    }
+
+    /// Whether token `before` makes the name after it no column: a qualifier, a cast, a keyword
+    /// that names something else or makes it a keyword, the end of an operand that an operator
+    /// class or a type name follows, or the bracket of `EXTRACT`.
+    fn names_no_column(&self, before: usize, name: &str) -> bool {
+        if let Some(word) = self.keyword(before) {
+            let follows = FOLLOWING_WORDS
+                .iter()
+                .any(|(first, then)| *first == word && then.contains(&name));
+            return follows || NAMING_WORDS.contains(&word) || !DEFINITION_WORDS.contains(&word);
+        }
+        let extract = self.kind(before) == Some(Kind::Open)
+            && before
+                .checked_sub(1)
+                .is_some_and(|call| self.keyword(call) == Some("extract"));
+        extract
+            || self.is_char(before, b'.')
+            || self.is_char(before, b':')
+            || matches!(self.kind(before), Some(Kind::Quoted | Kind::Close | Kind::Literal))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use ruff_python_parser::{parse_expression, parse_module};
@@ -2128,5 +2723,177 @@ mod tests {
         assert!(added("ALTER TABLE box ADD PRIMARY KEY (id)").is_empty());
         assert!(added("ALTER INDEX box_idx RENAME TO crate_idx").is_empty());
         assert!(added("SELECT 1 FROM box").is_empty());
+    }
+
+    /// The table and the names of the view a text creates, as `table: a b c` with `?` for unknowns.
+    fn viewed(text: &str) -> String {
+        let Some(view) = view(text) else {
+            return "none".to_owned();
+        };
+        let names = view.names.map_or("?".to_owned(), |n| n.join(" "));
+        format!("{}: {names}", view.table.as_deref().unwrap_or("?"))
+    }
+
+    #[test]
+    fn reads_the_name_and_the_columns_of_a_view() {
+        assert_eq!(
+            viewed("CREATE OR replace VIEW x_box_report AS(SELECT b.id AS id, b.depot_id, count(*) AS total FROM b)"),
+            "x_box_report: id depot_id total"
+        );
+        assert_eq!(
+            viewed("CREATE MATERIALIZED VIEW IF NOT EXISTS \"Box\" AS SELECT 0 n, \"Q\", w::date, b.w::text FROM b"),
+            "Box: n Q w w"
+        );
+        assert_eq!(viewed("create view %s as (select 1 as id)"), "?: id");
+        assert_eq!(viewed("CREATE VIEW x_{} AS SELECT 1 AS id"), "?: id");
+        assert_eq!(
+            viewed("DROP VIEW v; CREATE TABLE t (a int); CREATE VIEW v AS SELECT a FROM t"),
+            "v: a"
+        );
+        assert_eq!(
+            viewed("CREATE VIEW v (id, total) AS SELECT b.id, count(*) FROM b"),
+            "v: id total"
+        );
+        assert_eq!(
+            viewed("CREATE VIEW public.v (id) AS SELECT b.id, b.total, 1 AS n FROM b"),
+            "v: id total n"
+        );
+        assert_eq!(
+            viewed("CREATE VIEW v WITH (security_barrier) AS SELECT id FROM b"),
+            "v: id"
+        );
+        assert_eq!(
+            viewed(
+                "CREATE VIEW v AS (WITH RECURSIVE c (x) AS NOT MATERIALIZED (SELECT 1 AS x), d AS (SELECT 2) \
+                 SELECT DISTINCT ON (c.x) c.x AS id, row_number() OVER (ORDER BY c.x) rank, CASE WHEN true \
+                 THEN 1 END flag FROM c UNION SELECT 1, 2, 3)"
+            ),
+            "v: id rank flag"
+        );
+        assert_eq!(
+            viewed("CREATE VIEW v AS ((SELECT 1 AS id) UNION ALL (SELECT 2))"),
+            "v: id"
+        );
+    }
+
+    #[test]
+    fn leaves_the_columns_of_a_view_unknown_unless_each_item_names_one() {
+        for text in [
+            "CREATE VIEW v AS SELECT * FROM b",
+            "CREATE VIEW v AS SELECT b.* FROM b",
+            "CREATE VIEW v AS SELECT b.id, count(*) FROM b",
+            "CREATE VIEW v AS SELECT %s FROM b",
+            "CREATE VIEW v AS SELECT b.id AS %s FROM b",
+            "CREATE VIEW v AS SELECT NULL FROM b",
+            "CREATE VIEW v AS SELECT CASE WHEN a THEN b END FROM t",
+            "CREATE VIEW v AS SELECT a AND b FROM t",
+            "CREATE VIEW v AS SELECT x::double precision FROM t",
+            "CREATE VIEW v AS SELECT x::numeric(10, 2) FROM t",
+            "CREATE VIEW v AS VALUES (1)",
+            "CREATE VIEW v AS WITH c SELECT 1",
+            "CREATE VIEW v AS SELECT {} FROM b",
+            "CREATE VIEW v (a, b + 1) AS SELECT 1, 2",
+            "CREATE VIEW v (a) AS SELECT 1, count(*) FROM b",
+            "CREATE VIEW v (a) AS SELECT b.* FROM b",
+            "CREATE VIEW v (a, b, c) AS SELECT 1, 2",
+        ] {
+            assert_eq!(viewed(text), "v: ?", "{text}");
+        }
+        for text in [
+            "SELECT 1 AS id",
+            "CREATE TABLE v AS SELECT 1 AS id",
+            "CREATE VIEW reports.v AS SELECT 1 AS id",
+            "CREATE VIEW v SELECT 1 AS id",
+            "CREATE VIEW v AS (SELECT 1",
+        ] {
+            assert_eq!(viewed(text), "none", "{text}");
+        }
+    }
+
+    #[test]
+    fn reads_the_name_of_each_view_a_text_creates_whatever_follows_it() {
+        let created = |text: &str| -> Vec<String> {
+            created_views(text)
+                .into_iter()
+                .map(|name| name.unwrap_or_else(|| "?".to_owned()))
+                .collect()
+        };
+        assert_eq!(created("CREATE OR REPLACE VIEW x_report AS ({"), ["x_report"]);
+        assert_eq!(created("CREATE VIEW public.x_report AS {"), ["x_report"]);
+        assert_eq!(
+            created(
+                "DROP VIEW IF EXISTS a; CREATE VIEW a AS SELECT 1; CREATE MATERIALIZED VIEW IF NOT EXISTS \"B\" AS x"
+            ),
+            ["a", "B"]
+        );
+        assert_eq!(created("CREATE VIEW %s AS SELECT 1"), ["?"]);
+        assert_eq!(created("CREATE VIEW x_{} AS SELECT 1"), ["?"]);
+        assert_eq!(created("CREATE VIEW {"), ["?"]);
+        assert_eq!(created("CREATE OR REPLACE VIEW "), ["?"]);
+        assert!(created("CREATE VIEW reports.x AS SELECT 1").is_empty());
+        assert!(created("CREATE TABLE x AS SELECT 1; SELECT 'CREATE VIEW y AS'").is_empty());
+    }
+
+    fn defined(text: &str) -> Option<Vec<String>> {
+        definition_columns(text).map(|columns| columns.into_iter().map(|(name, _)| name).collect())
+    }
+
+    #[test]
+    fn reads_the_columns_a_definition_names() {
+        let names = |text: &str| defined(text).expect("a readable definition").join(" ");
+        assert_eq!(names("unique(name, company_id)"), "name company_id");
+        assert_eq!(
+            names("CHECK (key IS NOT NULL OR \"Mode\" = 'x' AND size>=0)"),
+            "key Mode size"
+        );
+        assert_eq!(
+            names("CHECK(sort IS NULL OR jsonb_typeof(sort::jsonb) = 'array' OR CAST(x AS integer) > 0)"),
+            "sort sort x"
+        );
+        assert_eq!(
+            names("CHECK(date_from <= date_to + interval '1 day' AND EXTRACT(year FROM day) > 2000)"),
+            "date_from date_to day"
+        );
+        assert_eq!(
+            names("FOREIGN KEY (box_id) REFERENCES parcel_box (id) ON DELETE CASCADE DEFERRABLE INITIALLY DEFERRED"),
+            "box_id"
+        );
+        assert_eq!(
+            names("EXCLUDE USING gist (tsrange(start, stop, '()') WITH &&, crate_id WITH =) WHERE (active)"),
+            "start stop crate_id active"
+        );
+        assert_eq!(
+            names("(lower(name) text_pattern_ops, code COLLATE \"C\" DESC NULLS LAST) INCLUDE (ref) WHERE x"),
+            "name code ref x"
+        );
+        assert_eq!(names("PRIMARY KEY (id)"), "id");
+        assert_eq!(names("(a) NULLS NOT DISTINCT"), "a");
+        assert_eq!(names("CHECK (t.a > 0 AND current_date > b AT TIME ZONE 'UTC')"), "b");
+        assert_eq!(names("CHECK (x::timestamp with time zone > y)"), "x y");
+        assert_eq!(names("CHECK (CAST(x AS timestamp with time zone) > y)"), "x y");
+        assert_eq!(names("CHECK (a > 0) NO INHERIT"), "a");
+        assert_eq!(names("CHECK (a IS UNKNOWN OR b IS NOT UNKNOWN)"), "a b");
+        assert_eq!(names("CHECK (substring(a FROM 1 FOR 3) <> 'x')"), "a");
+        assert_eq!(
+            names("CHECK (trim(LEADING FROM a) <> '' AND trim(BOTH FROM b) <> '')"),
+            "a b"
+        );
+        assert_eq!(
+            names("(a) WITH (fillfactor = 70, deduplicate_items = off) TABLESPACE fast WHERE b"),
+            "a b"
+        );
+        assert_eq!(names("UNIQUE (a) USING INDEX TABLESPACE fast"), "a");
+        assert_eq!(names("CHECK (time > 0 AND interval > 0)"), "time interval");
+    }
+
+    #[test]
+    fn places_each_definition_column_and_skips_what_it_cannot_read() {
+        assert_eq!(
+            definition_columns("UNIQUE (a, \"B\")"),
+            Some(vec![("a".to_owned(), 8), ("B".to_owned(), 11)])
+        );
+        for text in ["CHECK (a IN %s)", "UNIQUE ({})", "CHECK (a = 'x)", "UNIQUE (a"] {
+            assert!(definition_columns(text).is_none(), "{text}");
+        }
     }
 }

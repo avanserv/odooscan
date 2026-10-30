@@ -133,6 +133,9 @@ rules! {
     "OD222" "check-company-without-company" Correctness Warning Some(">=13.0"), true, "A field sets check_company to a comodel without company_id.";
     "OD223" "compute-leaves-field-unassigned" Correctness Error Some(">=14.0"), true, "A compute method leaves a non-stored readonly field unassigned on some records.";
     "OD224" "sql-unknown-column" Correctness Error None, true, "A literal SQL query names a column its model's table does not have.";
+    "OD225" "sql-view-missing-column" Correctness Error None, true, "The SQL view of a model selects no column for one of its stored fields.";
+    "OD226" "sql-view-not-created" Correctness Error None, true, "A model sets _auto = False, and nothing creates its SQL view.";
+    "OD227" "sql-definition-unknown-column" Correctness Error None, true, "An SQL constraint or index names a column its model's table does not have.";
     "OD301" "unresolved-xmlid" Correctness Error None, true, "The XML id is not defined by its module.";
     "OD302" "xmlid-not-in-depends" Correctness Error None, true, "The XML id comes from a module missing from depends.";
     "OD303" "duplicate-xmlid" Correctness Warning None, false, "The same XML id is defined twice in one file.";

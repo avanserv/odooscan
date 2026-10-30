@@ -5,8 +5,8 @@ use std::path::Path;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::facts::{
-    Annotation, ClassFact, DomainFact, FieldFact, JsFacts, JsName, ModelKind, OptionValue, OrmCall, Pos, RawDiag,
-    RecordFact, Spanned, SqlColumn, ViewFact, XmlRef,
+    Annotation, ClassFact, DefinitionSource, DomainFact, FieldFact, JsFacts, JsName, ModelKind, OptionValue, OrmCall,
+    Pos, RawDiag, RecordFact, Spanned, SqlColumn, SqlView, ViewFact, XmlRef,
 };
 use crate::flows;
 use crate::index::{
@@ -1124,6 +1124,8 @@ struct ModelFields<'m> {
     model: &'m str,
     fields: FxHashMap<&'m str, Field<'m>>,
     labels: Vec<Label<'m>>,
+    /// The view `init()` creates for the model, when its text spells the names of the columns.
+    view: Option<&'m SqlView>,
 }
 
 /// The label Odoo gives a field of a model, and the definition of this module that decides it with
@@ -1290,6 +1292,9 @@ impl<'m> Ctx<'_, 'm> {
                 self.self_dependencies(out, &file.path, class, fields, &mut reported_self_dependencies);
                 unassigned_computes(out, &file.path, class, fields);
                 self.parent_store(out, &file.path, class);
+                self.view_not_created(out, &file.path, class);
+                self.view_id(out, &file.path, class, fields);
+                self.definitions(out, &file.path, class);
                 for entry in &class.delegations {
                     self.delegation(out, &file.path, class, entry);
                 }
@@ -1320,6 +1325,7 @@ impl<'m> Ctx<'_, 'm> {
         self.tracking(out, path, field, own);
         self.check_company(out, path, field, own);
         self.duplicate_label(out, path, fields, own);
+        self.view_field(out, path, fields, own);
     }
 
     /// The fields of `model` as the registry builds them in scope, merged once for every rule.
@@ -1349,7 +1355,12 @@ impl<'m> Ctx<'_, 'm> {
                     here: None,
                 }),
         );
-        ModelFields { model, fields, labels }
+        ModelFields {
+            model,
+            fields,
+            labels,
+            view: self.view_of(model),
+        }
     }
 
     /// The field `name` of `model` as the registry builds it in scope.
@@ -2049,9 +2060,26 @@ enum Column<'m> {
     X2many(&'m str),
 }
 
+/// Why the table of a model has no column of a name.
+enum Lack<'m> {
+    NotStored,
+    Computed,
+    Unlogged,
+    X2many(&'m str),
+    /// A field of the parent model it names first, which the model reaches through `_inherits` by
+    /// the field it names second.
+    Delegated(&'m str, &'m str),
+    /// No field of the name; the `<name>_id` field the model stores, when it has one.
+    Undefined(Option<String>),
+}
+
+/// Methods and attributes that create the table or the view of a model with `_auto = False`.
+const VIEW_MAKERS: &[&str] = &["init", "_auto_init", "_table_query", "_table_sql"];
+
 /// OD224 on a qualified column a literal query names on the table of a model, which no stored
-/// field of the model provides. The rule does not run for a module whose scope is partial, nor in
-/// upgrade scripts, and reads only tables `column_model` accepts.
+/// field of the model provides, or on a view whose columns its `init()` spells, which selects no
+/// column of that name. The rule does not run for a module whose scope is partial, nor in upgrade
+/// scripts, and reads only tables `column_model` or `view_model` accepts.
 impl<'m> Ctx<'_, 'm> {
     fn sql_columns(&self, out: &mut Out<'m>, path: &'m Path, columns: &[SqlColumn]) {
         if self.partial {
@@ -2064,46 +2092,110 @@ impl<'m> Ctx<'_, 'm> {
         }
     }
 
-    /// The model whose stored fields make up `table`: the one model whose table it may be, which is
-    /// introduced in scope, takes that table there, has no plain Python base, and has a table Odoo
-    /// builds from its fields rather than an SQL view or a `_table_query`.
+    /// Whether `model` is the one model whose table may be `table`, introduced in scope, which
+    /// takes that table there and has no plain Python base.
+    fn owns_table(&self, model: &str, table: &str) -> bool {
+        self.index.table_models(table) == [model]
+            && self.index.table(model, self.scope).as_deref() == Some(table)
+            && self.index.introduced(model, self.scope)
+            && !self.index.plain_bases(model, self.scope)
+    }
+
+    /// The model whose stored fields make up `table`: the one `owns_table` accepts, when Odoo builds
+    /// the table from its fields rather than an SQL view or a table query.
     fn column_model(&self, table: &str) -> Option<&'m str> {
         let &[model] = self.index.table_models(table) else {
             return None;
         };
-        let table_query =
-            |c: &ClassFact| c.attr("_table_query").is_some() || c.methods.iter().any(|m| m == "_table_query");
-        let readable = self.index.table(model, self.scope).as_deref() == Some(table)
-            && self.index.introduced(model, self.scope)
-            && !self.index.plain_bases(model, self.scope)
-            && self.has_table(model)
-            && !self.some_class(model, table_query);
+        let readable = self.owns_table(model, table) && self.has_table(model) && !self.table_query(model);
         readable.then_some(model)
+    }
+
+    /// The model whose view is `table`, the one `owns_table` accepts, with the view `view_of` reads.
+    fn view_model(&self, table: &str) -> Option<(&'m str, &'m SqlView)> {
+        let &[model] = self.index.table_models(table) else {
+            return None;
+        };
+        let view = self.owns_table(model, table).then(|| self.view_of(model))??;
+        Some((model, view))
+    }
+
+    /// Whether a class of `model` in scope gives it a `_table_query` or, from 20.0, a `_table_sql`.
+    fn table_query(&self, model: &str) -> bool {
+        self.some_class(model, |c| {
+            c.methods.iter().any(|m| m == "_table_query" || m == "_table_sql")
+        })
     }
 
     /// The message on a column no field gives, unless a module adds it by hand.
     fn unknown_column(&self, column: &SqlColumn) -> Option<String> {
+        let head = format!("{}: {} has no such column", column.text, column.table);
+        if let Some((model, view)) = self.view_model(&column.table) {
+            let names = view.names.as_deref().unwrap_or_default();
+            return (!names.contains(&column.column)).then(|| {
+                format!(
+                    "{head}, since the view init() creates for {model} selects none; name a column the view selects"
+                )
+            });
+        }
         let model = self.column_model(&column.table)?;
         let name = column.column.as_str();
-        let found = self.column(model, name);
-        if matches!(found, Column::Present) || self.index.hand_made_column(model, &column.table, name, self.scope) {
+        let reason = match self.lack(model, &column.table, name)? {
+            Lack::NotStored => {
+                format!("{model}.{name} is not stored; set store=True on the field, or read it through the ORM")
+            }
+            Lack::Computed => format!("{model}.{name} is computed by the ORM, not stored; read it through the ORM"),
+            Lack::Unlogged => format!(
+                "{model}.{name} is not created, as {model} sets _log_access to False; drop it from the query, or log access on the model"
+            ),
+            Lack::X2many("One2many") => {
+                format!("{model}.{name} is a One2many; join the table of its comodel on its inverse field")
+            }
+            Lack::X2many(ftype) => format!("{model}.{name} is a {ftype}; join its relation table"),
+            Lack::Delegated(parent, via) => format!(
+                "{name} is a field of {parent}, which {model} reaches through _inherits; join {} on {via}",
+                self.parent_table(parent)
+            ),
+            Lack::Undefined(suggested) => format!("{model} has no field {name}; {}", fix_name(model, suggested)),
+        };
+        Some(format!("{head}, since {reason}"))
+    }
+
+    fn parent_table(&self, parent: &str) -> String {
+        self.index
+            .table(parent, self.scope)
+            .unwrap_or_else(|| parent.replace('.', "_"))
+    }
+
+    /// Why the `table` of `model` has no column `name`, None when it has one or may have one: a
+    /// module adds it by hand, or one outside the scope defines the field.
+    fn lack(&self, model: &'m str, table: &str, name: &str) -> Option<Lack<'m>> {
+        if self.index.hand_made_column(model, table, name, self.scope) {
             return None;
         }
-        let head = format!("{}: {} has no such column", column.text, column.table);
-        let fix = match found {
-            Column::Missing => return self.missing_column(model, column, &head),
-            Column::NotStored => "is not stored; set store=True on the field, or read it through the ORM".to_owned(),
-            Column::Computed => "is computed by the ORM, not stored; read it through the ORM".to_owned(),
-            Column::Unlogged => format!(
-                "is not created, as {model} sets _log_access to False; drop it from the query, or log access on the model"
-            ),
-            Column::X2many("One2many") => {
-                "is a One2many; join the table of its comodel on its inverse field".to_owned()
-            }
-            Column::X2many(ftype) => format!("is a {ftype}; join its relation table"),
-            Column::Present => return None,
-        };
-        Some(format!("{head}, since {model}.{name} {fix}"))
+        match self.column(model, name) {
+            Column::Present => None,
+            Column::NotStored => Some(Lack::NotStored),
+            Column::Computed => Some(Lack::Computed),
+            Column::Unlogged => Some(Lack::Unlogged),
+            Column::X2many(ftype) => Some(Lack::X2many(ftype)),
+            Column::Missing => self.undefined_column(model, name),
+        }
+    }
+
+    /// What a table lacks for a name no field of `model` in scope has, unless a module outside the
+    /// scope defines it.
+    fn undefined_column(&self, model: &'m str, name: &str) -> Option<Lack<'m>> {
+        if self.index.defines_field(model, name) {
+            return None;
+        }
+        if let Some((parent, via)) = self.delegated_field(model, name) {
+            return Some(Lack::Delegated(parent, via));
+        }
+        let suggested = format!("{name}_id");
+        let stored =
+            matches!(self.column(model, &suggested), Column::Present) && self.index.defines_field(model, &suggested);
+        Some(Lack::Undefined(stored.then_some(suggested)))
     }
 
     /// What the table of `model` holds for `name`. Of the fields Odoo adds without a definition,
@@ -2149,30 +2241,6 @@ impl<'m> Ctx<'_, 'm> {
         })
     }
 
-    /// The message on a name no field of `model` in scope has, unless a module outside the scope
-    /// defines it.
-    fn missing_column(&self, model: &'m str, column: &SqlColumn, head: &str) -> Option<String> {
-        let name = column.column.as_str();
-        if self.index.defines_field(model, name) {
-            return None;
-        }
-        if let Some((parent, via)) = self.delegated_field(model, name) {
-            let parent_table = self
-                .index
-                .table(parent, self.scope)
-                .unwrap_or_else(|| parent.replace('.', "_"));
-            return Some(format!(
-                "{head}, since {name} is a field of {parent}, which {model} reaches through _inherits; join {parent_table} on {via}"
-            ));
-        }
-        let suggested = format!("{name}_id");
-        let fix = match self.column(model, &suggested) {
-            Column::Present if self.index.defines_field(model, &suggested) => format!("use {suggested}"),
-            _ => format!("name the column of a stored field of {model}"),
-        };
-        Some(format!("{head}, since {model} has no field {name}; {fix}"))
-    }
-
     /// The model `model` delegates to through `_inherits` that has the field `name`, with the field
     /// that delegates to it.
     fn delegated_field(&self, model: &str, name: &str) -> Option<(&'m str, &'m str)> {
@@ -2184,27 +2252,265 @@ impl<'m> Ctx<'_, 'm> {
     }
 }
 
+/// The fix for a name no field of `model` has: its `_id` field, or else any stored field.
+fn fix_name(model: &str, suggested: Option<String>) -> String {
+    suggested.map_or_else(
+        || format!("name the column of a stored field of {model}"),
+        |field| format!("use {field}"),
+    )
+}
+
+/// OD225 and OD226 on models built on an SQL view, and OD227 on the columns of constraint and index
+/// definitions. They run where `registry` does.
+impl<'m> Ctx<'_, 'm> {
+    /// OD226 at the `_auto = False` of the class that introduces a model with a literal table that
+    /// `view_made` finds nothing to create, unless the class sets `_register = False`, which keeps
+    /// it out of the registry.
+    fn view_not_created(&self, out: &mut Out<'m>, path: &'m Path, class: &ClassFact) {
+        let auto = class.attr("_auto").filter(|a| a.value == OptionValue::Bool(false));
+        let unregistered = class
+            .attr("_register")
+            .is_some_and(|r| r.value == OptionValue::Bool(false));
+        let Some(auto) = auto.filter(|_| class.new_model && !unregistered) else {
+            return;
+        };
+        let model = class.model.as_str();
+        let Some(table) = self.index.table(model, self.scope) else {
+            return;
+        };
+        if self.view_made(model, &table) {
+            return;
+        }
+        out.push(
+            path,
+            "OD226",
+            auto.pos,
+            format!(
+                "_auto = False leaves {model} without a table, and nothing creates the view {table}; create it in init(), or drop _auto = False"
+            ),
+        );
+    }
+
+    /// Whether something may give `model` the relation `table`: a class of it or of a model it
+    /// inherits, in any indexed module, defines `init()` or `_auto_init()`, sets a table query or
+    /// has a plain Python base; another model, or a Many2many in scope, has that table; an indexed
+    /// module creates a view of that name in Python or SQL; or a module in scope creates a view it
+    /// names at runtime. `table_models` leaves out an abstract model.
+    fn view_made(&self, model: &str, table: &str) -> bool {
+        let creates = |c: &ClassFact| c.plain_bases || c.methods.iter().any(|m| VIEW_MAKERS.contains(&m.as_str()));
+        self.index.chain_classes(model).iter().any(|(_, c)| creates(c))
+            || self.index.table_models(table) != [model]
+            || self.index.relation_table(table, self.scope)
+            || self.index.creates_view(table)
+            || self.index.creates_any_view(self.scope)
+    }
+
+    /// The view the `init()` of `model` creates, when its text spells the names of the columns. The
+    /// model has no table nor table query, and the one class of it or of a model it inherits, in any
+    /// indexed module, that defines `init()` is one of `model` in scope, which creates one view, on
+    /// the table of the model or on a placeholder; none defines `_auto_init()`.
+    fn view_of(&self, model: &'m str) -> Option<&'m SqlView> {
+        if !self.viewed(model) {
+            return None;
+        }
+        let chain = self.index.chain_classes(model);
+        let defining = |method: &str| -> Vec<(usize, &'m ClassFact)> {
+            chain
+                .iter()
+                .filter(|(_, c)| c.methods.iter().any(|m| m == method))
+                .copied()
+                .collect()
+        };
+        let [(module, class)] = defining("init")[..] else {
+            return None;
+        };
+        let [view] = class.views.as_slice() else {
+            return None;
+        };
+        let table = self.index.table(model, self.scope)?;
+        let own = class.model == model && self.scope.sees(module) && defining("_auto_init").is_empty();
+        let on_table = view.table.as_ref().is_none_or(|t| *t == table);
+        (own && on_table && view.names.is_some()).then_some(view)
+    }
+
+    /// Whether `model` reads from a view: no class of it in scope is abstract, one sets
+    /// `_auto = False`, and none gives it a table query.
+    fn viewed(&self, model: &str) -> bool {
+        let auto_false = |c: &ClassFact| c.attr("_auto").is_some_and(|a| a.value == OptionValue::Bool(false));
+        self.every_class(model, |c| c.kind != ModelKind::Abstract)
+            && self.some_class(model, auto_false)
+            && !self.table_query(model)
+    }
+
+    /// OD225 on a field with a column, at its first definition, when the view of its model selects
+    /// no column of its name.
+    fn view_field(&self, out: &mut Out<'m>, path: &'m Path, fields: &ModelFields<'m>, own: &'m FieldFact) {
+        let (Some(view), Some(field)) = (fields.view, fields.fields.get(own.name.as_str())) else {
+            return;
+        };
+        let names = view.names.as_deref().unwrap_or_default();
+        let first = self.first_def(field).is_some_and(|d| std::ptr::eq(d.2, own));
+        if names.contains(&own.name) || !first || !has_certain_column(field) {
+            return;
+        }
+        let (model, name) = (fields.model, own.name.as_str());
+        out.push(
+            path,
+            "OD225",
+            own.name_pos,
+            format!(
+                "{model}.{name} is stored, but the view {} selects no column {name} for it; select one AS {name} in init()",
+                self.view_table(model, view)
+            ),
+        );
+    }
+
+    /// OD225 at the view `class` creates for its model, when the view selects no `id`, or no column
+    /// for a field with a column that another module defines first, which `view_field` reports
+    /// nowhere in this one.
+    fn view_id(&self, out: &mut Out<'m>, path: &'m Path, class: &ClassFact, fields: &ModelFields<'m>) {
+        let Some(view) = fields
+            .view
+            .filter(|v| class.views.iter().any(|own| std::ptr::eq(own, *v)))
+        else {
+            return;
+        };
+        let (model, table) = (fields.model, self.view_table(fields.model, view));
+        let names = view.names.as_deref().unwrap_or_default();
+        if !names.iter().any(|n| n == "id") {
+            let message = format!(
+                "the view {table} of {model} selects no id column, which every read of its records needs; select one AS id"
+            );
+            out.push(path, "OD225", view.pos, message);
+        }
+        for (name, module) in self.foreign_fields(fields, names) {
+            let message = format!(
+                "the view {table} of {model} selects no column {name}, which the stored field {model}.{name} of {module} needs; select one AS {name}"
+            );
+            out.push(path, "OD225", view.pos, message);
+        }
+    }
+
+    /// The fields with a column of a model with a view that the view selects no column for and
+    /// another module defines first, by name, with that module.
+    fn foreign_fields(&self, fields: &ModelFields<'m>, names: &[String]) -> Vec<(&'m str, &'m str)> {
+        let me = self.index.by_name[self.module.name.as_str()];
+        let mut found: Vec<(&str, &str)> = fields
+            .fields
+            .iter()
+            .filter(|(name, field)| !names.iter().any(|n| n == *name) && has_certain_column(field))
+            .filter_map(|(&name, field)| {
+                let (module, _, _) = self.first_def(field)?;
+                (*module != me).then(|| (name, self.index.modules[*module].name.as_str()))
+            })
+            .collect();
+        found.sort_unstable();
+        found
+    }
+
+    fn view_table(&self, model: &str, view: &SqlView) -> String {
+        view.table
+            .clone()
+            .or_else(|| self.index.table(model, self.scope))
+            .unwrap_or_else(|| model.replace('.', "_"))
+    }
+
+    /// OD227 on each column a constraint or an index definition of `class` names that the table of
+    /// its model lacks. Odoo reads `_sql_constraints` before 19.0 and the table objects from 19.0,
+    /// and applies neither to a model without a table of its fields.
+    fn definitions(&self, out: &mut Out<'m>, path: &'m Path, class: &'m ClassFact) {
+        let model = class.model.as_str();
+        if class.definitions.is_empty() || !self.has_table(model) || self.table_query(model) {
+            return;
+        }
+        let Some(table) = self.index.table(model, self.scope) else {
+            return;
+        };
+        for (_, column) in class
+            .definitions
+            .iter()
+            .filter(|(source, _)| applies(*source, self.series))
+        {
+            if let Some(reason) = self.definition_reason(model, &table, &column.value) {
+                let message = format!("{}: {table} has no such column, since {reason}", column.value);
+                out.push(path, "OD227", column.pos, message);
+            }
+        }
+    }
+
+    /// Why a definition cannot name `name` on the table of `model`, with the fix.
+    fn definition_reason(&self, model: &'m str, table: &str, name: &str) -> Option<String> {
+        Some(match self.lack(model, table, name)? {
+            Lack::NotStored => {
+                format!("{model}.{name} is not stored; set store=True on the field, or drop it from the definition")
+            }
+            Lack::Computed => format!("{model}.{name} is computed by the ORM, not stored; drop it from the definition"),
+            Lack::Unlogged => format!(
+                "{model}.{name} is not created, as {model} sets _log_access to False; drop it from the definition, or log access on the model"
+            ),
+            Lack::X2many(ftype) => {
+                format!("{model}.{name} is a {ftype}, which has no column; drop it from the definition")
+            }
+            Lack::Delegated(parent, _) => format!(
+                "{name} is a field of {parent}, which {model} reaches through _inherits; declare the definition on {parent}"
+            ),
+            Lack::Undefined(suggested) => format!("{model} has no field {name}; {}", fix_name(model, suggested)),
+        })
+    }
+}
+
+/// Whether Odoo applies the definitions of `source` in `series`, or may when it is unknown.
+fn applies(source: DefinitionSource, series: Option<Series>) -> bool {
+    let modern = series.map(|s| s >= Series { major: 19, minor: 0 });
+    match source {
+        DefinitionSource::SqlConstraints => modern != Some(true),
+        DefinitionSource::TableObject => modern != Some(false),
+    }
+}
+
+fn company_dependent(field: &Field) -> bool {
+    !matches!(
+        field.get("company_dependent"),
+        Merged::Unset | Merged::Known(OptionValue::Bool(false))
+    )
+}
+
 /// Whether a merged field has a column: x2many fields and fields not stored have none, and the
 /// column of a Binary or a company-dependent field depends on `attachment` or on the series.
 fn stored_column<'m>(field: &Field<'m>) -> Column<'m> {
     let ftype = field.defs.first().map_or("", |d| d.2.ftype.as_str());
-    let company_dependent = !matches!(
-        field.get("company_dependent"),
-        Merged::Unset | Merged::Known(OptionValue::Bool(false))
-    );
     match ftype {
         "One2many" | "Many2many" => Column::X2many(ftype),
         "Binary" | "Image" => Column::Present,
-        _ if company_dependent => Column::Present,
+        _ if company_dependent(field) => Column::Present,
         _ if field.stored() == Some(false) => Column::NotStored,
         _ => Column::Present,
     }
 }
 
+/// Whether a merged field certainly has a column: it is stored, and its column does not depend on
+/// `attachment` or the series, as `stored_column` says.
+fn has_certain_column(field: &Field) -> bool {
+    let ftype = field.defs.first().map_or("", |d| d.2.ftype.as_str());
+    let typed = !matches!(ftype, "One2many" | "Many2many" | "Binary" | "Image");
+    typed && !company_dependent(field) && field.stored() == Some(true)
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{derived_label, shadowed_member};
+    use super::{applies, derived_label, shadowed_member};
+    use crate::facts::DefinitionSource;
     use crate::series::Series;
+
+    #[test]
+    fn applies_sql_constraints_before_19_and_table_objects_from_19() {
+        let applied = |source, series: &str| applies(source, Series::parse(series));
+        assert!(
+            applied(DefinitionSource::SqlConstraints, "18.0") && !applied(DefinitionSource::SqlConstraints, "19.0")
+        );
+        assert!(!applied(DefinitionSource::TableObject, "18.0") && applied(DefinitionSource::TableObject, "19.0"));
+        assert!(applies(DefinitionSource::SqlConstraints, None) && applies(DefinitionSource::TableObject, None));
+    }
 
     #[test]
     fn derives_labels_as_python_title_case() {

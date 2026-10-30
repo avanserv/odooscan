@@ -70,7 +70,7 @@ class GardenTrellis(models.Model):
 class GardenZoneReport(models.Model):
     _name = "garden.zone.report"
     _description = "Garden zone report"
-    _auto = False
+    _auto = False  # odooscan: ignore[OD226]
     _parent_store = True
 
     parent_id = fields.Many2one("garden.zone.report")

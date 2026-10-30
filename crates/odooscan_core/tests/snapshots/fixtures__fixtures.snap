@@ -207,6 +207,13 @@ custom/registry_fields/models/shipment.py:11:17: OD205 'reference' is a Many2one
 custom/registry_fields/models/shipment.py:13:19: OD205 'carrier_ids' is a Many2one field elsewhere and is redefined here as Many2many
 custom/registry_fields/models/shipment.py:24:17: OD205 'reference' is a Char field elsewhere and is redefined here as Many2one
 custom/registry_fields/models/shipment.py:26:19: OD205 'carrier_ids' is a Many2many field elsewhere and is redefined here as Many2one
+custom/sql_columns/models/constraints.py:7:35: OD227 depot: parcel_box has no such column, since parcel.box has no field depot; use depot_id
+custom/sql_columns/models/constraints.py:8:36: OD227 total_weight: parcel_box has no such column, since parcel.box.total_weight is not stored; set store=True on the field, or drop it from the definition
+custom/sql_columns/models/constraints.py:9:38: OD227 tag_ids: parcel_box has no such column, since parcel.box.tag_ids is a Many2many, which has no column; drop it from the definition
+custom/sql_columns/models/constraints.py:10:34: OD227 display_name: parcel_box has no such column, since parcel.box.display_name is computed by the ORM, not stored; drop it from the definition
+custom/sql_columns/models/constraints.py:27:52: OD227 name: parcel_locker has no such column, since name is a field of parcel.depot, which parcel.locker reaches through _inherits; declare the definition on parcel.depot
+custom/sql_columns/models/parcels.py:74:5: OD226 _auto = False leaves parcel.report without a table, and nothing creates the view parcel_report; create it in init(), or drop _auto = False
+custom/sql_columns/models/parcels.py:166:63: OD227 write_date: parcel_beacon has no such column, since parcel.beacon.write_date is not created, as parcel.beacon sets _log_access to False; drop it from the definition, or log access on the model
 custom/sql_columns/models/queries.py:11:27: OD224 b.weight_uom: parcel_box has no such column, since parcel.box has no field weight_uom; use weight_uom_id
 custom/sql_columns/models/queries.py:16:48: OD224 parcel_box.label: parcel_box has no such column, since parcel.box has no field label; name the column of a stored field of parcel.box
 custom/sql_columns/models/queries.py:22:22: OD224 b.total_weight: parcel_box has no such column, since parcel.box.total_weight is not stored; set store=True on the field, or read it through the ORM
@@ -222,4 +229,13 @@ custom/sql_columns/models/queries.py:102:27: OD224 b.code: parcel_box has no suc
 custom/sql_columns/models/queries.py:115:34: OD224 b.shelf: parcel_box has no such column, since parcel.box has no field shelf; name the column of a stored field of parcel.box
 custom/sql_columns/models/queries.py:120:38: OD224 s.occupancy: parcel_shelf has no such column, since parcel.shelf.occupancy is not stored; set store=True on the field, or read it through the ORM
 custom/sql_columns/models/queries.py:121:46: OD224 c.create_date: parcel_beacon has no such column, since parcel.beacon.create_date is not created, as parcel.beacon sets _log_access to False; drop it from the query, or log access on the model
+custom/sql_columns/models/views.py:14:5: OD225 parcel.summary.heaviest is stored, but the view parcel_summary selects no column heaviest for it; select one AS heaviest in init()
+custom/sql_columns/models/views.py:39:53: OD224 s.heaviest: parcel_summary has no such column, since the view init() creates for parcel.summary selects none; name a column the view selects
+custom/sql_columns/models/views.py:48:5: OD225 parcel.summary.volume is stored, but the view parcel_summary selects no column volume for it; select one AS volume in init()
+custom/sql_columns/models/views.py:69:17: OD225 the view parcel_weekly of parcel.weekly selects no id column, which every read of its records needs; select one AS id
+custom/sql_objects/models/pallets.py:7:5: OD110 _sql_constraints is ignored; declare models.Constraint, models.Index or models.UniqueIndex attributes instead
+custom/sql_objects/models/pallets.py:12:47: OD227 lane_code: freight_pallet has no such column, since freight.pallet has no field lane_code; name the column of a stored field of freight.pallet
+custom/sql_objects/models/pallets.py:13:45: OD227 slot: freight_pallet has no such column, since freight.pallet has no field slot; name the column of a stored field of freight.pallet
+custom/sql_objects/models/pallets.py:14:64: OD227 bin: freight_pallet has no such column, since freight.pallet has no field bin; name the column of a stored field of freight.pallet
+custom/sql_view_builders/models/builders.py:8:29: OD225 the view parcel_manifest of parcel.manifest selects no column weight_total, which the stored field parcel.manifest.weight_total of sql_columns needs; select one AS weight_total
 custom/supers/models/supers.py:29:24: OD211 no parent class of bad.super defines '_prepare_gone', so this super() call fails

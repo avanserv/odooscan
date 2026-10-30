@@ -134,7 +134,8 @@ pub struct ClassFact {
     /// The delegating fields the `_inherits` dict names, at their entry.
     pub delegations: Vec<Spanned<String>>,
     pub fields: Vec<FieldFact>,
-    /// Methods the class defines, and `_check_company_domain` when it assigns one.
+    /// Methods the class defines, and `_check_company_domain`, `_table_query` and `_table_sql`
+    /// when it assigns them.
     pub methods: Vec<String>,
     /// The undotted names given to `@api.onchange` and `@api.constrains`.
     pub paths: Vec<Spanned<String>>,
@@ -151,11 +152,35 @@ pub struct ClassFact {
     pub plain_bases: bool,
     /// The value of `_table`, when the class sets it.
     pub table: Option<OptionValue>,
-    /// `_parent_store`, `_auto`, `_log_access` and `_table_query`, when the class sets them.
+    /// `_parent_store`, `_auto`, `_log_access` and `_register`, when the class sets them.
     pub attrs: Vec<(String, Spanned<OptionValue>)>,
     /// Compute methods, at their name, with the fields of the class they compute and can leave
     /// unassigned on a record.
     pub unassigned_computes: Vec<(Spanned<String>, Vec<String>)>,
+    /// The views `init()` creates with a literal `CREATE VIEW`.
+    pub views: Vec<SqlView>,
+    /// The columns each literal definition of `_sql_constraints`, or of a call of `Constraint`,
+    /// `Index` or `UniqueIndex` such as `models.Index(...)`, names, by where Odoo reads it.
+    pub definitions: Vec<(DefinitionSource, Spanned<String>)>,
+}
+
+/// A view a literal `CREATE VIEW` creates.
+#[derive(Debug)]
+pub struct SqlView {
+    /// The view's name, None for a placeholder such as `%s`.
+    pub table: Option<String>,
+    /// The names of its columns, None when the text does not spell each one.
+    pub names: Option<Vec<String>>,
+    pub pos: Pos,
+}
+
+/// Where a constraint or an index definition comes from, which decides the series Odoo reads it in.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DefinitionSource {
+    /// An entry of `_sql_constraints`, which Odoo reads before 19.0.
+    SqlConstraints,
+    /// A `Constraint`, `Index` or `UniqueIndex` attribute, such as `models.Index(...)`, from 19.0.
+    TableObject,
 }
 
 impl ClassFact {
@@ -256,6 +281,12 @@ pub struct PyFacts {
     /// The table and the column each literal `ALTER TABLE ... ADD COLUMN` or `create_column()`
     /// adds by hand, as modules do for a field Odoo does not store.
     pub added_columns: Vec<(String, String)>,
+    /// The names of the views `CREATE VIEW` queries create, wherever they run, when the literal
+    /// head of the query spells them.
+    pub created_views: Vec<String>,
+    /// A `CREATE VIEW` outside the `init()` or `_auto_init()` of a model names its view at runtime,
+    /// so it may create any view.
+    pub creates_any_view: bool,
     pub diags: Vec<RawDiag>,
     /// OD121 on the rollbacks of `ir.http._handle_exception()`, Odoo's hook for a failed request
     /// only before 16.0, which the series of the module decides.
