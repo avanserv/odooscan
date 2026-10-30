@@ -136,6 +136,7 @@ rules! {
     "OD225" "sql-view-missing-column" Correctness Error None, true, "The SQL view of a model selects no column for one of its stored fields.";
     "OD226" "sql-view-not-created" Correctness Error None, true, "A model sets _auto = False, and nothing creates its SQL view.";
     "OD227" "sql-definition-unknown-column" Correctness Error None, true, "An SQL constraint or index names a column its model's table does not have.";
+    "OD228" "delegate-without-ondelete" Correctness Error Some(">=saas~14.4,<saas~18.3"), true, "A delegate=True Many2one has no ondelete, so Odoo fails when it sets up the registry.";
     "OD301" "unresolved-xmlid" Correctness Error None, true, "The XML id is not defined by its module.";
     "OD302" "xmlid-not-in-depends" Correctness Error None, true, "The XML id comes from a module missing from depends.";
     "OD303" "duplicate-xmlid" Correctness Warning None, false, "The same XML id is defined twice in one file.";
@@ -240,6 +241,17 @@ mod tests {
         assert_eq!(od222.severity_for(Series::parse("18.0")), Severity::Error);
         assert_eq!(od222.severity_for(Series::parse("20.0")), Severity::Error);
         assert_eq!(od222.severity_for(None), Severity::Warning);
+    }
+
+    #[test]
+    fn delegate_crash_rule_runs_from_saas_14_4_before_saas_18_3() {
+        let od228 = rule("OD228");
+        assert!(!od228.applies_to(Series::parse("saas~14.3")));
+        assert!(!od228.applies_to(Series::parse("saas~18.3")));
+        assert!(!od228.applies_to(None));
+        assert!(od228.applies_to(Series::parse("saas~14.4")));
+        assert!(od228.applies_to(Series::parse("18.0")));
+        assert!(od228.applies_to(Series::parse("saas~18.2")));
     }
 
     #[test]

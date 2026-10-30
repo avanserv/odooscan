@@ -93,6 +93,7 @@ variable, since the scan cannot tell which model it names.
 | [OD225](OD225.md) | `sql-view-missing-column` | The SQL view of a model selects no column for one of its stored fields. |
 | [OD226](OD226.md) | `sql-view-not-created` | A model sets _auto = False, and nothing creates its SQL view. |
 | [OD227](OD227.md) | `sql-definition-unknown-column` | An SQL constraint or index names a column its model's table does not have. |
+| [OD228](OD228.md) | `delegate-without-ondelete` | A delegate=True Many2one has no ondelete, so Odoo fails when it sets up the registry. |
 
 ## OD3: XML ids, views and data
 

@@ -16,3 +16,10 @@ class LegacyLedger(models.Model):
     create_date = fields.Datetime(index=True)
     opened_on = fields.Datetime(string="Created on")
     stamped_on = fields.Datetime(string="Create Date")
+
+
+class LegacySeal(models.AbstractModel):
+    _name = "legacy.seal"
+    _description = "Legacy seal"
+
+    model_id = fields.Many2one("ir.model", delegate=True, required=True)
