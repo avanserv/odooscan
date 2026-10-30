@@ -265,6 +265,8 @@ custom/modern20/models/res_partner.py:74:40: OD220 'opened_on' has the label 'Cr
 custom/modern20/models/res_partner.py:75:35: OD220 'shown_as' has the label 'Stamp name' of field 'display_name' of modern.desk, so Odoo logs a warning and users cannot tell them apart; give it another string
 custom/modern20/models/res_partner.py:82:34: OD220 'caption' has the label 'Display Name' of field 'display_name' of modern.tag, so Odoo logs a warning and users cannot tell them apart; give it another string
 custom/modern20/models/res_partner.py:90:20: OD220 'display_name' has the label 'Display Name' of field 'caption' of modern.shelf, so Odoo logs a warning and users cannot tell them apart; give it another string
+custom/modern20/models/res_partner.py:111:7: OD401 model 'modern.lamp.shade' has no ir.model.access rule, so only the superuser can use it
+custom/modern20/models/res_partner.py:117:39: OD224 l.x_shade: modern_lamp has no such column, since modern.lamp has no field x_shade; name the column of a stored field of modern.lamp
 custom/modern20/models/tariff.py:13:45: OD212 Monetary field 'amount' takes its currency from 'x_tariff_currency_id', which modern.tariff does not have
 custom/modern20/models/tariff.py:16:39: OD224 t.code: modern_tariff has no such column, since modern.tariff has no field code; name the column of a stored field of modern.tariff
 custom/orm_overrides/models/caches.py:7:21: OD120 'lang' in an ormcache key is not a parameter of _greeting_for(), so every call raises NameError; key on a parameter or on self
@@ -338,6 +340,8 @@ custom/sql_columns/models/parcels.py:76:5: OD226 _auto = False leaves parcel.rep
 custom/sql_columns/models/parcels.py:168:63: OD227 write_date: parcel_beacon has no such column, since parcel.beacon.write_date is not created, as parcel.beacon sets _log_access to False; drop it from the definition, or log access on the model
 custom/sql_columns/models/parcels.py:219:62: OD224 t.channel: parcel_tracker has no such column, since parcel.tracker.channel is not stored; set store=True on the field, or read it through the ORM
 custom/sql_columns/models/parcels.py:229:52: OD224 t.lane: parcel_tracker has no such column, since parcel.tracker.lane is not stored; set store=True on the field, or read it through the ORM
+custom/sql_columns/models/parcels.py:263:7: OD401 model 'ParcelItemTagged' has no ir.model.access rule, so only the superuser can use it
+custom/sql_columns/models/parcels.py:269:39: OD224 i.x_tag: parcel_item has no such column, since parcel.item has no field x_tag; name the column of a stored field of parcel.item
 custom/sql_columns/models/queries.py:12:27: OD224 b.weight_uom: parcel_box has no such column, since parcel.box has no field weight_uom; use weight_uom_id
 custom/sql_columns/models/queries.py:17:48: OD224 parcel_box.label: parcel_box has no such column, since parcel.box has no field label; name the column of a stored field of parcel.box
 custom/sql_columns/models/queries.py:23:22: OD224 b.total_weight: parcel_box has no such column, since parcel.box.total_weight is not stored; set store=True on the field, or read it through the ORM

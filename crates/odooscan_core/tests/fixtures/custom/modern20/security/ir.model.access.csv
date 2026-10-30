@@ -2,3 +2,4 @@ id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
 access_modern_meter,modern.meter,model_modern_meter,base.group_user,1,0,0,0
 access_modern_desk,modern.desk,model_modern_desk,base.group_user,1,0,0,0
 access_modern_shelf,modern.shelf,model_modern_shelf,base.group_user,1,0,0,0
+access_modern_lamp,modern.lamp,model_modern_lamp,base.group_user,1,0,0,0

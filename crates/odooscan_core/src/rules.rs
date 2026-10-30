@@ -118,7 +118,7 @@ rules! {
     "OD206" "unknown-env-model" Correctness Warning None, true, "env[...] names a model no indexed module defines.";
     "OD207" "related-type-mismatch" Correctness Error None, true, "A related field has another type than the field it relates to.";
     "OD208" "invalid-one2many-inverse" Correctness Error None, true, "A One2many's inverse field is not a Many2one.";
-    "OD209" "model-redefined" Correctness Error None, true, "A new _name replaces a model that a module in depends already defines.";
+    "OD209" "model-redefined" Correctness Error None, true, "A class redefines a model that a module in depends already defines.";
     "OD210" "unknown-domain-field" Correctness Error None, true, "A literal domain or group_by names a field its model does not have.";
     "OD211" "orphan-super" Correctness Error None, true, "super() calls a method no parent class defines.";
     "OD212" "monetary-without-currency" Correctness Error None, true, "A Monetary field's currency field is not a field of its model.";

@@ -99,3 +99,29 @@ class ModernLedger(models.AbstractModel):
     _description = "Modern ledger"
 
     _table_query = fields.Char()
+
+
+class ModernLamp(models.Model):
+    _name = "modern.lamp"
+    _description = "Lamp"
+
+    name = fields.Char()
+
+
+class ModernLampShade(models.Model):
+    _inherit = ["modern.lamp"]
+
+    x_shade = fields.Char()
+
+    def x_shades(self):
+        self.env.cr.execute("SELECT l.x_shade FROM modern_lamp l")
+        return self.env.cr.fetchall()
+
+
+PARTNER = "res.partner"
+
+
+class ResPartner(models.Model):
+    _inherit = [PARTNER]
+
+    x_shade_id = fields.Many2one("modern.lamp")

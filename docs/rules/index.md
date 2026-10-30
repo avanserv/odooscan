@@ -72,7 +72,7 @@ knows its fields and methods.
 | [OD206](OD206.md) | `unknown-env-model` | env[...] names a model no indexed module defines. |
 | [OD207](OD207.md) | `related-type-mismatch` | A related field has another type than the field it relates to. |
 | [OD208](OD208.md) | `invalid-one2many-inverse` | A One2many's inverse field is not a Many2one. |
-| [OD209](OD209.md) | `model-redefined` | A new _name replaces a model that a module in depends already defines. |
+| [OD209](OD209.md) | `model-redefined` | A class redefines a model that a module in depends already defines. |
 | [OD210](OD210.md) | `unknown-domain-field` | A literal domain or group_by names a field its model does not have. |
 | [OD211](OD211.md) | `orphan-super` | super() calls a method no parent class defines. |
 | [OD212](OD212.md) | `monetary-without-currency` | A Monetary field's currency field is not a field of its model. |

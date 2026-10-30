@@ -258,3 +258,39 @@ class ParcelAntenna(models.Model):
 class ParcelAntennaQuiet(models.Model):
     _inherit = "parcel.antenna"
     _log_access = False
+
+
+class ParcelItemTagged(models.Model):
+    _inherit = ["parcel.item", "parcel.box"]
+
+    x_tag = fields.Char()
+
+    def x_tags(self):
+        self.env.cr.execute("SELECT i.x_tag FROM parcel_item i")
+        return self.env.cr.fetchall()
+
+
+class ParcelItemKept(models.Model):
+    _inherit = ["parcel.item"]
+
+    x_kept = fields.Char()
+
+    def x_kept_values(self):
+        self.env.cr.execute("SELECT i.x_kept FROM parcel_item i")
+        return self.env.cr.fetchall()
+
+
+class ParcelPallet(models.Model):
+    _name = "parcel.pallet"
+    _description = "Parcel pallet"
+
+    name = fields.Char()
+
+
+PARCEL_MIXINS = []
+
+
+class ParcelPalletMixed(models.Model):
+    _inherit = ["parcel.pallet", *PARCEL_MIXINS]
+
+    x_mixed = fields.Char()
