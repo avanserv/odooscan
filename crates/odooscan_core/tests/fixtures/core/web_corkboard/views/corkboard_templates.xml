@@ -1,0 +1,9 @@
+<odoo>
+    <template id="corkboard">
+        <html>
+            <body>
+                <div id="cork"/>
+            </body>
+        </html>
+    </template>
+</odoo>

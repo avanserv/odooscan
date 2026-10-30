@@ -1,0 +1,9 @@
+<odoo>
+    <template id="sketch">
+        <html>
+            <body>
+                <div id="outline"/>
+            </body>
+        </html>
+    </template>
+</odoo>

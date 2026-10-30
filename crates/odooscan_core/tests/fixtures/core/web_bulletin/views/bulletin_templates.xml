@@ -1,0 +1,9 @@
+<odoo>
+    <template id="bulletin">
+        <html>
+            <body>
+                <div id="bulletins"/>
+            </body>
+        </html>
+    </template>
+</odoo>

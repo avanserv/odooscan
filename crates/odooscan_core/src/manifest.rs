@@ -5,6 +5,31 @@ use crate::facts::Spanned;
 use crate::python::{Locator, str_lit};
 use crate::series::Series;
 
+/// The `auto_install` key as written: `True` waits on every depend. The index reads `Listed` by series,
+/// as only from `saas~12.4` does Odoo take a list for the depends it waits on.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub enum AutoInstall {
+    #[default]
+    Off,
+    Depends,
+    Listed(Vec<String>),
+}
+
+impl AutoInstall {
+    /// A collection with an entry that is not a string literal names unknown triggers, so it reads as `Off`.
+    fn read(value: &Expr) -> Self {
+        let entries = match value {
+            Expr::BooleanLiteral(b) if b.value => return Self::Depends,
+            Expr::List(l) => &l.elts[..],
+            Expr::Tuple(t) => &t.elts[..],
+            Expr::Set(s) => &s.elts[..],
+            _ => return Self::Off,
+        };
+        let names: Option<Vec<String>> = entries.iter().map(|e| str_lit(e).map(str::to_owned)).collect();
+        names.map_or(Self::Off, Self::Listed)
+    }
+}
+
 /// The manifest keys odooscan reads, evaluated as literals; the file is never executed.
 #[derive(Debug, Default)]
 pub struct Manifest {
@@ -16,8 +41,7 @@ pub struct Manifest {
     pub demo: Vec<Spanned<String>>,
     pub category: Option<String>,
     pub installable: bool,
-    /// `auto_install` is `True`, not a list of the depends that trigger it.
-    pub auto_install: bool,
+    pub auto_install: AutoInstall,
     /// Globs the `assets` bundles add, relative to the addons directory.
     pub assets: Vec<String>,
 }
@@ -44,7 +68,7 @@ impl Manifest {
             "category" => self.category = str_lit(value).map(str::to_owned),
             "installable" => self.installable = !matches!(value, Expr::BooleanLiteral(b) if !b.value),
             "assets" => self.assets = asset_globs(value),
-            "auto_install" => self.auto_install = matches!(value, Expr::BooleanLiteral(b) if b.value),
+            "auto_install" => self.auto_install = AutoInstall::read(value),
             _ => {}
         }
     }
@@ -126,6 +150,24 @@ mod tests {
         )
         .unwrap();
         assert_eq!(m.assets, ["x/static/src/**/*", "x/static/src/b.js"]);
+    }
+
+    #[test]
+    fn reads_auto_install_forms() {
+        let read = |src: &str| parse(src).unwrap().auto_install;
+        assert_eq!(read(r#"{"auto_install": True}"#), AutoInstall::Depends);
+        assert_eq!(
+            read(r#"{"auto_install": ["web"]}"#),
+            AutoInstall::Listed(vec!["web".to_owned()])
+        );
+        assert_eq!(read(r#"{"auto_install": []}"#), AutoInstall::Listed(vec![]));
+        assert_eq!(
+            read(r#"{"auto_install": {"web"}}"#),
+            AutoInstall::Listed(vec!["web".to_owned()])
+        );
+        assert_eq!(read(r#"{"auto_install": ["web", OTHER]}"#), AutoInstall::Off);
+        assert_eq!(read(r#"{"auto_install": False}"#), AutoInstall::Off);
+        assert_eq!(read(r#"{"name": "x"}"#), AutoInstall::Off);
     }
 
     #[test]

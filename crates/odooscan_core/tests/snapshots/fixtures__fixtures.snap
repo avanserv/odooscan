@@ -87,7 +87,9 @@ custom/bad_sale/views/views.xml:53:9: OD306 view_mode 'tree' is renamed 'list'
 custom/base_only/models/res_partner.py:17:16: OD202 model 'registry.invoice' comes from module registry_fields; add it to depends
 custom/base_only/views/views.xml:12:9: OD301 module web defines no XML id 'web.no_such_layout'
 custom/base_only/views/views.xml:49:9: OD302 'mail_digest.digest' is defined by module mail_digest; add it to depends
-custom/base_only/views/views.xml:58:9: OD302 'web_pinboard.pinboard' is defined by module web_pinboard; add it to depends
+custom/base_only/views/views.xml:94:9: OD302 'web_easel.easel' is defined by module web_easel; add it to depends
+custom/base_only/views/views.xml:103:9: OD302 'web_sketch.sketch' is defined by module web_sketch; add it to depends
+custom/base_only/views/views.xml:112:9: OD302 'web_ribbon.ribbon' is defined by module web_ribbon; add it to depends
 custom/cursor_state/controllers/main.py:13:13: OD121 rolling back discards the whole transaction, the caller's work included, while the code carries on; raise an exception so that Odoo rolls back, or run the step that may fail under self.env.cr.savepoint()
 custom/cursor_state/controllers/main.py:19:9: OD122 UPDATE on res_partner bypasses the ORM, so records this transaction already read keep stale values; call flush_model() before the query and invalidate_model() after it (flush() and invalidate_cache() before 16.0)
 custom/cursor_state/models/caches.py:6:1: OD124 _label_by_partner is filled at runtime but lives in the Python process, so every database the server runs shares it and each worker fills its own copy; cache on a model method with tools.ormcache, which Odoo keeps per database and clears in every worker
@@ -146,6 +148,8 @@ custom/form_patches/static/src/quick_form_card.js:8:24: OD605 no indexed bundle 
 custom/form_patches/static/src/quick_form_card.xml:14:9: OD606 no <div> with class 'o_form_status' in template web.FormController or the templates that extend it
 custom/form_patches/static/src/quick_form_card.xml:15:9: OD606 <div> with class 'o_mail_chatter' is added by module mail, which is not in depends
 custom/form_patches/static/src/quick_form_card.xml:18:19: OD605 no indexed bundle defines template 'web.FormCompiler'
+custom/legacy12/views/views.xml:12:9: OD302 'web_corkboard.corkboard' is defined by module web_corkboard; add it to depends
+custom/legacy12/views/views.xml:21:9: OD302 'web_slate.slate' is defined by module web_slate; add it to depends
 custom/legacy13/models/res_partner.py:7:72: OD213 'holder_id' is required, so Odoo refuses ondelete='set null'; use 'restrict' or 'cascade'
 custom/legacy13/models/res_partner.py:9:18: OD214 'origin_ids' and 'market_ids' are Many2many fields of res.partner to the same comodel without relation, so Odoo gives both the same table; set relation on one
 custom/legacy13/models/res_partner.py:12:68: OD222 'home_country_id' has check_company=True, but res.country has no company_id field to check; remove check_company

@@ -1,0 +1,9 @@
+<odoo>
+    <template id="noticeboard">
+        <html>
+            <body>
+                <div id="notices"/>
+            </body>
+        </html>
+    </template>
+</odoo>

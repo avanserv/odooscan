@@ -1,0 +1,28 @@
+<odoo>
+    <record id="noticeboard_banner" model="ir.ui.view">
+        <field name="inherit_id" ref="web_noticeboard.noticeboard"/>
+        <field name="arch" type="xml">
+            <xpath expr="//body" position="inside">
+                <div class="banner"/>
+            </xpath>
+        </field>
+    </record>
+
+    <record id="corkboard_banner" model="ir.ui.view">
+        <field name="inherit_id" ref="web_corkboard.corkboard"/>
+        <field name="arch" type="xml">
+            <xpath expr="//body" position="inside">
+                <div class="banner"/>
+            </xpath>
+        </field>
+    </record>
+
+    <record id="slate_banner" model="ir.ui.view">
+        <field name="inherit_id" ref="web_slate.slate"/>
+        <field name="arch" type="xml">
+            <xpath expr="//body" position="inside">
+                <div class="banner"/>
+            </xpath>
+        </field>
+    </record>
+</odoo>

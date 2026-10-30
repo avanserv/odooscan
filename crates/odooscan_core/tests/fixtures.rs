@@ -42,6 +42,24 @@ fn series_notice_only_without_default() {
         .filter(|n| n.contains("--odoo-version"))
         .count()
     };
-    assert_eq!(notices(None), 2);
+    assert_eq!(notices(None), 3);
     assert_eq!(notices(Series::parse("18.0")), 0);
+}
+
+#[test]
+fn default_series_reads_a_seriesless_auto_install_list() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+    // Before saas~12.4 the list waits on every depend, and web_sticker also depends on web_glue.
+    let reported = |default_series| {
+        scan(&ScanOptions {
+            paths: vec![root.join("custom")],
+            addons_paths: vec![root.join("core")],
+            default_series,
+        })
+        .diagnostics
+        .iter()
+        .any(|d| d.code == "OD302" && d.message.contains("'web_sticker.sticker'"))
+    };
+    assert!(!reported(None));
+    assert!(reported(Series::parse("12.0")));
 }

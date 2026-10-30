@@ -1,0 +1,9 @@
+<odoo>
+    <template id="sticker">
+        <html>
+            <body>
+                <div id="stickers"/>
+            </body>
+        </html>
+    </template>
+</odoo>
