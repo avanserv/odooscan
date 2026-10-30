@@ -696,6 +696,7 @@ impl<'m> Ctx<'_, 'm> {
         self.super_calls(out, path, class);
         if class.new_model
             && class.kind != ModelKind::Abstract
+            && class.registered()
             && !self.index.models_with_access.contains(class.model.as_str())
         {
             out.push(
@@ -2611,14 +2612,10 @@ fn fix_name(model: &str, suggested: Option<String>) -> String {
 /// definitions. They run where `registry` does.
 impl<'m> Ctx<'_, 'm> {
     /// OD226 at the `_auto = False` of the class that introduces a model with a literal table that
-    /// `view_made` finds nothing to create, unless the class sets `_register = False`, which keeps
-    /// it out of the registry.
+    /// `view_made` finds nothing to create, unless the class is kept out of the registry.
     fn view_not_created(&self, out: &mut Out<'m>, path: &'m Path, class: &ClassFact) {
         let auto = class.attr("_auto").filter(|a| a.value == OptionValue::Bool(false));
-        let unregistered = class
-            .attr("_register")
-            .is_some_and(|r| r.value == OptionValue::Bool(false));
-        let Some(auto) = auto.filter(|_| class.new_model && !unregistered) else {
+        let Some(auto) = auto.filter(|_| class.new_model && class.registered()) else {
             return;
         };
         let model = class.model.as_str();

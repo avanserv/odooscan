@@ -1698,6 +1698,25 @@ mod tests {
     }
 
     #[test]
+    fn reads_register_from_the_own_body() {
+        let registered = |body: &str| {
+            let facts = analyze(&format!(
+                "class X(models.Model):\n    _name = 'x'\n{body}\n\nclass Y(X):\n    _name = 'y'\n"
+            ));
+            let [x, y] = &facts.classes[..] else {
+                panic!("expected two classes, got {:?}", facts.classes);
+            };
+            (x.registered(), y.registered())
+        };
+        assert_eq!(registered("    _register = False"), (false, true));
+        assert_eq!(registered("    _register = None"), (false, true));
+        assert_eq!(registered("    _register = 0"), (false, true));
+        assert_eq!(registered("    _register = True"), (true, true));
+        assert_eq!(registered("    _register = REGISTER"), (true, true));
+        assert_eq!(registered(""), (true, true));
+    }
+
+    #[test]
     fn counts_cached_model_as_a_model_base() {
         for base in ["models.CachedModel", "CachedModel"] {
             let facts = analyze(&format!("class X({base}):\n    _name = 'x'\n"));
