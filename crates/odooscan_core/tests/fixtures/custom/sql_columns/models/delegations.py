@@ -353,3 +353,20 @@ class ParcelOutlet(models.Model):
     def x_outlet_columns(self):
         self.env.cr.execute("SELECT o.name FROM parcel_outlet o")
         return self.env.cr.fetchall()
+
+
+RAMP_EXTRA = "parcel.boxed"
+
+
+# An _inherit element that is not a literal may name a parent whose _inherits gives any column.
+class ParcelRamp(models.Model):
+    _name = "parcel.ramp"
+    _inherit = ["parcel.hosted", RAMP_EXTRA]
+    _description = "Parcel ramp"
+    _sql_constraints = [
+        ("boxed_unique", "UNIQUE(x_boxed_id)", "A box rests on one ramp."),
+    ]
+
+    def x_ramp_columns(self):
+        self.env.cr.execute("SELECT r.x_host_id, r.x_boxed_id FROM parcel_ramp r")
+        return self.env.cr.fetchall()

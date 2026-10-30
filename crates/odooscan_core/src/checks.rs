@@ -1680,9 +1680,7 @@ impl<'m> Ctx<'_, 'm> {
         if a.1.model == model || b.1.model == model {
             return self.merges_before(model, a, b);
         }
-        let Some(listed) = self.listed(model) else {
-            return false;
-        };
+        let listed = self.listed(model);
         let (Some(pa), Some(pb)) = (listed.through(a.1), listed.through(b.1)) else {
             return false;
         };
@@ -1697,13 +1695,8 @@ impl<'m> Ctx<'_, 'm> {
         std::ptr::eq(pa.class, pb.class) && pa.at > pb.at
     }
 
-    /// The models the in-scope classes of `model` list in `_inherit`, with what each merges. None
-    /// when a class `model` merges lists models that are not literals, which may hide a path.
-    fn listed(&self, model: &str) -> Option<Listed<'m>> {
-        let unknown = |(_, c): &(usize, &ClassFact)| c.inherit_unknown;
-        if self.index.merged_classes(model, self.scope).iter().any(unknown) {
-            return None;
-        }
+    /// The models the in-scope classes of `model` list in `_inherit`, with what each merges.
+    fn listed(&self, model: &str) -> Listed<'m> {
         let classes = self.index.classes(model).iter().filter(|(mi, _)| self.scope.sees(*mi));
         let parents = classes.flat_map(|&(_, class)| {
             let listed = class.inherit.iter().enumerate().filter(|(_, p)| p.value != model);
@@ -1714,9 +1707,9 @@ impl<'m> Ctx<'_, 'm> {
                 merges: self.index.merged_classes(&p.value, self.scope),
             })
         });
-        Some(Listed {
+        Listed {
             parents: parents.collect(),
-        })
+        }
     }
 
     /// Whether a class of `model` in scope lists another model before `model` in `_inherit`.
@@ -1854,12 +1847,13 @@ impl<'m> Ctx<'_, 'm> {
     }
 
     /// Whether the `_inherits` of `model` names the field `name`, None when unknown: a class gives
-    /// one that is not literal, or the last classes giving a parent model disagree on whether its
-    /// field is `name`. Odoo merges the `_inherits` of the classes the model merges, those of the
-    /// models it inherits included, key by key, a later class replacing the field of a parent.
+    /// an `_inherits` or lists an `_inherit` that is not literal, whose unseen parent may give an
+    /// entry, or the last classes giving a parent model disagree on whether its field is `name`.
+    /// Odoo merges the `_inherits` of the classes the model merges, those of the models it
+    /// inherits included, key by key, a later class replacing the field of a parent.
     fn inherits_entry(&self, model: &str, name: &str) -> Option<bool> {
         let classes = self.index.merged_classes(model, self.scope);
-        if classes.iter().any(|(_, c)| c.inherits_unknown) {
+        if classes.iter().any(|(_, c)| c.inherits_unknown || c.inherit_unknown) {
             return None;
         }
         let entries: Vec<Entry<'m>> = classes

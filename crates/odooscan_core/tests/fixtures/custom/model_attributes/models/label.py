@@ -160,3 +160,26 @@ class GardenBarn(models.AbstractModel):
 
     partner_id = fields.Many2one(delegate=True)
     tenant_id = fields.Many2one(delegate=True, required=False)
+
+
+class GardenFenced(models.AbstractModel):
+    _name = "garden.fenced"
+    _description = "Fenced garden item"
+    _inherits = {"res.country": "fence_country_id", "res.currency": "fence_currency_id"}
+
+    fence_country_id = fields.Many2one("res.country", required=True, ondelete="cascade")
+    fence_currency_id = fields.Many2one("res.currency", required=True, ondelete="cascade")
+
+
+LOFT_EXTRA = "garden.fenced"
+
+
+# The scan does not resolve LOFT_EXTRA, whose _inherits may name both fields, so neither is held
+# to the rules for a field no entry names.
+class GardenLoft(models.AbstractModel):
+    _name = "garden.loft"
+    _inherit = ["garden.held", LOFT_EXTRA]
+    _description = "Garden loft"
+
+    fence_country_id = fields.Many2one(delegate=True)
+    fence_currency_id = fields.Many2one(required=True, ondelete="set null")
