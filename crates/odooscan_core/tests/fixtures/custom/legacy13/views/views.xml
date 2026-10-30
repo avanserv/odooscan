@@ -7,4 +7,15 @@
             </xpath>
         </field>
     </record>
+
+    <record id="stamp_form" model="ir.ui.view">
+        <field name="name">legacy.stamp.form</field>
+        <field name="model">legacy.stamp</field>
+        <field name="arch" type="xml">
+            <form>
+                <button type="object" name="action_stmap"/>
+                <button type="object" name="_stamp"/>
+            </form>
+        </field>
+    </record>
 </odoo>

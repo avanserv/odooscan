@@ -95,6 +95,22 @@ custom/base_only/views/views.xml:94:9: OD302 'web_easel.easel' is defined by mod
 custom/base_only/views/views.xml:103:9: OD302 'web_sketch.sketch' is defined by module web_sketch; add it to depends
 custom/base_only/views/views.xml:112:9: OD302 'web_ribbon.ribbon' is defined by module web_ribbon; add it to depends
 custom/base_only/views/views.xml:123:13: OD310 no <div id="sidebar"> in view web.layout or the views that extend it
+custom/button_calls/views/buttons.xml:9:49: OD312 button.order has no method 'action_confrim'
+custom/button_calls/views/buttons.xml:13:49: OD313 method '_helper' of button.order is private, so Odoo refuses to call it from a button
+custom/button_calls/views/buttons.xml:14:49: OD313 method 'action_audit' of button.order is private, so Odoo refuses to call it from a button
+custom/button_calls/views/buttons.xml:15:49: OD313 method 'action_seal' of button.order is private, so Odoo refuses to call it from a button
+custom/button_calls/views/buttons.xml:25:53: OD312 button.line has no method 'action_confirm'
+custom/button_calls/views/buttons.xml:39:49: OD312 res.partner has no method 'action_confirm'
+custom/button_calls/views/buttons.xml:52:45: OD312 button.order has no method 'action_stmap'
+custom/button_calls/views/buttons.xml:55:45: OD312 button.line has no method 'action_splt'
+custom/button_calls/views/buttons.xml:71:45: OD312 button.ticket has no method 'action_confirm'
+custom/button_calls/views/buttons.xml:81:45: OD312 method 'action_follow' of res.partner comes from module mail, which is not in depends
+custom/button_calls/views/buttons.xml:111:9: OD301 module button_calls defines no XML id 'button_calls.order_nowhere'
+custom/button_calls/views/calls.xml:5:42: OD314 button.order has no method '_run_misspelled'
+custom/button_calls/views/calls.xml:6:41: OD314 method 'action_follow' of res.partner comes from module mail, which is not in depends
+custom/button_mixin/models/hooks.py:19:17: OD201 no indexed module defines model 'ghost.mixin'
+custom/button_partial/__manifest__.py:4:25: OD503 module 'ghost_enterprise' is not on the addons path
+custom/button_partial/views/partial.xml:8:45: OD313 method '_from_enterprise' of button.visit is private, so Odoo refuses to call it from a button
 custom/cursor_state/controllers/main.py:13:13: OD121 rolling back discards the whole transaction, the caller's work included, while the code carries on; raise an exception so that Odoo rolls back, or run the step that may fail under self.env.cr.savepoint()
 custom/cursor_state/controllers/main.py:19:9: OD122 UPDATE on res_partner bypasses the ORM, so records this transaction already read keep stale values; call flush_model() before the query and invalidate_model() after it (flush() and invalidate_cache() before 16.0)
 custom/cursor_state/models/caches.py:6:1: OD124 _label_by_partner is filled at runtime but lives in the Python process, so every database the server runs shares it and each worker fills its own copy; cache on a model method with tools.ormcache, which Odoo keeps per database and clears in every worker
@@ -191,6 +207,8 @@ custom/legacy13/models/ledger.py:18:41: OD220 'stamped_on' has the label 'Create
 custom/legacy13/models/res_partner.py:7:72: OD213 'holder_id' is required, so Odoo refuses ondelete='set null'; use 'restrict' or 'cascade'
 custom/legacy13/models/res_partner.py:9:18: OD214 'origin_ids' and 'market_ids' are Many2many fields of res.partner to the same comodel without relation, so Odoo gives both the same table; set relation on one
 custom/legacy13/models/res_partner.py:12:68: OD222 'home_country_id' has check_company=True, but res.country has no company_id field to check; remove check_company
+custom/legacy13/views/views.xml:16:45: OD312 legacy.stamp has no method 'action_stmap'
+custom/legacy13/views/views.xml:17:45: OD313 method '_stamp' of legacy.stamp is private, so Odoo refuses to call it from a button
 custom/legacy14/models/badge.py:7:33: OD218 _inherits delegates to 'partner_id', which must be required with ondelete 'cascade' or 'restrict'; give it ondelete="cascade"
 custom/legacy14/models/badge.py:9:73: OD213 'partner_id' is required, so Odoo refuses ondelete='set null'; use 'restrict' or 'cascade'
 custom/legacy14/models/badge.py:10:58: OD218 'country_id' has delegate=True, so it must be required with ondelete 'cascade' or 'restrict'; give it ondelete="cascade"

@@ -1,0 +1,122 @@
+<odoo>
+    <record id="order_form" model="ir.ui.view">
+        <field name="name">button.order.form</field>
+        <field name="model">button.order</field>
+        <field name="arch" type="xml">
+            <form>
+                <header>
+                    <button type="object" name="action_confirm"/>
+                    <button type="object" name="action_confrim"/>
+                    <button type="object" name="action_stamp"/>
+                    <button type="object" name="action_validate"/>
+                    <button type="object" name="toggle_active"/>
+                    <button type="object" name="_helper"/>
+                    <button type="object" name="action_audit"/>
+                    <button type="object" name="action_seal"/>
+                    <button special="cancel" type="object" name="action_nothing"/>
+                    <button type="object" t-att-name="next_step"/>
+                    <button type="action" name="open_lines"/>
+                </header>
+                <field name="name"/>
+                <field name="line_ids">
+                    <list>
+                        <field name="name"/>
+                        <button type="object" name="action_split"/>
+                        <button type="object" name="action_confirm"/>
+                    </list>
+                </field>
+            </form>
+        </field>
+    </record>
+
+    <record id="order_list" model="ir.ui.view">
+        <field name="name">button.order.list</field>
+        <field name="model">button.order</field>
+        <field name="arch" type="xml">
+            <list>
+                <field name="name"/>
+                <groupby name="partner_id">
+                    <button type="object" name="action_confirm"/>
+                    <button type="object" name="write"/>
+                </groupby>
+            </list>
+        </field>
+    </record>
+
+    <record id="order_form_extension" model="ir.ui.view">
+        <field name="name">button.order.form.extension</field>
+        <field name="inherit_id" ref="order_form"/>
+        <field name="arch" type="xml">
+            <xpath expr="//header" position="inside">
+                <button type="object" name="action_stamp"/>
+                <button type="object" name="action_stmap"/>
+            </xpath>
+            <xpath expr="//field[@name='line_ids']/list/field[@name='name']" position="after">
+                <button type="object" name="action_splt"/>
+            </xpath>
+            <xpath expr="//list" position="inside">
+                <button type="object" name="action_nothing"/>
+            </xpath>
+            <button name="open_lines" type="object" position="after">
+                <button type="object" name="action_confirm"/>
+            </button>
+        </field>
+    </record>
+
+    <record id="ticket_form" model="ir.ui.view">
+        <field name="name">button.ticket.form</field>
+        <field name="model">button.ticket</field>
+        <field name="arch" type="xml">
+            <form>
+                <button type="object" name="action_confirm"/>
+            </form>
+        </field>
+    </record>
+
+    <record id="partner_form" model="ir.ui.view">
+        <field name="name">res.partner.form.buttons</field>
+        <field name="model">res.partner</field>
+        <field name="arch" type="xml">
+            <form>
+                <button type="object" name="action_follow"/>
+            </form>
+        </field>
+    </record>
+
+    <record id="order_page" model="ir.ui.view">
+        <field name="name">button.order.page</field>
+        <field name="model">button.order</field>
+        <field name="type">qweb</field>
+        <field name="arch" type="xml">
+            <div>
+                <button type="object" name="action_nothing"/>
+            </div>
+        </field>
+    </record>
+
+    <record id="order_page_extension" model="ir.ui.view">
+        <field name="name">button.order.page.extension</field>
+        <field name="model">button.order</field>
+        <field name="inherit_id" ref="order_page"/>
+        <field name="arch" type="xml">
+            <xpath expr="//div" position="inside">
+                <button type="object" name="action_nothing"/>
+            </xpath>
+        </field>
+    </record>
+
+    <record id="order_lost_parent" model="ir.ui.view">
+        <field name="name">button.order.lost.parent</field>
+        <field name="model">button.order</field>
+        <field name="inherit_id" ref="order_nowhere"/>
+        <field name="arch" type="xml">
+            <xpath expr="//header" position="inside">
+                <button type="object" name="action_nothing"/>
+            </xpath>
+        </field>
+    </record>
+
+    <template id="order_snippet">
+        <button type="object" name="action_nothing"/>
+    </template>
+</odoo>

@@ -1,0 +1,24 @@
+<odoo>
+    <record id="plain_form" model="ir.ui.view">
+        <field name="name">button.plain.form</field>
+        <field name="model">button.plain</field>
+        <field name="arch" type="xml">
+            <form>
+                <button type="object" name="action_hook"/>
+            </form>
+        </field>
+    </record>
+
+    <record id="ghosted_form" model="ir.ui.view">
+        <field name="name">button.ghosted.form</field>
+        <field name="model">button.ghosted</field>
+        <field name="arch" type="xml">
+            <form>
+                <button type="object" name="action_ghost"/>
+            </form>
+        </field>
+    </record>
+
+    <function model="button.plain" name="action_hook"/>
+    <function model="button.ghosted" name="action_ghost"/>
+</odoo>

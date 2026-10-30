@@ -5,8 +5,8 @@ use std::path::Path;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::facts::{
-    Annotation, ClassFact, DefinitionSource, DomainFact, FieldFact, JsFacts, JsName, ModelKind, OptionValue, OrmCall,
-    Pos, RawDiag, RecordFact, Spanned, SqlColumn, SqlView, ViewFact, XmlRef,
+    Annotation, ClassFact, DefinitionSource, DomainFact, FieldFact, FunctionCall, JsFacts, JsName, ModelKind,
+    OptionValue, OrmCall, Pos, RawDiag, RecordFact, Spanned, SqlColumn, SqlView, ViewFact, XmlRef,
 };
 use crate::index::{
     BASE_MODEL_METHODS, Export, FieldDef, FieldInfo, Index, JsSpec, RELATIONAL_TYPES, Scope, Status, ViewTree, full_id,
@@ -955,6 +955,9 @@ impl<'m> Ctx<'_, 'm> {
             for record in &file.facts.records {
                 self.record(out, path, record);
             }
+            for call in &file.facts.functions {
+                self.function_call(out, path, call);
+            }
             self.domains(out, path, &file.facts.action_domains);
         }
     }
@@ -1043,6 +1046,7 @@ impl<'m> Ctx<'_, 'm> {
         };
         let Some(model) = model else { return };
         self.view_domains(out, path, model, view);
+        self.buttons(out, path, model, view);
         for field in view
             .fields
             .iter()
@@ -1067,21 +1071,77 @@ impl<'m> Ctx<'_, 'm> {
 
     /// Domains in an arch filter the model at their position: the view's, or a subview's comodel.
     fn view_domains(&self, out: &mut Out<'m>, path: &'m Path, model: &str, view: &ViewFact) {
-        for d in view
-            .domains
-            .iter()
-            .filter(|d| !d.path.iter().any(|s| s == UNKNOWN_CONTEXT))
-        {
-            let Some(joined) = self.arch_path(model, &d.path) else {
-                continue;
-            };
-            let target = match joined.as_str() {
-                "" => Some(model.to_owned()),
-                joined => self.index.path_comodel(model, joined, self.scope),
-            };
+        for d in &view.domains {
+            let target = self.arch_model(model, &d.path);
             for f in target.iter().flat_map(|t| d.fields.iter().map(move |f| (t, f))) {
                 self.path(out, path, "OD210", f.0, f.1);
             }
+        }
+    }
+
+    /// The model of an arch position: the view's, or the comodel of the subviews that enclose it.
+    fn arch_model(&self, model: &str, segments: &[String]) -> Option<String> {
+        if segments.iter().any(|s| s == UNKNOWN_CONTEXT) {
+            return None;
+        }
+        match self.arch_path(model, segments)?.as_str() {
+            "" => Some(model.to_owned()),
+            joined => self.index.path_comodel(model, joined, self.scope),
+        }
+    }
+
+    /// Odoo checks a button on the model at its arch position, unless the tree is QWeb, whose
+    /// buttons are plain HTML. A root the index cannot read may be QWeb.
+    fn buttons(&self, out: &mut Out<'m>, path: &'m Path, model: &str, view: &ViewFact) {
+        let kind = match view.inherit.as_deref() {
+            Some(parent) => self.index.view_kind(full_id(&self.module.name, parent)),
+            None => view.kind.as_deref(),
+        };
+        if kind.is_none_or(|k| k == QWEB) {
+            return;
+        }
+        for button in &view.buttons {
+            if let Some(target) = self.arch_model(model, &button.path) {
+                self.button(out, path, &target, &button.method);
+            }
+        }
+    }
+
+    /// A leading `_` is private whatever the model defines, so it needs no lookup. `@api.private`
+    /// counts on any definition, since Odoo walks the whole MRO.
+    fn button(&self, out: &mut Out<'m>, path: &'m Path, model: &str, method: &Spanned<String>) {
+        let name = &method.value;
+        if name.starts_with('_') || self.index.private_method(model, name, self.scope) {
+            let message = format!("method '{name}' of {model} is private, so Odoo refuses to call it from a button");
+            out.push(path, "OD313", method.pos, message);
+        } else if let Some(message) = self.method_gap(model, name) {
+            out.push(path, "OD312", method.pos, message);
+        }
+    }
+
+    fn function_call(&self, out: &mut Out<'m>, path: &'m Path, call: &FunctionCall) {
+        if let Some(message) = self.method_gap(&call.model, &call.method.value) {
+            out.push(path, "OD314", call.method.pos, message);
+        }
+    }
+
+    /// Why `model` lacks the method a data file calls, when the scan sees every class that could
+    /// define it. A model that is not visible is OD201's or OD202's.
+    fn method_gap(&self, model: &str, method: &str) -> Option<String> {
+        if self.partial
+            || self.dynamic
+            || !matches!(self.index.model_status(model, self.scope, None), Status::Visible)
+            || self.index.hidden_parents(model, self.scope)
+            || self.index.unindexed_parent(model, self.scope)
+        {
+            return None;
+        }
+        match self.index.data_method(model, method, self.scope) {
+            Status::Visible => None,
+            Status::Hidden(m) => Some(format!(
+                "method '{method}' of {model} comes from module {m}, which is not in depends"
+            )),
+            Status::Missing => Some(format!("{model} has no method '{method}'")),
         }
     }
 

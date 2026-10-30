@@ -1,0 +1,9 @@
+<odoo>
+    <function model="button.order" name="action_confirm" eval="[[]]"/>
+    <function model="button.order" name="_helper"/>
+    <function model="button.order" name="_get_external_ids"/>
+    <function model="button.order" name="_run_misspelled"/>
+    <function model="res.partner" name="action_follow"/>
+    <function model="button.nowhere" name="action_nothing"/>
+    <function model="mail.thread" name="action_nothing"/>
+</odoo>
