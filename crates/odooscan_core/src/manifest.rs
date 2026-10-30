@@ -5,6 +5,15 @@ use crate::facts::Spanned;
 use crate::python::{Locator, str_lit};
 use crate::series::Series;
 
+/// The first series that loads a module's data from `data` alone (`saas~15.2`).
+const DATA_ONLY: Series = Series { major: 15, minor: 2 };
+
+/// The first series that loads the files of `init_xml` with those of `data` again (`19.0`).
+const INIT_XML_BACK: Series = Series { major: 19, minor: 0 };
+
+/// The first series that loads the files of `data` alone again (`20.0`).
+const INIT_XML_GONE: Series = Series { major: 20, minor: 0 };
+
 /// The `auto_install` key as written: `True` waits on every depend. The index reads `Listed` by series,
 /// as only from `saas~12.4` does Odoo take a list for the depends it waits on.
 #[derive(Debug, Default, PartialEq, Eq)]
@@ -36,8 +45,8 @@ pub struct Manifest {
     pub version: Option<String>,
     pub depends: Vec<Spanned<String>>,
     pub data: Vec<Spanned<String>>,
-    /// The files of `init_xml` and `update_xml`, which Odoo loads as data before 19.0.
-    pub old_data: Vec<String>,
+    pub init_xml: Vec<String>,
+    pub update_xml: Vec<String>,
     pub demo: Vec<Spanned<String>>,
     pub category: Option<String>,
     pub installable: bool,
@@ -51,11 +60,17 @@ impl Manifest {
         self.version.as_deref().and_then(Series::from_module_version)
     }
 
-    /// The SQL files Odoo runs when it loads the data of the module.
-    pub fn sql_files(&self) -> impl Iterator<Item = &str> {
+    /// The SQL files Odoo runs when it loads the data of the module in `series`: those of `data`,
+    /// and of the legacy keys the series still reads. An unknown series reads every key.
+    pub fn sql_files(&self, series: Option<Series>) -> impl Iterator<Item = &str> {
+        let (init_xml, update_xml) = match series {
+            Some(s) if s >= DATA_ONLY => ((INIT_XML_BACK..INIT_XML_GONE).contains(&s), false),
+            _ => (true, true),
+        };
         let data = self.data.iter().map(|f| f.value.as_str());
-        data.chain(self.old_data.iter().map(String::as_str))
-            .filter(|f| f.ends_with(".sql"))
+        let init_xml = self.init_xml.iter().filter(move |_| init_xml).map(String::as_str);
+        let update_xml = self.update_xml.iter().filter(move |_| update_xml).map(String::as_str);
+        data.chain(init_xml).chain(update_xml).filter(|f| f.ends_with(".sql"))
     }
 
     fn set(&mut self, loc: &Locator, key: &str, value: &Expr) {
@@ -63,13 +78,21 @@ impl Manifest {
             "version" => self.version = str_lit(value).map(str::to_owned),
             "depends" => self.depends = list(loc, value),
             "data" => self.data = list(loc, value),
-            "init_xml" | "update_xml" => self.old_data.extend(list(loc, value).into_iter().map(|f| f.value)),
+            "init_xml" | "update_xml" => self.set_legacy(key, list(loc, value).into_iter().map(|f| f.value).collect()),
             "demo" => self.demo = list(loc, value),
             "category" => self.category = str_lit(value).map(str::to_owned),
             "installable" => self.installable = !matches!(value, Expr::BooleanLiteral(b) if !b.value),
             "assets" => self.assets = asset_globs(value),
             "auto_install" => self.auto_install = AutoInstall::read(value),
             _ => {}
+        }
+    }
+
+    fn set_legacy(&mut self, key: &str, files: Vec<String>) {
+        if key == "init_xml" {
+            self.init_xml = files;
+        } else {
+            self.update_xml = files;
         }
     }
 }
@@ -171,9 +194,16 @@ mod tests {
     }
 
     #[test]
-    fn lists_the_sql_files_of_every_data_key() {
+    fn lists_the_sql_files_of_the_data_keys_a_series_reads() {
         let m =
             parse(r#"{"data": ["a.xml", "a.sql"], "init_xml": ["b.sql"], "update_xml": ["c.sql", "c.csv"]}"#).unwrap();
-        assert_eq!(m.sql_files().collect::<Vec<_>>(), ["a.sql", "b.sql", "c.sql"]);
+        let files = |series: Option<&str>| m.sql_files(series.and_then(Series::parse)).collect::<Vec<_>>();
+        assert_eq!(files(Some("14.0")), ["a.sql", "b.sql", "c.sql"]);
+        assert_eq!(files(Some("saas~15.1")), ["a.sql", "b.sql", "c.sql"]);
+        assert_eq!(files(Some("saas~15.2")), ["a.sql"]);
+        assert_eq!(files(Some("17.0")), ["a.sql"]);
+        assert_eq!(files(Some("19.0")), ["a.sql", "b.sql"]);
+        assert_eq!(files(Some("20.0")), ["a.sql"]);
+        assert_eq!(files(None), ["a.sql", "b.sql", "c.sql"]);
     }
 }

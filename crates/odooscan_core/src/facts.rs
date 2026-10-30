@@ -173,6 +173,8 @@ pub struct ClassFact {
     pub unassigned_computes: Vec<(Spanned<String>, Vec<String>)>,
     /// The views `init()` creates with a literal `CREATE VIEW`.
     pub views: Vec<SqlView>,
+    /// A method of the class creates a view whose whole name is `self._table`, the model's own.
+    pub own_view: bool,
     /// The columns each literal definition of `_sql_constraints`, or of a call of `Constraint`,
     /// `Index` or `UniqueIndex` such as `models.Index(...)`, names, by where Odoo reads it.
     pub definitions: Vec<(DefinitionSource, Spanned<String>)>,
@@ -319,8 +321,8 @@ pub struct PyFacts {
     /// The names of the views `CREATE VIEW` queries create, wherever they run, when the literal
     /// head of the query spells them.
     pub created_views: Vec<String>,
-    /// A `CREATE VIEW` outside the `init()` or `_auto_init()` of a model names its view at runtime,
-    /// so it may create any view.
+    /// A `CREATE VIEW` outside the `init()` or `_auto_init()` of a class names its view at runtime
+    /// with something other than `self._table` whole in a model class, so it may create any view.
     pub creates_any_view: bool,
     pub diags: Vec<RawDiag>,
     /// OD121 on the rollbacks of `ir.http._handle_exception()`, Odoo's hook for a failed request

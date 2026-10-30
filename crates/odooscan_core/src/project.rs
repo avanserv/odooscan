@@ -39,7 +39,7 @@ pub struct Module {
     pub js: Vec<SourceFile<JsFacts>>,
     /// Owl templates: the XML files under `static/src`.
     pub templates: Vec<SourceFile<TemplateFacts>>,
-    /// The views the SQL files the manifest loads create.
+    /// The views the SQL files the manifest loads in the module's series create.
     pub sql_views: Vec<String>,
 }
 
@@ -146,7 +146,9 @@ pub fn load(paths: &[PathBuf], addons_paths: &[PathBuf], default_series: Option<
             ));
         }
     }
-    modules.par_iter_mut().for_each(parse_module_files);
+    modules
+        .par_iter_mut()
+        .for_each(|module| parse_module_files(module, default_series));
     Discovery { modules, notices }
 }
 
@@ -193,7 +195,7 @@ fn read_module(name: String, dir: PathBuf, checked: bool) -> Option<Module> {
     })
 }
 
-fn parse_module_files(module: &mut Module) {
+fn parse_module_files(module: &mut Module, default_series: Option<Series>) {
     let ranks: FxHashMap<String, usize> = module
         .manifest
         .data
@@ -256,18 +258,16 @@ fn parse_module_files(module: &mut Module) {
         .sort_by_key(|f| (f.rank.unwrap_or(usize::MAX), f.rel.clone()));
     module.js = parse_static_files(&module.dir, "js", checked, js::analyze);
     module.templates = parse_static_files(&module.dir, "xml", checked, owl::analyze);
-    module.sql_views = sql_views(module);
+    module.sql_views = sql_views(module, module.series.or(default_series));
 }
 
-/// The views the SQL files of a module's manifest create by name.
-fn sql_views(module: &Module) -> Vec<String> {
+/// The views the SQL files that a module's manifest loads in `series` create by name.
+fn sql_views(module: &Module, series: Option<Series>) -> Vec<String> {
     let texts = module
         .manifest
-        .sql_files()
+        .sql_files(series)
         .filter_map(|file| std::fs::read_to_string(module.dir.join(normalize(file))).ok());
-    texts
-        .flat_map(|text| sql::created_views(&text).into_iter().flatten())
-        .collect()
+    texts.flat_map(|text| sql::file_views(&text)).collect()
 }
 
 fn parse_static_files<T: Send>(

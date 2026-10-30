@@ -1076,17 +1076,6 @@ impl<'m> Index<'m> {
         })
     }
 
-    /// Whether a module in `scope` creates a view whose name it computes outside the `init()` of a
-    /// model, which may be any view.
-    pub fn creates_any_view(&self, scope: &Scope) -> bool {
-        self.modules
-            .iter()
-            .enumerate()
-            .filter(|(mi, _)| scope.sees(*mi))
-            .flat_map(|(_, m)| &m.python)
-            .any(|f| f.facts.creates_any_view)
-    }
-
     /// Whether a Many2many field of a module in `scope` keeps its rows in `table`, which it names
     /// with `relation`, or which Odoo names after the tables of its model and comodel.
     pub fn relation_table(&self, table: &str, scope: &Scope) -> bool {

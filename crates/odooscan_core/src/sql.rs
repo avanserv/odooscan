@@ -1104,18 +1104,28 @@ pub(crate) fn query_source(expr: &Expr) -> Option<QuerySource<'_>> {
     }
 }
 
-/// The text a query starts with as far as literals spell it: the text `query_text` reads, or the
-/// head of the left operand of a `+`, before `%` or `.format()` too, with a `{` for the value that
-/// follows. A `SQL()` call is read where it is called.
+/// The text a query starts with as far as literals spell it: the text `query_text` reads, that of
+/// a sum of literals, or the head of the left operand of another `+`, before `%` or `.format()`
+/// too, with a `{` for the value that follows. A `SQL()` call is read where it is called.
 pub(crate) fn query_head(expr: &Expr) -> Option<String> {
     match expr {
-        Expr::BinOp(b) if b.op == Operator::Add => query_head(&b.left).map(|head| head + "{"),
+        Expr::BinOp(b) if b.op == Operator::Add => {
+            literal_sum(expr).or_else(|| query_head(&b.left).map(|head| head + "{"))
+        }
         Expr::BinOp(b) if b.op == Operator::Mod => query_head(&b.left),
         Expr::Call(c) => match &*c.func {
             Expr::Attribute(a) if a.attr.as_str() == "format" => query_head(&a.value),
             _ => None,
         },
         _ => query_text(expr),
+    }
+}
+
+/// The text of a literal or a `+` of literals, which Python joins before the query runs.
+fn literal_sum(expr: &Expr) -> Option<String> {
+    match expr {
+        Expr::BinOp(b) if b.op == Operator::Add => Some(literal_sum(&b.left)? + &literal_sum(&b.right)?),
+        _ => str_lit(expr).map(str::to_owned),
     }
 }
 
@@ -1340,18 +1350,23 @@ struct Scope {
 
 /// The tokens of a query, None for a quote, comment or placeholder that never closes.
 fn tokenize(text: &str) -> Option<Vec<Token>> {
-    let (tokens, whole) = leading_tokens(text);
-    whole.then_some(tokens)
+    let (tokens, stop) = leading_tokens(text);
+    stop.is_none().then_some(tokens)
 }
 
 /// The tokens of a text up to the first quote, comment or placeholder that never closes, such as
-/// the `{` that ends the literal head of an f-string, and whether they cover the whole text.
-fn leading_tokens(text: &str) -> (Vec<Token>, bool) {
+/// the `{` that ends the literal head of an f-string, with where that one starts when there is one.
+fn leading_tokens(text: &str) -> (Vec<Token>, Option<usize>) {
+    tokens_from(text, 0, usize::MAX)
+}
+
+/// At most `cap` tokens of a text from byte `i`, which starts a character, as `leading_tokens`
+/// reads them. Reaching the cap is no stop.
+fn tokens_from(text: &str, mut i: usize, cap: usize) -> (Vec<Token>, Option<usize>) {
     let mut tokens = vec![];
-    let mut i = 0;
-    while i < text.len() {
+    while i < text.len() && tokens.len() < cap {
         let Some((kind, end)) = lex(text, i) else {
-            return (tokens, false);
+            return (tokens, Some(i));
         };
         if kind != Kind::Blank {
             let name = token_name(kind, &text[i..end]);
@@ -1364,7 +1379,7 @@ fn leading_tokens(text: &str) -> (Vec<Token>, bool) {
         }
         i = end;
     }
-    (tokens, true)
+    (tokens, None)
 }
 
 fn token_name(kind: Kind, text: &str) -> Option<String> {
@@ -2116,11 +2131,22 @@ pub(crate) fn view(text: &str) -> Option<View> {
     None
 }
 
+/// What a `CREATE VIEW` statement tells of the name of the view it creates.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum Created {
+    /// A name the text spells.
+    Named(String),
+    /// A name that is, whole, the first value Python puts in the query.
+    FirstValue,
+    /// A name Python fills in otherwise, or in part.
+    Computed,
+}
+
 /// The view each `CREATE [OR REPLACE] [MATERIALIZED] VIEW` statement of a text creates, read up to
 /// its name, so that whatever follows may be unreadable, as in the literal head of an f-string or
-/// of a concatenation: None for a name Python fills in or that the head stops before.
-pub(crate) fn created_views(text: &str) -> Vec<Option<String>> {
-    let (tokens, _) = leading_tokens(text);
+/// of a concatenation.
+pub(crate) fn created_views(text: &str) -> Vec<Created> {
+    let (tokens, stop) = leading_tokens(text);
     let reader = Reader {
         text,
         tokens: &tokens,
@@ -2128,8 +2154,44 @@ pub(crate) fn created_views(text: &str) -> Vec<Option<String>> {
     };
     (0..tokens.len())
         .filter(|&k| reader.keyword(k) == Some("create"))
-        .filter_map(|k| reader.created_view(k + 1))
+        .filter_map(|k| reader.created_view(k + 1, stop))
         .collect()
+}
+
+/// Enough tokens to read a view's name after `CREATE`: every prefix, `VIEW IF NOT EXISTS`,
+/// `public.`, the name, and the token after it that tells a name of another schema.
+const VIEW_HEAD_TOKENS: usize = 16;
+
+/// The names of the views an SQL file creates. The file is lexed only when it says `view`, and
+/// only each `CREATE` outside comments and strings is read into tokens, so that a large data
+/// script costs a search or a scan rather than its tokens.
+pub(crate) fn file_views(text: &str) -> Vec<String> {
+    let mut views = vec![];
+    if !says_view(text) {
+        return views;
+    }
+    let mut i = 0;
+    // A quote or comment that never closes holds the rest of the file, as PostgreSQL reads it.
+    while let Some((kind, end)) = (i < text.len()).then(|| lex(text, i)).flatten() {
+        if kind == Kind::Word && text[i..end].eq_ignore_ascii_case("create") {
+            let (tokens, stop) = tokens_from(text, i, VIEW_HEAD_TOKENS);
+            let reader = Reader {
+                text,
+                tokens: &tokens,
+                close: &[],
+            };
+            if let Some(Created::Named(name)) = reader.created_view(1, stop) {
+                views.push(name);
+            }
+        }
+        i = end;
+    }
+    views
+}
+
+/// Whether a text says `view` in any case, without which an SQL file creates no view.
+fn says_view(text: &str) -> bool {
+    text.as_bytes().windows(4).any(|w| w.eq_ignore_ascii_case(b"view"))
 }
 
 /// The names of the columns of a view with a column list: those of the list, then PostgreSQL
@@ -2258,15 +2320,44 @@ impl Reader<'_> {
         }
     }
 
-    /// The name of the view a `CREATE` statement creates, read after its `CREATE`: None inside
-    /// when Python fills it in or the text ends before it, and None when the statement creates no
-    /// view or one of another schema.
-    fn created_view(&self, k: usize) -> Option<Option<String>> {
-        let start = self.view_start(k)?;
-        if start >= self.tokens.len() {
-            return Some(None);
+    /// What the text says of the name of the view a `CREATE` statement creates, read after its
+    /// `CREATE`, where lexing stopped at `stop`. None when the statement creates no view or one of
+    /// another schema.
+    fn created_view(&self, k: usize, stop: Option<usize>) -> Option<Created> {
+        let mut start = self.view_start(k)?;
+        // `view_name` reads past `public.` too, but finds no view when the tokens end after it,
+        // where `public.{` names one Python fills in.
+        if self.name(start).as_deref() == Some("public") && self.is_char(start + 1, b'.') {
+            start += 2;
         }
-        self.view_name(start).map(|(name, _)| name)
+        let created = self.name_at(start, stop)?;
+        let later_gap = self.tokens[..start.min(self.tokens.len())]
+            .iter()
+            .any(|t| t.kind == Kind::Placeholder);
+        Some(if later_gap && created == Created::FirstValue {
+            Created::Computed
+        } else {
+            created
+        })
+    }
+
+    /// The name of a view at `start` as `created_view` reads it, taking a name that is one gap,
+    /// whichever, for the first value. A name whose last token ends at `stop`, as `x_report_` does
+    /// in `x_report_{`, is computed.
+    fn name_at(&self, start: usize, stop: Option<usize>) -> Option<Created> {
+        if start >= self.tokens.len() {
+            let gap = stop.is_some_and(|stop| self.text[stop..].starts_with('{'));
+            return Some(if gap { Created::FirstValue } else { Created::Computed });
+        }
+        let (name, end) = self.view_name(start)?;
+        let cut = stop.is_some_and(|stop| self.tokens[end - 1].end == stop);
+        let gap = end == start + 1 && self.tokens[start].kind == Kind::Placeholder;
+        Some(match name {
+            _ if cut => Created::Computed,
+            Some(name) => Created::Named(name),
+            None if gap => Created::FirstValue,
+            None => Created::Computed,
+        })
     }
 
     /// The names of the bracket at `open` when it lists only names.
@@ -3394,7 +3485,11 @@ mod tests {
         let created = |text: &str| -> Vec<String> {
             created_views(text)
                 .into_iter()
-                .map(|name| name.unwrap_or_else(|| "?".to_owned()))
+                .map(|created| match created {
+                    Created::Named(name) => name,
+                    Created::FirstValue => "1".to_owned(),
+                    Created::Computed => "?".to_owned(),
+                })
                 .collect()
         };
         assert_eq!(created("CREATE OR REPLACE VIEW x_report AS ({"), ["x_report"]);
@@ -3405,12 +3500,49 @@ mod tests {
             ),
             ["a", "B"]
         );
-        assert_eq!(created("CREATE VIEW %s AS SELECT 1"), ["?"]);
+        assert_eq!(created("CREATE VIEW %s AS SELECT 1"), ["1"]);
         assert_eq!(created("CREATE VIEW x_{} AS SELECT 1"), ["?"]);
-        assert_eq!(created("CREATE VIEW {"), ["?"]);
+        assert_eq!(created("CREATE VIEW {"), ["1"]);
+        assert_eq!(created("CREATE VIEW public.{} AS SELECT 1"), ["1"]);
         assert_eq!(created("CREATE OR REPLACE VIEW "), ["?"]);
+        assert_eq!(created("CREATE OR REPLACE VIEW public.{"), ["1"]);
+        assert_eq!(created("CREATE VIEW x_report_{"), ["?"]);
+        assert_eq!(created("CREATE VIEW %s_report AS SELECT 1"), ["?"]);
+        assert_eq!(created("CREATE VIEW {}{"), ["?"]);
+        assert_eq!(created("SELECT %s; CREATE VIEW %s AS SELECT 1"), ["?"]);
+        assert_eq!(created("CREATE VIEW %s AS SELECT 1; CREATE VIEW {"), ["1", "?"]);
+        assert_eq!(created("CREATE VIEW x_report {"), ["x_report"]);
+        assert_eq!(created("CREATE VIEW x_report"), ["x_report"]);
         assert!(created("CREATE VIEW reports.x AS SELECT 1").is_empty());
         assert!(created("CREATE TABLE x AS SELECT 1; SELECT 'CREATE VIEW y AS'").is_empty());
+    }
+
+    #[test]
+    fn reads_the_views_a_file_creates_outside_comments_and_strings() {
+        assert!(file_views("INSERT INTO x_seed VALUES (1, 'create');\nCREATE TABLE x_box (id int);").is_empty());
+        assert_eq!(
+            file_views(
+                "-- seeds\nINSERT INTO t VALUES ('it''s');\ncreate or replace view public.x_a as select 1;\n\
+                 CREATE VIEW reports.x_b AS SELECT 1; x_create VIEW x_c; CREATE VIEW \"X_d\" AS SELECT 1"
+            ),
+            ["x_a", "X_d"]
+        );
+        assert_eq!(
+            file_views(
+                "-- CREATE VIEW x_f AS SELECT 1\n/* CREATE VIEW x_g AS SELECT 1 */\n\
+                 SELECT 'CREATE VIEW x_h AS', $$CREATE VIEW x_i AS$$; CREATE VIEW x_j AS SELECT 1"
+            ),
+            ["x_j"]
+        );
+        assert!(file_views("SELECT 'unclosed; CREATE VIEW x_e AS SELECT 1").is_empty());
+    }
+
+    #[test]
+    fn lexes_only_a_file_that_says_view() {
+        assert!(says_view("CREATE OR REPLACE View x_a AS SELECT 1"));
+        assert!(!says_view(
+            "INSERT INTO x_seed VALUES (1, 'create');\nCREATE TABLE x_box (id int);"
+        ));
     }
 
     fn defined(text: &str) -> Option<Vec<String>> {

@@ -194,6 +194,7 @@ custom/legacy15/models/card.py:7:33: OD218 _inherits delegates to 'partner_id', 
 custom/legacy15/models/card.py:10:58: OD218 'country_id' has delegate=True, so it must be required with ondelete 'cascade' or 'restrict'; give it ondelete="cascade"
 custom/legacy15/models/res_partner.py:9:22: OD212 Monetary field 'parent_balance' has no currency: res.partner has no currency_id, and the field names no currency_field
 custom/legacy15/models/res_partner.py:13:18: OD221 'child_ids.total' makes 'total' depend on itself on other records, so Odoo logs a warning; declare 'total' with recursive=True
+custom/legacy16/models/gauge.py:7:5: OD226 _auto = False leaves legacy.gauge without a table, and nothing creates the view legacy_gauge; create it in init(), or drop _auto = False
 custom/legacy16/models/res_partner.py:6:34: OD203 'nickname': res.partner has no field 'nickname'
 custom/legacy16/models/res_partner.py:12:5: OD117 @api.model on create() makes Odoo call it once per record; decorate it with @api.model_create_multi and take a list of dicts
 custom/legacy16/models/res_partner.py:22:40: OD220 'opened_on' has the label 'Created on' of field 'create_date' of res.partner, so Odoo logs a warning and users cannot tell them apart; give it another string
@@ -237,6 +238,8 @@ custom/modern19/models/partner.py:47:33: OD218 _inherits delegates to 'partner_i
 custom/modern19/models/partner.py:49:73: OD213 'partner_id' is required, so Odoo refuses ondelete='set null'; use 'restrict' or 'cascade'
 custom/modern19/models/partner.py:63:30: OD220 'ref' has the label 'ID' of field 'id' of modern.seal, so Odoo logs a warning and users cannot tell them apart; give it another string
 custom/modern19/models/partner.py:69:21: OD120 'time' in an ormcache key is not a parameter of _quarter_hour_rates(), so every call raises NameError; key on a parameter or on self
+custom/modern19/models/views.py:15:5: OD226 _auto = False leaves modern.gauge without a table, and nothing creates the view modern_gauge; create it in init(), or drop _auto = False
+custom/modern20/models/meter.py:7:5: OD226 _auto = False leaves modern.meter without a table, and nothing creates the view modern_meter; create it in init(), or drop _auto = False
 custom/modern20/models/res_partner.py:10:96: OD203 'x_parent_model': res.partner has no field 'x_parent_model'
 custom/modern20/models/res_partner.py:17:33: OD219 'note' sets tracking, but modern.note does not inherit mail.thread, so Odoo ignores it and logs a warning; inherit mail.thread or remove tracking
 custom/modern20/models/res_partner.py:41:30: OD220 'ref' has the label 'ID' of field 'id' of modern.ticket, so Odoo logs a warning and users cannot tell them apart; give it another string
@@ -322,5 +325,6 @@ custom/sql_objects/models/pallets.py:12:47: OD227 lane_code: freight_pallet has 
 custom/sql_objects/models/pallets.py:13:45: OD227 slot: freight_pallet has no such column, since freight.pallet has no field slot; name the column of a stored field of freight.pallet
 custom/sql_objects/models/pallets.py:14:64: OD227 bin: freight_pallet has no such column, since freight.pallet has no field bin; name the column of a stored field of freight.pallet
 custom/sql_view_builders/models/builders.py:8:29: OD225 the view parcel_manifest of parcel.manifest selects no column weight_total, which the stored field parcel.manifest.weight_total of sql_columns needs; select one AS weight_total
+custom/sql_view_users/models/summary.py:7:5: OD226 _auto = False leaves drawer.summary without a table, and nothing creates the view drawer_summary; create it in init(), or drop _auto = False
 custom/supers/models/supers.py:29:24: OD211 no parent class of bad.super defines '_prepare_gone', so this super() call fails
 custom/unversioned_logs/models/probes.py:39:39: OD224 s.create_uid: drift_sensor has no such column, since drift.sensor.create_uid is not created, as drift.sensor sets _log_access to False; drop it from the query, or log access on the model
