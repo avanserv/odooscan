@@ -730,9 +730,9 @@ impl<'m> Ctx<'_, 'm> {
         }
     }
 
-    /// `_rec_names_search` is read from 16.0 on.
+    /// `_rec_names_search` is read from saas~15.3 on.
     fn rec_names_search<'c>(&self, class: &'c ClassFact) -> &'c [Spanned<String>] {
-        if self.series.is_some_and(|s| s >= Series { major: 16, minor: 0 }) {
+        if self.series.is_some_and(|s| s >= REC_NAMES_SEARCH) {
             &class.rec_names_search
         } else {
             &[]
@@ -1219,8 +1219,19 @@ const BASE_MAGIC: Series = Series { major: 18, minor: 1 };
 const REFUSED_DELEGATION: Series = Series { major: 18, minor: 3 };
 
 /// The first series that builds no company domain for a `check_company` field of a model without
-/// a company field, logging that it cannot (`18.0`).
+/// a company field, logging that it cannot (`18.0`, `odoo/fields.py:3177`; `saas-17.4` builds it for
+/// every model, `odoo/fields.py:3030`).
 const COMPANY_FIELD_DOMAIN: Series = Series { major: 18, minor: 0 };
+
+/// The first series whose name search reads `_rec_names_search` (`saas~15.3`, `odoo/models.py:1924`;
+/// `saas-15.2` knows `_rec_name` alone, `odoo/models.py:1932`).
+const REC_NAMES_SEARCH: Series = Series { major: 15, minor: 3 };
+
+/// The first series that moves the acceptance of `tracking` to `mail.track.mixin`, so an abstract
+/// model loses it (`saas~19.3`, `addons/mail/models/mail_track_mixin.py:34`; `saas-19.2` still
+/// accepts it, `addons/mail/models/models.py:28`). No lower bound applies: `mail` accepts it from
+/// `saas~13.4`, before OD219 starts, in `addons/mail/models/ir_model.py:11` until `saas-14.3`.
+const MIXIN_TRACKING: Series = Series { major: 19, minor: 3 };
 
 /// An `_inherits` entry of a class: its module, the class, the parent model and the field.
 type Entry<'m> = (usize, &'m ClassFact, &'m str, &'m Spanned<String>);
@@ -2170,14 +2181,14 @@ impl<'m> Ctx<'_, 'm> {
 
     /// Odoo hands each attribute a field does not know to the model's `_valid_field_parameter`, and
     /// logs a warning when it refuses it. `BaseModel` only accepts `related_sudo`; `mail.thread` and
-    /// the other models that override the method may accept `tracking`, and before 20.0 so does
-    /// `mail` for an abstract model.
+    /// the other models that override the method may accept `tracking`, and before saas~19.3 so
+    /// does `mail` for an abstract model.
     fn tracking(&self, out: &mut Out<'m>, path: &'m Path, field: &Field<'m>, own: &FieldFact) {
         let Some(at) = own.option("tracking") else {
             return;
         };
         let model = field.model;
-        let abstract_accepted = self.series.is_none_or(|s| s < Series { major: 20, minor: 0 })
+        let abstract_accepted = self.series.is_none_or(|s| s < MIXIN_TRACKING)
             && self.index.kind(model, self.scope) == Some(ModelKind::Abstract);
         if abstract_accepted
             || self.index.defines_method(model, "_valid_field_parameter", false)
