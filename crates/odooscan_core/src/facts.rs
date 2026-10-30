@@ -217,6 +217,12 @@ impl ClassFact {
             .attr("_register")
             .is_some_and(|r| matches!(r.value, OptionValue::Bool(false) | OptionValue::Falsy))
     }
+
+    /// Whether the class has a parent the scan cannot see, which may give it fields and methods: a
+    /// plain Python base class, or an `_inherit` element that is not a literal.
+    pub fn hidden_parents(&self) -> bool {
+        self.plain_bases || self.inherit_unknown
+    }
 }
 
 /// The methods a call can run: those of a model, or of the same Python class in the file.

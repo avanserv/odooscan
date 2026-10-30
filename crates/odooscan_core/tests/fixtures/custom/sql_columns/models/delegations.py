@@ -370,3 +370,20 @@ class ParcelRamp(models.Model):
     def x_ramp_columns(self):
         self.env.cr.execute("SELECT r.x_host_id, r.x_boxed_id FROM parcel_ramp r")
         return self.env.cr.fetchall()
+
+
+# The parent RAMP_EXTRA names may store x_chute_load, so the column may exist.
+class ParcelChute(models.Model):
+    _name = "parcel.chute"
+    _inherit = ["parcel.hosted", RAMP_EXTRA]
+    _description = "Parcel chute"
+
+    x_chute_load = fields.Float(compute="_compute_x_chute_load")
+
+    def _compute_x_chute_load(self):
+        for chute in self:
+            chute.x_chute_load = 0.0
+
+    def x_chute_columns(self):
+        self.env.cr.execute("SELECT c.x_chute_load FROM parcel_chute c")
+        return self.env.cr.fetchall()

@@ -1024,10 +1024,12 @@ impl<'m> Index<'m> {
             .collect()
     }
 
-    /// Whether a class in scope of `model`, or of a model it inherits or delegates to, has a plain
-    /// Python base class, whose fields and methods only Python knows.
-    pub fn plain_bases(&self, model: &str, scope: &Scope) -> bool {
-        self.chain(model, Some(scope), true).iter().any(|(_, c)| c.plain_bases)
+    /// Whether a class in scope of `model`, or of a model it inherits or delegates to, has a parent
+    /// the scan cannot see, whose fields and methods it does not know.
+    pub fn hidden_parents(&self, model: &str, scope: &Scope) -> bool {
+        self.chain(model, Some(scope), true)
+            .iter()
+            .any(|(_, c)| c.hidden_parents())
     }
 
     /// Whether the class that introduces `model` with `_name` is in scope. When it is not, the

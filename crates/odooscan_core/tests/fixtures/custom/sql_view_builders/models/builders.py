@@ -24,3 +24,11 @@ class ParcelDrawer(models.Model):
     _name = "parcel.drawer"
     _description = "Parcel drawer"
     _auto = False
+
+
+QUOTA_BUILDER = "parcel.depot"
+
+
+class ParcelQuotaView(models.Model):
+    _name = "parcel.quota"
+    _inherit = ["parcel.quota", QUOTA_BUILDER]

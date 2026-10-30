@@ -9,3 +9,7 @@ access_registry_shipment,registry.shipment,model_registry_shipment,base.group_us
 access_registry_badge,registry.badge,model_registry_badge,base.group_user,1,1,1,1
 access_registry_voucher,registry.voucher,model_registry_voucher,base.group_user,1,1,1,1
 access_registry_parcel,registry.parcel,model_registry_parcel,base.group_user,1,1,1,1
+access_registry_shed,registry.shed,model_registry_shed,base.group_user,1,1,1,1
+access_registry_shed_rack,registry.shed.rack,model_registry_shed_rack,base.group_user,1,1,1,1
+access_registry_shed_view,registry.shed.view,model_registry_shed_view,base.group_user,1,1,1,1
+access_registry_shed_loft,registry.shed.loft,model_registry_shed_loft,base.group_user,1,1,1,1

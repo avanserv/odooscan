@@ -172,3 +172,13 @@ class ParcelPeak(models.Model):
             )
             """
         )
+
+
+# sql_view_builders, outside the dependencies, extends this model with a parent the scan does not
+# resolve, which may create the view.
+class ParcelQuota(models.Model):
+    _name = "parcel.quota"
+    _description = "Parcel quota"
+    _auto = False
+
+    box_count = fields.Integer()
