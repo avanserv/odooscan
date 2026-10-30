@@ -1194,6 +1194,10 @@ const BASE_MAGIC: Series = Series { major: 18, minor: 1 };
 /// or 'restrict', and a `delegate=True` field no entry names (`saas~18.3`).
 const REFUSED_DELEGATION: Series = Series { major: 18, minor: 3 };
 
+/// The first series that builds no company domain for a `check_company` field of a model without
+/// a company field, logging that it cannot (`18.0`).
+const COMPANY_FIELD_DOMAIN: Series = Series { major: 18, minor: 0 };
+
 /// An `_inherits` entry of a class: its module, the class, the parent model and the field.
 type Entry<'m> = (usize, &'m ClassFact, &'m str, &'m Spanned<String>);
 
@@ -2347,10 +2351,10 @@ impl<'m> Ctx<'_, 'm> {
         false
     }
 
-    /// From 18.0 Odoo gives a relational field with `check_company` a domain on the comodel's
+    /// From saas~16.4 Odoo gives a relational field with `check_company` a domain on the comodel's
     /// `company_id`, through the comodel's `_check_company_domain`, which fails on a comodel without
-    /// one. Odoo builds that domain only for a model that has a company field, is `res.company`, or
-    /// for a company-dependent field.
+    /// one. From 18.0 it builds that domain only for a model that has a company field, is
+    /// `res.company`, or for a company-dependent field.
     fn check_company(&self, out: &mut Out<'m>, path: &'m Path, field: &Field<'m>, own: &FieldFact) {
         if !RELATIONAL_TYPES.contains(&own.ftype.as_str())
             || !field.is("check_company", &OptionValue::Bool(true))
@@ -2362,7 +2366,9 @@ impl<'m> Ctx<'_, 'm> {
         let Merged::Known(OptionValue::Str(comodel)) = field.get("comodel_name") else {
             return;
         };
-        if !self.lacks_company(comodel) || !self.company_domain(field) {
+        if !self.lacks_company(comodel)
+            || (self.series.is_some_and(|s| s >= COMPANY_FIELD_DOMAIN) && !self.company_domain(field))
+        {
             return;
         }
         let message = format!(
@@ -2381,7 +2387,8 @@ impl<'m> Ctx<'_, 'm> {
             && !self.index.defines_method(comodel, "_check_company_domain", true)
     }
 
-    /// Whether Odoo builds a company domain for the field rather than logging that it cannot.
+    /// Whether Odoo, from 18.0, builds a company domain for the field rather than logging that it
+    /// cannot.
     fn company_domain(&self, field: &Field<'m>) -> bool {
         field.model == "res.company"
             || field.is("company_dependent", &OptionValue::Bool(true))

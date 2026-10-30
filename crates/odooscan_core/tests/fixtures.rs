@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 
+use odooscan_core::rules::Severity;
 use odooscan_core::series::Series;
 use odooscan_core::{ScanOptions, scan};
 
@@ -79,6 +80,33 @@ fn unassigned_compute_waits_for_a_known_series() {
     };
     assert!(!reported(None));
     assert!(reported(Series::parse("14.0")));
+}
+
+#[test]
+fn company_check_severity_follows_the_module_series() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+    let report = scan(&ScanOptions {
+        paths: vec![root.join("custom")],
+        addons_paths: vec![root.join("core")],
+        default_series: None,
+    });
+    let mut found: Vec<(String, Severity)> = report
+        .diagnostics
+        .iter()
+        .filter(|d| d.code == "OD222")
+        .map(|d| {
+            let module = d.path.strip_prefix(root.join("custom")).unwrap().iter().next().unwrap();
+            (module.to_string_lossy().into_owned(), d.severity)
+        })
+        .collect();
+    found.dedup();
+    let expected = [
+        ("field_options", Severity::Error),
+        ("legacy13", Severity::Warning),
+        ("legacy16", Severity::Warning),
+        ("legacy17", Severity::Error),
+    ];
+    assert_eq!(found, expected.map(|(m, s)| (m.to_owned(), s)));
 }
 
 #[test]
