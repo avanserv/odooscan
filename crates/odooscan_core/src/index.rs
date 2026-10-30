@@ -2,8 +2,8 @@ use globset::{GlobBuilder, GlobSetBuilder};
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::facts::{
-    Annotation, ArchElement, ClassFact, FieldFact, FlowSummary, Heritage, JsClass, OptionValue, PyFacts, Receiver,
-    ViewFact,
+    Annotation, ArchElement, ClassFact, FieldFact, FlowSummary, Heritage, JsClass, ModelKind, OptionValue, PyFacts,
+    Receiver, ViewFact,
 };
 use crate::project::{Module, SourceFile};
 
@@ -35,7 +35,7 @@ const BASE_METHODS: &[&str] = &[
 
 /// Methods of `BaseModel`, written from the ORM API reference: models inherit them from a class
 /// outside every addons directory, so the index never sees them.
-const BASE_MODEL_METHODS: &[&str] = &[
+pub(crate) const BASE_MODEL_METHODS: &[&str] = &[
     // Records and environment
     "browse",
     "exists",
@@ -1054,6 +1054,25 @@ impl<'m> Index<'m> {
                 .chain(model, Some(scope), true)
                 .iter()
                 .any(|(_, c)| c.methods.iter().any(|m| m == method))
+    }
+
+    /// Whether a class of `model` or of a model it inherits, in any indexed module, defines
+    /// `method`; the classes of `base` count only `with_base`.
+    pub fn defines_method(&self, model: &str, method: &str, with_base: bool) -> bool {
+        self.chain(model, None, false)
+            .iter()
+            .any(|(_, c)| (with_base || c.model != "base") && c.methods.iter().any(|m| m == method))
+    }
+
+    /// The kind of the class in scope that introduces `model` with `_name`.
+    pub fn kind(&self, model: &str, scope: &Scope) -> Option<ModelKind> {
+        let introducers = || {
+            self.classes(model)
+                .iter()
+                .filter(|(mi, c)| c.new_model && scope.sees(*mi))
+        };
+        let mi = self.introducer(introducers())?;
+        introducers().find(|(m, _)| *m == mi).map(|(_, c)| c.kind)
     }
 
     /// Whether a client may call `method` on `model`: a method of `BaseModel`, or of a class of the

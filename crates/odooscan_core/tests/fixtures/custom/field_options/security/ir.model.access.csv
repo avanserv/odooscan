@@ -1,0 +1,15 @@
+id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
+access_greenhouse_plant,greenhouse.plant,model_greenhouse_plant,base.group_user,1,1,1,1
+access_greenhouse_log,greenhouse.log,model_greenhouse_log,base.group_user,1,1,1,1
+access_greenhouse_sensor,greenhouse.sensor,model_greenhouse_sensor,base.group_user,1,1,1,1
+access_greenhouse_wizard,greenhouse.wizard,model_greenhouse_wizard,base.group_user,1,1,1,1
+access_greenhouse_bench,greenhouse.bench,model_greenhouse_bench,base.group_user,1,1,1,1
+access_greenhouse_reading,greenhouse.reading,model_greenhouse_reading,base.group_user,1,1,1,1
+access_greenhouse_report,greenhouse.report,model_greenhouse_report,base.group_user,1,1,1,1
+access_greenhouse_zone,greenhouse.zone,model_greenhouse_zone,base.group_user,1,1,1,1
+access_greenhouse_bay,greenhouse.bay,model_greenhouse_bay,base.group_user,1,1,1,1
+access_greenhouse_crate,greenhouse.crate,model_greenhouse_crate,base.group_user,1,1,1,1
+access_greenhouse_site,greenhouse.site,model_greenhouse_site,base.group_user,1,1,1,1
+access_greenhouse_site_line,greenhouse.site.line,model_greenhouse_site_line,base.group_user,1,1,1,1
+access_greenhouse_network,greenhouse.network,model_greenhouse_network,base.group_user,1,1,1,1
+access_greenhouse_shelf,greenhouse.shelf,model_greenhouse_shelf,base.group_user,1,1,1,1

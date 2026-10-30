@@ -45,6 +45,7 @@ Python code checked on its own: security, deprecated APIs and ORM mistakes visib
 | [OD113](OD113.md) | `fields-view-get-removed` | fields_view_get() is removed; override _get_view() or get_views(). |
 | [OD114](OD114.md) | `depends-on-id` | @api.depends names the field id, which Odoo refuses. |
 | [OD115](OD115.md) | `dotted-onchange-constrains` | @api.onchange or @api.constrains names a dotted path, which Odoo ignores. |
+| [OD116](OD116.md) | `field-shadows-model-member` | A field is named like a method or an attribute every model has. |
 
 ## OD2: models and fields
 
@@ -70,6 +71,10 @@ Models, fields and methods checked against every module in the dependency graph.
 | [OD216](OD216.md) | `selection-add-without-ondelete` | selection_add leaves a value of a required Selection with ondelete 'set null'. |
 | [OD217](OD217.md) | `parent-store-without-path` | A model sets _parent_store without an indexed parent_path field. |
 | [OD218](OD218.md) | `delegation-field-not-required` | A field that delegates to a parent model is not required with ondelete cascade or restrict. |
+| [OD219](OD219.md) | `tracking-without-mail-thread` | A field sets tracking on a model that does not inherit mail.thread, which Odoo ignores. |
+| [OD220](OD220.md) | `duplicate-field-label` | Two fields of a model have the same label. |
+| [OD221](OD221.md) | `self-dependency-not-recursive` | A computed field depends on itself through other records without recursive=True. |
+| [OD222](OD222.md) | `check-company-without-company` | A field sets check_company to a comodel without company_id. |
 
 ## OD3: XML ids, views and data
 

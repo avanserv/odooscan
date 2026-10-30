@@ -18,6 +18,12 @@ class ResCurrency(models.Model):
     name = fields.Char()
 
 
+class ResCompany(models.Model):
+    _name = "res.company"
+
+    name = fields.Char()
+
+
 class ResPartner(models.Model):
     _name = "res.partner"
 
