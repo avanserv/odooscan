@@ -1,0 +1,13 @@
+<odoo>
+    <record id="generated_user_form" model="ir.ui.view">
+        <field name="name">bad.generated.user.form</field>
+        <field name="model">bad.generated.user</field>
+        <field name="arch" type="xml">
+            <form>
+                <button type="object" name="action_generated"/>
+            </form>
+        </field>
+    </record>
+
+    <function model="bad.generated.user" name="action_generated"/>
+</odoo>

@@ -166,6 +166,175 @@ pub(crate) const BASE_MODEL_METHODS: &[&str] = &[
     "_where_calc",
 ];
 
+/// The other methods of `BaseModel` in 12.0 to 20.0, read off each series, dunders aside: a button
+/// or a `<function>` may name any. Apart from `BASE_MODEL_METHODS`, which OD116 reads as the members
+/// a field must not replace in every series.
+const BASE_MODEL_EXTRA: &[&str] = &[
+    "_add_fake_fields",
+    "_add_field",
+    "_add_magic_fields",
+    "_add_sql_constraints",
+    "_apply_ir_rules",
+    "_apply_onchange_methods",
+    "_as_query",
+    "_browse",
+    "_build_model",
+    "_build_model_attributes",
+    "_build_model_check_base",
+    "_build_model_check_parent",
+    "_cache",
+    "_check_company_domain",
+    "_check_concurrency",
+    "_check_field_access",
+    "_check_parent_path",
+    "_check_qorder",
+    "_check_removed_columns",
+    "_clean_properties",
+    "_compute_concurrency_field",
+    "_constraint_methods",
+    "_context",
+    "_convert_records",
+    "_convert_to_cache",
+    "_convert_to_cache_properties_definition",
+    "_convert_to_column_properties_definition",
+    "_convert_to_record",
+    "_convert_to_write",
+    "_cr",
+    "_create_parent_columns",
+    "_dependent_fields",
+    "_execute_sql",
+    "_export_rows",
+    "_extract_records",
+    "_fetch_field",
+    "_field_properties_to_sql",
+    "_fields_view_get",
+    "_filter_access_rules_python",
+    "_filtered_access",
+    "_flush_search",
+    "_generate_m2o_order_by",
+    "_generate_order_by",
+    "_generate_order_by_inner",
+    "_generate_translated_field",
+    "_get_default_activity_view",
+    "_get_default_calendar_view",
+    "_get_default_form_view",
+    "_get_default_graph_view",
+    "_get_default_kanban_view",
+    "_get_default_pivot_view",
+    "_get_default_search_view",
+    "_get_default_tree_view",
+    "_get_dirty",
+    "_get_external_ids",
+    "_get_redirect_suggested_company",
+    "_get_stored_translations",
+    "_has_cycle",
+    "_has_onchange",
+    "_in_cache_without",
+    "_inherits_check",
+    "_inherits_join_add",
+    "_inherits_join_calc",
+    "_init_constraints_onchanges",
+    "_invalidate_cache",
+    "_is_an_ordinary_table",
+    "_is_dirty",
+    "_mapped_cache",
+    "_mapped_func",
+    "_modified",
+    "_modified_triggers",
+    "_onchange_eval",
+    "_onchange_methods",
+    "_onchange_spec",
+    "_ondelete_methods",
+    "_origin",
+    "_parent_store_create",
+    "_parent_store_update",
+    "_parent_store_update_prepare",
+    "_patch_method",
+    "_pop_field",
+    "_populate",
+    "_populate_dependencies",
+    "_populate_factories",
+    "_populate_sizes",
+    "_prefetch_field",
+    "_prepare_setup",
+    "_read_from_database",
+    "_read_group_check_field_access_rights",
+    "_read_group_empty_value",
+    "_read_group_expand_full",
+    "_read_group_fill_results",
+    "_read_group_fill_temporal",
+    "_read_group_format_result",
+    "_read_group_format_result_properties",
+    "_read_group_get_annotated_groupby",
+    "_read_group_get_annoted_groupby",
+    "_read_group_groupby_properties",
+    "_read_group_having",
+    "_read_group_postprocess_groupby",
+    "_read_group_prepare",
+    "_read_group_prepare_data",
+    "_read_group_process_groupby",
+    "_read_group_raw",
+    "_read_group_resolve_many2one_fields",
+    "_read_group_resolve_many2x_fields",
+    "_rec_name_fallback",
+    "_recompute_check",
+    "_recompute_done",
+    "_recompute_field",
+    "_recompute_model",
+    "_recompute_recordset",
+    "_recompute_todo",
+    "_reflect",
+    "_revert_method",
+    "_set_dirty",
+    "_setup_base",
+    "_setup_fields",
+    "_sorted_order_to_function",
+    "_sql_error_to_message",
+    "_sql_error_to_message_generic",
+    "_table_has_rows",
+    "_table_sql",
+    "_transient_clean_old_rows",
+    "_transient_clean_rows_older_than",
+    "_transient_max_count",
+    "_transient_max_hours",
+    "_transient_vacuum",
+    "_traverse_related_sql",
+    "_uid",
+    "_update_cache",
+    "_validate_properties_definition",
+    "_write_multi",
+    "check_field_access",
+    "clear_caches",
+    "compute_concurrency_field",
+    "compute_concurrency_field_with_access",
+    "concat",
+    "fields_get_keys",
+    "fields_view_get",
+    "flush",
+    "get_access_action",
+    "get_empty_list_help",
+    "get_external_id",
+    "get_formview_action",
+    "get_formview_id",
+    "get_metadata",
+    "get_property_definition",
+    "get_xml_id",
+    "has_field_access",
+    "ids",
+    "invalidate_cache",
+    "is_transient",
+    "load_views",
+    "lock_for_update",
+    "name_get",
+    "recompute",
+    "refresh",
+    "resolve_2many_commands",
+    "try_lock_for_update",
+    "union",
+    "user_has_groups",
+    "view_header_get",
+    "view_init",
+];
 pub fn full_id(module: &str, id: &str) -> String {
     if id.contains('.') {
         id.to_owned()
@@ -1277,6 +1446,32 @@ impl<'m> Index<'m> {
             Some(_) if defining.iter().any(|&mi| self.always_installed(mi)) => Status::Visible,
             Some(&mi) => Status::Hidden(&self.modules[mi].name),
         }
+    }
+
+    /// Whether a button or a `<function>` finds `method` on `model`: any method of `BaseModel`, or
+    /// what `rpc_method` finds. Python looks both up on the model's class.
+    pub fn data_method(&self, model: &str, method: &str, scope: &Scope) -> Status<'m> {
+        if BASE_MODEL_EXTRA.contains(&method) {
+            return Status::Visible;
+        }
+        self.rpc_method(model, method, scope)
+    }
+
+    /// Whether a class in scope of `model` or of a model it inherits decorates `method` with
+    /// `@api.private`: Odoo refuses a method that any class of the MRO marks.
+    pub fn private_method(&self, model: &str, method: &str, scope: &Scope) -> bool {
+        self.merged_classes(model, scope)
+            .iter()
+            .any(|(_, c)| c.private_methods.iter().any(|m| m == method))
+    }
+
+    /// Whether a class in scope of `model`, or of a model it inherits, lists in `_inherit` a model
+    /// no class of the index defines, whose methods it does not know.
+    pub fn unindexed_parent(&self, model: &str, scope: &Scope) -> bool {
+        self.merged_classes(model, scope)
+            .iter()
+            .flat_map(|(_, c)| &c.inherit)
+            .any(|parent| !self.has_model(&parent.value))
     }
 
     /// Follows a dotted field path from `model`. Paths through models nobody defines are accepted.

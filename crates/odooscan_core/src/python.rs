@@ -744,6 +744,7 @@ impl<'ast> PyVisitor<'_, 'ast> {
             inherits_unknown: false,
             fields: vec![],
             methods: vec![],
+            private_methods: vec![],
             paths: vec![],
             depends: vec![],
             order_fields: vec![],
@@ -803,10 +804,14 @@ impl<'ast> PyVisitor<'_, 'ast> {
         }
     }
 
-    /// What a method adds to its class: its name, the `super()` calls it makes, whether it calls
-    /// the method it overrides through `super()`, and for `init()` the views it creates.
+    /// What a method adds to its class: its name, whether it is `@api.private`, the `super()` calls
+    /// it makes, whether it calls the method it overrides through `super()`, and for `init()` the
+    /// views it creates.
     fn method_fact(&mut self, func: &ast::StmtFunctionDef, fact: &mut ClassFact) {
         fact.methods.push(func.name.to_string());
+        if func.decorator_list.iter().any(|d| is_api(&d.expression, "private")) {
+            fact.private_methods.push(func.name.to_string());
+        }
         if func.name.as_str() == "init" {
             fact.views = self.init_views(func);
         }
@@ -846,7 +851,8 @@ impl<'ast> PyVisitor<'_, 'ast> {
     }
 
     /// Any other class attribute: one that shapes the table, a company domain or a table query
-    /// that is not a field, `_sql_constraints`, a constraint or an index, or else a field.
+    /// that is not a field, `_sql_constraints`, a constraint or an index, an alias of a method, or
+    /// else a field.
     fn attr_or_field(&mut self, target: &ast::ExprName, value: &Expr, fact: &mut ClassFact) {
         match target.id.as_str() {
             "_table" => fact.table = Some(option_value(value)),
@@ -870,12 +876,21 @@ impl<'ast> PyVisitor<'_, 'ast> {
                 );
                 self.sql_constraints(value, fact);
             }
-            _ if is_table_object(value) => {
-                if let Some(definition) = value.as_call_expr().and_then(|c| c.arguments.args.first()) {
-                    self.definition(DefinitionSource::TableObject, definition, fact);
-                }
+            _ => self.unnamed_attr(target, value, fact),
+        }
+    }
+
+    /// A class attribute whose name means nothing to Odoo: its value tells a constraint or an index
+    /// from an alias of a method and from a field.
+    fn unnamed_attr(&mut self, target: &ast::ExprName, value: &Expr, fact: &mut ClassFact) {
+        if is_table_object(value) {
+            if let Some(definition) = value.as_call_expr().and_then(|c| c.arguments.args.first()) {
+                self.definition(DefinitionSource::TableObject, definition, fact);
             }
-            _ => self.class_field(target, value, fact),
+        } else if matches!(value, Expr::Name(_) | Expr::Attribute(_) | Expr::Lambda(_)) {
+            fact.methods.push(target.id.to_string());
+        } else {
+            self.class_field(target, value, fact);
         }
     }
 
@@ -2120,6 +2135,20 @@ mod tests {
         let ledger = &facts.classes[1];
         let names: Vec<&str> = ledger.fields.iter().map(|f| f.name.as_str()).collect();
         assert!(names == ["_table_query"] && ledger.methods.is_empty());
+    }
+
+    #[test]
+    fn reads_private_methods_and_the_names_a_class_binds_to_callables() {
+        let facts = analyze(
+            "class X(models.Model):\n    _name = 'x'\n    limit = 3\n    state = fields.Char()\n\n    \
+             @api.private\n    def a(self):\n        pass\n\n    \
+             @api.model\n    def b(self):\n        pass\n\n    \
+             c = a\n    d = helpers.run\n    e = lambda self: None\n",
+            None,
+        );
+        let class = &facts.classes[0];
+        assert_eq!(class.private_methods, ["a"]);
+        assert_eq!(class.methods, ["a", "b", "c", "d", "e"]);
     }
 
     #[test]

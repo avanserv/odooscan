@@ -112,6 +112,9 @@ XML ids, views and data records, within a file and across the dependency graph.
 | [OD309](OD309.md) | `unknown-record-field` | A data record sets a field its model does not have. |
 | [OD310](OD310.md) | `unmatched-view-locator` | An inherited view locates an element its parent views do not have. |
 | [OD311](OD311.md) | `unknown-qweb-template` | A QWeb view calls a template no module in scope defines. |
+| [OD312](OD312.md) | `unknown-button-method` | A button calls a method its model does not have. |
+| [OD313](OD313.md) | `private-button-method` | A button calls a private method, which Odoo refuses. |
+| [OD314](OD314.md) | `unknown-function-method` | A `<function>` of a data file calls a method its model does not have. |
 
 ## OD4: access
 
