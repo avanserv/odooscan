@@ -177,6 +177,7 @@ custom/model_attributes/models/bed.py:17:39: OD204 garden.bed has no method '_se
 custom/model_attributes/models/bed.py:18:29: OD204 garden.bed has no method '_selection_sizes'
 custom/model_attributes/models/bed.py:20:31: OD204 garden.bed has no method '_selection_origins'
 custom/model_attributes/models/bed.py:24:53: OD203 'owner_model': garden.bed has no field 'owner_model'
+custom/model_attributes/models/bed.py:25:86: OD203 'parent_model': garden.bed has no field 'parent_model'
 custom/model_attributes/models/label.py:9:33: OD218 _inherits delegates to 'partner_id', which must be required with ondelete 'cascade' or 'restrict'; give it ondelete="cascade"
 custom/model_attributes/models/label.py:9:62: OD218 _inherits delegates to 'country_id', which must be required with ondelete 'cascade' or 'restrict'; give it required=True
 custom/model_attributes/models/label.py:44:58: OD218 'country_id' has delegate=True and no ondelete, so Odoo fails with AttributeError when it sets up the registry; give it ondelete="cascade"
@@ -202,8 +203,9 @@ custom/modern19/models/partner.py:22:5: OD118 @api.model on create() passes a li
 custom/modern19/models/partner.py:41:93: OD216 'type' is required, so Odoo refuses ondelete 'set null' for the selection_add value 'kiosk'; give it 'cascade', 'set default' or a function
 custom/modern19/models/partner.py:47:33: OD218 _inherits delegates to 'partner_id', which must be required with ondelete 'cascade' or 'restrict'; give it ondelete="cascade"
 custom/modern19/models/partner.py:49:73: OD213 'partner_id' is required, so Odoo refuses ondelete='set null'; use 'restrict' or 'cascade'
-custom/modern20/models/res_partner.py:14:33: OD219 'note' sets tracking, but modern.note does not inherit mail.thread, so Odoo ignores it and logs a warning; inherit mail.thread or remove tracking
-custom/modern20/models/res_partner.py:38:30: OD220 'ref' has the label 'ID' of field 'id' of modern.ticket, so Odoo logs a warning and users cannot tell them apart; give it another string
+custom/modern20/models/res_partner.py:10:96: OD203 'x_parent_model': res.partner has no field 'x_parent_model'
+custom/modern20/models/res_partner.py:17:33: OD219 'note' sets tracking, but modern.note does not inherit mail.thread, so Odoo ignores it and logs a warning; inherit mail.thread or remove tracking
+custom/modern20/models/res_partner.py:41:30: OD220 'ref' has the label 'ID' of field 'id' of modern.ticket, so Odoo logs a warning and users cannot tell them apart; give it another string
 custom/orm_overrides/models/caches.py:7:21: OD120 'lang' in an ormcache key is not a parameter of _greeting_for(), so every call raises NameError; key on a parameter or on self
 custom/orm_overrides/models/caches.py:11:29: OD120 'country' in an ormcache key is not a parameter of _country_label(), so every call raises NameError; key on a parameter or on self
 custom/orm_overrides/models/computes.py:40:9: OD223 _compute_initials() can leave 'initials' unassigned on a record, so reading it raises ValueError; assign it on every path through the loop, False when there is no value

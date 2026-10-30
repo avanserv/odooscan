@@ -745,9 +745,10 @@ impl<'m> Ctx<'_, 'm> {
     }
 
     /// A Many2oneReference reads its record's model from the Char field `model_field` names, which
-    /// in a mixin is a field of the models that inherit it.
+    /// in a mixin is a field of the models that inherit it. A related one keeps the `model_field`
+    /// it sets; one it inherits from its target is not checked.
     fn model_field(&self, out: &mut Out<'m>, path: &'m Path, class: &ClassFact, field: &FieldFact) {
-        if field.ftype != "Many2oneReference" || field.related.is_some() || class.kind == ModelKind::Abstract {
+        if field.ftype != "Many2oneReference" || class.kind == ModelKind::Abstract {
             return;
         }
         if let Some(Spanned {

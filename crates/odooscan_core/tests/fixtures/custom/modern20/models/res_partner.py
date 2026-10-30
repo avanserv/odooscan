@@ -5,6 +5,9 @@ class ResPartner(models.Model):
     _inherit = "res.partner"
 
     home_country_id = fields.Many2one("res.country", delegate=True)
+    x_origin_model = fields.Char()
+    x_origin_id = fields.Many2oneReference(model_field="x_origin_model")
+    x_parent_origin_id = fields.Many2oneReference(related="parent_id.x_origin_id", model_field="x_parent_model")
 
 
 class ModernNote(models.AbstractModel):
