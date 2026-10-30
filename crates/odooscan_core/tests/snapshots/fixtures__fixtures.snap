@@ -311,6 +311,7 @@ custom/saas144/models/res_partner.py:8:40: OD220 'opened_on' has the label 'Crea
 custom/saas183/models/ticket.py:7:33: OD218 _inherits delegates to 'partner_id', which must be required with ondelete 'cascade' or 'restrict'; give it ondelete="cascade"
 custom/saas183/models/ticket.py:9:73: OD213 'partner_id' is required, so Odoo refuses ondelete='set null'; use 'restrict' or 'cascade'
 custom/saas183/models/ticket.py:10:88: OD213 'country_id' is required, so Odoo refuses ondelete='set null'; use 'restrict' or 'cascade'
+custom/sql_base_entries/models/buoys.py:35:54: OD224 f.x_base_depot_id: buoy_float has no such column, since buoy.float has no field x_base_depot_id; name the column of a stored field of buoy.float
 custom/sql_columns/models/constraints.py:7:35: OD227 depot: parcel_box has no such column, since parcel.box has no field depot; use depot_id
 custom/sql_columns/models/constraints.py:8:36: OD227 total_weight: parcel_box has no such column, since parcel.box.total_weight is not stored; set store=True on the field, or drop it from the definition
 custom/sql_columns/models/constraints.py:9:38: OD227 tag_ids: parcel_box has no such column, since parcel.box.tag_ids is a Many2many, which has no column; drop it from the definition
@@ -326,10 +327,10 @@ custom/sql_columns/models/delegations.py:67:33: OD227 x_site_id: parcel_post has
 custom/sql_columns/models/delegations.py:71:52: OD224 p.x_site_id: parcel_post has no such column, since parcel.post has no field x_site_id; name the column of a stored field of parcel.post
 custom/sql_columns/models/delegations.py:105:54: OD224 w.x_host_id: parcel_wharf has no such column, since parcel.wharf has no field x_host_id; name the column of a stored field of parcel.wharf
 custom/sql_columns/models/delegations.py:105:67: OD224 w.x_site_id: parcel_wharf has no such column, since parcel.wharf has no field x_site_id; name the column of a stored field of parcel.wharf
-custom/sql_columns/models/delegations.py:252:55: OD224 p.x_cleat_id: parcel_pontoon has no such column, since parcel.pontoon has no field x_cleat_id; name the column of a stored field of parcel.pontoon
-custom/sql_columns/models/delegations.py:329:39: OD224 s.x_shop_depot_id: parcel_shop has no such column, since parcel.shop.x_shop_depot_id is not stored; set store=True on the field, or read it through the ORM
-custom/sql_columns/models/delegations.py:340:39: OD224 a.name: parcel_annex has no such column, since name is a field of parcel.box, which parcel.annex reaches through _inherits; join parcel_box on x_annex_box_id
-custom/sql_columns/models/delegations.py:352:39: OD224 o.name: parcel_outlet has no such column, since name is a field of parcel.depot, which parcel.outlet reaches through _inherits; join parcel_depot on x_outlet_depot_id
+custom/sql_columns/models/delegations.py:254:55: OD224 p.x_cleat_id: parcel_pontoon has no such column, since parcel.pontoon has no field x_cleat_id; name the column of a stored field of parcel.pontoon
+custom/sql_columns/models/delegations.py:331:39: OD224 s.x_shop_depot_id: parcel_shop has no such column, since parcel.shop.x_shop_depot_id is not stored; set store=True on the field, or read it through the ORM
+custom/sql_columns/models/delegations.py:342:39: OD224 a.name: parcel_annex has no such column, since name is a field of parcel.box, which parcel.annex reaches through _inherits; join parcel_box on x_annex_box_id
+custom/sql_columns/models/delegations.py:354:39: OD224 o.name: parcel_outlet has no such column, since name is a field of parcel.depot, which parcel.outlet reaches through _inherits; join parcel_depot on x_outlet_depot_id
 custom/sql_columns/models/parcels.py:76:5: OD226 _auto = False leaves parcel.report without a table, and nothing creates the view parcel_report; create it in init(), or drop _auto = False
 custom/sql_columns/models/parcels.py:168:63: OD227 write_date: parcel_beacon has no such column, since parcel.beacon.write_date is not created, as parcel.beacon sets _log_access to False; drop it from the definition, or log access on the model
 custom/sql_columns/models/parcels.py:219:62: OD224 t.channel: parcel_tracker has no such column, since parcel.tracker.channel is not stored; set store=True on the field, or read it through the ORM

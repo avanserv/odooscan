@@ -218,9 +218,11 @@ class ParcelLanding(models.Model):
     _description = "Parcel landing"
 
 
-# Odoo merges the parents this class lists after those of the class it extends, so the entry of
-# parcel.hosted wins though parcel.sited sits earlier in its list than parcel.hosted in the other.
+# Odoo adds parcel.sited after the classes of parcel.landing in the bases, so it merges before
+# parcel.hosted, whose entry wins. Two classes list the parents, so the scan leaves their order
+# unknown and both names stay silent. Without _name, listing two models would make a new model.
 class ParcelLandingSited(models.Model):
+    _name = "parcel.landing"
     _inherit = ["parcel.landing", "parcel.sited"]
 
     def x_landing_columns(self):
