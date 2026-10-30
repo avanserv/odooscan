@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.1](https://github.com/avanserv/odooscan/compare/v0.8.0...v0.8.1) (2026-10-30)
+
+
+### Bug Fixes
+
+* **cli:** Expand ~ in addons paths and reject a missing one ([#102](https://github.com/avanserv/odooscan/issues/102)) ([623f3b2](https://github.com/avanserv/odooscan/commit/623f3b2867f401279d157f291648189aa3e59c4a))
+
 ## [0.8.0](https://github.com/avanserv/odooscan/compare/v0.7.0...v0.8.0) (2026-10-30)
 
 

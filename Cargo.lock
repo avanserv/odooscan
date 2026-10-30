@@ -680,7 +680,7 @@ dependencies = [
 
 [[package]]
 name = "odooscan"
-version = "0.8.0"
+version = "0.8.1"
 dependencies = [
  "clap",
  "ignore",
@@ -693,7 +693,7 @@ dependencies = [
 
 [[package]]
 name = "odooscan_core"
-version = "0.8.0"
+version = "0.8.1"
 dependencies = [
  "csv",
  "globset",
