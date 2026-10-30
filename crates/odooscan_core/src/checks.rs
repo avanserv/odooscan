@@ -764,10 +764,20 @@ impl<'m> Ctx<'_, 'm> {
         }
     }
 
-    /// Parents the index cannot see: a Python base class, a module that is not indexed, a model
-    /// nobody indexes, and for a mixin, every model that inherits it.
+    /// Parents the index cannot see: a plain Python base of this class, an `_inherit` element that
+    /// is not a literal in any class of the model or of a model it inherits, a module that is not
+    /// indexed, a model nobody indexes, and for a mixin, every model that inherits it.
     fn super_calls(&self, out: &mut Out<'m>, path: &'m Path, class: &ClassFact) {
-        if class.plain_bases || self.partial || class.kind == ModelKind::Abstract || !self.index.has_model(&class.model)
+        if class.super_calls.is_empty()
+            || class.plain_bases
+            || self.partial
+            || class.kind == ModelKind::Abstract
+            || !self.index.has_model(&class.model)
+            || self
+                .index
+                .chain_classes(&class.model)
+                .iter()
+                .any(|(_, c)| c.inherit_unknown)
         {
             return;
         }
@@ -837,10 +847,10 @@ impl<'m> Ctx<'_, 'm> {
         }
     }
 
-    /// Odoo replaces the compute and inverse of a related field with its own, and a plain Python
-    /// base class may hold methods only Python knows.
+    /// Odoo replaces the compute and inverse of a related field with its own, and a parent the scan
+    /// cannot see may hold methods only Python knows.
     fn missing_methods(&self, out: &mut Out<'m>, path: &'m Path, class: &ClassFact, field: &FieldFact) {
-        if field.related.is_some() || self.index.plain_bases(&class.model, self.scope) {
+        if field.related.is_some() || self.index.hidden_parents(&class.model, self.scope) {
             return;
         }
         for method in &field.methods {
@@ -1505,14 +1515,15 @@ fn unassigned_message(method: &str, fields: &[&str]) -> String {
 /// or that fail once used. Each rule reads every definition merged into the model, so none runs
 /// where a module in scope depends on a module that is not indexed. None runs on a model whose
 /// class with `_name` is out of scope, or where a class of it, or of a model it inherits or
-/// delegates to, has a plain Python base class, whose fields only Python knows.
+/// delegates to, has a plain Python base class or an `_inherit` element that is not a literal, a
+/// parent whose fields the scan cannot see.
 impl<'m> Ctx<'_, 'm> {
     fn registry(&self, out: &mut Out<'m>) {
         if self.partial {
             return;
         }
         let checked = |c: &&ClassFact| {
-            self.index.introduced(&c.model, self.scope) && !self.index.plain_bases(&c.model, self.scope)
+            self.index.introduced(&c.model, self.scope) && !self.index.hidden_parents(&c.model, self.scope)
         };
         let mut models: FxHashMap<&'m str, ModelFields<'m>> = FxHashMap::default();
         let mut reported_self_dependencies = FxHashSet::default();
@@ -2365,7 +2376,7 @@ impl<'m> Ctx<'_, 'm> {
     /// `BaseModel` gives its `_check_company_domain`.
     fn lacks_company(&self, comodel: &str) -> bool {
         self.index.introduced(comodel, self.scope)
-            && !self.index.plain_bases(comodel, self.scope)
+            && !self.index.hidden_parents(comodel, self.scope)
             && matches!(self.index.field(comodel, "company_id", self.scope), Err(None))
             && !self.index.defines_method(comodel, "_check_company_domain", true)
     }
@@ -2568,12 +2579,12 @@ impl<'m> Ctx<'_, 'm> {
     }
 
     /// Whether `model` is the one model whose table may be `table`, introduced in scope, which
-    /// takes that table there and has no plain Python base.
+    /// takes that table there and has no parent the scan cannot see.
     fn owns_table(&self, model: &str, table: &str) -> bool {
         self.index.table_models(table) == [model]
             && self.index.table(model, self.scope).as_deref() == Some(table)
             && self.index.introduced(model, self.scope)
-            && !self.index.plain_bases(model, self.scope)
+            && !self.index.hidden_parents(model, self.scope)
     }
 
     /// The model whose stored fields make up `table`: the one `owns_table` accepts, when Odoo builds
@@ -2791,13 +2802,14 @@ impl<'m> Ctx<'_, 'm> {
 
     /// Whether something may give `model` the relation `table`: a class of it or of a model it
     /// inherits, in any indexed module, defines `init()` or `_auto_init()`, sets a table query,
-    /// creates a view whose whole name is `self._table` or has a plain Python base; another model,
-    /// or a Many2many in scope, has that table; an indexed module creates a view of that name in
-    /// Python or SQL; or this module, not a dependency, creates a view it names at runtime.
+    /// creates a view whose whole name is `self._table` or has a parent the scan cannot see; another
+    /// model, or a Many2many in scope, has that table; an indexed module creates a view of that name
+    /// in Python or SQL; or this module, not a dependency, creates a view it names at runtime.
     /// `table_models` leaves out an abstract model.
     fn view_made(&self, model: &str, table: &str) -> bool {
-        let creates =
-            |c: &ClassFact| c.plain_bases || c.own_view || c.methods.iter().any(|m| VIEW_MAKERS.contains(&m.as_str()));
+        let creates = |c: &ClassFact| {
+            c.hidden_parents() || c.own_view || c.methods.iter().any(|m| VIEW_MAKERS.contains(&m.as_str()))
+        };
         self.index.chain_classes(model).iter().any(|(_, c)| creates(c))
             || self.index.table_models(table) != [model]
             || self.index.relation_table(table, self.scope)

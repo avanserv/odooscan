@@ -60,7 +60,9 @@ Python code checked on its own: security, deprecated APIs and ORM mistakes visib
 Models, fields and methods checked against every module in the dependency graph. A model class has
 `Model`, `TransientModel`, `AbstractModel` or, from 20.0, `CachedModel` among its bases, and any
 other base is a plain Python base class, which the rules whose page says so skip, since only Python
-knows its fields and methods.
+knows its fields and methods. As each page says, they also skip a model when a class of it, or of a
+model it inherits or delegates to, has an `_inherit` element that is not a literal, such as a
+variable, since the scan cannot tell which model it names.
 
 | Code | Name | Reports |
 | --- | --- | --- |
