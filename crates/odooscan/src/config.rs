@@ -67,10 +67,19 @@ fn read(path: &Path) -> Result<Option<Loaded>, String> {
     };
     let dir = path.parent().unwrap_or(Path::new("")).to_path_buf();
     Ok(config.map(|mut config| {
-        config.addons_path = config.addons_path.iter().map(|p| dir.join(p)).collect();
+        config.addons_path = config.addons_path.iter().map(|p| dir.join(expand_home(p))).collect();
         config.baseline = config.baseline.map(|p| dir.join(p));
         Loaded { config, dir }
     }))
+}
+
+/// The path with a leading `~` component replaced by the home directory. A shell expands only the
+/// `~` that starts a word, so the later entries of `--addons-path ~/a,~/b` arrive literally.
+pub fn expand_home(path: &Path) -> PathBuf {
+    match (path.strip_prefix("~"), std::env::home_dir()) {
+        (Ok(rest), Some(home)) => home.join(rest),
+        _ => path.to_path_buf(),
+    }
 }
 
 /// Gitignore-style patterns. An anchored one, such as `/migrations` or `a/b`, is relative to the
@@ -106,5 +115,20 @@ impl Exclude {
             Path::to_path_buf,
         );
         matcher.matched_path_or_any_parents(&rel, false).is_ignore()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn expand_home_replaces_only_a_leading_tilde_component() {
+        let home = std::env::home_dir().unwrap();
+        assert_eq!(expand_home(Path::new("~")), home);
+        assert_eq!(expand_home(Path::new("~/x")), home.join("x"));
+        for unchanged in ["~user/x", "/x", "x", "x/~/y"] {
+            assert_eq!(expand_home(Path::new(unchanged)), Path::new(unchanged));
+        }
     }
 }

@@ -1,3 +1,5 @@
+use std::fs;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
 fn oscn(args: &[&str]) -> Output {
@@ -5,6 +7,74 @@ fn oscn(args: &[&str]) -> Output {
         .args(args)
         .output()
         .expect("oscn runs")
+}
+
+fn scratch(name: &str) -> PathBuf {
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join(name);
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).unwrap();
+    dir
+}
+
+/// `oscn check` in `dir`, with that directory as the home directory.
+fn check_in(dir: &Path, args: &[&str]) -> Command {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_oscn"));
+    command
+        .arg("check")
+        .args(args)
+        .current_dir(dir)
+        .env("HOME", dir)
+        .env("USERPROFILE", dir)
+        .env_remove("ODOOSCAN_ADDONS_PATH");
+    command
+}
+
+fn assert_rejects(out: &Output, entry: &str) {
+    assert_eq!(out.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("addons path") && stderr.contains(entry), "{stderr}");
+}
+
+#[test]
+fn check_rejects_a_missing_addons_path() {
+    let dir = scratch("addons_path_flag");
+    let out = check_in(&dir, &["--addons-path", "missing"]).output().unwrap();
+    assert_rejects(&out, "missing");
+}
+
+#[test]
+fn check_rejects_a_missing_addons_path_from_the_environment() {
+    let dir = scratch("addons_path_env");
+    let out = check_in(&dir, &[])
+        .env("ODOOSCAN_ADDONS_PATH", "missing")
+        .output()
+        .unwrap();
+    assert_rejects(&out, "missing");
+}
+
+#[test]
+fn check_rejects_a_missing_addons_path_from_the_file() {
+    let dir = scratch("addons_path_file");
+    fs::write(dir.join("odooscan.toml"), "addons-path = [\"missing\"]\n").unwrap();
+    let out = check_in(&dir, &[]).output().unwrap();
+    assert_rejects(&out, "missing");
+}
+
+#[test]
+fn check_expands_a_tilde_after_a_comma() {
+    let dir = scratch("addons_path_comma");
+    fs::create_dir_all(dir.join("addons")).unwrap();
+    let out = check_in(&dir, &["--addons-path", "addons,~/addons"]).output().unwrap();
+    assert_eq!(out.status.code(), Some(0), "{}", String::from_utf8_lossy(&out.stderr));
+}
+
+#[test]
+fn check_expands_a_tilde_from_the_file() {
+    let dir = scratch("addons_path_file_tilde");
+    fs::create_dir_all(dir.join("addons")).unwrap();
+    fs::write(dir.join("odooscan.toml"), "addons-path = [\"~/addons\"]\n").unwrap();
+    let out = check_in(&dir, &[]).output().unwrap();
+    assert_eq!(out.status.code(), Some(0), "{}", String::from_utf8_lossy(&out.stderr));
 }
 
 #[test]
