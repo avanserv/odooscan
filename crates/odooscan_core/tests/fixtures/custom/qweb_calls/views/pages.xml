@@ -67,4 +67,44 @@
             <t t-call="kanban_extra"/>
         </xpath>
     </template>
+
+    <template t-name="by_name">
+        <div/>
+    </template>
+
+    <template t-name="qweb_calls.by_full_name">
+        <div/>
+    </template>
+
+    <template id="by_id" t-name="not_a_name">
+        <div/>
+    </template>
+
+    <template t-name="named_extension" inherit_id="by_id">
+        <xpath expr="//div" position="inside">
+            <div name="added_by_name"/>
+        </xpath>
+    </template>
+
+    <template id="extends_named" inherit_id="by_id">
+        <xpath expr="//div[@name='added_by_name']" position="inside">
+            <span/>
+        </xpath>
+    </template>
+
+    <template id="extends_by_name" inherit_id="by_name">
+        <xpath expr="//div" position="inside">
+            <span/>
+        </xpath>
+    </template>
+
+    <template id="names">
+        <t t-call="qweb_calls.by_name"/>
+        <t t-call="qweb_calls.by_full_name"/>
+        <t t-call="qweb_calls.by_id"/>
+        <t t-call="qweb_calls.absent_name"/>
+        <t t-call="by_name"/>
+        <t t-call="qweb_calls.not_a_name"/>
+        <t t-call="not_a_name"/>
+    </template>
 </odoo>

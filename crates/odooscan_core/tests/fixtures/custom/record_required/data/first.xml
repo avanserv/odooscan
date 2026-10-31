@@ -73,4 +73,18 @@
     <record id="kept_for_demo" model="rr.note">
         <field name="name">First</field>
     </record>
+    <template id="by_id_then_name">
+        <div>first</div>
+    </template>
+    <template t-name="record_required.by_name_then_id">
+        <div>first</div>
+    </template>
+    <template id="id_beside_name" t-name="name_beside_id">
+        <div>first</div>
+    </template>
+    <template id="extends_late_name" inherit_id="late_name">
+        <xpath expr="//div" position="inside">
+            <span/>
+        </xpath>
+    </template>
 </odoo>

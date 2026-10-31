@@ -361,6 +361,10 @@ custom/qweb_calls/views/pages.xml:7:24: OD311 no indexed module defines template
 custom/qweb_calls/views/pages.xml:23:38: OD311 no indexed module defines template 'web.layot_extended'
 custom/qweb_calls/views/pages.xml:33:28: OD311 no indexed module defines template 'web.layot_record'
 custom/qweb_calls/views/pages.xml:43:28: OD311 no indexed module defines template 'web.layot_appended'
+custom/qweb_calls/views/pages.xml:105:20: OD311 no indexed module defines template 'qweb_calls.absent_name'
+custom/qweb_calls/views/pages.xml:106:20: OD311 no indexed module defines template 'by_name'
+custom/qweb_calls/views/pages.xml:107:20: OD311 no indexed module defines template 'qweb_calls.not_a_name'
+custom/qweb_calls/views/pages.xml:108:20: OD311 no indexed module defines template 'not_a_name'
 custom/qweb_partial/__manifest__.py:4:24: OD503 module 'ghost_enterprise' is not on the addons path
 custom/qweb_partial/views/partial.xml:5:20: OD311 no indexed module defines template 'web.layot'
 custom/qweb_partial/views/partial.xml:23:35: OD311 no indexed module defines template 'web.layot_report'
@@ -387,6 +391,7 @@ custom/record_required/data/delegates.xml:22:5: OD324 rr.parent.label is require
 custom/record_required/data/delegates.xml:25:5: OD324 rr.loop.a.name_a is required and has no default, so Odoo cannot create this record; give the field a value
 custom/record_required/data/delegates.xml:25:5: OD324 rr.loop.b.name_b is required and has no default, so Odoo cannot create this record; give the field a value
 custom/record_required/data/delegates.xml:28:5: OD324 rr.parent.label is required and has no default, so Odoo cannot create this record; give the field a value
+custom/record_required/data/first.xml:85:5: OD308 'late_name' is defined in data/second.xml, which loads after this reference
 custom/record_required/data/rooted.xml:6:5: OD324 rr.named.code is required and has no default, so Odoo cannot create this record; give the field a value
 custom/record_required/data/rr.note.csv:2:1: OD323 XML id 'rewritten_by_row' is already defined in data/first.xml, and this definition writes the fields it names over it; remove the copy when the two say the same thing, or rename one when both are meant to exist
 custom/record_required/data/rr.thing-bare.csv:2:1: OD324 rr.thing.name is required and has no default, so Odoo cannot create this record; give the field a value
@@ -407,6 +412,9 @@ custom/record_required/data/second.xml:28:5: OD323 XML id 'asset_twice' is alrea
 custom/record_required/data/second.xml:45:5: OD323 XML id 'relinked' is already defined in data/first.xml, and this definition writes the fields it names over it; remove the copy when the two say the same thing, or rename one when both are meant to exist
 custom/record_required/data/second.xml:63:5: OD323 XML id 'record_then_menuitem' is already defined in data/first.xml, and this definition writes the fields it names over it; remove the copy when the two say the same thing, or rename one when both are meant to exist
 custom/record_required/data/second.xml:70:5: OD303 XML id 'twice_in_one_file' is already defined earlier in this file
+custom/record_required/data/second.xml:73:5: OD323 XML id 'by_id_then_name' is already defined in data/first.xml, and this definition writes the fields it names over it; remove the copy when the two say the same thing, or rename one when both are meant to exist
+custom/record_required/data/second.xml:76:5: OD323 XML id 'by_name_then_id' is already defined in data/first.xml, and this definition writes the fields it names over it; remove the copy when the two say the same thing, or rename one when both are meant to exist
+custom/record_required/data/second.xml:88:5: OD303 XML id 'name_in_one_file' is already defined earlier in this file
 custom/record_required/data/unlisted.xml:1:1: OD502 'data/unlisted.xml' is not in the manifest's data or demo, so Odoo never loads it
 custom/record_required/demo/first.xml:11:5: OD324 rr.thing.name is required and has no default, so Odoo cannot create this record; give the field a value
 custom/record_required_ext/data/after.xml:3:5: OD324 rr.thing.name is required and has no default, so Odoo cannot create this record; give the field a value
@@ -532,6 +540,8 @@ custom/report_actions/data/templates_named.xml:73:35: OD311 no indexed module de
 custom/report_actions/data/templates_named.xml:82:35: OD311 no indexed module defines template 'report_actions.absent_name_last'
 custom/report_actions/data/templates_named.xml:88:35: OD311 no indexed module defines template 'report_actions.sheet_values'
 custom/report_actions/data/templates_named.xml:94:35: OD311 no indexed module defines template 'report_actions.absent_no_id'
+custom/report_actions/data/templates_named.xml:106:35: OD311 no indexed module defines template 'report_actions.ignored_sheet'
+custom/report_actions/data/templates_named.xml:112:35: OD311 no indexed module defines template 'named_sheet'
 custom/report_actions/data/unlisted.xml:1:1: OD502 'data/unlisted.xml' is not in the manifest's data or demo, so Odoo never loads it
 custom/report_actions/data/updates.xml:2:5: OD323 XML id 'name_replaced' is already defined in data/first_writes.xml, and this definition writes the fields it names over it; remove the copy when the two say the same thing, or rename one when both are meant to exist
 custom/report_actions/data/updates.xml:6:5: OD323 XML id 'name_hidden_later' is already defined in data/first_writes.xml, and this definition writes the fields it names over it; remove the copy when the two say the same thing, or rename one when both are meant to exist
