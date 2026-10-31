@@ -1340,22 +1340,28 @@ impl<'m> Index<'m> {
         let mut types = FxHashSet::default();
         for module in self.modules {
             let loaded = module.data.iter().filter(|f| f.rank.is_some());
-            for view in loaded.flat_map(|f| &f.facts.views).filter(|v| v.primary != Some(false)) {
-                let id = view.id.as_ref().map(|id| full_id(&module.name, id));
-                let own_model = view.model.as_ref().map(|m| m.value.as_str());
-                let Some(model) = own_model.or_else(|| self.view_model(id.clone()?)) else {
-                    continue;
-                };
-                let top = id.and_then(|id| self.view_top(id)).unwrap_or_default();
-                let kind = top.iter().find_map(|n| n.fact.kind.as_deref());
-                let kind = kind.or(view.kind.as_deref());
-                let unread = view.unread_parent || top.iter().any(|n| n.fact.unread_parent);
-                if kind.is_some() || unread || view.primary.is_none() {
-                    types.insert((model, kind));
-                }
-            }
+            let views = loaded.flat_map(|f| &f.facts.views).filter(|v| v.primary != Some(false));
+            types.extend(views.filter_map(|view| self.view_type(module, view)));
         }
         types
+    }
+
+    /// The entry of `view` in `view_types`, if it has one. Odoo gives a view with a parent the type
+    /// of its tree's root, so with a view above it not indexed, its own root says nothing.
+    fn view_type(&self, module: &'m Module, view: &'m ViewFact) -> Option<(&'m str, Option<&'m str>)> {
+        let id = view.id.as_ref().map(|id| full_id(&module.name, id));
+        let own_model = view.model.as_ref().map(|m| m.value.as_str());
+        let model = own_model.or_else(|| self.view_model(id.clone()?))?;
+        let parent = view.inherit.as_ref().map(|parent| full_id(&module.name, parent));
+        let top = id.or(parent).and_then(|start| self.view_top(start));
+        if view.inherit.is_some() && top.is_none() {
+            return Some((model, None));
+        }
+        let top = top.unwrap_or_default();
+        let kind = top.iter().find_map(|n| n.fact.kind.as_deref());
+        let kind = kind.or(view.kind.as_deref());
+        let unread = view.unread_parent || top.iter().any(|n| n.fact.unread_parent);
+        (kind.is_some() || unread || view.primary.is_none()).then_some((model, kind))
     }
 
     fn template_bases(&self) -> FxHashSet<ClassKey> {

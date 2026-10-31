@@ -874,8 +874,12 @@ custom/window_actions/views/actions.xml:11:33: OD318 window.plain has no primary
 custom/window_actions/views/actions.xml:17:33: OD318 window.plain has no primary calendar view, and no date field to generate one from
 custom/window_actions/views/actions.xml:23:33: OD318 window.dated has no primary calendar view, and no stop or duration field to generate one from
 custom/window_actions/views/actions.xml:65:33: OD318 window.derived has no primary gantt view, and nothing generates one
+custom/window_actions/views/actions.xml:110:33: OD318 window.cloned has no primary map view, and nothing generates one
 custom/window_actions/views/actions.xml:128:33: OD318 window.sought has no primary map view, and nothing generates one
+custom/window_actions/views/actions.xml:158:33: OD318 window.ghosted has no primary gantt view, and nothing generates one
+custom/window_actions/views/actions.xml:164:33: OD318 window.nameless has no primary map view, and nothing generates one
 custom/window_actions/views/unlisted.xml:1:1: OD502 'views/unlisted.xml' is not in the manifest's data or demo, so Odoo never loads it
+custom/window_clone/__manifest__.py:4:35: OD503 module 'ghost_enterprise' is not on the addons path
 custom/window_hidden/views/actions.xml:4:33: OD202 model 'window.plain' comes from module window_actions; add it to depends
 custom/window_named/views/actions.xml:19:33: OD318 window.plain has no primary gantt view, and nothing generates one
 custom/window_named/views/actions.xml:32:33: OD318 window.plain has no primary map view, and nothing generates one

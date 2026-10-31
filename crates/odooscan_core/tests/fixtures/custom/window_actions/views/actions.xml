@@ -107,7 +107,7 @@
     <record id="action_cloned_view" model="ir.actions.act_window">
         <field name="name">action_cloned_view</field>
         <field name="res_model">window.cloned</field>
-        <field name="view_mode">gantt</field>
+        <field name="view_mode">gantt,map</field>
     </record>
 
     <record id="action_adopted_view" model="ir.actions.act_window">
@@ -131,6 +131,36 @@
     <record id="action_sifted_view" model="ir.actions.act_window">
         <field name="name">action_sifted_view</field>
         <field name="res_model">window.sifted</field>
+        <field name="view_mode">gantt,map</field>
+    </record>
+
+    <record id="action_outside_view" model="ir.actions.act_window">
+        <field name="name">action_outside_view</field>
+        <field name="res_model">window.outside</field>
+        <field name="view_mode">gantt,map</field>
+    </record>
+
+    <record id="action_rooted_view" model="ir.actions.act_window">
+        <field name="name">action_rooted_view</field>
+        <field name="res_model">window.rooted</field>
+        <field name="view_mode">gantt,map</field>
+    </record>
+
+    <record id="action_stepped_view" model="ir.actions.act_window">
+        <field name="name">action_stepped_view</field>
+        <field name="res_model">window.stepped</field>
+        <field name="view_mode">gantt,map</field>
+    </record>
+
+    <record id="action_ghosted_view" model="ir.actions.act_window">
+        <field name="name">action_ghosted_view</field>
+        <field name="res_model">window.ghosted</field>
+        <field name="view_mode">gantt</field>
+    </record>
+
+    <record id="action_nameless_view" model="ir.actions.act_window">
+        <field name="name">action_nameless_view</field>
+        <field name="res_model">window.nameless</field>
         <field name="view_mode">gantt,map</field>
     </record>
 </odoo>
