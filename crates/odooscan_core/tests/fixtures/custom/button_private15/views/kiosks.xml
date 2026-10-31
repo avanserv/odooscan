@@ -1,0 +1,14 @@
+<odoo>
+    <record id="kiosk_form" model="ir.ui.view">
+        <field name="name">button.kiosk.form</field>
+        <field name="model">button.kiosk</field>
+        <field name="arch" type="xml">
+            <form>
+                <button type="object" name="init"/>
+                <button type="object" name="ensure_one"/>
+                <button type="object" name="action_open"/>
+                <field name="name"/>
+            </form>
+        </field>
+    </record>
+</odoo>

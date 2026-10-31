@@ -11,8 +11,8 @@ use crate::facts::{
     RecordWrite, ReportFact, RuleFact, ServerFact, Spanned, SqlColumn, SqlView, ViewFact, WrittenValue, XmlRef,
 };
 use crate::index::{
-    BASE_MODEL_METHODS, Export, FieldDef, FieldInfo, Index, JsSpec, RELATIONAL_TYPES, Scope, Status, ViewTree, full_id,
-    js_module_path, located,
+    BASE_MODEL_METHODS, Export, FieldDef, FieldInfo, Index, JsSpec, RELATIONAL_TYPES, Scope, Status, ViewTree,
+    base_private_method, full_id, js_module_path, located,
 };
 use crate::project::{Module, SourceFile, code_loaded};
 use crate::rules::rule;
@@ -1885,11 +1885,15 @@ impl<'m> Ctx<'_, 'm> {
         }
     }
 
-    /// A leading `_` is private whatever the model defines, so it needs no lookup. `@api.private`
-    /// counts on any definition, since Odoo walks the whole MRO.
+    /// A leading `_` or a private method of `BaseModel` is private whatever the model defines, so it
+    /// needs no lookup, even on a model the scan cannot see whole. `@api.private` counts on any
+    /// definition, since Odoo walks the whole MRO.
     fn button(&self, out: &mut Out<'m>, path: &'m Path, model: &str, method: &Spanned<String>) {
         let name = &method.value;
-        if name.starts_with('_') || self.index.private_method(model, name, self.scope) {
+        if name.starts_with('_')
+            || base_private_method(name, self.series)
+            || self.index.private_method(model, name, self.scope)
+        {
             let message = format!("method '{name}' of {model} is private, so Odoo refuses to call it from a button");
             out.push(path, "OD313", method.pos, message);
         } else if let Some(message) = self.method_gap(model, name) {

@@ -125,6 +125,10 @@ custom/button_delegate/views/delegate.xml:20:34: OD320 res.users has no method '
 custom/button_mixin/models/hooks.py:19:17: OD201 no indexed module defines model 'ghost.mixin'
 custom/button_partial/__manifest__.py:4:25: OD503 module 'ghost_enterprise' is not on the addons path
 custom/button_partial/views/partial.xml:8:45: OD313 method '_from_enterprise' of button.visit is private, so Odoo refuses to call it from a button
+custom/button_private/views/desks.xml:7:45: OD313 method 'ensure_one' of button.desk is private, so Odoo refuses to call it from a button
+custom/button_private/views/desks.xml:8:45: OD313 method 'init' of button.desk is private, so Odoo refuses to call it from a button
+custom/button_private/views/desks.xml:9:45: OD313 method 'with_context' of button.desk is private, so Odoo refuses to call it from a button
+custom/button_private15/views/kiosks.xml:7:45: OD313 method 'init' of button.kiosk is private, so Odoo refuses to call it from a button
 custom/cursor_state/controllers/main.py:13:13: OD121 rolling back discards the whole transaction, the caller's work included, while the code carries on; raise an exception so that Odoo rolls back, or run the step that may fail under self.env.cr.savepoint()
 custom/cursor_state/controllers/main.py:19:9: OD122 UPDATE on res_partner bypasses the ORM, so records this transaction already read keep stale values; call flush_model() before the query and invalidate_model() after it (flush() and invalidate_cache() before 16.0)
 custom/cursor_state/models/caches.py:6:1: OD124 _label_by_partner is filled at runtime but lives in the Python process, so every database the server runs shares it and each worker fills its own copy; cache on a model method with tools.ormcache, which Odoo keeps per database and clears in every worker
