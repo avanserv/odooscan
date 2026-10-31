@@ -91,6 +91,11 @@ const RULE_DOMAIN_VALIDATED: Series = Series { major: 15, minor: 0 };
 /// lets every user through, `odoo/addons/base/models/ir_model.py:1500`).
 const TRANSIENT_ACCESS: Series = Series { major: 13, minor: 2 };
 
+/// The first series that gives a child action the model of its parent as it creates the child
+/// (`45a5562fc41b`, `odoo/addons/base/models/ir_actions.py:645` on saas~18.2). `write` leaves the
+/// model alone (`:714` on 20.0), so this says nothing of a child linked after its creation.
+const CHILD_ACTION_MODEL: Series = Series { major: 18, minor: 2 };
+
 /// The first series without `ir.model.access`: `odoo/addons/base/__manifest__.py:81` loads
 /// `ir.access.csv` where saas~19.3 loads `ir.model.access.csv` (`:78`). The loader calls `env[model]`
 /// on the model of the file name (`odoo/tools/convert.py:776` on saas~19.4), so loading an
@@ -1730,24 +1735,25 @@ impl<'m> Ctx<'_, 'm> {
 
     /// Checks the calls `server` makes, if the record still holds that code and runs it. Each field
     /// holds the last value `scope` gave it: what a module depending on this one replaces later does
-    /// not mend a database without that module. A cron runs code without saying so.
+    /// not mend a database without that module. `server_model` gives a created child's model. A cron
+    /// runs code without saying so.
     fn server_code(&self, out: &mut Out<'m>, path: &'m Path, server: &'m ServerFact) {
         if server.calls.is_empty() {
             return;
         }
         let own = [self.own(server)];
         let id = server.id.as_ref().map(|id| full_id(&self.module.name, id));
-        let writes = id.and_then(|id| self.index.server_writes.get(&id));
+        let writes = id.as_ref().and_then(|id| self.index.server_writes.get(id));
         let writes = writes.map_or(&own[..], Vec::as_slice);
         let last = || writes.iter().rev().filter(|w| self.scope.reads(w));
         let holds = last()
             .find(|w| w.fact.writes_code)
             .is_some_and(|w| std::ptr::eq(w.fact, server));
         let runs = last().find_map(|w| w.fact.state).unwrap_or(server.cron);
-        let model = last()
-            .find(|w| !matches!(w.fact.model, ActionValue::Unset))
-            .and_then(|w| self.written_model(w.module, &w.fact.model, w.fact.by_name));
-        let Some(model) = model.filter(|_| holds && runs) else {
+        if !holds || !runs {
+            return;
+        }
+        let Some(model) = self.server_model(writes, &mut id.into_iter().collect()) else {
             return;
         };
         for call in &server.calls {
@@ -1755,6 +1761,54 @@ impl<'m> Ctx<'_, 'm> {
                 out.push(path, "OD320", call.pos, message);
             }
         }
+    }
+
+    /// The model `writes` leave a server action on: that of the last write after the one creating
+    /// the record that gives `model_id`, or else the one it was created on. `seen` holds the actions
+    /// already followed, whose `parent_id` may form a cycle.
+    fn server_model(&self, writes: &[Placed<&'m ServerFact>], seen: &mut FxHashSet<String>) -> Option<&'m str> {
+        let mut read = writes.iter().filter(|w| self.scope.reads(w));
+        let creator = read.next()?;
+        match read.rfind(|w| !matches!(w.fact.model, ActionValue::Unset)) {
+            Some(w) => self.written_model(w.module, &w.fact.model, w.fact.by_name),
+            None => self.created_model(creator, seen),
+        }
+    }
+
+    /// The model `creator` creates a server action on: from `CHILD_ACTION_MODEL` that of its parent,
+    /// whatever it gives `model_id`. An unknown series may be on either side of that bound.
+    fn created_model(&self, creator: &Placed<&'m ServerFact>, seen: &mut FxHashSet<String>) -> Option<&'m str> {
+        let own = self.written_model(creator.module, &creator.fact.model, creator.fact.by_name);
+        let orphan = matches!(creator.fact.parent, ActionValue::Unset);
+        if orphan || self.series.is_some_and(|s| s < CHILD_ACTION_MODEL) {
+            return own;
+        }
+        let parent = self.parent_model(creator, seen);
+        parent.filter(|_| self.series.is_some() || parent == own)
+    }
+
+    /// The model the parent of `child` holds when Odoo creates `child`, if the scan can tell: only
+    /// a parent all of whose writes agree says, as a child keeps the model of the moment it was
+    /// created. `parent_id` points at `ir.actions.server`, so a cron gives no model.
+    fn parent_model(&self, child: &Placed<&'m ServerFact>, seen: &mut FxHashSet<String>) -> Option<&'m str> {
+        let ActionValue::Literal(parent) = &child.fact.parent else {
+            return None;
+        };
+        let id = full_id(&self.index.modules[child.module].name, &parent.value);
+        let writes = self.index.server_writes.get(&id)?;
+        if !seen.insert(id) {
+            return None;
+        }
+        let mut read = writes.iter().filter(|w| self.scope.reads(w));
+        if read.clone().any(|w| w.fact.cron) {
+            return None;
+        }
+        let model = self.created_model(read.next()?, seen)?;
+        let agrees = |w: &Placed<&'m ServerFact>| {
+            matches!(w.fact.model, ActionValue::Unset)
+                || self.written_model(w.module, &w.fact.model, w.fact.by_name) == Some(model)
+        };
+        read.all(agrees).then_some(model)
     }
 
     /// OD311 on the template `report` names, if the record still holds it and renders one. A Python

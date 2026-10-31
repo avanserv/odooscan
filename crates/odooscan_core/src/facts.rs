@@ -632,6 +632,8 @@ pub struct ServerFact {
     /// What it gives `model_id`: an `ir.model` XML id, or a model name when `by_name`.
     pub model: ActionValue,
     pub by_name: bool,
+    /// The XML id of the action it gives `parent_id`, or nests it under through `child_ids`.
+    pub parent: ActionValue,
     /// Whether what it gives `state` is `code`, where a value only a run tells counts as false.
     pub state: Option<bool>,
     /// It gives `code` a value, which replaces the last one even when no call can be read from it.

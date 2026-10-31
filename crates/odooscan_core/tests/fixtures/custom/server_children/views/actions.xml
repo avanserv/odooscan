@@ -1,0 +1,146 @@
+<odoo>
+    <record id="plan_action" model="ir.actions.server">
+        <field name="name">plan_action</field>
+        <field name="model_id" ref="model_child_plan"/>
+        <field name="state">multi</field>
+        <field name="child_ids">
+            <record id="nested_on_parent" model="ir.actions.server">
+                <field name="name">nested_on_parent</field>
+                <field name="model_id" ref="model_child_task"/>
+                <field name="state">code</field>
+                <field name="code">record.action_plan()</field>
+            </record>
+            <record id="nested_against_parent" model="ir.actions.server">
+                <field name="name">nested_against_parent</field>
+                <field name="model_id" ref="model_child_task"/>
+                <field name="state">code</field>
+                <field name="code">record.action_task()</field>
+            </record>
+            <record id="nested_without_model" model="ir.actions.server">
+                <field name="name">nested_without_model</field>
+                <field name="state">code</field>
+                <field name="code">record.action_task()</field>
+            </record>
+            <record id="nested_then_given_model" model="ir.actions.server">
+                <field name="name">nested_then_given_model</field>
+                <field name="state">code</field>
+                <field name="code">record.action_plan()</field>
+            </record>
+            <record id="grandchild_parent" model="ir.actions.server">
+                <field name="name">grandchild_parent</field>
+                <field name="model_id" ref="model_child_task"/>
+                <field name="state">multi</field>
+                <field name="child_ids">
+                    <record id="grandchild" model="ir.actions.server">
+                        <field name="name">grandchild</field>
+                        <field name="model_id" ref="model_child_task"/>
+                        <field name="state">code</field>
+                        <field name="code">record.action_task()</field>
+                    </record>
+                </field>
+            </record>
+        </field>
+    </record>
+
+    <record id="parent_by_ref" model="ir.actions.server">
+        <field name="name">parent_by_ref</field>
+        <field name="model_id" ref="model_child_task"/>
+        <field name="parent_id" ref="plan_action"/>
+        <field name="state">code</field>
+        <field name="code">record.action_task()</field>
+    </record>
+
+    <record id="parent_by_eval" model="ir.actions.server">
+        <field name="name">parent_by_eval</field>
+        <field name="model_id" ref="model_child_task"/>
+        <field name="parent_id" eval="ref('plan_action')"/>
+        <field name="state">code</field>
+        <field name="code">record.action_task()</field>
+    </record>
+
+    <record id="linked_by_parent" model="ir.actions.server">
+        <field name="name">linked_by_parent</field>
+        <field name="model_id" ref="model_child_task"/>
+        <field name="state">code</field>
+        <field name="code">record.action_plan()</field>
+    </record>
+
+    <record id="linking_parent" model="ir.actions.server">
+        <field name="name">linking_parent</field>
+        <field name="model_id" ref="model_child_plan"/>
+        <field name="state">multi</field>
+        <field name="child_ids" eval="[(4, ref('linked_by_parent'))]"/>
+    </record>
+
+    <record id="linked_by_child" model="ir.actions.server">
+        <field name="name">linked_by_child</field>
+        <field name="model_id" ref="model_child_task"/>
+        <field name="state">code</field>
+        <field name="code">record.action_plan()</field>
+    </record>
+
+    <record model="ir.actions.server">
+        <field name="name">anonymous_parent</field>
+        <field name="model_id" ref="model_child_plan"/>
+        <field name="state">multi</field>
+        <field name="child_ids">
+            <record id="under_anonymous_parent" model="ir.actions.server">
+                <field name="name">under_anonymous_parent</field>
+                <field name="model_id" ref="model_child_task"/>
+                <field name="state">code</field>
+                <field name="code">record._nope_anonymous_parent()</field>
+            </record>
+        </field>
+    </record>
+
+    <record id="plan_cron" model="ir.cron">
+        <field name="name">plan_cron</field>
+        <field name="model_id" ref="model_child_plan"/>
+        <field name="child_ids">
+            <record id="nested_under_cron" model="ir.actions.server">
+                <field name="name">nested_under_cron</field>
+                <field name="model_id" ref="model_child_task"/>
+                <field name="state">code</field>
+                <field name="code">record._nope_nested_under_cron()</field>
+            </record>
+        </field>
+    </record>
+
+    <record id="parent_is_a_cron" model="ir.actions.server">
+        <field name="name">parent_is_a_cron</field>
+        <field name="model_id" ref="model_child_task"/>
+        <field name="parent_id" ref="plan_cron"/>
+        <field name="state">code</field>
+        <field name="code">record._nope_cron_parent()</field>
+    </record>
+
+    <record id="opaque_parent" model="ir.actions.server">
+        <field name="name">opaque_parent</field>
+        <field name="model_id" ref="model_child_task"/>
+        <field name="parent_id" search="[('name', '=', 'plan_action')]"/>
+        <field name="state">code</field>
+        <field name="code">record._nope_opaque_parent()</field>
+    </record>
+
+    <record id="rewritten_action" model="ir.actions.server">
+        <field name="name">rewritten_action</field>
+        <field name="model_id" ref="model_child_plan"/>
+        <field name="state">multi</field>
+    </record>
+
+    <record id="under_rewritten_parent" model="ir.actions.server">
+        <field name="name">under_rewritten_parent</field>
+        <field name="model_id" ref="model_child_plan"/>
+        <field name="parent_id" ref="rewritten_action"/>
+        <field name="state">code</field>
+        <field name="code">record._nope_rewritten_parent()</field>
+    </record>
+
+    <record id="own_parent" model="ir.actions.server">
+        <field name="name">own_parent</field>
+        <field name="model_id" ref="model_child_plan"/>
+        <field name="parent_id" ref="own_parent"/>
+        <field name="state">code</field>
+        <field name="code">record._nope_own_parent()</field>
+    </record>
+</odoo>

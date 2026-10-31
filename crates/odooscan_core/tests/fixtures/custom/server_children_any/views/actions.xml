@@ -1,0 +1,26 @@
+<odoo>
+    <record id="plan_action" model="ir.actions.server">
+        <field name="name">plan_action</field>
+        <field name="model_id" ref="model_child_any_plan"/>
+        <field name="state">multi</field>
+        <field name="child_ids">
+            <record id="models_differ" model="ir.actions.server">
+                <field name="name">models_differ</field>
+                <field name="model_id" ref="model_child_any_task"/>
+                <field name="state">code</field>
+                <field name="code">record._nope_models_differ()</field>
+            </record>
+            <record id="models_agree" model="ir.actions.server">
+                <field name="name">models_agree</field>
+                <field name="model_id" ref="model_child_any_plan"/>
+                <field name="state">code</field>
+                <field name="code">record._nope_models_agree()</field>
+            </record>
+            <record id="no_model" model="ir.actions.server">
+                <field name="name">no_model</field>
+                <field name="state">code</field>
+                <field name="code">record._nope_no_model()</field>
+            </record>
+        </field>
+    </record>
+</odoo>
