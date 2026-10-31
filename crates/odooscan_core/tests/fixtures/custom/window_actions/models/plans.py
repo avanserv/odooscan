@@ -113,3 +113,38 @@ class WindowExtended(models.Model):
     _description = "Window extended"
 
     name = fields.Char()
+
+
+class WindowOutside(models.Model):
+    _name = "window.outside"
+    _description = "Window outside"
+
+    name = fields.Char()
+
+
+class WindowRooted(models.Model):
+    _name = "window.rooted"
+    _description = "Window rooted"
+
+    name = fields.Char()
+
+
+class WindowStepped(models.Model):
+    _name = "window.stepped"
+    _description = "Window stepped"
+
+    name = fields.Char()
+
+
+class WindowGhosted(models.Model):
+    _name = "window.ghosted"
+    _description = "Window ghosted"
+
+    name = fields.Char()
+
+
+class WindowNameless(models.Model):
+    _name = "window.nameless"
+    _description = "Window nameless"
+
+    name = fields.Char()
