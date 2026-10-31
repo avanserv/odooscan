@@ -361,6 +361,9 @@ custom/qweb_calls/data/pages.xml:1:1: OD502 'data/pages.xml' is not in the manif
 custom/qweb_calls/static/src/panel.xml:6:20: OD605 no indexed bundle defines template 'qweb_calls.Absent'
 custom/qweb_calls/static/src/panel.xml:7:20: OD605 template 'qweb_outside.Panel' comes from module qweb_outside, which is not in depends
 custom/qweb_calls/static/src/panel.xml:14:76: OD605 no indexed bundle defines template 'qweb_calls.AbsentChildRoot'
+custom/qweb_calls/static/src/panel.xml:16:9: OD606 no <t> with t-call="qweb_calls.AbsentStale" in template qweb_calls.Panel or the templates that extend it
+custom/qweb_calls/static/src/panel.xml:17:24: OD605 no indexed bundle defines template 'qweb_calls.AbsentReplacement'
+custom/qweb_calls/static/src/panel.xml:21:20: OD605 no indexed bundle defines template 'qweb_calls.AbsentPositioned'
 custom/qweb_calls/views/aside.xml:1:1: OD502 'views/aside.xml' is not in the manifest's data or demo, so Odoo never loads it
 custom/qweb_calls/views/pages.xml:4:24: OD311 no indexed module defines template 'web.layot'
 custom/qweb_calls/views/pages.xml:5:24: OD311 no indexed module defines template 'local'
@@ -380,6 +383,14 @@ custom/qweb_calls/views/pages.xml:124:20: OD311 no indexed module defines templa
 custom/qweb_calls/views/pages.xml:125:20: OD311 no indexed module defines template 'qweb_calls.migration_page'
 custom/qweb_calls/views/pages.xml:126:20: OD311 no indexed module defines template 'qweb_outside.aside_page'
 custom/qweb_calls/views/pages.xml:132:9: OD310 no <div name="aside_block"> in view qweb_calls.home or the views that extend it
+custom/qweb_calls/views/pages.xml:142:9: OD310 no <t t-call="web.layot_stale"> in view qweb_calls.home or the views that extend it
+custom/qweb_calls/views/pages.xml:143:24: OD311 no indexed module defines template 'web.layot_replacement'
+custom/qweb_calls/views/pages.xml:148:9: OD310 no <t t-call="web.layot_stale_xpath"> in view qweb_calls.home or the views that extend it
+custom/qweb_calls/views/pages.xml:155:13: OD310 no <t t-call="web.layot_moved"> in view qweb_calls.home or the views that extend it
+custom/qweb_calls/views/pages.xml:163:17: OD310 no <t t-call="web.layot_stale_record"> in view qweb_calls.home or the views that extend it
+custom/qweb_calls/views/pages.xml:171:24: OD311 no indexed module defines template 'web.layot_positioned'
+custom/qweb_calls/views/pages.xml:176:20: OD311 no indexed module defines template 'web.layot_positioned_plain'
+custom/qweb_calls/views/pages.xml:182:38: OD311 no indexed module defines template 'web.layot_set'
 custom/qweb_outside/views/aside.xml:1:1: OD502 'views/aside.xml' is not in the manifest's data or demo, so Odoo never loads it
 custom/qweb_partial/__manifest__.py:4:24: OD503 module 'ghost_enterprise' is not on the addons path
 custom/qweb_partial/views/partial.xml:5:20: OD311 no indexed module defines template 'web.layot'

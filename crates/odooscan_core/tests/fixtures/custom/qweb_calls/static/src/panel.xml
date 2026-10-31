@@ -12,4 +12,12 @@
     </t>
     <t t-inherit="qweb_calls.Panel" t-inherit-mode="extension" t-call="qweb_calls.AbsentRoot"/>
     <t t-name="qweb_calls.PanelChild" t-inherit="qweb_calls.Panel" t-call="qweb_calls.AbsentChildRoot"/>
+    <t t-inherit="qweb_calls.Panel" t-inherit-mode="extension">
+        <t t-call="qweb_calls.AbsentStale" position="replace">
+            <t t-call="qweb_calls.AbsentReplacement"/>
+        </t>
+    </t>
+    <t t-name="qweb_calls.PanelPositioned">
+        <t t-call="qweb_calls.AbsentPositioned" position="'top'"/>
+    </t>
 </templates>

@@ -387,7 +387,7 @@ pub struct ArchDomain {
     pub fields: Vec<Spanned<String>>,
 }
 
-/// An arch element as an inheriting view locates it: its tag and its `name` or `id`.
+/// An arch element as an inheriting view locates it: its tag and its `name`, `id` or `t-call`.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ArchElement {
     pub tag: String,
@@ -422,7 +422,7 @@ pub struct ViewFact {
     pub has_arch: bool,
     /// Elements the arch adds, which views extending it can locate.
     pub elements: Vec<ArchElement>,
-    /// Elements the arch's specs (`position` elements and xpaths) must find in the parent views.
+    /// Elements the arch's specs must find in the parent views.
     pub locators: Vec<Spanned<ArchElement>>,
     pub domains: Vec<ArchDomain>,
     pub buttons: Vec<ArchButton>,
