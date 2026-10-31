@@ -1,0 +1,24 @@
+<odoo>
+    <record id="ticket_aside" model="ir.ui.view">
+        <field name="name">modifier.ticket.aside</field>
+        <field name="model">modifier.ticket</field>
+        <field name="arch" type="xml">
+            <form>
+                <field name="name"/>
+            </form>
+        </field>
+    </record>
+
+    <record id="ticket_brief_lines" model="ir.ui.view">
+        <field name="name">modifier.ticket.brief.lines</field>
+        <field name="model">modifier.ticket</field>
+        <field name="inherit_id" ref="ticket_brief"/>
+        <field name="arch" type="xml">
+            <field name="line_ids" position="inside">
+                <list>
+                    <field name="name"/>
+                </list>
+            </field>
+        </field>
+    </record>
+</odoo>

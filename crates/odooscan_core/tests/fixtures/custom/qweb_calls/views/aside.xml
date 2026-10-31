@@ -1,0 +1,11 @@
+<odoo>
+    <template id="aside_page" key="qweb_calls.aside_key">
+        <div/>
+    </template>
+
+    <template id="aside_extension" inherit_id="home">
+        <xpath expr="//t" position="inside">
+            <div name="aside_block"/>
+        </xpath>
+    </template>
+</odoo>

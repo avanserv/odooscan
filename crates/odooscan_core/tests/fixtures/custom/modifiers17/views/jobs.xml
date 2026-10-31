@@ -45,4 +45,14 @@
             </calendar>
         </field>
     </record>
+
+    <record id="job_brief" model="ir.ui.view">
+        <field name="name">modifier.job.brief</field>
+        <field name="model">modifier.job</field>
+        <field name="arch" type="xml">
+            <form>
+                <field name="name" invisible="note"/>
+            </form>
+        </field>
+    </record>
 </odoo>

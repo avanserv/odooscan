@@ -264,6 +264,9 @@ custom/legacy17/models/res_partner.py:13:68: OD222 'home_country_id' has check_c
 custom/legacy17/partner_tagline_views.xml:1:1: OD502 'partner_tagline_views.xml' is listed under update_xml, which Odoo ignores in this series; move it to data
 custom/legacy17/views/partner_motto_views.xml:1:1: OD502 'views/partner_motto_views.xml' is listed under update_xml, which Odoo ignores in this series; move it to data
 custom/legacy17/views/partner_nickname_views.xml:1:1: OD502 'views/partner_nickname_views.xml' is listed under init_xml, which Odoo ignores in this series; move it to data
+custom/legacy17/views/partner_pages.xml:4:20: OD311 no indexed module defines template 'legacy17.partner_motto_page'
+custom/legacy17/views/partner_pages.xml:5:20: OD311 no indexed module defines template 'legacy17.partner_ported_page'
+custom/legacy17/views/partner_ported_views.xml:1:1: OD502 'views/partner_ported_views.xml' is listed under update_xml, which Odoo ignores in this series; move it to data
 custom/model_attributes/models/bed.py:7:20: OD203 'parent_bed_id': garden.bed has no field 'parent_bed_id'
 custom/model_attributes/models/bed.py:8:18: OD203 'folded': garden.bed has no field 'folded'
 custom/model_attributes/models/bed.py:9:20: OD203 'x_active': garden.bed has no field 'x_active'
@@ -329,6 +332,8 @@ custom/modern20/security/access.xml:6:30: OD210 'no_xml_domain': modern.lamp has
 custom/modern20/security/ir.access-inactive.csv:3:1: OD402 base.group_portal gets write, create or unlink on modern.lamp; public and portal access should be read-only and go through controllers
 custom/modern20/security/ir.access.csv:2:1: OD210 'no_csv_name': modern.lamp has no field 'no_csv_name'
 custom/modifiers17/views/jobs.xml:7:47: OD317 invisible reads field 'state', which the view does not show
+custom/modifiers17/views/jobs.xml:54:47: OD317 invisible reads field 'note', which the view does not show
+custom/modifiers17/views/unlisted.xml:1:1: OD502 'views/unlisted.xml' is not in the manifest's data or demo, so Odoo never loads it
 custom/modifiers173/views/tasks.xml:8:47: OD316 invisible names 'active_id': modifier.task has no field 'active_id'
 custom/orm_overrides/models/caches.py:7:21: OD120 'lang' in an ormcache key is not a parameter of _greeting_for(), so every call raises NameError; key on a parameter or on self
 custom/orm_overrides/models/caches.py:11:29: OD120 'country' in an ormcache key is not a parameter of _country_label(), so every call raises NameError; key on a parameter or on self
@@ -352,9 +357,11 @@ custom/orm_overrides/models/overrides.py:14:9: OD119 copy() calls super() but re
 custom/orm_overrides/models/overrides.py:24:5: OD117 @api.model on create() makes Odoo call it once per record; decorate it with @api.model_create_multi and take a list of dicts
 custom/project_fork/data/projects.xml:7:9: OD309 field 'allow_timesheets' of project.project comes from module hr_timesheet, which is not in depends
 custom/project_fork/models/task.py:4:7: OD209 module project already defines model 'project.task', and this class replaces it; extend it with _inherit = 'project.task'
+custom/qweb_calls/data/pages.xml:1:1: OD502 'data/pages.xml' is not in the manifest's data or demo, so Odoo never loads it
 custom/qweb_calls/static/src/panel.xml:6:20: OD605 no indexed bundle defines template 'qweb_calls.Absent'
 custom/qweb_calls/static/src/panel.xml:7:20: OD605 template 'qweb_outside.Panel' comes from module qweb_outside, which is not in depends
 custom/qweb_calls/static/src/panel.xml:14:76: OD605 no indexed bundle defines template 'qweb_calls.AbsentChildRoot'
+custom/qweb_calls/views/aside.xml:1:1: OD502 'views/aside.xml' is not in the manifest's data or demo, so Odoo never loads it
 custom/qweb_calls/views/pages.xml:4:24: OD311 no indexed module defines template 'web.layot'
 custom/qweb_calls/views/pages.xml:5:24: OD311 no indexed module defines template 'local'
 custom/qweb_calls/views/pages.xml:6:24: OD311 template 'qweb_outside.page' comes from module qweb_outside, which is not in depends
@@ -367,6 +374,13 @@ custom/qweb_calls/views/pages.xml:106:20: OD311 no indexed module defines templa
 custom/qweb_calls/views/pages.xml:107:20: OD311 no indexed module defines template 'qweb_calls.not_a_name'
 custom/qweb_calls/views/pages.xml:108:20: OD311 no indexed module defines template 'not_a_name'
 custom/qweb_calls/views/pages.xml:113:24: OD311 no indexed module defines template 'web.layot_inside_extension'
+custom/qweb_calls/views/pages.xml:122:20: OD311 no indexed module defines template 'qweb_calls.aside_page'
+custom/qweb_calls/views/pages.xml:123:20: OD311 no indexed module defines template 'qweb_calls.aside_key'
+custom/qweb_calls/views/pages.xml:124:20: OD311 no indexed module defines template 'qweb_calls.test_page'
+custom/qweb_calls/views/pages.xml:125:20: OD311 no indexed module defines template 'qweb_calls.migration_page'
+custom/qweb_calls/views/pages.xml:126:20: OD311 no indexed module defines template 'qweb_outside.aside_page'
+custom/qweb_calls/views/pages.xml:132:9: OD310 no <div name="aside_block"> in view qweb_calls.home or the views that extend it
+custom/qweb_outside/views/aside.xml:1:1: OD502 'views/aside.xml' is not in the manifest's data or demo, so Odoo never loads it
 custom/qweb_partial/__manifest__.py:4:24: OD503 module 'ghost_enterprise' is not on the addons path
 custom/qweb_partial/views/partial.xml:5:20: OD311 no indexed module defines template 'web.layot'
 custom/qweb_partial/views/partial.xml:23:35: OD311 no indexed module defines template 'web.layot_report'
@@ -544,6 +558,8 @@ custom/report_actions/data/templates_named.xml:88:35: OD311 no indexed module de
 custom/report_actions/data/templates_named.xml:94:35: OD311 no indexed module defines template 'report_actions.absent_no_id'
 custom/report_actions/data/templates_named.xml:106:35: OD311 no indexed module defines template 'report_actions.ignored_sheet'
 custom/report_actions/data/templates_named.xml:112:35: OD311 no indexed module defines template 'named_sheet'
+custom/report_actions/data/templates_named.xml:118:35: OD311 no indexed module defines template 'report_actions.unlisted_sheet'
+custom/report_actions/data/templates_named.xml:124:35: OD311 no indexed module defines template 'report_actions.unlisted_sheet_key'
 custom/report_actions/data/unlisted.xml:1:1: OD502 'data/unlisted.xml' is not in the manifest's data or demo, so Odoo never loads it
 custom/report_actions/data/updates.xml:2:5: OD323 XML id 'name_replaced' is already defined in data/first_writes.xml, and this definition writes the fields it names over it; remove the copy when the two say the same thing, or rename one when both are meant to exist
 custom/report_actions/data/updates.xml:6:5: OD323 XML id 'name_hidden_later' is already defined in data/first_writes.xml, and this definition writes the fields it names over it; remove the copy when the two say the same thing, or rename one when both are meant to exist
@@ -714,6 +730,7 @@ custom/view_modifiers/views/extensions.xml:11:50: OD316 invisible names 'stat': 
 custom/view_modifiers/views/extensions.xml:12:44: OD315 invalid required expression: Expected an expression
 custom/view_modifiers/views/extensions.xml:15:47: OD316 invisible names 'stat': modifier.ticket has no field 'stat'
 custom/view_modifiers/views/extensions.xml:56:50: OD316 readonly names 'nowhere': modifier.ticket has no field 'nowhere'
+custom/view_modifiers/views/extensions.xml:123:46: OD316 readonly names 'quantity': modifier.ticket has no field 'quantity'
 custom/view_modifiers/views/tickets.xml:7:47: OD315 invalid invisible expression: Expected an expression
 custom/view_modifiers/views/tickets.xml:8:46: OD316 readonly names 'stat': modifier.ticket has no field 'stat'
 custom/view_modifiers/views/tickets.xml:9:46: OD315 invalid required expression: Odoo does not read this construct, such as a comprehension, a set or a lambda
@@ -721,6 +738,7 @@ custom/view_modifiers/views/tickets.xml:10:47: OD316 invisible names 'true': mod
 custom/view_modifiers/views/tickets.xml:20:62: OD316 column_invisible names 'parent.stat': modifier.ticket has no field 'stat'
 custom/view_modifiers/views/tickets.xml:21:62: OD316 column_invisible names 'parent.state.x': Odoo refuses a composed field
 custom/view_modifiers/views/tickets.xml:23:54: OD316 readonly names 'state': modifier.line has no field 'state'
+custom/view_modifiers/views/unlisted.xml:1:1: OD502 'views/unlisted.xml' is not in the manifest's data or demo, so Odoo never loads it
 custom/window_actions/views/actions.xml:4:33: OD201 no indexed module defines model 'sale.ordr'
 custom/window_actions/views/actions.xml:11:33: OD318 window.plain has no gantt view, and nothing generates one
 custom/window_actions/views/actions.xml:11:33: OD318 window.plain has no map view, and nothing generates one

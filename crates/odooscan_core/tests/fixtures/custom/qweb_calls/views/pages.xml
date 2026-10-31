@@ -117,4 +117,24 @@
     <template id="primary_root_call_dropped" inherit_id="home" primary="True" t-call="web.layot_primary"/>
 
     <template id="empty_parent" inherit_id=""/>
+
+    <template id="loaded_files">
+        <t t-call="qweb_calls.aside_page"/>
+        <t t-call="qweb_calls.aside_key"/>
+        <t t-call="qweb_calls.test_page"/>
+        <t t-call="qweb_calls.migration_page"/>
+        <t t-call="qweb_outside.aside_page"/>
+        <t t-call="qweb_calls.demo_page"/>
+        <t t-call="qweb_calls.code_page"/>
+    </template>
+
+    <template id="extends_aside" inherit_id="home">
+        <xpath expr="//div[@name='aside_block']" position="after">
+            <span/>
+        </xpath>
+    </template>
+
+    <template id="unread_key">
+        <t t-call="qweb_calls.other_page"/>
+    </template>
 </odoo>

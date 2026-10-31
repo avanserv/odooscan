@@ -92,4 +92,36 @@
             </xpath>
         </field>
     </record>
+
+    <record id="ticket_aside_extended" model="ir.ui.view">
+        <field name="name">modifier.ticket.aside.extended</field>
+        <field name="inherit_id" ref="ticket_aside"/>
+        <field name="arch" type="xml">
+            <group name="absent" position="inside">
+                <field name="name" readonly="nowhere"/>
+            </group>
+        </field>
+    </record>
+
+    <record id="ticket_brief" model="ir.ui.view">
+        <field name="name">modifier.ticket.brief</field>
+        <field name="model">modifier.ticket</field>
+        <field name="arch" type="xml">
+            <form>
+                <group name="heading"/>
+                <field name="line_ids"/>
+            </form>
+        </field>
+    </record>
+
+    <record id="ticket_brief_anchored" model="ir.ui.view">
+        <field name="name">modifier.ticket.brief.anchored</field>
+        <field name="model">modifier.ticket</field>
+        <field name="inherit_id" ref="ticket_brief"/>
+        <field name="arch" type="xml">
+            <group name="heading" position="inside">
+                <field name="name" readonly="quantity"/>
+            </group>
+        </field>
+    </record>
 </odoo>

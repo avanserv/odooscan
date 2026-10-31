@@ -9,4 +9,8 @@
             </field>
         </field>
     </record>
+
+    <template id="partner_motto_page">
+        <div/>
+    </template>
 </odoo>
