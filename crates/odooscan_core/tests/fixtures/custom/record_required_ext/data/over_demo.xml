@@ -1,0 +1,3 @@
+<odoo>
+    <record id="created_over_demo" model="rr.thing"/>
+</odoo>

@@ -566,8 +566,8 @@ fn model_xmlid(model: &str) -> String {
 
 type Models<'m> = FxHashMap<&'m str, Vec<(usize, &'m ClassFact)>>;
 
-/// Every write to a record, by full id, with the module that makes it.
-type Writes<'m, T> = FxHashMap<String, Vec<(usize, &'m T)>>;
+/// Every write to a record, by full id, with where it loads.
+type Writes<'m, T> = FxHashMap<String, Vec<Placed<&'m T>>>;
 
 /// The modules whose data give a view each `key`.
 type ViewKeys<'m> = FxHashMap<&'m str, Vec<usize>>;
@@ -965,7 +965,7 @@ fn fold_writes<'m>(writes: impl Iterator<Item = (&'m str, PlacedWrite<'m>)>) -> 
     let mut records: Vec<FoldedRecord<'m>> = vec![];
     let mut by_id: FxHashMap<String, usize> = FxHashMap::default();
     for (module, placed) in writes {
-        let id = placed.write.id.as_ref().map(|id| full_id(module, id));
+        let id = placed.fact.id.as_ref().map(|id| full_id(module, id));
         let known = id.as_ref().and_then(|id| by_id.get(id)).copied();
         if let Some(at) = known {
             records[at].push(placed);
@@ -982,7 +982,7 @@ fn fold_writes<'m>(writes: impl Iterator<Item = (&'m str, PlacedWrite<'m>)>) -> 
 /// The value the last of `record`'s writes to give the field `name` leaves it.
 fn last_written<'m>(record: &[PlacedWrite<'m>], name: &str) -> Option<(usize, &'m WrittenValue)> {
     record.iter().rev().find_map(|placed| {
-        let field = placed.write.fields.iter().find(|f| f.name == name)?;
+        let field = placed.fact.fields.iter().find(|f| f.name == name)?;
         Some((placed.module, &field.value))
     })
 }
@@ -1005,10 +1005,15 @@ fn record_writes<'m, T>(
     let mut writes: Writes<'m, T> = FxHashMap::default();
     for mi in load_order(modules, by_name) {
         let module = &modules[mi];
-        let loaded = module.data.iter().filter(|f| f.rank.is_some());
-        for write in loaded.flat_map(|f| facts(&f.facts)) {
-            if let Some(id) = id(write) {
-                writes.entry(full_id(&module.name, id)).or_default().push((mi, write));
+        for file in module.data.iter().filter(|f| f.rank.is_some()) {
+            for fact in facts(&file.facts) {
+                if let Some(id) = id(fact) {
+                    writes.entry(full_id(&module.name, id)).or_default().push(Placed {
+                        module: mi,
+                        demo: file.demo,
+                        fact,
+                    });
+                }
             }
         }
     }
@@ -1116,6 +1121,18 @@ impl Scope {
         }
     }
 
+    /// Whether `write` has loaded when the reader of this scope runs, whichever module makes it. Odoo
+    /// loads a module's demo files after its data files and may skip them or roll them back alone, so
+    /// a demo write says nothing of the value a reader in a data file leaves.
+    pub fn loads<F>(&self, write: &Placed<F>) -> bool {
+        self.demo || !write.demo
+    }
+
+    /// Whether `write` belongs to the state this scope's reader acts on.
+    pub fn reads<F>(&self, write: &Placed<F>) -> bool {
+        self.sees(write.module) && self.loads(write)
+    }
+
     /// Whether the field `record` adds exists when the reader of this scope runs.
     fn holds(&self, record: &DataField) -> bool {
         self.records[record.module] && (self.demo || !record.demo)
@@ -1133,13 +1150,17 @@ pub enum Status<'m> {
 /// A field definition, with its module and class.
 pub type FieldDef<'m> = (usize, &'m ClassFact, &'m FieldFact);
 
-/// A write of an `ir.model.fields` record, with where it loads.
+/// A fact of a data file, with where it loads.
 #[derive(Clone, Copy)]
-struct PlacedWrite<'m> {
-    module: usize,
-    demo: bool,
-    write: &'m RecordWrite,
+pub struct Placed<F> {
+    pub module: usize,
+    /// Only a database with demo data gets it.
+    pub demo: bool,
+    pub fact: F,
 }
+
+/// A write of an `ir.model.fields` record, with where it loads.
+type PlacedWrite<'m> = Placed<&'m RecordWrite>;
 
 /// A field an `ir.model.fields` record adds.
 struct DataField<'m> {
@@ -1282,16 +1303,9 @@ impl<'m> Index<'m> {
             let name = module.name.as_str();
             files.flat_map(move |f| {
                 let writes = f.facts.writes.iter().filter(|w| w.model == "ir.model.fields");
-                writes.map(move |write| {
+                writes.map(move |fact| {
                     let demo = f.demo;
-                    (
-                        name,
-                        PlacedWrite {
-                            module: mi,
-                            demo,
-                            write,
-                        },
-                    )
+                    (name, PlacedWrite { module: mi, demo, fact })
                 })
             })
         });
@@ -2365,9 +2379,9 @@ mod tests {
             </odoo>"#,
         );
         let elsewhere = xml::analyze(r#"<odoo><record id="f" model="ir.model.fields"/></odoo>"#);
-        let placed = |module, name, write| {
+        let placed = |module, name, fact| {
             let demo = false;
-            (name, PlacedWrite { module, demo, write })
+            (name, PlacedWrite { module, demo, fact })
         };
         let writes = facts.writes.iter().map(|w| placed(0, "a", w));
         let records = fold_writes(writes.chain(elsewhere.writes.iter().map(|w| placed(1, "b", w))));

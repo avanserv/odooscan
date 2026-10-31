@@ -1,0 +1,5 @@
+<odoo>
+    <record id="record_required_ext.created_over_demo" model="rr.thing">
+        <field name="name">Demo</field>
+    </record>
+</odoo>
