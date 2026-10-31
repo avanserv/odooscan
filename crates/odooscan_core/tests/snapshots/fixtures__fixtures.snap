@@ -809,6 +809,8 @@ custom/sql_view_users/models/summary.py:7:5: OD226 _auto = False leaves drawer.s
 custom/supers/models/supers.py:29:24: OD211 no parent class of bad.super defines '_prepare_gone', so this super() call fails
 custom/supers/models/supers.py:74:24: OD211 no parent class of bad.super.child defines '_stamp', so this super() call fails
 custom/supers/models/supers.py:85:31: OD211 no parent class of bad.super defines '_own_gone', so this super() call fails
+custom/supers/models/supers.py:97:21: OD211 no parent class of bad.super defines '_guard_unchecked', so this super() call fails
+custom/supers/models/supers.py:98:24: OD211 no parent class of bad.super defines '_guard_gone', so this super() call fails
 custom/unversioned_logs/data/reports.xml:7:35: OD311 no indexed module defines template 'unversioned_logs.absent_record'
 custom/unversioned_logs/data/reports.xml:8:46: OD319 Odoo refuses this expression when it prints the report: Unexpected token at the end of an expression
 custom/unversioned_logs/models/probes.py:39:39: OD224 s.create_uid: drift_sensor has no such column, since drift.sensor.create_uid is not created, as drift.sensor sets _log_access to False; drop it from the query, or log access on the model

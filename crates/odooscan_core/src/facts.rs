@@ -171,7 +171,8 @@ pub struct ClassFact {
     pub setup_fields: Vec<Spanned<String>>,
     /// The field paths of `_rec_names_search`.
     pub rec_names_search: Vec<Spanned<String>>,
-    /// Methods the class's methods call through `super()`.
+    /// Methods the class's methods call through `super()`, leaving out a call inside a `hasattr`
+    /// test on that same `super()` and name.
     pub super_calls: Vec<Spanned<String>>,
     /// Methods of the class that call the method they override through `super()`.
     pub extended: Vec<String>,
