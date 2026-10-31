@@ -111,7 +111,7 @@ XML ids, views and data records, within a file and across the dependency graph.
 | [OD308](OD308.md) | `xmlid-used-before-definition` | An XML id is referenced before the file that defines it is loaded. |
 | [OD309](OD309.md) | `unknown-record-field` | A data record sets a field its model does not have. |
 | [OD310](OD310.md) | `unmatched-view-locator` | An inherited view locates an element its parent views do not have. |
-| [OD311](OD311.md) | `unknown-qweb-template` | A QWeb view calls a template no module in scope defines. |
+| [OD311](OD311.md) | `unknown-qweb-template` | A QWeb view or a report names a template no module in scope defines. |
 | [OD312](OD312.md) | `unknown-button-method` | A button calls a method its model does not have. |
 | [OD313](OD313.md) | `private-button-method` | A button calls a private method, which Odoo refuses. |
 | [OD314](OD314.md) | `unknown-function-method` | A `<function>` of a data file calls a method its model does not have. |
@@ -119,7 +119,7 @@ XML ids, views and data records, within a file and across the dependency graph.
 | [OD316](OD316.md) | `unknown-modifier-name` | A view modifier names a field its model does not have. |
 | [OD317](OD317.md) | `modifier-field-not-in-view` | A view modifier reads a field the view does not show. |
 | [OD318](OD318.md) | `view-mode-without-view` | A window action lists a view type its model has no view for. |
-| [OD319](OD319.md) | `python-field-syntax-error` | The code of a server action or a cron is not Python that Odoo compiles. |
+| [OD319](OD319.md) | `python-field-syntax-error` | The code of a server action or a cron, or the file name of a report, is not Python that Odoo compiles. |
 | [OD320](OD320.md) | `unknown-server-code-method` | The code of a server action or a cron calls a method its model does not have. |
 
 ## OD4: access

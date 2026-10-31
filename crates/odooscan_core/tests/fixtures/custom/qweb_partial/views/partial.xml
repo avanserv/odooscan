@@ -4,4 +4,22 @@
         <t t-call="ghost_block"/>
         <t t-call="web.layot"/>
     </template>
+
+    <record id="report_enterprise" model="ir.actions.report">
+        <field name="name">Enterprise</field>
+        <field name="model">res.partner</field>
+        <field name="report_name">ghost_enterprise.report</field>
+    </record>
+
+    <record id="report_undotted" model="ir.actions.report">
+        <field name="name">Undotted</field>
+        <field name="model">res.partner</field>
+        <field name="report_name">ghost_report</field>
+    </record>
+
+    <record id="report_indexed" model="ir.actions.report">
+        <field name="name">Indexed</field>
+        <field name="model">res.partner</field>
+        <field name="report_name">web.layot_report</field>
+    </record>
 </odoo>

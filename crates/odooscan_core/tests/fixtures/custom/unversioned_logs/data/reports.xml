@@ -1,0 +1,10 @@
+<odoo>
+    <report id="tag_unread" string="Unread" model="res.partner" name="unversioned_logs.absent_tag" print_report_name="name = 1"/>
+
+    <record id="record_read" model="ir.actions.report">
+        <field name="name">Read</field>
+        <field name="model">res.partner</field>
+        <field name="report_name">unversioned_logs.absent_record</field>
+        <field name="print_report_name">name = 2</field>
+    </record>
+</odoo>

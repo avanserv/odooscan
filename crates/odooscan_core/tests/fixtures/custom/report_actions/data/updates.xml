@@ -1,0 +1,37 @@
+<odoo>
+    <record id="name_replaced" model="ir.actions.report">
+        <field name="report_name">report_actions.sheet</field>
+    </record>
+
+    <record id="name_hidden_later" model="ir.actions.report">
+        <field name="report_name" eval="'report_actions.' + 'sheet'"/>
+    </record>
+
+    <record id="name_kept" model="ir.actions.report">
+        <field name="name">name_kept again</field>
+    </record>
+
+    <record id="name_type_later" model="ir.actions.report">
+        <field name="report_type">controller</field>
+    </record>
+
+    <record id="name_type_earlier" model="ir.actions.report">
+        <field name="report_type">qweb-pdf</field>
+    </record>
+
+    <record id="file_replaced" model="ir.actions.report">
+        <field name="print_report_name">object.name</field>
+    </record>
+
+    <record id="file_cleared" model="ir.actions.report">
+        <field name="print_report_name"/>
+    </record>
+
+    <record id="file_hidden" model="ir.actions.report">
+        <field name="print_report_name" eval="'object.name'"/>
+    </record>
+
+    <record id="file_kept" model="ir.actions.report">
+        <field name="name">file_kept again</field>
+    </record>
+</odoo>
