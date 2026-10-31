@@ -89,6 +89,8 @@ struct ModifierName<'a> {
     name: &'a str,
     owner: String,
     field: &'a str,
+    /// The field a spec locates to open the enclosing subview, which may match in any subview.
+    locator: Option<&'a str>,
 }
 
 pub struct Out<'m> {
@@ -1817,14 +1819,17 @@ impl<'m> Ctx<'_, 'm> {
             (None, None) => None,
         };
         let Some(model) = model else { return };
-        self.view_domains(out, path, model, view);
-        self.buttons(out, path, model, view);
+        self.view_domains(out, path, model, view, trees);
+        self.buttons(out, path, model, view, trees);
         self.modifiers(out, path, model, view, trees);
         for field in view
             .fields
             .iter()
             .filter(|f| !f.path.iter().any(|s| s == UNKNOWN_CONTEXT))
         {
+            if self.unsure_spec_subview(model, view, &field.path, trees) {
+                continue;
+            }
             let Some(joined) = self.arch_path(model, &field.path) else {
                 continue;
             };
@@ -1843,9 +1848,17 @@ impl<'m> Ctx<'_, 'm> {
     }
 
     /// Domains in an arch filter the model at their position: the view's, or a subview's comodel.
-    fn view_domains(&self, out: &mut Out<'m>, path: &'m Path, model: &str, view: &ViewFact) {
+    fn view_domains(
+        &self,
+        out: &mut Out<'m>,
+        path: &'m Path,
+        model: &str,
+        view: &ViewFact,
+        trees: &mut FxHashMap<String, ViewTree<'m>>,
+    ) {
         for d in &view.domains {
-            let target = self.arch_model(model, &d.path);
+            let unsure = self.unsure_spec_subview(model, view, &d.path, trees);
+            let target = self.arch_model(model, &d.path).filter(|_| !unsure);
             for f in target.iter().flat_map(|t| d.fields.iter().map(move |f| (t, f))) {
                 self.path(out, path, "OD210", f.0, f.1);
             }
@@ -1882,11 +1895,21 @@ impl<'m> Ctx<'_, 'm> {
     }
 
     /// Odoo checks a button on the model at its arch position.
-    fn buttons(&self, out: &mut Out<'m>, path: &'m Path, model: &str, view: &ViewFact) {
+    fn buttons(
+        &self,
+        out: &mut Out<'m>,
+        path: &'m Path,
+        model: &str,
+        view: &ViewFact,
+        trees: &mut FxHashMap<String, ViewTree<'m>>,
+    ) {
         if self.arch_kind(view).is_none() {
             return;
         }
         for button in &view.buttons {
+            if self.unsure_spec_subview(model, view, &button.path, trees) {
+                continue;
+            }
             if let Some(target) = self.arch_model(model, &button.path) {
                 self.button(out, path, &target, &button.method);
             }
@@ -2051,6 +2074,7 @@ impl<'m> Ctx<'_, 'm> {
             name,
             owner,
             field,
+            locator: spec_locator(&m.path),
         })
     }
 
@@ -2083,17 +2107,50 @@ impl<'m> Ctx<'_, 'm> {
     }
 
     /// Whether an extension's element may have landed in a subview of the tree, where the name
-    /// would be a field of the comodel: a spec on a plain element can match inside one. None when
-    /// the tree is unknown.
+    /// would be a field of the comodel: a spec on a plain element can match inside one. A field
+    /// spec takes the first match anywhere, so a subview on a model with the locator leaves the
+    /// owner unknown too. None when the tree is unknown.
     fn anchored_in_subview(&self, n: &ModifierName, trees: &mut FxHashMap<String, ViewTree<'m>>) -> Option<bool> {
-        let Some(parent) = n.view.inherit.as_deref() else {
+        let names = [n.locator.unwrap_or(n.field), n.field];
+        self.subview_may_have(n.model, n.view, &names, trees)
+    }
+
+    /// Whether the spec subview at `path` may sit in another field than the one its path resolves:
+    /// a field spec takes the first match anywhere, so the comodel is then unknown.
+    fn unsure_spec_subview(
+        &self,
+        model: &str,
+        view: &ViewFact,
+        path: &[String],
+        trees: &mut FxHashMap<String, ViewTree<'m>>,
+    ) -> bool {
+        spec_locator(path).is_some_and(|locator| self.subview_may_have(model, view, &[locator], trees) != Some(false))
+    }
+
+    /// Whether a subview of the view's tree is on a model that may have one of `names`, or on an
+    /// unknown model. None when the tree is unknown.
+    fn subview_may_have(
+        &self,
+        model: &str,
+        view: &ViewFact,
+        names: &[&str],
+        trees: &mut FxHashMap<String, ViewTree<'m>>,
+    ) -> Option<bool> {
+        let Some(parent) = view.inherit.as_deref() else {
             return Some(false);
         };
         let tree = self.view_tree(full_id(&self.module.name, parent), trees)?;
-        Some(tree.subviews.iter().any(|subview| {
-            self.arch_model(n.model, subview)
-                .is_none_or(|comodel| !matches!(self.index.field(&comodel, n.field, self.scope), Err(None)))
-        }))
+        let has = |comodel: String| names.iter().any(|name| self.may_have(&comodel, name));
+        Some(
+            tree.subviews
+                .iter()
+                .any(|subview| self.arch_model(model, subview).is_none_or(has)),
+        )
+    }
+
+    /// Whether `field` may exist on `model`, even if only outside `depends` or the scan's reach.
+    fn may_have(&self, model: &str, field: &str) -> bool {
+        !self.sees_whole_model(model) || !matches!(self.index.field(model, field, self.scope), Err(None))
     }
 
     /// Before saas~17.3 Odoo refuses a modifier on a field the view lacks. Any element of the tree
@@ -2198,6 +2255,15 @@ impl<'m> Ctx<'_, 'm> {
                 ),
             }
         }
+    }
+}
+
+/// The field a spec locates to open the subview `path` runs through. A locator followed by another
+/// name is a field the spec adds beside it, whose subview reads that field as any other.
+fn spec_locator(path: &[String]) -> Option<&str> {
+    match path {
+        [first, opened, ..] => first.strip_prefix(LOCATOR).filter(|locator| locator == opened),
+        _ => None,
     }
 }
 
