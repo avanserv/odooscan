@@ -1,0 +1,8 @@
+<odoo>
+    <record id="record_rules.rule_demo_off" model="ir.rule">
+        <field name="domain_force">[('no_demo_off', '=', 1)]</field>
+    </record>
+    <record id="record_rules.rule_demo_moved" model="ir.rule">
+        <field name="domain_force">[('no_demo_moved', '=', 1)]</field>
+    </record>
+</odoo>

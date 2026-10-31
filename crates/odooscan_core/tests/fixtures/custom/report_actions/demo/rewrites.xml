@@ -1,0 +1,13 @@
+<odoo>
+    <record id="demo_fixes_name" model="ir.actions.report">
+        <field name="report_name">report_actions.sheet</field>
+    </record>
+
+    <record id="demo_changes_type" model="ir.actions.report">
+        <field name="report_type">controller</field>
+    </record>
+
+    <record id="demo_fixes_file" model="ir.actions.report">
+        <field name="print_report_name">object.name</field>
+    </record>
+</odoo>

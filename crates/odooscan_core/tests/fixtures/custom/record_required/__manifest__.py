@@ -19,5 +19,6 @@
         "demo/first.xml",
         "demo/second.xml",
         "demo/defaults.xml",
+        "demo/ext_ids.xml",
     ],
 }

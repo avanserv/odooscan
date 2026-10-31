@@ -1,0 +1,10 @@
+<odoo>
+    <record id="rule_ledger_demo_fixes" model="ir.rule">
+        <field name="model_id" ref="model_legacy_ledger"/>
+        <field name="domain_force">[('no_demo_fixes', '=', 1)]</field>
+    </record>
+    <record id="rule_ledger_demo_breaks" model="ir.rule">
+        <field name="model_id" ref="model_legacy_ledger"/>
+        <field name="domain_force">[('name', '=', 'a')]</field>
+    </record>
+</odoo>
