@@ -121,6 +121,13 @@ pub fn analyze(text: &str) -> DataFacts {
     facts
 }
 
+/// The XML id an element defines. Only `<template>` reads `t-name`, and `el.get('id', ...)` lets an
+/// `id` win even when empty.
+fn defined_id<'a>(node: Node<'a, '_>) -> Option<&'a str> {
+    node.attribute("id")
+        .or_else(|| node.attribute("t-name").filter(|_| node.has_tag_name("template")))
+}
+
 struct Walker<'a> {
     lines: &'a Lines,
     facts: &'a mut DataFacts,
@@ -132,7 +139,7 @@ impl Walker<'_> {
     }
 
     fn def(&mut self, node: Node, model: Option<&str>) {
-        if let Some(id) = node.attribute("id") {
+        if let Some(id) = defined_id(node) {
             let pos = self.pos(node);
             self.facts.defs.push(XmlDef {
                 id: id.to_owned(),
@@ -260,7 +267,7 @@ impl Walker<'_> {
     /// A `<template>` is a QWeb view whose arch is its content.
     fn template(&mut self, node: Node) {
         let mut view = ViewFact {
-            id: node.attribute("id").map(str::to_owned),
+            id: defined_id(node).map(str::to_owned),
             inherit: node.attribute("inherit_id").map(str::to_owned),
             has_arch: true,
             kind: Some(QWEB.to_owned()),
@@ -2160,5 +2167,28 @@ mod tests {
         assert!(record("res.partner").is_empty());
         let keyed = analyze(r#"<odoo><template id="x" key="a.b"/></odoo>"#);
         assert_eq!(keyed.view_keys, ["a.b"]);
+    }
+
+    #[test]
+    fn names_a_template_by_its_id_else_its_t_name() {
+        let names = |element: &str| {
+            let facts = analyze(&format!("<odoo>{element}</odoo>"));
+            assert!(facts.view_keys.is_empty());
+            let defs: Vec<String> = facts.defs.into_iter().map(|d| d.id).collect();
+            let views: Vec<Option<String>> = facts.views.into_iter().map(|v| v.id).collect();
+            (defs, views)
+        };
+        let named = |id: &str| (vec![id.to_owned()], vec![Some(id.to_owned())]);
+        assert_eq!(names(r#"<template t-name="a"/>"#), named("a"));
+        assert_eq!(names(r#"<template id="a" t-name="b"/>"#), named("a"));
+        assert_eq!(names(r#"<template id="" t-name="b"/>"#), named(""));
+        assert_eq!(names("<template/>"), (vec![], vec![None]));
+    }
+
+    #[test]
+    fn t_name_names_only_a_template() {
+        let defs = |element: &str| analyze(&format!("<odoo>{element}</odoo>")).defs;
+        assert!(defs(r#"<menuitem t-name="a"/>"#).is_empty());
+        assert!(defs(r#"<record t-name="a" model="ir.ui.view"/>"#).is_empty());
     }
 }
