@@ -110,6 +110,26 @@ const REPORT_MODEL: Series = Series { major: 11, minor: 0 };
 /// branch). Before, only a run reads it.
 const MODEL_FIELD_ASSERTED: Series = Series { major: 20, minor: 0 };
 
+/// The first series whose import compares a Selection cell in any case
+/// (`odoo/addons/base/models/ir_fields.py:319` on saas~14.3). saas~14.2 compares it exactly (`:266`).
+const CSV_ANY_CASE: Series = Series { major: 14, minor: 3 };
+
+/// The first series that keeps a selection's values in `_selection`, empty for a tuple, so a write
+/// checks nothing (`odoo/fields.py:2763,2883` on saas~17.2). Before, a write reads the values from
+/// the field, tuple included (`:2865` on 17.0).
+const TUPLE_UNCHECKED: Series = Series { major: 17, minor: 2 };
+
+/// The first series whose `selection_add` takes a tuple as its base (`odoo/orm/fields_selection.py:99`
+/// on saas~18.1). Before, `odoo/fields.py:2932` on 18.0 leaves the tuple no values, so the
+/// `selection_add` fails.
+const TUPLE_LISTED: Series = Series { major: 18, minor: 1 };
+
+/// The first series that reads a lone definition's tuple into `_selection`, so a write checks it
+/// (`odoo/orm/fields_selection.py:101` on saas~19.3). From `TUPLE_LISTED`, `:95` on saas~19.2 returns
+/// before that for a lone definition: only several definitions or a field from another model get
+/// there, which `listed_values` cannot tell apart from a lone one.
+const TUPLE_CHECKED: Series = Series { major: 19, minor: 3 };
+
 /// The series whose loader reads `<report>` as a write to `ir.actions.report`. 18446f23f11e removes
 /// the tag in saas~16.1 (`_tag_report`, `odoo/tools/convert.py:275` on 16.0).
 const REPORT_TAG: &str = ">=11.0,<saas~16.1";
@@ -1638,10 +1658,10 @@ impl<'m> Ctx<'_, 'm> {
             return;
         }
         let defs = self.index.field_defs(&write.model, name, None);
-        let Some(values) = self.listed_values(&defs) else {
+        let Some(values) = self.listed_values(&defs, write.csv) else {
             return;
         };
-        if values.contains(text.value.as_str()) || (write.csv && csv_label(&defs, &values, &text.value)) {
+        if values.contains(text.value.as_str()) || (write.csv && csv_label(&defs, &values, &text.value, self.series)) {
             return;
         }
         let message = format!("{}.{name} has no value '{}'", write.model, text.value.escape_debug());
@@ -1650,8 +1670,8 @@ impl<'m> Ctx<'_, 'm> {
 
     /// The values `defs` list between them. None when one of them only tells a run, or none sets
     /// `selection`, which leaves the base of a `selection_add` out of the index.
-    fn listed_values(&self, defs: &[FieldDef<'m>]) -> Option<FxHashSet<&'m str>> {
-        let tuples = self.series.is_some_and(|s| s >= Series { major: 19, minor: 0 });
+    fn listed_values(&self, defs: &[FieldDef<'m>], csv: bool) -> Option<FxHashSet<&'m str>> {
+        let tuples = csv || tuple_checked(self.series);
         let mut values = FxHashSet::default();
         for (_, _, def) in defs {
             if def.splat {
@@ -3646,8 +3666,7 @@ impl<'m> Ctx<'_, 'm> {
         if field.get("related") != Merged::Unset || !field.is("required", &OptionValue::Bool(true)) {
             return;
         }
-        let tuples = self.series.is_some_and(|s| s >= Series { major: 19, minor: 0 });
-        let Some(known) = earlier_values(field, at, tuples) else {
+        let Some(known) = earlier_values(field, at, tuple_listed(self.series)) else {
             return;
         };
         let Some(set_null) = set_null_values(own, added, &known).filter(|v| !v.is_empty()) else {
@@ -4083,10 +4102,22 @@ fn selection_values<'m>(def: &'m FieldFact, tuples: bool, values: &mut FxHashSet
     Some(())
 }
 
-/// Whether Odoo's import takes `cell` for a value of `defs`: it compares each value and each label
-/// in any case. A label only a run tells may be the cell.
-fn csv_label(defs: &[FieldDef], values: &FxHashSet<&str>, cell: &str) -> bool {
-    let same = |known: &str| known.to_lowercase() == cell.to_lowercase();
+/// Whether a write outside a CSV checks its value against a tuple `selection`. The import never
+/// reads `_selection`: it asks the field for its values
+/// (`odoo/addons/base/models/ir_fields.py:473` on 18.0), which a tuple gives in every series.
+fn tuple_checked(series: Option<Series>) -> bool {
+    series.is_some_and(|s| s < TUPLE_UNCHECKED || s >= TUPLE_CHECKED)
+}
+
+fn tuple_listed(series: Option<Series>) -> bool {
+    series.is_some_and(|s| s >= TUPLE_LISTED)
+}
+
+/// Whether Odoo's import takes `cell` for a value of `defs`: it compares each value and each label,
+/// from `CSV_ANY_CASE` in any case. A label only a run tells may be the cell.
+fn csv_label(defs: &[FieldDef], values: &FxHashSet<&str>, cell: &str, series: Option<Series>) -> bool {
+    let any_case = series.is_none_or(|s| s >= CSV_ANY_CASE);
+    let same = |known: &str| known == cell || (any_case && known.to_lowercase() == cell.to_lowercase());
     let mut labels = defs.iter().flat_map(|d| &d.2.labels);
     values.iter().any(|v| same(v)) || labels.any(|l| l.as_deref().is_none_or(same))
 }
@@ -4593,8 +4624,11 @@ fn has_certain_column(field: &Field) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use rustc_hash::FxHashSet;
+
     use super::{
-        MagicEra, applies, cache_global, derived_label, has_last_update, magic_era, reads_model_access, shadowed_member,
+        MagicEra, applies, cache_global, csv_label, derived_label, has_last_update, magic_era, reads_model_access,
+        shadowed_member, tuple_checked, tuple_listed,
     };
     use crate::facts::DefinitionSource;
     use crate::series::Series;
@@ -4605,6 +4639,35 @@ mod tests {
         assert!(reads_model_access(None));
         assert!(reads("18.0") && reads("saas~19.3"));
         assert!(!reads("saas~19.4") && !reads("20.0"));
+    }
+
+    #[test]
+    fn a_write_checks_a_tuple_outside_saas_17_2_to_19_2() {
+        let checked = |series: &str| tuple_checked(Series::parse(series));
+        assert!(checked("9.0") && checked("saas~17.1"));
+        assert!(!checked("saas~17.2") && !checked("18.0"));
+        assert!(!checked("saas~18.1") && !checked("19.0") && !checked("saas~19.2"));
+        assert!(checked("saas~19.3") && checked("20.0"));
+        assert!(!tuple_checked(None));
+    }
+
+    #[test]
+    fn a_tuple_takes_a_selection_add_from_saas_18_1() {
+        let takes = |series: &str| tuple_listed(Series::parse(series));
+        assert!(!takes("saas~17.1") && !takes("18.0"));
+        assert!(takes("saas~18.1") && takes("20.0"));
+        assert!(!tuple_listed(None));
+    }
+
+    #[test]
+    fn a_csv_cell_passes_in_any_case_from_saas_14_3() {
+        let values = FxHashSet::from_iter(["draft"]);
+        let passes = |cell: &str, series: Option<Series>| csv_label(&[], &values, cell, series);
+        assert!(!passes("DRAFT", Series::parse("9.0")) && !passes("DRAFT", Series::parse("saas~14.2")));
+        assert!(passes("draft", Series::parse("saas~14.2")));
+        assert!(passes("DRAFT", Series::parse("saas~14.3")) && passes("DRAFT", Series::parse("18.0")));
+        assert!(passes("DRAFT", None));
+        assert!(!passes("done", None));
     }
 
     #[test]

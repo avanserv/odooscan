@@ -393,7 +393,6 @@ custom/model_attributes/models/plot.py:20:21: OD115 'partner_id.nickname': @api.
 custom/model_attributes/models/zone.py:9:5: OD217 garden.zone sets _parent_store but has no parent_path field, which Odoo logs as an error; add parent_path = fields.Char(index=True)
 custom/model_attributes/models/zone.py:22:5: OD217 garden.area sets _parent_store but its parent_path field has no index, which Odoo logs as an error; add index=True to it
 custom/model_attributes/models/zone.py:31:5: OD217 garden.terrace sets _parent_store but its parent_path field has no index, which Odoo logs as an error; add index=True to it
-custom/modern19/data/tiers.xml:3:28: OD322 res.partner.tier has no value 'bronze'
 custom/modern19/models/partner.py:6:5: OD110 _sql_constraints is ignored; declare models.Constraint, models.Index or models.UniqueIndex attributes instead
 custom/modern19/models/partner.py:9:9: OD109 self._cr is deprecated; use self.env.cr
 custom/modern19/models/partner.py:9:9: OD122 UPDATE on res_partner bypasses the ORM, so records this transaction already read keep stale values; call flush_model() before the query and invalidate_model() after it (flush() and invalidate_cache() before 16.0)
@@ -625,6 +624,7 @@ custom/record_values/data/rv.thing.csv:1:1: OD309 rv.thing has no field 'line_id
 custom/record_values/data/rv.thing.csv:7:1: OD321 'record_values.other_1' is a record of rv.other, but rv.thing.parent_id takes rv.parent
 custom/record_values/data/rv.thing.csv:7:1: OD321 'record_values.parent_1' is a record of rv.parent, but rv.thing.other_ids takes rv.other
 custom/record_values/data/rv.thing.csv:7:1: OD322 rv.thing.state has no value 'zz'
+custom/record_values/data/rv.thing.csv:9:1: OD322 rv.thing.by_tuple has no value 'zz'
 custom/record_values/data/selections.xml:3:29: OD322 rv.thing.state has no value 'c'
 custom/record_values/data/selections.xml:8:35: OD322 rv.thing.state has no value 'Ay'
 custom/record_values/data/selections.xml:12:30: OD322 rv.thing.state has no value ' a '
@@ -762,6 +762,13 @@ custom/saas193/models/memo.py:8:34: OD219 'stage' sets tracking, but saas.memo d
 custom/saas193/security/ir.model.access.csv:2:1: OD402 no group limits this row, so every user, public and portal included, gets write, create or unlink on model_saas_before_desk; name a group
 custom/saas193/security/ir.model.access.csv:3:1: OD402 base.group_portal gets write, create or unlink on model_saas_before_desk; public and portal access should be read-only and go through controllers
 custom/saas194/models/ledger.py:4:7: OD401 model 'saas.after.ledger' has no ir.model.access rule, so only the superuser can use it
+custom/selection_values13/data/res.partner.csv:2:1: OD322 res.partner.sv13_state has no value 'DRAFT'
+custom/selection_values17/data/partners.xml:4:33: OD322 res.partner.sv17_mode has no value 'zz'
+custom/selection_values172/data/res.partner.csv:2:1: OD322 res.partner.sv172_mode has no value 'zz'
+custom/selection_values181/models/res_partner.py:14:49: OD216 'sv181_gate' is required, so Odoo refuses ondelete 'set null' for the selection_add value 'shut'; give it 'cascade', 'set default' or a function
+custom/selection_values193/data/partners.xml:4:34: OD322 res.partner.sv193_mode has no value 'zz'
+custom/selection_values9/data/partners.xml:4:32: OD322 res.partner.sv9_mode has no value 'zz'
+custom/selection_values9/data/res.partner.csv:2:1: OD322 res.partner.sv9_state has no value 'DRAFT'
 custom/server_children/views/actions.xml:17:43: OD320 child.plan has no method 'action_task'
 custom/server_children/views/actions.xml:22:43: OD320 child.plan has no method 'action_task'
 custom/server_children/views/actions.xml:27:43: OD320 child.task has no method 'action_plan'
