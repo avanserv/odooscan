@@ -3,7 +3,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::facts::{
     ActionFact, Annotation, ArchElement, ClassFact, DataFacts, FieldFact, FlowSummary, Heritage, JsClass, ModelKind,
-    OptionValue, PyFacts, Receiver, ReportFact, RuleFact, ServerFact, ViewFact,
+    OptionValue, PyFacts, Receiver, RecordWrite, ReportFact, RuleFact, ServerFact, ViewFact,
 };
 use crate::manifest::AutoInstall;
 use crate::project::{Module, SourceFile};
@@ -364,7 +364,7 @@ type Writes<'m, T> = FxHashMap<String, Vec<(usize, &'m T)>>;
 /// The modules whose data give a view each `key`.
 type ViewKeys<'m> = FxHashMap<&'m str, Vec<usize>>;
 
-type XmlIds = FxHashMap<String, Vec<XmlIdDef>>;
+type XmlIds<'m> = FxHashMap<String, Vec<XmlIdDef<'m>>>;
 
 /// The flow summary of a function, with the file and module it is in.
 #[derive(Clone, Copy)]
@@ -423,7 +423,10 @@ fn module_ids(module: &Module, base: usize, xmlids: &mut XmlIds) {
     xmlids
         .entry(format!("base.module_{}", module.name))
         .or_default()
-        .push(XmlIdDef { module: base });
+        .push(XmlIdDef {
+            module: base,
+            model: Some("ir.module.module"),
+        });
     let Some(category) = &module.manifest.category else {
         return;
     };
@@ -433,7 +436,10 @@ fn module_ids(module: &Module, base: usize, xmlids: &mut XmlIds) {
         xmlids
             .entry(format!("base.module_category_{id}"))
             .or_default()
-            .push(XmlIdDef { module: base });
+            .push(XmlIdDef {
+                module: base,
+                model: Some("ir.module.category"),
+            });
     }
 }
 
@@ -442,7 +448,7 @@ fn class_ids<'m>(
     module: &'m Module,
     models: &mut Models<'m>,
     model_by_xmlid: &mut FxHashMap<String, &'m str>,
-    xmlids: &mut XmlIds,
+    xmlids: &mut XmlIds<'m>,
 ) {
     let name = module.name.as_str();
     for class in module.python.iter().flat_map(|f| &f.facts.classes) {
@@ -451,11 +457,17 @@ fn class_ids<'m>(
         // Odoo gives every module that defines or extends a model its own ir.model XML id.
         let id = format!("{name}.{prefix}");
         model_by_xmlid.insert(id.clone(), class.model.as_str());
-        xmlids.entry(id).or_default().push(XmlIdDef { module: mi });
+        xmlids.entry(id).or_default().push(XmlIdDef {
+            module: mi,
+            model: Some("ir.model"),
+        });
         let magic = MAGIC_FIELDS.iter().filter(|_| class.new_model).copied();
         for field in class.fields.iter().map(|f| f.name.as_str()).chain(magic) {
             let id = format!("{name}.field_{}__{field}", &prefix["model_".len()..]);
-            xmlids.entry(id).or_default().push(XmlIdDef { module: mi });
+            xmlids.entry(id).or_default().push(XmlIdDef {
+                module: mi,
+                model: Some("ir.model.fields"),
+            });
         }
     }
 }
@@ -464,7 +476,7 @@ fn data_ids<'m>(
     mi: usize,
     module: &'m Module,
     by_name: &FxHashMap<&str, usize>,
-    xmlids: &mut XmlIds,
+    xmlids: &mut XmlIds<'m>,
     views: &mut Nodes<'m>,
     view_keys: &mut ViewKeys<'m>,
 ) {
@@ -481,7 +493,12 @@ fn data_ids<'m>(
                 .and_then(|(m, _)| by_name.get(m))
                 .copied()
                 .unwrap_or(mi);
-            xmlids.entry(id).or_default().push(XmlIdDef { module: owner });
+            // A `theme_` module loads these tags as models of its own (18.0 `convert.py`, `_tag_template`).
+            let model = def
+                .model
+                .as_deref()
+                .filter(|_| !(def.themed && name.starts_with("theme_")));
+            xmlids.entry(id).or_default().push(XmlIdDef { module: owner, model });
         }
         for view in &file.facts.views {
             if let Some(id) = &view.id {
@@ -496,8 +513,8 @@ fn data_ids<'m>(
     }
 }
 
-/// Ids of records Odoo creates alongside others, with the module they belong to.
-fn derived_ids(modules: &[Module], models: &Models) -> Vec<(String, usize)> {
+/// Ids of records Odoo creates alongside others, with their module and model.
+fn derived_ids<'m>(modules: &'m [Module], models: &Models<'m>) -> Vec<(String, usize, &'m str)> {
     // A record of a model with _inherits also gets an id for each parent record Odoo creates,
     // e.g. <cron id>_ir_actions_server for an ir.cron.
     let mut derived = vec![];
@@ -510,6 +527,7 @@ fn derived_ids(modules: &[Module], models: &Models) -> Vec<(String, usize)> {
                 derived.push((
                     format!("{}_{}", full_id(&module.name, &def.id), parent.replace('.', "_")),
                     mi,
+                    parent.as_str(),
                 ));
             }
         }
@@ -783,8 +801,10 @@ fn join_segments<'s>(mut parts: Vec<&'s str>, specifier: &'s str) -> Option<Stri
     Some(parts.join("/"))
 }
 
-pub struct XmlIdDef {
+pub struct XmlIdDef<'m> {
     pub module: usize,
+    /// The model of the record, none when only a run tells it.
+    pub model: Option<&'m str>,
 }
 
 /// The modules a module may use: itself, its transitive depends and the always-installed modules.
@@ -834,7 +854,7 @@ pub struct Index<'m> {
     pub modules: &'m [Module],
     pub by_name: FxHashMap<&'m str, usize>,
     models: Models<'m>,
-    pub xmlids: FxHashMap<String, Vec<XmlIdDef>>,
+    pub xmlids: XmlIds<'m>,
     pub views: Inheritance<'m>,
     /// The (model, type) of every view of the files manifests load.
     pub view_types: FxHashSet<(&'m str, &'m str)>,
@@ -842,6 +862,7 @@ pub struct Index<'m> {
     pub rule_writes: Writes<'m, RuleFact>,
     pub server_writes: Writes<'m, ServerFact>,
     pub report_writes: Writes<'m, ReportFact>,
+    pub value_writes: Writes<'m, RecordWrite>,
     view_keys: ViewKeys<'m>,
     pub templates: Inheritance<'m>,
     pub models_with_access: FxHashSet<String>,
@@ -877,8 +898,11 @@ impl<'m> Index<'m> {
             class_ids(mi, module, &mut models, &mut model_by_xmlid, &mut xmlids);
             data_ids(mi, module, &by_name, &mut xmlids, &mut views, &mut view_keys);
         }
-        for (id, mi) in derived_ids(modules, &models) {
-            xmlids.entry(id).or_default().push(XmlIdDef { module: mi });
+        for (id, mi, parent) in derived_ids(modules, &models) {
+            xmlids.entry(id).or_default().push(XmlIdDef {
+                module: mi,
+                model: Some(parent),
+            });
         }
         let models_with_access = access_models(modules, &model_by_xmlid);
         let (js_loaded, templates_loaded) = loaded_static(modules);
@@ -892,6 +916,7 @@ impl<'m> Index<'m> {
             rule_writes: record_writes(modules, &by_name, |f| &f.rules, |r| r.id.as_ref()),
             server_writes: record_writes(modules, &by_name, |f| &f.servers, |s| s.id.as_ref()),
             report_writes: record_writes(modules, &by_name, |f| &f.reports, |r| r.id.as_ref()),
+            value_writes: record_writes(modules, &by_name, |f| &f.writes, |w| w.id.as_ref()),
             view_keys,
             templates: Inheritance::new(template_nodes(modules, &templates_loaded)),
             models_with_access,
@@ -1208,6 +1233,28 @@ impl<'m> Index<'m> {
         let module = &self.modules[*self.by_name.get(addon)?];
         let file = module.python.iter().find(|f| files.contains(&f.rel))?;
         Some(file.facts.classes.iter().any(|c| c.class_name == class))
+    }
+
+    /// The models of the records of a full XML id. None when the index does not know the id, or only
+    /// a run tells the model of one of them.
+    pub fn record_models(&self, id: &str) -> Option<Vec<&'m str>> {
+        self.xmlids.get(id)?.iter().map(|d| d.model).collect()
+    }
+
+    /// Whether a record of `model` may be one of `comodel`: the same model, a model that inherits it
+    /// by `_inherit` and so may share its ids, as `ir.actions.*` do for `ir.actions.actions`, or one
+    /// on the same table. None when a class of `model` is unknown to the index.
+    pub fn stands_for(&self, model: &str, comodel: &str, scope: &Scope) -> Option<bool> {
+        if model == comodel {
+            return Some(true);
+        }
+        let classes = self.chain_classes(model);
+        if !self.has_model(model) || classes.iter().any(|(_, c)| c.hidden_parents()) {
+            return None;
+        }
+        let inherits = classes.iter().any(|(_, c)| c.model == comodel);
+        let table = self.table(model, scope);
+        Some(inherits || table.is_none() || table == self.table(comodel, scope))
     }
 
     /// The model of the `ir.model` record Odoo generates under a full XML id.

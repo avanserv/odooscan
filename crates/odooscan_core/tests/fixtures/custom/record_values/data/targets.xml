@@ -1,0 +1,18 @@
+<odoo>
+    <record id="parent_1" model="rv.parent"><field name="name">Parent</field></record>
+    <record id="other_1" model="rv.other"><field name="name">Other</field></record>
+    <record id="child_1" model="rv.child"><field name="parent_id" ref="parent_1"/></record>
+    <record id="shared_1" model="rv.shared"><field name="name">Same table as rv.other</field></record>
+    <record id="computed_1" model="rv.computed"><field name="name">Table only a run tells</field></record>
+    <record id="blended_1" model="rv.blended"/>
+    <record id="action_1" model="rv.action"><field name="name">Action</field></record>
+    <record id="window_1" model="rv.action.window"><field name="name">Window action</field></record>
+    <record id="nowhere_1" model="rv.nowhere"/>
+    <record id="both_models" model="rv.other"><field name="name">The ext module gives this id a second model</field></record>
+    <record id="assigned_too" model="rv.parent"><field name="name">Also assigned below</field></record>
+    <menuitem id="menu_1" name="Menu"/>
+    <template id="template_1"><div/></template>
+    <function model="ir.model.data" name="_update_xmlids">
+        <value eval="[{'xml_id': 'record_values.assigned_too', 'record': obj().browse(1)}]"/>
+    </function>
+</odoo>

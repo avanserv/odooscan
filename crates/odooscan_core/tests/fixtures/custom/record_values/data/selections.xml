@@ -1,0 +1,23 @@
+<odoo>
+    <record id="wrong_values" model="rv.thing">
+        <field name="state">c</field>
+        <field name="by_tuple" eval="'a'"/>
+    </record>
+
+    <record id="eval_value" model="rv.thing">
+        <field name="state" eval="'Ay'"/>
+    </record>
+
+    <record id="spaced_value" model="rv.thing">
+        <field name="state"> a </field>
+    </record>
+
+    <record id="delegated_value" model="rv.child">
+        <field name="parent_id" ref="parent_1"/>
+        <field name="kind">z</field>
+    </record>
+
+    <record id="beyond_selection_add" model="rv.thing">
+        <field name="added">q</field>
+    </record>
+</odoo>

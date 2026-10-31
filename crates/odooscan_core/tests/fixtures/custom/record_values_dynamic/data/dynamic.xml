@@ -1,0 +1,6 @@
+<odoo>
+    <record id="builds_model_names" model="rv.thing">
+        <field name="other_id" ref="record_values.parent_1"/>
+        <field name="state">zz</field>
+    </record>
+</odoo>

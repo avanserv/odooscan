@@ -226,6 +226,44 @@ fn first_strings(elts: &[Expr]) -> Option<Vec<String>> {
     elts.iter().map(|e| first(e).map(str::to_owned)).collect()
 }
 
+/// The labels of the lists a Selection gives, by position or as `selection` and `selection_add`.
+fn selection_labels(ftype: &str, call: &ast::ExprCall) -> Vec<Option<String>> {
+    if ftype != "Selection" {
+        return vec![];
+    }
+    let items = |list: &Expr| match list {
+        Expr::List(l) => l.elts.clone(),
+        Expr::Tuple(t) => t.elts.clone(),
+        _ => vec![],
+    };
+    let label_of = |item: Expr| match item {
+        Expr::Tuple(t) => t.elts.get(1).map(label),
+        Expr::List(l) => l.elts.get(1).map(label),
+        _ => None,
+    };
+    let lists = [
+        call.arguments.args.first(),
+        keyword(call, "selection"),
+        keyword(call, "selection_add"),
+    ];
+    lists
+        .into_iter()
+        .flatten()
+        .flat_map(items)
+        .filter_map(label_of)
+        .collect()
+}
+
+/// A literal label, translated or not.
+fn label(expr: &Expr) -> Option<String> {
+    match expr {
+        Expr::Call(c) if matches!(tail_name(&c.func), Some("_" | "_lt")) => {
+            str_lit(c.arguments.args.first()?).map(str::to_owned)
+        }
+        literal => str_lit(literal).map(str::to_owned),
+    }
+}
+
 /// The methods a field names by a string: its compute, inverse and search, the method a
 /// `selection` names that returns the values, and the one `group_expand` names.
 fn methods(options: &[(String, Spanned<OptionValue>)]) -> Vec<Spanned<String>> {
@@ -1057,6 +1095,7 @@ impl<'ast> PyVisitor<'_, 'ast> {
             inverse_name: inverse_name.map(|s| self.spanned(s)),
             related: kw_str("related").map(|s| self.spanned(s)),
             methods: methods(&options),
+            labels: selection_labels(ftype, call),
             domain: keyword(call, "domain").map(|d| self.domain(d)).unwrap_or_default(),
             options,
             splat: call.arguments.args.iter().any(Expr::is_starred_expr)
@@ -1776,6 +1815,17 @@ mod tests {
 
     fn option(f: &FieldFact, name: &str) -> Option<OptionValue> {
         f.option(name).map(|o| o.value.clone())
+    }
+
+    #[test]
+    fn reads_the_labels_of_literal_selection_lists() {
+        let literal = |l: &str| Some(l.to_owned());
+        let f = field("fields.Selection([('a', 'Ay'), ('b', _('Bee')), ('c', LABEL)], string='S')");
+        assert_eq!(f.labels, [literal("Ay"), literal("Bee"), None]);
+        let f = field("fields.Selection(selection_add=[('a', _lt('Ay')), ('b',)])");
+        assert_eq!(f.labels, [literal("Ay")]);
+        assert_eq!(field("fields.Selection('_list')").labels, []);
+        assert_eq!(field("fields.Char('[]')").labels, []);
     }
 
     #[test]
