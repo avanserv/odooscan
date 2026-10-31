@@ -306,6 +306,7 @@ custom/legacy14/security/second_writes.xml:2:5: OD323 XML id 'rule_ledger_replac
 custom/legacy14/security/second_writes.xml:5:5: OD323 XML id 'rule_ledger_deactivated' is already defined in security/rules.xml, and this definition writes the fields it names over it; remove the copy when the two say the same thing, or rename one when both are meant to exist
 custom/legacy14/views/ledger_archive.xml:1:1: OD502 'views/ledger_archive.xml' is not in the manifest's init_xml, update_xml, data, demo_xml or demo, so Odoo never loads it
 custom/legacy14/views/ledger_reports.xml:19:71: OD201 no indexed module defines model 'legacy.ledgr'
+custom/legacy14/views/ledger_reports.xml:27:97: OD318 legacy.ledger has no primary gantt view, and nothing generates one
 custom/legacy14/views/ledger_updates.xml:4:33: OD318 legacy.ledger has no primary gantt view, and nothing generates one
 custom/legacy14/views/ledger_updates.xml:7:5: OD323 XML id 'action_ledger_default' is already defined in views/ledger_reports.xml, and this definition writes the fields it names over it; remove the copy when the two say the same thing, or rename one when both are meant to exist
 custom/legacy14/views/ledger_views.xml:8:17: OD304 'x_opening_balance': legacy.ledger has no field 'x_opening_balance'
@@ -927,7 +928,23 @@ custom/window_named/views/actions.xml:169:33: OD318 window.plain has no primary 
 custom/window_named/views/actions.xml:176:33: OD318 window.plain has no primary gantt view, and nothing generates one
 custom/window_named/views/actions.xml:183:33: OD318 window.plain has no primary gantt view, and nothing generates one
 custom/window_named/views/actions.xml:190:33: OD318 window.plain has no primary gantt view, and nothing generates one
+custom/window_named/views/actions.xml:225:33: OD318 window.plain has no primary gantt view, and nothing generates one
+custom/window_named/views/actions.xml:232:33: OD318 window.plain has no primary gantt view, and nothing generates one
+custom/window_named/views/actions.xml:249:33: OD318 window.plain has no primary gantt view, and nothing generates one
+custom/window_named/views/actions.xml:256:33: OD318 window.plain has no primary gantt view, and nothing generates one
+custom/window_named/views/actions.xml:263:33: OD318 window.plain has no primary gantt view, and nothing generates one
+custom/window_named/views/actions.xml:271:33: OD318 window.plain has no primary gantt view, and nothing generates one
+custom/window_named/views/actions.xml:284:33: OD318 window.plain has no primary gantt view, and nothing generates one
+custom/window_named/views/actions.xml:291:33: OD318 window.plain has no primary map view, and nothing generates one
+custom/window_named/views/actions.xml:299:9: OD302 'nowhere.view_y' belongs to module nowhere, which is neither in depends nor on the addons path
+custom/window_named/views/actions.xml:330:41: OD318 window.plain has no primary gantt view, and nothing generates one
+custom/window_named/views/later.xml:6:5: OD323 XML id 'action_view_id_undone' is already defined in views/actions.xml, and this definition writes the fields it names over it; remove the copy when the two say the same thing, or rename one when both are meant to exist
+custom/window_named/views/later.xml:10:5: OD323 XML id 'action_context_undone' is already defined in views/actions.xml, and this definition writes the fields it names over it; remove the copy when the two say the same thing, or rename one when both are meant to exist
 custom/window_nested15/views/actions.xml:5:33: OD318 window.nested.old has no primary gantt view, and nothing generates one
+custom/window_tag15/views/later.xml:2:5: OD323 XML id 'action_tag_view_undone' is already defined in views/actions.xml, and this definition writes the fields it names over it; remove the copy when the two say the same thing, or rename one when both are meant to exist
+custom/window_tag15/views/later.xml:2:106: OD318 window.tag.old has no primary gantt view, and nothing generates one
+custom/window_tag15/views/later.xml:3:5: OD323 XML id 'action_tag_context_undone' is already defined in views/actions.xml, and this definition writes the fields it names over it; remove the copy when the two say the same thing, or rename one when both are meant to exist
+custom/window_tag15/views/later.xml:3:112: OD318 window.tag.old has no primary gantt view, and nothing generates one
 custom/window_update/demo/rewrites.xml:15:33: OD318 window.plain has no primary gantt view, and nothing generates one
 custom/window_update/views/a_last.xml:2:5: OD323 XML id 'action_ranked' is already defined in views/z_first.xml, and this definition writes the fields it names over it; remove the copy when the two say the same thing, or rename one when both are meant to exist
 custom/window_update/views/a_last.xml:6:5: OD323 XML id 'action_model_replaced' is already defined in views/z_first.xml, and this definition writes the fields it names over it; remove the copy when the two say the same thing, or rename one when both are meant to exist
@@ -940,3 +957,4 @@ custom/window_update/views/demo_writes.xml:11:33: OD318 window.plain has no prim
 custom/window_update/views/demo_writes.xml:17:33: OD318 window.plain has no primary gantt view, and nothing generates one
 custom/window_update/views/updates.xml:3:33: OD318 window.plain has no primary gantt view, and nothing generates one
 custom/window_update/views/updates.xml:18:5: OD323 XML id 'action_model_replaced' is already defined in views/z_first.xml, and this definition writes the fields it names over it; remove the copy when the two say the same thing, or rename one when both are meant to exist
+custom/window_update/views/updates.xml:51:33: OD318 window.plain has no primary gantt view, and nothing generates one

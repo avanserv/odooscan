@@ -6,7 +6,7 @@ use std::rc::Rc;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::facts::{
-    ActionFact, ActionValue, Annotation, ArchElement, ArchModifier, ArchSubview, ClassFact, DataFacts,
+    ActionFact, ActionValue, ActionViewId, Annotation, ArchElement, ArchModifier, ArchSubview, ClassFact, DataFacts,
     DefinitionSource, DomainFact, FieldFact, FieldWrite, FunctionCall, JsFacts, JsName, ModelKind, OptionValue,
     OrmCall, Pos, RawDiag, RecordFact, RecordWrite, ReportFact, RuleFact, ServerFact, Spanned, SqlColumn, SqlView,
     ViewFact, WrittenValue, XmlRef,
@@ -1763,8 +1763,6 @@ impl<'m> Ctx<'_, 'm> {
         }
     }
 
-    /// A view an action names counts from any indexed module, as one in `view_types` does, as long as
-    /// the scope loads that write. A module of unknown series may run from `NESTED_RECORDS`.
     fn view_mode(
         &self,
         out: &mut Out<'m>,
@@ -1773,17 +1771,56 @@ impl<'m> Ctx<'_, 'm> {
         mode: &Spanned<String>,
         writes: &[Placed<&ActionFact>],
     ) {
-        let nested = self.series.is_none_or(|s| s >= NESTED_RECORDS);
         let mut seen = FxHashSet::default();
         let kinds = mode.value.split(',').map(str::trim).filter(|k| !k.is_empty());
         for kind in kinds.filter(|k| seen.insert(*k)) {
-            let named = writes
-                .iter()
-                .any(|w| self.scope.loads(w) && w.fact.names_view(kind, nested));
             let gap = self.activity_gap(model, kind);
-            if let Some(message) = gap.or_else(|| self.view_gap(model, kind).filter(|_| !named)) {
+            let gap = gap.or_else(|| self.view_gap(model, kind).filter(|_| !self.action_names(writes, kind)));
+            if let Some(message) = gap {
                 out.push(path, "OD318", mode.pos, message);
             }
+        }
+    }
+
+    /// Whether `writes` give the action a view of `kind`. A view counts from any indexed module, as one
+    /// in `view_types` does, as long as the scope loads that write. A module of unknown series may run
+    /// from `NESTED_RECORDS`.
+    fn action_names(&self, writes: &[Placed<&ActionFact>], kind: &str) -> bool {
+        let nested = self.series.is_none_or(|s| s >= NESTED_RECORDS);
+        let of_kind = |kinds: &[String]| kinds.iter().any(|k| k == kind);
+        writes
+            .iter()
+            .any(|w| self.scope.loads(w) && w.fact.row_names_view(kind, nested))
+            || self
+                .held(writes, |a| !matches!(a.view_id, ActionViewId::Unset))
+                .any(|w| self.view_id_names(w, kind))
+            || self
+                .held(writes, |a| a.context_kinds.is_some())
+                .any(|w| w.fact.context_kinds.as_deref().is_some_and(of_kind))
+    }
+
+    /// The writes of a field that may be what the action holds: only a write in scope undoes those
+    /// before it, and one from outside the scope after it counts as that module may be installed.
+    fn held<'w, 'a>(
+        &self,
+        writes: &'w [Placed<&'a ActionFact>],
+        writes_field: fn(&ActionFact) -> bool,
+    ) -> impl Iterator<Item = &'w Placed<&'a ActionFact>> {
+        let start = writes.iter().rposition(|w| self.scope.reads(w) && writes_field(w.fact));
+        let from = writes[start.unwrap_or(0)..].iter();
+        from.filter(move |w| self.scope.loads(w) && writes_field(w.fact))
+    }
+
+    /// Whether the `view_id` of `write` serves `kind`: Odoo gives it to its view's type alone. A view
+    /// the scan does not reach may be of any type.
+    fn view_id_names(&self, write: &Placed<&ActionFact>, kind: &str) -> bool {
+        match &write.fact.view_id {
+            ActionViewId::Ref(id) => {
+                let id = full_id(&self.index.modules[write.module].name, id);
+                self.index.view_kind(id).is_none_or(|k| k == kind)
+            }
+            ActionViewId::Unread => true,
+            ActionViewId::Unset | ActionViewId::Cleared => false,
         }
     }
 

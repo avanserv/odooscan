@@ -29,4 +29,11 @@
         <field name="view_mode">list</field>
         <field name="view_id" ref="window_actions.view_shown_gantt"/>
     </record>
+
+    <record id="action_demo_view_undone" model="ir.actions.act_window">
+        <field name="name">action_demo_view_undone</field>
+        <field name="res_model">window.plain</field>
+        <field name="view_mode">gantt</field>
+        <field name="view_id" ref="window_actions.view_shown_gantt"/>
+    </record>
 </odoo>

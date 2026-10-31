@@ -1,0 +1,9 @@
+<odoo>
+    <record id="view_other_gantt" model="ir.ui.view">
+        <field name="name">window.tag.other.gantt</field>
+        <field name="model">window.tag.other</field>
+        <field name="arch" type="xml">
+            <gantt string="Other"/>
+        </field>
+    </record>
+</odoo>

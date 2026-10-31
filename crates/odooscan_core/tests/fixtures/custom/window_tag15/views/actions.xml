@@ -1,0 +1,15 @@
+<odoo>
+    <act_window id="action_tag_other_model" name="Tag other model" res_model="window.tag.old" view_mode="gantt" view_id="view_other_gantt"/>
+
+    <record id="action_tag_view_undone" model="ir.actions.act_window">
+        <field name="name">action_tag_view_undone</field>
+        <field name="res_model">window.tag.old</field>
+        <field name="view_id" ref="view_other_gantt"/>
+    </record>
+
+    <record id="action_tag_context_undone" model="ir.actions.act_window">
+        <field name="name">action_tag_context_undone</field>
+        <field name="res_model">window.tag.old</field>
+        <field name="context">{'gantt_view_ref': 'window_tag15.view_other_gantt'}</field>
+    </record>
+</odoo>

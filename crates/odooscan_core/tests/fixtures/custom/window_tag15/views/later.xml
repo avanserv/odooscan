@@ -1,0 +1,4 @@
+<odoo>
+    <act_window id="action_tag_view_undone" name="Tag view undone" res_model="window.tag.old" view_mode="gantt"/>
+    <act_window id="action_tag_context_undone" name="Tag context undone" res_model="window.tag.old" view_mode="gantt"/>
+</odoo>
