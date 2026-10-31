@@ -193,11 +193,11 @@ pub(crate) const BASE_MODEL_METHODS: &[&str] = &[
     "_where_calc",
 ];
 
-/// The other methods of `BaseModel` in 12.0 to 20.0, by `def` or class-level alias, read off each
-/// series: a button, a `<function>` or a `super()` call may name any. Dunders stay out because
-/// buttons read this list, so `BASE_MODEL_DUNDERS` holds them for `super()` alone. Any other `__`
-/// name stays out too: it is mangled, so `getattr` never finds it. Apart from `BASE_MODEL_METHODS`,
-/// which OD116 reads as the members a field must not replace in every series.
+/// The methods of `BaseModel` outside `BASE_MODEL_METHODS`, which OD116 reads as the members a
+/// field must not replace in every series, by `def` or class-level alias, read off the heads 12.0
+/// to 20.0 and saas~11.5 to saas~19.4: a button, a `<function>` or a `super()` call may name any.
+/// Dunders stay out because buttons read this list, so `BASE_MODEL_DUNDERS` holds them for
+/// `super()` alone. Any other `__` name stays out too: it is mangled, so `getattr` never finds it.
 const BASE_MODEL_EXTRA: &[&str] = &[
     "_add_fake_fields",
     "_add_field",
@@ -244,6 +244,7 @@ const BASE_MODEL_EXTRA: &[&str] = &[
     "_generate_order_by",
     "_generate_order_by_inner",
     "_generate_translated_field",
+    "_get_access_action",
     "_get_default_activity_view",
     "_get_default_calendar_view",
     "_get_default_form_view",
@@ -271,6 +272,7 @@ const BASE_MODEL_EXTRA: &[&str] = &[
     "_mapped_func",
     "_modified",
     "_modified_triggers",
+    "_neutralize",
     "_onchange_eval",
     "_onchange_methods",
     "_onchange_spec",
