@@ -405,6 +405,7 @@ pub(crate) fn base_private_method(name: &str, series: Option<Series>) -> bool {
                 .any(|(spec, names)| names.contains(&name) && series::matches(spec, s))
     })
 }
+
 pub fn full_id(module: &str, id: &str) -> String {
     if id.contains('.') {
         id.to_owned()
