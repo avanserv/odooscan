@@ -364,6 +364,9 @@ type Writes<'m, T> = FxHashMap<String, Vec<(usize, &'m T)>>;
 /// The modules whose data give a view each `key`.
 type ViewKeys<'m> = FxHashMap<&'m str, Vec<usize>>;
 
+/// The modules whose data gives a default to each (model, field), with whether a demo file does.
+type IrDefaults<'m> = FxHashMap<(&'m str, &'m str), Vec<(usize, bool)>>;
+
 type XmlIds<'m> = FxHashMap<String, Vec<XmlIdDef<'m>>>;
 
 /// The flow summary of a function, with the file and module it is in.
@@ -511,6 +514,21 @@ fn data_ids<'m>(
             }
         }
     }
+}
+
+/// The fields each `ir.default.set()` of the files manifests load gives a default, with its module
+/// and whether a demo file makes the call.
+fn ir_defaults(modules: &[Module]) -> IrDefaults<'_> {
+    let mut defaults: IrDefaults<'_> = FxHashMap::default();
+    for (mi, module) in modules.iter().enumerate() {
+        for file in module.data.iter().filter(|f| f.rank.is_some()) {
+            for (model, field) in file.facts.functions.iter().filter_map(|c| c.default_of.as_ref()) {
+                let key = (model.as_str(), field.as_str());
+                defaults.entry(key).or_default().push((mi, file.demo));
+            }
+        }
+    }
+    defaults
 }
 
 /// Ids of records Odoo creates alongside others, with their module and model.
@@ -863,6 +881,9 @@ pub struct Index<'m> {
     pub server_writes: Writes<'m, ServerFact>,
     pub report_writes: Writes<'m, ReportFact>,
     pub value_writes: Writes<'m, RecordWrite>,
+    /// The ids of records Odoo creates alongside others.
+    pub derived: FxHashSet<String>,
+    ir_defaults: IrDefaults<'m>,
     view_keys: ViewKeys<'m>,
     pub templates: Inheritance<'m>,
     pub models_with_access: FxHashSet<String>,
@@ -898,7 +919,9 @@ impl<'m> Index<'m> {
             class_ids(mi, module, &mut models, &mut model_by_xmlid, &mut xmlids);
             data_ids(mi, module, &by_name, &mut xmlids, &mut views, &mut view_keys);
         }
+        let mut derived = FxHashSet::default();
         for (id, mi, parent) in derived_ids(modules, &models) {
+            derived.insert(id.clone());
             xmlids.entry(id).or_default().push(XmlIdDef {
                 module: mi,
                 model: Some(parent),
@@ -917,6 +940,8 @@ impl<'m> Index<'m> {
             server_writes: record_writes(modules, &by_name, |f| &f.servers, |s| s.id.as_ref()),
             report_writes: record_writes(modules, &by_name, |f| &f.reports, |r| r.id.as_ref()),
             value_writes: record_writes(modules, &by_name, |f| &f.writes, |w| w.id.as_ref()),
+            derived,
+            ir_defaults: ir_defaults(modules),
             view_keys,
             templates: Inheritance::new(template_nodes(modules, &templates_loaded)),
             models_with_access,
@@ -1421,6 +1446,13 @@ impl<'m> Index<'m> {
         self.chain(model, None, false)
             .iter()
             .any(|(_, c)| c.fields.iter().any(|f| f.name == field))
+    }
+
+    /// Whether a module in `scope` gives `field` of `model` an `ir.default`. One of a demo file is no
+    /// default for `demo` false: it loads after the data, and only where demo data does.
+    pub fn ir_default(&self, model: &str, field: &str, scope: &Scope, demo: bool) -> bool {
+        let defaults = self.ir_defaults.get(&(model, field));
+        defaults.is_some_and(|d| d.iter().any(|&(mi, in_demo)| scope.sees(mi) && (demo || !in_demo)))
     }
 
     /// Whether `field` is `id`, which every table of a model has, or a column of `model` that no

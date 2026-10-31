@@ -1,0 +1,76 @@
+<odoo>
+    <record id="tag_a" model="rr.tag">
+        <field name="name">A</field>
+    </record>
+    <record id="rewritten" model="rr.note">
+        <field name="name">First</field>
+        <field name="code">first</field>
+    </record>
+    <record id="rewritten_by_prefix" model="rr.note">
+        <field name="name">First</field>
+    </record>
+    <record id="record_required.prefixed_first" model="rr.note">
+        <field name="name">First</field>
+    </record>
+    <record id="rewritten_noupdate" model="rr.note">
+        <field name="name">First</field>
+    </record>
+    <record id="rewritten_by_row" model="rr.note">
+        <field name="name">First</field>
+    </record>
+    <record id="other_model" model="rr.note">
+        <field name="name">First</field>
+    </record>
+    <record id="other_model_by_tag" model="ir.ui.view">
+        <field name="name">First</field>
+    </record>
+    <template id="template_twice">
+        <div>first</div>
+    </template>
+    <record id="record_then_template" model="ir.ui.view">
+        <field name="name">First</field>
+    </record>
+    <menuitem id="menu_twice" name="First"/>
+    <act_window id="action_twice" name="First" res_model="rr.note"/>
+    <asset id="asset_twice" name="First">
+        <bundle>web.assets_backend</bundle>
+        <path>record_required/static/src/first.js</path>
+    </asset>
+    <record id="grown" model="rr.note">
+        <field name="name">First</field>
+    </record>
+    <record id="grown_too" model="rr.note">
+        <field name="name">First</field>
+    </record>
+    <record id="linked" model="rr.note">
+        <field name="tag_ids" eval="[(4, ref('tag_a'))]"/>
+    </record>
+    <record id="linked_by_command" model="rr.note">
+        <field name="tag_ids" eval="[Command.link(ref('tag_a'))]"/>
+    </record>
+    <record id="relinked" model="rr.note">
+        <field name="tag_ids" eval="[(4, ref('tag_a'))]"/>
+    </record>
+    <record id="nested_later" model="rr.note">
+        <field name="entry_ids" eval="[(5, 0, 0)]"/>
+    </record>
+    <record id="empty_later" model="rr.note">
+        <field name="name">First</field>
+    </record>
+    <record id="declared_later" model="rr.note">
+        <field name="name">First</field>
+    </record>
+    <template id="template_then_record">
+        <div>first</div>
+    </template>
+    <menuitem id="menu_then_record" name="First"/>
+    <record id="record_then_menuitem" model="ir.ui.menu">
+        <field name="name">First</field>
+    </record>
+    <record id="base.note_elsewhere" model="rr.note">
+        <field name="name">First</field>
+    </record>
+    <record id="kept_for_demo" model="rr.note">
+        <field name="name">First</field>
+    </record>
+</odoo>

@@ -171,6 +171,8 @@ rules! {
     "OD320" "unknown-server-code-method" Correctness Error None, true, "The code of a server action or a cron calls a method its model does not have.";
     "OD321" "wrong-model-reference" Correctness Error None, true, "A data record gives a relational field a record of another model.";
     "OD322" "unknown-selection-value" Correctness Error None, true, "A data record gives a Selection field a value it does not list.";
+    "OD323" "duplicate-xmlid-across-files" Correctness Warning None, false, "A data file defines an XML id another file of the module already defines, and writes the fields it names over it.";
+    "OD324" "missing-required-field" Correctness Warning None, true, "A data record is created without a required field that has no default.";
     "OD401" "model-without-access" Security Warning None, true, "A new model has no ir.model.access rule.";
     "OD402" "public-write-access" Security Warning None, false, "An access row gives public or portal users write, create or unlink, through their group or no group.";
     "OD501" "manifest-data-missing" Correctness Error None, false, "A file listed in the manifest does not exist.";

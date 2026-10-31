@@ -1,0 +1,4 @@
+<odoo>
+    <record id="main_settled" model="res.settled"/>
+    <record model="res.settled"/>
+</odoo>

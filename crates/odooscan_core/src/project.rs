@@ -22,6 +22,8 @@ pub struct SourceFile<T> {
     /// Load position among the files the manifest loads in the module's series, as
     /// `Manifest::loaded_files` orders them; `None` when Odoo never loads it.
     pub rank: Option<usize>,
+    /// Odoo first loads it as demo data, which a database may skip.
+    pub demo: bool,
     pub facts: T,
     pub suppressions: Suppressions,
 }
@@ -205,6 +207,7 @@ fn ranks(manifest: &Manifest, series: Option<Series>) -> FxHashMap<String, usize
 fn parse_module_files(module: &mut Module, default_series: Option<Series>) {
     let series = module.series.or(default_series);
     let ranks = ranks(&module.manifest, series);
+    let data_entries = module.manifest.data_entries(series);
     let files = module_files(&module.dir);
     let checked = module.checked;
     let parsed: Vec<_> = files
@@ -213,6 +216,7 @@ fn parse_module_files(module: &mut Module, default_series: Option<Series>) {
             let text = std::fs::read_to_string(&path).ok()?;
             let rel = normalize(&path.strip_prefix(&module.dir).ok()?.to_string_lossy());
             let rank = ranks.get(&rel).copied();
+            let demo = rank.is_some_and(|r| r >= data_entries);
             let suppressions = if checked {
                 Suppressions::parse(&text)
             } else {
@@ -224,6 +228,7 @@ fn parse_module_files(module: &mut Module, default_series: Option<Series>) {
                     path,
                     rel,
                     rank,
+                    demo,
                     suppressions,
                 }),
                 Some("xml") => Err(SourceFile {
@@ -231,6 +236,7 @@ fn parse_module_files(module: &mut Module, default_series: Option<Series>) {
                     path,
                     rel,
                     rank,
+                    demo,
                     suppressions,
                 }),
                 _ => {
@@ -242,6 +248,7 @@ fn parse_module_files(module: &mut Module, default_series: Option<Series>) {
                         path,
                         rel,
                         rank,
+                        demo,
                         suppressions,
                     })
                 }
@@ -284,6 +291,7 @@ fn parse_static_files<T: Send>(
             Some(SourceFile {
                 rel: normalize(&path.strip_prefix(dir).ok()?.to_string_lossy()),
                 rank: None,
+                demo: false,
                 suppressions: if checked {
                     Suppressions::parse(&text)
                 } else {
@@ -301,6 +309,15 @@ fn parse_static_files<T: Send>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_file_listed_as_data_too_is_no_demo() {
+        let m = manifest::parse(r#"{"data": ["a.xml", "b.xml"], "demo": ["b.xml", "c.xml"]}"#).unwrap();
+        let series = Series::parse("18.0");
+        let ranks = ranks(&m, series);
+        assert!(ranks["b.xml"] < m.data_entries(series));
+        assert!(ranks["c.xml"] >= m.data_entries(series));
+    }
 
     #[test]
     fn ranks_a_file_listed_twice_at_its_first_place() {

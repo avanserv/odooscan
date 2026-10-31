@@ -1,0 +1,9 @@
+<odoo>
+    <function model="ir.model.data" name="_update_xmlids" eval="[{'xml_id': 'record_required_ext.assigned_later', 'record': obj().browse(1)}]"/>
+    <function model="ir.default" name="set" eval="('rr.defaulted', 'name', 'x')"/>
+    <function model="ir.default" name="set">
+        <value>rr.child</value>
+        <value>label</value>
+        <value>x</value>
+    </function>
+</odoo>

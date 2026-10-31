@@ -1,0 +1,29 @@
+<odoo>
+    <record id="parent_1" model="rr.parent">
+        <field name="label">One</field>
+    </record>
+    <record id="child_created" model="rr.child"/>
+    <record id="child_labelled" model="rr.child">
+        <field name="label">Given</field>
+    </record>
+    <record id="child_of_parent" model="rr.child">
+        <field name="parent_id" ref="parent_1"/>
+    </record>
+    <record id="child_by_context" model="rr.child" context="{'default_label': 'x'}"/>
+    <record id="child_by_parent_context" model="rr.child" context="{'default_parent_id': 1}"/>
+    <record id="child_created_rr_parent" model="rr.parent"/>
+    <record id="grandchild_created" model="rr.grandchild"/>
+    <record id="grandchild_of_child" model="rr.grandchild">
+        <field name="child_id" ref="child_of_parent"/>
+    </record>
+    <record id="grandchild_of_parent" model="rr.grandchild">
+        <field name="parent_id" ref="parent_1"/>
+    </record>
+    <record id="flagged_created" model="rr.flagged"/>
+    <record id="spared_empty" model="rr.spared"/>
+    <record id="hooked_child_empty" model="rr.hooked.child"/>
+    <record id="loop_a" model="rr.loop.a"/>
+    <record id="child_defaulted" model="rr.child.default"/>
+    <record id="grandchild_defaulted" model="rr.grandchild.default"/>
+    <record id="child_shadowing" model="rr.child.shadow"/>
+</odoo>

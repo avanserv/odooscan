@@ -1,0 +1,6 @@
+<odoo>
+    <record id="rewritten" model="rr.note">
+        <field name="name">Unlisted</field>
+    </record>
+    <record id="unlisted_thing" model="rr.thing"/>
+</odoo>
