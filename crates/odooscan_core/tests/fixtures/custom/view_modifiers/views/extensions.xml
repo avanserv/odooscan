@@ -498,4 +498,26 @@
             </group>
         </field>
     </record>
+
+    <record id="ticket_form_ids" model="ir.ui.view">
+        <field name="name">modifier.ticket.form.ids</field>
+        <field name="model">modifier.ticket</field>
+        <field name="inherit_id" ref="ticket_form"/>
+        <field name="arch" type="xml">
+            <field name="state" position="attributes">
+                <attribute name="invisible">state %%%(base.action_partner)d</attribute>
+            </field>
+        </field>
+    </record>
+
+    <record id="ticket_form_ids_leading" model="ir.ui.view">
+        <field name="name">modifier.ticket.form.ids.leading</field>
+        <field name="model">modifier.ticket</field>
+        <field name="inherit_id" ref="ticket_form"/>
+        <field name="arch" type="xml">
+            <field name="state" position="attributes">
+                <attribute name="readonly">%(base.action_partner)d == state</attribute>
+            </field>
+        </field>
+    </record>
 </odoo>
