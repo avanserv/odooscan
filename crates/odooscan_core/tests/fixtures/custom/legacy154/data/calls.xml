@@ -1,0 +1,5 @@
+<odoo>
+    <function model="res.partner" name="_neutralize"/>
+    <function model="res.partner" name="_get_access_action"/>
+    <function model="res.partner" name="_neutralized"/>
+</odoo>
