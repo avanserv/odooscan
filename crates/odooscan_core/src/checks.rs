@@ -2084,7 +2084,12 @@ impl<'m> Ctx<'_, 'm> {
             return;
         }
         let Some(kind) = self.arch_kind(view) else { return };
-        for m in &view.modifiers {
+        let read: Vec<&ArchModifier> = view
+            .modifiers
+            .iter()
+            .filter(|m| !self.lone_constant(m, view, trees))
+            .collect();
+        for m in read {
             match modifier::names(&m.value.value) {
                 Ok(names) => {
                     for name in &names {
@@ -2104,6 +2109,28 @@ impl<'m> Ctx<'_, 'm> {
                 ),
             }
         }
+    }
+
+    /// Whether an `add` of a constant may stand alone, which Odoo takes unparsed: it joins a value
+    /// only when every element the spec may locate holds one, as far as the tree shows. The order
+    /// of the tree's extensions is out of reach, so a spec that may empty the modifier on one of
+    /// those elements counts, whichever of the element's names it uses.
+    fn lone_constant(&self, m: &ArchModifier, view: &ViewFact, trees: &mut FxHashMap<String, ViewTree<'m>>) -> bool {
+        let Some(joins) = m.joins.as_ref().filter(|_| modifier::constant(&m.value.value)) else {
+            return false;
+        };
+        let parent = view.inherit.as_deref().map(|p| full_id(&self.module.name, p));
+        let Some(tree) = parent.and_then(|p| self.view_tree(p, trees)) else {
+            return true;
+        };
+        let joins = located(joins, &self.module.name);
+        let matches: Vec<_> = tree.valued.iter().filter(|v| v.elements.contains(&joins)).collect();
+        let reaches = |target: &ArchElement| matches.iter().any(|v| v.elements.contains(target));
+        let emptied = tree
+            .emptied
+            .iter()
+            .any(|e| e.attr == m.attr && e.target.as_ref().is_none_or(reaches));
+        emptied || matches.is_empty() || !matches.iter().all(|v| v.attrs.contains(&m.attr))
     }
 
     /// Resolves a name to the field it reads, unless that field is out of the scan's reach. Each

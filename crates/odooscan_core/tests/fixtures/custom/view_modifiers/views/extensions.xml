@@ -320,4 +320,182 @@
             </field>
         </field>
     </record>
+
+    <record id="ticket_flags" model="ir.ui.view">
+        <field name="name">modifier.ticket.flags</field>
+        <field name="model">modifier.ticket</field>
+        <field name="arch" type="xml">
+            <form>
+                <field name="state" readonly="name"/>
+                <field name="name"/>
+                <field name="tag_ids"/>
+                <field name="tag_ids" readonly="name"/>
+                <field name="line_ids"/>
+            </form>
+        </field>
+    </record>
+
+    <record id="ticket_flags_added" model="ir.ui.view">
+        <field name="name">modifier.ticket.flags.added</field>
+        <field name="model">modifier.ticket</field>
+        <field name="inherit_id" ref="ticket_flags"/>
+        <field name="arch" type="xml">
+            <field name="state" position="attributes">
+                <attribute name="readonly"> </attribute>
+                <attribute name="readonly" add="true" separator="or"/>
+                <attribute name="invisible">
+                    true
+                </attribute>
+                <attribute name="required">true</attribute>
+                <attribute name="required">
+                    0
+                </attribute>
+                <attribute name="required">
+                    True
+                </attribute>
+                <attribute name="readonly" add="1" separator="or"/>
+            </field>
+            <xpath expr="//field[@name='state']" position="attributes">
+                <attribute name="readonly" add="false" separator=" and "/>
+            </xpath>
+            <field name="name" position="attributes">
+                <attribute name="readonly" add="true" separator="or"/>
+            </field>
+            <field name="tag_ids" position="attributes">
+                <attribute name="readonly" add="true" separator="or"/>
+            </field>
+            <xpath expr="//field[@name='state']/.." position="attributes">
+                <attribute name="readonly" add="true" separator="or"/>
+            </xpath>
+            <field name="line_ids" position="attributes">
+                <attribute name="name">bound_ids</attribute>
+            </field>
+            <field name="bound_ids" position="attributes">
+                <attribute name="readonly" add="true" separator="or"/>
+            </field>
+        </field>
+    </record>
+
+    <record id="ticket_flags_middle" model="ir.ui.view">
+        <field name="name">modifier.ticket.flags.middle</field>
+        <field name="model">modifier.ticket</field>
+        <field name="inherit_id" ref="ticket_flags"/>
+        <field name="arch" type="xml">
+            <field name="name" position="after">
+                <field name="hook_ids" readonly="name"/>
+            </field>
+        </field>
+    </record>
+
+    <record id="ticket_flags_stacked" model="ir.ui.view">
+        <field name="name">modifier.ticket.flags.stacked</field>
+        <field name="model">modifier.ticket</field>
+        <field name="inherit_id" ref="ticket_flags_middle"/>
+        <field name="arch" type="xml">
+            <field name="state" position="attributes">
+                <attribute name="readonly" add="true" separator="or"/>
+            </field>
+            <field name="hook_ids" position="attributes">
+                <attribute name="readonly" add="true" separator="or"/>
+            </field>
+        </field>
+    </record>
+
+    <record id="ticket_stray_add" model="ir.ui.view">
+        <field name="name">modifier.ticket.stray.add</field>
+        <field name="model">modifier.ticket</field>
+        <field name="arch" type="xml">
+            <form>
+                <group name="stray" readonly="name">
+                    <attribute name="readonly" add="true" separator="or"/>
+                </group>
+                <field name="name"/>
+            </form>
+        </field>
+    </record>
+
+    <record id="ticket_emptied" model="ir.ui.view">
+        <field name="name">modifier.ticket.emptied</field>
+        <field name="model">modifier.ticket</field>
+        <field name="arch" type="xml">
+            <form>
+                <field name="state" readonly="name" invisible="name" required="name" column_invisible="name"/>
+                <field name="name"/>
+            </form>
+        </field>
+    </record>
+
+    <record id="ticket_emptied_first" model="ir.ui.view">
+        <field name="name">modifier.ticket.emptied.first</field>
+        <field name="model">modifier.ticket</field>
+        <field name="inherit_id" ref="ticket_emptied"/>
+        <field name="arch" type="xml">
+            <field name="state" position="attributes">
+                <attribute name="readonly"/>
+                <attribute name="invisible" remove="name" separator="or"/>
+            </field>
+        </field>
+    </record>
+
+    <record id="ticket_emptied_added" model="ir.ui.view">
+        <field name="name">modifier.ticket.emptied.added</field>
+        <field name="model">modifier.ticket</field>
+        <field name="inherit_id" ref="ticket_emptied"/>
+        <field name="arch" type="xml">
+            <field name="state" position="attributes">
+                <attribute name="readonly" add="true" separator="or"/>
+                <attribute name="invisible" add="true" separator="or"/>
+                <attribute name="invisible" add="true" remove="name" separator="or"/>
+                <attribute name="required"></attribute>
+                <attribute name="required" add="true" separator="or"/>
+                <attribute name="column_invisible" remove="name" separator="or"/>
+                <attribute name="column_invisible" add="true" separator="or"/>
+            </field>
+        </field>
+    </record>
+
+    <record id="ticket_cleared" model="ir.ui.view">
+        <field name="name">modifier.ticket.cleared</field>
+        <field name="model">modifier.ticket</field>
+        <field name="arch" type="xml">
+            <form>
+                <group name="box" id="box_anchor" invisible="name">
+                    <field name="state" readonly="name" required="name"/>
+                    <field name="name"/>
+                </group>
+            </form>
+        </field>
+    </record>
+
+    <record id="ticket_cleared_first" model="ir.ui.view">
+        <field name="name">modifier.ticket.cleared.first</field>
+        <field name="model">modifier.ticket</field>
+        <field name="inherit_id" ref="ticket_cleared"/>
+        <field name="arch" type="xml">
+            <field name="name" position="attributes">
+                <attribute name="readonly"/>
+            </field>
+            <xpath expr="//group[@name='box']/field[1]" position="attributes">
+                <attribute name="required"/>
+            </xpath>
+            <xpath expr="//group[@id='box_anchor']" position="attributes">
+                <attribute name="invisible"/>
+            </xpath>
+        </field>
+    </record>
+
+    <record id="ticket_cleared_added" model="ir.ui.view">
+        <field name="name">modifier.ticket.cleared.added</field>
+        <field name="model">modifier.ticket</field>
+        <field name="inherit_id" ref="ticket_cleared"/>
+        <field name="arch" type="xml">
+            <field name="state" position="attributes">
+                <attribute name="readonly" add="true" separator="or"/>
+                <attribute name="required" add="true" separator="or"/>
+            </field>
+            <group name="box" position="attributes">
+                <attribute name="invisible" add="true" separator="or"/>
+            </group>
+        </field>
+    </record>
 </odoo>
