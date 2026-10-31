@@ -12,6 +12,7 @@ mod module_state;
 mod owl;
 mod project;
 mod python;
+mod record_eval;
 pub mod rules;
 pub mod series;
 mod server_code;

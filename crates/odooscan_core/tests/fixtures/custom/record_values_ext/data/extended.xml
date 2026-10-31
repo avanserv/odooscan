@@ -1,0 +1,21 @@
+<odoo>
+    <record id="record_values.replaced_in_ext" model="rv.thing">
+        <field name="other_id" ref="record_values.other_1"/>
+        <field name="state">a</field>
+    </record>
+
+    <record id="record_values.both_models" model="rv.parent">
+        <field name="name">The second model of this id</field>
+    </record>
+
+    <record id="reported" model="rv.thing">
+        <field name="new_id" ref="record_values.other_1"/>
+        <field name="retyped_id" ref="record_values.other_1"/>
+        <field name="new_state">zz</field>
+    </record>
+
+    <record id="silent" model="rv.thing">
+        <field name="retyped_id" ref="record_values.parent_1"/>
+        <field name="fallen_id" ref="record_values.parent_1"/>
+    </record>
+</odoo>

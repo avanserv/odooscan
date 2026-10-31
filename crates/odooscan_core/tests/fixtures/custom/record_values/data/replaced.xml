@@ -1,0 +1,8 @@
+<odoo>
+    <record id="later_1" model="rv.other"><field name="name">Defined after its use</field></record>
+
+    <record id="replaced_later" model="rv.thing">
+        <field name="parent_id" ref="parent_1"/>
+        <field name="state">a</field>
+    </record>
+</odoo>

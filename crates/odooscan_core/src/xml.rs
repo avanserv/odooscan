@@ -6,9 +6,10 @@ use roxmltree::{Document, Node, ParsingOptions};
 use crate::domain;
 use crate::facts::{
     AccessRow, ActionFact, ActionValue, ArchButton, ArchDomain, ArchElement, ArchField, ArchModifier, DataFacts,
-    DomainFact, FunctionCall, Lines, Pos, RawDiag, RecordFact, ReportFact, RuleFact, ServerFact, Spanned, ViewFact,
-    XmlDef, XmlRef,
+    DomainFact, FieldWrite, FunctionCall, Lines, Pos, RawDiag, RecordFact, RecordWrite, ReportFact, RuleFact,
+    ServerFact, Spanned, ViewFact, WrittenValue, XmlDef, XmlRef,
 };
+use crate::record_eval;
 use crate::server_code;
 
 /// A `False` second argument makes `ref()` return nothing for an unknown id instead of failing.
@@ -128,14 +129,14 @@ impl Walker<'_> {
         self.lines.pos(node.range().start)
     }
 
-    fn def(&mut self, node: Node) {
+    fn def(&mut self, node: Node, model: Option<&str>) {
         if let Some(id) = node.attribute("id") {
             let pos = self.pos(node);
-            let model = node.attribute("model").map(str::to_owned);
             self.facts.defs.push(XmlDef {
                 id: id.to_owned(),
-                model,
+                model: model.map(str::to_owned),
                 pos,
+                themed: matches!(node.tag_name().name(), "template" | "asset"),
                 assigned: false,
             });
         }
@@ -184,6 +185,7 @@ impl Walker<'_> {
                     id: cap[1].to_owned(),
                     model: None,
                     pos,
+                    themed: false,
                     assigned: true,
                 });
             }
@@ -216,7 +218,7 @@ impl Walker<'_> {
                 "data" | "odoo" | "openerp" => self.data(child),
                 "record" => self.record(child),
                 "template" => {
-                    self.def(child);
+                    self.def(child, Some("ir.ui.view"));
                     if let Some(parent) = child.attribute("inherit_id") {
                         self.reference(parent, child);
                     }
@@ -238,7 +240,12 @@ impl Walker<'_> {
 
     /// The tags that stand for a record, with the id and the groups of one.
     fn shorthand(&mut self, node: Node) {
-        self.def(node);
+        let model = match node.tag_name().name() {
+            "act_window" => "ir.actions.act_window",
+            "report" => "ir.actions.report",
+            _ => "ir.asset",
+        };
+        self.def(node, Some(model));
         self.groups(node);
         match node.tag_name().name() {
             "act_window" => self.act_window(node),
@@ -268,7 +275,7 @@ impl Walker<'_> {
     }
 
     fn menuitem(&mut self, node: Node) {
-        self.def(node);
+        self.def(node, Some("ir.ui.menu"));
         for attr in ["parent", "action"] {
             if let Some(id) = node.attribute(attr) {
                 self.reference(id, node);
@@ -281,8 +288,9 @@ impl Walker<'_> {
     }
 
     fn record(&mut self, node: Node) {
-        self.def(node);
+        self.def(node, node.attribute("model"));
         let Some(model) = node.attribute("model") else { return };
+        self.record_write(node, model);
         let mut record = RecordFact {
             model: Spanned {
                 value: model.to_owned(),
@@ -312,6 +320,31 @@ impl Walker<'_> {
         }
         self.model_facts(node, model);
         self.facts.records.push(record);
+    }
+
+    /// Odoo creates a record before those nested in it, so this write comes first.
+    fn record_write(&mut self, node: Node, model: &str) {
+        let mut fields: Vec<FieldWrite> = vec![];
+        for field in node.children().filter(|c| c.has_tag_name("field")) {
+            let Some(name) = field.attribute("name") else { continue };
+            fields.retain(|f| f.name != name);
+            fields.push(FieldWrite {
+                name: name.to_owned(),
+                value: written(field, self.lines),
+            });
+        }
+        let enclosing = node.parent_element().filter(|p| p.has_tag_name("field"));
+        let nested_in = enclosing.and_then(|f| {
+            let parent = f.parent_element()?.attribute("model")?;
+            Some((parent.to_owned(), f.attribute("name")?.to_owned()))
+        });
+        self.facts.writes.push(RecordWrite {
+            id: node.attribute("id").map(str::to_owned),
+            model: model.to_owned(),
+            fields,
+            nested_in,
+            csv: false,
+        });
     }
 
     /// What a record means to the rules of its model, read from the record as a whole.
@@ -726,6 +759,22 @@ fn field_of<'a, 'i>(node: Node<'a, 'i>, name: &str) -> Option<Node<'a, 'i>> {
         .find(|c| c.has_tag_name("field") && c.attribute("name") == Some(name))
 }
 
+/// What `field` writes, in the order Odoo reads it: a `search`, a `ref`, an `eval`, then the text.
+/// An empty attribute counts as absent, and an empty text clears the field.
+fn written(field: Node, lines: &Lines) -> WrittenValue {
+    let set = |attr: &str| attr_value(field, attr, lines).filter(|a| !a.value.is_empty());
+    if set("search").is_some() {
+        return WrittenValue::Opaque;
+    }
+    if let Some(id) = set("ref") {
+        return WrittenValue::Ids(vec![id]);
+    }
+    match set("eval") {
+        Some(eval) => record_eval::written(&eval),
+        None => direct_value(field, lines).map_or(WrittenValue::Opaque, WrittenValue::Text),
+    }
+}
+
 /// The field Odoo keeps of those of a name: each one replaces the value of the one before.
 fn last_field_of<'a, 'i>(node: Node<'a, 'i>, name: &str) -> Option<Node<'a, 'i>> {
     node.children()
@@ -1085,6 +1134,81 @@ fn xpath_steps(expr: &str, path: &mut Vec<String>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// What the first field a record with the given field elements keeps ends on.
+    fn write_of(fields: &str) -> String {
+        let facts = analyze(&format!("<odoo><record id=\"r\" model=\"m\">{fields}</record></odoo>"));
+        match &facts.writes[0].fields[0].value {
+            WrittenValue::Ids(ids) => ids.iter().map(|i| i.value.as_str()).collect::<Vec<_>>().join(","),
+            WrittenValue::Text(text) => format!("text:{}", text.value),
+            WrittenValue::Opaque => "opaque".to_owned(),
+        }
+    }
+
+    #[test]
+    fn reads_a_written_value_in_the_order_of_odoo() {
+        assert_eq!(write_of(r#"<field name="f" search="[]" ref="a"/>"#), "opaque");
+        assert_eq!(
+            write_of(r#"<field name="f" search="" ref="a" eval="ref('b')">c</field>"#),
+            "a"
+        );
+        assert_eq!(write_of(r#"<field name="f" ref="" eval="ref('b')">c</field>"#), "b");
+        assert_eq!(write_of(r#"<field name="f" eval="" type="char">c</field>"#), "opaque");
+        assert_eq!(write_of(r#"<field name="f" eval="" >c</field>"#), "text:c");
+        assert_eq!(write_of(r#"<field name="f"> c </field>"#), "text: c ");
+    }
+
+    #[test]
+    fn takes_the_values_only_a_run_tells_as_opaque() {
+        assert_eq!(write_of(r#"<field name="f"/>"#), "opaque");
+        assert_eq!(write_of(r#"<field name="f"><!-- c -->d</field>"#), "opaque");
+        assert_eq!(write_of(r#"<field name="f" type="int">1</field>"#), "opaque");
+        assert_eq!(write_of(r#"<field name="f" file="a.txt">c</field>"#), "opaque");
+        assert_eq!(write_of(r#"<field name="f" eval="1 + 1"/>"#), "opaque");
+    }
+
+    #[test]
+    fn writes_the_last_field_of_a_name() {
+        assert_eq!(write_of(r#"<field name="f" ref="a"/><field name="f" ref="b"/>"#), "b");
+        assert_eq!(
+            write_of(r#"<field name="f" ref="a"/><field name="f" eval="False"/>"#),
+            "opaque"
+        );
+    }
+
+    #[test]
+    fn writes_a_nested_record_after_the_one_that_holds_it() {
+        let facts = analyze(
+            r#"<odoo><record id="p" model="m"><field name="line_ids">
+                <record id="c" model="n"><field name="x" ref="a"/></record>
+            </field></record></odoo>"#,
+        );
+        assert_eq!(facts.writes[0].id.as_deref(), Some("p"));
+        assert_eq!(facts.writes[0].nested_in, None);
+        assert_eq!(facts.writes[1].id.as_deref(), Some("c"));
+        assert_eq!(facts.writes[1].nested_in, Some(("m".to_owned(), "line_ids".to_owned())));
+    }
+
+    #[test]
+    fn gives_each_shorthand_its_model() {
+        let facts = analyze(
+            r#"<odoo><template id="t"><div/></template><menuitem id="m"><menuitem id="n"/></menuitem>
+            <act_window id="w" name="w" res_model="x"/><report id="p" model="x" name="n" string="s"/>
+            <asset id="a"/><record id="r" model="x"/></odoo>"#,
+        );
+        let def = |d: &XmlDef| (d.id.clone(), d.model.clone().unwrap_or_default(), d.themed);
+        let found: Vec<_> = facts.defs.iter().map(def).collect();
+        let expected = [
+            ("t", "ir.ui.view", true),
+            ("m", "ir.ui.menu", false),
+            ("n", "ir.ui.menu", false),
+            ("w", "ir.actions.act_window", false),
+            ("p", "ir.actions.report", false),
+            ("a", "ir.asset", true),
+            ("r", "x", false),
+        ];
+        assert_eq!(found, expected.map(|(i, m, t)| (i.to_owned(), m.to_owned(), t)));
+    }
 
     fn calls(arch: &str) -> Vec<(String, u32, u32)> {
         let facts = analyze(&format!("<odoo>\n<template id=\"x\">{arch}</template>\n</odoo>"));

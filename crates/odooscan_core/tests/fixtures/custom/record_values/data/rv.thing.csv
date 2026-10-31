@@ -1,0 +1,8 @@
+id,name,parent_id:id,other_ids/id,state,rated,other_id/.id,line_ids/other_id:id
+csv_right,Right,parent_1,"other_1,later_1",a,,,
+csv_label,Label,,,Bee,a,,
+csv_any_case,Any case,,,A,A,,
+csv_label_case,Label in any case,,,bEE,Anything a run may name,,
+csv_empty,Empty,,,,,,
+csv_wrong,Wrong,other_1,"other_1,parent_1",zz,,,
+replaced_by_rows,Replaced,,,,,3,other_1

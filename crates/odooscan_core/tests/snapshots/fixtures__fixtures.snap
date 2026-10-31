@@ -292,6 +292,7 @@ custom/model_attributes/models/plot.py:20:21: OD115 'partner_id.nickname': @api.
 custom/model_attributes/models/zone.py:9:5: OD217 garden.zone sets _parent_store but has no parent_path field, which Odoo logs as an error; add parent_path = fields.Char(index=True)
 custom/model_attributes/models/zone.py:22:5: OD217 garden.area sets _parent_store but its parent_path field has no index, which Odoo logs as an error; add index=True to it
 custom/model_attributes/models/zone.py:31:5: OD217 garden.terrace sets _parent_store but its parent_path field has no index, which Odoo logs as an error; add index=True to it
+custom/modern19/data/tiers.xml:3:28: OD322 res.partner.tier has no value 'bronze'
 custom/modern19/models/partner.py:6:5: OD110 _sql_constraints is ignored; declare models.Constraint, models.Index or models.UniqueIndex attributes instead
 custom/modern19/models/partner.py:9:9: OD109 self._cr is deprecated; use self.env.cr
 custom/modern19/models/partner.py:9:9: OD122 UPDATE on res_partner bypasses the ORM, so records this transaction already read keep stale values; call flush_model() before the query and invalidate_model() after it (flush() and invalidate_cache() before 16.0)
@@ -376,6 +377,54 @@ custom/record_update/security/updates.xml:6:36: OD210 'no_replaced_by_update': r
 custom/record_update/security/updates.xml:9:36: OD210 'no_scoped': rule.ticket has no field 'no_scoped'
 custom/record_update/security/updates.xml:13:36: OD210 'no_note': rule.note has no field 'no_note'
 custom/record_update/security/updates.xml:17:36: OD210 'no_moved': rule.note has no field 'no_moved'
+custom/record_values/data/references.xml:3:38: OD321 'record_values.other_1' is a record of rv.other, but rv.thing.parent_id takes rv.parent
+custom/record_values/data/references.xml:4:38: OD321 'record_values.parent_1' is a record of rv.parent, but rv.thing.other_id takes rv.other
+custom/record_values/data/references.xml:5:39: OD321 'record_values.other_1' is a record of rv.other, but rv.thing.action_id takes rv.action
+custom/record_values/data/references.xml:9:39: OD321 'record_values.parent_1' is a record of rv.parent, but rv.thing.other_ids takes rv.other
+custom/record_values/data/references.xml:9:39: OD321 'record_values.parent_1' is a record of rv.parent, but rv.thing.other_ids takes rv.other
+custom/record_values/data/references.xml:9:39: OD321 'record_values.parent_1' is a record of rv.parent, but rv.thing.other_ids takes rv.other
+custom/record_values/data/references.xml:9:39: OD321 'record_values.parent_1' is a record of rv.parent, but rv.thing.other_ids takes rv.other
+custom/record_values/data/references.xml:10:38: OD321 'record_values.parent_1' is a record of rv.parent, but rv.thing.line_ids takes rv.line
+custom/record_values/data/references.xml:10:38: OD321 'record_values.other_1' is a record of rv.other, but rv.thing.line_ids takes rv.line
+custom/record_values/data/references.xml:14:39: OD321 'record_values.parent_1' is a record of rv.parent, but rv.thing.other_ids takes rv.other
+custom/record_values/data/references.xml:14:39: OD321 'record_values.parent_1' is a record of rv.parent, but rv.thing.other_ids takes rv.other
+custom/record_values/data/references.xml:14:39: OD321 'record_values.parent_1' is a record of rv.parent, but rv.thing.other_ids takes rv.other
+custom/record_values/data/references.xml:15:38: OD321 'record_values.other_1' is a record of rv.other, but rv.thing.line_ids takes rv.line
+custom/record_values/data/references.xml:15:38: OD321 'record_values.other_1' is a record of rv.other, but rv.thing.line_ids takes rv.line
+custom/record_values/data/references.xml:19:38: OD321 'record_values.child_1' is a record of rv.child, but rv.thing.parent_id takes rv.parent
+custom/record_values/data/references.xml:24:36: OD321 'record_values.parent_1' is a record of rv.parent, but rv.child.twin_id takes rv.other
+custom/record_values/data/references.xml:25:37: OD321 'record_values.other_1' is a record of rv.other, but rv.child.shade_id takes rv.parent
+custom/record_values/data/references.xml:29:39: OD321 'record_values.menu_1' is a record of ir.ui.menu, but rv.thing.other_ids takes rv.other
+custom/record_values/data/references.xml:29:39: OD321 'record_values.template_1' is a record of ir.ui.view, but rv.thing.other_ids takes rv.other
+custom/record_values/data/references.xml:29:39: OD321 'record_values.model_rv_other' is a record of ir.model, but rv.thing.other_ids takes rv.other
+custom/record_values/data/references.xml:29:39: OD321 'record_values.child_1_rv_parent' is a record of rv.parent, but rv.thing.other_ids takes rv.other
+custom/record_values/data/references.xml:30:9: OD308 'later_1' is defined in data/replaced.xml, which loads after this reference
+custom/record_values/data/references.xml:30:38: OD321 'record_values.later_1' is a record of rv.other, but rv.thing.parent_id takes rv.parent
+custom/record_values/data/references.xml:31:38: OD321 'base.main_company' is a record of res.company, but rv.thing.action_id takes rv.action
+custom/record_values/data/references.xml:32:38: OD321 'base.module_record_values' is a record of ir.module.module, but rv.thing.line_ids takes rv.line
+custom/record_values/data/references.xml:38:45: OD321 'record_values.parent_1' is a record of rv.parent, but rv.line.other_id takes rv.other
+custom/record_values/data/references.xml:39:37: OD322 rv.line.state has no value 'zz'
+custom/record_values/data/references.xml:45:37: OD321 'record_values.parent_1' is a record of rv.parent, but rv.thing.other_id takes rv.other
+custom/record_values/data/references.xml:46:29: OD322 rv.thing.state has no value 'zz'
+custom/record_values/data/references.xml:50:37: OD321 'record_values.parent_1' is a record of rv.parent, but rv.thing.other_id takes rv.other
+custom/record_values/data/rv.thing.csv:1:1: OD309 rv.thing has no field 'line_ids/other_id'
+custom/record_values/data/rv.thing.csv:7:1: OD321 'record_values.other_1' is a record of rv.other, but rv.thing.parent_id takes rv.parent
+custom/record_values/data/rv.thing.csv:7:1: OD321 'record_values.parent_1' is a record of rv.parent, but rv.thing.other_ids takes rv.other
+custom/record_values/data/rv.thing.csv:7:1: OD322 rv.thing.state has no value 'zz'
+custom/record_values/data/selections.xml:3:29: OD322 rv.thing.state has no value 'c'
+custom/record_values/data/selections.xml:8:35: OD322 rv.thing.state has no value 'Ay'
+custom/record_values/data/selections.xml:12:30: OD322 rv.thing.state has no value ' a '
+custom/record_values/data/selections.xml:17:28: OD322 rv.child.kind has no value 'z'
+custom/record_values/data/selections.xml:21:29: OD322 rv.thing.added has no value 'q'
+custom/record_values/data/silent.xml:22:9: OD302 'ghost_addon.line_1' belongs to module ghost_addon, which is neither in depends nor on the addons path
+custom/record_values/data/targets.xml:10:5: OD201 no indexed module defines model 'rv.nowhere'
+custom/record_values/data/unloaded.xml:1:1: OD502 'data/unloaded.xml' is not in the manifest's data or demo, so Odoo never loads it
+custom/record_values/models/things.py:110:31: OD202 model 'rv.side.only' comes from module record_values_side; add it to depends
+custom/record_values_ext/data/extended.xml:12:35: OD321 'record_values.other_1' is a record of rv.other, but rv.thing.new_id takes rv.parent
+custom/record_values_ext/data/extended.xml:13:39: OD321 'record_values.other_1' is a record of rv.other, but rv.thing.retyped_id takes rv.parent
+custom/record_values_ext/data/extended.xml:14:33: OD322 rv.thing.new_state has no value 'zz'
+custom/record_values_ext/models/things.py:8:17: OD205 'fallen_id' is a Many2one field elsewhere and is redefined here as Char
+custom/record_values_partial/__manifest__.py:4:34: OD503 module 'ghost_enterprise' is not on the addons path
 custom/registry_fields/models/links.py:7:71: OD213 'owner_id' is required, so Odoo refuses ondelete='set null'; use 'restrict' or 'cascade'
 custom/registry_fields/models/links.py:11:19: OD214 'follower_ids' and 'watcher_ids' are Many2many fields of registry.invoice to the same comodel without relation, so Odoo gives both the same table; set relation on one
 custom/registry_fields/models/links.py:14:33: OD215 relation table 'registry_invoice_partners_notified_about_each_payment_reminder_rel' of 'notified_ids' is 66 characters long, and PostgreSQL allows 63; name a shorter one with relation=

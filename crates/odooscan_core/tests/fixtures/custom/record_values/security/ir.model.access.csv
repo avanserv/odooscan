@@ -1,0 +1,11 @@
+id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
+access_rv_other,rv.other,model_rv_other,base.group_user,1,0,0,0
+access_rv_shared,rv.shared,model_rv_shared,base.group_user,1,0,0,0
+access_rv_computed,rv.computed,model_rv_computed,base.group_user,1,0,0,0
+access_rv_blended,rv.blended,model_rv_blended,base.group_user,1,0,0,0
+access_rv_action,rv.action,model_rv_action,base.group_user,1,0,0,0
+access_rv_action_window,rv.action.window,model_rv_action_window,base.group_user,1,0,0,0
+access_rv_parent,rv.parent,model_rv_parent,base.group_user,1,0,0,0
+access_rv_child,rv.child,model_rv_child,base.group_user,1,0,0,0
+access_rv_line,rv.line,model_rv_line,base.group_user,1,0,0,0
+access_rv_thing,rv.thing,model_rv_thing,base.group_user,1,0,0,0

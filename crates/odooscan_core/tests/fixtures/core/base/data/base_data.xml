@@ -1,0 +1,3 @@
+<odoo>
+    <record id="main_company" model="res.company"><field name="name">Main company</field></record>
+</odoo>
