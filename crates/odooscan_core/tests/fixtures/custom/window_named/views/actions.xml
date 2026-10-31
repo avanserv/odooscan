@@ -105,4 +105,47 @@
             </record>
         </field>
     </record>
+
+    <record id="action_row_eval" model="ir.actions.act_window">
+        <field name="name">action_row_eval</field>
+        <field name="res_model">window.plain</field>
+        <field name="view_mode">gantt,map</field>
+    </record>
+
+    <record id="row_eval" model="ir.actions.act_window.view">
+        <field name="view_mode">gantt</field>
+        <field name="view_id" ref="window_actions.view_shown_gantt"/>
+        <field name="act_window_id" eval="ref('action_row_eval')"/>
+    </record>
+
+    <record id="action_view_id_search" model="ir.actions.act_window">
+        <field name="name">action_view_id_search</field>
+        <field name="res_model">window.plain</field>
+        <field name="view_mode">gantt</field>
+        <field name="view_id" search="[('name', '=', 'window.shown.gantt')]"/>
+    </record>
+
+    <record id="action_nested_row_search" model="ir.actions.act_window">
+        <field name="name">action_nested_row_search</field>
+        <field name="res_model">window.plain</field>
+        <field name="view_mode">gantt,map</field>
+        <field name="view_ids">
+            <record id="row_nested_search" model="ir.actions.act_window.view">
+                <field name="view_mode">gantt</field>
+                <field name="view_id" search="[('name', '=', 'window.shown.gantt')]"/>
+            </record>
+        </field>
+    </record>
+
+    <record id="action_row_search" model="ir.actions.act_window">
+        <field name="name">action_row_search</field>
+        <field name="res_model">window.plain</field>
+        <field name="view_mode">gantt,map</field>
+    </record>
+
+    <record id="row_search" model="ir.actions.act_window.view">
+        <field name="view_mode">gantt</field>
+        <field name="view_id" search="[('name', '=', 'window.shown.gantt')]"/>
+        <field name="act_window_id" ref="action_row_search"/>
+    </record>
 </odoo>

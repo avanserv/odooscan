@@ -882,6 +882,9 @@ custom/window_named/views/actions.xml:58:33: OD318 window.plain has no gantt vie
 custom/window_named/views/actions.xml:69:33: OD318 window.plain has no map view, and nothing generates one
 custom/window_named/views/actions.xml:89:33: OD318 window.plain has no map view, and nothing generates one
 custom/window_named/views/actions.xml:101:33: OD318 window.plain has no gantt view, and nothing generates one
+custom/window_named/views/actions.xml:112:33: OD318 window.plain has no map view, and nothing generates one
+custom/window_named/views/actions.xml:131:33: OD318 window.plain has no map view, and nothing generates one
+custom/window_named/views/actions.xml:143:33: OD318 window.plain has no map view, and nothing generates one
 custom/window_update/views/a_last.xml:2:5: OD323 XML id 'action_ranked' is already defined in views/z_first.xml, and this definition writes the fields it names over it; remove the copy when the two say the same thing, or rename one when both are meant to exist
 custom/window_update/views/a_last.xml:6:5: OD323 XML id 'action_model_replaced' is already defined in views/z_first.xml, and this definition writes the fields it names over it; remove the copy when the two say the same thing, or rename one when both are meant to exist
 custom/window_update/views/a_last.xml:10:5: OD323 XML id 'action_mode_replaced' is already defined in views/updates.xml, and this definition writes the fields it names over it; remove the copy when the two say the same thing, or rename one when both are meant to exist
