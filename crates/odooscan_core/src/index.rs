@@ -166,9 +166,10 @@ pub(crate) const BASE_MODEL_METHODS: &[&str] = &[
     "_where_calc",
 ];
 
-/// The other methods of `BaseModel` in 12.0 to 20.0, read off each series, dunders aside: a button
-/// or a `<function>` may name any. Apart from `BASE_MODEL_METHODS`, which OD116 reads as the members
-/// a field must not replace in every series.
+/// The other methods of `BaseModel` in 12.0 to 20.0, by `def` or class-level alias, read off each
+/// series: a button or a `<function>` may name any. Dunders stay out, as does any other `__` name,
+/// which is mangled, so `getattr` never finds it. Apart from `BASE_MODEL_METHODS`, which OD116 reads
+/// as the members a field must not replace in every series.
 const BASE_MODEL_EXTRA: &[&str] = &[
     "_add_fake_fields",
     "_add_field",
@@ -227,6 +228,7 @@ const BASE_MODEL_EXTRA: &[&str] = &[
     "_get_external_ids",
     "_get_redirect_suggested_company",
     "_get_stored_translations",
+    "_get_xml_ids",
     "_has_cycle",
     "_has_onchange",
     "_in_cache_without",
@@ -329,6 +331,7 @@ const BASE_MODEL_EXTRA: &[&str] = &[
     "recompute",
     "refresh",
     "resolve_2many_commands",
+    "resolve_o2m_commands_to_record_dicts",
     "try_lock_for_update",
     "union",
     "user_has_groups",
