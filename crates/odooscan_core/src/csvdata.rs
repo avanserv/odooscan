@@ -144,8 +144,10 @@ fn database_id<'r>(row: &'r csv::StringRecord, columns: &[(&str, bool)], field: 
     row.get(columns.iter().position(|(c, _)| database_field(c) == Some(field))?)
 }
 
-/// Odoo's import takes these as true, `0`, `false`, `no` and an empty cell as false, and refuses
-/// any other word (`ir_fields.py`, `_str_to_boolean`), which aborts the file.
+/// Odoo's import takes these as true, `0`, `false`, `no` and an empty cell as false, with their
+/// translations in the installed languages (`ir_fields.py`, `_str_to_boolean`). From saas~14.3
+/// it refuses any other word, which aborts the file. Below, that word loads as true with an
+/// `ImportWarning`, which `truthy` reads as false.
 fn truthy(cell: &str) -> bool {
     ["1", "true", "yes"].iter().any(|t| cell.trim().eq_ignore_ascii_case(t))
 }
