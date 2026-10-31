@@ -163,3 +163,41 @@ class WindowTracked(models.Model):
 
     name = fields.Char()
     activity_ids = fields.Many2many("res.partner")
+
+
+class WindowPostponed(models.Model):
+    _name = "window.postponed"
+    _description = "Window postponed"
+
+    name = fields.Char()
+
+
+class WindowGuessed(models.Model):
+    _name = "window.guessed"
+    _description = "Window guessed"
+
+    name = fields.Char()
+
+
+class WindowUnplanned(models.Model):
+    _name = "window.unplanned"
+    _description = "Window unplanned"
+
+    name = fields.Char()
+
+
+class WindowLender(models.Model):
+    _name = "window.lender"
+    _description = "Window lender"
+    _date_name = "planned_on"
+
+    planned_on = fields.Date()
+    date_delay = fields.Float()
+
+
+class WindowLent(models.Model):
+    _name = "window.lent"
+    _description = "Window lent"
+    _inherits = {"window.lender": "lender_id"}
+
+    lender_id = fields.Many2one("window.lender", required=True, ondelete="cascade")
