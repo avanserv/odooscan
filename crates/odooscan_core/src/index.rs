@@ -2,8 +2,9 @@ use globset::{GlobBuilder, GlobSetBuilder};
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::facts::{
-    ActionFact, Annotation, ArchElement, ArchSubview, ClassFact, DataFacts, FieldFact, FlowSummary, Heritage, JsClass,
-    ModelKind, OptionValue, PyFacts, Receiver, RecordWrite, ReportFact, RuleFact, ServerFact, ViewFact, WrittenValue,
+    ActionFact, Annotation, ArchElement, ArchEmptied, ArchSubview, ArchValued, ClassFact, DataFacts, FieldFact,
+    FlowSummary, Heritage, JsClass, ModelKind, OptionValue, PyFacts, Receiver, RecordWrite, ReportFact, RuleFact,
+    ServerFact, ViewFact, WrittenValue,
 };
 use crate::manifest::AutoInstall;
 use crate::project::{Module, SourceFile, code_loaded};
@@ -619,6 +620,11 @@ pub struct ViewTree<'m> {
     pub hidden: FxHashMap<ArchElement, &'m str>,
     /// The subviews every view of the tree opens, in scope or not, each relative to its own view.
     pub subviews: Vec<&'m ArchSubview>,
+    /// The elements the own tags of the tree's views add, in scope or not, repeated when several
+    /// add one.
+    pub valued: Vec<ArchValued>,
+    /// What the specs of the tree may leave empty, in scope or not.
+    pub emptied: Vec<ArchEmptied>,
 }
 
 /// `%(id)d` names an action by XML id, which Odoo resolves against the module of the view.
@@ -2210,6 +2216,14 @@ impl<'m> Inheritance<'m> {
                 let module = modules[node.module].name.as_str();
                 let elements = node.fact.elements.iter().map(|e| located(e, module));
                 tree.subviews.extend(node.fact.subviews.iter());
+                tree.valued.extend(node.fact.valued.iter().map(|v| ArchValued {
+                    elements: v.elements.iter().map(|e| located(e, module)).collect(),
+                    attrs: v.attrs.clone(),
+                }));
+                tree.emptied.extend(node.fact.emptied.iter().map(|e| ArchEmptied {
+                    attr: e.attr,
+                    target: e.target.as_ref().map(|t| located(t, module)),
+                }));
                 if sees(node.module) {
                     tree.visible.extend(elements);
                 } else {

@@ -425,6 +425,7 @@ custom/modifiers17/views/jobs.xml:346:55: OD317 invisible reads field 'phase', w
 custom/modifiers17/views/jobs.xml:349:63: OD317 invisible reads field 'phase', which the view does not show
 custom/modifiers17/views/jobs.xml:364:47: OD317 invisible reads field 'phase', which the view does not show
 custom/modifiers17/views/jobs.xml:368:47: OD317 invisible reads field 'phase', which the view does not show
+custom/modifiers17/views/jobs.xml:390:49: OD316 readonly names 'true': modifier.job has no field 'true'
 custom/modifiers17/views/unlisted.xml:1:1: OD502 'views/unlisted.xml' is not in the manifest's data or demo, so Odoo never loads it
 custom/modifiers173/views/tasks.xml:8:47: OD316 invisible names 'active_id': modifier.task has no field 'active_id'
 custom/orm_overrides/models/caches.py:7:21: OD120 'lang' in an ormcache key is not a parameter of _greeting_for(), so every call raises NameError; key on a parameter or on self
@@ -849,6 +850,13 @@ custom/view_modifiers/views/extensions.xml:151:49: OD312 modifier.line has no me
 custom/view_modifiers/views/extensions.xml:156:59: OD316 invisible names 'nowhere': modifier.line.tag has no field 'nowhere'
 custom/view_modifiers/views/extensions.xml:227:25: OD304 'line_ids.nowhere': modifier.line has no field 'nowhere'
 custom/view_modifiers/views/extensions.xml:314:9: OD301 module view_modifiers defines no XML id 'view_modifiers.ticket_missing'
+custom/view_modifiers/views/extensions.xml:344:45: OD315 invalid readonly expression: Expected an expression
+custom/view_modifiers/views/extensions.xml:345:49: OD316 readonly names 'true': modifier.ticket has no field 'true'
+custom/view_modifiers/views/extensions.xml:347:21: OD316 invisible names 'true': modifier.ticket has no field 'true'
+custom/view_modifiers/views/extensions.xml:359:49: OD316 readonly names 'false': modifier.ticket has no field 'false'
+custom/view_modifiers/views/extensions.xml:396:49: OD316 readonly names 'true': modifier.ticket has no field 'true'
+custom/view_modifiers/views/extensions.xml:399:49: OD316 readonly names 'true': modifier.ticket has no field 'true'
+custom/view_modifiers/views/extensions.xml:493:49: OD316 readonly names 'true': modifier.ticket has no field 'true'
 custom/view_modifiers/views/tickets.xml:7:47: OD315 invalid invisible expression: Expected an expression
 custom/view_modifiers/views/tickets.xml:8:46: OD316 readonly names 'stat': modifier.ticket has no field 'stat'
 custom/view_modifiers/views/tickets.xml:9:46: OD315 invalid required expression: Odoo does not read this construct, such as a comprehension, a set or a lambda
