@@ -107,4 +107,14 @@
         <t t-call="qweb_calls.not_a_name"/>
         <t t-call="not_a_name"/>
     </template>
+
+    <template id="root_call_dropped" inherit_id="home" t-call="web.layot_dropped">
+        <xpath expr="//t" position="inside">
+            <t t-call="web.layot_inside_extension"/>
+        </xpath>
+    </template>
+
+    <template id="primary_root_call_dropped" inherit_id="home" primary="True" t-call="web.layot_primary"/>
+
+    <template id="empty_parent" inherit_id=""/>
 </odoo>
