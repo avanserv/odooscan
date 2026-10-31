@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="ring_a" model="ir.ui.view">
+        <field name="inherit_id" ref="views_ring.ring_b"/>
+        <field name="arch" type="xml"><xpath expr="/*" position="inside"/></field>
+    </record>
+    <record id="ring_b" model="ir.ui.view">
+        <field name="inherit_id" ref="views_ring.ring_a"/>
+        <field name="arch" type="xml"><xpath expr="/*" position="inside"/></field>
+    </record>
+</odoo>
