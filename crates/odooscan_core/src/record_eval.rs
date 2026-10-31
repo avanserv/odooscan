@@ -160,7 +160,7 @@ mod tests {
         match written(&Spanned { value, pos }) {
             WrittenValue::Ids(ids) => Some(ids.into_iter().map(|i| i.value).collect()),
             WrittenValue::Text(text) => Some(vec![format!("text:{}", text.value)]),
-            WrittenValue::Opaque => None,
+            WrittenValue::Model(_) | WrittenValue::Opaque => None,
         }
     }
 

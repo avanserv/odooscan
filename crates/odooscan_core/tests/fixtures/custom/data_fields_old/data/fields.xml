@@ -1,0 +1,7 @@
+<odoo>
+    <record id="field_x_res_model" model="ir.model.fields">
+        <field name="name">x_res_model</field>
+        <field name="model_id" ref="model_old_follower"/>
+        <field name="ttype">char</field>
+    </record>
+</odoo>

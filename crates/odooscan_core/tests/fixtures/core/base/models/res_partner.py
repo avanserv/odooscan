@@ -142,7 +142,20 @@ class IrModel(models.Model):
     _name = "ir.model"
 
     model = fields.Char()
+    field_id = fields.One2many("ir.model.fields", "model_id")
     rule_ids = fields.One2many("ir.rule", "model_id")
+
+
+class IrModelFields(models.Model):
+    _name = "ir.model.fields"
+
+    name = fields.Char()
+    model = fields.Char()
+    model_id = fields.Many2one("ir.model")
+    ttype = fields.Char()
+    relation = fields.Char()
+    relation_field = fields.Char()
+    state = fields.Char()
 
 
 class IrActionsServer(models.Model):

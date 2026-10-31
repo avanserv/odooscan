@@ -1,0 +1,43 @@
+<odoo>
+    <record id="rule_x_text" model="ir.rule">
+        <field name="name">by a field of a record</field>
+        <field name="model_id" ref="model_data_ticket"/>
+        <field name="domain_force">[('x_text', '=', 'a')]</field>
+    </record>
+    <record id="access_x_text" model="ir.access">
+        <field name="name">by a field of a record</field>
+        <field name="model_id" ref="model_data_ticket"/>
+        <field name="group_id" ref="base.group_user"/>
+        <field name="domain">[('x_text', '=', 'a')]</field>
+    </record>
+    <record id="rule_x_unloaded" model="ir.rule">
+        <field name="name">by a field of no loaded record</field>
+        <field name="model_id" ref="base.model_res_partner"/>
+        <field name="domain_force">[('x_unloaded', '=', True)]</field>
+    </record>
+    <record id="rule_x_demo" model="ir.rule">
+        <field name="name">by a field of a demo record</field>
+        <field name="model_id" ref="base.model_res_partner"/>
+        <field name="domain_force">[('x_demo', '=', True)]</field>
+    </record>
+    <record id="rule_later_relation" model="ir.rule">
+        <field name="name">through a relation a later record gives</field>
+        <field name="model_id" ref="model_data_ticket"/>
+        <field name="domain_force">[('x_partner_id.no_partner_field', '=', 'a')]</field>
+    </record>
+    <record id="rule_through_text" model="ir.rule">
+        <field name="name">through a field of no comodel</field>
+        <field name="model_id" ref="model_data_ticket"/>
+        <field name="domain_force">[('x_text.name', '=', 'a')]</field>
+    </record>
+    <record id="rule_through_unread" model="ir.rule">
+        <field name="name">through a type only a run tells</field>
+        <field name="model_id" ref="model_data_ticket"/>
+        <field name="domain_force">[('x_unread_type.name', '=', 'a')]</field>
+    </record>
+    <record id="rule_through_python" model="ir.rule">
+        <field name="name">through a field Python defines first</field>
+        <field name="model_id" ref="model_data_ticket"/>
+        <field name="domain_force">[('x_python.name', '=', 'a')]</field>
+    </record>
+</odoo>

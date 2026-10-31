@@ -792,7 +792,7 @@ fn field_of<'a, 'i>(node: Node<'a, 'i>, name: &str) -> Option<Node<'a, 'i>> {
 fn written(field: Node, lines: &Lines) -> WrittenValue {
     let set = |attr: &str| attr_value(field, attr, lines).filter(|a| !a.value.is_empty());
     if set("search").is_some() {
-        return WrittenValue::Opaque;
+        return searched_ir_model(field, lines).map_or(WrittenValue::Opaque, WrittenValue::Model);
     }
     if let Some(id) = set("ref") {
         return WrittenValue::Ids(vec![id]);
@@ -920,6 +920,17 @@ fn names_group(model_id: Node) -> bool {
     })
 }
 
+/// The model a `search` of `field` finds, when it searches `ir.model` by name and writes the id of
+/// the record it finds.
+fn searched_ir_model(field: Node, lines: &Lines) -> Option<Spanned<String>> {
+    if field.has_attribute("use") || field.attribute("model").is_some_and(|m| m != "ir.model") {
+        return None;
+    }
+    let search = attr_value(field, "search", lines)?;
+    let value = domain::searched_model(&search.value)?;
+    Some(Spanned { value, pos: search.pos })
+}
+
 /// What a `model_id` field writes, as Odoo reads it: a `search`, a `ref`, then an `eval`. With
 /// `true` the value is a model name, else an XML id.
 fn rule_model(field: Node, lines: &Lines) -> (ActionValue, bool) {
@@ -927,11 +938,8 @@ fn rule_model(field: Node, lines: &Lines) -> (ActionValue, bool) {
     if field.has_attribute("use") || field.attribute("model").is_some_and(|m| m != "ir.model") {
         return opaque;
     }
-    if let Some(search) = attr_value(field, "search", lines).filter(|s| !s.value.is_empty()) {
-        return domain::searched_model(&search.value).map_or(opaque, |value| {
-            let pos = search.pos;
-            (ActionValue::Literal(Spanned { value, pos }), true)
-        });
+    if attr_value(field, "search", lines).is_some_and(|s| !s.value.is_empty()) {
+        return searched_ir_model(field, lines).map_or(opaque, |model| (ActionValue::Literal(model), true));
     }
     if let Some(id) = attr_value(field, "ref", lines).filter(|r| !r.value.is_empty()) {
         return (ActionValue::Literal(id), false);
@@ -1259,12 +1267,29 @@ mod tests {
         match &facts.writes[0].fields[0].value {
             WrittenValue::Ids(ids) => ids.iter().map(|i| i.value.as_str()).collect::<Vec<_>>().join(","),
             WrittenValue::Text(text) => format!("text:{}", text.value),
+            WrittenValue::Model(model) => format!("model:{}", model.value),
             WrittenValue::Opaque => "opaque".to_owned(),
         }
     }
 
     fn first_write(data: &str) -> RecordWrite {
         analyze(&format!("<odoo>{data}</odoo>")).writes.swap_remove(0)
+    }
+
+    #[test]
+    fn a_search_of_ir_model_by_name_writes_that_model() {
+        let search = r#"search="[('model', '=', 'res.partner')]""#;
+        assert_eq!(write_of(&format!("<field name=\"f\" {search}/>")), "model:res.partner");
+        assert_eq!(
+            write_of(&format!("<field name=\"f\" model=\"ir.model\" {search}/>")),
+            "model:res.partner"
+        );
+        assert_eq!(
+            write_of(&format!("<field name=\"f\" model=\"res.users\" {search}/>")),
+            "opaque"
+        );
+        assert_eq!(write_of(&format!("<field name=\"f\" use=\"id\" {search}/>")), "opaque");
+        assert_eq!(write_of(r#"<field name="f" search="[('name', '=', 'x')]"/>"#), "opaque");
     }
 
     #[test]
