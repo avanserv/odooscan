@@ -535,12 +535,17 @@ pub struct RecordWrite {
 #[derive(Debug)]
 pub struct AccessRow {
     pub id: Option<String>,
-    /// An `ir.model` XML id, or a model name when `by_name` (the `ir.access` CSV format).
+    /// An `ir.model` XML id, or a model name when `by_name`: a plain `model_id` CSV column, which
+    /// `ir.access` takes as the name and the name search of `ir.model` matches on every series.
     pub model: String,
     pub by_name: bool,
     pub pos: Pos,
     /// A CSV row with no group gives every user a permission other than read.
     pub global_write: bool,
+    /// The public or portal group a CSV row gives a permission other than read.
+    pub public_write: Option<String>,
+    /// A row of `ir.model.access`, not of `ir.access`.
+    pub model_access: bool,
 }
 
 /// A `<function>` of a data file, which Odoo calls when it loads the file.

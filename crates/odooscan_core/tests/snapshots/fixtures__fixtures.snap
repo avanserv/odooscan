@@ -2,6 +2,8 @@
 source: crates/odooscan_core/tests/fixtures.rs
 expression: "lines.join(\"\\n\")"
 ---
+custom/access_rows/security/ir.model.access-hook.csv:2:1: OD402 no group limits this row, so every user, public and portal included, gets write, create or unlink on model_access_desk; name a group
+custom/access_rows/security/ir.model.access-hook.csv:3:1: OD402 base.group_portal gets write, create or unlink on model_access_desk; public and portal access should be read-only and go through controllers
 custom/access_rows/security/ir.model.access-inactive.csv:6:1: OD402 no group limits this row, so every user, public and portal included, gets write, create or unlink on model_access_desk; name a group
 custom/access_rows/security/ir.model.access-inactive.csv:7:1: OD402 base.group_portal gets write, create or unlink on model_access_desk; public and portal access should be read-only and go through controllers
 custom/access_rows/security/ir.model.access-nogroup.csv:2:1: OD402 no group limits this row, so every user, public and portal included, gets write, create or unlink on model_access_desk; name a group
@@ -728,8 +730,10 @@ custom/saas124/views/actions.xml:11:33: OD318 saas124.tracked has no primary act
 custom/saas125/models/res_partner.py:7:68: OD222 'home_country_id' has check_company=True, but res.country has no company_id field to check; remove check_company
 custom/saas131/models/badge.py:8:53: OD218 'model_id' has delegate=True, so it must be required with ondelete 'cascade' or 'restrict'; give it ondelete="cascade"
 custom/saas131/security/ir.model.access.csv:3:1: OD402 no group limits this row, so every user, public and portal included, gets write, create or unlink on model_saas_register; name a group
+custom/saas131/security/ir.model.access.csv:5:1: OD402 base.group_portal gets write, create or unlink on model_saas_register; public and portal access should be read-only and go through controllers
 custom/saas132/models/wizards.py:4:7: OD401 model 'saas.later.pass.wizard' has no ir.model.access rule, so only the superuser can use it
 custom/saas132/security/ir.model.access.csv:2:1: OD402 no group limits this row, so every user, public and portal included, gets write, create or unlink on model_saas_later_note_wizard; name a group
+custom/saas132/security/ir.model.access.csv:3:1: OD402 base.group_portal gets write, create or unlink on model_saas_later_note_wizard; public and portal access should be read-only and go through controllers
 custom/saas133/models/res_partner.py:10:9: OD223 _compute_monogram() can leave 'monogram' unassigned on a record, so reading it raises ValueError; assign it on every path through the loop, False when there is no value
 custom/saas143/models/badge.py:9:60: OD218 'currency_id' has delegate=True, so it must be required with ondelete 'cascade' or 'restrict'; give it required=True
 custom/saas143/models/badge.py:14:54: OD218 'view_id' has delegate=True, so it must be required with ondelete 'cascade' or 'restrict'; give it required=True
@@ -751,6 +755,8 @@ custom/saas183/models/ticket.py:9:73: OD213 'partner_id' is required, so Odoo re
 custom/saas183/models/ticket.py:10:88: OD213 'country_id' is required, so Odoo refuses ondelete='set null'; use 'restrict' or 'cascade'
 custom/saas193/models/ledger.py:4:7: OD401 model 'saas.before.ledger' has no ir.model.access rule, so only the superuser can use it
 custom/saas193/models/memo.py:8:34: OD219 'stage' sets tracking, but saas.memo does not inherit mail.thread, so Odoo ignores it and logs a warning; inherit mail.thread or remove tracking
+custom/saas193/security/ir.model.access.csv:2:1: OD402 no group limits this row, so every user, public and portal included, gets write, create or unlink on model_saas_before_desk; name a group
+custom/saas193/security/ir.model.access.csv:3:1: OD402 base.group_portal gets write, create or unlink on model_saas_before_desk; public and portal access should be read-only and go through controllers
 custom/saas194/models/ledger.py:4:7: OD401 model 'saas.after.ledger' has no ir.model.access rule, so only the superuser can use it
 custom/server_code/data/calls.xml:5:34: OD320 server.job has no method '_run_misspelled'
 custom/server_code/data/calls.xml:12:36: OD320 server.job has no method 'action_opne'
