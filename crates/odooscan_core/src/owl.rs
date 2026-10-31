@@ -244,11 +244,13 @@ mod tests {
         <xpath expr="//t" position="inside"><t t-call="x.C"/></xpath>
         <xpath expr="//t" position="attributes"><attribute name="t-call">x.D</attribute></xpath>
     </t>
+    <t t-name="x.Child" t-inherit="x.A" t-call="x.Kept"/>
 </templates>"#,
         );
         let calls = |t: &OwlTemplate| t.arch.calls.iter().map(|c| c.value.clone()).collect::<Vec<_>>();
         assert_eq!(calls(&facts.templates[0]), ["x.Root", "x.B"]);
         assert_eq!(calls(&facts.templates[1]), ["x.C", "x.D"]);
+        assert_eq!(calls(&facts.templates[2]), ["x.Kept"]);
     }
 
     #[test]

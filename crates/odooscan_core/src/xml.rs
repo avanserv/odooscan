@@ -229,7 +229,8 @@ impl Walker<'_> {
                 "record" => self.record(child),
                 "template" => {
                     self.def(child, Some("ir.ui.view"));
-                    if let Some(parent) = child.attribute("inherit_id") {
+                    // Odoo reads an empty `inherit_id` as no parent.
+                    if let Some(parent) = child.attribute("inherit_id").filter(|p| !p.is_empty()) {
                         self.reference(parent, child);
                     }
                     self.template(child);
@@ -274,9 +275,12 @@ impl Walker<'_> {
             ..ViewFact::default()
         };
         self.facts.view_keys.extend(node.attribute("key").map(str::to_owned));
-        // The loader turns the `<template>` itself into the arch's root, which keeps its `t-call`.
-        view.calls
-            .extend(node.descendants().filter_map(|n| t_call(n, self.lines)));
+        // The loader turns the `<template>` into the arch's root, which keeps its `t-call`, unless
+        // it extends a parent: a truthy `inherit_id` renames the root to `<data>`, which only
+        // lends its children to the inheritance, `primary` included.
+        let extends = node.attribute("inherit_id").is_some_and(|p| !p.is_empty());
+        let body = node.descendants().skip(usize::from(extends));
+        view.calls.extend(body.filter_map(|n| t_call(n, self.lines)));
         for n in node.descendants().skip(1).filter(Node::is_element) {
             let pos = self.pos(n);
             arch_element(n, pos, &mut view);
@@ -1394,6 +1398,19 @@ mod tests {
     fn a_template_root_calls_too() {
         let facts = analyze(r#"<odoo><template id="x" t-call="a.b"/></odoo>"#);
         assert_eq!(facts.views[0].calls[0].value, "a.b");
+    }
+
+    #[test]
+    fn an_extending_template_root_calls_nothing() {
+        let calls = |attrs: &str| {
+            let facts = analyze(&format!(
+                r#"<odoo><template id="x" {attrs} t-call="a.root"><t t-call="a.inner"/></template></odoo>"#
+            ));
+            facts.views[0].calls.iter().map(|c| c.value.clone()).collect::<Vec<_>>()
+        };
+        assert_eq!(calls(r#"inherit_id="y""#), ["a.inner"]);
+        assert_eq!(calls(r#"inherit_id="y" primary="True""#), ["a.inner"]);
+        assert_eq!(calls(r#"inherit_id="""#), ["a.root", "a.inner"]);
     }
 
     fn buttons(arch: &str) -> Vec<(Vec<String>, String, u32, u32)> {

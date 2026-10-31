@@ -354,6 +354,7 @@ custom/project_fork/data/projects.xml:7:9: OD309 field 'allow_timesheets' of pro
 custom/project_fork/models/task.py:4:7: OD209 module project already defines model 'project.task', and this class replaces it; extend it with _inherit = 'project.task'
 custom/qweb_calls/static/src/panel.xml:6:20: OD605 no indexed bundle defines template 'qweb_calls.Absent'
 custom/qweb_calls/static/src/panel.xml:7:20: OD605 template 'qweb_outside.Panel' comes from module qweb_outside, which is not in depends
+custom/qweb_calls/static/src/panel.xml:14:76: OD605 no indexed bundle defines template 'qweb_calls.AbsentChildRoot'
 custom/qweb_calls/views/pages.xml:4:24: OD311 no indexed module defines template 'web.layot'
 custom/qweb_calls/views/pages.xml:5:24: OD311 no indexed module defines template 'local'
 custom/qweb_calls/views/pages.xml:6:24: OD311 template 'qweb_outside.page' comes from module qweb_outside, which is not in depends
@@ -365,6 +366,7 @@ custom/qweb_calls/views/pages.xml:105:20: OD311 no indexed module defines templa
 custom/qweb_calls/views/pages.xml:106:20: OD311 no indexed module defines template 'by_name'
 custom/qweb_calls/views/pages.xml:107:20: OD311 no indexed module defines template 'qweb_calls.not_a_name'
 custom/qweb_calls/views/pages.xml:108:20: OD311 no indexed module defines template 'not_a_name'
+custom/qweb_calls/views/pages.xml:113:24: OD311 no indexed module defines template 'web.layot_inside_extension'
 custom/qweb_partial/__manifest__.py:4:24: OD503 module 'ghost_enterprise' is not on the addons path
 custom/qweb_partial/views/partial.xml:5:20: OD311 no indexed module defines template 'web.layot'
 custom/qweb_partial/views/partial.xml:23:35: OD311 no indexed module defines template 'web.layot_report'
