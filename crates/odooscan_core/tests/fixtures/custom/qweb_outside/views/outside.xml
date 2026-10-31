@@ -2,4 +2,8 @@
     <template id="page">
         <div/>
     </template>
+
+    <template id="keyed" key="qweb_outside.alias">
+        <div/>
+    </template>
 </odoo>
