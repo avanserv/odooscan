@@ -281,6 +281,7 @@ custom/legacy13/models/res_partner.py:12:68: OD222 'home_country_id' has check_c
 custom/legacy13/security/rules.xml:4:36: OD210 'no_legacy_field': legacy.ledger has no field 'no_legacy_field'
 custom/legacy13/views/views.xml:16:45: OD312 legacy.stamp has no method 'action_stmap'
 custom/legacy13/views/views.xml:17:45: OD313 method '_stamp' of legacy.stamp is private, so Odoo refuses to call it from a button
+custom/legacy13/views/views.xml:25:33: OD318 legacy.stamp has no field activity_ids, which the activity view searches; inherit mail.activity.mixin
 custom/legacy14/data/calls.xml:3:41: OD314 res.partner has no method '_get_xml_id'
 custom/legacy14/data/calls.xml:14:34: OD320 res.partner has no method '_get_xml_id'
 custom/legacy14/models/badge.py:7:33: OD218 _inherits delegates to 'partner_id', which must be required with ondelete 'cascade' or 'restrict'; give it ondelete="cascade"
@@ -698,6 +699,8 @@ custom/report_tag161/data/reports.xml:22:46: OD319 Odoo refuses this expression 
 custom/report_tag161/data/reports.xml:28:35: OD311 no indexed module defines template 'report_tag161.absent_record'
 custom/report_tag161/data/reports.xml:29:46: OD319 Odoo refuses this expression when it prints the report: Unexpected token at the end of an expression
 custom/report_tag161/data/updates.xml:2:5: OD323 XML id 'tag_replaces' is already defined in data/reports.xml, and this definition writes the fields it names over it; remove the copy when the two say the same thing, or rename one when both are meant to exist
+custom/saas124/views/actions.xml:5:33: OD318 saas124.plain has no field activity_ids, which the activity view searches; inherit mail.activity.mixin
+custom/saas124/views/actions.xml:11:33: OD318 saas124.tracked has no primary activity view, and nothing generates one
 custom/saas125/models/res_partner.py:7:68: OD222 'home_country_id' has check_company=True, but res.country has no company_id field to check; remove check_company
 custom/saas131/models/badge.py:8:53: OD218 'model_id' has delegate=True, so it must be required with ondelete 'cascade' or 'restrict'; give it ondelete="cascade"
 custom/saas131/security/ir.model.access.csv:3:1: OD402 no group limits this row, so every user, public and portal included, gets write, create or unlink on model_saas_register; name a group
@@ -878,7 +881,15 @@ custom/window_actions/views/actions.xml:110:33: OD318 window.cloned has no prima
 custom/window_actions/views/actions.xml:128:33: OD318 window.sought has no primary map view, and nothing generates one
 custom/window_actions/views/actions.xml:158:33: OD318 window.ghosted has no primary gantt view, and nothing generates one
 custom/window_actions/views/actions.xml:164:33: OD318 window.nameless has no primary map view, and nothing generates one
+custom/window_actions/views/actions.xml:170:33: OD318 window.plain has no field activity_ids, which the activity view searches; inherit mail.activity.mixin
+custom/window_actions/views/actions.xml:182:33: OD318 window.tracked has no primary activity view, and nothing generates one
 custom/window_actions/views/unlisted.xml:1:1: OD502 'views/unlisted.xml' is not in the manifest's data or demo, so Odoo never loads it
+custom/window_activity/models/delegated.py:67:33: OD201 no indexed module defines model 'window.absent'
+custom/window_activity/models/delegated.py:73:17: OD201 no indexed module defines model 'window.absent'
+custom/window_activity/views/actions.xml:11:33: OD318 window.noted has no field activity_ids, which the activity view searches; inherit mail.activity.mixin
+custom/window_activity/views/actions.xml:17:33: OD318 window.boxed has no field activity_ids, which the activity view searches; inherit mail.activity.mixin
+custom/window_activity/views/actions.xml:23:33: OD318 window.boxed has no field activity_ids, which the activity view searches; inherit mail.activity.mixin
+custom/window_activity/views/actions.xml:36:33: OD318 window.delegated.bare has no field activity_ids, which the activity view searches; inherit mail.activity.mixin
 custom/window_clone/__manifest__.py:4:35: OD503 module 'ghost_enterprise' is not on the addons path
 custom/window_hidden/views/actions.xml:4:33: OD202 model 'window.plain' comes from module window_actions; add it to depends
 custom/window_named/views/actions.xml:19:33: OD318 window.plain has no primary gantt view, and nothing generates one

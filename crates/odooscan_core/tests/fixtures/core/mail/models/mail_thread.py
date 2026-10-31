@@ -11,6 +11,19 @@ class MailThread(models.AbstractModel):
         return accepted or super()._valid_field_parameter(field, option)
 
 
+class MailActivityMixin(models.AbstractModel):
+    _name = "mail.activity.mixin"
+
+    activity_ids = fields.One2many("res.partner", "parent_id")
+
+
+class Base(models.AbstractModel):
+    _inherit = "base"
+
+    def _get_default_activity_view(self):
+        return None
+
+
 class ResPartner(models.Model):
     _inherit = "res.partner"
 

@@ -19,3 +19,5 @@ access_window_rooted,window.rooted,model_window_rooted,base.group_user,1,1,1,1
 access_window_stepped,window.stepped,model_window_stepped,base.group_user,1,1,1,1
 access_window_ghosted,window.ghosted,model_window_ghosted,base.group_user,1,1,1,1
 access_window_nameless,window.nameless,model_window_nameless,base.group_user,1,1,1,1
+access_window_scheduled,window.scheduled,model_window_scheduled,base.group_user,1,1,1,1
+access_window_tracked,window.tracked,model_window_tracked,base.group_user,1,1,1,1

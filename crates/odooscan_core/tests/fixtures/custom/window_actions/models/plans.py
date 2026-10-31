@@ -148,3 +148,18 @@ class WindowNameless(models.Model):
     _description = "Window nameless"
 
     name = fields.Char()
+
+
+class WindowScheduled(models.Model):
+    _name = "window.scheduled"
+    _description = "Window scheduled"
+
+    name = fields.Char()
+
+
+class WindowTracked(models.Model):
+    _name = "window.tracked"
+    _description = "Window tracked"
+
+    name = fields.Char()
+    activity_ids = fields.Many2many("res.partner")
