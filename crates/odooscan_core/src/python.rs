@@ -359,6 +359,22 @@ struct SuperCalls<'a> {
 }
 
 impl<'a> Visitor<'a> for SuperCalls<'a> {
+    /// A class body's `super()` calls are not the method's. Its decorators and bases run in the
+    /// method.
+    fn visit_stmt(&mut self, stmt: &'a Stmt) {
+        match stmt {
+            Stmt::ClassDef(class) => {
+                for decorator in &class.decorator_list {
+                    self.visit_decorator(decorator);
+                }
+                if let Some(arguments) = &class.arguments {
+                    self.visit_arguments(arguments);
+                }
+            }
+            _ => visitor::walk_stmt(self, stmt),
+        }
+    }
+
     fn visit_expr(&mut self, expr: &'a Expr) {
         if let Expr::Call(call) = expr
             && let Expr::Attribute(a) = &*call.func
@@ -2071,6 +2087,24 @@ mod tests {
         assert_eq!(class.private_methods, ["_hidden"]);
         assert!(class.super_calls.is_empty());
         assert!(!facts.diags.iter().any(|d| d.code == "OD106"));
+    }
+
+    #[test]
+    fn a_nested_class_keeps_its_super_calls() {
+        let facts = analyze(
+            "class X(models.Model):\n    _name = 'x'\n    def write(self, vals):\n        \
+             @super().decorator()\n        class Inner(super().base()):\n            \
+             def write(self, vals):\n                return super().write(vals)\n        \
+             class Own(models.Model):\n            _inherit = 'x'\n            \
+             def _own(self):\n                return super()._own()\n        \
+             def helper():\n            return super().in_function()\n",
+            None,
+        );
+        let called = |class: &ClassFact| class.super_calls.iter().map(|c| c.value.clone()).collect::<Vec<_>>();
+        assert_eq!(called(&facts.classes[0]), ["decorator", "base", "in_function"]);
+        assert_eq!(called(&facts.classes[1]), ["_own"]);
+        assert!(facts.classes[0].extended.is_empty());
+        assert!(!facts.diags.iter().any(|d| d.code == "OD119"));
     }
 
     #[test]
