@@ -103,4 +103,34 @@
         <field name="name">action_no_model</field>
         <field name="view_mode">gantt</field>
     </record>
+
+    <record id="action_cloned_view" model="ir.actions.act_window">
+        <field name="name">action_cloned_view</field>
+        <field name="res_model">window.cloned</field>
+        <field name="view_mode">gantt</field>
+    </record>
+
+    <record id="action_adopted_view" model="ir.actions.act_window">
+        <field name="name">action_adopted_view</field>
+        <field name="res_model">window.adopted</field>
+        <field name="view_mode">gantt,map</field>
+    </record>
+
+    <record id="action_relayed_view" model="ir.actions.act_window">
+        <field name="name">action_relayed_view</field>
+        <field name="res_model">window.relayed</field>
+        <field name="view_mode">gantt,map</field>
+    </record>
+
+    <record id="action_sought_view" model="ir.actions.act_window">
+        <field name="name">action_sought_view</field>
+        <field name="res_model">window.sought</field>
+        <field name="view_mode">gantt,map</field>
+    </record>
+
+    <record id="action_sifted_view" model="ir.actions.act_window">
+        <field name="name">action_sifted_view</field>
+        <field name="res_model">window.sifted</field>
+        <field name="view_mode">gantt,map</field>
+    </record>
 </odoo>
