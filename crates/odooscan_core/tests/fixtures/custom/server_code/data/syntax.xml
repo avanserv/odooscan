@@ -125,4 +125,10 @@ a = 1 &lt; 2
             </record>
         </field>
     </record>
+
+    <record id="syntax_async_name" model="ir.cron">
+        <field name="name">syntax_async_name</field>
+        <field name="model_id" ref="model_server_job"/>
+        <field name="code">async = 1</field>
+    </record>
 </odoo>

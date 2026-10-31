@@ -252,7 +252,7 @@ fn parse_module_files(module: &mut Module, default_series: Option<Series>) {
                     suppressions,
                 }),
                 Some("xml") => Err(SourceFile {
-                    facts: xml::analyze(&text),
+                    facts: xml::analyze(&text, series),
                     path,
                     rel,
                     rank,

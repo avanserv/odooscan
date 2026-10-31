@@ -11,6 +11,7 @@ use crate::facts::{
 };
 use crate::modifier;
 use crate::record_eval;
+use crate::series::Series;
 use crate::server_code;
 
 /// A `False` second argument makes `ref()` return nothing for an unknown id instead of failing.
@@ -87,7 +88,7 @@ const KEYED_MODELS: &[&str] = &[
     "website.controller.page",
 ];
 
-pub fn analyze(text: &str) -> DataFacts {
+pub fn analyze(text: &str, series: Option<Series>) -> DataFacts {
     let lines = Lines::new(text);
     let mut facts = DataFacts::default();
     if text.trim().is_empty() {
@@ -118,6 +119,7 @@ pub fn analyze(text: &str) -> DataFacts {
         facts.is_data = true;
         Walker {
             lines: &lines,
+            series,
             facts: &mut facts,
             around: vec![],
         }
@@ -135,6 +137,7 @@ fn defined_id<'a>(node: Node<'a, '_>) -> Option<&'a str> {
 
 struct Walker<'a> {
     lines: &'a Lines,
+    series: Option<Series>,
     facts: &'a mut DataFacts,
     /// The subviews around the arch position being walked, as `ArchModifier::subviews` says.
     around: Vec<ArchSubview>,
@@ -471,7 +474,7 @@ impl Walker<'_> {
         };
         let raw = text.text().unwrap_or_default();
         let lead = raw.len() - raw.trim_start().len();
-        let read = server_code::read(raw.trim());
+        let read = server_code::read(raw.trim(), self.series);
         let spanned = |(value, at): (String, usize)| Spanned {
             value,
             pos: code_pos(text, raw, lead + at, self.lines),
@@ -497,7 +500,7 @@ impl Walker<'_> {
     fn refused_file_name(&self, field: Node) -> Option<Spanned<String>> {
         let text = direct_text(field)?;
         let raw = text.text().filter(|raw| !raw.is_empty())?;
-        refused_expression(raw, |at| code_pos(text, raw, at, self.lines))
+        refused_expression(raw, self.series, |at| code_pos(text, raw, at, self.lines))
     }
 
     /// Odoo tests each attribute of the tag for truth, so an empty one writes nothing.
@@ -505,7 +508,7 @@ impl Walker<'_> {
         let set = |name: &str| attr_value(node, name, self.lines).filter(|a| !a.value.is_empty());
         let file_name = set("print_report_name");
         let refused = file_name.as_ref().and_then(|name| {
-            refused_expression(&name.value, |at| Pos {
+            refused_expression(&name.value, self.series, |at| Pos {
                 col: name.pos.col + at as u32,
                 ..name.pos
             })
@@ -965,9 +968,9 @@ fn qweb_report(report_type: &str) -> bool {
 }
 
 /// Why Odoo refuses `text` as an expression, which it strips first, where `at` places a byte of it.
-fn refused_expression(text: &str, at: impl Fn(usize) -> Pos) -> Option<Spanned<String>> {
+fn refused_expression(text: &str, series: Option<Series>, at: impl Fn(usize) -> Pos) -> Option<Spanned<String>> {
     let lead = text.len() - text.trim_start().len();
-    let (value, offset) = server_code::expression_error(text.trim())?;
+    let (value, offset) = server_code::expression_error(text.trim(), series)?;
     Some(Spanned {
         value,
         pos: at(lead + offset),
@@ -1447,6 +1450,10 @@ fn xpath_steps(expr: &str, path: &mut Vec<String>, around: &mut Vec<ArchSubview>
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn analyze(text: &str) -> DataFacts {
+        super::analyze(text, None)
+    }
 
     /// What the first field a record with the given field elements keeps ends on.
     fn write_of(fields: &str) -> String {

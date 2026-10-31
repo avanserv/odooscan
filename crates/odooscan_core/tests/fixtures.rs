@@ -236,7 +236,7 @@ fn a_refused_file_name_needs_no_base() {
         let matching = report.diagnostics.iter().filter(|d| d.code == code);
         matching.filter(|d| d.path.ends_with(name)).count()
     };
-    assert_eq!(in_file("OD319", "data/file_names.xml"), 10);
+    assert_eq!(in_file("OD319", "data/file_names.xml"), 11);
     assert_eq!(in_file("OD319", "demo/reports.xml"), 1);
     assert_eq!(in_file("OD311", "data/templates_named.xml"), 0);
 }

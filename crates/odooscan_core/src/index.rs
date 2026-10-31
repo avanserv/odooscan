@@ -2408,8 +2408,9 @@ mod tests {
                 <record model="ir.model.fields"><field name="name">x_other_idless</field></record>
                 <record id="a.f" model="ir.model.fields"><field name="name">x_new</field></record>
             </odoo>"#,
+            None,
         );
-        let elsewhere = xml::analyze(r#"<odoo><record id="f" model="ir.model.fields"/></odoo>"#);
+        let elsewhere = xml::analyze(r#"<odoo><record id="f" model="ir.model.fields"/></odoo>"#, None);
         let placed = |module, name, fact| {
             let demo = false;
             (name, PlacedWrite { module, demo, fact })
