@@ -1,0 +1,96 @@
+<odoo>
+    <record id="name_missing" model="ir.actions.report">
+        <field name="name">name_missing</field>
+        <field name="model">res.partner</field>
+        <field name="report_name">report_actions.absent</field>
+    </record>
+
+    <record id="name_undotted" model="ir.actions.report">
+        <field name="name">name_undotted</field>
+        <field name="model">res.partner</field>
+        <field name="report_name">absent_undotted</field>
+    </record>
+
+    <record id="name_trimmed" model="ir.actions.report">
+        <field name="name">name_trimmed</field>
+        <field name="model">res.partner</field>
+        <field name="report_name">  report_actions.absent_trimmed
+        </field>
+    </record>
+
+    <record id="name_on_next_line" model="ir.actions.report">
+        <field name="name">name_on_next_line</field>
+        <field name="model">res.partner</field>
+        <field name="report_name">
+            report_actions.absent_next_line
+        </field>
+    </record>
+
+    <record id="name_cdata" model="ir.actions.report">
+        <field name="name">name_cdata</field>
+        <field name="model">res.partner</field>
+        <field name="report_name"><![CDATA[
+            report_actions.absent_cdata
+        ]]></field>
+    </record>
+
+    <record id="name_hidden" model="ir.actions.report">
+        <field name="name">name_hidden</field>
+        <field name="model">res.partner</field>
+        <field name="report_name">qweb_outside.page</field>
+    </record>
+
+    <record id="name_empty_attributes" model="ir.actions.report">
+        <field name="name">name_empty_attributes</field>
+        <field name="model">res.partner</field>
+        <field name="report_name" eval="" ref="" search="" file="">report_actions.absent_empty_attributes</field>
+    </record>
+
+    <record id="type_pdf" model="ir.actions.report">
+        <field name="name">type_pdf</field>
+        <field name="model">res.partner</field>
+        <field name="report_name">report_actions.absent_pdf</field>
+        <field name="report_type">qweb-pdf</field>
+    </record>
+
+    <record id="type_html" model="ir.actions.report">
+        <field name="name">type_html</field>
+        <field name="model">res.partner</field>
+        <field name="report_name">report_actions.absent_html</field>
+        <field name="report_type">qweb-html</field>
+    </record>
+
+    <record id="type_text" model="ir.actions.report">
+        <field name="name">type_text</field>
+        <field name="model">res.partner</field>
+        <field name="report_name">report_actions.absent_text</field>
+        <field name="report_type">qweb-text</field>
+    </record>
+
+    <record id="type_last" model="ir.actions.report">
+        <field name="name">type_last</field>
+        <field name="model">res.partner</field>
+        <field name="report_name">report_actions.absent_type_last</field>
+        <field name="report_type">controller</field>
+        <field name="report_type">qweb-pdf</field>
+    </record>
+
+    <record id="name_last" model="ir.actions.report">
+        <field name="name">name_last</field>
+        <field name="model">res.partner</field>
+        <field name="report_name">report_actions.sheet</field>
+        <field name="report_name">report_actions.absent_name_last</field>
+    </record>
+
+    <record id="python_model" model="ir.actions.report">
+        <field name="name">python_model</field>
+        <field name="model">res.partner</field>
+        <field name="report_name">report_actions.sheet_values</field>
+    </record>
+
+    <record model="ir.actions.report">
+        <field name="name">no id</field>
+        <field name="model">res.partner</field>
+        <field name="report_name">report_actions.absent_no_id</field>
+    </record>
+</odoo>

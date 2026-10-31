@@ -3,7 +3,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::facts::{
     ActionFact, Annotation, ArchElement, ClassFact, DataFacts, FieldFact, FlowSummary, Heritage, JsClass, ModelKind,
-    OptionValue, PyFacts, Receiver, RuleFact, ServerFact, ViewFact,
+    OptionValue, PyFacts, Receiver, ReportFact, RuleFact, ServerFact, ViewFact,
 };
 use crate::manifest::AutoInstall;
 use crate::project::{Module, SourceFile};
@@ -841,6 +841,7 @@ pub struct Index<'m> {
     pub action_writes: Writes<'m, ActionFact>,
     pub rule_writes: Writes<'m, RuleFact>,
     pub server_writes: Writes<'m, ServerFact>,
+    pub report_writes: Writes<'m, ReportFact>,
     view_keys: ViewKeys<'m>,
     pub templates: Inheritance<'m>,
     pub models_with_access: FxHashSet<String>,
@@ -890,6 +891,7 @@ impl<'m> Index<'m> {
             action_writes: record_writes(modules, &by_name, |f| &f.actions, |a| a.id.as_ref()),
             rule_writes: record_writes(modules, &by_name, |f| &f.rules, |r| r.id.as_ref()),
             server_writes: record_writes(modules, &by_name, |f| &f.servers, |s| s.id.as_ref()),
+            report_writes: record_writes(modules, &by_name, |f| &f.reports, |r| r.id.as_ref()),
             view_keys,
             templates: Inheritance::new(template_nodes(modules, &templates_loaded)),
             models_with_access,

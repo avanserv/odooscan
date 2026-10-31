@@ -6,8 +6,8 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::facts::{
     ActionFact, ActionValue, Annotation, ArchElement, ArchModifier, ClassFact, DefinitionSource, DomainFact, FieldFact,
-    FunctionCall, JsFacts, JsName, ModelKind, OptionValue, OrmCall, Pos, RawDiag, RecordFact, RuleFact, ServerFact,
-    Spanned, SqlColumn, SqlView, ViewFact, XmlRef,
+    FunctionCall, JsFacts, JsName, ModelKind, OptionValue, OrmCall, Pos, RawDiag, RecordFact, ReportFact, RuleFact,
+    ServerFact, Spanned, SqlColumn, SqlView, ViewFact, XmlRef,
 };
 use crate::index::{
     BASE_MODEL_METHODS, Export, FieldDef, FieldInfo, Index, JsSpec, RELATIONAL_TYPES, Scope, Status, ViewTree, full_id,
@@ -71,6 +71,14 @@ const RULE_DOMAIN_VALIDATED: Series = Series { major: 15, minor: 0 };
 /// lets every user through, `odoo/addons/base/models/ir_model.py:1500`).
 const TRANSIENT_ACCESS: Series = Series { major: 13, minor: 2 };
 
+/// The first series with `ir.actions.report`. Through 10.0 the model is `ir.actions.report.xml`, and
+/// a `render_html` replaces the template (`addons/report/models/report.py:138` on 10.0).
+const REPORT_MODEL: Series = Series { major: 11, minor: 0 };
+
+/// The series whose loader reads `<report>` as a write to `ir.actions.report`. 18446f23f11e removes
+/// the tag in saas~16.1 (`_tag_report`, `odoo/tools/convert.py:275` on 16.0).
+const REPORT_TAG: &str = ">=11.0,<saas~16.1";
+
 /// A name a modifier reads, with the view it sits in and the field it must find on `owner`.
 struct ModifierName<'a> {
     model: &'a str,
@@ -104,6 +112,7 @@ pub fn check_module<'m>(index: &Index<'m>, mi: usize, series: Option<Series>) ->
     import_patches(index, module, &mut out);
     global_writes(index, mi, series, &mut out);
     refused_server_code(module, &mut out);
+    refused_file_names(index, mi, series, &mut out);
     for (_, file) in es_modules(index, mi, series) {
         if let Some(e) = &file.facts.syntax_error {
             out.push(&file.path, "OD000", e.pos, e.value.clone());
@@ -185,6 +194,56 @@ fn refused_server_code<'m>(module: &'m Module, out: &mut Out<'m>) {
         for refused in file.facts.servers.iter().filter_map(|s| s.refused.as_ref()) {
             let message = format!("Odoo refuses this code when it loads the record: {}", refused.value);
             out.push(&file.path, "OD319", refused.pos, message);
+        }
+    }
+}
+
+/// Whether a module of `series` reads a write to a report: a series it cannot tell gets no `<report>`.
+fn reads_report(series: Option<Series>, tag: bool) -> bool {
+    match series {
+        Some(series) if tag => series::matches(REPORT_TAG, series),
+        Some(series) => series >= REPORT_MODEL,
+        None => !tag,
+    }
+}
+
+/// The writes that give the record of `report` its fields once `scope` has loaded, in load order.
+/// What a module depending on this one replaces later does not mend a database without that module.
+fn report_state<'m>(
+    index: &Index<'m>,
+    mi: usize,
+    scope: &Scope,
+    series: Option<Series>,
+    report: &'m ReportFact,
+) -> Vec<&'m ReportFact> {
+    let own = [(mi, report)];
+    let id = report.id.as_ref().map(|id| full_id(&index.modules[mi].name, id));
+    let writes = id.and_then(|id| index.report_writes.get(&id));
+    let writes = writes.map_or(&own[..], Vec::as_slice);
+    let read = writes
+        .iter()
+        .filter(|(m, r)| scope.sees(*m) && reads_report(series, r.tag));
+    read.map(|(_, r)| *r).collect()
+}
+
+/// OD319 on the `print_report_name` of what the manifest loads. Print compiles only the value the
+/// record holds, unlike the constraint on `code`, and compiling needs no index, so this runs without
+/// base.
+fn refused_file_names<'m>(index: &Index<'m>, mi: usize, series: Option<Series>, out: &mut Out<'m>) {
+    let module = &index.modules[mi];
+    let scope = index.scope(mi);
+    for file in module.data.iter().filter(|f| f.rank.is_some()) {
+        for report in &file.facts.reports {
+            let Some(refused) = &report.refused else { continue };
+            let state = report_state(index, mi, &scope, series, report);
+            let holder = state.iter().rev().find(|r| r.writes_file_name);
+            if holder.is_some_and(|r| std::ptr::eq(*r, report)) {
+                let message = format!(
+                    "Odoo refuses this expression when it prints the report: {}",
+                    refused.value
+                );
+                out.push(&file.path, "OD319", refused.pos, message);
+            }
         }
     }
 }
@@ -1059,6 +1118,9 @@ impl<'m> Ctx<'_, 'm> {
             for server in &file.facts.servers {
                 self.server_code(out, path, server);
             }
+            for report in &file.facts.reports {
+                self.report_template(out, path, report);
+            }
             self.domains(out, path, &file.facts.action_domains);
             self.actions(out, path, &file.facts.actions);
         }
@@ -1154,6 +1216,21 @@ impl<'m> Ctx<'_, 'm> {
             if let Some(message) = self.method_gap(model, &call.value) {
                 out.push(path, "OD320", call.pos, message);
             }
+        }
+    }
+
+    /// OD311 on the template `report` names, if the record still holds it and renders one. A Python
+    /// report model only gives the values: the type alone tells whether a template is needed.
+    fn report_template(&self, out: &mut Out<'m>, path: &'m Path, report: &'m ReportFact) {
+        let ActionValue::Literal(template) = &report.template else {
+            return;
+        };
+        let mi = self.index.by_name[self.module.name.as_str()];
+        let state = report_state(self.index, mi, self.scope, self.series, report);
+        let holder = state.iter().rev().find(|r| !matches!(r.template, ActionValue::Unset));
+        let qweb = state.iter().rev().find_map(|r| r.qweb).unwrap_or(true);
+        if qweb && holder.is_some_and(|r| std::ptr::eq(*r, report)) {
+            self.qweb_call(out, path, template);
         }
     }
 
@@ -1635,21 +1712,26 @@ impl<'m> Ctx<'_, 'm> {
             return;
         }
         for call in &view.calls {
-            // A module outside the index, such as an Enterprise one, may define the target.
-            let owner = call.value.split_once('.').map(|(m, _)| m);
-            if self.partial && !owner.is_some_and(|m| self.index.by_name.contains_key(m)) {
-                continue;
-            }
-            let message = match self.index.qweb_status(&call.value, self.scope) {
-                Status::Visible => continue,
-                Status::Hidden(m) => format!(
-                    "template '{}' comes from module {m}, which is not in depends",
-                    call.value
-                ),
-                Status::Missing => format!("no indexed module defines template '{}'", call.value),
-            };
-            out.push(path, "OD311", call.pos, message);
+            self.qweb_call(out, path, call);
         }
+    }
+
+    /// OD311 on `name`, the target of a server render, unless a view in scope answers to it.
+    fn qweb_call(&self, out: &mut Out<'m>, path: &'m Path, name: &Spanned<String>) {
+        // A module outside the index, such as an Enterprise one, may define the target.
+        let owner = name.value.split_once('.').map(|(m, _)| m);
+        if self.partial && !owner.is_some_and(|m| self.index.by_name.contains_key(m)) {
+            return;
+        }
+        let message = match self.index.qweb_status(&name.value, self.scope) {
+            Status::Visible => return,
+            Status::Hidden(m) => format!(
+                "template '{}' comes from module {m}, which is not in depends",
+                name.value
+            ),
+            Status::Missing => format!("no indexed module defines template '{}'", name.value),
+        };
+        out.push(path, "OD311", name.pos, message);
     }
 
     /// The dotted path of an arch field without its locators, or None when one of them is not on

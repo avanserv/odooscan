@@ -1,0 +1,25 @@
+<odoo>
+    <record id="report_actions.ext_replaces_name" model="ir.actions.report">
+        <field name="report_name">report_actions.sheet</field>
+    </record>
+
+    <record id="report_actions.ext_replaces_file" model="ir.actions.report">
+        <field name="print_report_name">object.name</field>
+    </record>
+
+    <record id="report_actions.ext_changes_type" model="ir.actions.report">
+        <field name="report_type">qweb-pdf</field>
+    </record>
+
+    <record id="report_actions.quiet_controller" model="ir.actions.report">
+        <field name="report_name">report_actions.absent_keeps_controller</field>
+    </record>
+
+    <record id="report_actions.name_replaced" model="ir.actions.report">
+        <field name="report_name">report_actions.absent_in_extension</field>
+    </record>
+
+    <record id="report_actions.file_replaced" model="ir.actions.report">
+        <field name="print_report_name">name = 14</field>
+    </record>
+</odoo>

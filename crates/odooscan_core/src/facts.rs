@@ -517,6 +517,22 @@ pub struct ServerFact {
     pub calls: Vec<Spanned<String>>,
 }
 
+/// One write to an `ir.actions.report`, by a `<record>` or a `<report>` tag.
+#[derive(Debug)]
+pub struct ReportFact {
+    pub id: Option<String>,
+    /// It comes from a `<report>` tag, which only some series read.
+    pub tag: bool,
+    /// What it gives `report_name`, where a name no scan can look up is opaque.
+    pub template: ActionValue,
+    /// Whether what it gives `report_type` renders QWeb, where a value only a run tells counts as false.
+    pub qweb: Option<bool>,
+    /// It gives `print_report_name` a value, which replaces the last one even when it is empty.
+    pub writes_file_name: bool,
+    /// Why Odoo refuses what it gives `print_report_name`.
+    pub refused: Option<Spanned<String>>,
+}
+
 /// Facts from an XML or CSV data file.
 #[derive(Debug, Default)]
 pub struct DataFacts {
@@ -534,6 +550,7 @@ pub struct DataFacts {
     pub access: Vec<AccessRow>,
     pub rules: Vec<RuleFact>,
     pub servers: Vec<ServerFact>,
+    pub reports: Vec<ReportFact>,
     pub functions: Vec<FunctionCall>,
     pub diags: Vec<RawDiag>,
 }

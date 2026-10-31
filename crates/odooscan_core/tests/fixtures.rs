@@ -157,6 +157,43 @@ fn refused_server_code_needs_no_base() {
 }
 
 #[test]
+fn a_refused_file_name_needs_no_base() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+    let report = scan(&ScanOptions {
+        paths: vec![root.join("custom/report_actions")],
+        addons_paths: vec![],
+        default_series: None,
+    });
+    let in_file = |code: &str, name: &str| {
+        let matching = report.diagnostics.iter().filter(|d| d.code == code);
+        matching.filter(|d| d.path.ends_with(name)).count()
+    };
+    assert_eq!(in_file("OD319", "data/file_names.xml"), 10);
+    assert_eq!(in_file("OD319", "demo/reports.xml"), 1);
+    assert_eq!(in_file("OD311", "data/templates_named.xml"), 0);
+}
+
+#[test]
+fn a_report_tag_waits_for_a_known_series() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+    let findings = |default_series| {
+        let report = scan(&ScanOptions {
+            paths: vec![root.join("custom")],
+            addons_paths: vec![root.join("core")],
+            default_series,
+        });
+        let found = report.diagnostics.iter();
+        found
+            .filter(|d| d.path.ends_with("unversioned_logs/data/reports.xml"))
+            .map(|d| d.line)
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(findings(None), [7, 8]);
+    assert_eq!(findings(Series::parse("14.0")), [2, 2, 7, 8]);
+    assert_eq!(findings(Series::parse("10.0")), [0; 0]);
+}
+
+#[test]
 fn import_patches_without_base_take_the_advice_of_the_path() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
     let report = scan(&ScanOptions {

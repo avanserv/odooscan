@@ -1,0 +1,9 @@
+<odoo>
+    <template id="sheet">
+        <div/>
+    </template>
+
+    <template id="keyed" key="report_actions.alias">
+        <div/>
+    </template>
+</odoo>

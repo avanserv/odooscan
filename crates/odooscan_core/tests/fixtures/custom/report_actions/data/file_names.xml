@@ -1,0 +1,78 @@
+<odoo>
+    <record id="file_statement" model="ir.actions.report">
+        <field name="name">file_statement</field>
+        <field name="model">res.partner</field>
+        <field name="report_name">report_actions.sheet</field>
+        <field name="print_report_name">name = object.name</field>
+    </record>
+
+    <record id="file_unclosed" model="ir.actions.report">
+        <field name="name">file_unclosed</field>
+        <field name="model">res.partner</field>
+        <field name="report_name">report_actions.sheet</field>
+        <field name="print_report_name">'Sheet %s' % (object.name</field>
+    </record>
+
+    <record id="file_second_line" model="ir.actions.report">
+        <field name="name">file_second_line</field>
+        <field name="model">res.partner</field>
+        <field name="report_name">report_actions.sheet</field>
+        <field name="print_report_name">
+            'Sheet - '
+            + object.name
+        </field>
+    </record>
+
+    <record id="file_blank" model="ir.actions.report">
+        <field name="name">file_blank</field>
+        <field name="model">res.partner</field>
+        <field name="report_name">report_actions.sheet</field>
+        <field name="print_report_name">   </field>
+    </record>
+
+    <record id="file_yield" model="ir.actions.report">
+        <field name="name">file_yield</field>
+        <field name="model">res.partner</field>
+        <field name="report_name">report_actions.sheet</field>
+        <field name="print_report_name">(yield)</field>
+    </record>
+
+    <record id="file_cdata" model="ir.actions.report">
+        <field name="name">file_cdata</field>
+        <field name="model">res.partner</field>
+        <field name="report_name">report_actions.sheet</field>
+        <field name="print_report_name"><![CDATA[
+            object.name <
+        ]]></field>
+    </record>
+
+    <record id="file_entity" model="ir.actions.report">
+        <field name="name">file_entity</field>
+        <field name="model">res.partner</field>
+        <field name="report_name">report_actions.sheet</field>
+        <field name="print_report_name">object.id &lt; 1 else</field>
+    </record>
+
+    <record id="file_other_type" model="ir.actions.report">
+        <field name="name">file_other_type</field>
+        <field name="model">res.partner</field>
+        <field name="report_name">report_actions.sheet</field>
+        <field name="report_type">controller</field>
+        <field name="print_report_name">name = object.name</field>
+    </record>
+
+    <record id="file_empty_attributes" model="ir.actions.report">
+        <field name="name">file_empty_attributes</field>
+        <field name="model">res.partner</field>
+        <field name="report_name">report_actions.sheet</field>
+        <field name="print_report_name" eval="" ref="" search="" file="">name = 1</field>
+    </record>
+
+    <record id="file_last" model="ir.actions.report">
+        <field name="name">file_last</field>
+        <field name="model">res.partner</field>
+        <field name="report_name">report_actions.sheet</field>
+        <field name="print_report_name">object.name</field>
+        <field name="print_report_name">name = 2</field>
+    </record>
+</odoo>
