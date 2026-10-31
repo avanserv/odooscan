@@ -668,7 +668,7 @@ custom/report_actions/data/file_names.xml:22:1: OD319 Odoo refuses this expressi
 custom/report_actions/data/file_names.xml:30:44: OD319 Odoo refuses this expression when it prints the report: Expected an expression
 custom/report_actions/data/file_names.xml:37:42: OD319 Odoo refuses this expression when it prints the report: 'yield' outside function
 custom/report_actions/data/file_names.xml:45:26: OD319 Odoo refuses this expression when it prints the report: Expected an expression
-custom/report_actions/data/file_names.xml:53:55: OD319 Odoo refuses this expression when it prints the report: Unexpected token at the end of an expression
+custom/report_actions/data/file_names.xml:53:58: OD319 Odoo refuses this expression when it prints the report: Unexpected token at the end of an expression
 custom/report_actions/data/file_names.xml:61:46: OD319 Odoo refuses this expression when it prints the report: Unexpected token at the end of an expression
 custom/report_actions/data/file_names.xml:68:79: OD319 Odoo refuses this expression when it prints the report: Unexpected token at the end of an expression
 custom/report_actions/data/file_names.xml:76:46: OD319 Odoo refuses this expression when it prints the report: Unexpected token at the end of an expression
@@ -784,7 +784,7 @@ custom/server_code/data/calls.xml:48:7: OD320 server.job has no method '_nope_af
 custom/server_code/data/calls.xml:55:67: OD320 server.job has no method '_nope_empty_attributes'
 custom/server_code/data/calls.xml:63:11: OD320 server.job has no method '_nope_cdata'
 custom/server_code/data/calls.xml:70:43: OD320 server.job has no method '_nope_cdata_first'
-custom/server_code/data/calls.xml:78:7: OD320 server.job has no method '_nope_text_cdata'
+custom/server_code/data/calls.xml:78:16: OD320 server.job has no method '_nope_text_cdata'
 custom/server_code/data/calls.xml:87:7: OD320 server.job has no method '_nope_entity'
 custom/server_code/data/calls.xml:96:11: OD320 server.job has no method '_nope_nested_def'
 custom/server_code/data/calls.xml:107:7: OD320 server.job has no method '_nope_other_name'
@@ -796,6 +796,9 @@ custom/server_code/data/calls.xml:147:34: OD320 server.job has no method '_nope_
 custom/server_code/data/calls.xml:159:42: OD320 server.job has no method '_nope_nested'
 custom/server_code/data/calls.xml:173:43: OD320 server.note has no method 'action_close'
 custom/server_code/data/calls.xml:182:35: OD320 server.note has no method 'action_close'
+custom/server_code/data/calls.xml:195:44: OD320 server.job has no method '_nope_x'
+custom/server_code/data/calls.xml:201:48: OD320 server.job has no method '_nope_y'
+custom/server_code/data/calls.xml:207:53: OD320 server.job has no method '_nope_z'
 custom/server_code/data/demo_writes.xml:5:34: OD320 server.job has no method '_nope_demo_fixes'
 custom/server_code/data/demo_writes.xml:12:34: OD320 server.job has no method '_nope_demo_state'
 custom/server_code/data/demo_writes.xml:18:34: OD320 server.job has no method 'action_pin'
@@ -818,6 +821,7 @@ custom/server_code/data/syntax.xml:99:1: OD319 Odoo refuses this code when it lo
 custom/server_code/data/syntax.xml:114:28: OD319 Odoo refuses this code when it loads the record: Expected a statement
 custom/server_code/data/syntax.xml:124:36: OD319 Odoo refuses this code when it loads the record: Expected a statement
 custom/server_code/data/syntax.xml:132:34: OD319 Odoo refuses this code when it loads the record: Expected `def`, `with` or `for` to follow `async`, found `=`
+custom/server_code/data/syntax.xml:138:43: OD319 Odoo refuses this code when it loads the record: unexpected EOF while parsing
 custom/server_code/data/updates.xml:2:5: OD323 XML id 'code_replaced' is already defined in data/first_writes.xml, and this definition writes the fields it names over it; remove the copy when the two say the same thing, or rename one when both are meant to exist
 custom/server_code/data/updates.xml:3:34: OD320 server.job has no method '_nope_code_replaces'
 custom/server_code/data/updates.xml:6:5: OD323 XML id 'code_cleared' is already defined in data/first_writes.xml, and this definition writes the fields it names over it; remove the copy when the two say the same thing, or rename one when both are meant to exist

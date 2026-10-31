@@ -73,6 +73,10 @@ const QWEB_REPORT: &str = "qweb-";
 
 /// What opens a CDATA section, which a text node's range starts on.
 const CDATA: &str = "<![CDATA[";
+/// What closes a CDATA section.
+const CDATA_END: &str = "]]>";
+/// The entities XML defines itself, each of one character. Any other comes from a DOCTYPE.
+const PREDEFINED_ENTITIES: [&str; 5] = ["lt", "gt", "amp", "quot", "apos"];
 
 /// The view type of a `<template>`.
 pub const QWEB: &str = "qweb";
@@ -1312,27 +1316,60 @@ fn spec_text(node: Node, lines: &Lines) -> Option<Spanned<String>> {
     })
 }
 
-/// Where the byte `at` of `decoded`, the value of the node `text`, sits. The node holds no offsets of
-/// its own past its start, so newlines give the line, which entities and CDATA leave as they are, and
-/// the column counts from the last one, short of any entity or CDATA opening earlier on the line.
+/// Where the byte `at` of `decoded`, the value of the node `text`, sits in the source.
 fn code_pos(text: Node, decoded: &str, at: usize, lines: &Lines) -> Pos {
-    let start = text.range().start;
-    let first = lines.pos(start);
-    let before = &decoded[..at];
-    match before.rfind('\n') {
-        Some(newline) => Pos {
-            line: first.line + before.matches('\n').count() as u32,
-            col: (at - newline) as u32,
-        },
-        None => {
-            let opened = text.document().input_text()[start..].starts_with(CDATA);
-            let skipped = if opened { CDATA.len() } else { 0 };
-            Pos {
-                col: first.col + (skipped + at) as u32,
-                ..first
+    lines.pos(source_offset(
+        text.document().input_text(),
+        text.range().start,
+        decoded,
+        at,
+    ))
+}
+
+/// The offset in `input` of the byte `at` of `decoded`, a text whose source opens at `start`. The
+/// parser keeps no offsets past that start, so this reads the source again. CDATA markers read
+/// nothing, but none is skipped at the end of `decoded`, so an error there stays on the closing one.
+/// A DOCTYPE entity has no known width, so the walk stops on its `&`. It compares no characters: a
+/// text opening with such an entity starts inside the DOCTYPE, and the result then means nothing.
+fn source_offset(input: &str, start: usize, decoded: &str, at: usize) -> usize {
+    let (mut source, mut read, mut cdata) = (start, 0, false);
+    loop {
+        while read < decoded.len() {
+            let marker = if cdata { CDATA_END } else { CDATA };
+            if !input[source..].starts_with(marker) {
+                break;
             }
+            source += marker.len();
+            cdata = !cdata;
         }
+        if read >= at {
+            return source;
+        }
+        let step = decoded
+            .get(read..)
+            .and_then(|rest| source_step(&input[source..], rest, cdata));
+        let Some((source_width, decoded_width)) = step else {
+            return source;
+        };
+        source += source_width;
+        read += decoded_width;
     }
+}
+
+/// The bytes the next character takes in `source` and in `decoded`, in that order. None where the
+/// source stops or holds an entity of unknown width.
+fn source_step(source: &str, decoded: &str, cdata: bool) -> Option<(usize, usize)> {
+    if source.starts_with("\r\n") {
+        return Some((2, 1));
+    }
+    let width = source.chars().next()?.len_utf8();
+    if cdata || !source.starts_with('&') {
+        return Some((width, width));
+    }
+    let end = source.find(';')?;
+    let name = &source[1..end];
+    let known = name.starts_with('#') || PREDEFINED_ENTITIES.contains(&name);
+    known.then_some((end + 1, decoded.chars().next()?.len_utf8()))
 }
 
 fn literal_target(value: &str) -> bool {
@@ -2677,6 +2714,37 @@ mod tests {
         assert_eq!(at(&code("\n<![CDATA[\nmodel.a()]]>")[0]), ("a", 5, 7));
         assert_eq!(at(&code("x = 1 &lt; 2\nmodel.a()")[0]), ("a", 4, 7));
         assert_eq!(at(&code("&#32;\nmodel.a()")[0]), ("a", 4, 7));
+        assert_eq!(at(&code("a = 1&#10;model.a()")[0]), ("a", 3, 36));
+        assert_eq!(at(&code("a = 1 &lt; 2; model.a()")[0]), ("a", 3, 40));
+        assert_eq!(at(&code("<![CDATA[a = 1]]>; model.a()")[0]), ("a", 3, 45));
+        assert_eq!(at(&code("<![CDATA[a = 1]]><![CDATA[; model.a()]]>")[0]), ("a", 3, 54));
+        assert_eq!(at(&code("<![CDATA[]]>model.a()")[0]), ("a", 3, 38));
+        assert_eq!(at(&code("s = \"&#xE9;\"; model.a()")[0]), ("a", 3, 40));
+        assert_eq!(at(&code("<![CDATA[a = \"&lt;\"; model.a()]]>")[0]), ("a", 3, 47));
+        assert_eq!(at(&code("a = 1\r\nmodel.a()")[0]), ("a", 4, 7));
+        assert_eq!(at(&code("<![CDATA[a = 1\r\nmodel.a()]]>")[0]), ("a", 4, 7));
+        let name = report_facts("<field name=\"report_name\">&#32;a.b</field>\n");
+        assert_eq!(at(literal_of(&name.template)), ("a.b", 3, 32));
+    }
+
+    #[test]
+    fn a_doctype_entity_ends_the_count() {
+        let code = |text: &str| {
+            let doc = format!(
+                "<!DOCTYPE odoo [<!ENTITY e \"a\">]>\n<odoo>\n<record id=\"s\" model=\"ir.cron\">\n\
+                 <field name=\"code\">{text}</field></record>\n</odoo>"
+            );
+            analyze(&doc).servers.remove(0).calls
+        };
+        assert_eq!(at(&code("b = &e;; model.a()")[0]), ("a", 4, 24));
+        assert_eq!(code("&e; = 1; model.a()")[0].value, "a");
+    }
+
+    #[test]
+    fn source_offset_stops_where_it_cannot_count() {
+        assert_eq!(source_offset("&lt", 0, "<x", 1), 0);
+        assert_eq!(source_offset("ab", 0, "abc", 3), 2);
+        assert_eq!(source_offset("\u{e9}&lt;x", 0, "a\u{e9}<x", 4), 2);
     }
 
     #[test]
@@ -2908,7 +2976,7 @@ mod tests {
         assert_eq!(refused("\n\n   x = 1\n"), (5, 6));
         assert_eq!(refused("<![CDATA[x = 1]]>"), (3, 44));
         assert_eq!(refused("<![CDATA[\n  x = 1\n]]>"), (4, 5));
-        assert_eq!(refused("a &lt;\nb"), (3, 36));
+        assert_eq!(refused("a &lt;\nb"), (3, 39));
     }
 
     #[test]
