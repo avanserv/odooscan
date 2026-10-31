@@ -2,15 +2,9 @@
 
 use std::collections::BTreeSet;
 use std::iter::once;
-use std::sync::LazyLock;
 
-use regex::{Captures, Regex};
 use ruff_python_ast::Expr;
 use ruff_python_parser::parse_expression;
-
-/// What the data loader rewrites in an arch: `%(id)d` and `%(id)s` to a database id, `%%` to `%`.
-/// Taking `%%` first, as the loader does, leaves `%%(id)d` a literal `%(id)d`.
-static LOADER_ESCAPE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"%%|%\(.*?\)[ds]").unwrap());
 
 /// Names Odoo's view validation ignores, and `id`, which every record has. They only count at the
 /// root of a name: `parent.uid` is a field of the parent.
@@ -51,8 +45,7 @@ pub fn constant(value: &str) -> bool {
 /// The fields an expression reads: `parent.x` whole, and otherwise the name a path starts from. An
 /// expression Odoo refuses, for its syntax or a construct its walk leaves out, is the error.
 pub fn names(text: &str) -> Result<Vec<String>, String> {
-    let text = LOADER_ESCAPE.replace_all(text, |c: &Captures| if &c[0] == "%%" { "%" } else { "0" });
-    let parsed = parse_expression(text.trim()).map_err(|e| e.error.to_string())?;
+    let parsed = parse_expression(loaded(text).trim()).map_err(|e| e.error.to_string())?;
     let mut names = BTreeSet::new();
     for name in values(parsed.expr())? {
         let root = name.split('.').next().unwrap_or_default();
@@ -63,6 +56,40 @@ pub fn names(text: &str) -> Result<Vec<String>, String> {
         names.extend(read.map(str::to_owned));
     }
     Ok(names.into_iter().collect())
+}
+
+/// `text` as the data loader leaves it, with each id at `0`. Ids go first and `%%` becomes `%` after,
+/// which only `a %%%(x)d` tells apart: the loader leaves `a %%(x)d`, the other order `a %0`. An id it
+/// takes is rewritten wherever that text stands, even behind a `%`.
+fn loaded(text: &str) -> String {
+    let rewritten = ids(text)
+        .into_iter()
+        .fold(text.to_owned(), |text, id| text.replace(id, "0"));
+    rewritten.replace("%%", "%")
+}
+
+/// The `%(id)d` and `%(id)s` the data loader takes. It needs a character other than `%` ahead of one,
+/// outside the id before it, so the second of `%(a)d%(b)d` stays too. The start of `text` passes:
+/// the loader reads the serialized arch, where a quote or `>` stands before every value.
+fn ids(text: &str) -> Vec<&str> {
+    let mut found = Vec::new();
+    let mut taken = 0;
+    for (start, _) in text.match_indices("%(") {
+        let free = start == 0 || (start > taken && !text[..start].ends_with('%'));
+        if let Some(id) = id_at(&text[start..]).filter(|_| free) {
+            taken = start + id.len();
+            found.push(id);
+        }
+    }
+    found
+}
+
+/// The id `text` opens with, up to the first `)d` or `)s` on its line.
+fn id_at(text: &str) -> Option<&str> {
+    let line = text.split('\n').next()?;
+    let closing = |pair: &[u8]| matches!(pair, [b')', b'd' | b's']);
+    let close = line.as_bytes().windows(2).skip(2).position(closing)?;
+    Some(&line[..close + 4])
 }
 
 /// Every name and dotted path under `expr`. A path off several names, as in `(a or b).c`, stops at
@@ -181,6 +208,44 @@ mod tests {
         assert_eq!(read("a == %(base.x)s"), ["a"]);
         assert_eq!(read("a %% 2"), ["a"]);
         assert!(names("a == %%(base.x)d").is_err());
+    }
+
+    #[test]
+    fn an_id_at_the_start_of_the_value_is_rewritten() {
+        assert_eq!(read("%(x)d == a"), ["a"]);
+        assert_eq!(read("\n    %(x)d == a\n"), ["a"]);
+    }
+
+    #[test]
+    fn an_id_behind_a_percent_or_another_id_stays() {
+        assert!(names("a %%%(x)d").is_err());
+        assert!(names("%(x)d%(y)d").is_err());
+    }
+
+    #[test]
+    fn ids_go_before_the_percent_escape() {
+        assert_eq!(loaded("a %%%(x)d"), "a %%(x)d");
+        assert_eq!(loaded("a == %%(x)d"), "a == %(x)d");
+        assert_eq!(loaded("a %% 2"), "a % 2");
+        assert_eq!(loaded("a %% %(x)d"), "a % 0");
+    }
+
+    #[test]
+    fn an_id_cannot_lead_the_next() {
+        assert_eq!(loaded("%(a)d%(b)d"), "0%(b)d");
+        assert_eq!(loaded("%(a)d+%(b)d"), "0+0");
+    }
+
+    #[test]
+    fn an_id_is_rewritten_wherever_its_text_stands() {
+        assert_eq!(loaded("%(x)d %%%(x)d"), "0 %0");
+    }
+
+    #[test]
+    fn an_id_ends_at_the_first_close_on_its_line() {
+        assert_eq!(loaded("%(a)q %(b)d"), "0");
+        assert_eq!(loaded("%()d"), "0");
+        assert_eq!(loaded("%(a\n)d"), "%(a\n)d");
     }
 
     #[test]
