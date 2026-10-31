@@ -350,6 +350,7 @@ custom/modern20/security/ir.access-inactive.csv:3:1: OD402 base.group_portal get
 custom/modern20/security/ir.access.csv:2:1: OD210 'no_csv_name': modern.lamp has no field 'no_csv_name'
 custom/modifiers17/views/jobs.xml:7:47: OD317 invisible reads field 'state', which the view does not show
 custom/modifiers17/views/jobs.xml:54:47: OD317 invisible reads field 'note', which the view does not show
+custom/modifiers17/views/jobs.xml:76:51: OD317 invisible reads field 'phase', which the view does not show
 custom/modifiers17/views/unlisted.xml:1:1: OD502 'views/unlisted.xml' is not in the manifest's data or demo, so Odoo never loads it
 custom/modifiers173/views/tasks.xml:8:47: OD316 invisible names 'active_id': modifier.task has no field 'active_id'
 custom/orm_overrides/models/caches.py:7:21: OD120 'lang' in an ormcache key is not a parameter of _greeting_for(), so every call raises NameError; key on a parameter or on self
@@ -756,12 +757,21 @@ custom/unversioned_logs/data/reports.xml:7:35: OD311 no indexed module defines t
 custom/unversioned_logs/data/reports.xml:8:46: OD319 Odoo refuses this expression when it prints the report: Unexpected token at the end of an expression
 custom/unversioned_logs/models/probes.py:39:39: OD224 s.create_uid: drift_sensor has no such column, since drift.sensor.create_uid is not created, as drift.sensor sets _log_access to False; drop it from the query, or log access on the model
 custom/unversioned_logs/models/probes.py:59:58: OD218 'country_id' has delegate=True, so it must be required with ondelete 'cascade' or 'restrict'; give it ondelete="cascade"
+custom/view_modifiers/models/tickets.py:75:17: OD201 no indexed module defines model 'modifier.ghost'
 custom/view_modifiers/views/extensions.xml:9:21: OD316 readonly names 'stat': modifier.ticket has no field 'stat'
 custom/view_modifiers/views/extensions.xml:11:50: OD316 invisible names 'stat': modifier.ticket has no field 'stat'
 custom/view_modifiers/views/extensions.xml:12:44: OD315 invalid required expression: Expected an expression
 custom/view_modifiers/views/extensions.xml:15:47: OD316 invisible names 'stat': modifier.ticket has no field 'stat'
-custom/view_modifiers/views/extensions.xml:56:50: OD316 readonly names 'nowhere': modifier.ticket has no field 'nowhere'
+custom/view_modifiers/views/extensions.xml:56:50: OD316 readonly names 'nowhere': modifier.line has no field 'nowhere'
 custom/view_modifiers/views/extensions.xml:123:46: OD316 readonly names 'quantity': modifier.ticket has no field 'quantity'
+custom/view_modifiers/views/extensions.xml:145:50: OD316 readonly names 'state': modifier.line has no field 'state'
+custom/view_modifiers/views/extensions.xml:146:50: OD316 readonly names 'parent.stat': modifier.ticket has no field 'stat'
+custom/view_modifiers/views/extensions.xml:149:21: OD304 'line_ids.state': modifier.line has no field 'state'
+custom/view_modifiers/views/extensions.xml:150:21: OD210 'stat': modifier.ticket has no field 'stat'
+custom/view_modifiers/views/extensions.xml:151:49: OD312 modifier.line has no method 'action_close'
+custom/view_modifiers/views/extensions.xml:156:59: OD316 invisible names 'nowhere': modifier.line.tag has no field 'nowhere'
+custom/view_modifiers/views/extensions.xml:227:25: OD304 'line_ids.nowhere': modifier.line has no field 'nowhere'
+custom/view_modifiers/views/extensions.xml:314:9: OD301 module view_modifiers defines no XML id 'view_modifiers.ticket_missing'
 custom/view_modifiers/views/tickets.xml:7:47: OD315 invalid invisible expression: Expected an expression
 custom/view_modifiers/views/tickets.xml:8:46: OD316 readonly names 'stat': modifier.ticket has no field 'stat'
 custom/view_modifiers/views/tickets.xml:9:46: OD315 invalid required expression: Odoo does not read this construct, such as a comprehension, a set or a lambda

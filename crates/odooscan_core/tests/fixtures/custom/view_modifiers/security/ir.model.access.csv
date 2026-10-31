@@ -1,3 +1,7 @@
 id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
 access_modifier_ticket,modifier.ticket,model_modifier_ticket,base.group_user,1,1,1,0
 access_modifier_line,modifier.line,model_modifier_line,base.group_user,1,1,1,0
+access_modifier_ticket_tag,modifier.ticket.tag,model_modifier_ticket_tag,base.group_user,1,1,1,0
+access_modifier_line_tag,modifier.line.tag,model_modifier_line_tag,base.group_user,1,1,1,0
+access_modifier_hook,modifier.hook,model_modifier_hook,base.group_user,1,1,1,0
+access_modifier_bound,modifier.bound,model_modifier_bound,base.group_user,1,1,1,0
