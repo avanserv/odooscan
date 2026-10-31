@@ -1,0 +1,16 @@
+<odoo>
+    <record id="desk_form" model="ir.ui.view">
+        <field name="name">button.desk.form</field>
+        <field name="model">button.desk</field>
+        <field name="arch" type="xml">
+            <form>
+                <button type="object" name="ensure_one"/>
+                <button type="object" name="init"/>
+                <button type="object" name="with_context"/>
+                <button type="object" name="browse"/>
+                <button type="object" name="action_open"/>
+                <field name="name"/>
+            </form>
+        </field>
+    </record>
+</odoo>
