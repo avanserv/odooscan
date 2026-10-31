@@ -196,6 +196,7 @@ pub(crate) const BASE_MODEL_METHODS: &[&str] = &[
 /// The methods of `BaseModel` outside `BASE_MODEL_METHODS`, which OD116 reads as the members a
 /// field must not replace in every series, by `def` or class-level alias, read off the heads 12.0
 /// to 20.0 and saas~11.5 to saas~19.4: a button, a `<function>` or a `super()` call may name any.
+/// `OLD_BASE_METHODS` holds those gone before these heads, dated by series.
 /// Dunders stay out because buttons read this list, so `BASE_MODEL_DUNDERS` holds them for
 /// `super()` alone. Any other `__` name stays out too: it is mangled, so `getattr` never finds it.
 const BASE_MODEL_EXTRA: &[&str] = &[
@@ -368,6 +369,68 @@ const BASE_MODEL_EXTRA: &[&str] = &[
     "view_header_get",
     "view_init",
 ];
+
+/// The methods of `BaseModel` gone by saas~11.5, by the range of series that has them, read off the
+/// heads 9.0 to saas~11.4, but for the undotted saas branches, which `Series` cannot name. Not in
+/// `BASE_MODEL_EXTRA`, since a call to one fails on any later series and must stay a report.
+/// `_all_columns` stays out: a property on 9.0, not a method.
+const OLD_BASE_METHODS: &[(&str, &[&str])] = &[
+    (
+        "<=9.0",
+        &[
+            "_inherits_reload",
+            "_init_function_fields",
+            "_m2m_raise_or_create_relation",
+            "_o2m_raise_on_missing_reference",
+            "_read_group_get_domain",
+            "_set_default_value_on_column",
+            "_store_get_values",
+            "_store_set_values",
+            "_update_store",
+            "_view_look_dom_arch",
+            "check_recursion",
+            "distinct_field_get",
+            "import_data",
+        ],
+    ),
+    (
+        "<=10.0",
+        &[
+            "_add_manual_fields",
+            "_auto_end",
+            "_create_table",
+            "_drop_constraint",
+            "_field_create",
+            "_m2o_add_foreign_key_checked",
+            "_m2o_add_foreign_key_unchecked",
+            "_m2o_fix_foreign_key",
+            "_parent_columns_exist",
+            "_save_constraint",
+            "_save_relation_table",
+            "_select_column_data",
+            "_table_exist",
+            "create_workflow",
+            "delete_workflow",
+            "print_report",
+            "redirect_workflow",
+            "signal_workflow",
+            "step_workflow",
+        ],
+    ),
+    ("<=11.1", &["_check_selection_field_value"]),
+    ("==11.2", &["_parent_store_create_prepare"]),
+    ("<=11.4", &["_check_record_rules_result_count"]),
+];
+
+/// Whether `name` is a method of `BaseModel` that `series` has and saas~11.5 has lost. A module of
+/// unknown series gets none, so a true report on a later series stands.
+pub(crate) fn old_base_method(name: &str, series: Option<Series>) -> bool {
+    series.is_some_and(|s| {
+        OLD_BASE_METHODS
+            .iter()
+            .any(|(spec, names)| names.contains(&name) && series::matches(spec, s))
+    })
+}
 
 /// The dunder methods `super()` finds at the end of the MRO: those of `BaseModel` in any of 9.0 to
 /// 20.0, read off each series, then those `object` adds. Data dunders such as `__slots__` stay out:
@@ -1926,9 +1989,10 @@ impl<'m> Index<'m> {
     /// `super()` follows the class bases, which Odoo builds from `_inherit` and `base`. Modules
     /// outside the scope count: an override of a method from a module that is not in depends is
     /// called only by that module.
-    pub fn has_parent_method(&self, model: &str, method: &str, except: &ClassFact) -> bool {
+    pub fn has_parent_method(&self, model: &str, method: &str, except: &ClassFact, series: Option<Series>) -> bool {
         BASE_MODEL_METHODS.contains(&method)
             || BASE_MODEL_EXTRA.contains(&method)
+            || old_base_method(method, series)
             || BASE_MODEL_DUNDERS.contains(&method)
             || self
                 .chain_classes(model)
@@ -1992,8 +2056,8 @@ impl<'m> Index<'m> {
 
     /// Whether a button or a `<function>` finds `method` on `model`: any method of `BaseModel`, or
     /// what `rpc_method` finds. Python looks both up on the model's class.
-    pub fn data_method(&self, model: &str, method: &str, scope: &Scope) -> Status<'m> {
-        if BASE_MODEL_EXTRA.contains(&method) {
+    pub fn data_method(&self, model: &str, method: &str, scope: &Scope, series: Option<Series>) -> Status<'m> {
+        if BASE_MODEL_EXTRA.contains(&method) || old_base_method(method, series) {
             return Status::Visible;
         }
         self.rpc_method(model, method, scope)
@@ -2230,8 +2294,8 @@ fn method_flows(modules: &[Module]) -> MethodFlows<'_> {
 #[cfg(test)]
 mod tests {
     use super::{
-        BASE_MODEL_EXTRA, BASE_MODEL_METHODS, BASE_PRIVATE_METHODS, FIELD_CLASSES, PlacedWrite, base_private_method,
-        class_file, fold_writes, last_text,
+        BASE_MODEL_DUNDERS, BASE_MODEL_EXTRA, BASE_MODEL_METHODS, BASE_PRIVATE_METHODS, FIELD_CLASSES,
+        OLD_BASE_METHODS, PlacedWrite, base_private_method, class_file, fold_writes, last_text, old_base_method,
     };
     use crate::series::Series;
     use crate::xml;
@@ -2333,6 +2397,37 @@ mod tests {
                 BASE_MODEL_METHODS.contains(name) || BASE_MODEL_EXTRA.contains(name),
                 "{name} would raise OD312 on an earlier series"
             );
+        }
+    }
+
+    #[test]
+    fn old_base_methods_stop_at_their_last_series() {
+        let has = |name: &str, series: &str| old_base_method(name, Series::parse(series));
+        assert!(has("import_data", "9.0") && !has("import_data", "10.0"));
+        assert!(has("create_workflow", "10.0") && !has("create_workflow", "11.0"));
+        let selection = "_check_selection_field_value";
+        assert!(has(selection, "saas~11.1") && !has(selection, "saas~11.2"));
+        let prepare = "_parent_store_create_prepare";
+        assert!(!has(prepare, "saas~11.1") && has(prepare, "saas~11.2") && !has(prepare, "saas~11.3"));
+        let count = "_check_record_rules_result_count";
+        assert!(has(count, "saas~11.4") && !has(count, "saas~11.5"));
+        assert!(!old_base_method("create_workflow", None));
+    }
+
+    #[test]
+    fn old_base_methods_end_before_the_flat_lists_start() {
+        for (spec, names) in OLD_BASE_METHODS {
+            for series in ["saas~11.5", "12.0", "20.0"] {
+                assert!(!crate::series::matches(spec, Series::parse(series).unwrap()), "{spec}");
+            }
+            for name in *names {
+                assert!(
+                    ![BASE_MODEL_METHODS, BASE_MODEL_EXTRA, BASE_MODEL_DUNDERS]
+                        .iter()
+                        .any(|l| l.contains(name)),
+                    "{name} would count in every series"
+                );
+            }
         }
     }
 }
