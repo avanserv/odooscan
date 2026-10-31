@@ -68,6 +68,11 @@ const CALENDAR_STOPS: &[&str] = &[
 /// saas~19.1 does not (`:2909`).
 const CALENDAR_STOP_OPTIONAL: Series = Series { major: 19, minor: 1 };
 
+/// The first series that loads a record nested in a one2many field (`2b80f3e5f1be`). Below it the
+/// schema refuses the file (`odoo/tools/convert.py:797` on 15.0), so a row nested in `view_ids`
+/// gives the action no view.
+const NESTED_RECORDS: Series = Series { major: 15, minor: 1 };
+
 /// The first series whose `activity` default comes with `mail` (`b2de618f9ff9`), so a model outside
 /// it has none (`odoo/addons/base/models/ir_ui_view.py:2711` on 18.0), and whose client searches
 /// `activity_ids` (`addons/mail/static/src/views/web/activity/activity_model.js:10` on 18.0). From
@@ -1759,7 +1764,7 @@ impl<'m> Ctx<'_, 'm> {
     }
 
     /// A view an action names counts from any indexed module, as one in `view_types` does, as long as
-    /// the scope loads that write.
+    /// the scope loads that write. A module of unknown series may run from `NESTED_RECORDS`.
     fn view_mode(
         &self,
         out: &mut Out<'m>,
@@ -1768,10 +1773,13 @@ impl<'m> Ctx<'_, 'm> {
         mode: &Spanned<String>,
         writes: &[Placed<&ActionFact>],
     ) {
+        let nested = self.series.is_none_or(|s| s >= NESTED_RECORDS);
         let mut seen = FxHashSet::default();
         let kinds = mode.value.split(',').map(str::trim).filter(|k| !k.is_empty());
         for kind in kinds.filter(|k| seen.insert(*k)) {
-            let named = writes.iter().any(|w| self.scope.loads(w) && w.fact.names_view(kind));
+            let named = writes
+                .iter()
+                .any(|w| self.scope.loads(w) && w.fact.names_view(kind, nested));
             let gap = self.activity_gap(model, kind);
             if let Some(message) = gap.or_else(|| self.view_gap(model, kind).filter(|_| !named)) {
                 out.push(path, "OD318", mode.pos, message);

@@ -10,4 +10,16 @@
         <field name="res_model">window.loose</field>
         <field name="view_mode">list,activity</field>
     </record>
+
+    <record id="action_loose_nested" model="ir.actions.act_window">
+        <field name="name">action_loose_nested</field>
+        <field name="res_model">window.loose</field>
+        <field name="view_mode">gantt</field>
+        <field name="view_ids">
+            <record id="row_loose_nested" model="ir.actions.act_window.view">
+                <field name="view_mode">gantt</field>
+                <field name="view_id" search="[('name', '=', 'window.shown.gantt')]"/>
+            </record>
+        </field>
+    </record>
 </odoo>

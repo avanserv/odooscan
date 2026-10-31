@@ -1,0 +1,13 @@
+<odoo>
+    <record id="action_nested" model="ir.actions.act_window">
+        <field name="name">action_nested</field>
+        <field name="res_model">window.nested.old</field>
+        <field name="view_mode">gantt</field>
+        <field name="view_ids">
+            <record id="row_nested" model="ir.actions.act_window.view">
+                <field name="view_mode">gantt</field>
+                <field name="view_id" search="[('name', '=', 'window.shown.gantt')]"/>
+            </record>
+        </field>
+    </record>
+</odoo>

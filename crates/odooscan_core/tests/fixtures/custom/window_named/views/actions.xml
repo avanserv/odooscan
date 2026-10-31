@@ -148,4 +148,74 @@
         <field name="view_id" search="[('name', '=', 'window.shown.gantt')]"/>
         <field name="act_window_id" ref="action_row_search"/>
     </record>
+
+    <record id="action_row_order_only" model="ir.actions.act_window">
+        <field name="name">action_row_order_only</field>
+        <field name="res_model">window.plain</field>
+        <field name="view_mode">gantt</field>
+        <field name="view_ids" eval="[(0, 0, {'view_mode': 'gantt'})]"/>
+    </record>
+
+    <record id="action_row_order_only_dict" model="ir.actions.act_window">
+        <field name="name">action_row_order_only_dict</field>
+        <field name="res_model">window.plain</field>
+        <field name="view_mode">gantt</field>
+        <field name="view_ids" eval="[Command.create(dict(view_mode='gantt'))]"/>
+    </record>
+
+    <record id="action_row_view_false" model="ir.actions.act_window">
+        <field name="name">action_row_view_false</field>
+        <field name="res_model">window.plain</field>
+        <field name="view_mode">gantt</field>
+        <field name="view_ids" eval="[(0, 0, {'view_mode': 'gantt', 'view_id': False})]"/>
+    </record>
+
+    <record id="action_rows_cleared" model="ir.actions.act_window">
+        <field name="name">action_rows_cleared</field>
+        <field name="res_model">window.plain</field>
+        <field name="view_mode">gantt</field>
+        <field name="view_ids" eval="[(5, 0, 0)]"/>
+    </record>
+
+    <record id="action_rows_false" model="ir.actions.act_window">
+        <field name="name">action_rows_false</field>
+        <field name="res_model">window.plain</field>
+        <field name="view_mode">gantt</field>
+        <field name="view_ids" eval="False"/>
+    </record>
+
+    <record id="action_rows_emptied" model="ir.actions.act_window">
+        <field name="name">action_rows_emptied</field>
+        <field name="res_model">window.plain</field>
+        <field name="view_mode">gantt</field>
+        <field name="view_ids" eval="[(6, 0, [])]"/>
+    </record>
+
+    <record id="action_row_order_beside_link" model="ir.actions.act_window">
+        <field name="name">action_row_order_beside_link</field>
+        <field name="res_model">window.plain</field>
+        <field name="view_mode">gantt</field>
+        <field name="view_ids" eval="[(0, 0, {'view_mode': 'gantt'}), (4, ref('row_gantt'))]"/>
+    </record>
+
+    <record id="action_row_spread" model="ir.actions.act_window">
+        <field name="name">action_row_spread</field>
+        <field name="res_model">window.plain</field>
+        <field name="view_mode">gantt</field>
+        <field name="view_ids" eval="[(0, 0, {'view_mode': 'gantt', **extra})]"/>
+    </record>
+
+    <record id="action_row_mode_unread" model="ir.actions.act_window">
+        <field name="name">action_row_mode_unread</field>
+        <field name="res_model">window.plain</field>
+        <field name="view_mode">gantt</field>
+        <field name="view_ids" eval="[(0, 0, {'view_mode': mode, 'view_id': ref('window_actions.view_shown_gantt')})]"/>
+    </record>
+
+    <record id="action_row_view_first" model="ir.actions.act_window">
+        <field name="name">action_row_view_first</field>
+        <field name="res_model">window.plain</field>
+        <field name="view_mode">gantt</field>
+        <field name="view_ids" eval="[(0, 0, {'view_id': ref('window_actions.view_shown_gantt'), 'view_mode': 'gantt'})]"/>
+    </record>
 </odoo>
