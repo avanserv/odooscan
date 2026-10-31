@@ -78,4 +78,295 @@
             </field>
         </field>
     </record>
+
+    <record id="job_agenda" model="ir.ui.view">
+        <field name="name">modifier.job.agenda</field>
+        <field name="model">modifier.job</field>
+        <field name="arch" type="xml">
+            <form>
+                <field name="step_ids">
+                    <calendar date_start="start">
+                        <field name="name" invisible="start"/>
+                        <field name="name" invisible="parent.state"/>
+                    </calendar>
+                </field>
+            </form>
+        </field>
+    </record>
+
+    <record id="job_agenda_phase" model="ir.ui.view">
+        <field name="name">modifier.job.agenda.phase</field>
+        <field name="model">modifier.job</field>
+        <field name="inherit_id" ref="job_agenda"/>
+        <field name="arch" type="xml">
+            <xpath expr="//field[@name='step_ids']/calendar/field[@name='name']" position="after">
+                <field name="phase" invisible="start"/>
+            </xpath>
+        </field>
+    </record>
+
+    <record id="job_plan" model="ir.ui.view">
+        <field name="name">modifier.job.plan</field>
+        <field name="model">modifier.job</field>
+        <field name="arch" type="xml">
+            <form>
+                <field name="step_ids"/>
+            </form>
+        </field>
+    </record>
+
+    <record id="job_plan_calendar" model="ir.ui.view">
+        <field name="name">modifier.job.plan.calendar</field>
+        <field name="model">modifier.job</field>
+        <field name="inherit_id" ref="job_plan"/>
+        <field name="arch" type="xml">
+            <field name="step_ids" position="inside">
+                <calendar date_start="start">
+                    <field name="name" invisible="start"/>
+                </calendar>
+            </field>
+        </field>
+    </record>
+
+    <record id="job_chart" model="ir.ui.view">
+        <field name="name">modifier.job.chart</field>
+        <field name="model">modifier.job</field>
+        <field name="arch" type="xml">
+            <form>
+                <field name="step_ids">
+                    <graph>
+                        <field name="name" invisible="phase"/>
+                    </graph>
+                </field>
+            </form>
+        </field>
+    </record>
+
+    <record id="job_leads" model="ir.ui.view">
+        <field name="name">modifier.job.leads</field>
+        <field name="model">modifier.job</field>
+        <field name="arch" type="xml">
+            <tree>
+                <groupby name="lead_id">
+                    <field name="name" invisible="phase"/>
+                </groupby>
+                <field name="name"/>
+            </tree>
+        </field>
+    </record>
+
+    <record id="job_swap" model="ir.ui.view">
+        <field name="name">modifier.job.swap</field>
+        <field name="model">modifier.job</field>
+        <field name="arch" type="xml">
+            <form>
+                <field name="step_ids">
+                    <calendar date_start="start">
+                        <field name="name"/>
+                    </calendar>
+                </field>
+            </form>
+        </field>
+    </record>
+
+    <record id="job_swap_tree" model="ir.ui.view">
+        <field name="name">modifier.job.swap.tree</field>
+        <field name="model">modifier.job</field>
+        <field name="inherit_id" ref="job_swap"/>
+        <field name="arch" type="xml">
+            <xpath expr="//field[@name='step_ids']/calendar" position="replace">
+                <tree>
+                    <field name="name" invisible="phase"/>
+                </tree>
+            </xpath>
+        </field>
+    </record>
+
+    <record id="job_board" model="ir.ui.view">
+        <field name="name">modifier.job.board</field>
+        <field name="model">modifier.job</field>
+        <field name="arch" type="xml">
+            <form>
+                <field name="step_ids">
+                    <tree>
+                        <field name="name"/>
+                    </tree>
+                </field>
+            </form>
+        </field>
+    </record>
+
+    <record id="job_board_calendar" model="ir.ui.view">
+        <field name="name">modifier.job.board.calendar</field>
+        <field name="model">modifier.job</field>
+        <field name="inherit_id" ref="job_board"/>
+        <field name="arch" type="xml">
+            <xpath expr="//field[@name='step_ids']/tree" position="after">
+                <calendar date_start="start">
+                    <field name="name" invisible="start"/>
+                </calendar>
+            </xpath>
+        </field>
+    </record>
+
+    <record id="job_nested" model="ir.ui.view">
+        <field name="name">modifier.job.nested</field>
+        <field name="model">modifier.job</field>
+        <field name="arch" type="xml">
+            <form>
+                <field name="step_ids">
+                    <calendar date_start="start">
+                        <field name="job_id">
+                            <tree>
+                                <field name="name" invisible="note"/>
+                                <field name="name" invisible="parent.start"/>
+                            </tree>
+                            <form>
+                                <field name="name" invisible="user_id"/>
+                            </form>
+                        </field>
+                    </calendar>
+                </field>
+            </form>
+        </field>
+    </record>
+
+    <record id="job_cards" model="ir.ui.view">
+        <field name="name">modifier.job.cards</field>
+        <field name="model">modifier.job</field>
+        <field name="arch" type="xml">
+            <kanban>
+                <field name="name" invisible="note"/>
+                <field name="step_ids">
+                    <kanban>
+                        <field name="name" invisible="phase"/>
+                    </kanban>
+                </field>
+            </kanban>
+        </field>
+    </record>
+
+    <record id="job_pivot" model="ir.ui.view">
+        <field name="name">modifier.job.pivot</field>
+        <field name="model">modifier.job</field>
+        <field name="arch" type="xml">
+            <form>
+                <field name="step_ids">
+                    <tree>
+                        <field name="name" invisible="phase"/>
+                    </tree>
+                    <pivot/>
+                </field>
+            </form>
+        </field>
+    </record>
+
+    <record id="job_outer" model="ir.ui.view">
+        <field name="name">modifier.job.outer</field>
+        <field name="model">modifier.job</field>
+        <field name="arch" type="xml">
+            <form>
+                <field name="step_ids">
+                    <pivot>
+                        <field name="name" invisible="phase"/>
+                    </pivot>
+                </field>
+                <field name="step_ids">
+                    <list>
+                        <field name="name" invisible="phase"/>
+                    </list>
+                </field>
+                <field name="step_ids">
+                    <search>
+                        <field name="name" invisible="phase"/>
+                    </search>
+                </field>
+            </form>
+        </field>
+    </record>
+
+    <record id="job_mixed" model="ir.ui.view">
+        <field name="name">modifier.job.mixed</field>
+        <field name="model">modifier.job</field>
+        <field name="arch" type="xml">
+            <form>
+                <field name="step_ids">
+                    <tree>
+                        <field name="name" invisible="phase"/>
+                    </tree>
+                    <calendar date_start="start">
+                        <field name="name"/>
+                    </calendar>
+                </field>
+            </form>
+        </field>
+    </record>
+
+    <record id="job_mixed_steps" model="ir.ui.view">
+        <field name="name">modifier.job.mixed.steps</field>
+        <field name="model">modifier.job</field>
+        <field name="inherit_id" ref="job_mixed"/>
+        <field name="arch" type="xml">
+            <xpath expr="//field[@name='step_ids']/calendar/field[@name='name']" position="attributes">
+                <attribute name="invisible">start</attribute>
+            </xpath>
+            <xpath expr="//field[@name='step_ids']/tree/field[@name='name']" position="attributes">
+                <attribute name="readonly">start</attribute>
+            </xpath>
+            <xpath expr="//field[@name='step_ids']//field[@name='name']" position="attributes">
+                <attribute name="required">start</attribute>
+            </xpath>
+        </field>
+    </record>
+
+    <record id="job_dates" model="ir.ui.view">
+        <field name="name">modifier.job.dates</field>
+        <field name="model">modifier.job</field>
+        <field name="arch" type="xml">
+            <form>
+                <field name="step_ids">
+                    <calendar date_start="start" color="job_id.note">
+                        <filter name="phase"/>
+                        <field name="name" invisible="start"/>
+                        <field name="name" invisible="job_id"/>
+                        <field name="name" invisible="phase"/>
+                    </calendar>
+                </field>
+            </form>
+        </field>
+    </record>
+
+    <record id="job_unread" model="ir.ui.view">
+        <field name="name">modifier.job.unread</field>
+        <field name="model">modifier.job</field>
+        <field name="arch" type="xml">
+            <form>
+                <field name="step_ids">
+                    <calendar date_start="start">
+                        <field name="name" invisible="phase"/>
+                        <field name="job_id">
+                            <tree>
+                                <field name="name" invisible="parent.phase"/>
+                            </tree>
+                        </field>
+                    </calendar>
+                </field>
+            </form>
+        </field>
+    </record>
+
+    <record id="job_unread_steps" model="ir.ui.view">
+        <field name="name">modifier.job.unread.steps</field>
+        <field name="model">modifier.job</field>
+        <field name="inherit_id" ref="job_unread"/>
+        <field name="arch" type="xml">
+            <xpath expr="//field[@name='step_ids']/calendar/field[@name='name']" position="after">
+                <field name="name" invisible="phase"/>
+            </xpath>
+            <xpath expr="//field[@name='step_ids']//field[@name='name']" position="after">
+                <field name="name" invisible="start"/>
+                <field name="name" invisible="phase"/>
+            </xpath>
+        </field>
+    </record>
 </odoo>

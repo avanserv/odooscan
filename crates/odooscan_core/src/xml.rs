@@ -5,9 +5,9 @@ use roxmltree::{Document, Node, ParsingOptions};
 
 use crate::domain;
 use crate::facts::{
-    AccessRow, ActionFact, ActionValue, ArchButton, ArchDomain, ArchElement, ArchField, ArchModifier, DataFacts,
-    DomainFact, FieldWrite, FunctionCall, Lines, Pos, RawDiag, RecordFact, RecordWrite, ReportFact, RuleFact,
-    ServerFact, Spanned, ViewFact, WrittenValue, XmlDef, XmlRef,
+    AccessRow, ActionFact, ActionValue, ArchButton, ArchDomain, ArchElement, ArchField, ArchModifier, ArchSubview,
+    DataFacts, DomainFact, FieldWrite, FunctionCall, Lines, Pos, RawDiag, RecordFact, RecordWrite, ReportFact,
+    RuleFact, ServerFact, Spanned, ViewFact, WrittenValue, XmlDef, XmlRef,
 };
 use crate::record_eval;
 use crate::server_code;
@@ -35,6 +35,9 @@ static XPATH_CONTAINER: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r#"field\[@name=['"](\w+)['"]\]/+([\w*.-]+)(::)?"#).unwrap());
 /// An xpath ending on a field step locates that field wherever it is, subviews included.
 static XPATH_LAST_FIELD: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"field\[@name=['"](\w+)['"]\]$"#).unwrap());
+/// An xpath ending on the step right under a field locates a subview of that field.
+static XPATH_LAST_SUBVIEW: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"field\[@name=['"]\w+['"]\]/+([\w-]+)(\[[^\]]*\])*$"#).unwrap());
 /// A step on a view tag other than through a field may land in the main view or in any subview.
 static XPATH_AMBIGUOUS: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(^|/)(list|tree|kanban|column)\b").unwrap());
 
@@ -54,6 +57,9 @@ const INDIRECT_VALUE: [&str; 4] = ["ref", "search", "file", "type"];
 
 /// Tags under which a `<field>` opens a subview on the field's comodel.
 const SUBVIEWS: &[&str] = &["list", "tree", "form", "kanban", "graph", "pivot", "calendar", "search"];
+
+/// Attributes of a calendar whose value starts with a field the view loads.
+const CALENDAR_FIELD_ATTRS: [&str; 5] = ["date_start", "date_delay", "date_stop", "color", "all_day"];
 
 /// Attributes Odoo reads as Python expressions on the records of an arch.
 const MODIFIERS: [&str; 4] = ["column_invisible", "invisible", "readonly", "required"];
@@ -115,6 +121,7 @@ pub fn analyze(text: &str) -> DataFacts {
         Walker {
             lines: &lines,
             facts: &mut facts,
+            around: vec![],
         }
         .data(root);
     }
@@ -131,6 +138,8 @@ fn defined_id<'a>(node: Node<'a, '_>) -> Option<&'a str> {
 struct Walker<'a> {
     lines: &'a Lines,
     facts: &'a mut DataFacts,
+    /// The subviews around the arch position being walked, as `ArchModifier::subviews` says.
+    around: Vec<ArchSubview>,
 }
 
 impl Walker<'_> {
@@ -644,8 +653,11 @@ impl Walker<'_> {
         let tag = node.tag_name().name();
         arch_element(node, pos, view);
         let depth = path.len();
+        let around = self.around.len();
         let opened = spec_subview(node, path);
-        view.subviews.extend(opened.clone());
+        if let Some(opened) = &opened {
+            self.open_subview(opened, node, view);
+        }
         path.extend(opened.into_iter().flatten().skip(depth));
         view.calls.extend(t_call(node, self.lines));
         self.arch_button(node, path, view);
@@ -663,21 +675,38 @@ impl Walker<'_> {
             let fields = domain_attr(node, "domain").chain(group_by_attr(node));
             arch_domain(pos, path.clone(), fields, view);
         }
-        match tag {
-            "xpath" => xpath_steps(node.attribute("expr").unwrap_or_default(), path),
-            _ if AMBIGUOUS_SPECS.contains(&tag) && node.has_attribute("position") => {
-                path.push(UNKNOWN_CONTEXT.to_owned())
-            }
-            "groupby" => {
-                path.extend(node.attribute("name").map(str::to_owned));
-                view.subviews.extend((path.len() > depth).then(|| path.clone()));
-            }
-            _ => {}
-        }
+        self.arch_context(node, tag, path, view);
         for child in node.children().filter(Node::is_element) {
             self.arch(child, path, view);
         }
         path.truncate(depth);
+        self.around.truncate(around);
+    }
+
+    /// Extends `path` with where the children of `node` sit.
+    fn arch_context(&mut self, node: Node, tag: &str, path: &mut Vec<String>, view: &mut ViewFact) {
+        match tag {
+            "xpath" => xpath_steps(node.attribute("expr").unwrap_or_default(), path, &mut self.around),
+            _ if AMBIGUOUS_SPECS.contains(&tag) && node.has_attribute("position") => {
+                path.push(UNKNOWN_CONTEXT.to_owned())
+            }
+            "groupby" => {
+                if let Some(name) = node.attribute("name") {
+                    path.push(name.to_owned());
+                    self.open_subview(path, node, view);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn open_subview(&mut self, path: &[String], node: Node, view: &mut ViewFact) {
+        let opened = ArchSubview {
+            attribute_fields: attribute_fields(node),
+            ..subview(path, node.tag_name().name())
+        };
+        self.around.push(opened.clone());
+        view.subviews.push(opened);
     }
 
     /// A button only calls a method of the model when it has no `special`, which Odoo reads first,
@@ -711,6 +740,7 @@ impl Walker<'_> {
         let parsed = found.into_iter().filter(|(_, value)| !constant_modifier(&value.value));
         view.modifiers.extend(parsed.map(|(attr, value)| ArchModifier {
             path: path.to_vec(),
+            subviews: self.around.clone(),
             attr,
             value,
         }));
@@ -770,10 +800,12 @@ impl Walker<'_> {
         arch_domain(pos, path.clone(), domain_attr(node, "filter_domain"), view);
         view.fields.push(ArchField { path: field_path, pos });
         for child in node.children().filter(Node::is_element) {
-            if SUBVIEWS.contains(&child.tag_name().name()) {
+            let tag = child.tag_name().name();
+            if SUBVIEWS.contains(&tag) {
                 path.push(name.to_owned());
-                view.subviews.push(path.clone());
+                self.open_subview(path, child, view);
                 self.arch(child, path, view);
+                self.around.pop();
                 path.pop();
             } else {
                 self.arch(child, path, view);
@@ -1228,27 +1260,77 @@ fn xpath_locators(expr: &str, pos: Pos) -> Vec<Spanned<ArchElement>> {
         .collect()
 }
 
+fn subview(path: &[String], tag: &str) -> ArchSubview {
+    ArchSubview {
+        path: path.to_vec(),
+        tag: tag.to_owned(),
+        attribute_fields: vec![],
+    }
+}
+
+/// What `_validate_tag_calendar` adds to the view's fields (`odoo/addons/base/models/ir_ui_view.py:1415`
+/// on 17.0). No other subview loads a field without a `<field>`.
+fn attribute_fields(node: Node) -> Vec<String> {
+    if !node.has_tag_name("calendar") {
+        return vec![];
+    }
+    let attributes = CALENDAR_FIELD_ATTRS
+        .iter()
+        .filter_map(|attr| node.attribute(*attr)?.split('.').next());
+    let filters = node
+        .children()
+        .filter(|c| c.has_tag_name("filter"))
+        .filter_map(|c| c.attribute("name"));
+    attributes
+        .chain(filters)
+        .filter(|name| !name.is_empty())
+        .map(str::to_owned)
+        .collect()
+}
+
 /// The path of the subview `node` opens when a spec puts it inside the field `path` locates. Odoo
 /// reads only a field's direct children on the comodel, so a subview beside the field or wrapped in
-/// another element stays on the model around it.
+/// another element stays on the model around it. Beside a subview an xpath locates, `path` is
+/// already inside the field.
 fn spec_subview(node: Node, path: &[String]) -> Option<Vec<String>> {
-    let field = path.last()?.strip_prefix(LOCATOR)?;
+    if !SUBVIEWS.contains(&node.tag_name().name()) {
+        return None;
+    }
     let spec = node.parent_element()?;
+    let Some(field) = path.last()?.strip_prefix(LOCATOR) else {
+        return beside_subview(spec).then(|| path.to_vec());
+    };
     let is_spec = spec.has_tag_name("xpath") || spec.has_attribute("position");
     let inside = matches!(spec.attribute("position"), None | Some("inside"));
     let opened = path.iter().map(String::as_str).chain([field]);
-    (is_spec && inside && SUBVIEWS.contains(&node.tag_name().name())).then(|| opened.map(str::to_owned).collect())
+    (is_spec && inside).then(|| opened.map(str::to_owned).collect())
+}
+
+/// Whether `spec` is an xpath that puts its content where a subview of a field sits, or next to it.
+fn beside_subview(spec: Node) -> bool {
+    let target = spec
+        .attribute("expr")
+        .filter(|_| spec.has_tag_name("xpath"))
+        .and_then(|expr| XPATH_LAST_SUBVIEW.captures(expr.trim()));
+    matches!(spec.attribute("position"), Some("before" | "after" | "replace"))
+        && target.is_some_and(|c| SUBVIEWS.contains(&&c[1]))
 }
 
 /// Extends `path` with where an xpath's target sits: the subviews it reaches into and the field it
-/// locates.
-fn xpath_steps(expr: &str, path: &mut Vec<String>) {
+/// locates. `around` gets those it names by tag, since only the xpath tells them apart when a field
+/// holds more than one.
+fn xpath_steps(expr: &str, path: &mut Vec<String>, around: &mut Vec<ArchSubview>) {
     let before = path.len();
     // Axes such as `/..` or `/following-sibling::x` stay in the field's own view.
     let containers = XPATH_CONTAINER
         .captures_iter(expr)
         .filter(|c| c.get(3).is_none() && &c[2] != "..");
-    path.extend(containers.map(|c| c[1].to_owned()));
+    for c in containers {
+        path.push(c[1].to_owned());
+        if SUBVIEWS.contains(&&c[2]) {
+            around.push(subview(path, &c[2]));
+        }
+    }
     if path.len() == before && XPATH_AMBIGUOUS.is_match(expr) {
         path.push(UNKNOWN_CONTEXT.to_owned());
     }
@@ -1755,11 +1837,70 @@ mod tests {
         );
     }
 
+    fn arch_view(arch: &str) -> ViewFact {
+        view(&format!(
+            r#"<record id="x" model="ir.ui.view"><field name="arch" type="xml">{arch}</field></record>"#
+        ))
+    }
+
     fn subviews(arch: &str) -> Vec<Vec<String>> {
-        let facts = analyze(&format!(
-            r#"<odoo><record id="x" model="ir.ui.view"><field name="arch" type="xml">{arch}</field></record></odoo>"#
-        ));
-        facts.views[0].subviews.clone()
+        arch_view(arch).subviews.into_iter().map(|s| s.path).collect()
+    }
+
+    #[test]
+    fn records_the_tag_of_each_subview() {
+        let tags = |arch| arch_view(arch).subviews.into_iter().map(|s| s.tag).collect::<Vec<_>>();
+        assert_eq!(
+            tags(r#"<form><field name="a"><calendar/></field></form>"#),
+            ["calendar"]
+        );
+        assert_eq!(tags(r#"<field name="a" position="inside"><graph/></field>"#), ["graph"]);
+        assert_eq!(tags(r#"<tree><groupby name="a"/></tree>"#), ["groupby"]);
+    }
+
+    #[test]
+    fn a_calendar_records_the_fields_it_adds() {
+        let fields = |arch| arch_view(arch).subviews.swap_remove(0).attribute_fields;
+        let calendar = r#"<form><field name="a"><calendar date_start="s" date_delay="d" date_stop="e" color="c.color"
+            all_day="y" mode="month"><filter name="f"/><field name="n"/><group><filter name="deep"/></group></calendar></field></form>"#;
+        assert_eq!(fields(calendar), ["s", "d", "e", "c", "y", "f"]);
+        let unset = r#"<form><field name="a"><calendar date_stop=""><filter/></calendar></field></form>"#;
+        assert!(fields(unset).is_empty());
+        let other = r#"<form><field name="a"><graph date_start="s"><filter name="f"/></graph></field></form>"#;
+        assert!(fields(other).is_empty());
+    }
+
+    #[test]
+    fn an_xpath_on_a_subview_opens_what_it_puts_beside_it() {
+        let spec =
+            |position| format!(r#"<xpath expr="//field[@name='a']/tree" position="{position}"><calendar/></xpath>"#);
+        for position in ["before", "after", "replace"] {
+            assert_eq!(subviews(&spec(position)), [vec!["a"]]);
+        }
+        assert!(subviews(&spec("inside")).is_empty());
+        let nested =
+            r#"<xpath expr="//field[@name='a']/form//field[@name='b']/tree[1]" position="after"><form/></xpath>"#;
+        assert_eq!(subviews(nested), [vec!["a", "b"]]);
+        let through = r#"<xpath expr="//field[@name='a']/form/group" position="after"><form/></xpath>"#;
+        assert!(subviews(through).is_empty());
+        let sibling = r#"<xpath expr="//field[@name='a']/following-sibling::tree" position="after"><form/></xpath>"#;
+        assert!(subviews(sibling).is_empty());
+    }
+
+    #[test]
+    fn a_modifier_keeps_the_subviews_around_it() {
+        let around = |arch: &str| {
+            let subviews = arch_view(arch).modifiers.swap_remove(0).subviews;
+            subviews.into_iter().map(|s| s.tag).collect::<Vec<_>>()
+        };
+        let inline = r#"<form><field name="a"><calendar/><tree><field name="b" invisible="c"/></tree></field></form>"#;
+        assert_eq!(around(inline), ["tree"]);
+        let reached = r#"<xpath expr="//field[@name='a']/calendar/field[@name='b']" position="after"><field name="c" invisible="d"/></xpath>"#;
+        assert_eq!(around(reached), ["calendar"]);
+        let swapped = r#"<xpath expr="//field[@name='a']/calendar" position="replace"><tree><field name="c" invisible="d"/></tree></xpath>"#;
+        assert_eq!(around(swapped), ["calendar", "tree"]);
+        let unnamed = r#"<xpath expr="//field[@name='a']//field[@name='b']" position="after"><field name="c" invisible="d"/></xpath>"#;
+        assert!(around(unnamed).is_empty());
     }
 
     #[test]
