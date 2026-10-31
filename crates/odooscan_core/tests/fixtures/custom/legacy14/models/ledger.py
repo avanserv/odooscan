@@ -22,3 +22,15 @@ class LegacyJournal(models.Model):  # odooscan: ignore[OD401]
     _description = "Legacy journal"
 
     name = fields.Char()
+
+
+class LedgerStamp:
+    stamp = fields.Char()
+
+
+class LegacyStamped(LedgerStamp, models.Model):  # odooscan: ignore[OD401]
+    _name = "legacy.stamped"
+    _description = "Legacy stamped"
+
+    def x_stamped(self):
+        return self.search([("stamp", "=", "a")])

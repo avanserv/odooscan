@@ -1,0 +1,3 @@
+id,name,model_id:id,domain_force
+rule_csv_hidden,Hidden parent,model_domain_hidden,"[('stamp', '=', 'a')]"
+rule_csv_whole,Every parent read,model_domain_whole,"[('no_csv_rule', '=', 'a')]"

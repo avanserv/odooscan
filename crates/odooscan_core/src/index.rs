@@ -1792,6 +1792,32 @@ impl<'m> Index<'m> {
             .any(|(_, c)| c.hidden_parents())
     }
 
+    /// Whether a class in scope of `model`, or of a model it inherits or delegates to, may get fields
+    /// from a parent the scan cannot read. Unlike `hidden_parents`, a Python base defined above the
+    /// class in its file that is another class of the chain counts as read: mixins subclass each
+    /// other along their `_inherit`, and Odoo merges that class's fields either way. Every chain
+    /// holds `base`, so its classes prove nothing.
+    pub fn hidden_field_parents(&self, model: &str, scope: &Scope) -> bool {
+        let chain = self.chain(model, Some(scope), true);
+        let read = |mi: usize, class: &ClassFact, base: &str| {
+            self.class_above(mi, class, base).is_some_and(|above| {
+                above.model != "base" && chain.iter().any(|(_, other)| std::ptr::eq(*other, above))
+            })
+        };
+        chain
+            .iter()
+            .any(|&(mi, c)| c.inherit_unknown || c.plain_bases.iter().any(|base| !read(mi, c, base)))
+    }
+
+    /// The class `name` holds where `class` is defined, when its own file defines it above. The
+    /// index keeps no imports, so a class of that name elsewhere may be another class.
+    fn class_above(&self, mi: usize, class: &ClassFact, name: &str) -> Option<&'m ClassFact> {
+        let mut files = self.modules[mi].python.iter().map(|f| &f.facts.classes);
+        let classes = files.find(|classes| classes.iter().any(|c| std::ptr::eq(c, class)))?;
+        let above = classes.iter().take_while(|c| !std::ptr::eq(*c, class));
+        above.filter(|c| c.class_name == name).last()
+    }
+
     /// Whether a class merged into `model` has a parent the scan cannot see. A parent reached through
     /// `_inherits` does not count: it gives the model its fields, so its hidden methods do not reach
     /// the model.

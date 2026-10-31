@@ -1,0 +1,31 @@
+<odoo>
+    <record id="action_domain_hidden" model="ir.actions.act_window">
+        <field name="name">Hidden parent</field>
+        <field name="res_model">domain.hidden</field>
+        <field name="domain">[('stamp', '=', 'a')]</field>
+    </record>
+    <record id="action_domain_whole" model="ir.actions.act_window">
+        <field name="name">Every parent read</field>
+        <field name="res_model">domain.whole</field>
+        <field name="domain">[('no_action', '=', 'a')]</field>
+    </record>
+
+    <record id="view_domain_hidden_search" model="ir.ui.view">
+        <field name="name">domain.hidden.search</field>
+        <field name="model">domain.hidden</field>
+        <field name="arch" type="xml">
+            <search>
+                <filter name="stamped" domain="[('stamp', '=', 'a')]"/>
+            </search>
+        </field>
+    </record>
+    <record id="view_domain_whole_search" model="ir.ui.view">
+        <field name="name">domain.whole.search</field>
+        <field name="model">domain.whole</field>
+        <field name="arch" type="xml">
+            <search>
+                <filter name="unknown" domain="[('no_view_filter', '=', 'a')]"/>
+            </search>
+        </field>
+    </record>
+</odoo>

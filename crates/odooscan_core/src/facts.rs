@@ -180,9 +180,10 @@ pub struct ClassFact {
     pub super_calls: Vec<Spanned<String>>,
     /// Methods of the class that call the method they override through `super()`.
     pub extended: Vec<String>,
-    /// A base class is a plain Python class, whose methods only Python knows: any base but
-    /// `Model`, `TransientModel`, `AbstractModel` and `CachedModel`.
-    pub plain_bases: bool,
+    /// The base classes that are plain Python classes, whose methods only Python knows: any base
+    /// but `Model`, `TransientModel`, `AbstractModel` and `CachedModel`. Each is its bare name, or
+    /// empty for a base a class of the file cannot be, such as `Layout()` or `mixins.Layout`.
+    pub plain_bases: Vec<String>,
     /// The value of `_table`, when the class sets it.
     pub table: Option<OptionValue>,
     /// `_parent_store`, `_auto`, `_log_access`, `_register`, `_date_name` and `_defaults`, when the
@@ -236,7 +237,7 @@ impl ClassFact {
     /// Whether the class has a parent the scan cannot see, which may give it fields and methods: a
     /// plain Python base class, or an `_inherit` element that is not a literal.
     pub fn hidden_parents(&self) -> bool {
-        self.plain_bases || self.inherit_unknown
+        !self.plain_bases.is_empty() || self.inherit_unknown
     }
 }
 

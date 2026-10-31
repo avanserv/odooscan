@@ -225,6 +225,16 @@ custom/data_fields_dep/models/ticket.py:16:36: OD203 'x_demo_text': data.ticket 
 custom/data_fields_dep/models/ticket.py:23:18: OD221 'x_parent_id.dep_depth' makes 'dep_depth' depend on itself on other records, so Odoo logs a warning; declare 'dep_depth' with recursive=True
 custom/data_fields_dep/views/partner_views.xml:8:17: OD304 'x_demo': res.partner has no field 'x_demo'
 custom/data_fields_side/views/partner_views.xml:7:17: OD304 'x_flag': field 'x_flag' of res.partner comes from module data_fields, which is not in depends
+custom/domain_bases/models/domain_models.py:23:23: OD210 'whole_id.no_past_base': domain.whole has no field 'no_past_base'
+custom/domain_bases/models/domain_models.py:53:30: OD210 'no_chained': domain.chained has no field 'no_chained'
+custom/domain_bases/models/domain_models.py:99:23: OD210 'label.no_past_char': domain.found.label is not a relational field, so the path cannot continue
+custom/domain_bases/models/domain_models.py:100:30: OD210 'side_stamp': field 'side_stamp' of domain.found comes from module domain_bases_side, which is not in depends
+custom/domain_bases/models/domain_models.py:108:58: OD210 'no_field_domain': domain.whole has no field 'no_field_domain'
+custom/domain_bases/models/domain_models.py:111:23: OD210 'no_search': domain.whole has no field 'no_search'
+custom/domain_bases/security/ir.rule.csv:3:1: OD210 'no_csv_rule': domain.whole has no field 'no_csv_rule'
+custom/domain_bases/security/rules.xml:10:36: OD210 'no_xml_rule': domain.whole has no field 'no_xml_rule'
+custom/domain_bases/views/domains.xml:10:9: OD210 'no_action': domain.whole has no field 'no_action'
+custom/domain_bases/views/domains.xml:27:17: OD210 'no_view_filter': domain.whole has no field 'no_view_filter'
 custom/field_options/models/bench.py:9:19: OD220 'partner_ids' has the label 'Partner' of field 'partner_id' of greenhouse.bench, so Odoo logs a warning and users cannot tell them apart; give it another string
 custom/field_options/models/bench.py:10:34: OD220 'planted_on' has the label 'Created on' of field 'create_date' of greenhouse.bench, so Odoo logs a warning and users cannot tell them apart; give it another string
 custom/field_options/models/bench.py:44:38: OD220 'common_name' has the label 'Name' of field 'name' of res.partner, so Odoo logs a warning and users cannot tell them apart; give it another string
