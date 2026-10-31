@@ -14,7 +14,7 @@ use crate::index::{
     BASE_MODEL_METHODS, Export, FieldDef, FieldInfo, Index, JsSpec, RELATIONAL_TYPES, Scope, Status, ViewTree, full_id,
     js_module_path, located,
 };
-use crate::project::{Module, SourceFile};
+use crate::project::{Module, SourceFile, code_loaded};
 use crate::rules::rule;
 use crate::series::{self, Series};
 use crate::xml::{LOCATOR, QWEB, UNKNOWN_CONTEXT};
@@ -468,25 +468,13 @@ fn manifest_files<'m>(module: &'m Module, out: &mut Out<'m>) {
 }
 
 fn unloaded_files<'m>(module: &'m Module, series: Option<Series>, out: &mut Out<'m>) {
-    let mentioned = |in_manifest: bool| -> FxHashSet<&str> {
-        let files = module
-            .python
-            .iter()
-            .filter(|f| (f.path == module.manifest_path) == in_manifest);
-        files.flat_map(|f| &f.facts.file_mentions).map(String::as_str).collect()
-    };
-    let (in_code, in_manifest) = (mentioned(false), mentioned(true));
+    let mentions = module.code_mentions();
     for file in module.data.iter().filter(|f| f.rank.is_none() && f.facts.is_data) {
         let top = file.rel.split('/').next().unwrap_or_default();
-        let base = file.rel.rsplit('/').next().unwrap_or_default();
         let ignored = module.manifest.ignored_key(&file.rel, series);
-        // Chart templates and files named in Python code are loaded by that code.
-        let code_loaded = in_code.contains(base) || file.rel.starts_with("data/template/");
-        // A file listed under a legacy key was meant to load, wherever it sits. The manifest names
-        // the files of keys such as `other_files` too, which the module loads itself.
-        let unlisted = ignored.is_none()
-            && (!file.rel.contains('/') || UNLISTED_DIRS.contains(&top) || in_manifest.contains(base));
-        if !code_loaded && !unlisted {
+        // A file listed under a legacy key was meant to load, wherever it sits.
+        let unlisted = ignored.is_none() && (!file.rel.contains('/') || UNLISTED_DIRS.contains(&top));
+        if !code_loaded(&file.rel, &mentions, &module.manifest, series) && !unlisted {
             out.push(
                 &file.path,
                 "OD502",

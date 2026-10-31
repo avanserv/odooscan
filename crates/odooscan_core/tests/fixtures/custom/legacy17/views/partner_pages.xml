@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <template id="partner_cover">
+        <t t-call="legacy17.partner_motto_page"/>
+        <t t-call="legacy17.partner_ported_page"/>
+    </template>
+</odoo>

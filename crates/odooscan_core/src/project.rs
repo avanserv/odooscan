@@ -46,6 +46,26 @@ pub struct Module {
     pub sql_views: Vec<String>,
 }
 
+impl Module {
+    /// The `.xml` and `.csv` file names the module's Python mentions, its manifest aside.
+    pub fn code_mentions(&self) -> FxHashSet<&str> {
+        let code = self.python.iter().filter(|f| f.path != self.manifest_path);
+        code.flat_map(|f| &f.facts.file_mentions).map(String::as_str).collect()
+    }
+}
+
+/// Whether the module loads the file itself, given its `Module::code_mentions`: chart templates,
+/// any file its Python names by base name, and any file the manifest lists under a key Odoo loads
+/// nothing from, unless a legacy key `series` ignores lists it too: that file was meant to load
+/// from there. A manifest entry matches by path: a base name would also match each entry of
+/// `data`, and so every `tests/` copy of a listed file.
+pub fn code_loaded(rel: &str, mentions: &FxHashSet<&str>, manifest: &Manifest, series: Option<Series>) -> bool {
+    let base = rel.rsplit('/').next().unwrap_or_default();
+    mentions.contains(base)
+        || rel.starts_with("data/template/")
+        || (manifest.unread.iter().any(|f| f == rel) && manifest.ignored_key(rel, series).is_none())
+}
+
 fn manifest_in(dir: &Path) -> Option<PathBuf> {
     MANIFESTS.iter().map(|m| dir.join(m)).find(|p| p.is_file())
 }
@@ -309,6 +329,39 @@ fn parse_static_files<T: Send>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn code_loads_the_files_it_names_and_chart_templates() {
+        let mentions = FxHashSet::from_iter(["pages.xml"]);
+        let none = Manifest::default();
+        assert!(code_loaded("data/pages.xml", &mentions, &none, None));
+        assert!(code_loaded("pages.xml", &mentions, &none, None));
+        assert!(code_loaded(
+            "data/template/account.tax.csv",
+            &FxHashSet::default(),
+            &none,
+            None
+        ));
+        assert!(!code_loaded("views/page.xml", &mentions, &none, None));
+        assert!(!code_loaded("template/account.tax.csv", &mentions, &none, None));
+    }
+
+    #[test]
+    fn code_loads_the_files_a_key_odoo_ignores_lists_by_path() {
+        let m = manifest::parse(r#"{"data": ["views/a.xml"], "other_files": ["data/b.xml"]}"#).unwrap();
+        let mentions = FxHashSet::default();
+        assert!(code_loaded("data/b.xml", &mentions, &m, None));
+        assert!(!code_loaded("tests/b.xml", &mentions, &m, None));
+        assert!(!code_loaded("tests/a.xml", &mentions, &m, None));
+    }
+
+    #[test]
+    fn code_does_not_load_a_file_a_legacy_key_was_meant_to() {
+        let m = manifest::parse(r#"{"update_xml": ["views/a.xml"], "other_files": ["views/a.xml"]}"#).unwrap();
+        let mentions = FxHashSet::default();
+        assert!(!code_loaded("views/a.xml", &mentions, &m, Series::parse("17.0")));
+        assert!(code_loaded("views/a.xml", &mentions, &m, Series::parse("14.0")));
+    }
 
     #[test]
     fn a_file_listed_as_data_too_is_no_demo() {

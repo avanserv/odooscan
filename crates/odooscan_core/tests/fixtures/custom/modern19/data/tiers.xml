@@ -2,4 +2,8 @@
     <record id="tier_partner" model="res.partner">
         <field name="tier">bronze</field>
     </record>
+
+    <template id="tier_cover">
+        <t t-call="modern19.tier_page"/>
+    </template>
 </odoo>

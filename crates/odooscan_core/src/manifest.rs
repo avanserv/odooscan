@@ -77,6 +77,8 @@ pub struct Manifest {
     pub auto_install: AutoInstall,
     /// Globs the `assets` bundles add, relative to the addons directory.
     pub assets: Vec<String>,
+    /// Entries of the list keys Odoo loads nothing from, such as `other_files`, normalized.
+    pub unread: Vec<String>,
 }
 
 impl Manifest {
@@ -144,7 +146,7 @@ impl Manifest {
             "installable" => self.installable = !matches!(value, Expr::BooleanLiteral(b) if !b.value),
             "assets" => self.assets = asset_globs(value),
             "auto_install" => self.auto_install = AutoInstall::read(value),
-            _ => {}
+            _ => self.unread.extend(names(loc, value).iter().map(|f| normalize(f))),
         }
     }
 
@@ -192,6 +194,7 @@ fn list(loc: &Locator, e: &Expr) -> Vec<Spanned<String>> {
     let elts = match e {
         Expr::List(l) => &l.elts[..],
         Expr::Tuple(t) => &t.elts[..],
+        Expr::Set(s) => &s.elts[..],
         _ => &[],
     };
     elts.iter()
@@ -316,5 +319,22 @@ mod tests {
         assert_eq!(key("views/update.xml", None), None);
         assert_eq!(key("views/other.xml", Some("17.0")), None);
         assert_eq!(m.listed("other_files").count(), 0);
+    }
+
+    #[test]
+    fn reads_a_set_as_odoo_iterates_it() {
+        let m = parse(r#"{"data": {"views/a.xml"}, "demo": {"data/b.xml"}}"#).unwrap();
+        let files: Vec<_> = m.loaded_files(Series::parse("16.0")).collect();
+        assert_eq!(files, ["views/a.xml", "data/b.xml"]);
+    }
+
+    #[test]
+    fn keeps_the_entries_of_keys_nothing_loads_from() {
+        let m = parse(
+            r#"{"name": "x.xml", "data": ["d.xml"], "update_xml": ["u.xml"], "demo": ["e.xml"],
+                "other_files": ["./data/x.xml"], "test": ("test/y.xml",)}"#,
+        )
+        .unwrap();
+        assert_eq!(m.unread, ["data/x.xml", "test/y.xml"]);
     }
 }

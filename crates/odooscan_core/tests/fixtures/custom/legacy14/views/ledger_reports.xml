@@ -27,4 +27,8 @@
     <act_window id="action_ledger_view" name="Ledger view" res_model="legacy.ledger" view_mode="gantt" view_id="view_ledger_form"/>
     <act_window id="action_ledger_ref" name="Ledger ref" res_model="legacy.ledger" view_mode="gantt"
                 context="{'gantt_view_ref': 'legacy14.view_ledger_form'}"/>
+
+    <template id="ledger_cover">
+        <t t-call="legacy14.ledger_page"/>
+    </template>
 </odoo>

@@ -111,4 +111,16 @@
         <field name="model">res.partner</field>
         <field name="report_name">named_sheet</field>
     </record>
+
+    <record id="name_unlisted_template" model="ir.actions.report">
+        <field name="name">name_unlisted_template</field>
+        <field name="model">res.partner</field>
+        <field name="report_name">report_actions.unlisted_sheet</field>
+    </record>
+
+    <record id="name_unlisted_key" model="ir.actions.report">
+        <field name="name">name_unlisted_key</field>
+        <field name="model">res.partner</field>
+        <field name="report_name">report_actions.unlisted_sheet_key</field>
+    </record>
 </odoo>

@@ -12,4 +12,8 @@
     </record>
 
     <menuitem id="menu_ledger" parent="menu_ledger_root" action="action_ledger"/>
+
+    <template id="ledger_page">
+        <div/>
+    </template>
 </odoo>

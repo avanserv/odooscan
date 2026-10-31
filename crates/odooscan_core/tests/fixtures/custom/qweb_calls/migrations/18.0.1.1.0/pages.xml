@@ -1,0 +1,5 @@
+<odoo>
+    <template id="migration_page">
+        <div/>
+    </template>
+</odoo>

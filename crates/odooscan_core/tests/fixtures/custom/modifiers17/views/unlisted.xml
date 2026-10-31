@@ -1,0 +1,12 @@
+<odoo>
+    <record id="job_brief_note" model="ir.ui.view">
+        <field name="name">modifier.job.brief.note</field>
+        <field name="model">modifier.job</field>
+        <field name="inherit_id" ref="job_brief"/>
+        <field name="arch" type="xml">
+            <field name="name" position="after">
+                <field name="note"/>
+            </field>
+        </field>
+    </record>
+</odoo>
