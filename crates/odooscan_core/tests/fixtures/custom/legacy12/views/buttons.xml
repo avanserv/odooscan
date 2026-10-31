@@ -1,0 +1,11 @@
+<odoo>
+    <record id="partner_buttons" model="ir.ui.view">
+        <field name="name">legacy12.partner.buttons</field>
+        <field name="model">res.partner</field>
+        <field name="arch" type="xml">
+            <form>
+                <button type="object" name="print_report"/>
+            </form>
+        </field>
+    </record>
+</odoo>

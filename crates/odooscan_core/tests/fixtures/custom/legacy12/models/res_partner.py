@@ -20,3 +20,10 @@ class ResPartnerStamp(models.Model):
 
     create_date = fields.Datetime(copy=False)
     stamped_on = fields.Datetime(string="Create Date")
+
+
+class ResPartnerWorkflow(models.Model):
+    _inherit = "res.partner"
+
+    def create_workflow(self):
+        return super().create_workflow()

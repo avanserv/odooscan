@@ -1,0 +1,4 @@
+<odoo>
+    <function model="res.partner" name="_check_selection_field_value"/>
+    <function model="res.partner" name="delete_workflow"/>
+</odoo>

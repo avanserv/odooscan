@@ -1040,7 +1040,10 @@ impl<'m> Ctx<'_, 'm> {
             return;
         }
         for call in &class.super_calls {
-            if !self.index.has_parent_method(&class.model, &call.value, class) {
+            if !self
+                .index
+                .has_parent_method(&class.model, &call.value, class, self.series)
+            {
                 out.push(
                     path,
                     "OD211",
@@ -2004,7 +2007,7 @@ impl<'m> Ctx<'_, 'm> {
         if !self.sees_model(model) || self.index.merged_hidden_parents(model, self.scope) {
             return None;
         }
-        match self.index.data_method(model, method, self.scope) {
+        match self.index.data_method(model, method, self.scope, self.series) {
             Status::Visible => None,
             Status::Hidden(m) => Some(format!(
                 "method '{method}' of {model} comes from module {m}, which is not in depends"
