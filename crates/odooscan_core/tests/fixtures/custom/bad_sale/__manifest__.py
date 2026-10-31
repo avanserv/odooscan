@@ -10,7 +10,6 @@
         "views/locators.xml",
         "data/missing.xml",
         "data/assigned.xml",
-        "data/res.partner-extra.csv",
         "views/domains.xml",
     ],
     "assets": {"web.assets_backend": ["bad_sale/static/src/js/**/*"]},
