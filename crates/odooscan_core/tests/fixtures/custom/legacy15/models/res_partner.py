@@ -37,3 +37,13 @@ class IrHttp(models.AbstractModel):
     def _handle_exception(cls, exception):
         http.request.env.cr.rollback()
         return exception
+
+
+class ResPartnerNames(models.Model):
+    _inherit = "res.partner"
+
+    def name_get(self):
+        return super().name_get()
+
+    def _name_gone(self):
+        return super()._name_gone()
