@@ -1787,6 +1787,17 @@ impl<'m> Index<'m> {
             .any(|(_, c)| c.hidden_parents())
     }
 
+    /// Whether a class in scope of `model`, or of a model it inherits or delegates to, delegates to a
+    /// parent the scan cannot read, or is such a parent, so the fields `model` has through `_inherits`
+    /// are not all known. `hidden_parents` asks of methods too, which a delegate does not pass on.
+    pub fn unread_delegate(&self, model: &str, scope: &Scope) -> bool {
+        self.chain(model, Some(scope), true).iter().any(|(_, c)| {
+            let delegates = c.inherits.iter().map(|(parent, _)| parent);
+            let mut parents = delegates.chain(c.inherit.iter().map(|parent| &parent.value));
+            c.inherits_unknown || c.delegate_unknown || parents.any(|parent| !self.has_model(parent))
+        })
+    }
+
     /// Whether the class that introduces `model` with `_name` is in scope. When it is not, the
     /// definitions that give its fields their first attributes are missing from the index.
     pub fn introduced(&self, model: &str, scope: &Scope) -> bool {

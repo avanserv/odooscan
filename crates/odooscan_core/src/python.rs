@@ -654,6 +654,16 @@ fn is_delegate(value: &Expr) -> bool {
         .is_some_and(|d| matches!(d, Expr::BooleanLiteral(b) if b.value))
 }
 
+/// Whether the Many2one may delegate in a way `ClassFact::inherits` cannot hold: Odoo reads the truth
+/// of `delegate`, which a non-literal value or a `**` unpacking may give.
+fn may_delegate(value: &Expr) -> bool {
+    let Some(("Many2one", call)) = field_call(value) else {
+        return false;
+    };
+    let falsy = |d: &Expr| matches!(option_value(d), OptionValue::Bool(false) | OptionValue::Falsy);
+    call.arguments.keywords.iter().any(|k| k.arg.is_none()) || keyword(call, "delegate").is_some_and(|d| !falsy(d))
+}
+
 fn is_api(expr: &Expr, name: &str) -> bool {
     matches!(expr, Expr::Attribute(a) if a.attr.as_str() == name && tail_name(&a.value) == Some("api"))
 }
@@ -909,6 +919,7 @@ impl<'ast> PyVisitor<'_, 'ast> {
             inherits: vec![],
             delegations: vec![],
             inherits_unknown: false,
+            delegate_unknown: false,
             fields: vec![],
             methods: vec![],
             private_methods: vec![],
@@ -1186,6 +1197,8 @@ impl<'ast> PyVisitor<'_, 'ast> {
             if !fact.inherits.contains(&pair) {
                 fact.inherits.push(pair);
             }
+        } else if may_delegate(value) {
+            fact.delegate_unknown = true;
         }
         fact.fields.push(field);
     }
@@ -2318,6 +2331,36 @@ mod tests {
                 None,
             );
             assert!(facts.classes[0].inherits_unknown, "{value}");
+        }
+    }
+
+    #[test]
+    fn marks_a_many2one_that_may_delegate_to_an_unread_parent() {
+        let unknown = |field: &str| {
+            let facts = analyze(
+                &format!("class X(models.Model):\n    _name = 'x'\n    y_id = {field}\n"),
+                None,
+            );
+            facts.classes[0].delegate_unknown
+        };
+        for field in [
+            "fields.Many2one(PARTNER, delegate=True)",
+            "fields.Many2one(comodel_name=PARTNER, delegate=True)",
+            "fields.Many2one('res.partner', delegate=DELEGATE)",
+            "fields.Many2one('res.partner', delegate=1)",
+            "fields.Many2one('res.partner', **OPTIONS)",
+        ] {
+            assert!(unknown(field), "{field}");
+        }
+        for field in [
+            "fields.Many2one('res.partner', delegate=True)",
+            "fields.Many2one('res.partner', delegate=False)",
+            "fields.Many2one('res.partner', delegate=None)",
+            "fields.Many2one('res.partner')",
+            "fields.Char(delegate=True)",
+            "fields.Many2many('res.partner', delegate=True)",
+        ] {
+            assert!(!unknown(field), "{field}");
         }
     }
 

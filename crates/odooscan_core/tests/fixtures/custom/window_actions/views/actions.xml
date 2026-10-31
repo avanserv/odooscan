@@ -80,7 +80,7 @@
     <record id="action_generated" model="ir.actions.act_window">
         <field name="name">action_generated</field>
         <field name="res_model">window.plain</field>
-        <field name="view_mode">form,search,list,pivot,kanban,graph,activity</field>
+        <field name="view_mode">form,search,list,pivot,kanban,graph</field>
     </record>
 
     <record id="action_eval_model" model="ir.actions.act_window">
@@ -162,5 +162,23 @@
         <field name="name">action_nameless_view</field>
         <field name="res_model">window.nameless</field>
         <field name="view_mode">gantt,map</field>
+    </record>
+
+    <record id="action_activity" model="ir.actions.act_window">
+        <field name="name">action_activity</field>
+        <field name="res_model">window.plain</field>
+        <field name="view_mode">list,activity</field>
+    </record>
+
+    <record id="action_scheduled_view" model="ir.actions.act_window">
+        <field name="name">action_scheduled_view</field>
+        <field name="res_model">window.scheduled</field>
+        <field name="view_mode">list,activity</field>
+    </record>
+
+    <record id="action_tracked" model="ir.actions.act_window">
+        <field name="name">action_tracked</field>
+        <field name="res_model">window.tracked</field>
+        <field name="view_mode">list,activity</field>
     </record>
 </odoo>

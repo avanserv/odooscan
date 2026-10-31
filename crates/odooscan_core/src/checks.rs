@@ -46,9 +46,8 @@ const VIEW_FIELD_KINDS: &[&str] = &["form", "tree", "kanban"];
 /// the outer view.
 const ATTRIBUTE_SUBVIEW: &str = "calendar";
 
-/// View types Odoo generates for any model. `activity` is `BaseModel`'s in 12.0, which no scan
-/// indexes, and `mail`'s after it.
-const GENERATED_VIEWS: &[&str] = &["form", "search", "list", "tree", "pivot", "kanban", "graph", "activity"];
+/// View types Odoo generates for any model. `activity` is not one: `ACTIVITY_IN_MAIL` says why.
+const GENERATED_VIEWS: &[&str] = &["form", "search", "list", "tree", "pivot", "kanban", "graph"];
 
 /// Fields Odoo's generated calendar takes its start from, after the model's `_date_name`.
 const CALENDAR_STARTS: &[&str] = &["date", "date_start", "x_date", "x_date_start"];
@@ -68,6 +67,15 @@ const CALENDAR_STOPS: &[&str] = &[
 /// 19.0 refuses to generate a calendar without a stop (`odoo/addons/base/models/ir_ui_view.py:2898`),
 /// saas~19.1 does not (`:2909`).
 const CALENDAR_STOP_OPTIONAL: Series = Series { major: 19, minor: 1 };
+
+/// The first series whose `activity` default comes with `mail` (`b2de618f9ff9`), so a model outside
+/// it has none (`odoo/addons/base/models/ir_ui_view.py:2711` on 18.0), and whose client searches
+/// `activity_ids` (`addons/mail/static/src/views/web/activity/activity_model.js:10` on 18.0). From
+/// saas~11.5 up to here `BaseModel` gives the default (`odoo/models.py:1292` on 12.0), and before
+/// saas~11.2 the client drops the type. saas~11.2 to 11.4 load it with no default
+/// (`addons/web/static/src/js/chrome/action_manager_act_window.js:304` on saas~11.3), which the
+/// rule leaves unreported.
+const ACTIVITY_IN_MAIL: Series = Series { major: 12, minor: 4 };
 
 /// The first series that validates a record rule's domain when it writes one
 /// (`odoo/addons/base/models/ir_rule.py:63` on 18.0). 14.0 evaluates it only when a query applies the
@@ -1748,21 +1756,41 @@ impl<'m> Ctx<'_, 'm> {
         let mut seen = FxHashSet::default();
         let kinds = mode.value.split(',').map(str::trim).filter(|k| !k.is_empty());
         for kind in kinds.filter(|k| seen.insert(*k)) {
-            if writes.iter().any(|(_, a)| a.names_view(kind)) {
-                continue;
-            }
-            if let Some(message) = self.view_gap(model, kind) {
+            let named = writes.iter().any(|(_, a)| a.names_view(kind));
+            let gap = self.activity_gap(model, kind);
+            if let Some(message) = gap.or_else(|| self.view_gap(model, kind).filter(|_| !named)) {
                 out.push(path, "OD318", mode.pos, message);
             }
         }
     }
 
+    /// Why the client cannot open `model` as `kind` whatever view it gets: from `ACTIVITY_IN_MAIL`
+    /// its domain names `activity_ids`, and the server refuses a field the model lacks. A field only
+    /// a module outside `depends` adds counts, as that module may be installed, and so may one that
+    /// a delegate the scan cannot read gives.
+    fn activity_gap(&self, model: &str, kind: &str) -> Option<String> {
+        let searched = kind == "activity" && self.series.is_some_and(|s| s >= ACTIVITY_IN_MAIL);
+        let absent = || {
+            !self.index.unread_delegate(model, self.scope)
+                && matches!(self.index.field(model, "activity_ids", self.scope), Err(None))
+        };
+        (searched && absent()).then(|| {
+            format!("{model} has no field activity_ids, which the activity view searches; inherit mail.activity.mixin")
+        })
+    }
+
+    /// Whether this module's series needs no view of `kind` from the model. `activity` is reported
+    /// from `ACTIVITY_IN_MAIL` only, and a module of unknown series may run below it.
+    fn generated(&self, kind: &str) -> bool {
+        GENERATED_VIEWS.contains(&kind) || (kind == "activity" && self.series.is_none_or(|s| s < ACTIVITY_IN_MAIL))
+    }
+
     /// Why opening `model` as `kind` fails. A view counts from any indexed module, in `depends` or
     /// not, as a bridge module that depends on this one may be what adds it. A default counts in
-    /// scope only: it comes with a module such as `web_gantt`, which nothing else installs.
+    /// scope only: a fresh database of this module lacks one from a module outside `depends`.
     fn view_gap(&self, model: &str, kind: &str) -> Option<String> {
         let types = &self.index.view_types;
-        if GENERATED_VIEWS.contains(&kind)
+        if self.generated(kind)
             || types.contains(&(model, Some(kind)))
             || types.contains(&(model, None))
             || self.index.default_view(model, kind, self.scope)

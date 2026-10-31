@@ -1,0 +1,80 @@
+<odoo>
+    <record id="action_mailed" model="ir.actions.act_window">
+        <field name="name">action_mailed</field>
+        <field name="res_model">window.mailed</field>
+        <field name="view_mode">list,form,activity</field>
+    </record>
+
+    <record id="action_noted" model="ir.actions.act_window">
+        <field name="name">action_noted</field>
+        <field name="res_model">window.noted</field>
+        <field name="view_mode">list,form,activity</field>
+    </record>
+
+    <record id="action_boxed" model="ir.actions.act_window">
+        <field name="name">action_boxed</field>
+        <field name="res_model">window.boxed</field>
+        <field name="view_mode">list,activity</field>
+    </record>
+
+    <record id="action_boxed_named" model="ir.actions.act_window">
+        <field name="name">action_boxed_named</field>
+        <field name="res_model">window.boxed</field>
+        <field name="view_mode">activity,list</field>
+        <field name="view_id" ref="view_boxed_activity"/>
+    </record>
+
+    <record id="action_delegated" model="ir.actions.act_window">
+        <field name="name">action_delegated</field>
+        <field name="res_model">window.delegated</field>
+        <field name="view_mode">list,activity</field>
+    </record>
+
+    <record id="action_delegated_bare" model="ir.actions.act_window">
+        <field name="name">action_delegated_bare</field>
+        <field name="res_model">window.delegated.bare</field>
+        <field name="view_mode">list,activity</field>
+    </record>
+
+    <record id="action_unread_value" model="ir.actions.act_window">
+        <field name="name">action_unread_value</field>
+        <field name="res_model">window.unread.value</field>
+        <field name="view_mode">list,activity</field>
+    </record>
+
+    <record id="action_unread_key" model="ir.actions.act_window">
+        <field name="name">action_unread_key</field>
+        <field name="res_model">window.unread.key</field>
+        <field name="view_mode">list,activity</field>
+    </record>
+
+    <record id="action_unread_comodel" model="ir.actions.act_window">
+        <field name="name">action_unread_comodel</field>
+        <field name="res_model">window.unread.comodel</field>
+        <field name="view_mode">list,activity</field>
+    </record>
+
+    <record id="action_unread_flag" model="ir.actions.act_window">
+        <field name="name">action_unread_flag</field>
+        <field name="res_model">window.unread.flag</field>
+        <field name="view_mode">list,activity</field>
+    </record>
+
+    <record id="action_unread_options" model="ir.actions.act_window">
+        <field name="name">action_unread_options</field>
+        <field name="res_model">window.unread.options</field>
+        <field name="view_mode">list,activity</field>
+    </record>
+
+    <record id="action_unread_absent" model="ir.actions.act_window">
+        <field name="name">action_unread_absent</field>
+        <field name="res_model">window.unread.absent</field>
+        <field name="view_mode">list,activity</field>
+    </record>
+
+    <record id="action_unread_whole" model="ir.actions.act_window">
+        <field name="name">action_unread_whole</field>
+        <field name="res_model">window.unread.whole</field>
+        <field name="view_mode">list,activity</field>
+    </record>
+</odoo>
