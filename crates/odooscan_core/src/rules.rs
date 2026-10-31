@@ -39,13 +39,14 @@ pub struct Rule {
 pub const SUPERSEDED: &[(&str, &str)] = &[("OD101", "OD701")];
 
 /// Severities that replace a rule's own from some series on, as (code, series range, severity).
-/// From 20.0, `ir.access` rows only grant access, so a model meant for the superuser alone has
-/// none. From saas~18.3, Odoo refuses a model whose `_inherits` field is not required with ondelete
-/// 'cascade' or 'restrict' instead of fixing it. From saas~16.4, a `check_company` field gets the
-/// domain its comodel's `_check_company_domain` gives, which by default names a `company_id` the
-/// comodel may lack.
+/// From saas~19.4, `odoo/addons/base/__manifest__.py:81` loads `ir.access.csv` where saas~19.3
+/// loads `ir.model.access.csv` (`:78`), and `ir.access` rows only grant access, so a model meant
+/// for the superuser alone has none. From saas~18.3, Odoo refuses a model whose `_inherits` field
+/// is not required with ondelete 'cascade' or 'restrict' instead of fixing it. From saas~16.4, a
+/// `check_company` field gets the domain its comodel's `_check_company_domain` gives, which by
+/// default names a `company_id` the comodel may lack.
 const SEVERITY_BY_SERIES: &[(&str, &str, Severity)] = &[
-    ("OD401", ">=20.0", Severity::Info),
+    ("OD401", ">=saas~19.4", Severity::Info),
     ("OD218", ">=saas~18.3", Severity::Error),
     ("OD222", ">=saas~16.4", Severity::Error),
 ];
@@ -230,9 +231,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn access_rule_is_info_from_20() {
+    fn access_rule_is_info_from_saas_19_4() {
         let od401 = rule("OD401");
         assert_eq!(od401.severity_for(Series::parse("18.0")), Severity::Warning);
+        assert_eq!(od401.severity_for(Series::parse("saas~19.3")), Severity::Warning);
+        assert_eq!(od401.severity_for(Series::parse("saas~19.4")), Severity::Info);
         assert_eq!(od401.severity_for(Series::parse("20.0")), Severity::Info);
         assert_eq!(od401.severity_for(None), Severity::Warning);
     }
