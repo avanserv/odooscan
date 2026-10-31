@@ -299,7 +299,7 @@ struct Finder<'n> {
 impl<'a> Visitor<'a> for Finder<'_> {
     fn visit_expr(&mut self, expr: &'a Expr) {
         let hit = match (self.attr, expr) {
-            (None, Expr::Call(c)) => matches!(&*c.func, Expr::Name(n) if n.id.as_str() == "super"),
+            (None, Expr::Call(c)) => is_super(&c.func),
             (Some(attr), Expr::Attribute(a)) => a.attr.as_str() == attr,
             _ => false,
         };
@@ -352,10 +352,45 @@ fn is_guard(expr: &Expr) -> bool {
     finder.found
 }
 
-/// The methods called as `super().name(...)` or `super(Class, self).name(...)`.
+/// The methods called as `super().name(...)` or `super(Class, self).name(...)`, each with whether
+/// a `hasattr` test on the same `super()` and name encloses the call.
 #[derive(Default)]
 struct SuperCalls<'a> {
-    calls: Vec<(&'a str, TextSize)>,
+    calls: Vec<(&'a str, TextSize, bool)>,
+    guards: Vec<(&'a Expr, &'a str)>,
+}
+
+impl<'a> SuperCalls<'a> {
+    fn under(&mut self, test: &'a Expr, visit: impl FnOnce(&mut Self)) {
+        let depth = self.guards.len();
+        hasattr_tests(test, &mut self.guards);
+        visit(self);
+        self.guards.truncate(depth);
+    }
+}
+
+/// The `hasattr(super(...), 'name')` tests that must hold for `test` to hold.
+fn hasattr_tests<'a>(test: &'a Expr, tests: &mut Vec<(&'a Expr, &'a str)>) {
+    match test {
+        Expr::BoolOp(all) if all.op == BoolOp::And => {
+            for value in &all.values {
+                hasattr_tests(value, tests);
+            }
+        }
+        Expr::Call(call) if matches!(&*call.func, Expr::Name(n) if n.id.as_str() == "hasattr") => {
+            if let [target @ Expr::Call(inner), name] = &*call.arguments.args
+                && is_super(&inner.func)
+                && let Some(name) = str_lit(name)
+            {
+                tests.push((target, name));
+            }
+        }
+        _ => {}
+    }
+}
+
+fn is_super(func: &Expr) -> bool {
+    matches!(func, Expr::Name(n) if n.id.as_str() == "super")
 }
 
 impl<'a> Visitor<'a> for SuperCalls<'a> {
@@ -371,17 +406,41 @@ impl<'a> Visitor<'a> for SuperCalls<'a> {
                     self.visit_arguments(arguments);
                 }
             }
+            Stmt::If(branch) => {
+                self.visit_expr(&branch.test);
+                self.under(&branch.test, |calls| calls.visit_body(&branch.body));
+                for clause in &branch.elif_else_clauses {
+                    match &clause.test {
+                        Some(test) => {
+                            self.visit_expr(test);
+                            self.under(test, |calls| calls.visit_body(&clause.body));
+                        }
+                        None => self.visit_body(&clause.body),
+                    }
+                }
+            }
             _ => visitor::walk_stmt(self, stmt),
         }
     }
 
     fn visit_expr(&mut self, expr: &'a Expr) {
+        if let Expr::If(branch) = expr {
+            self.visit_expr(&branch.test);
+            self.under(&branch.test, |calls| calls.visit_expr(&branch.body));
+            self.visit_expr(&branch.orelse);
+            return;
+        }
         if let Expr::Call(call) = expr
             && let Expr::Attribute(a) = &*call.func
             && let Expr::Call(inner) = &*a.value
-            && matches!(&*inner.func, Expr::Name(n) if n.id.as_str() == "super")
+            && is_super(&inner.func)
         {
-            self.calls.push((a.attr.as_str(), a.attr.start()));
+            let name = a.attr.as_str();
+            let guarded = self
+                .guards
+                .iter()
+                .any(|(target, test)| *test == name && method_body::same(target, &a.value));
+            self.calls.push((name, a.attr.start(), guarded));
         }
         visitor::walk_expr(self, expr);
     }
@@ -922,14 +981,20 @@ impl<'ast> PyVisitor<'_, 'ast> {
         calls.visit_body(&func.body);
         self.method_checks(func, fact);
         self.override_checks(func, &calls.calls);
-        if calls.calls.iter().any(|(name, _)| *name == func.name.as_str()) {
+        if calls.calls.iter().any(|(name, ..)| *name == func.name.as_str()) {
             fact.extended.push(func.name.to_string());
         }
-        fact.super_calls
-            .extend(calls.calls.into_iter().map(|(name, at)| Spanned {
-                value: name.to_owned(),
-                pos: self.loc.pos(at),
-            }));
+        // A guarded call cannot fail, so only OD211 skips it: OD119 and OD223 still see an override.
+        fact.super_calls.extend(
+            calls
+                .calls
+                .into_iter()
+                .filter(|(.., guarded)| !guarded)
+                .map(|(name, at, _)| Spanned {
+                    value: name.to_owned(),
+                    pos: self.loc.pos(at),
+                }),
+        );
     }
 
     fn class_attrs(&mut self, targets: &[Expr], value: &Expr, fact: &mut ClassFact, naming: &mut Naming) {
@@ -1259,10 +1324,10 @@ impl<'ast> PyVisitor<'_, 'ast> {
 
     /// OD119 on an override whose result never reaches its callers, and OD117 and OD118 on a
     /// `create` that takes one dict at a time.
-    fn override_checks(&mut self, func: &ast::StmtFunctionDef, supers: &[(&str, TextSize)]) {
+    fn override_checks(&mut self, func: &ast::StmtFunctionDef, supers: &[(&str, TextSize, bool)]) {
         let name = func.name.as_str();
         if matches!(name, "create" | "write" | "copy")
-            && supers.iter().any(|(called, _)| *called == name)
+            && supers.iter().any(|(called, ..)| *called == name)
             && !method_body::returns_value(&func.body)
         {
             self.diag(
@@ -2105,6 +2170,56 @@ mod tests {
         assert_eq!(called(&facts.classes[1]), ["_own"]);
         assert!(facts.classes[0].extended.is_empty());
         assert!(!facts.diags.iter().any(|d| d.code == "OD119"));
+    }
+
+    #[test]
+    fn a_hasattr_test_guards_only_its_own_super_call() {
+        let called = |body: &str| {
+            let facts = analyze(
+                &format!("class X(models.Model):\n    _name = 'x'\n    def m(self):\n{body}"),
+                None,
+            );
+            let class = &facts.classes[0];
+            class.super_calls.iter().map(|c| c.value.clone()).collect::<Vec<_>>()
+        };
+        let none: [&str; 0] = [];
+        for silent in [
+            "        if hasattr(super(), 'a'):\n            super().a()\n",
+            "        if hasattr(super(X, self), 'a'):\n            super(X, self).a()\n",
+            "        if x and hasattr(super(), 'a'):\n            super().a()\n",
+            "        if x:\n            pass\n        elif hasattr(super(), 'a'):\n            super().a()\n",
+            "        if hasattr(super(), 'a'):\n            def f():\n                super().a()\n",
+            "        return super().a() if hasattr(super(), 'a') else None\n",
+        ] {
+            assert_eq!(called(silent), none, "{silent}");
+        }
+        for reported in [
+            "        super().a()\n",
+            "        if hasattr(super(), 'b'):\n            super().a()\n",
+            "        if hasattr(super(), 'a'):\n            pass\n        super().a()\n",
+            "        if hasattr(super(), 'a'):\n            pass\n        else:\n            super().a()\n",
+            "        if hasattr(super(), 'a'):\n            pass\n        elif x:\n            super().a()\n",
+            "        if hasattr(super(), 'a') or x:\n            super().a()\n",
+            "        if not hasattr(super(), 'a'):\n            super().a()\n",
+            "        if hasattr(self, 'a'):\n            super().a()\n",
+            "        if hasattr(super(Y, self), 'a'):\n            super(X, self).a()\n",
+            "        return None if hasattr(super(), 'a') else super().a()\n",
+        ] {
+            assert_eq!(called(reported), ["a"], "{reported}");
+        }
+    }
+
+    #[test]
+    fn a_guarded_super_call_still_extends_the_method() {
+        let facts = analyze(
+            "class X(models.Model):\n    _name = 'x'\n    def write(self, vals):\n        \
+             if hasattr(super(), 'write'):\n            super().write(vals)\n",
+            None,
+        );
+        let class = &facts.classes[0];
+        assert!(class.super_calls.is_empty());
+        assert_eq!(class.extended, ["write"]);
+        assert!(facts.diags.iter().any(|d| d.code == "OD119"));
     }
 
     #[test]
