@@ -3,7 +3,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::facts::{
     ActionFact, Annotation, ArchElement, ClassFact, DataFacts, FieldFact, FlowSummary, Heritage, JsClass, ModelKind,
-    OptionValue, PyFacts, Receiver, RecordWrite, ReportFact, RuleFact, ServerFact, ViewFact,
+    OptionValue, PyFacts, Receiver, RecordWrite, ReportFact, RuleFact, ServerFact, ViewFact, WrittenValue,
 };
 use crate::manifest::AutoInstall;
 use crate::project::{Module, SourceFile, code_loaded};
@@ -26,8 +26,35 @@ const LOG_COLUMNS: &[&str] = &["create_uid", "create_date", "write_uid", "write_
 
 pub const RELATIONAL_TYPES: &[&str] = &["Many2one", "One2many", "Many2many"];
 
-/// Types whose value is not a record of a fixed comodel, so a path cannot continue through them.
-const OPAQUE_TYPES: &[&str] = &["Reference", "Many2oneReference", "Properties", "Json"];
+/// Types a path cannot be followed through: the value is not a record of a fixed comodel, or, for
+/// `UNREAD_TYPE`, the scan cannot tell which comodel it is.
+const OPAQUE_TYPES: &[&str] = &["Reference", "Many2oneReference", "Properties", "Json", UNREAD_TYPE];
+
+/// The type of a field whose `ir.model.fields` record gives no `ttype` the scan can read.
+const UNREAD_TYPE: &str = "Unread";
+
+/// The class Odoo builds for each `ttype`.
+const FIELD_CLASSES: &[(&str, &str)] = &[
+    ("binary", "Binary"),
+    ("boolean", "Boolean"),
+    ("char", "Char"),
+    ("date", "Date"),
+    ("datetime", "Datetime"),
+    ("float", "Float"),
+    ("html", "Html"),
+    ("integer", "Integer"),
+    ("json", "Json"),
+    ("many2many", "Many2many"),
+    ("many2one", "Many2one"),
+    ("many2one_reference", "Many2oneReference"),
+    ("monetary", "Monetary"),
+    ("one2many", "One2many"),
+    ("properties", "Properties"),
+    ("properties_definition", "PropertiesDefinition"),
+    ("reference", "Reference"),
+    ("selection", "Selection"),
+    ("text", "Text"),
+];
 
 /// Fields declared outside the class body, which the extractor cannot see.
 const EXTRA_FIELDS: &[(&str, &str)] = &[("ir.rule", "global")];
@@ -440,6 +467,12 @@ type IrDefaults<'m> = FxHashMap<(&'m str, &'m str), Vec<(usize, bool)>>;
 
 type XmlIds<'m> = FxHashMap<String, Vec<XmlIdDef<'m>>>;
 
+/// The writes that make up one record, in load order.
+type FoldedRecord<'m> = Vec<PlacedWrite<'m>>;
+
+/// The fields `ir.model.fields` records add, by name.
+type DataFields<'m> = FxHashMap<&'m str, Vec<DataField<'m>>>;
+
 /// The flow summary of a function, with the file and module it is in.
 #[derive(Clone, Copy)]
 pub struct FlowRef<'m> {
@@ -546,6 +579,14 @@ fn class_ids<'m>(
     }
 }
 
+/// The data files Odoo loads for `module`: those its manifest lists and those it loads itself.
+fn loaded_data(module: &Module, series: Option<Series>) -> impl Iterator<Item = &SourceFile<DataFacts>> {
+    let mentions = module.code_mentions();
+    let loaded =
+        move |f: &&SourceFile<DataFacts>| f.rank.is_some() || code_loaded(&f.rel, &mentions, &module.manifest, series);
+    module.data.iter().filter(loaded)
+}
+
 fn data_ids<'m>(
     mi: usize,
     module: &'m Module,
@@ -556,12 +597,7 @@ fn data_ids<'m>(
     series: Option<Series>,
 ) {
     let name = module.name.as_str();
-    let mentions = module.code_mentions();
-    for file in module
-        .data
-        .iter()
-        .filter(|f| f.rank.is_some() || code_loaded(&f.rel, &mentions, &module.manifest, series))
-    {
+    for file in loaded_data(module, series) {
         for key in &file.facts.view_keys {
             view_keys.entry(key).or_default().push(mi);
         }
@@ -808,6 +844,42 @@ fn load_order(modules: &[Module], by_name: &FxHashMap<&str, usize>) -> Vec<usize
     order
 }
 
+/// Folds writes of `(module name, write)`, in load order, into records: those of one id make one
+/// record, and a write without an id is a record of its own.
+fn fold_writes<'m>(writes: impl Iterator<Item = (&'m str, PlacedWrite<'m>)>) -> Vec<FoldedRecord<'m>> {
+    let mut records: Vec<FoldedRecord<'m>> = vec![];
+    let mut by_id: FxHashMap<String, usize> = FxHashMap::default();
+    for (module, placed) in writes {
+        let id = placed.write.id.as_ref().map(|id| full_id(module, id));
+        let known = id.as_ref().and_then(|id| by_id.get(id)).copied();
+        if let Some(at) = known {
+            records[at].push(placed);
+            continue;
+        }
+        if let Some(id) = id {
+            by_id.insert(id, records.len());
+        }
+        records.push(vec![placed]);
+    }
+    records
+}
+
+/// The value the last of `record`'s writes to give the field `name` leaves it.
+fn last_written<'m>(record: &[PlacedWrite<'m>], name: &str) -> Option<(usize, &'m WrittenValue)> {
+    record.iter().rev().find_map(|placed| {
+        let field = placed.write.fields.iter().find(|f| f.name == name)?;
+        Some((placed.module, &field.value))
+    })
+}
+
+/// The text `record` leaves in the field `name`.
+fn last_text<'m>(record: &[PlacedWrite<'m>], name: &str) -> Option<&'m str> {
+    match last_written(record, name)?.1 {
+        WrittenValue::Text(text) => Some(text.value.trim()),
+        _ => None,
+    }
+}
+
 /// Every write of the files manifests load to each record, in the order Odoo loads them.
 fn record_writes<'m, T>(
     modules: &'m [Module],
@@ -907,13 +979,31 @@ pub struct XmlIdDef<'m> {
 }
 
 /// The modules a module may use: itself, its transitive depends and the always-installed modules.
+#[derive(Clone)]
 pub struct Scope {
     visible: Vec<bool>,
+    /// The modules whose `ir.model.fields` records have loaded when the reader of this scope runs.
+    records: Vec<bool>,
+    demo: bool,
 }
 
 impl Scope {
     pub fn sees(&self, module: usize) -> bool {
         self.visible[module]
+    }
+
+    /// This scope for a reader in a demo file, which loads after the data and only where demo data
+    /// does.
+    pub fn in_demo(&self) -> Scope {
+        Scope {
+            demo: true,
+            ..self.clone()
+        }
+    }
+
+    /// Whether the field `record` adds exists when the reader of this scope runs.
+    fn holds(&self, record: &DataField) -> bool {
+        self.records[record.module] && (self.demo || !record.demo)
     }
 }
 
@@ -927,6 +1017,25 @@ pub enum Status<'m> {
 
 /// A field definition, with its module and class.
 pub type FieldDef<'m> = (usize, &'m ClassFact, &'m FieldFact);
+
+/// A write of an `ir.model.fields` record, with where it loads.
+#[derive(Clone, Copy)]
+struct PlacedWrite<'m> {
+    module: usize,
+    demo: bool,
+    write: &'m RecordWrite,
+}
+
+/// A field an `ir.model.fields` record adds.
+struct DataField<'m> {
+    module: usize,
+    /// Only a database with demo data gets it.
+    demo: bool,
+    /// None when only a run tells the model, which then may be any.
+    model: Option<&'m str>,
+    ftype: &'static str,
+    comodel: Option<&'m str>,
+}
 
 pub struct FieldInfo<'m> {
     pub ftype: &'m str,
@@ -962,6 +1071,7 @@ pub struct Index<'m> {
     pub server_writes: Writes<'m, ServerFact>,
     pub report_writes: Writes<'m, ReportFact>,
     pub value_writes: Writes<'m, RecordWrite>,
+    data_fields: DataFields<'m>,
     /// The ids of records Odoo creates alongside others.
     pub derived: FxHashSet<String>,
     ir_defaults: IrDefaults<'m>,
@@ -1022,6 +1132,7 @@ impl<'m> Index<'m> {
             server_writes: record_writes(modules, &by_name, |f| &f.servers, |s| s.id.as_ref()),
             report_writes: record_writes(modules, &by_name, |f| &f.reports, |r| r.id.as_ref()),
             value_writes: record_writes(modules, &by_name, |f| &f.writes, |w| w.id.as_ref()),
+            data_fields: FxHashMap::default(),
             derived,
             ir_defaults: ir_defaults(modules),
             view_keys,
@@ -1042,7 +1153,71 @@ impl<'m> Index<'m> {
         index.patched = index.patched_classes();
         index.template_bases = index.template_bases();
         index.view_types = index.view_types();
+        index.data_fields = index.data_fields(default_series);
         index
+    }
+
+    /// The fields the `ir.model.fields` records of the files Odoo loads add.
+    fn data_fields(&self, default_series: Option<Series>) -> DataFields<'m> {
+        let modules = self.modules;
+        let writes = load_order(modules, &self.by_name).into_iter().flat_map(|mi| {
+            let module = &modules[mi];
+            let files = loaded_data(module, module.series.or(default_series));
+            let name = module.name.as_str();
+            files.flat_map(move |f| {
+                let writes = f.facts.writes.iter().filter(|w| w.model == "ir.model.fields");
+                writes.map(move |write| {
+                    let demo = f.demo;
+                    (
+                        name,
+                        PlacedWrite {
+                            module: mi,
+                            demo,
+                            write,
+                        },
+                    )
+                })
+            })
+        });
+        let mut fields: DataFields<'m> = FxHashMap::default();
+        for record in fold_writes(writes) {
+            if let Some((name, field)) = self.field_of_record(&record) {
+                fields.entry(name).or_default().push(field);
+            }
+        }
+        fields
+    }
+
+    /// The field `record` leaves, if Odoo builds one: only a `manual` record, the default state, adds
+    /// a field, under a name Odoo holds to `x_`. `model_id` is required and `create` never derives
+    /// it, so a record that does not give it fails to load; one nested in an `ir.model` is unread.
+    fn field_of_record(&self, record: &[PlacedWrite<'m>]) -> Option<(&'m str, DataField<'m>)> {
+        let name = last_text(record, "name").filter(|n| n.starts_with("x_"))?;
+        last_written(record, "model_id")?;
+        if last_text(record, "state").is_some_and(|s| s != "manual") {
+            return None;
+        }
+        let ttype = last_text(record, "ttype");
+        let class = FIELD_CLASSES.iter().find(|(t, _)| Some(*t) == ttype).map(|(_, c)| *c);
+        let field = DataField {
+            module: record[0].module,
+            demo: record[0].demo,
+            model: self.model_of_record(record),
+            ftype: class.unwrap_or(UNREAD_TYPE),
+            comodel: last_text(record, "relation"),
+        };
+        Some((name, field))
+    }
+
+    /// The model the last `model_id` of `record` names. For a `model_id` only a run tells, the `model`
+    /// the record gives, which `create` holds to it, and else none.
+    fn model_of_record(&self, record: &[PlacedWrite<'m>]) -> Option<&'m str> {
+        let named = last_written(record, "model_id").and_then(|(mi, value)| match value {
+            WrittenValue::Ids(ids) => self.model_of_xmlid(&full_id(&self.modules[mi].name, &ids.first()?.value)),
+            WrittenValue::Model(model) => Some(model.value.as_str()),
+            _ => None,
+        });
+        named.or_else(|| last_text(record, "model"))
     }
 
     fn view_types(&self) -> FxHashSet<(&'m str, &'m str)> {
@@ -1283,7 +1458,24 @@ impl<'m> Index<'m> {
     pub fn scope(&self, module: usize) -> Scope {
         let always = (0..self.modules.len()).filter(|&mi| self.always_installed(mi));
         let (visible, _) = depends_closure(self.modules, &self.by_name, std::iter::once(module).chain(always));
-        Scope { visible }
+        Scope {
+            records: visible.clone(),
+            visible,
+            demo: false,
+        }
+    }
+
+    /// The scope of what Odoo reads as it sets up the Python fields and attributes of `module`, and
+    /// of what `init()` and `_auto_init()` run. That comes ahead of the data files of `module`, so of
+    /// the `ir.model.fields` records only those of its dependencies count, and a failure there
+    /// refuses the install whatever the file order.
+    pub fn setup_scope(&self, module: usize) -> Scope {
+        let (mut records, _) = depends_closure(self.modules, &self.by_name, [module]);
+        records[module] = false;
+        Scope {
+            records,
+            ..self.scope(module)
+        }
     }
 
     /// The summaries of every definition of a model's method, overrides included.
@@ -1532,11 +1724,31 @@ impl<'m> Index<'m> {
         })
     }
 
-    /// Whether a class of `model` or of a model it inherits, in any indexed module, defines `field`.
-    pub fn defines_field(&self, model: &str, field: &str) -> bool {
+    /// Whether a class of `model` or of a model it inherits, or an `ir.model.fields` record, in any
+    /// indexed module, defines `field`. A record in `scope` counts only if it has loaded by then.
+    pub fn defines_field(&self, model: &str, field: &str, scope: &Scope) -> bool {
+        let counts = |f: &DataField| !scope.sees(f.module) || scope.holds(f);
         self.chain(model, None, false)
             .iter()
             .any(|(_, c)| c.fields.iter().any(|f| f.name == field))
+            || self.data_field(model, field, None, counts).is_some()
+    }
+
+    /// The `ir.model.fields` record that adds `field` to `model` or to a model of its chain. Odoo adds
+    /// such a field before it copies delegated ones, so `_inherits` children get it. `_inherit`
+    /// children do not, but the chain joins both, and staying silent there is the safe side. Only
+    /// the records `counts` keeps qualify.
+    fn data_field(
+        &self,
+        model: &str,
+        field: &str,
+        scope: Option<&Scope>,
+        counts: impl Fn(&DataField) -> bool,
+    ) -> Option<&DataField<'m>> {
+        let candidates = self.data_fields.get(field)?;
+        let chain = self.chain(model, scope, true);
+        let on = |m: &str| m == model || chain.iter().any(|(_, c)| c.model == m);
+        candidates.iter().filter(|f| counts(f)).find(|f| f.model.is_none_or(on))
     }
 
     /// Whether a module in `scope` gives `field` of `model` an `ir.default`. One of a demo file is no
@@ -1576,7 +1788,8 @@ impl<'m> Index<'m> {
     }
 
     /// `field` of `model`: the model's own definitions, which shadow those of a model it delegates
-    /// to. `Err(Some(module))` when the field exists only outside the scope.
+    /// to, and else the record that adds it. `Err(Some(module))` when the field exists only outside
+    /// the scope.
     pub fn field(&self, model: &str, field: &str, scope: &Scope) -> Result<Option<FieldInfo<'m>>, Option<&'m str>> {
         self.field_from(model, field, scope, &mut vec![])
     }
@@ -1599,10 +1812,18 @@ impl<'m> Index<'m> {
             defs = self.field_defs(model, field, Some(scope));
         }
         let Some((_, _, first)) = defs.first() else {
-            return Err(self
-                .field_defs(model, field, None)
-                .first()
-                .map(|(mi, _, _)| self.modules[*mi].name.as_str()));
+            // Odoo skips a manual field whose name a class already gave the model.
+            if let Some(data) = self.data_field(model, field, Some(scope), |f| scope.holds(f)) {
+                return Ok(Some(FieldInfo {
+                    ftype: data.ftype,
+                    comodel: data.comodel.map(str::to_owned),
+                }));
+            }
+            let python = self.field_defs(model, field, None).first().map(|(mi, _, _)| *mi);
+            // A record in scope that has not loaded yet is no matter of `depends`.
+            let elsewhere = |f: &DataField| !scope.sees(f.module);
+            let definer = python.or_else(|| self.data_field(model, field, None, elsewhere).map(|d| d.module));
+            return Err(definer.map(|mi| self.modules[mi].name.as_str()));
         };
         let comodel = defs
             .iter()
@@ -1960,8 +2181,44 @@ fn method_flows(modules: &[Module]) -> MethodFlows<'_> {
 
 #[cfg(test)]
 mod tests {
-    use super::{BASE_MODEL_EXTRA, BASE_MODEL_METHODS, BASE_PRIVATE_METHODS, base_private_method, class_file};
+    use super::{
+        BASE_MODEL_EXTRA, BASE_MODEL_METHODS, BASE_PRIVATE_METHODS, FIELD_CLASSES, PlacedWrite, base_private_method,
+        class_file, fold_writes, last_text,
+    };
     use crate::series::Series;
+    use crate::xml;
+
+    #[test]
+    fn every_field_class_is_its_ttype_in_camel_case() {
+        for (ttype, class) in FIELD_CLASSES {
+            assert_eq!(class.to_lowercase(), ttype.replace('_', ""));
+        }
+    }
+
+    #[test]
+    fn folds_the_writes_of_an_id_and_keeps_the_rest_apart() {
+        let facts = xml::analyze(
+            r#"<odoo>
+                <record id="f" model="ir.model.fields">
+                    <field name="name">x_old</field>
+                    <field name="ttype">char</field>
+                </record>
+                <record model="ir.model.fields"><field name="name">x_idless</field></record>
+                <record model="ir.model.fields"><field name="name">x_other_idless</field></record>
+                <record id="a.f" model="ir.model.fields"><field name="name">x_new</field></record>
+            </odoo>"#,
+        );
+        let elsewhere = xml::analyze(r#"<odoo><record id="f" model="ir.model.fields"/></odoo>"#);
+        let placed = |module, name, write| {
+            let demo = false;
+            (name, PlacedWrite { module, demo, write })
+        };
+        let writes = facts.writes.iter().map(|w| placed(0, "a", w));
+        let records = fold_writes(writes.chain(elsewhere.writes.iter().map(|w| placed(1, "b", w))));
+        let names: Vec<_> = records.iter().map(|r| last_text(r, "name")).collect();
+        assert_eq!(names, [Some("x_new"), Some("x_idless"), Some("x_other_idless"), None]);
+        assert_eq!(last_text(&records[0], "ttype"), Some("char"));
+    }
 
     #[test]
     fn maps_a_class_path_to_its_files() {

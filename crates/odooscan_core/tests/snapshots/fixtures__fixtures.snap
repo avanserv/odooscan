@@ -182,6 +182,49 @@ custom/cursor_state/models/sql_writes.py:209:9: OD122 DELETE on res_partner bypa
 custom/cursor_state/models/sql_writes.py:213:9: OD122 INSERT on x_partner_tier bypasses the ORM, so records this transaction already read keep stale values; call flush_model() before the query and invalidate_model() after it (flush() and invalidate_cache() before 16.0)
 custom/cycle_a/__manifest__.py:1:66: OD504 module 'cycle_b' depends back on cycle_a, so Odoo installs neither
 custom/cycle_b/__manifest__.py:1:58: OD504 module 'cycle_a' depends back on cycle_b, so Odoo installs neither
+custom/data_fields/data/fields.xml:64:5: OD303 XML id 'field_x_late' is already defined earlier in this file
+custom/data_fields/data/fields.xml:122:5: OD303 XML id 'field_x_partner_id' is already defined earlier in this file
+custom/data_fields/data/partners.xml:5:9: OD309 res.partner has no field 'x_unloaded'
+custom/data_fields/data/partners.xml:6:9: OD309 res.partner has no field 'x_demo'
+custom/data_fields/data/unlisted.xml:1:1: OD502 'data/unlisted.xml' is not in the manifest's data or demo, so Odoo never loads it
+custom/data_fields/models/ticket.py:9:17: OD203 'x_text': data.ticket has no field 'x_text'
+custom/data_fields/models/ticket.py:10:20: OD203 'x_active': data.ticket has no field 'x_active'
+custom/data_fields/models/ticket.py:16:14: OD212 Monetary field 'amount' has no currency: data.ticket has no currency_id, and the field names no currency_field
+custom/data_fields/models/ticket.py:20:39: OD203 'x_text': data.ticket has no field 'x_text'
+custom/data_fields/models/ticket.py:21:45: OD203 'x_partner_id.name': data.ticket has no field 'x_partner_id'
+custom/data_fields/models/ticket.py:22:56: OD203 'x_ticket_id': data.ticket.line has no field 'x_ticket_id'
+custom/data_fields/models/ticket.py:23:58: OD203 'x_res_model': data.ticket has no field 'x_res_model'
+custom/data_fields/models/ticket.py:28:18: OD203 'x_depended': data.ticket has no field 'x_depended'
+custom/data_fields/models/ticket.py:33:18: OD203 'x_parent_id.depth': data.ticket has no field 'x_parent_id'
+custom/data_fields/models/ticket.py:50:53: OD224 t.x_demo_column: data_ticket has no such column, since data.ticket has no field x_demo_column; name the column of a stored field of data.ticket
+custom/data_fields/models/ticket.py:65:64: OD224 t.x_column: data_ticket has no such column, since data.ticket has no field x_column; name the column of a stored field of data.ticket
+custom/data_fields/models/ticket.py:86:75: OD224 t.x_column: data_ticket has no such column, since data.ticket has no field x_column; name the column of a stored field of data.ticket
+custom/data_fields/security/rules.xml:16:36: OD210 'x_unloaded': res.partner has no field 'x_unloaded'
+custom/data_fields/security/rules.xml:21:36: OD210 'x_demo': res.partner has no field 'x_demo'
+custom/data_fields/security/rules.xml:26:36: OD210 'x_partner_id.no_partner_field': res.partner has no field 'no_partner_field'
+custom/data_fields/security/rules.xml:31:36: OD210 'x_text.name': data.ticket.x_text is not a relational field, so the path cannot continue
+custom/data_fields/security/rules.xml:41:36: OD210 'x_python.name': data.ticket.x_python is not a relational field, so the path cannot continue
+custom/data_fields/views/partner_views.xml:19:17: OD304 'x_unloaded': res.partner has no field 'x_unloaded'
+custom/data_fields/views/partner_views.xml:20:17: OD304 'x_base_state': res.partner has no field 'x_base_state'
+custom/data_fields/views/partner_views.xml:21:17: OD304 'no_prefix': res.partner has no field 'no_prefix'
+custom/data_fields/views/partner_views.xml:22:53: OD316 invisible names 'x_unloaded': res.partner has no field 'x_unloaded'
+custom/data_fields/views/partner_views.xml:23:17: OD304 'x_no_model_id': res.partner has no field 'x_no_model_id'
+custom/data_fields/views/partner_views.xml:24:17: OD304 'x_nested': res.partner has no field 'x_nested'
+custom/data_fields/views/partner_views.xml:25:17: OD304 'x_demo': res.partner has no field 'x_demo'
+custom/data_fields/views/partner_views.xml:26:52: OD316 readonly names 'x_demo': res.partner has no field 'x_demo'
+custom/data_fields/views/ticket_views.xml:8:17: OD304 'x_flag': data.ticket has no field 'x_flag'
+custom/data_fields/views/ticket_views.xml:9:17: OD304 'x_by_eval': data.ticket has no field 'x_by_eval'
+custom/data_fields/views/ticket_views.xml:10:17: OD304 'x_by_search': data.ticket has no field 'x_by_search'
+custom/data_fields/views/ticket_views.xml:11:17: OD304 'x_by_name': data.ticket has no field 'x_by_name'
+custom/data_fields/views/ticket_views.xml:12:17: OD304 'x_from_csv': data.ticket has no field 'x_from_csv'
+custom/data_fields/views/ticket_views.xml:13:17: OD304 'x_late': data.ticket has no field 'x_late'
+custom/data_fields/views/ticket_views.xml:17:25: OD304 'x_line_ids.no_line_field': data.ticket.line has no field 'no_line_field'
+custom/data_fields/views/ticket_views.xml:18:53: OD312 data.ticket.line has no method 'no_line_method'
+custom/data_fields_dep/models/ticket.py:11:45: OD207 'dep_wrong_type' is a Integer field related to 'x_partner_id.name', which is a Char field
+custom/data_fields_dep/models/ticket.py:16:36: OD203 'x_demo_text': data.ticket has no field 'x_demo_text'
+custom/data_fields_dep/models/ticket.py:23:18: OD221 'x_parent_id.dep_depth' makes 'dep_depth' depend on itself on other records, so Odoo logs a warning; declare 'dep_depth' with recursive=True
+custom/data_fields_dep/views/partner_views.xml:8:17: OD304 'x_demo': res.partner has no field 'x_demo'
+custom/data_fields_side/views/partner_views.xml:7:17: OD304 'x_flag': field 'x_flag' of res.partner comes from module data_fields, which is not in depends
 custom/field_options/models/bench.py:9:19: OD220 'partner_ids' has the label 'Partner' of field 'partner_id' of greenhouse.bench, so Odoo logs a warning and users cannot tell them apart; give it another string
 custom/field_options/models/bench.py:10:34: OD220 'planted_on' has the label 'Created on' of field 'create_date' of greenhouse.bench, so Odoo logs a warning and users cannot tell them apart; give it another string
 custom/field_options/models/bench.py:44:38: OD220 'common_name' has the label 'Name' of field 'name' of res.partner, so Odoo logs a warning and users cannot tell them apart; give it another string

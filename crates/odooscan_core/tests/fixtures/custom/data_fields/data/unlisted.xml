@@ -1,0 +1,7 @@
+<odoo>
+    <record id="field_x_unloaded" model="ir.model.fields">
+        <field name="name">x_unloaded</field>
+        <field name="model_id" ref="base.model_res_partner"/>
+        <field name="ttype">boolean</field>
+    </record>
+</odoo>

@@ -1,0 +1,156 @@
+<odoo>
+    <record id="field_x_flag" model="ir.model.fields">
+        <field name="name">x_flag</field>
+        <field name="model_id" ref="base.model_res_partner"/>
+        <field name="ttype">boolean</field>
+    </record>
+    <record id="field_x_by_eval" model="ir.model.fields">
+        <field name="name">x_by_eval</field>
+        <field name="model_id" eval="ref('base.model_res_partner')"/>
+        <field name="ttype">char</field>
+    </record>
+    <record id="field_x_by_search" model="ir.model.fields">
+        <field name="name">x_by_search</field>
+        <field name="model_id" search="[('model', '=', 'res.partner')]"/>
+        <field name="ttype">char</field>
+    </record>
+    <record id="field_x_by_name" model="ir.model.fields">
+        <field name="name">x_by_name</field>
+        <field name="model_id" eval="obj().env['ir.model']._get_id('res.partner')"/>
+        <field name="model">res.partner</field>
+        <field name="ttype">char</field>
+    </record>
+    <record id="field_x_no_model_id" model="ir.model.fields">
+        <field name="name">x_no_model_id</field>
+        <field name="model">res.partner</field>
+        <field name="ttype">char</field>
+    </record>
+    <record id="field_x_by_run" model="ir.model.fields">
+        <field name="name">x_by_run</field>
+        <field name="model_id" eval="obj().env['ir.model']._get_id('res.partner')"/>
+        <field name="ttype">char</field>
+    </record>
+    <record model="ir.model.fields">
+        <field name="name">x_idless</field>
+        <field name="model_id" ref="base.model_res_partner"/>
+        <field name="ttype">char</field>
+    </record>
+    <record model="ir.model.fields">
+        <field name="name">x_idless_too</field>
+        <field name="model_id" ref="base.model_res_partner"/>
+        <field name="ttype">char</field>
+    </record>
+    <record id="field_x_manual_state" model="ir.model.fields">
+        <field name="name">x_manual_state</field>
+        <field name="model_id" ref="base.model_res_partner"/>
+        <field name="ttype">boolean</field>
+        <field name="state">manual</field>
+    </record>
+    <record id="field_x_base_state" model="ir.model.fields">
+        <field name="name">x_base_state</field>
+        <field name="model_id" ref="base.model_res_partner"/>
+        <field name="ttype">char</field>
+        <field name="state">base</field>
+    </record>
+    <record id="field_no_prefix" model="ir.model.fields">
+        <field name="name">no_prefix</field>
+        <field name="model_id" ref="base.model_res_partner"/>
+        <field name="ttype">char</field>
+    </record>
+    <record id="field_x_late" model="ir.model.fields">
+        <field name="model_id" ref="base.model_res_partner"/>
+        <field name="ttype">char</field>
+    </record>
+    <record id="field_x_late" model="ir.model.fields">
+        <field name="name">x_late</field>
+    </record>
+
+    <record id="field_x_date" model="ir.model.fields">
+        <field name="name">x_date</field>
+        <field name="model_id" ref="model_data_ticket"/>
+        <field name="ttype">date</field>
+    </record>
+    <record id="field_x_currency_id" model="ir.model.fields">
+        <field name="name">x_currency_id</field>
+        <field name="model_id" ref="model_data_ticket"/>
+        <field name="ttype">many2one</field>
+        <field name="relation">res.currency</field>
+    </record>
+    <record id="field_x_depended" model="ir.model.fields">
+        <field name="name">x_depended</field>
+        <field name="model_id" ref="model_data_ticket"/>
+        <field name="ttype">char</field>
+    </record>
+    <record id="field_x_checked" model="ir.model.fields">
+        <field name="name">x_checked</field>
+        <field name="model_id" ref="model_data_ticket"/>
+        <field name="ttype">integer</field>
+    </record>
+    <record id="field_x_column" model="ir.model.fields">
+        <field name="name">x_column</field>
+        <field name="model_id" ref="model_data_ticket"/>
+        <field name="ttype">char</field>
+    </record>
+    <record id="field_x_text" model="ir.model.fields">
+        <field name="name">x_text</field>
+        <field name="model_id" ref="model_data_ticket"/>
+        <field name="ttype">char</field>
+    </record>
+    <record id="field_x_line_ids" model="ir.model.fields">
+        <field name="name">x_line_ids</field>
+        <field name="model_id" ref="model_data_ticket"/>
+        <field name="ttype">one2many</field>
+        <field name="relation">data.ticket.line</field>
+        <field name="relation_field">ticket_id</field>
+    </record>
+    <record id="field_x_unread_type" model="ir.model.fields">
+        <field name="name">x_unread_type</field>
+        <field name="model_id" ref="model_data_ticket"/>
+        <field name="ttype" eval="obj().env.context.get('ttype')"/>
+    </record>
+    <record id="field_x_python" model="ir.model.fields">
+        <field name="name">x_python</field>
+        <field name="model_id" ref="model_data_ticket"/>
+        <field name="ttype">many2one</field>
+        <field name="relation">res.partner</field>
+    </record>
+    <record id="field_x_partner_id" model="ir.model.fields">
+        <field name="name">x_partner_id</field>
+        <field name="model_id" ref="model_data_ticket"/>
+        <field name="ttype">many2one</field>
+    </record>
+    <record id="field_x_partner_id" model="ir.model.fields">
+        <field name="relation">res.partner</field>
+    </record>
+    <record id="field_x_parent_id" model="ir.model.fields">
+        <field name="name">x_parent_id</field>
+        <field name="model_id" ref="model_data_ticket"/>
+        <field name="ttype">many2one</field>
+        <field name="relation">data.ticket</field>
+    </record>
+    <record id="field_x_active" model="ir.model.fields">
+        <field name="name">x_active</field>
+        <field name="model_id" ref="model_data_ticket"/>
+        <field name="ttype">boolean</field>
+    </record>
+    <record id="field_x_res_model" model="ir.model.fields">
+        <field name="name">x_res_model</field>
+        <field name="model_id" ref="model_data_ticket"/>
+        <field name="ttype">char</field>
+    </record>
+    <record id="field_x_ticket_id" model="ir.model.fields">
+        <field name="name">x_ticket_id</field>
+        <field name="model_id" ref="model_data_ticket_line"/>
+        <field name="ttype">many2one</field>
+        <field name="relation">data.ticket</field>
+    </record>
+
+    <record id="base.model_res_partner" model="ir.model">
+        <field name="field_id">
+            <record id="field_x_nested" model="ir.model.fields">
+                <field name="name">x_nested</field>
+                <field name="ttype">char</field>
+            </record>
+        </field>
+    </record>
+</odoo>

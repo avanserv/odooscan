@@ -256,7 +256,7 @@ mod tests {
                 format!("{}={}", f.name, ids.join("+"))
             }
             WrittenValue::Text(text) => format!("{}='{}'", f.name, text.value),
-            WrittenValue::Opaque => format!("{}?", f.name),
+            WrittenValue::Model(_) | WrittenValue::Opaque => format!("{}?", f.name),
         };
         facts.writes[0].fields.iter().map(shown).collect()
     }

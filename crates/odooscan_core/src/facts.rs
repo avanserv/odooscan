@@ -164,9 +164,11 @@ pub struct ClassFact {
     pub paths: Vec<Spanned<String>>,
     /// The field paths each method decorated with `@api.depends` names, by method.
     pub depends: Vec<(String, Vec<Spanned<String>>)>,
-    /// The fields `_order` sorts by and `_rec_name`, `_parent_name`, `_fold_name` and `_active_name`
-    /// name, which must exist on the model.
+    /// The fields `_order` sorts by and `_parent_name` and `_fold_name` name, which must exist on the
+    /// model when Odoo reads them.
     pub order_fields: Vec<Spanned<String>>,
+    /// The fields `_rec_name` and `_active_name` name, which Odoo asserts as it sets up the model.
+    pub setup_fields: Vec<Spanned<String>>,
     /// The field paths of `_rec_names_search`.
     pub rec_names_search: Vec<Spanned<String>>,
     /// Methods the class's methods call through `super()`.
@@ -312,6 +314,8 @@ pub struct SqlColumn {
     /// The reference as written.
     pub text: String,
     pub pos: Pos,
+    /// The query runs in `init()` or `_auto_init()`, ahead of its module's data.
+    pub before_data: bool,
 }
 
 #[derive(Debug, Default)]
@@ -450,6 +454,8 @@ pub enum WrittenValue {
     /// XML ids of records of the field's comodel.
     Ids(Vec<Spanned<String>>),
     Text(Spanned<String>),
+    /// The name of the `ir.model` a `search` finds.
+    Model(Spanned<String>),
     Opaque,
 }
 

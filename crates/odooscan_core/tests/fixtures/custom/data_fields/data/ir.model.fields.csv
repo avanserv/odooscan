@@ -1,0 +1,2 @@
+id,name,model_id:id,ttype
+field_x_from_csv,x_from_csv,base.model_res_partner,char
