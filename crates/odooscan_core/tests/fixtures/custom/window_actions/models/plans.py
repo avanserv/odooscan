@@ -66,6 +66,41 @@ class WindowDerived(models.Model):
     name = fields.Char()
 
 
+class WindowCloned(models.Model):
+    _name = "window.cloned"
+    _description = "Window cloned"
+
+    name = fields.Char()
+
+
+class WindowAdopted(models.Model):
+    _name = "window.adopted"
+    _description = "Window adopted"
+
+    name = fields.Char()
+
+
+class WindowRelayed(models.Model):
+    _name = "window.relayed"
+    _description = "Window relayed"
+
+    name = fields.Char()
+
+
+class WindowSought(models.Model):
+    _name = "window.sought"
+    _description = "Window sought"
+
+    name = fields.Char()
+
+
+class WindowSifted(models.Model):
+    _name = "window.sifted"
+    _description = "Window sifted"
+
+    name = fields.Char()
+
+
 class WindowBridged(models.Model):
     _name = "window.bridged"
     _description = "Window bridged"

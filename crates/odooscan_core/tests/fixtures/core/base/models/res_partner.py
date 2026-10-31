@@ -70,6 +70,7 @@ class IrUiView(models.Model):
     key = fields.Char()
     arch = fields.Text()
     inherit_id = fields.Many2one("ir.ui.view")
+    mode = fields.Char()
 
 
 class IrUiMenu(models.Model):

@@ -1179,8 +1179,9 @@ pub struct Index<'m> {
     models: Models<'m>,
     pub xmlids: XmlIds<'m>,
     pub views: Inheritance<'m>,
-    /// The (model, type) of every view of the files manifests load.
-    pub view_types: FxHashSet<(&'m str, &'m str)>,
+    /// The (model, type) of every view of the files manifests load that is primary or may be, as
+    /// Odoo looks a default view up among primary ones alone. None is a type only a run can tell.
+    pub view_types: FxHashSet<(&'m str, Option<&'m str>)>,
     pub action_writes: Writes<'m, ActionFact>,
     pub rule_writes: Writes<'m, RuleFact>,
     pub server_writes: Writes<'m, ServerFact>,
@@ -1335,16 +1336,23 @@ impl<'m> Index<'m> {
         named.or_else(|| last_text(record, "model"))
     }
 
-    fn view_types(&self) -> FxHashSet<(&'m str, &'m str)> {
+    fn view_types(&self) -> FxHashSet<(&'m str, Option<&'m str>)> {
         let mut types = FxHashSet::default();
         for module in self.modules {
             let loaded = module.data.iter().filter(|f| f.rank.is_some());
-            for view in loaded.flat_map(|f| &f.facts.views) {
+            for view in loaded.flat_map(|f| &f.facts.views).filter(|v| v.primary != Some(false)) {
                 let id = view.id.as_ref().map(|id| full_id(&module.name, id));
                 let own_model = view.model.as_ref().map(|m| m.value.as_str());
-                let model = own_model.or_else(|| self.view_model(id.clone()?));
-                let kind = id.and_then(|id| self.view_kind(id)).or(view.kind.as_deref());
-                types.extend(model.zip(kind));
+                let Some(model) = own_model.or_else(|| self.view_model(id.clone()?)) else {
+                    continue;
+                };
+                let top = id.and_then(|id| self.view_top(id)).unwrap_or_default();
+                let kind = top.iter().find_map(|n| n.fact.kind.as_deref());
+                let kind = kind.or(view.kind.as_deref());
+                let unread = view.unread_parent || top.iter().any(|n| n.fact.unread_parent);
+                if kind.is_some() || unread || view.primary.is_none() {
+                    types.insert((model, kind));
+                }
             }
         }
         types
@@ -2152,12 +2160,17 @@ impl<'m> Index<'m> {
 
     /// The type of the view at the root of `id`'s inheritance, which Odoo gives every view of the
     /// tree. None when a view on the way is not indexed.
-    pub fn view_kind(&self, mut id: String) -> Option<&'m str> {
+    pub fn view_kind(&self, id: String) -> Option<&'m str> {
+        self.view_top(id)?.iter().find_map(|n| n.fact.kind.as_deref())
+    }
+
+    /// The nodes of the view at the root of `id`'s inheritance.
+    fn view_top(&self, mut id: String) -> Option<&[ViewNode<'m>]> {
         for _ in 0..32 {
             let nodes = self.views.nodes.get(&id)?;
             match nodes.iter().find_map(|n| n.inherit.clone()) {
                 Some(parent) => id = parent,
-                None => return nodes.iter().find_map(|n| n.fact.kind.as_deref()),
+                None => return Some(nodes),
             }
         }
         None

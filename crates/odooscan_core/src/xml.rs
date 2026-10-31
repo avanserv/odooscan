@@ -289,6 +289,7 @@ impl Walker<'_> {
         // it extends a parent: a truthy `inherit_id` renames the root to `<data>`, which only
         // lends its children to the inheritance, `primary` included.
         let extends = node.attribute("inherit_id").is_some_and(|p| !p.is_empty());
+        view.primary = Some(!extends || node.attribute("primary") == Some("True"));
         let body = node.descendants().skip(usize::from(extends));
         view.calls.extend(body.filter_map(|n| t_call(n, self.lines)));
         // That root is a `<t>` in the arch, and a spec can locate it by its call.
@@ -348,6 +349,8 @@ impl Walker<'_> {
             self.record_field(field, name, model, &mut view);
         }
         if model == "ir.ui.view" {
+            view.primary = primary_view(node, self.lines);
+            view.unread_parent = view.inherit.is_none() && last_field_of(node, "inherit_id").is_some_and(holds_record);
             self.facts.views.push(view);
         }
         self.model_facts(node, model);
@@ -891,6 +894,24 @@ fn default_of(node: Node) -> Option<(String, String)> {
 fn last_field_of<'a, 'i>(node: Node<'a, 'i>, name: &str) -> Option<Node<'a, 'i>> {
     node.children()
         .rfind(|c| c.has_tag_name("field") && c.attribute("name") == Some(name))
+}
+
+/// Whether Odoo stores a `<record>` of `ir.ui.view` as primary, or None when only a run can tell. A
+/// `mode` wins, as `inherit_id` only sets its default, and a `search` that finds nothing sets none.
+fn primary_view(node: Node, lines: &Lines) -> Option<bool> {
+    if let Some(mode) = last_field_of(node, "mode") {
+        return match written(mode, lines) {
+            WrittenValue::Text(text) => Some(text.value != "extension"),
+            _ => None,
+        };
+    }
+    let Some(parent) = last_field_of(node, "inherit_id").filter(|f| holds_record(*f)) else {
+        return Some(true);
+    };
+    match written(parent, lines) {
+        WrittenValue::Ids(_) | WrittenValue::Text(_) => Some(false),
+        _ => None,
+    }
 }
 
 /// The field holding the domain of a model of record rules.
@@ -2799,6 +2820,71 @@ mod tests {
         assert_eq!(kind(&arch("xpath")), None);
         let typed = format!(r#"{}<field name="type">qweb</field>"#, arch("div"));
         assert_eq!(kind(&typed).as_deref(), Some(QWEB));
+    }
+
+    #[test]
+    fn tells_a_primary_record_from_an_extension() {
+        let primary = |fields: &str| view(&format!(r#"<record id="x" model="ir.ui.view">{fields}</record>"#)).primary;
+        let parent = r#"<field name="inherit_id" ref="y"/>"#;
+        let opaque = r#"<field name="inherit_id" eval="x"/>"#;
+        let search = r#"<field name="inherit_id" search="[('name', '=', 'y')]"/>"#;
+        let mode = r#"<field name="mode">primary</field>"#;
+        for fields in [
+            String::new(),
+            r#"<field name="inherit_id" eval="False"/>"#.to_owned(),
+            r#"<field name="inherit_id" ref=""/>"#.to_owned(),
+            r#"<field name="inherit_id"/>"#.to_owned(),
+            format!("{parent}{mode}"),
+            format!("{mode}{parent}"),
+            format!(r#"{parent}<field name="mode" eval="'primary'"/>"#),
+            format!(r#"{parent}<field name="mode">extension</field>{mode}"#),
+            format!(r#"{parent}<field name="inherit_id" eval="False"/>"#),
+            format!("{search}{mode}"),
+        ] {
+            assert_eq!(primary(&fields), Some(true), "{fields}");
+        }
+        for fields in [
+            parent,
+            r#"<field name="inherit_id" eval="ref('y')"/>"#,
+            r#"<field name="mode">extension</field>"#,
+            r#"<field name="mode" eval="'extension'"/>"#,
+        ] {
+            assert_eq!(primary(fields), Some(false), "{fields}");
+        }
+        for fields in [
+            search.to_owned(),
+            opaque.to_owned(),
+            r#"<field name="inherit_id" model="ir.model" search="[('model', '=', 'y')]"/>"#.to_owned(),
+            r#"<field name="mode" eval="x"/>"#.to_owned(),
+            format!(r#"{parent}<field name="mode" eval="x"/>"#),
+        ] {
+            assert_eq!(primary(&fields), None, "{fields}");
+        }
+    }
+
+    #[test]
+    fn tells_a_parent_the_view_does_not_read() {
+        let unread =
+            |parent: &str| view(&format!(r#"<record id="x" model="ir.ui.view">{parent}</record>"#)).unread_parent;
+        assert!(!unread(""));
+        assert!(!unread(r#"<field name="inherit_id" ref="y"/>"#));
+        assert!(!unread(r#"<field name="inherit_id" eval="False"/>"#));
+        assert!(!unread(
+            r#"<field name="inherit_id" eval="ref('y')"/><field name="inherit_id" ref="y"/>"#
+        ));
+        assert!(unread(r#"<field name="inherit_id" eval="ref('y')"/>"#));
+        assert!(unread(r#"<field name="inherit_id" search="[('name', '=', 'y')]"/>"#));
+        assert!(unread(r#"<field name="inherit_id" ref="" eval="x"/>"#));
+    }
+
+    #[test]
+    fn tells_a_primary_template_from_an_extension() {
+        let primary = |attrs: &str| view(&format!(r#"<template id="x" {attrs}/>"#)).primary;
+        assert_eq!(primary(""), Some(true));
+        assert_eq!(primary(r#"inherit_id="""#), Some(true));
+        assert_eq!(primary(r#"inherit_id="y" primary="True""#), Some(true));
+        assert_eq!(primary(r#"inherit_id="y""#), Some(false));
+        assert_eq!(primary(r#"inherit_id="y" primary="true""#), Some(false));
     }
 
     #[test]
