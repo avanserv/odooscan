@@ -177,7 +177,8 @@ pub struct ClassFact {
     pub plain_bases: bool,
     /// The value of `_table`, when the class sets it.
     pub table: Option<OptionValue>,
-    /// `_parent_store`, `_auto`, `_log_access`, `_register` and `_date_name`, when the class sets them.
+    /// `_parent_store`, `_auto`, `_log_access`, `_register`, `_date_name` and `_defaults`, when the
+    /// class sets them.
     pub attrs: Vec<(String, Spanned<OptionValue>)>,
     /// Compute methods, at their name, with the fields of the class they compute and can leave
     /// unassigned on a record.
@@ -455,6 +456,9 @@ pub enum WrittenValue {
 pub struct FieldWrite {
     pub name: String,
     pub value: WrittenValue,
+    /// It adds to what the field holds rather than replacing it: x2many commands that keep the
+    /// other rows, or records nested in the field.
+    pub incremental: bool,
 }
 
 /// One write of a data file to a record: a `<record>` or a CSV row.
@@ -462,11 +466,16 @@ pub struct FieldWrite {
 pub struct RecordWrite {
     pub id: Option<String>,
     pub model: String,
+    pub pos: Pos,
     /// The value each field ends on: the last `<field>` of a name replaces those before.
     pub fields: Vec<FieldWrite>,
     /// The model and the field whose `<field>` encloses the record.
     pub nested_in: Option<(String, String)>,
     pub csv: bool,
+    /// The fields a `default_*` key names in the `context` of the record or of the roots around it.
+    pub context_defaults: Vec<String>,
+    /// `forcecreate` is false, so the author expects the record to exist.
+    pub no_create: bool,
 }
 
 /// A row that grants access: a row of `ir.access` with no group restricts instead.
@@ -486,6 +495,8 @@ pub struct AccessRow {
 pub struct FunctionCall {
     pub model: String,
     pub method: Spanned<String>,
+    /// The model and the field of a literal `ir.default.set()`.
+    pub default_of: Option<(String, String)>,
 }
 
 /// What one element writes to a field of a window action or a record rule. A write that is no

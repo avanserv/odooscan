@@ -1,0 +1,12 @@
+<odoo>
+    <record id="kept_for_demo" model="rr.note">
+        <field name="name">Demo</field>
+    </record>
+    <record id="thing_filled_by_demo" model="rr.thing">
+        <field name="name">Demo</field>
+    </record>
+    <record id="demo_note" model="rr.note">
+        <field name="name">Demo</field>
+    </record>
+    <record id="thing_in_demo" model="rr.thing"/>
+</odoo>

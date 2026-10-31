@@ -1,0 +1,73 @@
+<odoo>
+    <record id="rewritten" model="rr.note">
+        <field name="name">Second</field>
+    </record>
+    <record id="record_required.rewritten_by_prefix" model="rr.note">
+        <field name="name">Second</field>
+    </record>
+    <record id="prefixed_first" model="rr.note">
+        <field name="name">Second</field>
+    </record>
+    <data noupdate="1">
+        <record id="rewritten_noupdate" model="rr.note">
+            <field name="name">Second</field>
+        </record>
+    </data>
+    <record id="other_model" model="rr.tag">
+        <field name="name">Second</field>
+    </record>
+    <menuitem id="other_model_by_tag" name="Second"/>
+    <template id="template_twice">
+        <div>second</div>
+    </template>
+    <template id="record_then_template">
+        <div>second</div>
+    </template>
+    <menuitem id="menu_twice" name="Second"/>
+    <act_window id="action_twice" name="Second" res_model="rr.note"/>
+    <asset id="asset_twice" name="Second">
+        <bundle>web.assets_backend</bundle>
+        <path>record_required/static/src/second.js</path>
+    </asset>
+    <record id="grown" model="rr.note">
+        <field name="name">Second</field>
+        <field name="code">second</field>
+    </record>
+    <record id="grown_too" model="rr.note">
+        <field name="code">second</field>
+    </record>
+    <record id="linked" model="rr.note">
+        <field name="tag_ids" eval="[(4, ref('tag_a'))]"/>
+    </record>
+    <record id="linked_by_command" model="rr.note">
+        <field name="tag_ids" eval="[Command.link(ref('tag_a'))]"/>
+    </record>
+    <record id="relinked" model="rr.note">
+        <field name="tag_ids" eval="[Command.set([ref('tag_a')])]"/>
+    </record>
+    <record id="nested_later" model="rr.note">
+        <field name="entry_ids">
+            <record id="nested_entry" model="rr.entry"/>
+        </field>
+    </record>
+    <record id="empty_later" model="rr.note"/>
+    <record id="declared_later" model="rr.note" forcecreate="False">
+        <field name="name">Second</field>
+    </record>
+    <record id="template_then_record" model="ir.ui.view">
+        <field name="name">Second</field>
+    </record>
+    <record id="menu_then_record" model="ir.ui.menu">
+        <field name="name">Second</field>
+    </record>
+    <menuitem id="record_then_menuitem" name="Second"/>
+    <record id="base.note_elsewhere" model="rr.note">
+        <field name="name">Second</field>
+    </record>
+    <record id="twice_in_one_file" model="rr.note">
+        <field name="name">One</field>
+    </record>
+    <record id="twice_in_one_file" model="rr.note">
+        <field name="name">Two</field>
+    </record>
+</odoo>

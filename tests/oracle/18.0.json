@@ -445,6 +445,12 @@
       "count": 1
     },
     {
+      "path": "addons/hr_contract/views/hr_employee_views.xml",
+      "code": "OD323",
+      "message": "XML id 'hr_employee_view_search' is already defined in views/hr_contract_views.xml, and this definition writes the fields it names over it; remove the copy when the two say the same thing, or rename one when both are meant to exist",
+      "count": 1
+    },
+    {
       "path": "addons/hr_holidays/models/res_users.py",
       "code": "OD101",
       "message": "query built by string formatting; pass parameters separately or build it with odoo.tools.SQL",
@@ -874,6 +880,12 @@
       "path": "addons/l10n_es_edi_facturae/wizard/account_move_reversal.py",
       "code": "OD211",
       "message": "no parent class of account.move.reversal defines '_get_ref_string', so this super() call fails",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_es_edi_facturae/wizard/account_move_reversal_view.xml",
+      "code": "OD323",
+      "message": "XML id 'view_tax_tree_inherit_l10n_es_edi_facturae' is already defined in views/account_tax_views.xml, and this definition writes the fields it names over it; remove the copy when the two say the same thing, or rename one when both are meant to exist",
       "count": 1
     },
     {
@@ -1789,6 +1801,12 @@
       "count": 1
     },
     {
+      "path": "addons/point_of_sale/views/account_move_views.xml",
+      "code": "OD323",
+      "message": "XML id 'view_account_journal_pos_user_form' is already defined in views/account_statement_view.xml, and this definition writes the fields it names over it; remove the copy when the two say the same thing, or rename one when both are meant to exist",
+      "count": 1
+    },
+    {
       "path": "addons/portal/controllers/mail.py",
       "code": "OD111",
       "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
@@ -2113,6 +2131,12 @@
       "count": 4
     },
     {
+      "path": "addons/stock/views/res_config_settings_views.xml",
+      "code": "OD323",
+      "message": "XML id 'menu_stock_config_settings' is already defined in views/stock_menu_views.xml, and this definition writes the fields it names over it; remove the copy when the two say the same thing, or rename one when both are meant to exist",
+      "count": 1
+    },
+    {
       "path": "addons/stock_account/static/src/stock_account_forecasted/forecasted_header.js",
       "code": "OD605",
       "message": "no indexed bundle defines template 'stock_account.ForecastedHeader'",
@@ -2269,6 +2293,12 @@
       "count": 1
     },
     {
+      "path": "addons/website_blog/data/website_blog_data.xml",
+      "code": "OD323",
+      "message": "XML id 'mt_blog_blog_published' is already defined in data/mail_message_subtype_data.xml, and this definition writes the fields it names over it; remove the copy when the two say the same thing, or rename one when both are meant to exist",
+      "count": 1
+    },
+    {
       "path": "addons/website_crm_iap_reveal/models/crm_reveal_rule.py",
       "code": "OD103",
       "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
@@ -2297,6 +2327,18 @@
       "code": "OD111",
       "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
       "count": 3
+    },
+    {
+      "path": "addons/website_event/views/snippets/snippets.xml",
+      "code": "OD323",
+      "message": "XML id 'snippet_options' is already defined in views/event_snippets.xml, and this definition writes the fields it names over it; remove the copy when the two say the same thing, or rename one when both are meant to exist",
+      "count": 1
+    },
+    {
+      "path": "addons/website_event/views/snippets/snippets.xml",
+      "code": "OD323",
+      "message": "XML id 'snippets' is already defined in views/event_snippets.xml, and this definition writes the fields it names over it; remove the copy when the two say the same thing, or rename one when both are meant to exist",
+      "count": 1
     },
     {
       "path": "addons/website_event_booth/controllers/event_booth.py",

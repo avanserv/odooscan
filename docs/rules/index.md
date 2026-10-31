@@ -123,6 +123,8 @@ XML ids, views and data records, within a file and across the dependency graph.
 | [OD320](OD320.md) | `unknown-server-code-method` | The code of a server action or a cron calls a method its model does not have. |
 | [OD321](OD321.md) | `wrong-model-reference` | A data record gives a relational field a record of another model. |
 | [OD322](OD322.md) | `unknown-selection-value` | A data record gives a Selection field a value it does not list. |
+| [OD323](OD323.md) | `duplicate-xmlid-across-files` | A data file defines an XML id another file of the module already defines, and writes the fields it names over it. |
+| [OD324](OD324.md) | `missing-required-field` | A data record is created without a required field that has no default. |
 
 ## OD4: access
 

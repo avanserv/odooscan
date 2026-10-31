@@ -1,0 +1,8 @@
+<odoo>
+    <record id="written_here_first" model="rr.thing"/>
+    <record id="created_before_a_call" model="rr.thing"/>
+    <record id="scoped_here" model="rr.scoped"/>
+    <record id="assigned_later" model="rr.note">
+        <field name="name">First</field>
+    </record>
+</odoo>
