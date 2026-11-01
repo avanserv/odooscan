@@ -576,6 +576,7 @@ pub struct ViewFact {
 pub struct RecordFact {
     pub model: Spanned<String>,
     pub fields: Vec<Spanned<String>>,
+    pub csv: bool,
 }
 
 /// What one `<field>` or CSV cell writes, as far as its text tells without a run.

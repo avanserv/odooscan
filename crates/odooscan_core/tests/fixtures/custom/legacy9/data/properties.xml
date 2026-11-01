@@ -1,0 +1,16 @@
+<odoo>
+    <!-- On 9.0 the model pops value into the column of the property's type. -->
+    <record id="property_margin" model="ir.property">
+        <field name="name">margin</field>
+        <field name="value">0.2</field>
+    </record>
+
+    <record id="property_ghost" model="ir.property">
+        <field name="name">ghost</field>
+        <field name="ghost">0.2</field>
+    </record>
+    <record id="property_translated" model="ir.property">
+        <field name="name">translated</field>
+        <field name="value@fr">0.2</field>
+    </record>
+</odoo>

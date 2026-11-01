@@ -1,0 +1,7 @@
+<odoo>
+    <record id="property_margin" model="ir.property">
+        <field name="name">margin</field>
+        <field name="value">0.2</field>
+        <field name="ghost">0.2</field>
+    </record>
+</odoo>

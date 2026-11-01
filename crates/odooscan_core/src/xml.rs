@@ -338,6 +338,7 @@ impl Walker<'_> {
                 pos: self.pos(node),
             },
             fields: vec![],
+            csv: false,
         };
         let mut view = ViewFact {
             id: node.attribute("id").map(str::to_owned),
