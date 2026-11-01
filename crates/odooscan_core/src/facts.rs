@@ -356,7 +356,8 @@ pub struct PyFacts {
     /// The whole name of the reading a class of unknown series does not take, which fits that name
     /// alone.
     pub built_model_names: Vec<String>,
-    /// Literal model names in `env['x']` outside code guarded by a test that the model exists.
+    /// Literal model names in `env['x']` outside code that runs once a runtime test of a model, field
+    /// or module has passed.
     pub env_models: Vec<Spanned<String>>,
     /// Literal domains given to `search()` and the like on `self` or `env['x']`.
     pub domains: Vec<DomainFact>,

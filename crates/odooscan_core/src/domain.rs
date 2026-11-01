@@ -5,7 +5,7 @@ use ruff_python_parser::parse_expression;
 
 use crate::facts::{ActionValue, Spanned};
 
-fn items(expr: &Expr) -> Option<&[Expr]> {
+pub(crate) fn items(expr: &Expr) -> Option<&[Expr]> {
     match expr {
         Expr::List(l) => Some(&l.elts),
         Expr::Tuple(t) => Some(&t.elts),
@@ -29,6 +29,23 @@ pub fn fields(expr: &Expr) -> Option<Vec<&ast::ExprStringLiteral>> {
         }
     }
     Some(out)
+}
+
+/// Whether a literal domain has a term asking for `value` in `field`, with `=` or `in`.
+/// An operator could lift that term, and anything but a term may hold one.
+pub(crate) fn requires(expr: &Expr, field: &str, value: &str) -> bool {
+    let is_value = |e: &Expr| matches!(e, Expr::StringLiteral(s) if s.value.to_str() == value);
+    let keeps = |term: &Expr| match items(term) {
+        Some([Expr::StringLiteral(name), Expr::StringLiteral(op), right]) if name.value.to_str() == field => {
+            match op.value.to_str() {
+                "=" => is_value(right),
+                "in" => items(right).is_some_and(|values| values.iter().any(is_value)),
+                _ => false,
+            }
+        }
+        _ => false,
+    };
+    items(expr).is_some_and(|terms| terms.iter().all(|t| items(t).is_some()) && terms.iter().any(keeps))
 }
 
 /// The field paths of a domain written as text, as XML and string field attributes hold it.

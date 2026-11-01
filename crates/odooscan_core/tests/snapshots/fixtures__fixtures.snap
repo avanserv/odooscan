@@ -864,6 +864,34 @@ custom/server_code/data/updates.xml:26:5: OD323 XML id 'model_replaced' is alrea
 custom/server_code/data/updates.xml:30:5: OD323 XML id 'model_hidden' is already defined in data/first_writes.xml, and this definition overwrites the fields both name; remove the copy when the two say the same thing, or rename one when both are meant to exist
 custom/server_code/demo/rewrites.xml:15:34: OD320 server.job has no method '_nope_demo_breaks'
 custom/server_code_extension/data/updates.xml:7:34: OD320 server.job has no method '_nope_extension'
+custom/soft_guards/models/soft_partner.py:9:48: OD210 'code': field 'code' of soft.thing comes from module soft_guards_side, which is not in depends
+custom/soft_guards/models/soft_partner.py:46:52: OD210 'code': field 'code' of soft.thing comes from module soft_guards_side, which is not in depends
+custom/soft_guards/models/soft_partner.py:50:52: OD210 'code': field 'code' of soft.thing comes from module soft_guards_side, which is not in depends
+custom/soft_guards/models/soft_partner.py:55:52: OD210 'code': field 'code' of soft.thing comes from module soft_guards_side, which is not in depends
+custom/soft_guards/models/soft_partner.py:58:50: OD210 'code': field 'code' of soft.thing comes from module soft_guards_side, which is not in depends
+custom/soft_guards/models/soft_partner.py:67:52: OD210 'code': field 'code' of soft.thing comes from module soft_guards_side, which is not in depends
+custom/soft_guards/models/soft_partner.py:71:52: OD210 'code': field 'code' of soft.thing comes from module soft_guards_side, which is not in depends
+custom/soft_guards/models/soft_partner.py:104:48: OD210 'code': field 'code' of soft.thing comes from module soft_guards_side, which is not in depends
+custom/soft_guards/models/soft_partner.py:109:48: OD210 'code': field 'code' of soft.thing comes from module soft_guards_side, which is not in depends
+custom/soft_guards/models/soft_partner.py:113:52: OD210 'code': field 'code' of soft.thing comes from module soft_guards_side, which is not in depends
+custom/soft_guards/models/soft_partner.py:118:52: OD210 'code': field 'code' of soft.thing comes from module soft_guards_side, which is not in depends
+custom/soft_guards/models/soft_partner.py:123:45: OD210 'code': field 'code' of soft.thing comes from module soft_guards_side, which is not in depends
+custom/soft_guards/models/soft_partner.py:131:52: OD210 'code': field 'code' of soft.thing comes from module soft_guards_side, which is not in depends
+custom/soft_guards/models/soft_partner.py:137:48: OD210 'code': field 'code' of soft.thing comes from module soft_guards_side, which is not in depends
+custom/soft_guards/models/soft_partner.py:142:52: OD210 'code': field 'code' of soft.thing comes from module soft_guards_side, which is not in depends
+custom/soft_guards/models/soft_partner.py:146:52: OD210 'code': field 'code' of soft.thing comes from module soft_guards_side, which is not in depends
+custom/soft_guards/models/soft_partner.py:150:52: OD210 'code': field 'code' of soft.thing comes from module soft_guards_side, which is not in depends
+custom/soft_guards/models/soft_partner.py:160:52: OD210 'code': field 'code' of soft.thing comes from module soft_guards_side, which is not in depends
+custom/soft_guards/models/soft_partner.py:164:52: OD210 'code': field 'code' of soft.thing comes from module soft_guards_side, which is not in depends
+custom/soft_guards/models/soft_partner.py:169:52: OD210 'code': field 'code' of soft.thing comes from module soft_guards_side, which is not in depends
+custom/soft_guards/models/soft_partner.py:174:52: OD210 'code': field 'code' of soft.thing comes from module soft_guards_side, which is not in depends
+custom/soft_guards/models/soft_partner.py:179:52: OD210 'code': field 'code' of soft.thing comes from module soft_guards_side, which is not in depends
+custom/soft_guards/tests/test_soft_guards.py:37:34: OD206 no indexed module defines model 'soft.absent'
+custom/soft_guards/tests/test_soft_guards.py:42:57: OD210 'code': field 'code' of soft.thing comes from module soft_guards_side, which is not in depends
+custom/soft_guards/tests/test_soft_guards.py:49:57: OD210 'code': field 'code' of soft.thing comes from module soft_guards_side, which is not in depends
+custom/soft_guards/tests/test_soft_guards.py:59:57: OD210 'code': field 'code' of soft.thing comes from module soft_guards_side, which is not in depends
+custom/soft_guards/tests/test_soft_guards.py:66:57: OD210 'code': field 'code' of soft.thing comes from module soft_guards_side, which is not in depends
+custom/soft_guards/tests/test_soft_guards.py:75:57: OD210 'code': field 'code' of soft.thing comes from module soft_guards_side, which is not in depends
 custom/sql_base_entries/models/buoys.py:35:54: OD224 f.x_base_depot_id: buoy_float has no such column, since buoy.float has no field x_base_depot_id; name the column of a stored field of buoy.float
 custom/sql_columns/models/constraints.py:7:35: OD227 depot: parcel_box has no such column, since parcel.box has no field depot; use depot_id
 custom/sql_columns/models/constraints.py:8:36: OD227 total_weight: parcel_box has no such column, since parcel.box.total_weight is not stored; set store=True on the field, or drop it from the definition
