@@ -36,12 +36,26 @@ class RvComputed(models.Model):
     name = fields.Char()
 
 
+class RvComputedTwin(models.Model):
+    _name = "rv.computed.twin"
+    _description = "Same table as rv.computed"
+    _table = "rv_computed"
+
+    name = fields.Char()
+
+
 class RvBlended(PlainMixin, models.Model):
     _name = "rv.blended"
     _description = "Blended"
 
     other_id = fields.Many2one("rv.other")
     state = fields.Selection([("a", "Ay")])
+
+
+class RvBlendedHeir(models.Model):
+    _name = "rv.blended.heir"
+    _inherit = "rv.blended"
+    _description = "Blended heir"
 
 
 class RvAction(models.Model):
@@ -110,6 +124,9 @@ class RvThing(models.Model):
     side_id = fields.Many2one("rv.side.only")
     retyped_id = fields.Many2one("rv.other")
     fallen_id = fields.Many2one("rv.other")
+    computed_id = fields.Many2one("rv.computed")
+    blended_id = fields.Many2one("rv.blended")
+    blended_heir_id = fields.Many2one("rv.blended.heir")
     state = fields.Selection([("a", "Ay"), ("b", _("Bee"))])
     rated = fields.Selection([("a", LABELS["a"])])
     by_method = fields.Selection("_list_kinds")

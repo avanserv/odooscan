@@ -49,4 +49,8 @@
     <record id="replaced_unloaded" model="rv.thing">
         <field name="other_id" ref="parent_1"/>
     </record>
+
+    <record id="table_of_a_blended_heir" model="rv.thing">
+        <field name="blended_heir_id" ref="other_1"/>
+    </record>
 </odoo>

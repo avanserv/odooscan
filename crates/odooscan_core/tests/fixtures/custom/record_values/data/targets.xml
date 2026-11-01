@@ -4,6 +4,7 @@
     <record id="child_1" model="rv.child"><field name="parent_id" ref="parent_1"/></record>
     <record id="shared_1" model="rv.shared"><field name="name">Same table as rv.other</field></record>
     <record id="computed_1" model="rv.computed"><field name="name">Table only a run tells</field></record>
+    <record id="computed_twin_1" model="rv.computed.twin"><field name="name">Same table as rv.computed</field></record>
     <record id="blended_1" model="rv.blended"/>
     <record id="action_1" model="rv.action"><field name="name">Action</field></record>
     <record id="window_1" model="rv.action.window"><field name="name">Window action</field></record>
