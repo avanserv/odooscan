@@ -1976,6 +1976,8 @@ impl<'m> Ctx<'_, 'm> {
     /// counts only if nothing replaces it, and an update takes its model from what the load left.
     /// Only `scope` loads ahead of this module: what a module depending on it replaces later does not
     /// mend a database without that module. A model that stays unknown is out of the scan or an `eval`.
+    /// A delegate's hidden parent does not stop the check: Odoo looks a view up by the model's `_name`
+    /// and calls the default on the model, so only a class merged into it can give a type.
     fn action_view_mode(&self, out: &mut Out<'m>, path: &'m Path, action: &'m ActionFact, mode: &Spanned<String>) {
         let own = [self.own(action)];
         let id = action.id.as_ref().map(|id| full_id(&self.module.name, id));
@@ -1992,7 +1994,8 @@ impl<'m> Ctx<'_, 'm> {
             return;
         }
         if let Some(ActionValue::Literal(model)) = last(|a| &a.model)
-            && self.sees_whole_model(&model.value)
+            && self.sees_model(&model.value)
+            && !self.index.merged_hidden_parents(&model.value, self.scope)
         {
             self.view_mode(out, path, &model.value, mode, writes);
         }
@@ -2062,11 +2065,12 @@ impl<'m> Ctx<'_, 'm> {
     /// Why the client cannot open `model` as `kind` whatever view it gets: from `ACTIVITY_IN_MAIL`
     /// its domain names `activity_ids`, and the server refuses a field the model lacks. A field only
     /// a module outside `depends` adds counts, as that module may be installed, and so may one that
-    /// a delegate the scan cannot read gives.
+    /// a delegate the scan cannot read gives, or a hidden parent of a delegate.
     fn activity_gap(&self, model: &str, kind: &str) -> Option<String> {
         let searched = kind == "activity" && self.series.is_some_and(|s| s >= ACTIVITY_IN_MAIL);
         let absent = || {
             !self.index.unread_delegate(model, self.scope)
+                && !self.index.hidden_parents(model, self.scope)
                 && matches!(self.index.field(model, "activity_ids", self.scope), Err(None))
         };
         (searched && absent()).then(|| {
@@ -2100,8 +2104,11 @@ impl<'m> Ctx<'_, 'm> {
 
     /// What Odoo misses to generate a calendar for `model`. A field or a `_date_name` only a module
     /// outside `depends` gives counts, as that module may be installed. A `_date_name` that is no
-    /// literal may name any.
+    /// literal may name any, and a hidden parent of a delegate may give any field.
     fn calendar_gap(&self, model: &str) -> Option<String> {
+        if self.index.hidden_parents(model, self.scope) {
+            return None;
+        }
         let mut starts = CALENDAR_STARTS.to_vec();
         for (_, class) in self.index.chain_classes(model) {
             match class.attr("_date_name").map(|a| &a.value) {

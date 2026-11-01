@@ -1058,6 +1058,7 @@ custom/window_activity/views/actions.xml:17:33: OD318 window.boxed has no field 
 custom/window_activity/views/actions.xml:23:33: OD318 window.boxed has no field activity_ids, which the activity view searches; inherit mail.activity.mixin
 custom/window_activity/views/actions.xml:36:33: OD318 window.delegated.bare has no field activity_ids, which the activity view searches; inherit mail.activity.mixin
 custom/window_clone/__manifest__.py:4:35: OD503 module 'ghost_enterprise' is not on the addons path
+custom/window_delegate/views/actions.xml:5:33: OD318 window.borrower has no primary gantt view, and nothing generates one
 custom/window_hidden/views/actions.xml:4:33: OD202 model 'window.plain' comes from module window_actions; add it to depends
 custom/window_named/views/actions.xml:19:33: OD318 window.plain has no primary gantt view, and nothing generates one
 custom/window_named/views/actions.xml:32:33: OD318 window.plain has no primary map view, and nothing generates one

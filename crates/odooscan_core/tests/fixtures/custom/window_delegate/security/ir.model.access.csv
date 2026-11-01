@@ -1,0 +1,6 @@
+id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
+access_window_shared,window.shared,model_window_shared,base.group_user,1,1,1,1
+access_window_borrower,window.borrower,model_window_borrower,base.group_user,1,1,1,1
+access_window_copied,window.copied,model_window_copied,base.group_user,1,1,1,1
+access_window_dated_parent,window.dated.parent,model_window_dated_parent,base.group_user,1,1,1,1
+access_window_dated_child,window.dated.child,model_window_dated_child,base.group_user,1,1,1,1
