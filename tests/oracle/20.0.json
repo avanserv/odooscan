@@ -189,7 +189,7 @@
     {
       "path": "addons/auth_totp/models/auth_totp_rate_limit_log.py",
       "code": "OD401",
-      "message": "model 'auth.totp.rate.limit.log' has no ir.model.access rule, so only the superuser can use it",
+      "message": "model 'auth.totp.rate.limit.log' has no ir.access rule with a group, so only the superuser can use it",
       "count": 1
     },
     {
@@ -237,7 +237,7 @@
     {
       "path": "addons/bus/models/bus.py",
       "code": "OD401",
-      "message": "model 'bus.bus' has no ir.model.access rule, so only the superuser can use it",
+      "message": "model 'bus.bus' has no ir.access rule with a group, so only the superuser can use it",
       "count": 1
     },
     {
@@ -303,7 +303,7 @@
     {
       "path": "addons/crm_iap_mine/models/crm_iap_lead_helpers.py",
       "code": "OD401",
-      "message": "model 'crm.iap.lead.helpers' has no ir.model.access rule, so only the superuser can use it",
+      "message": "model 'crm.iap.lead.helpers' has no ir.access rule with a group, so only the superuser can use it",
       "count": 1
     },
     {
@@ -2535,7 +2535,7 @@
     {
       "path": "addons/test_mail_full/models/test_mail_models_mail.py",
       "code": "OD401",
-      "message": "model 'mail.test.portal.no.access' has no ir.model.access rule, so only the superuser can use it",
+      "message": "model 'mail.test.portal.no.access' has no ir.access rule with a group, so only the superuser can use it",
       "count": 1
     },
     {
@@ -2883,7 +2883,7 @@
     {
       "path": "addons/website_sale/models/product_stock_notification.py",
       "code": "OD401",
-      "message": "model 'product.stock.notification' has no ir.model.access rule, so only the superuser can use it",
+      "message": "model 'product.stock.notification' has no ir.access rule with a group, so only the superuser can use it",
       "count": 1
     },
     {
@@ -3021,7 +3021,7 @@
     {
       "path": "odoo/addons/base/models/ir_model.py",
       "code": "OD401",
-      "message": "model 'ir.model.inherit' has no ir.model.access rule, so only the superuser can use it",
+      "message": "model 'ir.model.inherit' has no ir.access rule with a group, so only the superuser can use it",
       "count": 1
     },
     {
@@ -3129,25 +3129,25 @@
     {
       "path": "odoo/addons/test_base/models/test_orm.py",
       "code": "OD401",
-      "message": "model 'test_orm.model.no_access' has no ir.model.access rule, so only the superuser can use it",
+      "message": "model 'test_orm.model.no_access' has no ir.access rule with a group, so only the superuser can use it",
       "count": 1
     },
     {
       "path": "odoo/addons/test_base/models/test_orm.py",
       "code": "OD401",
-      "message": "model 'test_orm.onchange.order' has no ir.model.access rule, so only the superuser can use it",
+      "message": "model 'test_orm.onchange.order' has no ir.access rule with a group, so only the superuser can use it",
       "count": 1
     },
     {
       "path": "odoo/addons/test_base/models/test_orm.py",
       "code": "OD401",
-      "message": "model 'test_orm.onchange.order.line' has no ir.model.access rule, so only the superuser can use it",
+      "message": "model 'test_orm.onchange.order.line' has no ir.access rule with a group, so only the superuser can use it",
       "count": 1
     },
     {
       "path": "odoo/addons/test_base/models/test_orm.py",
       "code": "OD401",
-      "message": "model 'test_orm.req_m2o_transient' has no ir.model.access rule, so only the superuser can use it",
+      "message": "model 'test_orm.req_m2o_transient' has no ir.access rule with a group, so only the superuser can use it",
       "count": 1
     },
     {
@@ -3159,13 +3159,13 @@
     {
       "path": "odoo/addons/test_inherit/models/mother_base.py",
       "code": "OD401",
-      "message": "model 'test.inherit.partner' has no ir.model.access rule, so only the superuser can use it",
+      "message": "model 'test.inherit.partner' has no ir.access rule with a group, so only the superuser can use it",
       "count": 1
     },
     {
       "path": "odoo/addons/test_tests/models/models.py",
       "code": "OD401",
-      "message": "model 'test_testing_utilities.wide' has no ir.model.access rule, so only the superuser can use it",
+      "message": "model 'test_testing_utilities.wide' has no ir.access rule with a group, so only the superuser can use it",
       "count": 1
     },
     {
@@ -3177,13 +3177,13 @@
     {
       "path": "odoo/addons/test_translation/models/models.py",
       "code": "OD401",
-      "message": "model 'test.translation.model1' has no ir.model.access rule, so only the superuser can use it",
+      "message": "model 'test.translation.model1' has no ir.access rule with a group, so only the superuser can use it",
       "count": 1
     },
     {
       "path": "odoo/addons/test_translation/models/models.py",
       "code": "OD401",
-      "message": "model 'test.translation.model2' has no ir.model.access rule, so only the superuser can use it",
+      "message": "model 'test.translation.model2' has no ir.access rule with a group, so only the superuser can use it",
       "count": 1
     }
   ]
