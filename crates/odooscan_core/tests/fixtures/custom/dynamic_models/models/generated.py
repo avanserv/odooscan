@@ -16,6 +16,9 @@ class GeneratedUser(models.Model):
     small_id = fields.Many2one("bad.generated.small")
     large_id = fields.Many2one("bad.generated.large")
 
+    def _small_records(self):
+        return self.env["bad.generated.small"].search([])
+
 
 class GeneratedHuge(models.Model):
     _inherit = "bad.generated.huge"

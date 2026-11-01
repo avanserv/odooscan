@@ -249,14 +249,17 @@ custom/domain_bases/views/domains.xml:94:17: OD304 'no_fieldless_view': domain.f
 custom/dynamic_models/views/large.xml:39:17: OD304 'scale': bad.generated.user has no field 'scale'
 custom/dynamic_models_opaque/views/holder.xml:7:17: OD304 'no_holder_field': opaque.holder has no field 'no_holder_field'
 custom/dynamic_models_outside/models/built.py:14:32: OD202 model 'bad.generated.large' comes from module dynamic_models_side; add it to depends
+custom/dynamic_models_outside/models/built.py:17:25: OD206 no indexed module defines model 'outside.test.model'
 custom/dynamic_models_outside/static/src/large.js:3:30: OD603 model 'bad.generated.large' comes from module dynamic_models_side, which is not in depends
 custom/dynamic_models_outside/views/large.xml:4:9: OD202 model 'bad.generated.large' comes from module dynamic_models_side; add it to depends
 custom/dynamic_models_outside/views/large.xml:7:17: OD304 'name': field 'name' of bad.generated.large comes from module sql_base_entries, which is not in depends
 custom/dynamic_models_plain/models/holder.py:7:32: OD202 model 'bad.generated.large' comes from module dynamic_models_side; add it to depends
+custom/dynamic_models_plain/models/holder.py:10:25: OD206 no indexed module defines model 'bad.generated.small'
 custom/dynamic_models_plain/static/src/large.js:3:30: OD603 model 'bad.generated.large' comes from module dynamic_models_side, which is not in depends
 custom/dynamic_models_plain/views/large.xml:4:9: OD202 model 'bad.generated.large' comes from module dynamic_models_side; add it to depends
 custom/dynamic_models_plain/views/large.xml:7:17: OD304 'name': field 'name' of bad.generated.large comes from module sql_base_entries, which is not in depends
 custom/dynamic_models_unbuilt/models/proxies.py:27:32: OD202 model 'bad.generated.large' comes from module dynamic_models_side; add it to depends
+custom/dynamic_models_unbuilt/models/proxies.py:30:25: OD206 no indexed module defines model 'unbuilt.proxy'
 custom/dynamic_models_unbuilt/static/src/large.js:3:30: OD603 model 'bad.generated.large' comes from module dynamic_models_side, which is not in depends
 custom/dynamic_models_unknown/models/partner.py:14:31: OD202 model 'bad.generated.huge' comes from module dynamic_models_side; add it to depends
 custom/dynamic_models_unknown/models/partner.py:15:31: OD202 model 'side.order.line' comes from module dynamic_models_side; add it to depends
@@ -1034,6 +1037,7 @@ custom/unlisted_data/security/ir.model.access-unlisted.csv:1:1: OD502 'security/
 custom/unparsed_accent/models/thread.py:17:15: OD000 Simple statements must be separated by newlines or semicolons
 custom/unparsed_accent/views/accent.xml:4:9: OD201 no indexed module defines model 'unparsed.unknown'
 custom/unparsed_base/models/ledger.py:14:5: OD226 _auto = False leaves unparsed.report without a table, and nothing creates the view unparsed_report; create it in init(), or drop _auto = False
+custom/unparsed_built/models/built.py:10:15: OD000 Simple statements must be separated by newlines or semicolons
 custom/unparsed_code/models/ledger.py:25:15: OD000 Simple statements must be separated by newlines or semicolons
 custom/unparsed_code/views/ledger.xml:17:13: OD310 no <field name="missing_anchor"> in view unparsed_code.view_ledger_form or the views that extend it
 custom/unparsed_code/views/ledger.xml:44:20: OD311 no indexed module defines template 'unparsed_code.no_such_page'
