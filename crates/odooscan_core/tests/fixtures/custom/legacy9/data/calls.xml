@@ -18,4 +18,23 @@
 model.pool('res.partner')
 model._nope_after_attrs()</field>
     </record>
+
+    <record id="action_no_state" model="ir.actions.server">
+        <field name="name">action_no_state</field>
+        <field name="model_id" ref="base.model_res_partner"/>
+        <field name="code">model._nope_default_code()</field>
+    </record>
+
+    <record id="action_written_state" model="ir.actions.server">
+        <field name="name">action_written_state</field>
+        <field name="model_id" ref="base.model_res_partner"/>
+        <field name="state">object_write</field>
+        <field name="code">model._nope_written_state()</field>
+    </record>
+
+    <record id="base.action_elsewhere" model="ir.actions.server">
+        <field name="name">action_elsewhere</field>
+        <field name="model_id" ref="base.model_res_partner"/>
+        <field name="code">model._nope_elsewhere()</field>
+    </record>
 </odoo>
