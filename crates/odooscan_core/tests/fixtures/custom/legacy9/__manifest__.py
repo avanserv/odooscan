@@ -7,6 +7,7 @@
         "data/calls.xml",
         "views/buttons.xml",
         "views/columns.xml",
+        "views/aliases.xml",
     ],
     "assets": {"web.assets_backend": ["legacy9/static/src/**/*"]},
 }

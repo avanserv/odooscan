@@ -83,6 +83,13 @@ const NESTED_RECORDS: Series = Series { major: 15, minor: 1 };
 /// rule leaves unreported.
 const ACTIVITY_IN_MAIL: Series = Series { major: 12, minor: 4 };
 
+/// The first series whose client asks the server for each view by the kind the action lists
+/// (`addons/web/static/src/js/view_manager.js:135` on 10.0), which fails on a kind with no view
+/// (`odoo/models.py:1417`). On 9.0 the view class asks for its own `view_type`
+/// (`addons/web/static/src/js/framework/view.js:53`). `9.saas~9` to `9.saas~11` read as an unknown
+/// series, so they report as this series does.
+const VIEWS_BY_ACTION_KIND: Series = Series { major: 10, minor: 0 };
+
 /// The first series that validates a record rule's domain when it writes one
 /// (`odoo/addons/base/models/ir_rule.py:63` on 18.0). 14.0 evaluates it only when a query applies the
 /// rule (`:149`), so only the last write can fail.
@@ -2167,6 +2174,9 @@ impl<'m> Ctx<'_, 'm> {
         if kind == "calendar" {
             return self.calendar_gap(model);
         }
+        if fetches_own_view(self.series) && self.index.client_views.contains(kind) {
+            return None;
+        }
         Some(format!("{model} has no primary {kind} view, and nothing generates one"))
     }
 
@@ -3147,8 +3157,7 @@ enum MagicEra {
 }
 
 /// The era of `series`. An unknown series takes the metaclass era, which every series from
-/// saas~14.4 through 18.0 shares: it adds no field to an abstract model, so no label is reported
-/// that the series of the module may lack.
+/// saas~14.4 through 18.0 shares.
 fn magic_era(series: Option<Series>) -> MagicEra {
     match series {
         Some(s) if s < SETUP_MAGIC => MagicEra::RegistryMerge,
@@ -3158,8 +3167,12 @@ fn magic_era(series: Option<Series>) -> MagicEra {
     }
 }
 
-/// Whether Odoo adds `__last_update`. Not for an unknown series, so that no label is reported
-/// against a field the newest series lack.
+/// Whether a client view of `series` fetches the type of its class, whatever kind it registers as.
+fn fetches_own_view(series: Option<Series>) -> bool {
+    series.is_some_and(|s| s < VIEWS_BY_ACTION_KIND)
+}
+
+/// Whether Odoo adds `__last_update`. Not for an unknown series, as the newest series lack it.
 fn has_last_update(series: Option<Series>) -> bool {
     series.is_some_and(|s| s < NO_LAST_UPDATE)
 }
@@ -4076,7 +4089,7 @@ impl<'m> Ctx<'_, 'm> {
     /// The fields Odoo adds to `model`, with their labels. Before saas~14.4 every model gets `id`,
     /// `display_name` and `__last_update`, from saas~14.4 only a model that is not abstract, and
     /// from saas~18.1, where `BaseModel` defines the first two, every model gets those again.
-    /// `__last_update` stops after 16.0 and is left out for an unknown series (`has_last_update`).
+    /// `__last_update` stops after 16.0 (`has_last_update`).
     fn magic_labels(&self, model: &str) -> Vec<(&'static str, &'static str)> {
         let era = magic_era(self.series);
         if era == MagicEra::Metaclass && self.index.kind(model, self.scope) == Some(ModelKind::Abstract) {
@@ -4652,19 +4665,21 @@ impl<'m> Ctx<'_, 'm> {
         );
     }
 
-    /// Whether something may give `model` the relation `table`: a class of it or of a model it
-    /// inherits, in any indexed module but for one that does not parse outside the scope, defines
-    /// `init()` or `_auto_init()`, sets a table query, creates a view whose whole name is
-    /// `self._table` or has a parent the scan cannot see; another model, or a Many2many in scope,
-    /// has that table; an indexed module creates a view of that name in Python or SQL; or this
-    /// module, not a dependency, creates a view it names at runtime. `table_models` leaves out an
-    /// abstract model.
+    /// Whether `model` needs no relation or something may give it `table`: no class of it or of a
+    /// model it inherits has a field, `base` apart, so it stores nothing; a class of those, in any
+    /// indexed module but for one that does not parse outside the scope, defines `init()` or
+    /// `_auto_init()`, sets a table query, creates a view whose whole name is `self._table` or has
+    /// a parent the scan cannot see; another model, or a Many2many in scope, has that table; an
+    /// indexed module creates a view of that name in Python or SQL; or this module, not a
+    /// dependency, creates a view it names at runtime. `table_models` leaves out an abstract model.
     fn view_made(&self, model: &str, table: &str) -> bool {
         let creates = |c: &ClassFact| {
             c.hidden_parents() || c.own_view || c.methods.iter().any(|m| VIEW_MAKERS.contains(&m.as_str()))
         };
         let chain = self.index.chain_read_from(model, self.scope);
-        chain.iter().any(|(_, c)| creates(c))
+        let own = || chain.iter().filter(|(_, c)| c.model != "base");
+        own().all(|(_, c)| c.fields.is_empty())
+            || chain.iter().any(|(_, c)| creates(c))
             || self.index.table_models(table) != [model]
             || self.index.relation_table(table, self.scope)
             || self.index.creates_view(table)
@@ -4868,8 +4883,8 @@ mod tests {
     use rustc_hash::FxHashSet;
 
     use super::{
-        MagicEra, applies, cache_global, callable_attr, csv_label, derived_label, has_last_update, magic_era,
-        no_access_message, reads_model_access, shadowed_member, tuple_checked, tuple_listed,
+        MagicEra, applies, cache_global, callable_attr, csv_label, derived_label, fetches_own_view, has_last_update,
+        magic_era, no_access_message, reads_model_access, shadowed_member, tuple_checked, tuple_listed,
     };
     use crate::facts::DefinitionSource;
     use crate::series::Series;
@@ -4880,6 +4895,14 @@ mod tests {
         assert!(reads_model_access(None));
         assert!(reads("18.0") && reads("saas~19.3"));
         assert!(!reads("saas~19.4") && !reads("20.0"));
+    }
+
+    #[test]
+    fn only_9_0_fetches_the_view_type_of_the_class() {
+        let fetches = |series: &str| fetches_own_view(Series::parse(series));
+        assert!(fetches("9.0"));
+        assert!(!fetches("10.0") && !fetches("12.0") && !fetches("18.0"));
+        assert!(!fetches_own_view(None));
     }
 
     #[test]

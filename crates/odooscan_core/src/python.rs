@@ -755,12 +755,13 @@ fn body_contains(body: &[Stmt], attr: Option<&str>) -> bool {
 }
 
 /// The kind of an ORM model base class by its name. `CachedModel`, from 20.0, is a `Model` that
-/// caches some fields of its records.
+/// caches some fields of its records. The `osv` names alias the first three up to 17.0: a later
+/// class that names one does not import, so they need no gate.
 fn orm_kind(name: &str) -> Option<ModelKind> {
     match name {
-        "Model" | "CachedModel" => Some(ModelKind::Model),
-        "TransientModel" => Some(ModelKind::Transient),
-        "AbstractModel" => Some(ModelKind::Abstract),
+        "Model" | "CachedModel" | "osv" => Some(ModelKind::Model),
+        "TransientModel" | "osv_memory" => Some(ModelKind::Transient),
+        "AbstractModel" | "osv_abstract" => Some(ModelKind::Abstract),
         _ => None,
     }
 }
@@ -1651,11 +1652,14 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
             fact.extended.push(func.name.to_string());
         }
         // A guarded call cannot fail, so only OD211 skips it: OD119 and OD223 still see an override.
+        // No class defines `__getattr__` to end the chain: the AttributeError the last call raises
+        // is what `__getattr__` owes its caller.
+        let fails = |name: &str| name != "__getattr__" || func.name.as_str() != name;
         fact.super_calls.extend(
             calls
                 .calls
                 .into_iter()
-                .filter(|(.., guarded)| !guarded)
+                .filter(|(name, _, guarded)| !guarded && fails(name))
                 .map(|(name, at, _)| Spanned {
                     value: name.to_owned(),
                     pos: self.loc.pos(at),
@@ -3554,6 +3558,21 @@ mod tests {
         assert_eq!(registered("    _register = True"), (true, true));
         assert_eq!(registered("    _register = REGISTER"), (true, true));
         assert_eq!(registered(""), (true, true));
+    }
+
+    #[test]
+    fn counts_the_osv_aliases_as_model_bases() {
+        for (base, kind) in [
+            ("osv.osv", ModelKind::Model),
+            ("osv", ModelKind::Model),
+            ("osv.osv_memory", ModelKind::Transient),
+            ("osv.osv_abstract", ModelKind::Abstract),
+        ] {
+            let facts = analyze(&format!("class X({base}):\n    _name = 'x'\n"), None);
+            let class = &facts.classes[0];
+            assert_eq!(class.kind, kind, "{base}");
+            assert!(class.plain_bases.is_empty(), "{base}");
+        }
     }
 
     #[test]

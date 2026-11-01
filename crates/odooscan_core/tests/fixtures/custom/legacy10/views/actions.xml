@@ -1,0 +1,7 @@
+<odoo>
+    <record id="board_action" model="ir.actions.act_window">
+        <field name="name">Board</field>
+        <field name="res_model">legacy10.columns.user</field>
+        <field name="view_mode">legacy10_board,form</field>
+    </record>
+</odoo>

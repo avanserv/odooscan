@@ -324,7 +324,8 @@ custom/form_patches/static/src/quick_form_card.xml:14:9: OD606 no <div> with cla
 custom/form_patches/static/src/quick_form_card.xml:15:9: OD606 <div> with class 'o_mail_chatter' is added by module mail, which is not in depends
 custom/form_patches/static/src/quick_form_card.xml:18:19: OD605 no indexed bundle defines template 'web.FormCompiler'
 custom/legacy10/data/calls.xml:5:34: OD320 res.partner has no method '_nope_default_code'
-custom/legacy10/models/columns.py:15:32: OD203 'holder_id.code': legacy10.columns has no field 'code'
+custom/legacy10/models/columns.py:27:32: OD203 'holder_id.code': legacy10.columns has no field 'code'
+custom/legacy10/views/actions.xml:5:33: OD318 legacy10.columns.user has no primary legacy10_board view, and nothing generates one
 custom/legacy11/data/calls.xml:3:41: OD314 res.partner has no method 'delete_workflow'
 custom/legacy11/models/res_company.py:14:24: OD211 no parent class of res.company defines '_table_exist', so this super() call fails
 custom/legacy12/data/calls.xml:2:41: OD314 res.company has no method 'create_workflow'
@@ -336,6 +337,7 @@ custom/legacy12/models/ledger.py:17:40: OD220 'opened_on' has the label 'Created
 custom/legacy12/models/res_partner.py:22:41: OD220 'stamped_on' has the label 'Create Date' of field 'create_date' of res.partner, so Odoo logs a warning and users cannot tell them apart; give it another string
 custom/legacy12/models/res_partner.py:29:24: OD211 no parent class of res.partner defines 'create_workflow', so this super() call fails
 custom/legacy12/security/rules.xml:4:36: OD210 'no_legacy_field': legacy.ledger has no field 'no_legacy_field'
+custom/legacy12/views/actions.xml:5:33: OD318 legacy.stamp has no primary legacy12_board view, and nothing generates one
 custom/legacy12/views/buttons.xml:7:45: OD312 res.partner has no method 'print_report'
 custom/legacy12/views/views.xml:12:9: OD302 'web_corkboard.corkboard' is defined by module web_corkboard; add it to depends
 custom/legacy12/views/views.xml:21:9: OD302 'web_slate.slate' is defined by module web_slate; add it to depends
@@ -418,6 +420,10 @@ custom/legacy9/models/res_company.py:14:40: OD211 no parent class of res.company
 custom/legacy9/static/src/base_calls.js:7:45: OD604 model 'res.partner' has no method 'load_views'
 custom/legacy9/static/src/base_calls.js:8:45: OD604 model 'res.partner' has no method 'concat'
 custom/legacy9/static/src/base_calls.js:9:45: OD604 model 'res.partner' has no method 'ids'
+custom/legacy9/views/aliases.xml:7:45: OD312 legacy9.ledger has no method 'action_absent'
+custom/legacy9/views/aliases.xml:23:33: OD318 legacy9.ledger has no primary legacy9_unregistered view, and nothing generates one
+custom/legacy9/views/aliases.xml:23:33: OD318 legacy9.ledger has no primary gantt view, and nothing generates one
+custom/legacy9/views/aliases.xml:29:33: OD318 legacy9.gauge has no primary calendar view, and no date field to generate one from
 custom/legacy9/views/columns.xml:8:17: OD304 'ghost': legacy9.columns has no field 'ghost'
 custom/method_aliases/data/calls.xml:20:34: OD320 method.ticket has no method 'action_dnoe'
 custom/method_aliases/views/tickets.xml:21:45: OD312 method.ticket has no method 'action_dnoe'
@@ -1027,6 +1033,7 @@ custom/supers/models/supers.py:74:24: OD211 no parent class of bad.super.child d
 custom/supers/models/supers.py:85:31: OD211 no parent class of bad.super defines '_own_gone', so this super() call fails
 custom/supers/models/supers.py:97:21: OD211 no parent class of bad.super defines '_guard_unchecked', so this super() call fails
 custom/supers/models/supers.py:98:24: OD211 no parent class of bad.super defines '_guard_gone', so this super() call fails
+custom/supers/models/supers.py:108:24: OD211 no parent class of bad.super defines '__getattr__', so this super() call fails
 custom/unlisted_data/data/signs.xml:3:9: OD301 module unlisted_data defines no XML id 'unlisted_data.badge_hidden_unlisted_plate'
 custom/unlisted_data/data/signs.xml:11:5: OD324 unlisted.plate.code is required and has no default, so creating this record fails if the column is NOT NULL; give the field a value
 custom/unlisted_data/extra/access.xml:1:1: OD502 'extra/access.xml' is not in the manifest's data or demo, so Odoo never loads it

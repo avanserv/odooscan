@@ -8,6 +8,18 @@ class Legacy10Columns(models.Model):
     _columns = {"code": fields.Char("Code")}
 
 
+class Legacy10Node(models.Model):
+    _name = "legacy10.node"
+
+    kind = fields.Char()
+
+
+class Legacy10Arrow(models.Model):
+    _name = "legacy10.arrow"
+
+    signal = fields.Char()
+
+
 class Legacy10ColumnsUser(models.Model):
     _name = "legacy10.columns.user"
 

@@ -1,0 +1,7 @@
+<odoo>
+    <record id="board_action" model="ir.actions.act_window">
+        <field name="name">Board</field>
+        <field name="res_model">legacy.stamp</field>
+        <field name="view_mode">legacy12_board,form</field>
+    </record>
+</odoo>

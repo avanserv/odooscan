@@ -1,1 +1,1 @@
-{"name": "Legacy 12", "version": "12.0.1.0.0", "depends": ["base"], "data": ["security/ir.model.access.csv", "views/views.xml", "security/rules.xml", "data/cron.xml", "data/calls.xml", "views/buttons.xml"]}
+{"name": "Legacy 12", "version": "12.0.1.0.0", "depends": ["base"], "data": ["security/ir.model.access.csv", "views/views.xml", "security/rules.xml", "data/cron.xml", "data/calls.xml", "views/buttons.xml", "views/actions.xml"], "assets": {"web.assets_backend": ["legacy12/static/src/**/*"]}}

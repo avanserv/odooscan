@@ -672,6 +672,10 @@ impl Walker<'_> {
         let pos = self.pos(node);
         let tag = node.tag_name().name();
         arch_element(node, pos, view);
+        // Odoo reads a diagram's fields on the models its `node` and `arrow` name, not the view's.
+        if tag == "field" && node.ancestors().any(|a| a.has_tag_name("diagram")) {
+            return;
+        }
         let depth = path.len();
         let around = self.around.len();
         let opened = spec_subview(node, path);
@@ -1531,6 +1535,22 @@ mod tests {
 
     fn first_write(data: &str) -> RecordWrite {
         analyze(&format!("<odoo>{data}</odoo>")).writes.swap_remove(0)
+    }
+
+    #[test]
+    fn a_diagram_keeps_its_fields_as_elements_to_locate_and_none_to_check() {
+        let arch = r#"<diagram>
+            <node object="n"><field name="kind"/></node>
+            <arrow object="a"><field name="signal"/></arrow>
+            <field name="direct"/>
+        </diagram>"#;
+        let facts = analyze(&format!(
+            r#"<odoo><record id="v" model="ir.ui.view"><field name="arch" type="xml">{arch}</field></record></odoo>"#
+        ));
+        let view = &facts.views[0];
+        assert!(view.fields.is_empty());
+        let located = view.elements.iter().map(|e| e.value.as_str());
+        assert_eq!(located.collect::<Vec<_>>(), ["kind", "signal", "direct"]);
     }
 
     #[test]

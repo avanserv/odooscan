@@ -2,3 +2,5 @@ id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
 access_columns,columns,model_legacy9_columns,base.group_user,1,1,1,1
 access_columns_hidden,columns hidden,model_legacy9_columns_hidden,base.group_user,1,1,1,1
 access_columns_user,columns user,model_legacy9_columns_user,base.group_user,1,1,1,1
+access_ledger,ledger,model_legacy9_ledger,base.group_user,1,1,1,1
+access_gauge,gauge,model_legacy9_gauge,base.group_user,1,1,1,1

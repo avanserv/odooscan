@@ -1,0 +1,31 @@
+<odoo>
+    <record id="ledger_form" model="ir.ui.view">
+        <field name="name">legacy9.ledger.form</field>
+        <field name="model">legacy9.ledger</field>
+        <field name="arch" type="xml">
+            <form>
+                <button type="object" name="action_absent"/>
+            </form>
+        </field>
+    </record>
+
+    <record id="gauge_gantt" model="ir.ui.view">
+        <field name="name">legacy9.gauge.gantt</field>
+        <field name="model">legacy9.gauge</field>
+        <field name="arch" type="xml">
+            <gantt date_start="name"/>
+        </field>
+    </record>
+
+    <record id="ledger_action" model="ir.actions.act_window">
+        <field name="name">Ledger</field>
+        <field name="res_model">legacy9.ledger</field>
+        <field name="view_mode">tree,legacy9_compare,legacy9_unregistered,gantt</field>
+    </record>
+
+    <record id="gauge_action" model="ir.actions.act_window">
+        <field name="name">Gauge</field>
+        <field name="res_model">legacy9.gauge</field>
+        <field name="view_mode">form,calendar</field>
+    </record>
+</odoo>
