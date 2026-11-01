@@ -347,6 +347,7 @@ custom/form_patches/static/src/quick_form_card.xml:14:9: OD606 no <div> with cla
 custom/form_patches/static/src/quick_form_card.xml:15:9: OD606 <div> with class 'o_mail_chatter' is added by module mail, which is not in depends
 custom/form_patches/static/src/quick_form_card.xml:18:19: OD605 no indexed bundle defines template 'web.FormCompiler'
 custom/legacy10/data/calls.xml:5:34: OD320 res.partner has no method '_nope_default_code'
+custom/legacy10/data/calls.xml:12:30: OD319 Odoo refuses this code when it loads the record: Expected an expression
 custom/legacy10/models/columns.py:27:32: OD203 'holder_id.code': legacy10.columns has no field 'code'
 custom/legacy10/views/actions.xml:5:33: OD318 legacy10.columns.user has no primary legacy10_board view, and nothing generates one
 custom/legacy11/data/calls.xml:3:41: OD314 res.partner has no method 'delete_workflow'
@@ -354,6 +355,8 @@ custom/legacy11/models/res_company.py:14:24: OD211 no parent class of res.compan
 custom/legacy12/data/calls.xml:2:41: OD314 res.company has no method 'create_workflow'
 custom/legacy12/data/calls.xml:7:34: OD320 res.company has no method 'signal_workflow'
 custom/legacy12/data/cron.xml:5:34: OD320 legacy.ledger has no method '_post_legacy'
+custom/legacy12/data/syntax.xml:6:30: OD319 Odoo refuses this code when it loads the record: Expected an expression
+custom/legacy12/data/syntax.xml:12:30: OD319 Odoo refuses this code when it loads the record: Expected an expression
 custom/legacy12/models/badge.py:7:33: OD218 _inherits delegates to 'partner_id', which must be required with ondelete 'cascade' or 'restrict'; give it ondelete="cascade"
 custom/legacy12/models/badge.py:10:58: OD218 'country_id' has delegate=True, so it must be required with ondelete 'cascade' or 'restrict'; give it ondelete="cascade"
 custom/legacy12/models/ledger.py:17:40: OD220 'opened_on' has the label 'Created on' of field 'create_date' of legacy.ledger, so Odoo logs a warning and users cannot tell them apart; give it another string
@@ -438,6 +441,11 @@ custom/legacy17/views/partner_ported_views.xml:1:1: OD502 'views/partner_ported_
 custom/legacy9/data/calls.xml:4:41: OD314 res.partner has no method 'create_workflo'
 custom/legacy9/data/calls.xml:19:7: OD320 res.partner has no method '_nope_after_attrs'
 custom/legacy9/data/calls.xml:25:34: OD320 res.partner has no method '_nope_default_code'
+custom/legacy9/data/calls.xml:45:41: OD319 Odoo refuses this code when the action runs: unexpected EOF while parsing
+custom/legacy9/data/calls.xml:51:30: OD319 Odoo refuses this code when the action runs: Expected an expression
+custom/legacy9/data/calls.xml:77:9: OD309 ir.cron has no field 'no_such_field'
+custom/legacy9/data/rewrites.xml:2:5: OD323 XML id 'rewritten_code' is already defined in data/calls.xml, and this definition overwrites the fields both name; remove the copy when the two say the same thing, or rename one when both are meant to exist
+custom/legacy9/data/rewrites.xml:6:5: OD323 XML id 'rewritten_state' is already defined in data/calls.xml, and this definition overwrites the fields both name; remove the copy when the two say the same thing, or rename one when both are meant to exist
 custom/legacy9/models/columns.py:31:33: OD203 'holder_id.ghost': legacy9.columns has no field 'ghost'
 custom/legacy9/models/res_company.py:14:40: OD211 no parent class of res.company defines '_auto_finish', so this super() call fails
 custom/legacy9/static/src/base_calls.js:7:45: OD604 model 'res.partner' has no method 'load_views'
@@ -1102,6 +1110,8 @@ custom/unparsed_stranger/models/ledger.py:8:44: OD211 no parent class of unparse
 custom/unparsed_stranger/views/stranger.xml:4:9: OD202 model 'unparsed.fresh' comes from module unparsed_code; add it to depends
 custom/unparsed_stranger/views/stranger.xml:11:9: OD309 unparsed.ledger has no field 'note'
 custom/unparsed_stranger/views/stranger.xml:15:39: OD321 'unparsed_stranger.ledger_second' is a record of unparsed.ledger, but unparsed.ledger.partner_id takes res.partner
+custom/unversioned_logs/data/code.xml:6:30: OD319 Odoo refuses this code when it loads the record from 10.0, or when the action runs below it: Expected an expression
+custom/unversioned_logs/data/code.xml:12:30: OD319 Odoo refuses this code when it loads the record from 10.0, or when the action runs below it: Expected an expression
 custom/unversioned_logs/data/reports.xml:7:35: OD311 no indexed module defines template 'unversioned_logs.absent_record'
 custom/unversioned_logs/data/reports.xml:8:46: OD319 Odoo refuses this expression when it prints the report: Unexpected token at the end of an expression
 custom/unversioned_logs/models/probes.py:39:39: OD224 s.create_uid: drift_sensor has no such column, since drift.sensor.create_uid is not created, as drift.sensor sets _log_access to False; drop it from the query, or log access on the model

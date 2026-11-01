@@ -114,6 +114,17 @@ const CHILD_ACTION_MODEL: Series = Series { major: 18, minor: 2 };
 /// names.
 const OBJECT_WRITE_DEFAULT: Series = Series { major: 11, minor: 0 };
 
+/// The first series with a constraint that compiles the `code` of a server action on each write
+/// (`odoo/addons/base/ir/ir_actions.py:608-611` on 10.0). saas-12 adds it, which no `Series` names.
+/// 9.0 has none (`openerp/addons/base/ir/ir_actions.py:706-712`): only running the action compiles
+/// it (`:919`, reached at `:1086`).
+const CODE_CONSTRAINT: Series = Series { major: 10, minor: 0 };
+
+/// The first series whose cron has `code`, through its delegated server action
+/// (`odoo/addons/base/ir/ir_cron.py:50-52` on 11.0). saas-14 delegates first, which no `Series`
+/// names. Below it Odoo drops the field (`odoo/models.py:3876` on 10.0), so nothing compiles or runs.
+const CRON_CODE: Series = Series { major: 11, minor: 0 };
+
 /// The first series whose `Registry` has no `__call__` (`e6f99537f3aa`; saas~18.4 keeps it at
 /// `odoo/orm/registry.py:311`), so calling `model.pool` fails.
 const REGISTRY_UNCALLABLE: Series = Series { major: 19, minor: 0 };
@@ -196,7 +207,7 @@ pub fn check_module<'m>(index: &Index<'m>, mi: usize, series: Option<Series>) ->
     cache_key_names(module, series, &mut out);
     import_patches(index, module, &mut out);
     public_writes(index, mi, series, &mut out);
-    refused_server_code(module, &mut out);
+    refused_server_code(index, mi, series, &mut out);
     refused_file_names(index, mi, series, &mut out);
     for (_, file) in es_modules(index, mi, series) {
         if let Some(e) = &file.facts.syntax_error {
@@ -327,15 +338,87 @@ fn public_writes<'m>(index: &Index<'m>, mi: usize, series: Option<Series>, out: 
     }
 }
 
-/// OD319 on the code of what the manifest loads. Only a loaded record reaches the constraint that
-/// compiles it, and compiling needs no index, so this runs without base.
-fn refused_server_code<'m>(module: &'m Module, out: &mut Out<'m>) {
+/// OD319 on the code of what the manifest loads. Only a loaded record reaches what compiles it, and
+/// compiling needs no index, so this runs without base.
+fn refused_server_code<'m>(index: &Index<'m>, mi: usize, series: Option<Series>, out: &mut Out<'m>) {
+    let module = &index.modules[mi];
+    let scope = index.scope(mi);
+    let demo_scope = scope.in_demo();
     for file in module.data.iter().filter(|f| f.rank.is_some()) {
-        for refused in file.facts.servers.iter().filter_map(|s| s.refused.as_ref()) {
-            let message = format!("Odoo refuses this code when it loads the record: {}", refused.value);
-            out.push(&file.path, "OD319", refused.pos, message);
+        let scope = if file.demo { &demo_scope } else { &scope };
+        for server in &file.facts.servers {
+            let Some(refused) = &server.refused else { continue };
+            let held = || runs_held_code(index, scope, series, server, &server_writes(index, mi, server));
+            if let Some(when) = code_refusal(series, server.cron, held) {
+                let message = format!("Odoo refuses this code {when}: {}", refused.value);
+                out.push(&file.path, "OD319", refused.pos, message);
+            }
         }
     }
+}
+
+/// When Odoo refuses broken code, if ever. From `CODE_CONSTRAINT` every write compiles, whatever the
+/// `state`, or from `CRON_CODE` on a cron. Below that only running compiles, so `held` must say the
+/// record runs that code. An unknown series may be on either side, so it takes every write.
+fn code_refusal(series: Option<Series>, cron: bool, held: impl FnOnce() -> bool) -> Option<&'static str> {
+    let gate = if cron { CRON_CODE } else { CODE_CONSTRAINT };
+    match series {
+        Some(series) if series >= gate => Some("when it loads the record"),
+        Some(_) => held().then_some("when the action runs"),
+        None => Some("when it loads the record from 10.0, or when the action runs below it"),
+    }
+}
+
+/// The writes to the record of `server` in load order, `server` alone when it has no id.
+fn server_writes<'m>(index: &Index<'m>, mi: usize, server: &'m ServerFact) -> Vec<Placed<&'m ServerFact>> {
+    let id = server.id.as_ref().map(|id| full_id(&index.modules[mi].name, id));
+    let writes = id.and_then(|id| index.server_writes.get(&id));
+    let own = || {
+        vec![Placed {
+            module: mi,
+            demo: false,
+            fact: server,
+        }]
+    };
+    writes.map_or_else(own, Vec::clone)
+}
+
+/// Whether the record of `server` still holds its code and runs it, each field holding the last value
+/// `scope` gave it: what a module depending on this one replaces later does not mend a database
+/// without that module. A cron runs code without saying so, from `CRON_CODE`, and so does a server
+/// action `created_as_code`.
+fn runs_held_code<'m>(
+    index: &Index<'m>,
+    scope: &Scope,
+    series: Option<Series>,
+    server: &'m ServerFact,
+    writes: &[Placed<&'m ServerFact>],
+) -> bool {
+    if server.cron && series.is_some_and(|s| s < CRON_CODE) {
+        return false;
+    }
+    let last = || writes.iter().rev().filter(|w| scope.reads(w));
+    let holds = last()
+        .find(|w| w.fact.writes_code)
+        .is_some_and(|w| std::ptr::eq(w.fact, server));
+    let runs = last().find_map(|w| w.fact.state);
+    holds && runs.unwrap_or(server.cron || created_as_code(index, scope, series, writes))
+}
+
+/// Whether `writes` create the action on a series that fills an unset `state` with `code`. A first
+/// write to another module's action creates nothing: the action may hold any state, and an update
+/// leaves it. An unknown series may be on either side of `OBJECT_WRITE_DEFAULT`.
+fn created_as_code<'m>(
+    index: &Index<'m>,
+    scope: &Scope,
+    series: Option<Series>,
+    writes: &[Placed<&'m ServerFact>],
+) -> bool {
+    let creates = |w: &Placed<&'m ServerFact>| {
+        let module = &index.modules[w.module];
+        w.fact.id.as_ref().is_none_or(|id| own_id(module, id))
+    };
+    series.is_some_and(|s| s < OBJECT_WRITE_DEFAULT) && writes.iter().find(|w| scope.reads(w)).is_some_and(creates)
 }
 
 /// Whether a module of `series` reads a write to a report: a series it cannot tell gets no `<report>`.
@@ -2026,28 +2109,18 @@ impl<'m> Ctx<'_, 'm> {
             .model_of_xmlid(&full_id(&self.index.modules[mi].name, &model.value))
     }
 
-    /// Checks the calls `server` makes, if the record still holds that code and runs it. Each field
-    /// holds the last value `scope` gave it: what a module depending on this one replaces later does
-    /// not mend a database without that module. `server_model` gives a created child's model. A cron
-    /// runs code without saying so, and so does a server action `created_as_code`.
+    /// Checks the calls `server` makes, if `runs_held_code` says they run. `server_model` gives a
+    /// created child's model.
     fn server_code(&self, out: &mut Out<'m>, path: &'m Path, server: &'m ServerFact) {
         if server.calls.is_empty() {
             return;
         }
-        let own = [self.own(server)];
-        let id = server.id.as_ref().map(|id| full_id(&self.module.name, id));
-        let writes = id.as_ref().and_then(|id| self.index.server_writes.get(id));
-        let writes = writes.map_or(&own[..], Vec::as_slice);
-        let last = || writes.iter().rev().filter(|w| self.scope.reads(w));
-        let holds = last()
-            .find(|w| w.fact.writes_code)
-            .is_some_and(|w| std::ptr::eq(w.fact, server));
-        let runs = last().find_map(|w| w.fact.state);
-        let runs = runs.unwrap_or(server.cron || self.created_as_code(writes));
-        if !holds || !runs {
+        let writes = server_writes(self.index, self.mi, server);
+        if !runs_held_code(self.index, self.scope, self.series, server, &writes) {
             return;
         }
-        let Some(model) = self.server_model(writes, &mut id.into_iter().collect()) else {
+        let id = server.id.as_ref().map(|id| full_id(&self.module.name, id));
+        let Some(model) = self.server_model(&writes, &mut id.into_iter().collect()) else {
             return;
         };
         let calls = server.calls.iter().filter(|c| !callable_attr(&c.value, self.series));
@@ -2056,18 +2129,6 @@ impl<'m> Ctx<'_, 'm> {
                 out.push(path, "OD320", call.pos, message);
             }
         }
-    }
-
-    /// Whether `writes` create the action on a series that fills an unset `state` with `code`. A first
-    /// write to another module's action creates nothing: the action may hold any state, and an update
-    /// leaves it. An unknown series may be on either side of `OBJECT_WRITE_DEFAULT`.
-    fn created_as_code(&self, writes: &[Placed<&'m ServerFact>]) -> bool {
-        let creates = |w: &Placed<&'m ServerFact>| {
-            let module = &self.index.modules[w.module];
-            w.fact.id.as_ref().is_none_or(|id| own_id(module, id))
-        };
-        self.series.is_some_and(|s| s < OBJECT_WRITE_DEFAULT)
-            && writes.iter().find(|w| self.scope.reads(w)).is_some_and(creates)
     }
 
     /// The model `writes` leave a server action on: that of the last write after the one creating

@@ -721,7 +721,7 @@ pub struct ServerFact {
     pub state: Option<bool>,
     /// It gives `code` a value, which replaces the last one even when no call can be read from it.
     pub writes_code: bool,
-    /// Why Odoo refuses the code, in any `state`.
+    /// Why `compile()` refuses the code, which says nothing of the `state` or the series.
     pub refused: Option<Spanned<String>>,
     /// The methods the code calls on the records of `model_id`.
     pub calls: Vec<Spanned<String>>,

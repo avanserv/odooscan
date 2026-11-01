@@ -238,12 +238,17 @@ fn a_public_row_needs_no_base() {
 #[test]
 fn refused_server_code_needs_no_base() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
-    let report = scan(&ScanOptions {
-        paths: vec![root.join("custom/server_code")],
-        addons_paths: vec![],
-        default_series: None,
-    });
-    assert!(report.diagnostics.iter().any(|d| d.code == "OD319"));
+    let refused = |module: &str| {
+        let report = scan(&ScanOptions {
+            paths: vec![root.join(module)],
+            addons_paths: vec![],
+            default_series: None,
+        });
+        report.diagnostics.iter().filter(|d| d.code == "OD319").count()
+    };
+    assert!(refused("custom/server_code") > 0);
+    // Below 10.0 only the writes tell whether the code runs, and those need no base either.
+    assert_eq!(refused("custom/legacy9"), 2);
 }
 
 #[test]
