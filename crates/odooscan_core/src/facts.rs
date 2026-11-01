@@ -146,9 +146,11 @@ pub struct ClassFact {
     pub new_model: bool,
     pub kind: ModelKind,
     pub inherit: Vec<Spanned<String>>,
-    /// `_inherit` is neither `_name`, a string, nor a list or tuple of strings only, so which models
-    /// it lists, and in which order, is unknown.
+    /// `_inherit` is neither `_name`, a string, nor a list or tuple of strings only, or the class is
+    /// `unread`, so which models it lists, and in which order, is unknown.
     pub inherit_unknown: bool,
+    /// Read from the tokens of a file that does not parse, so the model is known and nothing else.
+    pub unread: bool,
     /// `_inherits` and `delegate=True` fields: parent model to delegating field.
     pub inherits: Vec<(String, String)>,
     /// The `_inherits` entries whose key and field are literals: parent model to delegating field,
@@ -229,6 +231,42 @@ pub enum DefinitionSource {
 }
 
 impl ClassFact {
+    /// A regular model class of unknown model, with nothing read from its body.
+    pub fn new(pos: Pos, class_name: String) -> Self {
+        Self {
+            pos,
+            class_name,
+            model: String::new(),
+            new_model: false,
+            kind: ModelKind::Model,
+            inherit: vec![],
+            inherit_unknown: false,
+            unread: false,
+            inherits: vec![],
+            delegations: vec![],
+            inherits_unknown: false,
+            delegate_unknown: false,
+            fields: vec![],
+            methods: vec![],
+            private_methods: vec![],
+            paths: vec![],
+            depends: vec![],
+            order_fields: vec![],
+            setup_fields: vec![],
+            rec_names_search: vec![],
+            super_calls: vec![],
+            extended: vec![],
+            table: None,
+            attrs: vec![],
+            unassigned_computes: vec![],
+            views: vec![],
+            own_view: false,
+            definitions: vec![],
+            plain_bases: vec![],
+            field_bases: vec![],
+        }
+    }
+
     pub fn attr(&self, name: &str) -> Option<&Spanned<OptionValue>> {
         self.attrs.iter().find(|(n, _)| n == name).map(|(_, v)| v)
     }
@@ -351,7 +389,8 @@ pub struct PyFacts {
     /// it declares a field instead when the scan finds a field class of that name.
     pub attr_calls: Vec<String>,
     /// A class names its model with an expression, so models and their ids are built at runtime,
-    /// or lacks `_name` in a module of unknown series and is named apart before and from saas~18.1.
+    /// lacks `_name` in a module of unknown series and is named apart before and from saas~18.1, or
+    /// sits in a file that does not parse with a `_name` or an `_inherit` its tokens do not spell.
     pub dynamic_models: bool,
     /// The literal start of each name the file's classes may give a model at runtime, empty when
     /// the expression shows none, which fits every name.

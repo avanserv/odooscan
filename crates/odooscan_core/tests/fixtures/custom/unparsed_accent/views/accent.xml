@@ -1,0 +1,9 @@
+<odoo>
+    <record id="view_unknown_form" model="ir.ui.view">
+        <field name="name">unparsed.unknown.form</field>
+        <field name="model">unparsed.unknown</field>
+        <field name="arch" type="xml">
+            <form/>
+        </field>
+    </record>
+</odoo>

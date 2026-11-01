@@ -1031,6 +1031,18 @@ custom/unlisted_data/models/rooms.py:24:7: OD401 model 'unlisted.room.xml' has n
 custom/unlisted_data/models/rooms.py:29:7: OD401 model 'unlisted.room.legacy' has no ir.model.access rule, so only the superuser can use it
 custom/unlisted_data/security/ir.model.access-legacy.csv:1:1: OD502 'security/ir.model.access-legacy.csv' is listed under update_xml, which Odoo ignores in this series; move it to data
 custom/unlisted_data/security/ir.model.access-unlisted.csv:1:1: OD502 'security/ir.model.access-unlisted.csv' is not in the manifest's data or demo, so Odoo never loads it
+custom/unparsed_accent/models/thread.py:17:15: OD000 Simple statements must be separated by newlines or semicolons
+custom/unparsed_accent/views/accent.xml:4:9: OD201 no indexed module defines model 'unparsed.unknown'
+custom/unparsed_base/models/ledger.py:14:5: OD226 _auto = False leaves unparsed.report without a table, and nothing creates the view unparsed_report; create it in init(), or drop _auto = False
+custom/unparsed_code/models/ledger.py:25:15: OD000 Simple statements must be separated by newlines or semicolons
+custom/unparsed_code/views/ledger.xml:17:13: OD310 no <field name="missing_anchor"> in view unparsed_code.view_ledger_form or the views that extend it
+custom/unparsed_code/views/ledger.xml:44:20: OD311 no indexed module defines template 'unparsed_code.no_such_page'
+custom/unparsed_code/views/ledger.xml:53:9: OD309 res.partner has no field 'ledger_note'
+custom/unparsed_code/views/ledger.xml:72:9: OD301 module unparsed_code defines no XML id 'unparsed_code.model_unparsed_stale'
+custom/unparsed_stranger/models/ledger.py:8:44: OD211 no parent class of unparsed.ledger defines 'action_settle', so this super() call fails
+custom/unparsed_stranger/views/stranger.xml:4:9: OD202 model 'unparsed.fresh' comes from module unparsed_code; add it to depends
+custom/unparsed_stranger/views/stranger.xml:11:9: OD309 unparsed.ledger has no field 'note'
+custom/unparsed_stranger/views/stranger.xml:15:39: OD321 'unparsed_stranger.ledger_second' is a record of unparsed.ledger, but unparsed.ledger.partner_id takes res.partner
 custom/unversioned_logs/data/reports.xml:7:35: OD311 no indexed module defines template 'unversioned_logs.absent_record'
 custom/unversioned_logs/data/reports.xml:8:46: OD319 Odoo refuses this expression when it prints the report: Unexpected token at the end of an expression
 custom/unversioned_logs/models/probes.py:39:39: OD224 s.create_uid: drift_sensor has no such column, since drift.sensor.create_uid is not created, as drift.sensor sets _log_access to False; drop it from the query, or log access on the model

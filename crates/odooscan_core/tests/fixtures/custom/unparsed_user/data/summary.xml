@@ -1,0 +1,13 @@
+<odoo>
+    <record id="copy_one" model="unparsed.copy">
+        <field name="label">One</field>
+    </record>
+
+    <record id="wrap_one" model="unparsed.wrap">
+        <field name="label">One</field>
+    </record>
+
+    <record id="ledger_user" model="unparsed.ledger">
+        <field name="partner_id" ref="unparsed_code.ledger_first"/>
+    </record>
+</odoo>

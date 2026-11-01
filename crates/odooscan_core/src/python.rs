@@ -1,7 +1,9 @@
+use ruff_python_ast::token::{Token, TokenKind};
 use ruff_python_ast::visitor::{self, Visitor};
 use ruff_python_ast::{self as ast, BoolOp, CmpOp, Expr, Operator, Stmt, UnaryOp};
+use ruff_python_parser::{Mode, parse_expression_range, parse_module, parse_unchecked};
 use ruff_source_file::LineIndex;
-use ruff_text_size::{Ranged, TextSize};
+use ruff_text_size::{Ranged, TextRange, TextSize};
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::facts::{
@@ -1041,6 +1043,190 @@ fn stores_inverse(write: &Write, table: Option<&str>, fields: &[&str]) -> bool {
             .is_some_and(|columns| columns.iter().all(|c| fields.contains(&c.as_str())))
 }
 
+/// A class of a file that does not parse, as far as its tokens name its model.
+struct UnreadClass {
+    fact: ClassFact,
+    naming: Naming,
+    /// How many blocks enclose the `class` statement.
+    depth: usize,
+    /// What `built_name_start` reads of an `_inherit` the class hides, which leaves a class without
+    /// `_name` as unnamed as a built `_name` does.
+    inherit_start: Option<String>,
+    may_reach_orm: bool,
+}
+
+/// A file that does not parse, walked over its tokens. Each assignment that names a model parses
+/// alone, so it reads as the class body of a file that parses does. It parses in place in the file,
+/// as `PyVisitor` hands every offset to a `Locator` of the file, which panics inside a character.
+struct UnreadFile<'s, 'a, 'ast> {
+    src: &'s str,
+    visitor: PyVisitor<'a, 'ast>,
+    depth: usize,
+    /// The classes whose block is open, by their place in `classes`.
+    open: Vec<usize>,
+    classes: Vec<UnreadClass>,
+}
+
+impl UnreadFile<'_, '_, '_> {
+    fn read(&mut self) {
+        let parsed = parse_unchecked(self.src, Mode::Module.into());
+        let tokens = parsed.tokens();
+        let mut starts = true;
+        for (i, token) in tokens.iter().enumerate() {
+            match token.kind() {
+                TokenKind::NonLogicalNewline | TokenKind::Comment => continue,
+                // An indent that mixes tabs and spaces, which Python 2 accepts, lexes as this token.
+                TokenKind::Unknown if starts => continue,
+                TokenKind::Indent => self.depth += 1,
+                TokenKind::Dedent => self.dedent(),
+                _ if starts => self.statement(&tokens[i..]),
+                _ => {}
+            }
+            starts = opens_statement(token.kind());
+        }
+    }
+
+    fn dedent(&mut self) {
+        self.depth = self.depth.saturating_sub(1);
+        let classes = &self.classes;
+        let depth = self.depth;
+        self.open.retain(|&at| classes[at].depth < depth);
+    }
+
+    fn class(&mut self, tokens: &[Token]) {
+        let [_, name, ..] = tokens else {
+            return;
+        };
+        self.open.push(self.classes.len());
+        self.classes.push(UnreadClass {
+            fact: ClassFact::new(self.visitor.loc.pos(name.start()), self.src[name.range()].to_owned()),
+            naming: Naming::default(),
+            depth: self.depth,
+            inherit_start: None,
+            may_reach_orm: header_reaches_orm(self.src, tokens),
+        });
+    }
+
+    fn statement(&mut self, tokens: &[Token]) {
+        if tokens[0].kind() == TokenKind::Class {
+            self.class(tokens);
+        } else {
+            self.attribute(tokens);
+        }
+    }
+
+    /// Reads an assignment to what names the model of the class whose body the statement sits in.
+    fn attribute(&mut self, tokens: &[Token]) {
+        let body = self.open.last().copied();
+        let Some(at) = body.filter(|&at| self.classes[at].depth + 1 == self.depth) else {
+            return;
+        };
+        let pairs = tokens.as_chunks::<2>().0.iter().take_while(|pair| is_target(pair));
+        let names = |pair: &&[Token; 2]| NAMING_ATTRS.contains(&&self.src[pair[0].range()]);
+        let targets: Vec<_> = pairs.clone().filter(names).map(|pair| pair[0].range()).collect();
+        let (Some(value), false) = (tokens.get(pairs.count() * 2), targets.is_empty()) else {
+            return;
+        };
+        let ends = |t: &&Token| matches!(t.kind(), TokenKind::Newline | TokenKind::Semi | TokenKind::EndOfFile);
+        let Some(end) = tokens.iter().find(ends) else {
+            return;
+        };
+        let parsed = parse_expression_range(self.src, TextRange::new(value.start(), end.start()));
+        let unparsed = hidden_value(value.range());
+        let value = parsed.as_ref().map_or(&unparsed, |parsed| parsed.expr());
+        for target in targets {
+            if let Ok(target) = parse_expression_range(self.src, target) {
+                self.assignment(at, target.expr(), value);
+            }
+        }
+    }
+
+    fn assignment(&mut self, at: usize, target: &Expr, value: &Expr) {
+        let class = &mut self.classes[at];
+        let visitor = &mut self.visitor;
+        visitor.class_attrs(std::slice::from_ref(target), value, &mut class.fact, &mut class.naming);
+        if target.as_name_expr().is_some_and(|n| n.id.as_str() == "_inherit") && class.fact.inherit_unknown {
+            class.inherit_start = built_name_start(value);
+        }
+    }
+
+    /// The facts of the file: only what a class names survives, so nothing that reads a class's body
+    /// takes the class for whole.
+    fn into_facts(self) -> PyFacts {
+        let mut visitor = self.visitor;
+        for mut class in self.classes {
+            // `_name` settles the model whatever `_inherit` hides, in either order in the class.
+            if class.fact.inherit_unknown && !class.naming.named {
+                visitor.facts.dynamic_models = true;
+                class.naming.built_start = class.inherit_start;
+            }
+            if let Some(fact) = visitor.named_model(class.fact, class.naming, class.may_reach_orm) {
+                visitor.facts.classes.push(ClassFact {
+                    inherit: vec![],
+                    inherit_unknown: true,
+                    unread: true,
+                    attrs: vec![],
+                    ..fact
+                });
+            }
+        }
+        visitor.facts
+    }
+}
+
+/// The class attributes a file that does not parse is read for: the two that name a model, and the
+/// one that keeps a class out of the registry.
+const NAMING_ATTRS: [&str; 3] = ["_name", "_inherit", "_register"];
+
+/// A name in place of a value that does not parse, as both hide what they hold.
+fn hidden_value(range: TextRange) -> Expr {
+    Expr::Name(ast::ExprName {
+        node_index: ast::AtomicNodeIndex::NONE,
+        range,
+        id: ast::name::Name::new_static("unparsed"),
+        ctx: ast::ExprContext::Load,
+    })
+}
+
+/// Whether a pair of tokens opens an assignment: a name and `=`.
+fn is_target([name, equal]: &[Token; 2]) -> bool {
+    name.kind() == TokenKind::Identifier && equal.kind() == TokenKind::Equal
+}
+
+/// Whether the token after one of `kind` starts a statement.
+fn opens_statement(kind: TokenKind) -> bool {
+    matches!(
+        kind,
+        TokenKind::Indent | TokenKind::Dedent | TokenKind::Newline | TokenKind::Semi
+    )
+}
+
+/// Whether a `class` statement of a file that does not parse, from its first token, may reach the
+/// ORM. A header that does not parse either may.
+fn header_reaches_orm(src: &str, tokens: &[Token]) -> bool {
+    let colon = tokens.iter().find(|t| t.kind() == TokenKind::Colon);
+    let header = colon.map(|colon| format!("{}: pass", &src[TextRange::new(tokens[0].start(), colon.start())]));
+    let parsed = header.and_then(|header| parse_module(&header).ok());
+    match parsed.as_ref().and_then(|parsed| parsed.suite().first()) {
+        Some(Stmt::ClassDef(class)) => may_reach_orm(class),
+        _ => true,
+    }
+}
+
+/// What the tokens of a file that does not parse say of its models, so that rules stay silent on
+/// those and only those. A name they hide may be any, as for a parsed class that builds it.
+fn unread_facts(src: &str, visitor: PyVisitor<'_, '_>) -> PyFacts {
+    let mut file = UnreadFile {
+        src,
+        visitor,
+        depth: 0,
+        open: vec![],
+        classes: vec![],
+    };
+    file.read();
+    file.into_facts()
+}
+
 /// The facts of a Python file of a module of `series`, which names a class without `_name`.
 pub fn analyze(src: &str, series: Option<Series>) -> PyFacts {
     analyze_with(src, series, &FieldClasses::default())
@@ -1053,40 +1239,13 @@ pub fn analyze_with(src: &str, series: Option<Series>, known: &FieldClasses) -> 
         Ok(module) => module,
         Err(e) => {
             let diag = RawDiag::new("OD000", loc.pos(e.location.start()), e.error.to_string());
-            return PyFacts {
-                diags: vec![diag],
-                ..PyFacts::default()
-            };
+            let mut visitor = PyVisitor::new(&loc, series, known, &[]);
+            visitor.facts.diags.push(diag);
+            return unread_facts(src, visitor);
         }
     };
     let body = &module.body;
-    let top = module_state::top_level(body);
-    let mut v = PyVisitor {
-        loc: &loc,
-        series,
-        known,
-        facts: PyFacts::default(),
-        kinds: FxHashMap::default(),
-        fieldless: fieldless_classes(body),
-        guarded: 0,
-        holders: GuardHolders::default(),
-        class_models: vec![],
-        class_facts: vec![],
-        owners: vec![],
-        query_vars: None,
-        read_queries: FxHashSet::default(),
-        self_cursors: vec![],
-        cursor_uses: vec![],
-        in_view_maker: false,
-        odoo_names: module_state::odoo_names(&top)
-            .into_iter()
-            .map(|(local, _)| local)
-            .collect(),
-        orm_names: ORM_PACKAGES
-            .iter()
-            .flat_map(|package| module_state::imported_names(&top, package))
-            .collect(),
-    };
+    let mut v = PyVisitor::new(&loc, series, known, body);
     v.visit_body(body);
     let (patches, diags) = module_state::check(body, &loc);
     v.facts.import_patches = patches;
@@ -1318,7 +1477,37 @@ struct PyVisitor<'a, 'ast> {
     orm_names: Vec<(&'ast str, String)>,
 }
 
-impl<'ast> PyVisitor<'_, 'ast> {
+impl<'a, 'ast> PyVisitor<'a, 'ast> {
+    fn new(loc: &'a Locator<'a>, series: Option<Series>, known: &'a FieldClasses, body: &'ast [Stmt]) -> Self {
+        let top = module_state::top_level(body);
+        Self {
+            loc,
+            series,
+            known,
+            facts: PyFacts::default(),
+            kinds: FxHashMap::default(),
+            fieldless: fieldless_classes(body),
+            guarded: 0,
+            holders: GuardHolders::default(),
+            class_models: vec![],
+            class_facts: vec![],
+            owners: vec![],
+            query_vars: None,
+            read_queries: FxHashSet::default(),
+            self_cursors: vec![],
+            cursor_uses: vec![],
+            in_view_maker: false,
+            odoo_names: module_state::odoo_names(&top)
+                .into_iter()
+                .map(|(local, _)| local)
+                .collect(),
+            orm_names: ORM_PACKAGES
+                .iter()
+                .flat_map(|package| module_state::imported_names(&top, package))
+                .collect(),
+        }
+    }
+
     fn diag(&mut self, code: &'static str, node: &impl Ranged, message: impl Into<String>) {
         let pos = self.loc.at(node);
         self.facts.diags.push(RawDiag::new(code, pos, message));
@@ -1350,35 +1539,10 @@ impl<'ast> PyVisitor<'_, 'ast> {
         let above = |base: &str| self.fieldless.get(base).is_some_and(|end| *end <= class.start());
         let field_bases = plain_bases.iter().filter(|base| !above(base)).cloned().collect();
         let mut fact = ClassFact {
-            pos: self.loc.at(&class.name),
-            class_name: class.name.to_string(),
-            model: String::new(),
-            new_model: false,
             kind: kind.unwrap_or(ModelKind::Model),
-            inherit: vec![],
-            inherit_unknown: false,
-            inherits: vec![],
-            delegations: vec![],
-            inherits_unknown: false,
-            delegate_unknown: false,
-            fields: vec![],
-            methods: vec![],
-            private_methods: vec![],
-            paths: vec![],
-            depends: vec![],
-            order_fields: vec![],
-            setup_fields: vec![],
-            rec_names_search: vec![],
-            super_calls: vec![],
-            extended: vec![],
-            table: None,
-            attrs: vec![],
-            unassigned_computes: vec![],
-            views: vec![],
-            own_view: false,
-            definitions: vec![],
             plain_bases,
             field_bases,
+            ..ClassFact::new(self.loc.at(&class.name), class.name.to_string())
         };
         for stmt in &class.body {
             if let Some((targets, value)) = assigned(stmt) {
@@ -1390,11 +1554,16 @@ impl<'ast> PyVisitor<'_, 'ast> {
             }
         }
         fact.unassigned_computes = self.unassigned_computes(class, &fact);
-        naming.registers = fact.registered() && may_reach_orm(class);
+        self.named_model(fact, naming, may_reach_orm(class))
+    }
+
+    /// `fact` with the model what a class says about it gives, when that gives one.
+    fn named_model(&mut self, mut fact: ClassFact, mut naming: Naming, may_reach_orm: bool) -> Option<ClassFact> {
+        naming.registers = fact.registered() && may_reach_orm;
         if naming.registers {
             self.facts.built_model_starts.extend(naming.built_start.take());
         }
-        fact.model = self.model_name(class.name.as_str(), &naming, &fact)?;
+        fact.model = self.model_name(&fact.class_name, &naming, &fact)?;
         fact.new_model = !fact.inherit.iter().any(|i| i.value == fact.model);
         Some(fact)
     }
@@ -3478,6 +3647,211 @@ mod tests {
         for value in ["_name", "'a'", "['a', 'b']", "('a', 'b')", "[]"] {
             assert!(!unknown(value), "{value}");
         }
+    }
+
+    /// The models a file that stops at a Python 2 `print` names: (model, new_model) of each class.
+    fn unread(body: &str) -> (Vec<(String, bool)>, bool, Vec<String>) {
+        let facts = analyze(&format!("{body}\nprint 'x'\n"), Series::parse("10.0"));
+        assert_eq!(facts.diags.len(), 1);
+        assert!(
+            facts
+                .classes
+                .iter()
+                .all(|c| c.unread && c.inherit_unknown && c.inherit.is_empty())
+        );
+        let models = facts.classes.iter().map(|c| (c.model.clone(), c.new_model)).collect();
+        (models, facts.dynamic_models, facts.built_model_starts)
+    }
+
+    #[test]
+    fn a_file_that_does_not_parse_still_names_its_models() {
+        let (a, b) = (("a".to_owned(), false), ("b".to_owned(), false));
+        let new = ("a".to_owned(), true);
+        let own = ("X".to_owned(), true);
+        let cases = [
+            ("class X(models.Model):\n    _name = 'a'", vec![new.clone()]),
+            ("class X(models.Model):\n    _name = u\"a\"  # why", vec![new.clone()]),
+            ("class X(osv.osv):\n\n    # why\n    _name = 'a'", vec![new.clone()]),
+            ("class X(models.Model):\n    _inherit = 'a'", vec![a.clone()]),
+            ("class X(models.Model):\n    _inherit = u'a'", vec![a.clone()]),
+            ("class X(models.Model):\n    _inherit = ['a']", vec![a.clone()]),
+            ("class X(models.Model):\n    _inherit = ['a', 'b']", vec![own.clone()]),
+            ("class X(models.Model):\n    _inherit = ('a', 'b')", vec![own.clone()]),
+            (
+                "class X(models.Model):\n    _inherit = [\n        'a',  # why\n        'b',\n    ]",
+                vec![own.clone()],
+            ),
+            (
+                "class X(models.Model):\n    _name = _description = 'a'",
+                vec![new.clone()],
+            ),
+            (
+                "class X(models.Model):\n    _description = _name = 'a'",
+                vec![new.clone()],
+            ),
+            ("class X(models.Model):\n    _name = 'a';", vec![new.clone()]),
+            (
+                "class X(models.Model):\n    _name = 'a'; _inherit = 'a'",
+                vec![a.clone()],
+            ),
+            (
+                "class X(models.Model):\n        x = 1\n\t_name = 'a'",
+                vec![new.clone()],
+            ),
+            ("class X(object):\n    _name = 'a'", vec![new.clone()]),
+            (
+                "class X(models.Model):\n    _name = 'a'\n    _inherit = 'b'",
+                vec![new.clone()],
+            ),
+            (
+                "class X(models.Model):\n    _inherit = 'b'\n    _name = 'a'",
+                vec![new.clone()],
+            ),
+            (
+                "class X(models.Model):\n    _name = 'a'\n    _inherit = 'a'",
+                vec![a.clone()],
+            ),
+            (
+                "class X(models.Model):\n    _name = 'a'\n    _inherit = ['a', 'b']",
+                vec![a.clone()],
+            ),
+            (
+                "class X(models.Model):\n    _name = 'a'\n    _inherit = _name",
+                vec![a.clone()],
+            ),
+            (
+                "class X(models.Model):\n    _name = 'a'\n\n\nclass Y(models.Model):\n    _inherit = 'b'",
+                vec![new.clone(), b.clone()],
+            ),
+            (
+                "class X(models.Model):\n    class Meta:\n        _name = 'b'\n    _name = 'a'",
+                vec![new.clone(), ("b".to_owned(), true)],
+            ),
+        ];
+        for (body, models) in cases {
+            assert_eq!(unread(body), (models, false, vec![]), "{body}");
+        }
+    }
+
+    #[test]
+    fn a_file_that_does_not_parse_reads_only_class_attributes() {
+        for body in [
+            "import os",
+            "_name = 'a'",
+            "class X(models.Model):\n    name = fields.Char()",
+            "class X(models.Model):\n    def f(self):\n        _name = 'a'",
+            "class X(models.Model):\n    if True:\n        _name = 'a'",
+            "class X(models.Model):\n    pass\n\n\ndef f():\n    _inherit = 'a'",
+            "class X(models.Model):\n    x = '_name = 1'",
+            "class X(models.Model):\n    _inherit = []",
+        ] {
+            assert_eq!(unread(body), (vec![], false, vec![]), "{body}");
+        }
+    }
+
+    #[test]
+    fn a_file_that_does_not_parse_builds_what_it_hides() {
+        let hidden = |models: Vec<(String, bool)>, start: &str| (models, true, vec![start.to_owned()]);
+        let a = ("a".to_owned(), false);
+        let cases = [
+            ("class X(models.Model):\n    _name = MODEL", hidden(vec![], "")),
+            (
+                "class X(models.Model):\n    _name = 'a.%s' % KIND",
+                hidden(vec![], "a."),
+            ),
+            ("class X(models.Model):\n    _name = print x", hidden(vec![], "")),
+            ("class X(models.Model):\n    _inherit = PARENT", hidden(vec![], "")),
+            ("class X(models.Model):\n    _inherit = _name", hidden(vec![], "")),
+            (
+                "class X(models.Model):\n    _inherit = ['a', PARENT]",
+                hidden(vec![a.clone()], ""),
+            ),
+            ("class X(models.Model):\n    _inherit = ['a'", hidden(vec![], "")),
+            ("class X(models.Model):\n    _name = x.y = 'a'", hidden(vec![], "")),
+        ];
+        for (body, expected) in cases {
+            assert_eq!(unread(body), expected, "{body}");
+        }
+    }
+
+    #[test]
+    fn a_file_that_does_not_parse_lets_name_settle_what_inherit_hides() {
+        let new = ("a".to_owned(), true);
+        let hidden = "_inherit = ['mail.thread', MIXIN]";
+        let cases = [
+            (format!("_name = 'a'\n    {hidden}"), vec![new.clone()], false, vec![]),
+            (format!("{hidden}\n    _name = 'a'"), vec![new.clone()], false, vec![]),
+            (
+                "_name = 'a'\n    _inherit = PARENT".to_owned(),
+                vec![new],
+                false,
+                vec![],
+            ),
+            (
+                "_name = 'a.%s' % KIND\n    _inherit = PARENT".to_owned(),
+                vec![],
+                true,
+                vec!["a.".to_owned()],
+            ),
+            ("_name = False\n    _inherit = PARENT".to_owned(), vec![], true, vec![]),
+        ];
+        for (attrs, models, dynamic, starts) in cases {
+            let body = format!("class X(models.Model):\n    {attrs}");
+            assert_eq!(unread(&body), (models, dynamic, starts), "{body}");
+        }
+    }
+
+    #[test]
+    fn a_file_that_does_not_parse_guards_what_it_builds_as_a_parsed_class_does() {
+        let a = ("a".to_owned(), false);
+        let cases = [
+            ("class X(models.Model):\n    _name = False", vec![]),
+            ("class X(models.Model):\n    _name = False\n    _inherit = 'a'", vec![a]),
+            ("class X(object):\n    _name = get()", vec![]),
+            ("class X:\n    _name = get()", vec![]),
+            (
+                "class X(models.Model):\n    _name = get()\n    _register = False",
+                vec![],
+            ),
+            ("class X(object):\n    _inherit = PARENT", vec![]),
+        ];
+        for (body, models) in cases {
+            assert_eq!(unread(body), (models, true, vec![]), "{body}");
+        }
+    }
+
+    #[test]
+    fn a_file_that_does_not_parse_names_a_list_inherit_as_its_series_does() {
+        let named = |series: &str| {
+            let src = "class FooBar(models.Model):\n    _inherit = ['mail.thread']\nprint 'x'\n";
+            let facts = analyze(src, Series::parse(series));
+            let class = &facts.classes[0];
+            (class.model.clone(), class.new_model)
+        };
+        assert_eq!(named("10.0"), ("mail.thread".to_owned(), false));
+        assert_eq!(named("20.0"), ("foo.bar".to_owned(), true));
+    }
+
+    /// Each of these sits in its statement at an offset that, in the whole file, falls inside `©`.
+    #[test]
+    fn a_file_that_does_not_parse_reads_offsets_of_the_file() {
+        let list = "# -*- coding: utf-8 -*-\n# © 2016 ...\nclass X(models.Model):\n    \
+                    _inherit = ['mail.thread', 'ir.needaction_mixin']\nprint 'x'\n";
+        let name = "# coding: ©\nclass X(models.Model):\n    _name = 'a'\n    _inherit = _name\nprint 'x'\n";
+        let target = "# coding: ©\nclass X(models.Model):\n    _inherit = _register = 'a'\nprint 'x'\n";
+        assert_eq!(list.as_bytes()[27] & 0xC0, 0x80);
+        assert_eq!(name.as_bytes()[11] & 0xC0, 0x80);
+        for (src, model) in [(list, "X"), (name, "a"), (target, "a")] {
+            let facts = analyze(src, Series::parse("10.0"));
+            assert_eq!(facts.classes[0].model, model, "{src}");
+        }
+    }
+
+    #[test]
+    fn a_file_that_parses_has_no_unread_class() {
+        let facts = analyze("class X(models.Model):\n    _name = 'a'\n", Series::parse("10.0"));
+        assert!(!facts.classes[0].unread);
+        assert!(!facts.classes[0].inherit_unknown);
     }
 
     #[test]

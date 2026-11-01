@@ -1772,7 +1772,7 @@ impl<'m> Index<'m> {
         if model == comodel {
             return Some(true);
         }
-        let classes = self.chain_classes(model);
+        let classes = self.chain_read_from(model, scope);
         if !self.has_model(model) || classes.iter().any(|(_, c)| c.hidden_parents()) {
             return None;
         }
@@ -1884,6 +1884,12 @@ impl<'m> Index<'m> {
             .any(|(_, c)| c.hidden_parents())
     }
 
+    /// Whether a class in scope of `model`, or of a model it inherits or delegates to, sits in a file
+    /// that does not parse, so the model may hold any field or method.
+    pub fn unread_class(&self, model: &str, scope: &Scope) -> bool {
+        self.chain(model, Some(scope), true).iter().any(|(_, c)| c.unread)
+    }
+
     /// Whether a class in scope of `model`, or of a model it inherits or delegates to, may get fields
     /// from a parent the scan cannot read.
     pub fn hidden_field_parents(&self, model: &str, scope: &Scope) -> bool {
@@ -1991,6 +1997,14 @@ impl<'m> Index<'m> {
     /// Every class of `model` and of the models it inherits, `base` included, in any indexed module.
     pub fn chain_classes(&self, model: &str) -> Vec<(usize, &'m ClassFact)> {
         self.chain(model, None, false)
+    }
+
+    /// `chain_classes` for a reader in `scope`. A class in a file that does not parse hides what the
+    /// modules that see it get, so a module outside its reach is still checked on the model.
+    pub fn chain_read_from(&self, model: &str, scope: &Scope) -> Vec<(usize, &'m ClassFact)> {
+        let mut chain = self.chain_classes(model);
+        chain.retain(|(mi, c)| !c.unread || scope.sees(*mi));
+        chain
     }
 
     /// Whether an indexed module creates a view named `table`, in Python with a query whose literal

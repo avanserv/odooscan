@@ -1,0 +1,75 @@
+<odoo>
+    <record id="view_ledger_form" model="ir.ui.view">
+        <field name="name">unparsed.ledger.form</field>
+        <field name="model">unparsed.ledger</field>
+        <field name="arch" type="xml">
+            <form>
+                <field name="note"/>
+            </form>
+        </field>
+    </record>
+
+    <record id="view_ledger_form_more" model="ir.ui.view">
+        <field name="name">unparsed.ledger.form.more</field>
+        <field name="model">unparsed.ledger</field>
+        <field name="inherit_id" ref="view_ledger_form"/>
+        <field name="arch" type="xml">
+            <field name="missing_anchor" position="after">
+                <field name="name"/>
+            </field>
+        </field>
+    </record>
+
+    <record id="view_fresh_form" model="ir.ui.view">
+        <field name="name">unparsed.fresh.form</field>
+        <field name="model">unparsed.fresh</field>
+        <field name="arch" type="xml">
+            <form>
+                <field name="name"/>
+            </form>
+        </field>
+    </record>
+
+    <record id="view_currency_form" model="ir.ui.view">
+        <field name="name">res.currency.books.form</field>
+        <field name="model">res.currency</field>
+        <field name="arch" type="xml">
+            <form>
+                <button type="object" name="action_close_books"/>
+            </form>
+        </field>
+    </record>
+
+    <template id="ledger_page">
+        <t t-call="unparsed_code.no_such_page"/>
+    </template>
+
+    <record id="ledger_first" model="unparsed.ledger">
+        <field name="note">First</field>
+        <field name="state">late</field>
+    </record>
+
+    <record id="partner_ledger" model="res.partner">
+        <field name="ledger_note">First</field>
+    </record>
+
+    <function model="res.currency" name="_close_books"/>
+
+    <record id="action_close_books" model="ir.actions.server">
+        <field name="name">Close books</field>
+        <field name="model_id" ref="base.model_res_currency"/>
+        <field name="code">model._close_books()</field>
+    </record>
+
+    <record id="action_fresh" model="ir.actions.server">
+        <field name="name">Fresh</field>
+        <field name="model_id" ref="model_unparsed_fresh"/>
+        <field name="code">records.write({})</field>
+    </record>
+
+    <record id="action_stale" model="ir.actions.server">
+        <field name="name">Stale</field>
+        <field name="model_id" ref="model_unparsed_stale"/>
+        <field name="code">records.write({})</field>
+    </record>
+</odoo>

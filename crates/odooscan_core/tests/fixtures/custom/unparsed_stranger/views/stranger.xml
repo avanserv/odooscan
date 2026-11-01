@@ -1,0 +1,17 @@
+<odoo>
+    <record id="view_fresh_list" model="ir.ui.view">
+        <field name="name">unparsed.fresh.list</field>
+        <field name="model">unparsed.fresh</field>
+        <field name="arch" type="xml">
+            <tree string="Fresh"/>
+        </field>
+    </record>
+
+    <record id="ledger_second" model="unparsed.ledger">
+        <field name="note">Second</field>
+    </record>
+
+    <record id="ledger_third" model="unparsed.ledger">
+        <field name="partner_id" ref="ledger_second"/>
+    </record>
+</odoo>
