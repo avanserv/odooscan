@@ -187,6 +187,7 @@ pub fn check_module<'m>(index: &Index<'m>, mi: usize, series: Option<Series>) ->
         let scope = index.scope(mi);
         let setup = index.setup_scope(mi);
         let dep_names = module.manifest.depends.iter().map(|d| d.value.as_str()).collect();
+        let built = BuiltModels::of(module);
         let ctx = Ctx {
             index,
             module,
@@ -194,6 +195,7 @@ pub fn check_module<'m>(index: &Index<'m>, mi: usize, series: Option<Series>) ->
             setup: &setup,
             dep_names: &dep_names,
             dynamic: module.python.iter().any(|f| f.facts.dynamic_models),
+            built: &built,
             partial: index.partial_scope(&scope),
             series,
         };
@@ -775,6 +777,40 @@ fn load_place(module: &Module, series: Option<Series>, def_rank: usize, rank: us
     format!("in {}", file.unwrap_or_default())
 }
 
+/// The names a module may build at runtime. A model another module spells out is still that
+/// module's unless the name fits, so a name that fits nothing is a real gap in `depends`.
+struct BuiltModels<'m> {
+    starts: Vec<&'m str>,
+    names: Vec<&'m str>,
+}
+
+impl<'m> BuiltModels<'m> {
+    /// A class under `tests/` exists only in a test run, so it builds nothing the module's code or
+    /// data can rely on.
+    fn of(module: &'m Module) -> Self {
+        let loaded = || {
+            module
+                .python
+                .iter()
+                .filter(|f| f.rel.split('/').next() != Some("tests"))
+        };
+        Self {
+            starts: loaded()
+                .flat_map(|f| &f.facts.built_model_starts)
+                .map(String::as_str)
+                .collect(),
+            names: loaded()
+                .flat_map(|f| &f.facts.built_model_names)
+                .map(String::as_str)
+                .collect(),
+        }
+    }
+
+    fn fit(&self, model: &str) -> bool {
+        self.names.contains(&model) || self.starts.iter().any(|start| model.starts_with(start))
+    }
+}
+
 #[derive(Clone, Copy)]
 struct Ctx<'a, 'm> {
     index: &'a Index<'m>,
@@ -786,6 +822,8 @@ struct Ctx<'a, 'm> {
     dep_names: &'a FxHashSet<&'m str>,
     /// The module builds model names at runtime, so its models and their ids cannot be listed.
     dynamic: bool,
+    /// What the module may build, outside `tests/`.
+    built: &'a BuiltModels<'m>,
     /// A module in scope depends on one that is not indexed, such as an Enterprise module.
     partial: bool,
     series: Option<Series>,
@@ -795,6 +833,7 @@ impl<'m> Ctx<'_, 'm> {
     fn model_ref(&self, out: &mut Out<'m>, path: &'m Path, model: &Spanned<String>, except: Option<&ClassFact>) {
         match self.index.model_status(&model.value, self.scope, except) {
             Status::Visible => {}
+            Status::Hidden(_) if self.built.fit(&model.value) => {}
             Status::Hidden(m) => out.push(
                 path,
                 "OD202",
@@ -964,7 +1003,9 @@ impl<'m> Ctx<'_, 'm> {
         };
         let message = match self.index.model_status(&model.value, self.scope, None) {
             Status::Visible => return self.orm_method(out, path, call, &model.value),
-            Status::Hidden(m) => format!("model '{}' comes from module {m}, which is not in depends", model.value),
+            Status::Hidden(m) if !self.built.fit(&model.value) => {
+                format!("model '{}' comes from module {m}, which is not in depends", model.value)
+            }
             Status::Missing if !self.dynamic => format!("no indexed module defines model '{}'", model.value),
             _ => return,
         };

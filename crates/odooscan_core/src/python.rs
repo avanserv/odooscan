@@ -817,6 +817,10 @@ struct Naming {
     named: bool,
     /// `_name` when it is a literal.
     name: Option<String>,
+    /// The literal start of the names `_name` may build.
+    built_start: Option<String>,
+    /// Odoo may register the class, so a name it reads as another model may be built.
+    registers: bool,
     inherit: InheritShape,
 }
 
@@ -839,6 +843,25 @@ impl InheritShape {
             _ => Self::Other,
         }
     }
+}
+
+/// The literal start of the names a `_name` may build, up to the first value it splices in. A
+/// literal builds nothing, and a false `_name` names no model.
+fn built_name_start(value: &Expr) -> Option<String> {
+    if str_lit(value).is_some() || matches!(option_value(value), OptionValue::Bool(false) | OptionValue::Falsy) {
+        return None;
+    }
+    let head = query_head(value).unwrap_or_default();
+    Some(head.split(['%', '{']).next().unwrap_or_default().to_owned())
+}
+
+/// Whether a base of the class may reach `models.Model`, so that Odoo registers it. With no base or
+/// only `object` it never can, while any other plain base may be a mixin that does.
+fn may_reach_orm(class: &ast::StmtClassDef) -> bool {
+    class
+        .bases()
+        .iter()
+        .any(|base| !matches!(base, Expr::Name(n) if n.id.as_str() == "object"))
 }
 
 /// The name Odoo gives a class without `_name` from saas~18.1: a dot before each ASCII capital that
@@ -953,6 +976,10 @@ impl<'ast> PyVisitor<'_, 'ast> {
             }
         }
         fact.unassigned_computes = self.unassigned_computes(class, &fact);
+        naming.registers = fact.registered() && may_reach_orm(class);
+        if naming.registers {
+            self.facts.built_model_starts.extend(naming.built_start.take());
+        }
         fact.model = self.model_name(class.name.as_str(), &naming, &fact)?;
         fact.new_model = !fact.inherit.iter().any(|i| i.value == fact.model);
         Some(fact)
@@ -979,9 +1006,22 @@ impl<'ast> PyVisitor<'_, 'ast> {
             Some(series) if series >= DOTTED_CLASS_NAME => Some(dotted(class_name)),
             Some(_) => earlier,
             None => {
-                self.facts.dynamic_models |= earlier.as_deref() != Some(dotted(class_name).as_str());
+                self.unknown_series_reading(dotted(class_name), earlier.as_deref(), naming, fact);
                 earlier
             }
+        }
+    }
+
+    /// Records the reading of a class of unknown series that `earlier` does not take, the only name
+    /// in doubt. One of the class's own parents is no such name: both readings need it from
+    /// `depends`.
+    fn unknown_series_reading(&mut self, later: String, earlier: Option<&str>, naming: &Naming, fact: &ClassFact) {
+        if earlier == Some(later.as_str()) {
+            return;
+        }
+        self.facts.dynamic_models = true;
+        if naming.registers && !fact.inherit.iter().any(|parent| parent.value == later) {
+            self.facts.built_model_names.push(later);
         }
     }
 
@@ -1019,6 +1059,7 @@ impl<'ast> PyVisitor<'_, 'ast> {
                 "_name" => {
                     naming.named = true;
                     naming.name = str_lit(value).map(str::to_owned);
+                    naming.built_start = built_name_start(value);
                     self.facts.dynamic_models |= naming.name.is_none();
                 }
                 "_inherit" => naming.inherit = self.inherit(value, fact, naming.name.as_deref()),
@@ -2461,6 +2502,92 @@ mod tests {
                 assert_eq!(&named(body, series), want, "{body} at {series:?}");
             }
         }
+    }
+
+    #[test]
+    fn reads_the_start_of_each_name_a_class_may_build() {
+        let starts = |body: &str| analyze(&format!("class X(models.Model):\n{body}\n"), None).built_model_starts;
+        for (name, start) in [
+            ("'export.%s' % name", "export."),
+            ("f'bad.generated.{kind}'", "bad.generated."),
+            ("'a.' f'b.{kind}'", "a.b."),
+            ("'a.' + b", "a."),
+            ("'a.' + b + '.c'", "a."),
+            ("'a.%s' % b + '.c'", "a."),
+            ("'a.{}'.format(b)", "a."),
+            ("'%s.line' % name", ""),
+            ("f'{kind}.line'", ""),
+            ("'{}.line'.format(b)", ""),
+            ("PREFIX + '.line'", ""),
+            ("MODEL", ""),
+            ("self.env['a']._name", ""),
+            ("'.'.join(parts)", ""),
+        ] {
+            assert_eq!(starts(&format!("    _name = {name}")), [start], "{name}");
+        }
+        for body in [
+            "    _name = 'a'",
+            "    _name = None",
+            "    _name = False",
+            "    _name = MODEL\n    _register = False",
+            "    _register = False\n    _name = MODEL",
+            "    _register = None\n    _name = f'a.{kind}'",
+        ] {
+            assert_eq!(starts(body), [""; 0], "{body}");
+        }
+        assert_eq!(starts("    _name = MODEL\n    _register = REGISTER"), [""]);
+        assert_eq!(starts("    _name = MODEL\n    _name = 'a'"), [""; 0]);
+        let bare = analyze("class Helper:\n    _name = None\n", None);
+        assert!(bare.built_model_starts.is_empty());
+        assert!(bare.dynamic_models);
+    }
+
+    #[test]
+    fn a_class_that_cannot_reach_the_orm_builds_nothing() {
+        let built = |src: &str| {
+            let facts = analyze(src, None);
+            (facts.dynamic_models, facts.built_model_starts, facts.built_model_names)
+        };
+        for src in [
+            "class Helper:\n    _name = MODEL\n",
+            "class Helper():\n    _name = MODEL\n",
+            "class Helper(object):\n    _name = MODEL\n",
+            "class Holder(models.Model):\n    _name = 'a'\n    class Helper:\n        _name = MODEL\n",
+            "class ResPartnerX:\n    _inherit = ['a']\n",
+            "class ResPartnerX(object):\n    _inherit = ['a']\n",
+        ] {
+            assert_eq!(built(src), (true, vec![], vec![]), "{src}");
+        }
+        for base in ["Mixin", "mixins.Layout", "object, Mixin"] {
+            let src = format!("class Helper({base}):\n    _name = MODEL\n");
+            assert_eq!(built(&src), (true, vec![String::new()], vec![]), "{base}");
+        }
+    }
+
+    #[test]
+    fn adds_the_reading_not_taken_of_a_class_of_unknown_series() {
+        let read = |body: &str, series: Option<&str>| {
+            let src = format!("class ResPartnerX(models.Model):\n{body}\n");
+            let facts = analyze(&src, series.and_then(Series::parse));
+            assert!(
+                facts.built_model_starts.is_empty(),
+                "a reading is a whole name, not a start"
+            );
+            (facts.dynamic_models, facts.built_model_names)
+        };
+        let parents = "    _inherit = ['a']";
+        assert_eq!(read(parents, None), (true, vec!["res.partner.x".to_owned()]));
+        for series in ["18.0", "20.0"] {
+            assert_eq!(read(parents, Some(series)), (false, vec![]), "{series}");
+        }
+        assert_eq!(read("    _inherit = ['res.partner.x']", None), (false, vec![]));
+        assert_eq!(
+            read("    _inherit = ['a']\n    _register = False", None),
+            (true, vec![])
+        );
+        // Each reading needs this parent from `depends`, so the module does not build it.
+        assert_eq!(read("    _inherit = ['res.partner.x', 'a']", None), (true, vec![]));
+        assert_eq!(read("    _inherit = ('a', 'res.partner.x')", None), (true, vec![]));
     }
 
     #[test]
