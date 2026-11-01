@@ -289,6 +289,29 @@ fn a_report_tag_waits_for_a_known_series() {
 }
 
 #[test]
+fn hierarchy_and_label_rules_wait_for_their_series_but_not_for_an_unknown_one() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+    let codes = |default_series| {
+        let report = scan(&ScanOptions {
+            paths: vec![root.join("custom")],
+            addons_paths: vec![root.join("core")],
+            default_series,
+        });
+        let found = report.diagnostics.into_iter();
+        found
+            .filter(|d| d.path.ends_with("unversioned_logs/models/orchard.py"))
+            .map(|d| d.code)
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(codes(None), ["OD217", "OD220"]);
+    assert_eq!(codes(Series::parse("9.0")), [""; 0]);
+    assert_eq!(codes(Series::parse("10.0")), [""; 0]);
+    assert_eq!(codes(Series::parse("saas~11.1")), [""; 0]);
+    assert_eq!(codes(Series::parse("saas~11.2")), ["OD220"]);
+    assert_eq!(codes(Series::parse("saas~11.3")), ["OD217", "OD220"]);
+}
+
+#[test]
 fn import_patches_without_base_take_the_advice_of_the_path() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
     let report = scan(&ScanOptions {

@@ -1142,6 +1142,8 @@ custom/unversioned_logs/data/code.xml:6:30: OD319 Odoo refuses this code when it
 custom/unversioned_logs/data/code.xml:12:30: OD319 Odoo refuses this code when it loads the record from 10.0, or when the action runs below it: Expected an expression
 custom/unversioned_logs/data/reports.xml:7:35: OD311 no indexed module defines template 'unversioned_logs.absent_record'
 custom/unversioned_logs/data/reports.xml:8:46: OD319 Odoo refuses this expression when it prints the report: Unexpected token at the end of an expression
+custom/unversioned_logs/models/orchard.py:8:5: OD217 drift.orchard sets _parent_store but has no parent_path field, which Odoo logs as an error; add parent_path = fields.Char(index=True)
+custom/unversioned_logs/models/orchard.py:11:32: OD220 'title' has the label 'Label' of field 'name' of drift.orchard, so Odoo logs a warning and users cannot tell them apart; give it another string
 custom/unversioned_logs/models/probes.py:39:39: OD224 s.create_uid: drift_sensor has no such column, since drift.sensor.create_uid is not created, as drift.sensor sets _log_access to False; drop it from the query, or log access on the model
 custom/unversioned_logs/models/probes.py:59:58: OD218 'country_id' has delegate=True, so it must be required with ondelete 'cascade' or 'restrict'; give it ondelete="cascade"
 custom/view_modifiers/models/tickets.py:75:17: OD201 no indexed module defines model 'modifier.ghost'

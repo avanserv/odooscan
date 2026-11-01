@@ -131,15 +131,13 @@ rules! {
     "OD214" "many2many-table-clash" Correctness Error Some(">=13.0"), true, "Two Many2many fields of a model to one comodel get the same table.";
     "OD215" "many2many-table-too-long" Correctness Error None, true, "A Many2many's relation table name is longer than PostgreSQL allows.";
     "OD216" "selection-add-without-ondelete" Correctness Error Some(">=14.0"), true, "selection_add leaves a value of a required Selection with ondelete 'set null'.";
-    // saas~11.3 stores `parent_path` (`odoo/models.py:2308`), and an earlier series `parent_left` and `parent_right`.
-    "OD217" "parent-store-without-path" Correctness Error Some(">=saas~11.3"), true, "A model sets _parent_store without an indexed parent_path field.";
+    "OD217" "parent-store-without-path" Correctness Error None, true, "A model sets _parent_store without an indexed parent_path field.";
     "OD218" "delegation-field-not-required" Correctness Warning None, true, "A field that delegates to a parent model is not required with ondelete cascade or restrict.";
     // 14.0 validates the merged attributes and warns (`odoo/fields.py:381`, 231bdca3f26d). saas~13.5 validates
     // `self.args` (`odoo/fields.py:360`), which a registry field built by `field.new()` lacks (`odoo/models.py:2750`),
     // so it logs nothing.
     "OD219" "tracking-without-mail-thread" Correctness Warning Some(">=14.0"), true, "A field sets tracking on a model that does not inherit mail.thread, which Odoo ignores.";
-    // saas~11.2 warns as it reflects a model (`odoo/addons/base/models/ir_model.py:807`), saas~11.1 says nothing.
-    "OD220" "duplicate-field-label" Correctness Warning Some(">=saas~11.2"), true, "Two fields of a model have the same label.";
+    "OD220" "duplicate-field-label" Correctness Warning None, true, "Two fields of a model have the same label.";
     // saas~14.4 warns (`odoo/fields.py:713`), saas~14.3 sets `recursive` without a word (`odoo/fields.py:645`).
     "OD221" "self-dependency-not-recursive" Correctness Warning Some(">=saas~14.4"), true, "A computed field depends on itself through other records without recursive=True.";
     // saas~12.5 introduces `check_company` (`odoo/fields.py:2217`), saas~12.4 has no such attribute.
@@ -288,12 +286,10 @@ mod tests {
 
     #[test]
     fn series_gates_follow_source() {
-        let gates: [(&str, &[&str], &[&str]); 10] = [
+        let gates: [(&str, &[&str], &[&str]); 8] = [
             ("OD117", &["saas~15.1", "saas~18.2"], &["saas~15.2", "saas~18.1"]),
             ("OD118", &["saas~18.1"], &["saas~18.2"]),
-            ("OD217", &["9.0", "11.0", "saas~11.2"], &["saas~11.3", "12.0"]),
             ("OD219", &["saas~13.5"], &["14.0"]),
-            ("OD220", &["9.0", "11.0", "saas~11.1"], &["saas~11.2", "12.0"]),
             ("OD221", &["saas~14.3"], &["saas~14.4"]),
             ("OD222", &["saas~12.4"], &["saas~12.5"]),
             ("OD315", &["saas~16.4"], &["17.0", "20.0"]),
@@ -309,12 +305,6 @@ mod tests {
                 assert!(r.applies_to(Series::parse(series)), "{code} skips {series}");
             }
         }
-    }
-
-    #[test]
-    fn hierarchy_and_label_rules_skip_an_unknown_series() {
-        assert!(!rule("OD217").applies_to(None));
-        assert!(!rule("OD220").applies_to(None));
     }
 
     #[test]
