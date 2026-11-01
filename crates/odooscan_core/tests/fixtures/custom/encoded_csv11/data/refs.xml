@@ -1,0 +1,10 @@
+<odoo>
+    <record id="partner_cafe" model="res.partner">
+        <field name="name">Cafe</field>
+        <field name="country_id" ref="country_cafe"/>
+    </record>
+    <record id="partner_gone" model="res.partner">
+        <field name="name">Gone</field>
+        <field name="country_id" ref="country_gone"/>
+    </record>
+</odoo>

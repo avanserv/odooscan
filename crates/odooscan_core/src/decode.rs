@@ -1,11 +1,22 @@
-//! The text of an XML data file. Odoo hands the bytes to `etree.parse` on every series, so libxml2
-//! picks the encoding, not Python: 9.0 `openerp/tools/convert.py:838,915`, 10.0
+//! The text of a data file. Odoo hands the bytes of an XML file to `etree.parse` on every series,
+//! so libxml2 picks the encoding, not Python: 9.0 `openerp/tools/convert.py:838,915`, 10.0
 //! `odoo/tools/convert.py:835,899`, 11.0 `:784,836`, 18.0 `:659,715`, 20.0 `:712,792`.
+//!
+//! A CSV goes through `ustr` cell by cell below 11.0, UTF-8 first, then Latin-1, which cannot fail:
+//! 8.0 `openerp/tools/convert.py:951`, 9.0 `:899` with `openerp/loglevels.py:28`, 10.0
+//! `odoo/tools/convert.py:882` with `odoo/loglevels.py:28`. From 11.0 it is strict UTF-8: 11.0
+//! `odoo/tools/convert.py:810` with `odoo/tools/pycompat.py:46-48,89-94`, 17.0 `:700`, 18.0 `:683`,
+//! 20.0 `:741`.
 
 use std::borrow::Cow;
 use std::sync::LazyLock;
 
 use regex::bytes::Regex;
+
+use crate::series::Series;
+
+/// The first series that reads a data CSV as strict UTF-8 (`11.0`).
+const CSV_UTF8: Series = Series { major: 11, minor: 0 };
 
 /// A declaration opens the file or is none, so a BOM ahead of it hides it: libxml2 lets a BOM beat
 /// the declaration (probed on lxml 5.2.1).
@@ -53,9 +64,40 @@ pub fn xml_text(bytes: &[u8]) -> Option<Cow<'_, str>> {
     }
 }
 
+/// The text of a data CSV as `series` reads it, or none when it does not decode. An unknown series,
+/// which a `10.saas~N` version parses to, stays strict: an unread file keeps the rules silent.
+pub fn csv_text(bytes: &[u8], series: Option<Series>) -> Option<Cow<'_, str>> {
+    if let Ok(text) = std::str::from_utf8(bytes) {
+        return Some(Cow::Borrowed(text));
+    }
+    let lenient = series.is_some_and(|s| s < CSV_UTF8);
+    lenient.then(|| Cow::Owned(csv_cells(bytes).map(csv_cell).collect()))
+}
+
+/// The cells of a CSV, each with the separator that ends it, so that they join back into the file
+/// with its line numbers.
+fn csv_cells(bytes: &[u8]) -> impl Iterator<Item = &[u8]> {
+    let mut quoted = false;
+    bytes.split_inclusive(move |&byte| {
+        quoted ^= byte == b'"';
+        !quoted && matches!(byte, b',' | b'\r' | b'\n')
+    })
+}
+
+fn csv_cell(cell: &[u8]) -> Cow<'_, str> {
+    match std::str::from_utf8(cell) {
+        Ok(text) => Cow::Borrowed(text),
+        Err(_) => Cow::Owned(cell.iter().copied().map(latin1).collect()),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn series(text: &str) -> Option<Series> {
+        Series::parse(text)
+    }
 
     fn declared(label: &str, body: &[u8]) -> Vec<u8> {
         let mut bytes = format!("<?xml version=\"1.0\" encoding=\"{label}\"?>").into_bytes();
@@ -160,5 +202,60 @@ mod tests {
     fn latin9_maps_all_eight_bytes() {
         let bytes = declared("ISO-8859-15", b"\xA4\xA6\xA8\xB4\xB8\xBC\xBD\xBE\xE9");
         assert!(xml_text(&bytes).unwrap().ends_with("€ŠšŽžŒœŸé"));
+    }
+
+    #[test]
+    fn a_latin1_csv_reads_below_11() {
+        for text in ["9.0", "10.0"] {
+            assert_eq!(
+                csv_text(b"id,name\nx,ol\xE9\n", series(text)).unwrap(),
+                "id,name\nx,olé\n"
+            );
+        }
+    }
+
+    #[test]
+    fn a_latin1_csv_stays_unread_from_11_and_on_an_unknown_series() {
+        for version in [series("11.0"), series("18.0"), None] {
+            assert!(csv_text(b"id,name\nx,ol\xE9\n", version).is_none());
+        }
+    }
+
+    #[test]
+    fn a_utf8_csv_stays_borrowed_on_every_series() {
+        for version in [series("9.0"), series("10.0"), series("11.0"), series("18.0"), None] {
+            assert!(matches!(
+                csv_text("x,olé\n".as_bytes(), version),
+                Some(Cow::Borrowed(_))
+            ));
+        }
+    }
+
+    #[test]
+    fn each_csv_cell_decodes_on_its_own() {
+        assert_eq!(csv_text(b"a\xC3\xA9,\xE9", series("9.0")).unwrap(), "aé,é");
+    }
+
+    #[test]
+    fn a_csv_cell_with_both_goes_latin1_whole() {
+        assert_eq!(csv_text(b"\xC3\xA9\xE9,x", series("9.0")).unwrap(), "Ã©é,x");
+    }
+
+    #[test]
+    fn a_quoted_comma_joins_a_csv_cell() {
+        assert_eq!(csv_text(b"\"\xC3\xA9,\xE9\",x", series("9.0")).unwrap(), "\"Ã©,é\",x");
+    }
+
+    #[test]
+    fn a_doubled_quote_keeps_the_csv_state() {
+        assert_eq!(
+            csv_text(b"\"a\"\"\xC3\xA9,\xE9\",x", series("9.0")).unwrap(),
+            "\"a\"\"Ã©,é\",x"
+        );
+    }
+
+    #[test]
+    fn a_line_end_closes_a_csv_cell() {
+        assert_eq!(csv_text(b"\xC3\xA9\r\n\xE9\n", series("9.0")).unwrap(), "é\r\né\n");
     }
 }
