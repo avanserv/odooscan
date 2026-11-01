@@ -12,7 +12,8 @@ use rustc_hash::FxHashSet;
 use crate::async_names::names_async;
 use crate::series::Series;
 
-/// The names Odoo sets from the record's `model_id` before it runs the code, in every series.
+/// The names the rule reads as holding records of `model_id`. Odoo sets them from 10.0: 9.0 sets
+/// `self`, `model`, `obj` and `object` instead, so `records` and `record` are unbound there.
 const FROM_MODEL_ID: [&str; 3] = ["model", "records", "record"];
 
 /// What `read` finds in code, at byte offsets into it.
@@ -20,7 +21,7 @@ const FROM_MODEL_ID: [&str; 3] = ["model", "records", "record"];
 pub struct ServerCode {
     /// Why `compile()` refuses the code, and where.
     pub error: Option<(String, usize)>,
-    /// The method of each call whose receiver is known to hold records of `model_id`.
+    /// The method of each call on one of `FROM_MODEL_ID`.
     pub calls: Vec<(String, usize)>,
 }
 
