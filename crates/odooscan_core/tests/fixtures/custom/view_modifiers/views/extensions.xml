@@ -520,4 +520,65 @@
             </field>
         </field>
     </record>
+
+    <record id="ticket_unseen" model="ir.ui.view">
+        <field name="name">modifier.ticket.unseen</field>
+        <field name="model">modifier.ticket</field>
+        <field name="arch" type="xml">
+            <form>
+                <field name="hook_ids">
+                    <list>
+                        <field name="hooked"/>
+                        <filter name="hooked" domain="[('hooked', '=', 1)]"/>
+                    </list>
+                </field>
+                <field name="bound_ids">
+                    <list>
+                        <field name="bounded"/>
+                        <filter name="bounded" domain="[('bounded', '=', 1)]"/>
+                    </list>
+                </field>
+                <field name="line_ids">
+                    <list>
+                        <field name="no_line_field"/>
+                    </list>
+                </field>
+            </form>
+        </field>
+    </record>
+
+    <record id="ticket_unseen_list" model="ir.ui.view">
+        <field name="name">modifier.ticket.unseen.list</field>
+        <field name="model">modifier.ticket</field>
+        <field name="inherit_id" ref="ticket_hooked"/>
+        <field name="arch" type="xml">
+            <field name="hook_ids" position="inside">
+                <list>
+                    <field name="hooked"/>
+                    <filter name="hooked" domain="[('hooked', '=', 1)]"/>
+                </list>
+            </field>
+        </field>
+    </record>
+
+    <record id="hook_form" model="ir.ui.view">
+        <field name="name">modifier.hook.form</field>
+        <field name="model">modifier.hook</field>
+        <field name="arch" type="xml">
+            <form>
+                <field name="hooked"/>
+            </form>
+        </field>
+    </record>
+
+    <record id="ticket_search" model="ir.ui.view">
+        <field name="name">modifier.ticket.search</field>
+        <field name="model">modifier.ticket</field>
+        <field name="arch" type="xml">
+            <search>
+                <filter name="unknown" domain="[('no_ticket_filter', '=', 1)]"/>
+                <filter name="hooked" domain="[('hook_ids.hooked', '=', 1)]"/>
+            </search>
+        </field>
+    </record>
 </odoo>

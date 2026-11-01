@@ -852,20 +852,55 @@ struct Ctx<'a, 'm> {
 }
 
 impl<'m> Ctx<'_, 'm> {
-    /// Whether a dependency outside the index may add a field or a method to `model`. It loads before
-    /// this module, and Odoo refuses to extend a model the registry does not hold yet, so it reaches
-    /// a model of this module only through a class or a parent the module does not hold.
+    /// Whether a dependency outside the index may add a method to `model`. It loads before this
+    /// module, and Odoo refuses to extend a model the registry does not hold yet, so it reaches a
+    /// model of this module only through a class or a parent the module does not hold.
     fn may_gain(&self, model: &str) -> bool {
         self.partial && !self.index.holds_model(self.mi, model, self.scope)
+    }
+
+    /// Whether another module may add a field to `model`. As for `may_gain`, one that loads first
+    /// reaches a model of this module only through a class or a parent the module does not hold.
+    fn may_add_field(&self, model: &str) -> bool {
+        !self.index.holds_fields(self.mi, model, self.scope)
     }
 
     /// Whether a dependency outside the index may supply what a path lacks. It cannot change the
     /// type of a field found on the way.
     fn may_supply(&self, e: &PathError<'_>) -> bool {
         match e {
-            PathError::Missing { model, .. } | PathError::Hidden { model, .. } => self.may_gain(model),
+            PathError::Missing { model, .. } | PathError::Hidden { model, .. } => {
+                self.partial && self.may_add_field(model)
+            }
             PathError::NotRelational { .. } => false,
         }
+    }
+
+    /// Whether this module builds `model` at runtime. A class in scope that introduces the model
+    /// spells it out whatever the module builds: `base` itself builds models of any name, so `fit`
+    /// alone would take all of its own models for built ones.
+    fn built_here(&self, model: &str) -> bool {
+        !self.index.introduced(model, self.scope) && self.built.fit(model)
+    }
+
+    /// Whether the model where a path fails may hold the field out of the scan's sight. That model
+    /// is the one to ask about, as a later step can be the one that hides the field. A parent or a
+    /// data file only explains a missing field: one `depends` does not reach is found on the model,
+    /// so it stays a gap unless the model is built here. A dependency's file loads before the module,
+    /// so it cannot add to a model the module defines whole, while the module's own file can. Nothing
+    /// explains a field found there that is not relational.
+    fn may_hide(&self, e: &PathError<'_>) -> bool {
+        let unseen = match e {
+            PathError::Missing { model, .. } => {
+                (self.lost && (self.module.lost_data() || self.may_add_field(model)))
+                    || self.built_here(model)
+                    || self.index.hidden_field_parents(model, self.scope)
+                    || self.index.unread_delegate(model, self.scope)
+            }
+            PathError::Hidden { model, .. } => self.built_here(model),
+            PathError::NotRelational { .. } => false,
+        };
+        unseen || self.may_supply(e)
     }
 
     /// A dependency outside the index may load a model the scope does not reach.
@@ -922,18 +957,10 @@ impl<'m> Ctx<'_, 'm> {
         }
     }
 
-    /// OD210 on a path that fails, unless the model where it fails may get the field from a
-    /// dependency outside the index, or a missing one from a parent the scan cannot read. That model
-    /// is the one to ask about, as a later step can be the one that hides the field, and a field
-    /// found there that is not relational fails whatever either of them holds.
     fn domain_path(&self, out: &mut Out<'m>, file: &'m Path, model: &str, path: &Spanned<String>) {
-        let Err(e) = self.index.resolve_path(model, &path.value, self.scope) else {
-            return;
-        };
-        if self.may_supply(&e) {
-            return;
-        }
-        if !matches!(&e, PathError::Missing { model, .. } if self.index.hidden_field_parents(model, self.scope)) {
+        if let Err(e) = self.index.resolve_path(model, &path.value, self.scope)
+            && !self.may_hide(&e)
+        {
             out.push(file, "OD210", path.pos, e.message(&path.value));
         }
     }
@@ -2259,7 +2286,7 @@ impl<'m> Ctx<'_, 'm> {
                 continue;
             };
             if let Err(e) = self.index.resolve_path(model, &joined, self.scope)
-                && !self.may_supply(&e)
+                && !self.may_hide(&e)
             {
                 out.push(path, "OD304", field.pos, e.message(&joined));
             }

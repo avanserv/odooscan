@@ -189,6 +189,9 @@ pub struct ClassFact {
     /// but `Model`, `TransientModel`, `AbstractModel` and `CachedModel`. Each is its bare name, or
     /// empty for a base a class of the file cannot be, such as `Layout()` or `mixins.Layout`.
     pub plain_bases: Vec<String>,
+    /// The entries of `plain_bases` that may give the class a field: all but the classes its file
+    /// defines above it that can hold none. Those still hide methods, so they stay in `plain_bases`.
+    pub field_bases: Vec<String>,
     /// The value of `_table`, when the class sets it.
     pub table: Option<OptionValue>,
     /// `_parent_store`, `_auto`, `_log_access`, `_register`, `_date_name` and `_defaults`, when the

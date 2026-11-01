@@ -18,3 +18,6 @@ access_domain_common,domain.common,model_domain_common,base.group_user,1,0,0,0
 access_domain_namesake_parent,domain.namesake_parent,model_domain_namesake_parent,base.group_user,1,0,0,0
 access_domain_own_parent,domain.own_parent,model_domain_own_parent,base.group_user,1,0,0,0
 access_domain_dotted_parent,domain.dotted_parent,model_domain_dotted_parent,base.group_user,1,0,0,0
+access_domain_fieldless,domain.fieldless,model_domain_fieldless,base.group_user,1,0,0,0
+access_domain_holding,domain.holding,model_domain_holding,base.group_user,1,0,0,0
+access_domain_foreign,domain.foreign,model_domain_foreign,base.group_user,1,0,0,0

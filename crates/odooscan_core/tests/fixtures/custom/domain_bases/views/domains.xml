@@ -28,4 +28,90 @@
             </search>
         </field>
     </record>
+
+    <record id="action_domain_whole_grouped" model="ir.actions.act_window">
+        <field name="name">Grouped by a field no parent holds</field>
+        <field name="res_model">domain.whole</field>
+        <field name="context">{'group_by': 'no_action_group'}</field>
+    </record>
+    <record id="view_domain_whole_grouped" model="ir.ui.view">
+        <field name="name">domain.whole.grouped</field>
+        <field name="model">domain.whole</field>
+        <field name="arch" type="xml">
+            <search>
+                <field name="parent_id" filter_domain="[('no_filter_domain', 'ilike', self)]"/>
+                <filter name="by_unknown" context="{'group_by': 'no_filter_group'}"/>
+            </search>
+        </field>
+    </record>
+
+    <record id="view_domain_hidden_form" model="ir.ui.view">
+        <field name="name">domain.hidden.form</field>
+        <field name="model">domain.hidden</field>
+        <field name="arch" type="xml">
+            <form>
+                <field name="stamp"/>
+                <field name="whole_id">
+                    <form>
+                        <field name="no_view_past_base"/>
+                    </form>
+                </field>
+            </form>
+        </field>
+    </record>
+    <record id="view_domain_computed_form" model="ir.ui.view">
+        <field name="name">domain.computed.form</field>
+        <field name="model">domain.computed</field>
+        <field name="arch" type="xml">
+            <form>
+                <field name="stamp"/>
+            </form>
+        </field>
+    </record>
+    <record id="view_domain_delegate_form" model="ir.ui.view">
+        <field name="name">domain.delegate.form</field>
+        <field name="model">domain.delegate</field>
+        <field name="arch" type="xml">
+            <form>
+                <field name="stamp"/>
+            </form>
+        </field>
+    </record>
+    <record id="view_domain_chained_form" model="ir.ui.view">
+        <field name="name">domain.chained.form</field>
+        <field name="model">domain.chained</field>
+        <field name="arch" type="xml">
+            <form>
+                <field name="no_chained"/>
+            </form>
+        </field>
+    </record>
+    <record id="view_domain_fieldless_form" model="ir.ui.view">
+        <field name="name">domain.fieldless.form</field>
+        <field name="model">domain.fieldless</field>
+        <field name="arch" type="xml">
+            <form>
+                <field name="no_fieldless_view"/>
+                <button name="x_label" type="object"/>
+            </form>
+        </field>
+    </record>
+    <record id="view_domain_holding_form" model="ir.ui.view">
+        <field name="name">domain.holding.form</field>
+        <field name="model">domain.holding</field>
+        <field name="arch" type="xml">
+            <form>
+                <field name="stamp"/>
+            </form>
+        </field>
+    </record>
+    <record id="view_domain_foreign_form" model="ir.ui.view">
+        <field name="name">domain.foreign.form</field>
+        <field name="model">domain.foreign</field>
+        <field name="arch" type="xml">
+            <form>
+                <field name="stamp"/>
+            </form>
+        </field>
+    </record>
 </odoo>

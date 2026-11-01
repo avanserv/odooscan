@@ -5,7 +5,7 @@ LOOSE_COMODEL = "modifier.line"
 
 class PlainHooks:
     """Leaves modifier.hook open to fields the scan cannot read."""
-
+    hooked = fields.Char()
 
 class ModifierTicket(models.Model):
     _name = "modifier.ticket"

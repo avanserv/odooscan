@@ -9,3 +9,6 @@ class Ledger(models.Model):
 
     def _legacy_group(self):
         return self.env.ref("encoded_lost.legacy_ledger")
+
+    def _legacy_lookup(self):
+        return self.search([("x_lost", "=", 1)])

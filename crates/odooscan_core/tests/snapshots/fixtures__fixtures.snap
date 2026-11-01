@@ -23,7 +23,6 @@ custom/bad_sale/controllers/main.py:6:61: OD112 csrf=False lets other sites subm
 custom/bad_sale/controllers/main.py:7:9: OD111 route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check
 custom/bad_sale/data/orphan.xml:1:1: OD502 'data/orphan.xml' is not in the manifest's data or demo, so Odoo never loads it
 custom/bad_sale/models/domains.py:7:64: OD210 'is_company': res.partner has no field 'is_company'
-custom/bad_sale/models/domains.py:11:23: OD210 'stat': bad.order has no field 'stat'
 custom/bad_sale/models/domains.py:12:55: OD210 'nmae': res.partner has no field 'nmae'
 custom/bad_sale/models/flows.py:9:9: OD122 UPDATE on bad_order bypasses the ORM, so records this transaction already read keep stale values; call flush_model() before the query and invalidate_model() after it (flush() and invalidate_cache() before 16.0)
 custom/bad_sale/models/flows.py:9:9: OD701 RPC argument 'name' reaches the query of cr.execute(); pass it as a query parameter or build the query with odoo.tools.SQL
@@ -71,12 +70,8 @@ custom/bad_sale/static/src/js/form_patch.js:3:26: OD601 '@web/views/form/form_co
 custom/bad_sale/static/src/js/form_patch.js:5:24: OD601 '@mail/thread' comes from module mail, which is not in depends
 custom/bad_sale/static/src/js/form_patch.js:6:22: OD601 no file of module web provides '@web/core/gone'
 custom/bad_sale/static/src/js/form_patch.js:9:8: OD601 './helpers' has no default export
-custom/bad_sale/views/domains.xml:5:9: OD210 'stat': bad.order has no field 'stat'
-custom/bad_sale/views/domains.xml:6:9: OD210 'stage_id': bad.order has no field 'stage_id'
-custom/bad_sale/views/domains.xml:13:17: OD210 'nam': bad.order has no field 'nam'
 custom/bad_sale/views/domains.xml:14:17: OD210 'is_company': res.partner has no field 'is_company'
 custom/bad_sale/views/domains.xml:15:17: OD210 'partner_id.nmae': res.partner has no field 'nmae'
-custom/bad_sale/views/domains.xml:16:17: OD210 'partnr_id': bad.order has no field 'partnr_id'
 custom/bad_sale/views/late.xml:16:9: OD202 model 'project.project' comes from module project; add it to depends
 custom/bad_sale/views/late.xml:23:9: OD302 'mail.no_such_id' belongs to module mail; add it to depends
 custom/bad_sale/views/late.xml:24:9: OD302 'encoded_lost.no_such_id' belongs to module encoded_lost; add it to depends
@@ -86,7 +81,6 @@ custom/bad_sale/views/locators.xml:10:17: OD310 <page name="mail_page"> is added
 custom/bad_sale/views/locators.xml:23:9: OD310 no <div id="crad"> in view base.partner_card or the views that extend it
 custom/bad_sale/views/views.xml:6:13: OD306 the <tree> view is renamed <list>
 custom/bad_sale/views/views.xml:7:17: OD305 the attrs attribute is removed; write invisible, readonly or required as a Python expression
-custom/bad_sale/views/views.xml:8:17: OD304 'nmae': bad.order has no field 'nmae'
 custom/bad_sale/views/views.xml:12:25: OD304 'line_ids.amonut': bad.order.line has no field 'amonut'
 custom/bad_sale/views/views.xml:15:17: OD302 'mail.mail_menu' is defined by module mail; add it to depends
 custom/bad_sale/views/views.xml:15:17: OD308 'action_late' is defined in views/late.xml, which loads after this reference
@@ -241,14 +235,27 @@ custom/domain_bases/models/domain_models.py:99:23: OD210 'label.no_past_char': d
 custom/domain_bases/models/domain_models.py:100:30: OD210 'side_stamp': field 'side_stamp' of domain.found comes from module domain_bases_side, which is not in depends
 custom/domain_bases/models/domain_models.py:108:58: OD210 'no_field_domain': domain.whole has no field 'no_field_domain'
 custom/domain_bases/models/domain_models.py:111:23: OD210 'no_search': domain.whole has no field 'no_search'
+custom/domain_bases/models/domain_plain.py:22:30: OD210 'no_fieldless': domain.fieldless has no field 'no_fieldless'
 custom/domain_bases/security/ir.rule.csv:3:1: OD210 'no_csv_rule': domain.whole has no field 'no_csv_rule'
 custom/domain_bases/security/rules.xml:10:36: OD210 'no_xml_rule': domain.whole has no field 'no_xml_rule'
 custom/domain_bases/views/domains.xml:10:9: OD210 'no_action': domain.whole has no field 'no_action'
 custom/domain_bases/views/domains.xml:27:17: OD210 'no_view_filter': domain.whole has no field 'no_view_filter'
+custom/domain_bases/views/domains.xml:35:9: OD210 'no_action_group': domain.whole has no field 'no_action_group'
+custom/domain_bases/views/domains.xml:42:17: OD210 'no_filter_domain': domain.whole has no field 'no_filter_domain'
+custom/domain_bases/views/domains.xml:43:17: OD210 'no_filter_group': domain.whole has no field 'no_filter_group'
+custom/domain_bases/views/domains.xml:56:25: OD304 'whole_id.no_view_past_base': domain.whole has no field 'no_view_past_base'
+custom/domain_bases/views/domains.xml:85:17: OD304 'no_chained': domain.chained has no field 'no_chained'
+custom/domain_bases/views/domains.xml:94:17: OD304 'no_fieldless_view': domain.fieldless has no field 'no_fieldless_view'
+custom/dynamic_models/views/large.xml:39:17: OD304 'scale': bad.generated.user has no field 'scale'
+custom/dynamic_models_opaque/views/holder.xml:7:17: OD304 'no_holder_field': opaque.holder has no field 'no_holder_field'
 custom/dynamic_models_outside/models/built.py:14:32: OD202 model 'bad.generated.large' comes from module dynamic_models_side; add it to depends
 custom/dynamic_models_outside/static/src/large.js:3:30: OD603 model 'bad.generated.large' comes from module dynamic_models_side, which is not in depends
+custom/dynamic_models_outside/views/large.xml:4:9: OD202 model 'bad.generated.large' comes from module dynamic_models_side; add it to depends
+custom/dynamic_models_outside/views/large.xml:7:17: OD304 'name': field 'name' of bad.generated.large comes from module sql_base_entries, which is not in depends
 custom/dynamic_models_plain/models/holder.py:7:32: OD202 model 'bad.generated.large' comes from module dynamic_models_side; add it to depends
 custom/dynamic_models_plain/static/src/large.js:3:30: OD603 model 'bad.generated.large' comes from module dynamic_models_side, which is not in depends
+custom/dynamic_models_plain/views/large.xml:4:9: OD202 model 'bad.generated.large' comes from module dynamic_models_side; add it to depends
+custom/dynamic_models_plain/views/large.xml:7:17: OD304 'name': field 'name' of bad.generated.large comes from module sql_base_entries, which is not in depends
 custom/dynamic_models_unbuilt/models/proxies.py:27:32: OD202 model 'bad.generated.large' comes from module dynamic_models_side; add it to depends
 custom/dynamic_models_unbuilt/static/src/large.js:3:30: OD603 model 'bad.generated.large' comes from module dynamic_models_side, which is not in depends
 custom/dynamic_models_unknown/models/partner.py:14:31: OD202 model 'bad.generated.huge' comes from module dynamic_models_side; add it to depends
@@ -260,12 +267,14 @@ custom/encoded_broken/data/broken.xml:4:1: OD000 expected 'record' tag, not 'odo
 custom/encoded_lost_code/models/ledger.py:7:15: OD212 Monetary field 'balance' has no currency: encoded.ledger has no currency_id, and the field names no currency_field
 custom/encoded_lost_code/models/ledger.py:10:24: OD211 no parent class of encoded.ledger defines 'action_settle', so this super() call fails
 custom/encoded_lost_code/models/ledger.py:13:39: OD224 t.no_such_column: encoded_ledger has no such column, since encoded.ledger has no field no_such_column; name the column of a stored field of encoded.ledger
+custom/encoded_lost_code/models/ledger.py:24:30: OD210 'no_note_search': encoded.note has no field 'no_note_search'
 custom/encoded_lost_code/static/src/ledger_form.js:9:22: OD602 neither LedgerForm nor its parents have 'discard', so super.discard() fails
 custom/encoded_lost_code/static/src/ledger_form.js:14:24: OD605 no indexed bundle defines template 'encoded_lost_code.Gone'
 custom/encoded_lost_code/static/src/ledger_form.js:17:48: OD604 model 'encoded.ledger' has no method 'action_gone'
 custom/encoded_lost_code/views/ledger.xml:7:45: OD312 encoded.ledger has no method 'action_confrim'
-custom/encoded_lost_code/views/ledger.xml:12:44: OD314 encoded.ledger has no method 'no_such_method'
-custom/encoded_lost_code/views/ledger.xml:17:34: OD320 encoded.ledger has no method 'action_clsoe'
+custom/encoded_lost_code/views/ledger.xml:17:17: OD304 'no_note_field': encoded.note has no field 'no_note_field'
+custom/encoded_lost_code/views/ledger.xml:22:44: OD314 encoded.ledger has no method 'no_such_method'
+custom/encoded_lost_code/views/ledger.xml:27:34: OD320 encoded.ledger has no method 'action_clsoe'
 custom/encoded_lost_stranger/data/page.xml:3:20: OD311 template 'encoded_lost.page' comes from module encoded_lost, which is not in depends
 custom/encoded_lost_stranger/models/visit.py:4:7: OD401 model 'encoded.visit' has no ir.model.access rule, so only the superuser can use it
 custom/encoded_ok/data/latin1.xml:5:9: OD309 res.country has no field 'no_such_field'
@@ -1046,6 +1055,8 @@ custom/view_modifiers/views/extensions.xml:396:49: OD316 readonly names 'true': 
 custom/view_modifiers/views/extensions.xml:399:49: OD316 readonly names 'true': modifier.ticket has no field 'true'
 custom/view_modifiers/views/extensions.xml:493:49: OD316 readonly names 'true': modifier.ticket has no field 'true'
 custom/view_modifiers/views/extensions.xml:508:45: OD315 invalid invisible expression: Expected an expression
+custom/view_modifiers/views/extensions.xml:543:25: OD304 'line_ids.no_line_field': modifier.line has no field 'no_line_field'
+custom/view_modifiers/views/extensions.xml:579:17: OD210 'no_ticket_filter': modifier.ticket has no field 'no_ticket_filter'
 custom/view_modifiers/views/tickets.xml:7:47: OD315 invalid invisible expression: Expected an expression
 custom/view_modifiers/views/tickets.xml:8:46: OD316 readonly names 'stat': modifier.ticket has no field 'stat'
 custom/view_modifiers/views/tickets.xml:9:46: OD315 invalid required expression: Odoo does not read this construct, such as a comprehension, a set or a lambda
