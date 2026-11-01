@@ -980,6 +980,13 @@ custom/soft_guards/tests/test_soft_guards.py:49:57: OD210 'code': field 'code' o
 custom/soft_guards/tests/test_soft_guards.py:59:57: OD210 'code': field 'code' of soft.thing comes from module soft_guards_side, which is not in depends
 custom/soft_guards/tests/test_soft_guards.py:66:57: OD210 'code': field 'code' of soft.thing comes from module soft_guards_side, which is not in depends
 custom/soft_guards/tests/test_soft_guards.py:75:57: OD210 'code': field 'code' of soft.thing comes from module soft_guards_side, which is not in depends
+custom/soft_guards/tests/test_soft_guards.py:115:38: OD302 'soft_guards_side.unguarded' belongs to module soft_guards_side; add it to depends
+custom/soft_guards/tests/test_soft_guards.py:119:26: OD302 'soft_guards_side.passed' belongs to module soft_guards_side; add it to depends
+custom/soft_guards/tests/test_soft_guards.py:125:26: OD302 'soft_guards_side.one_handler' belongs to module soft_guards_side; add it to depends
+custom/soft_guards/tests/test_soft_guards.py:135:26: OD302 'soft_guards_side.in_a_handler' belongs to module soft_guards_side; add it to depends
+custom/soft_guards/tests/test_soft_guards.py:144:26: OD302 'soft_guards_side.in_finally' belongs to module soft_guards_side; add it to depends
+custom/soft_guards/tests/test_soft_guards.py:147:22: OD302 'soft_guards_side.before_a_guard' belongs to module soft_guards_side; add it to depends
+custom/soft_guards/tests/test_soft_guards.py:153:42: OD301 module base defines no XML id 'base.no_such_guarded_id'
 custom/sql_base_entries/models/buoys.py:35:54: OD224 f.x_base_depot_id: buoy_float has no such column, since buoy.float has no field x_base_depot_id; name the column of a stored field of buoy.float
 custom/sql_columns/models/constraints.py:7:35: OD227 depot: parcel_box has no such column, since parcel.box has no field depot; use depot_id
 custom/sql_columns/models/constraints.py:8:36: OD227 total_weight: parcel_box has no such column, since parcel.box.total_weight is not stored; set store=True on the field, or drop it from the definition
