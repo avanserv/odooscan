@@ -1,3 +1,9 @@
 <odoo>
     <report id="tag_replaces" string="tag_replaces" model="res.partner" name="report_tag10.sheet" print_report_name="object.name"/>
+
+    <record id="tag_then_record" model="ir.actions.report.xml">
+        <field name="attachment_use" eval="True"/>
+    </record>
+
+    <report id="record_then_tag" string="record_then_tag" model="res.partner" name="report_tag10.sheet"/>
 </odoo>

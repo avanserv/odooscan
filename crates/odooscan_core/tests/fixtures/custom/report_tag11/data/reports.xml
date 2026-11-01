@@ -37,4 +37,6 @@
         <field name="report_name">report_tag11.sheet</field>
         <field name="print_report_name">async + '.pdf'</field>
     </record>
+
+    <report id="tag_then_record" string="tag_then_record" model="res.partner" name="report_tag11.sheet"/>
 </odoo>

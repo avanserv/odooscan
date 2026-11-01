@@ -181,6 +181,15 @@ class IrActionsReport(models.Model):
     print_report_name = fields.Char()
 
 
+class IrActionsReportXml(models.Model):
+    _name = "ir.actions.report.xml"
+
+    name = fields.Char()
+    model = fields.Char()
+    report_name = fields.Char()
+    attachment_use = fields.Boolean()
+
+
 class IrCron(models.Model):
     _name = "ir.cron"
     _inherits = {"ir.actions.server": "ir_actions_server_id"}

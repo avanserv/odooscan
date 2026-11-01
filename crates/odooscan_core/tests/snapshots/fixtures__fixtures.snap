@@ -7,7 +7,7 @@ custom/access_rows/security/ir.model.access-hook.csv:3:1: OD402 base.group_porta
 custom/access_rows/security/ir.model.access-inactive.csv:6:1: OD402 no group limits this row, so every user, public and portal included, gets write, create or unlink on model_access_desk; name a group
 custom/access_rows/security/ir.model.access-inactive.csv:7:1: OD402 base.group_portal gets write, create or unlink on model_access_desk; public and portal access should be read-only and go through controllers
 custom/access_rows/security/ir.model.access-nogroup.csv:2:1: OD402 no group limits this row, so every user, public and portal included, gets write, create or unlink on model_access_desk; name a group
-custom/access_rows/security/ir.model.access-rewrite.csv:2:1: OD323 XML id 'access_desk_rewritten' is already defined in security/ir.model.access.csv, and this definition writes the fields it names over it; remove the copy when the two say the same thing, or rename one when both are meant to exist
+custom/access_rows/security/ir.model.access-rewrite.csv:2:1: OD323 XML id 'access_desk_rewritten' is already defined in security/ir.model.access.csv, and this definition overwrites the fields both name; remove the copy when the two say the same thing, or rename one when both are meant to exist
 custom/access_rows/security/ir.model.access.csv:2:1: OD402 no group limits this row, so every user, public and portal included, gets write, create or unlink on model_access_desk; name a group
 custom/access_rows/security/ir.model.access.csv:3:1: OD402 no group limits this row, so every user, public and portal included, gets write, create or unlink on model_access_desk; name a group
 custom/access_rows/security/ir.model.access.csv:4:1: OD402 no group limits this row, so every user, public and portal included, gets write, create or unlink on model_access_desk; name a group
@@ -317,13 +317,13 @@ custom/legacy14/models/res_partner.py:33:41: OD220 'stamped_on' has the label 'C
 custom/legacy14/models/res_partner.py:35:41: OD220 'touched_on' has the label 'Last Modified on' of field '__last_update' of res.partner, so Odoo logs a warning and users cannot tell them apart; give it another string
 custom/legacy14/security/rules.xml:4:36: OD210 'no_legacy_field': legacy.ledger has no field 'no_legacy_field'
 custom/legacy14/security/rules.xml:24:36: OD210 'no_supplied': legacy.ledger has no field 'no_supplied'
-custom/legacy14/security/second_writes.xml:2:5: OD323 XML id 'rule_ledger_replaced' is already defined in security/rules.xml, and this definition writes the fields it names over it; remove the copy when the two say the same thing, or rename one when both are meant to exist
-custom/legacy14/security/second_writes.xml:5:5: OD323 XML id 'rule_ledger_deactivated' is already defined in security/rules.xml, and this definition writes the fields it names over it; remove the copy when the two say the same thing, or rename one when both are meant to exist
+custom/legacy14/security/second_writes.xml:2:5: OD323 XML id 'rule_ledger_replaced' is already defined in security/rules.xml, and this definition overwrites the fields both name; remove the copy when the two say the same thing, or rename one when both are meant to exist
+custom/legacy14/security/second_writes.xml:5:5: OD323 XML id 'rule_ledger_deactivated' is already defined in security/rules.xml, and this definition overwrites the fields both name; remove the copy when the two say the same thing, or rename one when both are meant to exist
 custom/legacy14/views/ledger_archive.xml:1:1: OD502 'views/ledger_archive.xml' is not in the manifest's init_xml, update_xml, data, demo_xml or demo, so Odoo never loads it
 custom/legacy14/views/ledger_reports.xml:19:71: OD201 no indexed module defines model 'legacy.ledgr'
 custom/legacy14/views/ledger_reports.xml:27:97: OD318 legacy.ledger has no primary gantt view, and nothing generates one
 custom/legacy14/views/ledger_updates.xml:4:33: OD318 legacy.ledger has no primary gantt view, and nothing generates one
-custom/legacy14/views/ledger_updates.xml:7:5: OD323 XML id 'action_ledger_default' is already defined in views/ledger_reports.xml, and this definition writes the fields it names over it; remove the copy when the two say the same thing, or rename one when both are meant to exist
+custom/legacy14/views/ledger_updates.xml:7:5: OD323 XML id 'action_ledger_default' is already defined in views/ledger_reports.xml, and this definition overwrites the fields both name; remove the copy when the two say the same thing, or rename one when both are meant to exist
 custom/legacy14/views/ledger_views.xml:8:17: OD304 'x_opening_balance': legacy.ledger has no field 'x_opening_balance'
 custom/legacy14/views/ledger_views.xml:9:17: OD308 'action_ledger_report' is defined in views/ledger_reports.xml, which loads after this reference
 custom/legacy15/models/card.py:7:33: OD218 _inherits delegates to 'partner_id', which must be required with ondelete 'cascade' or 'restrict'; give it ondelete="cascade"
@@ -333,7 +333,7 @@ custom/legacy15/models/res_partner.py:13:18: OD221 'child_ids.total' makes 'tota
 custom/legacy15/models/res_partner.py:49:24: OD211 no parent class of res.partner defines '_name_gone', so this super() call fails
 custom/legacy15/models/res_partner.py:65:24: OD211 no parent class of res.partner defines '__nope__', so this super() call fails
 custom/legacy15/security/rules.xml:4:36: OD210 'no_replaced': res.partner has no field 'no_replaced'
-custom/legacy15/security/second_writes.xml:2:5: OD323 XML id 'rule_partner_replaced' is already defined in security/rules.xml, and this definition writes the fields it names over it; remove the copy when the two say the same thing, or rename one when both are meant to exist
+custom/legacy15/security/second_writes.xml:2:5: OD323 XML id 'rule_partner_replaced' is already defined in security/rules.xml, and this definition overwrites the fields both name; remove the copy when the two say the same thing, or rename one when both are meant to exist
 custom/legacy154/data/calls.xml:4:41: OD314 res.partner has no method '_neutralized'
 custom/legacy154/models/res_company.py:14:24: OD211 no parent class of res.company defines '_neutralized', so this super() call fails
 custom/legacy16/models/gauge.py:7:5: OD226 _auto = False leaves legacy.gauge without a table, and nothing creates the view legacy_gauge; create it in init(), or drop _auto = False
@@ -534,27 +534,27 @@ custom/record_required/data/delegates.xml:25:5: OD324 rr.loop.b.name_b is requir
 custom/record_required/data/delegates.xml:28:5: OD324 rr.parent.label is required and has no default, so Odoo cannot create this record; give the field a value
 custom/record_required/data/first.xml:85:5: OD308 'late_name' is defined in data/second.xml, which loads after this reference
 custom/record_required/data/rooted.xml:6:5: OD324 rr.named.code is required and has no default, so Odoo cannot create this record; give the field a value
-custom/record_required/data/rr.note.csv:2:1: OD323 XML id 'rewritten_by_row' is already defined in data/first.xml, and this definition writes the fields it names over it; remove the copy when the two say the same thing, or rename one when both are meant to exist
+custom/record_required/data/rr.note.csv:2:1: OD323 XML id 'rewritten_by_row' is already defined in data/first.xml, and this definition overwrites the fields both name; remove the copy when the two say the same thing, or rename one when both are meant to exist
 custom/record_required/data/rr.thing-bare.csv:2:1: OD324 rr.thing.name is required and has no default, so Odoo cannot create this record; give the field a value
 custom/record_required/data/rr.thing-bare.csv:3:1: OD324 rr.thing.name is required and has no default, so Odoo cannot create this record; give the field a value
 custom/record_required/data/rr.thing-lines.csv:2:1: OD324 rr.thing.name is required and has no default, so Odoo cannot create this record; give the field a value
 custom/record_required/data/rr.thing-rows.csv:3:1: OD324 rr.thing.name is required and has no default, so Odoo cannot create this record; give the field a value
-custom/record_required/data/second.xml:2:5: OD323 XML id 'rewritten' is already defined in data/first.xml, and this definition writes the fields it names over it; remove the copy when the two say the same thing, or rename one when both are meant to exist
-custom/record_required/data/second.xml:5:5: OD323 XML id 'record_required.rewritten_by_prefix' is already defined in data/first.xml, and this definition writes the fields it names over it; remove the copy when the two say the same thing, or rename one when both are meant to exist
-custom/record_required/data/second.xml:8:5: OD323 XML id 'prefixed_first' is already defined in data/first.xml, and this definition writes the fields it names over it; remove the copy when the two say the same thing, or rename one when both are meant to exist
-custom/record_required/data/second.xml:12:9: OD323 XML id 'rewritten_noupdate' is already defined in data/first.xml, and this definition writes the fields it names over it; remove the copy when the two say the same thing, or rename one when both are meant to exist
-custom/record_required/data/second.xml:16:5: OD323 XML id 'other_model' is already a record of rr.note in data/first.xml, so it cannot name one of rr.tag; remove the copy when the two say the same thing, or rename one when both are meant to exist
-custom/record_required/data/second.xml:19:5: OD323 XML id 'other_model_by_tag' is already a record of ir.ui.view in data/first.xml, so it cannot name one of ir.ui.menu; remove the copy when the two say the same thing, or rename one when both are meant to exist
-custom/record_required/data/second.xml:20:5: OD323 XML id 'template_twice' is already defined in data/first.xml, and this definition writes the fields it names over it; remove the copy when the two say the same thing, or rename one when both are meant to exist
-custom/record_required/data/second.xml:23:5: OD323 XML id 'record_then_template' is already defined in data/first.xml, and this definition writes the fields it names over it; remove the copy when the two say the same thing, or rename one when both are meant to exist
-custom/record_required/data/second.xml:26:5: OD323 XML id 'menu_twice' is already defined in data/first.xml, and this definition writes the fields it names over it; remove the copy when the two say the same thing, or rename one when both are meant to exist
-custom/record_required/data/second.xml:27:5: OD323 XML id 'action_twice' is already defined in data/first.xml, and this definition writes the fields it names over it; remove the copy when the two say the same thing, or rename one when both are meant to exist
-custom/record_required/data/second.xml:28:5: OD323 XML id 'asset_twice' is already defined in data/first.xml, and this definition writes the fields it names over it; remove the copy when the two say the same thing, or rename one when both are meant to exist
-custom/record_required/data/second.xml:45:5: OD323 XML id 'relinked' is already defined in data/first.xml, and this definition writes the fields it names over it; remove the copy when the two say the same thing, or rename one when both are meant to exist
-custom/record_required/data/second.xml:63:5: OD323 XML id 'record_then_menuitem' is already defined in data/first.xml, and this definition writes the fields it names over it; remove the copy when the two say the same thing, or rename one when both are meant to exist
+custom/record_required/data/second.xml:2:5: OD323 XML id 'rewritten' is already defined in data/first.xml, and this definition overwrites the fields both name; remove the copy when the two say the same thing, or rename one when both are meant to exist
+custom/record_required/data/second.xml:5:5: OD323 XML id 'record_required.rewritten_by_prefix' is already defined in data/first.xml, and this definition overwrites the fields both name; remove the copy when the two say the same thing, or rename one when both are meant to exist
+custom/record_required/data/second.xml:8:5: OD323 XML id 'prefixed_first' is already defined in data/first.xml, and this definition overwrites the fields both name; remove the copy when the two say the same thing, or rename one when both are meant to exist
+custom/record_required/data/second.xml:12:9: OD323 XML id 'rewritten_noupdate' is already defined in data/first.xml, and this definition overwrites the fields both name; remove the copy when the two say the same thing, or rename one when both are meant to exist
+custom/record_required/data/second.xml:16:5: OD323 XML id 'other_model' is already a record of rr.note in data/first.xml, so it cannot name one of rr.tag; rename one
+custom/record_required/data/second.xml:19:5: OD323 XML id 'other_model_by_tag' is already a record of ir.ui.view in data/first.xml, so it cannot name one of ir.ui.menu; rename one
+custom/record_required/data/second.xml:20:5: OD323 XML id 'template_twice' is already defined in data/first.xml, and this definition overwrites the fields both name; remove the copy when the two say the same thing, or rename one when both are meant to exist
+custom/record_required/data/second.xml:23:5: OD323 XML id 'record_then_template' is already defined in data/first.xml, and this definition overwrites the fields both name; remove the copy when the two say the same thing, or rename one when both are meant to exist
+custom/record_required/data/second.xml:26:5: OD323 XML id 'menu_twice' is already defined in data/first.xml, and this definition overwrites the fields both name; remove the copy when the two say the same thing, or rename one when both are meant to exist
+custom/record_required/data/second.xml:27:5: OD323 XML id 'action_twice' is already defined in data/first.xml, and this definition overwrites the fields both name; remove the copy when the two say the same thing, or rename one when both are meant to exist
+custom/record_required/data/second.xml:28:5: OD323 XML id 'asset_twice' is already defined in data/first.xml, and this definition overwrites the fields both name; remove the copy when the two say the same thing, or rename one when both are meant to exist
+custom/record_required/data/second.xml:45:5: OD323 XML id 'relinked' is already defined in data/first.xml, and this definition overwrites the fields both name; remove the copy when the two say the same thing, or rename one when both are meant to exist
+custom/record_required/data/second.xml:63:5: OD323 XML id 'record_then_menuitem' is already defined in data/first.xml, and this definition overwrites the fields both name; remove the copy when the two say the same thing, or rename one when both are meant to exist
 custom/record_required/data/second.xml:70:5: OD303 XML id 'twice_in_one_file' is already defined earlier in this file
-custom/record_required/data/second.xml:73:5: OD323 XML id 'by_id_then_name' is already defined in data/first.xml, and this definition writes the fields it names over it; remove the copy when the two say the same thing, or rename one when both are meant to exist
-custom/record_required/data/second.xml:76:5: OD323 XML id 'by_name_then_id' is already defined in data/first.xml, and this definition writes the fields it names over it; remove the copy when the two say the same thing, or rename one when both are meant to exist
+custom/record_required/data/second.xml:73:5: OD323 XML id 'by_id_then_name' is already defined in data/first.xml, and this definition overwrites the fields both name; remove the copy when the two say the same thing, or rename one when both are meant to exist
+custom/record_required/data/second.xml:76:5: OD323 XML id 'by_name_then_id' is already defined in data/first.xml, and this definition overwrites the fields both name; remove the copy when the two say the same thing, or rename one when both are meant to exist
 custom/record_required/data/second.xml:88:5: OD303 XML id 'name_in_one_file' is already defined earlier in this file
 custom/record_required/data/unlisted.xml:1:1: OD502 'data/unlisted.xml' is not in the manifest's data or demo, so Odoo never loads it
 custom/record_required/demo/first.xml:11:5: OD324 rr.thing.name is required and has no default, so Odoo cannot create this record; give the field a value
@@ -576,7 +576,7 @@ custom/record_rules/security/model_forms.xml:4:36: OD210 'no_model_ref': rule.ti
 custom/record_rules/security/model_forms.xml:8:36: OD210 'no_model_dotted': rule.ticket has no field 'no_model_dotted'
 custom/record_rules/security/model_forms.xml:12:36: OD210 'no_model_eval': rule.ticket has no field 'no_model_eval'
 custom/record_rules/security/model_forms.xml:16:36: OD210 'no_model_search': rule.ticket has no field 'no_model_search'
-custom/record_rules/security/second_writes.xml:2:5: OD323 XML id 'rule_replaced' is already defined in security/updates.xml, and this definition writes the fields it names over it; remove the copy when the two say the same thing, or rename one when both are meant to exist
+custom/record_rules/security/second_writes.xml:2:5: OD323 XML id 'rule_replaced' is already defined in security/updates.xml, and this definition overwrites the fields both name; remove the copy when the two say the same thing, or rename one when both are meant to exist
 custom/record_rules/security/updates.xml:8:36: OD210 'no_replaced': rule.ticket has no field 'no_replaced'
 custom/record_rules/security/updates.xml:12:36: OD210 'no_switched_off_later': rule.ticket has no field 'no_switched_off_later'
 custom/record_update/demo/over_demo.xml:6:36: OD210 'no_demo_moved_in_demo': res.partner has no field 'no_demo_moved_in_demo'
@@ -620,7 +620,7 @@ custom/record_values/data/references.xml:45:37: OD321 'record_values.parent_1' i
 custom/record_values/data/references.xml:46:29: OD322 rv.thing.state has no value 'zz'
 custom/record_values/data/references.xml:50:37: OD321 'record_values.parent_1' is a record of rv.parent, but rv.thing.other_id takes rv.other
 custom/record_values/data/references.xml:54:44: OD321 'record_values.other_1' is a record of rv.other, but rv.thing.blended_heir_id takes rv.blended.heir
-custom/record_values/data/replaced.xml:4:5: OD323 XML id 'replaced_later' is already defined in data/silent.xml, and this definition writes the fields it names over it; remove the copy when the two say the same thing, or rename one when both are meant to exist
+custom/record_values/data/replaced.xml:4:5: OD323 XML id 'replaced_later' is already defined in data/silent.xml, and this definition overwrites the fields both name; remove the copy when the two say the same thing, or rename one when both are meant to exist
 custom/record_values/data/rv.thing.csv:1:1: OD309 rv.thing has no field 'line_ids/other_id'
 custom/record_values/data/rv.thing.csv:7:1: OD321 'record_values.other_1' is a record of rv.other, but rv.thing.parent_id takes rv.parent
 custom/record_values/data/rv.thing.csv:7:1: OD321 'record_values.parent_1' is a record of rv.parent, but rv.thing.other_ids takes rv.other
@@ -700,36 +700,38 @@ custom/report_actions/data/templates_named.xml:112:35: OD311 no indexed module d
 custom/report_actions/data/templates_named.xml:118:35: OD311 no indexed module defines template 'report_actions.unlisted_sheet'
 custom/report_actions/data/templates_named.xml:124:35: OD311 no indexed module defines template 'report_actions.unlisted_sheet_key'
 custom/report_actions/data/unlisted.xml:1:1: OD502 'data/unlisted.xml' is not in the manifest's data or demo, so Odoo never loads it
-custom/report_actions/data/updates.xml:2:5: OD323 XML id 'name_replaced' is already defined in data/first_writes.xml, and this definition writes the fields it names over it; remove the copy when the two say the same thing, or rename one when both are meant to exist
-custom/report_actions/data/updates.xml:6:5: OD323 XML id 'name_hidden_later' is already defined in data/first_writes.xml, and this definition writes the fields it names over it; remove the copy when the two say the same thing, or rename one when both are meant to exist
-custom/report_actions/data/updates.xml:10:5: OD323 XML id 'name_kept' is already defined in data/first_writes.xml, and this definition writes the fields it names over it; remove the copy when the two say the same thing, or rename one when both are meant to exist
-custom/report_actions/data/updates.xml:18:5: OD323 XML id 'name_type_earlier' is already defined in data/first_writes.xml, and this definition writes the fields it names over it; remove the copy when the two say the same thing, or rename one when both are meant to exist
-custom/report_actions/data/updates.xml:22:5: OD323 XML id 'file_replaced' is already defined in data/first_writes.xml, and this definition writes the fields it names over it; remove the copy when the two say the same thing, or rename one when both are meant to exist
-custom/report_actions/data/updates.xml:26:5: OD323 XML id 'file_cleared' is already defined in data/first_writes.xml, and this definition writes the fields it names over it; remove the copy when the two say the same thing, or rename one when both are meant to exist
-custom/report_actions/data/updates.xml:30:5: OD323 XML id 'file_hidden' is already defined in data/first_writes.xml, and this definition writes the fields it names over it; remove the copy when the two say the same thing, or rename one when both are meant to exist
-custom/report_actions/data/updates.xml:34:5: OD323 XML id 'file_kept' is already defined in data/first_writes.xml, and this definition writes the fields it names over it; remove the copy when the two say the same thing, or rename one when both are meant to exist
+custom/report_actions/data/updates.xml:2:5: OD323 XML id 'name_replaced' is already defined in data/first_writes.xml, and this definition overwrites the fields both name; remove the copy when the two say the same thing, or rename one when both are meant to exist
+custom/report_actions/data/updates.xml:6:5: OD323 XML id 'name_hidden_later' is already defined in data/first_writes.xml, and this definition overwrites the fields both name; remove the copy when the two say the same thing, or rename one when both are meant to exist
+custom/report_actions/data/updates.xml:10:5: OD323 XML id 'name_kept' is already defined in data/first_writes.xml, and this definition overwrites the fields both name; remove the copy when the two say the same thing, or rename one when both are meant to exist
+custom/report_actions/data/updates.xml:18:5: OD323 XML id 'name_type_earlier' is already defined in data/first_writes.xml, and this definition overwrites the fields both name; remove the copy when the two say the same thing, or rename one when both are meant to exist
+custom/report_actions/data/updates.xml:22:5: OD323 XML id 'file_replaced' is already defined in data/first_writes.xml, and this definition overwrites the fields both name; remove the copy when the two say the same thing, or rename one when both are meant to exist
+custom/report_actions/data/updates.xml:26:5: OD323 XML id 'file_cleared' is already defined in data/first_writes.xml, and this definition overwrites the fields both name; remove the copy when the two say the same thing, or rename one when both are meant to exist
+custom/report_actions/data/updates.xml:30:5: OD323 XML id 'file_hidden' is already defined in data/first_writes.xml, and this definition overwrites the fields both name; remove the copy when the two say the same thing, or rename one when both are meant to exist
+custom/report_actions/data/updates.xml:34:5: OD323 XML id 'file_kept' is already defined in data/first_writes.xml, and this definition overwrites the fields both name; remove the copy when the two say the same thing, or rename one when both are meant to exist
 custom/report_actions/demo/reports.xml:5:35: OD311 no indexed module defines template 'report_actions.absent_demo'
 custom/report_actions/demo/reports.xml:12:46: OD319 Odoo refuses this expression when it prints the report: Unexpected token at the end of an expression
 custom/report_actions_ext/data/updates.xml:19:35: OD311 no indexed module defines template 'report_actions.absent_in_extension'
 custom/report_actions_ext/data/updates.xml:23:46: OD319 Odoo refuses this expression when it prints the report: Unexpected token at the end of an expression
-custom/report_tag10/data/updates.xml:2:5: OD323 XML id 'tag_replaces' is already defined in data/reports.xml, and this definition writes the fields it names over it; remove the copy when the two say the same thing, or rename one when both are meant to exist
+custom/report_tag10/data/updates.xml:2:5: OD323 XML id 'tag_replaces' is already defined in data/reports.xml, and this definition overwrites the fields both name; remove the copy when the two say the same thing, or rename one when both are meant to exist
+custom/report_tag10/data/updates.xml:8:5: OD323 XML id 'record_then_tag' is already defined in data/reports.xml, and this definition overwrites the fields both name; remove the copy when the two say the same thing, or rename one when both are meant to exist
 custom/report_tag11/data/reports.xml:6:71: OD311 no indexed module defines template 'report_tag11.absent_tag'
 custom/report_tag11/data/reports.xml:8:71: OD311 no indexed module defines template 'report_tag11.absent_type'
 custom/report_tag11/data/reports.xml:10:125: OD319 Odoo refuses this expression when it prints the report: Unexpected token at the end of an expression
 custom/report_tag11/data/reports.xml:28:35: OD311 no indexed module defines template 'report_tag11.absent_record'
 custom/report_tag11/data/reports.xml:29:46: OD319 Odoo refuses this expression when it prints the report: Unexpected token at the end of an expression
-custom/report_tag11/data/updates.xml:2:5: OD323 XML id 'tag_replaces' is already defined in data/reports.xml, and this definition writes the fields it names over it; remove the copy when the two say the same thing, or rename one when both are meant to exist
+custom/report_tag11/data/updates.xml:2:5: OD323 XML id 'tag_replaces' is already defined in data/reports.xml, and this definition overwrites the fields both name; remove the copy when the two say the same thing, or rename one when both are meant to exist
+custom/report_tag11/data/updates.xml:4:5: OD323 XML id 'tag_then_record' is already a record of ir.actions.report in data/reports.xml, so it cannot name one of ir.actions.report.xml; rename one
 custom/report_tag16/data/reports.xml:6:71: OD311 no indexed module defines template 'report_tag16.absent_tag'
 custom/report_tag16/data/reports.xml:8:71: OD311 no indexed module defines template 'report_tag16.absent_type'
 custom/report_tag16/data/reports.xml:10:125: OD319 Odoo refuses this expression when it prints the report: Unexpected token at the end of an expression
 custom/report_tag16/data/reports.xml:28:35: OD311 no indexed module defines template 'report_tag16.absent_record'
 custom/report_tag16/data/reports.xml:29:46: OD319 Odoo refuses this expression when it prints the report: Unexpected token at the end of an expression
-custom/report_tag16/data/updates.xml:2:5: OD323 XML id 'tag_replaces' is already defined in data/reports.xml, and this definition writes the fields it names over it; remove the copy when the two say the same thing, or rename one when both are meant to exist
+custom/report_tag16/data/updates.xml:2:5: OD323 XML id 'tag_replaces' is already defined in data/reports.xml, and this definition overwrites the fields both name; remove the copy when the two say the same thing, or rename one when both are meant to exist
 custom/report_tag161/data/reports.xml:21:35: OD311 no indexed module defines template 'report_tag161.absent_replaced'
 custom/report_tag161/data/reports.xml:22:46: OD319 Odoo refuses this expression when it prints the report: Unexpected token at the end of an expression
 custom/report_tag161/data/reports.xml:28:35: OD311 no indexed module defines template 'report_tag161.absent_record'
 custom/report_tag161/data/reports.xml:29:46: OD319 Odoo refuses this expression when it prints the report: Unexpected token at the end of an expression
-custom/report_tag161/data/updates.xml:2:5: OD323 XML id 'tag_replaces' is already defined in data/reports.xml, and this definition writes the fields it names over it; remove the copy when the two say the same thing, or rename one when both are meant to exist
+custom/report_tag161/data/updates.xml:2:5: OD323 XML id 'tag_replaces' is already defined in data/reports.xml, and this definition overwrites the fields both name; remove the copy when the two say the same thing, or rename one when both are meant to exist
 custom/saas124/views/actions.xml:5:33: OD318 saas124.plain has no field activity_ids, which the activity view searches; inherit mail.activity.mixin
 custom/saas124/views/actions.xml:11:33: OD318 saas124.tracked has no primary activity view, and nothing generates one
 custom/saas125/models/res_partner.py:7:68: OD222 'home_country_id' has check_company=True, but res.country has no company_id field to check; remove check_company
@@ -779,7 +781,7 @@ custom/server_children/views/actions.xml:58:35: OD320 child.plan has no method '
 custom/server_children/views/actions.xml:65:35: OD320 child.task has no method 'action_plan'
 custom/server_children/views/actions.xml:79:35: OD320 child.task has no method 'action_plan'
 custom/server_children/views/actions.xml:112:38: OD321 'server_children.plan_cron' is a record of ir.cron, but ir.actions.server.parent_id takes ir.actions.server
-custom/server_children/views/updates.xml:10:5: OD323 XML id 'rewritten_action' is already defined in views/actions.xml, and this definition writes the fields it names over it; remove the copy when the two say the same thing, or rename one when both are meant to exist
+custom/server_children/views/updates.xml:10:5: OD323 XML id 'rewritten_action' is already defined in views/actions.xml, and this definition overwrites the fields both name; remove the copy when the two say the same thing, or rename one when both are meant to exist
 custom/server_children182/views/actions.xml:11:43: OD320 child182.plan has no method 'action_task'
 custom/server_children_any/views/actions.xml:17:43: OD320 child.any.plan has no method '_nope_models_agree'
 custom/server_code/data/calls.xml:5:34: OD320 server.job has no method '_run_misspelled'
@@ -830,14 +832,14 @@ custom/server_code/data/syntax.xml:114:28: OD319 Odoo refuses this code when it 
 custom/server_code/data/syntax.xml:124:36: OD319 Odoo refuses this code when it loads the record: Expected a statement
 custom/server_code/data/syntax.xml:132:34: OD319 Odoo refuses this code when it loads the record: Expected `def`, `with` or `for` to follow `async`, found `=`
 custom/server_code/data/syntax.xml:138:43: OD319 Odoo refuses this code when it loads the record: unexpected EOF while parsing
-custom/server_code/data/updates.xml:2:5: OD323 XML id 'code_replaced' is already defined in data/first_writes.xml, and this definition writes the fields it names over it; remove the copy when the two say the same thing, or rename one when both are meant to exist
+custom/server_code/data/updates.xml:2:5: OD323 XML id 'code_replaced' is already defined in data/first_writes.xml, and this definition overwrites the fields both name; remove the copy when the two say the same thing, or rename one when both are meant to exist
 custom/server_code/data/updates.xml:3:34: OD320 server.job has no method '_nope_code_replaces'
-custom/server_code/data/updates.xml:6:5: OD323 XML id 'code_cleared' is already defined in data/first_writes.xml, and this definition writes the fields it names over it; remove the copy when the two say the same thing, or rename one when both are meant to exist
-custom/server_code/data/updates.xml:10:5: OD323 XML id 'code_hidden' is already defined in data/first_writes.xml, and this definition writes the fields it names over it; remove the copy when the two say the same thing, or rename one when both are meant to exist
-custom/server_code/data/updates.xml:14:5: OD323 XML id 'code_kept' is already defined in data/first_writes.xml, and this definition writes the fields it names over it; remove the copy when the two say the same thing, or rename one when both are meant to exist
-custom/server_code/data/updates.xml:18:5: OD323 XML id 'state_replaced' is already defined in data/first_writes.xml, and this definition writes the fields it names over it; remove the copy when the two say the same thing, or rename one when both are meant to exist
-custom/server_code/data/updates.xml:26:5: OD323 XML id 'model_replaced' is already defined in data/first_writes.xml, and this definition writes the fields it names over it; remove the copy when the two say the same thing, or rename one when both are meant to exist
-custom/server_code/data/updates.xml:30:5: OD323 XML id 'model_hidden' is already defined in data/first_writes.xml, and this definition writes the fields it names over it; remove the copy when the two say the same thing, or rename one when both are meant to exist
+custom/server_code/data/updates.xml:6:5: OD323 XML id 'code_cleared' is already defined in data/first_writes.xml, and this definition overwrites the fields both name; remove the copy when the two say the same thing, or rename one when both are meant to exist
+custom/server_code/data/updates.xml:10:5: OD323 XML id 'code_hidden' is already defined in data/first_writes.xml, and this definition overwrites the fields both name; remove the copy when the two say the same thing, or rename one when both are meant to exist
+custom/server_code/data/updates.xml:14:5: OD323 XML id 'code_kept' is already defined in data/first_writes.xml, and this definition overwrites the fields both name; remove the copy when the two say the same thing, or rename one when both are meant to exist
+custom/server_code/data/updates.xml:18:5: OD323 XML id 'state_replaced' is already defined in data/first_writes.xml, and this definition overwrites the fields both name; remove the copy when the two say the same thing, or rename one when both are meant to exist
+custom/server_code/data/updates.xml:26:5: OD323 XML id 'model_replaced' is already defined in data/first_writes.xml, and this definition overwrites the fields both name; remove the copy when the two say the same thing, or rename one when both are meant to exist
+custom/server_code/data/updates.xml:30:5: OD323 XML id 'model_hidden' is already defined in data/first_writes.xml, and this definition overwrites the fields both name; remove the copy when the two say the same thing, or rename one when both are meant to exist
 custom/server_code/demo/rewrites.xml:15:34: OD320 server.job has no method '_nope_demo_breaks'
 custom/server_code_extension/data/updates.xml:7:34: OD320 server.job has no method '_nope_extension'
 custom/sql_base_entries/models/buoys.py:35:54: OD224 f.x_base_depot_id: buoy_float has no such column, since buoy.float has no field x_base_depot_id; name the column of a stored field of buoy.float
@@ -987,23 +989,23 @@ custom/window_named/views/actions.xml:284:33: OD318 window.plain has no primary 
 custom/window_named/views/actions.xml:291:33: OD318 window.plain has no primary map view, and nothing generates one
 custom/window_named/views/actions.xml:299:9: OD302 'nowhere.view_y' belongs to module nowhere, which is neither in depends nor on the addons path
 custom/window_named/views/actions.xml:330:41: OD318 window.plain has no primary gantt view, and nothing generates one
-custom/window_named/views/later.xml:6:5: OD323 XML id 'action_view_id_undone' is already defined in views/actions.xml, and this definition writes the fields it names over it; remove the copy when the two say the same thing, or rename one when both are meant to exist
-custom/window_named/views/later.xml:10:5: OD323 XML id 'action_context_undone' is already defined in views/actions.xml, and this definition writes the fields it names over it; remove the copy when the two say the same thing, or rename one when both are meant to exist
+custom/window_named/views/later.xml:6:5: OD323 XML id 'action_view_id_undone' is already defined in views/actions.xml, and this definition overwrites the fields both name; remove the copy when the two say the same thing, or rename one when both are meant to exist
+custom/window_named/views/later.xml:10:5: OD323 XML id 'action_context_undone' is already defined in views/actions.xml, and this definition overwrites the fields both name; remove the copy when the two say the same thing, or rename one when both are meant to exist
 custom/window_nested15/views/actions.xml:5:33: OD318 window.nested.old has no primary gantt view, and nothing generates one
-custom/window_tag15/views/later.xml:2:5: OD323 XML id 'action_tag_view_undone' is already defined in views/actions.xml, and this definition writes the fields it names over it; remove the copy when the two say the same thing, or rename one when both are meant to exist
+custom/window_tag15/views/later.xml:2:5: OD323 XML id 'action_tag_view_undone' is already defined in views/actions.xml, and this definition overwrites the fields both name; remove the copy when the two say the same thing, or rename one when both are meant to exist
 custom/window_tag15/views/later.xml:2:106: OD318 window.tag.old has no primary gantt view, and nothing generates one
-custom/window_tag15/views/later.xml:3:5: OD323 XML id 'action_tag_context_undone' is already defined in views/actions.xml, and this definition writes the fields it names over it; remove the copy when the two say the same thing, or rename one when both are meant to exist
+custom/window_tag15/views/later.xml:3:5: OD323 XML id 'action_tag_context_undone' is already defined in views/actions.xml, and this definition overwrites the fields both name; remove the copy when the two say the same thing, or rename one when both are meant to exist
 custom/window_tag15/views/later.xml:3:112: OD318 window.tag.old has no primary gantt view, and nothing generates one
 custom/window_update/demo/rewrites.xml:15:33: OD318 window.plain has no primary gantt view, and nothing generates one
-custom/window_update/views/a_last.xml:2:5: OD323 XML id 'action_ranked' is already defined in views/z_first.xml, and this definition writes the fields it names over it; remove the copy when the two say the same thing, or rename one when both are meant to exist
-custom/window_update/views/a_last.xml:6:5: OD323 XML id 'action_model_replaced' is already defined in views/z_first.xml, and this definition writes the fields it names over it; remove the copy when the two say the same thing, or rename one when both are meant to exist
-custom/window_update/views/a_last.xml:10:5: OD323 XML id 'action_mode_replaced' is already defined in views/updates.xml, and this definition writes the fields it names over it; remove the copy when the two say the same thing, or rename one when both are meant to exist
-custom/window_update/views/a_last.xml:14:5: OD323 XML id 'action_mode_grown' is already defined in views/updates.xml, and this definition writes the fields it names over it; remove the copy when the two say the same thing, or rename one when both are meant to exist
+custom/window_update/views/a_last.xml:2:5: OD323 XML id 'action_ranked' is already defined in views/z_first.xml, and this definition overwrites the fields both name; remove the copy when the two say the same thing, or rename one when both are meant to exist
+custom/window_update/views/a_last.xml:6:5: OD323 XML id 'action_model_replaced' is already defined in views/z_first.xml, and this definition overwrites the fields both name; remove the copy when the two say the same thing, or rename one when both are meant to exist
+custom/window_update/views/a_last.xml:10:5: OD323 XML id 'action_mode_replaced' is already defined in views/updates.xml, and this definition overwrites the fields both name; remove the copy when the two say the same thing, or rename one when both are meant to exist
+custom/window_update/views/a_last.xml:14:5: OD323 XML id 'action_mode_grown' is already defined in views/updates.xml, and this definition overwrites the fields both name; remove the copy when the two say the same thing, or rename one when both are meant to exist
 custom/window_update/views/a_last.xml:15:33: OD318 window.plain has no primary map view, and nothing generates one
-custom/window_update/views/a_last.xml:18:5: OD323 XML id 'action_mode_hidden' is already defined in views/updates.xml, and this definition writes the fields it names over it; remove the copy when the two say the same thing, or rename one when both are meant to exist
+custom/window_update/views/a_last.xml:18:5: OD323 XML id 'action_mode_hidden' is already defined in views/updates.xml, and this definition overwrites the fields both name; remove the copy when the two say the same thing, or rename one when both are meant to exist
 custom/window_update/views/demo_writes.xml:5:33: OD318 window.plain has no primary gantt view, and nothing generates one
 custom/window_update/views/demo_writes.xml:11:33: OD318 window.plain has no primary gantt view, and nothing generates one
 custom/window_update/views/demo_writes.xml:17:33: OD318 window.plain has no primary gantt view, and nothing generates one
 custom/window_update/views/updates.xml:3:33: OD318 window.plain has no primary gantt view, and nothing generates one
-custom/window_update/views/updates.xml:18:5: OD323 XML id 'action_model_replaced' is already defined in views/z_first.xml, and this definition writes the fields it names over it; remove the copy when the two say the same thing, or rename one when both are meant to exist
+custom/window_update/views/updates.xml:18:5: OD323 XML id 'action_model_replaced' is already defined in views/z_first.xml, and this definition overwrites the fields both name; remove the copy when the two say the same thing, or rename one when both are meant to exist
 custom/window_update/views/updates.xml:51:33: OD318 window.plain has no primary gantt view, and nothing generates one

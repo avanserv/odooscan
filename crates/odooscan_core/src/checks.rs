@@ -167,7 +167,7 @@ pub fn check_module<'m>(index: &Index<'m>, mi: usize, series: Option<Series>) ->
     manifest_files(module, &mut out);
     unloaded_files(module, series, &mut out);
     ids_repeated_in_a_file(module, &mut out);
-    ids_repeated_across_files(module, &mut out);
+    ids_repeated_across_files(module, series, &mut out);
     same_module_xmlids(module, series, &mut out);
     shadowed_members(module, series, &mut out);
     legacy_hook_rollbacks(module, series, &mut out);
@@ -672,20 +672,33 @@ impl IdDef<'_> {
 }
 
 /// Values are not compared, so a plain copy is reported too, and renaming it would duplicate the
-/// record: the hint has to offer both fixes.
+/// record: the hint has to offer both fixes. A model clash cannot be a copy, so its message offers
+/// only the rename.
 const REPEATED_ID_HINT: &str =
     "remove the copy when the two say the same thing, or rename one when both are meant to exist";
+
+/// The name a `<report>` and a `<record>` of the tag's model share. The parser, blind to the series,
+/// calls the tag's model `ir.actions.report`, but through 10.0 the tag writes `ir.actions.report.xml`
+/// (`odoo/tools/convert.py:323` on 10.0). No later series has that model, so a module of an unknown
+/// series that names it counts as one through 10.0.
+fn report_tag_model(model: &str, series: Option<Series>) -> &str {
+    if model == "ir.actions.report.xml" && series.is_none_or(|s| s < REPORT_MODEL) {
+        "ir.actions.report"
+    } else {
+        model
+    }
+}
 
 /// The finding on `later` repeating what a file before it defines under `id`, given those definitions
 /// in load order. A later `<record>` that adds a field, or adds to one, reads as a deliberate update,
 /// as does one that writes nothing or declares with `forcecreate` that the record exists.
-fn repeated(id: &str, earlier: &[&IdDef], later: &IdDef) -> Option<String> {
+fn repeated(id: &str, earlier: &[&IdDef], later: &IdDef, series: Option<Series>) -> Option<String> {
     let first = earlier.first()?;
     if let (Some(model), Some(other)) = (first.model, later.model)
-        && model != other
+        && report_tag_model(model, series) != report_tag_model(other, series)
     {
         return Some(format!(
-            "XML id '{id}' is already a record of {model} in {}, so it cannot name one of {other}; {REPEATED_ID_HINT}",
+            "XML id '{id}' is already a record of {model} in {}, so it cannot name one of {other}; rename one",
             first.rel
         ));
     }
@@ -699,16 +712,18 @@ fn repeated(id: &str, earlier: &[&IdDef], later: &IdDef) -> Option<String> {
     };
     overwrites.then(|| {
         format!(
-            "XML id '{id}' is already defined in {}, and this definition writes the fields it names over it; {REPEATED_ID_HINT}",
+            "XML id '{id}' is already defined in {}, and this definition overwrites the fields both name; {REPEATED_ID_HINT}",
             first.rel
         )
     })
 }
 
 /// OD323 on what loaded data files define under an id of the module that another of them defines.
-/// Installing writes every definition, so each field ends up as the last definition naming it left
-/// it. Demo data is meant to update what the data created.
-fn ids_repeated_across_files<'m>(module: &'m Module, out: &mut Out<'m>) {
+/// Installing writes every definition of one model, so each field ends up as the last definition
+/// naming it left it, except `groups` on a `<menuitem>`, and up to 16.0 on a `<report>` or
+/// `<act_window>`, which links and unlinks instead of replacing. Demo data is meant to update what
+/// the data created.
+fn ids_repeated_across_files<'m>(module: &'m Module, series: Option<Series>, out: &mut Out<'m>) {
     let mut defs: FxHashMap<String, Vec<IdDef<'m>>> = FxHashMap::default();
     let files = module.data.iter().enumerate();
     for (fi, file) in files.filter(|(_, f)| f.rank.is_some() && !f.demo) {
@@ -723,7 +738,7 @@ fn ids_repeated_across_files<'m>(module: &'m Module, out: &mut Out<'m>) {
             };
             let seen = defs.entry(full_id(&module.name, &def.id)).or_default();
             let earlier: Vec<&IdDef> = seen.iter().filter(|e| e.file != fi).collect();
-            if let Some(message) = repeated(&def.id, &earlier, &later) {
+            if let Some(message) = repeated(&def.id, &earlier, &later, series) {
                 out.push(&file.path, "OD323", def.pos, message);
             }
             seen.push(later);
