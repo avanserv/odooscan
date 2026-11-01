@@ -844,7 +844,8 @@ fn field_of<'a, 'i>(node: Node<'a, 'i>, name: &str) -> Option<Node<'a, 'i>> {
 }
 
 /// What `field` writes, in the order Odoo reads it: a `search`, a `ref`, an `eval`, then the text.
-/// An empty attribute counts as absent, and an empty text clears the field.
+/// An empty attribute counts as absent. An empty text gives no value to check: it clears a
+/// selection below saas~19.3, and from there writes `''`, which OD322 leaves unreported.
 fn written(field: Node, lines: &Lines) -> WrittenValue {
     let set = |attr: &str| attr_value(field, attr, lines).filter(|a| !a.value.is_empty());
     if set("search").is_some() {
