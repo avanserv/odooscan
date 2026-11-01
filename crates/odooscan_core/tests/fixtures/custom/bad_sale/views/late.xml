@@ -11,4 +11,16 @@
             </list>
         </field>
     </record>
+
+    <record id="view_project_late" model="ir.ui.view">
+        <field name="model">project.project</field>
+        <field name="arch" type="xml">
+            <form/>
+        </field>
+    </record>
+
+    <record id="partner_late" model="res.partner">
+        <field name="parent_id" ref="mail.no_such_id"/>
+        <field name="child_ids" eval="[(4, ref('encoded_lost.no_such_id'))]"/>
+    </record>
 </odoo>

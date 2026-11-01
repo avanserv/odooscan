@@ -1,0 +1,5 @@
+id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
+access_site_visit,site.visit,model_site_visit,base.group_user,1,0,0,0
+access_site_visit_line,site.visit.line,model_site_visit_line,base.group_user,1,0,0,0
+access_site_thread,site.thread,model_site_thread,base.group_user,1,0,0,0
+access_site_sheet,site.sheet,model_site_sheet,base.group_user,1,0,0,0

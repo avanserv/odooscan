@@ -1,0 +1,69 @@
+<odoo>
+    <record id="view_project_form" model="ir.ui.view">
+        <field name="model">project.project</field>
+        <field name="arch" type="xml">
+            <form/>
+        </field>
+    </record>
+
+    <record id="view_partner_search" model="ir.ui.view">
+        <field name="model">res.partner</field>
+        <field name="arch" type="xml">
+            <search>
+                <field name="x_ent"/>
+                <filter name="ent" domain="[('x_ent', '=', 1)]"/>
+            </search>
+        </field>
+    </record>
+
+    <record id="view_partner_simple_site" model="ir.ui.view">
+        <field name="model">res.partner</field>
+        <field name="inherit_id" ref="base.view_partner_simple"/>
+        <field name="arch" type="xml">
+            <data>
+                <field name="x_ent" position="after"/>
+                <xpath expr="//page[@name='mail_page']" position="inside"/>
+            </data>
+        </field>
+    </record>
+
+    <record id="action_projects" model="ir.actions.act_window">
+        <field name="name">Projects</field>
+        <field name="res_model">project.project</field>
+    </record>
+
+    <record id="partner_refs" model="res.partner">
+        <field name="parent_id" ref="mail.mail_menu"/>
+        <field name="child_ids" eval="[(4, ref('mail.no_such_id')), (4, ref('ghost_addon.line_1'))]"/>
+    </record>
+
+    <record id="partner_ref_owners" model="res.partner">
+        <field name="parent_id" ref="base.no_such_id"/>
+        <field name="child_ids" eval="[(4, ref('encoded_lost.no_such_id'))]"/>
+    </record>
+
+    <record id="view_visit_form" model="ir.ui.view">
+        <field name="model">site.visit</field>
+        <field name="arch" type="xml">
+            <form>
+                <field name="nmae"/>
+            </form>
+        </field>
+    </record>
+
+    <record id="view_visit_form_extra" model="ir.ui.view">
+        <field name="inherit_id" ref="view_visit_form"/>
+        <field name="arch" type="xml">
+            <field name="naem" position="after"/>
+        </field>
+    </record>
+
+    <record id="view_visit_search" model="ir.ui.view">
+        <field name="model">site.visit</field>
+        <field name="arch" type="xml">
+            <search>
+                <filter name="typo" domain="[('nmae', '=', 1)]"/>
+            </search>
+        </field>
+    </record>
+</odoo>

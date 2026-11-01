@@ -26,10 +26,3 @@ class RegistryNote(models.Model):
 class RegistryPartner(models.Model):
     _name = "res.partner"
     _description = "Contact"
-
-
-class RegistryCountry(models.Model):
-    _name = "res.country"
-    _inherit = _name
-
-    fee = fields.Monetary()
