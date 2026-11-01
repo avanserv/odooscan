@@ -1,0 +1,13 @@
+<odoo>
+    <record id="sign_hidden" model="unlisted.sign">
+        <field name="plate_id" ref="badge_hidden_unlisted_plate"/>
+    </record>
+    <record id="sign_shown" model="unlisted.sign">
+        <field name="plate_id" ref="badge_shown_unlisted_plate"/>
+    </record>
+    <record id="sign_hooked" model="unlisted.sign">
+        <field name="plate_id" ref="badge_hooked_unlisted_plate"/>
+    </record>
+    <record id="badge_shadowed_unlisted_plate" model="unlisted.plate"/>
+    <record id="badge_named_unlisted_plate" model="unlisted.plate"/>
+</odoo>

@@ -1,0 +1,8 @@
+<odoo>
+    <record id="badge_shown" model="unlisted.badge">
+        <field name="code">shown</field>
+    </record>
+    <record id="badge_named" model="unlisted.badge">
+        <field name="code">named</field>
+    </record>
+</odoo>
