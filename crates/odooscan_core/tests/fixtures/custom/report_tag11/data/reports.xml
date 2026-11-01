@@ -39,4 +39,10 @@
     </record>
 
     <report id="tag_then_record" string="tag_then_record" model="res.partner" name="report_tag11.sheet"/>
+
+    <report id="tag_then_paper" string="tag_then_paper" model="res.partner" name="report_tag11.sheet"/>
+
+    <record id="tag_then_paper" model="ir.actions.report.xml">
+        <field name="name">tag_then_paper</field>
+    </record>
 </odoo>

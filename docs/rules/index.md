@@ -112,7 +112,7 @@ XML ids, views and data records, within a file and across the dependency graph.
 | --- | --- | --- |
 | [OD301](OD301.md) | `unresolved-xmlid` | The XML id is not defined by its module. |
 | [OD302](OD302.md) | `xmlid-not-in-depends` | The XML id comes from a module missing from depends. |
-| [OD303](OD303.md) | `duplicate-xmlid` | The same XML id is defined twice in one file. |
+| [OD303](OD303.md) | `duplicate-xmlid` | The same XML id is defined twice in one file, with another model or overwriting a field. |
 | [OD304](OD304.md) | `unknown-view-field` | A view references a field its model does not have. |
 | [OD305](OD305.md) | `attrs-states-removed` | attrs and states are removed; use invisible, readonly and required expressions. |
 | [OD306](OD306.md) | `tree-renamed-list` | The tree view type is renamed list. |

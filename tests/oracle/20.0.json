@@ -387,31 +387,7 @@
     {
       "path": "addons/hr/data/hr_demo.xml",
       "code": "OD303",
-      "message": "XML id 'dep_management' is already defined earlier in this file",
-      "count": 1
-    },
-    {
-      "path": "addons/hr/data/hr_demo.xml",
-      "code": "OD303",
-      "message": "XML id 'dep_ps' is already defined earlier in this file",
-      "count": 1
-    },
-    {
-      "path": "addons/hr/data/hr_demo.xml",
-      "code": "OD303",
       "message": "XML id 'dep_rd' is already defined earlier in this file",
-      "count": 2
-    },
-    {
-      "path": "addons/hr/data/hr_demo.xml",
-      "code": "OD303",
-      "message": "XML id 'dep_rd_ltp' is already defined earlier in this file",
-      "count": 1
-    },
-    {
-      "path": "addons/hr/data/hr_demo.xml",
-      "code": "OD303",
-      "message": "XML id 'dep_sales' is already defined earlier in this file",
       "count": 1
     },
     {
@@ -436,30 +412,6 @@
       "path": "addons/hr_recruitment/data/hr_recruitment_demo.xml",
       "code": "OD303",
       "message": "XML id 'hr_case_traineemca1' is already defined earlier in this file",
-      "count": 1
-    },
-    {
-      "path": "addons/hr_recruitment/data/hr_recruitment_demo.xml",
-      "code": "OD303",
-      "message": "XML id 'hr_talent_cto_2' is already defined earlier in this file",
-      "count": 1
-    },
-    {
-      "path": "addons/hr_recruitment/data/hr_recruitment_demo.xml",
-      "code": "OD303",
-      "message": "XML id 'hr_talent_cto_3' is already defined earlier in this file",
-      "count": 1
-    },
-    {
-      "path": "addons/hr_recruitment/data/hr_recruitment_demo.xml",
-      "code": "OD303",
-      "message": "XML id 'hr_talent_dev_1' is already defined earlier in this file",
-      "count": 1
-    },
-    {
-      "path": "addons/hr_recruitment/data/scenarios/hr_recruitment_scenario.xml",
-      "code": "OD303",
-      "message": "XML id 'scenario_applicant_macm_enrique' is already defined earlier in this file",
       "count": 1
     },
     {
@@ -503,84 +455,6 @@
       "code": "OD111",
       "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
       "count": 4
-    },
-    {
-      "path": "addons/l10n_ar/demo/account_supplier_invoice_demo.xml",
-      "code": "OD303",
-      "message": "XML id 'demo_despacho_1' is already defined earlier in this file",
-      "count": 1
-    },
-    {
-      "path": "addons/l10n_ar/demo/account_supplier_invoice_demo.xml",
-      "code": "OD303",
-      "message": "XML id 'demo_sup_invoice_1' is already defined earlier in this file",
-      "count": 1
-    },
-    {
-      "path": "addons/l10n_ar/demo/account_supplier_invoice_demo.xml",
-      "code": "OD303",
-      "message": "XML id 'demo_sup_invoice_10' is already defined earlier in this file",
-      "count": 1
-    },
-    {
-      "path": "addons/l10n_ar/demo/account_supplier_invoice_demo.xml",
-      "code": "OD303",
-      "message": "XML id 'demo_sup_invoice_11' is already defined earlier in this file",
-      "count": 1
-    },
-    {
-      "path": "addons/l10n_ar/demo/account_supplier_invoice_demo.xml",
-      "code": "OD303",
-      "message": "XML id 'demo_sup_invoice_12' is already defined earlier in this file",
-      "count": 1
-    },
-    {
-      "path": "addons/l10n_ar/demo/account_supplier_invoice_demo.xml",
-      "code": "OD303",
-      "message": "XML id 'demo_sup_invoice_2' is already defined earlier in this file",
-      "count": 1
-    },
-    {
-      "path": "addons/l10n_ar/demo/account_supplier_invoice_demo.xml",
-      "code": "OD303",
-      "message": "XML id 'demo_sup_invoice_3' is already defined earlier in this file",
-      "count": 1
-    },
-    {
-      "path": "addons/l10n_ar/demo/account_supplier_invoice_demo.xml",
-      "code": "OD303",
-      "message": "XML id 'demo_sup_invoice_4' is already defined earlier in this file",
-      "count": 1
-    },
-    {
-      "path": "addons/l10n_ar/demo/account_supplier_invoice_demo.xml",
-      "code": "OD303",
-      "message": "XML id 'demo_sup_invoice_5' is already defined earlier in this file",
-      "count": 1
-    },
-    {
-      "path": "addons/l10n_ar/demo/account_supplier_invoice_demo.xml",
-      "code": "OD303",
-      "message": "XML id 'demo_sup_invoice_6' is already defined earlier in this file",
-      "count": 1
-    },
-    {
-      "path": "addons/l10n_ar/demo/account_supplier_invoice_demo.xml",
-      "code": "OD303",
-      "message": "XML id 'demo_sup_invoice_7' is already defined earlier in this file",
-      "count": 1
-    },
-    {
-      "path": "addons/l10n_ar/demo/account_supplier_invoice_demo.xml",
-      "code": "OD303",
-      "message": "XML id 'demo_sup_invoice_8' is already defined earlier in this file",
-      "count": 1
-    },
-    {
-      "path": "addons/l10n_ar/demo/account_supplier_invoice_demo.xml",
-      "code": "OD303",
-      "message": "XML id 'demo_sup_invoice_9' is already defined earlier in this file",
-      "count": 1
     },
     {
       "path": "addons/l10n_br/data/template/account.account-br.csv",
@@ -1353,18 +1227,6 @@
     {
       "path": "addons/l10n_mn/data/vat_report.xml",
       "code": "OD303",
-      "message": "XML id 'vat_report_line42' is already defined earlier in this file",
-      "count": 1
-    },
-    {
-      "path": "addons/l10n_mn/data/vat_report.xml",
-      "code": "OD303",
-      "message": "XML id 'vat_report_line52' is already defined earlier in this file",
-      "count": 1
-    },
-    {
-      "path": "addons/l10n_mn/data/vat_report.xml",
-      "code": "OD303",
       "message": "XML id 'vat_report_line64_balance' is already defined earlier in this file",
       "count": 1
     },
@@ -1504,18 +1366,6 @@
       "path": "addons/mail/controllers/thread.py",
       "code": "OD122",
       "message": "UPDATE on mail_canned_response bypasses the ORM, so records this transaction already read keep stale values; call flush_model() before the query and invalidate_model() after it (flush() and invalidate_cache() before 16.0)",
-      "count": 1
-    },
-    {
-      "path": "addons/mail/data/discuss_channel_data.xml",
-      "code": "OD303",
-      "message": "XML id 'mail.channel_admin' is already defined earlier in this file",
-      "count": 1
-    },
-    {
-      "path": "addons/mail/data/discuss_channel_data.xml",
-      "code": "OD303",
-      "message": "XML id 'mail.channel_all_employees' is already defined earlier in this file",
       "count": 1
     },
     {
@@ -2222,12 +2072,6 @@
     },
     {
       "path": "addons/purchase/views/purchase_views.xml",
-      "code": "OD303",
-      "message": "XML id 'menu_product_in_config_purchase' is already defined earlier in this file",
-      "count": 1
-    },
-    {
-      "path": "addons/purchase/views/purchase_views.xml",
       "code": "OD320",
       "message": "purchase.order.line has no method 'action_open_accrual_wizard'",
       "count": 1
@@ -2380,24 +2224,6 @@
       "path": "addons/sale_stock/controllers/return_order.py",
       "code": "OD111",
       "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
-      "count": 1
-    },
-    {
-      "path": "addons/sale_timesheet/data/sale_service_demo.xml",
-      "code": "OD303",
-      "message": "XML id 'sale_order_1' is already defined earlier in this file",
-      "count": 1
-    },
-    {
-      "path": "addons/sale_timesheet/data/sale_service_demo.xml",
-      "code": "OD303",
-      "message": "XML id 'sale_order_2' is already defined earlier in this file",
-      "count": 1
-    },
-    {
-      "path": "addons/sale_timesheet/data/sale_service_demo.xml",
-      "code": "OD303",
-      "message": "XML id 'sale_order_3' is already defined earlier in this file",
       "count": 1
     },
     {
@@ -2859,12 +2685,6 @@
     {
       "path": "addons/website_sale/data/demo.xml",
       "code": "OD303",
-      "message": "XML id 'product.product_product_4_product_template' is already defined earlier in this file",
-      "count": 1
-    },
-    {
-      "path": "addons/website_sale/data/demo.xml",
-      "code": "OD303",
       "message": "XML id 'public_category_furnitures_chairs' is already defined earlier in this file",
       "count": 1
     },
@@ -2944,18 +2764,6 @@
       "path": "addons/website_slides/models/slide_slide.py",
       "code": "OD223",
       "message": "_compute_vimeo_id() can leave 'vimeo_id' unassigned on a record, so reading it raises ValueError; assign it on every path through the loop, False when there is no value",
-      "count": 1
-    },
-    {
-      "path": "odoo/addons/base/data/res_users_demo.xml",
-      "code": "OD303",
-      "message": "XML id 'partner_demo' is already defined earlier in this file",
-      "count": 1
-    },
-    {
-      "path": "odoo/addons/base/data/res_users_demo.xml",
-      "code": "OD303",
-      "message": "XML id 'partner_light' is already defined earlier in this file",
       "count": 1
     },
     {

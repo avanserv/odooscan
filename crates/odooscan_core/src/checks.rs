@@ -9,7 +9,7 @@ use crate::facts::{
     AccessRow, ActionFact, ActionValue, ActionViewId, Annotation, ArchElement, ArchModifier, ArchSubview, ClassFact,
     DataFacts, DefinitionSource, DomainFact, FieldFact, FieldWrite, FunctionCall, JsFacts, JsName, ModelKind,
     OptionValue, OrmCall, Pos, RawDiag, RecordFact, RecordWrite, ReportFact, RuleFact, ServerFact, Spanned, SqlColumn,
-    SqlView, UNREAD_TYPE, ViewFact, WrittenValue, XmlRef,
+    SqlView, UNREAD_TYPE, ViewFact, WrittenValue, XmlDef, XmlRef,
 };
 use crate::index::{
     BASE_MODEL_METHODS, Export, FieldDef, FieldInfo, Index, JsSpec, PathError, Placed, RELATIONAL_TYPES, Scope, Status,
@@ -188,7 +188,7 @@ pub fn check_module<'m>(index: &Index<'m>, mi: usize, series: Option<Series>) ->
     let mut out = Out { diags: vec![] };
     manifest_files(module, &mut out);
     unloaded_files(module, series, &mut out);
-    ids_repeated_in_a_file(module, &mut out);
+    ids_repeated_in_a_file(module, series, &mut out);
     ids_repeated_across_files(module, series, &mut out);
     same_module_xmlids(module, series, &mut out);
     shadowed_members(module, series, &mut out);
@@ -688,20 +688,23 @@ fn own_id(module: &Module, id: &str) -> bool {
     id.split_once('.').is_none_or(|(m, _)| m == module.name)
 }
 
-/// OD303 on each id an earlier element of its file defines.
-fn ids_repeated_in_a_file<'m>(module: &'m Module, out: &mut Out<'m>) {
-    for file in &module.data {
-        let mut in_file: FxHashSet<&str> = FxHashSet::default();
-        for def in file.facts.defs.iter().filter(|d| !d.assigned) {
-            if !in_file.insert(&def.id) {
+/// OD303 on each definition that repeats an earlier one of its file, as `rewrites_in_a_file` tells.
+fn ids_repeated_in_a_file<'m>(module: &'m Module, series: Option<Series>, out: &mut Out<'m>) {
+    for (fi, file) in module.data.iter().enumerate() {
+        let mut in_file: FxHashMap<&str, Vec<IdDef<'m>>> = FxHashMap::default();
+        for (def, later) in id_defs(module, fi, file) {
+            let seen = in_file.entry(&def.id).or_default();
+            let earlier: Vec<&IdDef> = seen.iter().collect();
+            if rewrites_in_a_file(&earlier, &later, series) {
                 let message = format!("XML id '{}' is already defined earlier in this file", def.id);
                 out.push(&file.path, "OD303", def.pos, message);
             }
+            seen.push(later);
         }
     }
 }
 
-/// What one element defines an XML id as, for the definitions of later files to compare with.
+/// What one element defines an XML id as, for later definitions to compare with.
 struct IdDef<'m> {
     file: usize,
     rel: &'m str,
@@ -716,6 +719,26 @@ impl IdDef<'_> {
     fn writes(&self, name: &str) -> bool {
         self.write.is_some_and(|w| w.fields.iter().any(|f| f.name == name))
     }
+}
+
+/// Each definition of the data file at index `fi`, in file order, with what it defines its id as.
+fn id_defs<'m>(
+    module: &'m Module,
+    fi: usize,
+    file: &'m SourceFile<DataFacts>,
+) -> impl Iterator<Item = (&'m XmlDef, IdDef<'m>)> {
+    let writes: FxHashMap<Pos, &RecordWrite> = file.facts.writes.iter().map(|w| (w.pos, w)).collect();
+    let themed = module.name.starts_with("theme_");
+    file.facts.defs.iter().filter(|d| !d.assigned).map(move |def| {
+        let id_def = IdDef {
+            file: fi,
+            rel: &file.rel,
+            model: def.model.as_deref().filter(|_| !(def.themed && themed)),
+            write: writes.get(&def.pos).copied(),
+            no_create: def.no_create,
+        };
+        (def, id_def)
+    })
 }
 
 /// Values are not compared, so a plain copy is reported too, and renaming it would duplicate the
@@ -736,15 +759,36 @@ fn report_tag_model(model: &str, series: Option<Series>) -> &str {
     }
 }
 
+/// The models of two definitions of one id, when they are not the same one.
+fn other_model<'m>(first: &IdDef<'m>, later: &IdDef<'m>, series: Option<Series>) -> Option<(&'m str, &'m str)> {
+    let models = first.model.zip(later.model)?;
+    (report_tag_model(models.0, series) != report_tag_model(models.1, series)).then_some(models)
+}
+
+/// Whether `field` replaces what one of the `earlier` definitions of its id wrote.
+fn rewrites(field: &FieldWrite, earlier: &[&IdDef]) -> bool {
+    !field.incremental && earlier.iter().any(|e| e.writes(&field.name))
+}
+
+/// Whether `later` undoes what the `earlier` definitions of its id in one file set up. Odoo writes a
+/// definition field by field, so a `<record>` naming other fields is a second phase of the first.
+/// This takes `any` against the `all` of OD323, and ignores `forcecreate`: a repeat within one file
+/// is far more likely a copy than a deliberate update.
+fn rewrites_in_a_file(earlier: &[&IdDef], later: &IdDef, series: Option<Series>) -> bool {
+    let Some(first) = earlier.first() else { return false };
+    other_model(first, later, series).is_some()
+        || later
+            .write
+            .is_none_or(|write| write.fields.iter().any(|f| rewrites(f, earlier)))
+}
+
 /// The finding on `later` repeating what a file before it defines under `id`, given those definitions
 /// in load order. A later `<record>` that adds a field, or adds to one, reads as a deliberate update,
 /// as does one that writes nothing. A `<record>` or `<template>` declares with `forcecreate` that the
 /// record exists, which says nothing of a record of another model.
 fn repeated(id: &str, earlier: &[&IdDef], later: &IdDef, series: Option<Series>) -> Option<String> {
     let first = earlier.first()?;
-    if let (Some(model), Some(other)) = (first.model, later.model)
-        && report_tag_model(model, series) != report_tag_model(other, series)
-    {
+    if let Some((model, other)) = other_model(first, later, series) {
         return Some(format!(
             "XML id '{id}' is already a record of {model} in {}, and this definition is one of {other}; rename one",
             first.rel
@@ -755,10 +799,7 @@ fn repeated(id: &str, earlier: &[&IdDef], later: &IdDef, series: Option<Series>)
     }
     let overwrites = match later.write {
         Some(write) if write.fields.is_empty() => false,
-        Some(write) => {
-            let rewrites = |f: &FieldWrite| !f.incremental && earlier.iter().any(|e| e.writes(&f.name));
-            earlier.iter().all(|e| e.write.is_some()) && write.fields.iter().all(rewrites)
-        }
+        Some(write) => earlier.iter().all(|e| e.write.is_some()) && write.fields.iter().all(|f| rewrites(f, earlier)),
         None => true,
     };
     overwrites.then(|| {
@@ -778,16 +819,7 @@ fn ids_repeated_across_files<'m>(module: &'m Module, series: Option<Series>, out
     let mut defs: FxHashMap<String, Vec<IdDef<'m>>> = FxHashMap::default();
     let files = module.data.iter().enumerate();
     for (fi, file) in files.filter(|(_, f)| f.rank.is_some() && !f.demo) {
-        let writes: FxHashMap<Pos, &RecordWrite> = file.facts.writes.iter().map(|w| (w.pos, w)).collect();
-        let themed = module.name.starts_with("theme_");
-        for def in file.facts.defs.iter().filter(|d| !d.assigned && own_id(module, &d.id)) {
-            let later = IdDef {
-                file: fi,
-                rel: &file.rel,
-                model: def.model.as_deref().filter(|_| !(def.themed && themed)),
-                write: writes.get(&def.pos).copied(),
-                no_create: def.no_create,
-            };
+        for (def, later) in id_defs(module, fi, file).filter(|(d, _)| own_id(module, &d.id)) {
             let seen = defs.entry(full_id(&module.name, &def.id)).or_default();
             let earlier: Vec<&IdDef> = seen.iter().filter(|e| e.file != fi).collect();
             if let Some(message) = repeated(&def.id, &earlier, &later, series) {

@@ -379,42 +379,6 @@
       "count": 1
     },
     {
-      "path": "addons/hr/data/hr_demo.xml",
-      "code": "OD303",
-      "message": "XML id 'dep_management' is already defined earlier in this file",
-      "count": 1
-    },
-    {
-      "path": "addons/hr/data/hr_demo.xml",
-      "code": "OD303",
-      "message": "XML id 'dep_ps' is already defined earlier in this file",
-      "count": 1
-    },
-    {
-      "path": "addons/hr/data/hr_demo.xml",
-      "code": "OD303",
-      "message": "XML id 'dep_rd' is already defined earlier in this file",
-      "count": 1
-    },
-    {
-      "path": "addons/hr/data/hr_demo.xml",
-      "code": "OD303",
-      "message": "XML id 'dep_rd_be' is already defined earlier in this file",
-      "count": 1
-    },
-    {
-      "path": "addons/hr/data/hr_demo.xml",
-      "code": "OD303",
-      "message": "XML id 'dep_rd_ltp' is already defined earlier in this file",
-      "count": 1
-    },
-    {
-      "path": "addons/hr/data/hr_demo.xml",
-      "code": "OD303",
-      "message": "XML id 'dep_sales' is already defined earlier in this file",
-      "count": 1
-    },
-    {
       "path": "addons/hr_attendance/controllers/main.py",
       "code": "OD111",
       "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
@@ -460,12 +424,6 @@
       "path": "addons/hr_holidays/static/src/views/calendar/calendar_controller.js",
       "code": "OD601",
       "message": "'@web/core/dropdown/dropdown' does not export 'DropdownItem'",
-      "count": 1
-    },
-    {
-      "path": "addons/hr_recruitment/data/scenarios/hr_recruitment_scenario.xml",
-      "code": "OD303",
-      "message": "XML id 'scenario_applicant_macm_enrique' is already defined earlier in this file",
       "count": 1
     },
     {
@@ -532,282 +490,6 @@
       "path": "addons/l10n_account_withholding_tax/models/account_payment_withholding_line.py",
       "code": "OD203",
       "message": "'payment_register_id.amount': account.payment.withholding.line has no field 'payment_register_id'",
-      "count": 1
-    },
-    {
-      "path": "addons/l10n_ar/data/l10n_latam_identification_type_data.xml",
-      "code": "OD303",
-      "message": "XML id 'it_AN' is already defined earlier in this file",
-      "count": 1
-    },
-    {
-      "path": "addons/l10n_ar/data/l10n_latam_identification_type_data.xml",
-      "code": "OD303",
-      "message": "XML id 'it_CBA' is already defined earlier in this file",
-      "count": 1
-    },
-    {
-      "path": "addons/l10n_ar/data/l10n_latam_identification_type_data.xml",
-      "code": "OD303",
-      "message": "XML id 'it_CCat' is already defined earlier in this file",
-      "count": 1
-    },
-    {
-      "path": "addons/l10n_ar/data/l10n_latam_identification_type_data.xml",
-      "code": "OD303",
-      "message": "XML id 'it_CCor' is already defined earlier in this file",
-      "count": 1
-    },
-    {
-      "path": "addons/l10n_ar/data/l10n_latam_identification_type_data.xml",
-      "code": "OD303",
-      "message": "XML id 'it_CCorr' is already defined earlier in this file",
-      "count": 1
-    },
-    {
-      "path": "addons/l10n_ar/data/l10n_latam_identification_type_data.xml",
-      "code": "OD303",
-      "message": "XML id 'it_CDI' is already defined earlier in this file",
-      "count": 1
-    },
-    {
-      "path": "addons/l10n_ar/data/l10n_latam_identification_type_data.xml",
-      "code": "OD303",
-      "message": "XML id 'it_CIBAR' is already defined earlier in this file",
-      "count": 1
-    },
-    {
-      "path": "addons/l10n_ar/data/l10n_latam_identification_type_data.xml",
-      "code": "OD303",
-      "message": "XML id 'it_CICha' is already defined earlier in this file",
-      "count": 1
-    },
-    {
-      "path": "addons/l10n_ar/data/l10n_latam_identification_type_data.xml",
-      "code": "OD303",
-      "message": "XML id 'it_CIChu' is already defined earlier in this file",
-      "count": 1
-    },
-    {
-      "path": "addons/l10n_ar/data/l10n_latam_identification_type_data.xml",
-      "code": "OD303",
-      "message": "XML id 'it_CIER' is already defined earlier in this file",
-      "count": 1
-    },
-    {
-      "path": "addons/l10n_ar/data/l10n_latam_identification_type_data.xml",
-      "code": "OD303",
-      "message": "XML id 'it_CIF' is already defined earlier in this file",
-      "count": 1
-    },
-    {
-      "path": "addons/l10n_ar/data/l10n_latam_identification_type_data.xml",
-      "code": "OD303",
-      "message": "XML id 'it_CIJ' is already defined earlier in this file",
-      "count": 1
-    },
-    {
-      "path": "addons/l10n_ar/data/l10n_latam_identification_type_data.xml",
-      "code": "OD303",
-      "message": "XML id 'it_CILP' is already defined earlier in this file",
-      "count": 1
-    },
-    {
-      "path": "addons/l10n_ar/data/l10n_latam_identification_type_data.xml",
-      "code": "OD303",
-      "message": "XML id 'it_CILR' is already defined earlier in this file",
-      "count": 1
-    },
-    {
-      "path": "addons/l10n_ar/data/l10n_latam_identification_type_data.xml",
-      "code": "OD303",
-      "message": "XML id 'it_CIMen' is already defined earlier in this file",
-      "count": 1
-    },
-    {
-      "path": "addons/l10n_ar/data/l10n_latam_identification_type_data.xml",
-      "code": "OD303",
-      "message": "XML id 'it_CIMis' is already defined earlier in this file",
-      "count": 1
-    },
-    {
-      "path": "addons/l10n_ar/data/l10n_latam_identification_type_data.xml",
-      "code": "OD303",
-      "message": "XML id 'it_CIN' is already defined earlier in this file",
-      "count": 1
-    },
-    {
-      "path": "addons/l10n_ar/data/l10n_latam_identification_type_data.xml",
-      "code": "OD303",
-      "message": "XML id 'it_CIRN' is already defined earlier in this file",
-      "count": 1
-    },
-    {
-      "path": "addons/l10n_ar/data/l10n_latam_identification_type_data.xml",
-      "code": "OD303",
-      "message": "XML id 'it_CIS' is already defined earlier in this file",
-      "count": 1
-    },
-    {
-      "path": "addons/l10n_ar/data/l10n_latam_identification_type_data.xml",
-      "code": "OD303",
-      "message": "XML id 'it_CISC' is already defined earlier in this file",
-      "count": 1
-    },
-    {
-      "path": "addons/l10n_ar/data/l10n_latam_identification_type_data.xml",
-      "code": "OD303",
-      "message": "XML id 'it_CISF' is already defined earlier in this file",
-      "count": 1
-    },
-    {
-      "path": "addons/l10n_ar/data/l10n_latam_identification_type_data.xml",
-      "code": "OD303",
-      "message": "XML id 'it_CISJ' is already defined earlier in this file",
-      "count": 1
-    },
-    {
-      "path": "addons/l10n_ar/data/l10n_latam_identification_type_data.xml",
-      "code": "OD303",
-      "message": "XML id 'it_CISL' is already defined earlier in this file",
-      "count": 1
-    },
-    {
-      "path": "addons/l10n_ar/data/l10n_latam_identification_type_data.xml",
-      "code": "OD303",
-      "message": "XML id 'it_CISdE' is already defined earlier in this file",
-      "count": 1
-    },
-    {
-      "path": "addons/l10n_ar/data/l10n_latam_identification_type_data.xml",
-      "code": "OD303",
-      "message": "XML id 'it_CIT' is already defined earlier in this file",
-      "count": 1
-    },
-    {
-      "path": "addons/l10n_ar/data/l10n_latam_identification_type_data.xml",
-      "code": "OD303",
-      "message": "XML id 'it_CITdF' is already defined earlier in this file",
-      "count": 1
-    },
-    {
-      "path": "addons/l10n_ar/data/l10n_latam_identification_type_data.xml",
-      "code": "OD303",
-      "message": "XML id 'it_CPF' is already defined earlier in this file",
-      "count": 1
-    },
-    {
-      "path": "addons/l10n_ar/data/l10n_latam_identification_type_data.xml",
-      "code": "OD303",
-      "message": "XML id 'it_CdM' is already defined earlier in this file",
-      "count": 1
-    },
-    {
-      "path": "addons/l10n_ar/data/l10n_latam_identification_type_data.xml",
-      "code": "OD303",
-      "message": "XML id 'it_ET' is already defined earlier in this file",
-      "count": 1
-    },
-    {
-      "path": "addons/l10n_ar/data/l10n_latam_identification_type_data.xml",
-      "code": "OD303",
-      "message": "XML id 'it_LC' is already defined earlier in this file",
-      "count": 1
-    },
-    {
-      "path": "addons/l10n_ar/data/l10n_latam_identification_type_data.xml",
-      "code": "OD303",
-      "message": "XML id 'it_LE' is already defined earlier in this file",
-      "count": 1
-    },
-    {
-      "path": "addons/l10n_ar/data/l10n_latam_identification_type_data.xml",
-      "code": "OD303",
-      "message": "XML id 'it_Sigd' is already defined earlier in this file",
-      "count": 1
-    },
-    {
-      "path": "addons/l10n_ar/data/l10n_latam_identification_type_data.xml",
-      "code": "OD303",
-      "message": "XML id 'it_UpApP' is already defined earlier in this file",
-      "count": 1
-    },
-    {
-      "path": "addons/l10n_ar/demo/account_supplier_invoice_demo.xml",
-      "code": "OD303",
-      "message": "XML id 'demo_despacho_1' is already defined earlier in this file",
-      "count": 1
-    },
-    {
-      "path": "addons/l10n_ar/demo/account_supplier_invoice_demo.xml",
-      "code": "OD303",
-      "message": "XML id 'demo_sup_invoice_1' is already defined earlier in this file",
-      "count": 1
-    },
-    {
-      "path": "addons/l10n_ar/demo/account_supplier_invoice_demo.xml",
-      "code": "OD303",
-      "message": "XML id 'demo_sup_invoice_10' is already defined earlier in this file",
-      "count": 1
-    },
-    {
-      "path": "addons/l10n_ar/demo/account_supplier_invoice_demo.xml",
-      "code": "OD303",
-      "message": "XML id 'demo_sup_invoice_11' is already defined earlier in this file",
-      "count": 1
-    },
-    {
-      "path": "addons/l10n_ar/demo/account_supplier_invoice_demo.xml",
-      "code": "OD303",
-      "message": "XML id 'demo_sup_invoice_12' is already defined earlier in this file",
-      "count": 1
-    },
-    {
-      "path": "addons/l10n_ar/demo/account_supplier_invoice_demo.xml",
-      "code": "OD303",
-      "message": "XML id 'demo_sup_invoice_2' is already defined earlier in this file",
-      "count": 1
-    },
-    {
-      "path": "addons/l10n_ar/demo/account_supplier_invoice_demo.xml",
-      "code": "OD303",
-      "message": "XML id 'demo_sup_invoice_3' is already defined earlier in this file",
-      "count": 1
-    },
-    {
-      "path": "addons/l10n_ar/demo/account_supplier_invoice_demo.xml",
-      "code": "OD303",
-      "message": "XML id 'demo_sup_invoice_4' is already defined earlier in this file",
-      "count": 1
-    },
-    {
-      "path": "addons/l10n_ar/demo/account_supplier_invoice_demo.xml",
-      "code": "OD303",
-      "message": "XML id 'demo_sup_invoice_5' is already defined earlier in this file",
-      "count": 1
-    },
-    {
-      "path": "addons/l10n_ar/demo/account_supplier_invoice_demo.xml",
-      "code": "OD303",
-      "message": "XML id 'demo_sup_invoice_6' is already defined earlier in this file",
-      "count": 1
-    },
-    {
-      "path": "addons/l10n_ar/demo/account_supplier_invoice_demo.xml",
-      "code": "OD303",
-      "message": "XML id 'demo_sup_invoice_7' is already defined earlier in this file",
-      "count": 1
-    },
-    {
-      "path": "addons/l10n_ar/demo/account_supplier_invoice_demo.xml",
-      "code": "OD303",
-      "message": "XML id 'demo_sup_invoice_8' is already defined earlier in this file",
-      "count": 1
-    },
-    {
-      "path": "addons/l10n_ar/demo/account_supplier_invoice_demo.xml",
-      "code": "OD303",
-      "message": "XML id 'demo_sup_invoice_9' is already defined earlier in this file",
       "count": 1
     },
     {
@@ -1077,18 +759,6 @@
     {
       "path": "addons/l10n_mn/data/vat_report.xml",
       "code": "OD303",
-      "message": "XML id 'vat_report_line42' is already defined earlier in this file",
-      "count": 1
-    },
-    {
-      "path": "addons/l10n_mn/data/vat_report.xml",
-      "code": "OD303",
-      "message": "XML id 'vat_report_line52' is already defined earlier in this file",
-      "count": 1
-    },
-    {
-      "path": "addons/l10n_mn/data/vat_report.xml",
-      "code": "OD303",
       "message": "XML id 'vat_report_line64_balance' is already defined earlier in this file",
       "count": 1
     },
@@ -1324,12 +994,6 @@
       "path": "addons/mail/controllers/thread.py",
       "code": "OD703",
       "message": "route parameter 'post_data' reaches Markup() through 'key', 'post_data', '_prepare_post_data()' unescaped; escape it, or pass it as an argument of Markup's % or format()",
-      "count": 1
-    },
-    {
-      "path": "addons/mail/data/discuss_channel_data.xml",
-      "code": "OD303",
-      "message": "XML id 'mail.channel_all_employees' is already defined earlier in this file",
       "count": 1
     },
     {
@@ -1939,12 +1603,6 @@
       "count": 2
     },
     {
-      "path": "addons/purchase/views/purchase_views.xml",
-      "code": "OD303",
-      "message": "XML id 'menu_product_in_config_purchase' is already defined earlier in this file",
-      "count": 1
-    },
-    {
       "path": "addons/purchase_stock/models/stock.py",
       "code": "OD211",
       "message": "no parent class of stock.return.picking defines '_prepare_move_default_values', so this super() call fails",
@@ -2038,24 +1696,6 @@
       "path": "addons/sale_stock/models/sale_order_line.py",
       "code": "OD211",
       "message": "no parent class of sale.order.line defines '_get_action_add_from_catalog_extra_context', so this super() call fails",
-      "count": 1
-    },
-    {
-      "path": "addons/sale_timesheet/data/sale_service_demo.xml",
-      "code": "OD303",
-      "message": "XML id 'sale_order_1' is already defined earlier in this file",
-      "count": 1
-    },
-    {
-      "path": "addons/sale_timesheet/data/sale_service_demo.xml",
-      "code": "OD303",
-      "message": "XML id 'sale_order_2' is already defined earlier in this file",
-      "count": 1
-    },
-    {
-      "path": "addons/sale_timesheet/data/sale_service_demo.xml",
-      "code": "OD303",
-      "message": "XML id 'sale_order_3' is already defined earlier in this file",
       "count": 1
     },
     {
@@ -2481,38 +2121,26 @@
     {
       "path": "addons/website_partner/data/website_partner_demo.xml",
       "code": "OD303",
-      "message": "XML id 'base.res_partner_1' is already defined earlier in this file",
-      "count": 1
-    },
-    {
-      "path": "addons/website_partner/data/website_partner_demo.xml",
-      "code": "OD303",
       "message": "XML id 'base.res_partner_10' is already defined earlier in this file",
-      "count": 2
+      "count": 1
     },
     {
       "path": "addons/website_partner/data/website_partner_demo.xml",
       "code": "OD303",
       "message": "XML id 'base.res_partner_12' is already defined earlier in this file",
-      "count": 6
-    },
-    {
-      "path": "addons/website_partner/data/website_partner_demo.xml",
-      "code": "OD303",
-      "message": "XML id 'base.res_partner_18' is already defined earlier in this file",
-      "count": 1
+      "count": 5
     },
     {
       "path": "addons/website_partner/data/website_partner_demo.xml",
       "code": "OD303",
       "message": "XML id 'base.res_partner_2' is already defined earlier in this file",
-      "count": 4
+      "count": 3
     },
     {
       "path": "addons/website_partner/data/website_partner_demo.xml",
       "code": "OD303",
       "message": "XML id 'base.res_partner_3' is already defined earlier in this file",
-      "count": 4
+      "count": 3
     },
     {
       "path": "addons/website_partner/data/website_partner_demo.xml",
@@ -2566,12 +2194,6 @@
       "path": "addons/website_sale/data/demo.xml",
       "code": "OD303",
       "message": "XML id 'product.product_product_2_product_template' is already defined earlier in this file",
-      "count": 1
-    },
-    {
-      "path": "addons/website_sale/data/demo.xml",
-      "code": "OD303",
-      "message": "XML id 'product.product_product_4_product_template' is already defined earlier in this file",
       "count": 1
     },
     {
@@ -2689,12 +2311,6 @@
       "count": 2
     },
     {
-      "path": "odoo/addons/base/data/res_users_demo.xml",
-      "code": "OD303",
-      "message": "XML id 'partner_demo' is already defined earlier in this file",
-      "count": 1
-    },
-    {
       "path": "odoo/addons/base/models/assetsbundle.py",
       "code": "OD101",
       "message": "query built by string formatting; pass parameters separately or build it with odoo.tools.SQL",
@@ -2794,18 +2410,6 @@
       "path": "odoo/addons/base/report/custom_view.xml",
       "code": "OD502",
       "message": "'report/custom_view.xml' is not in the manifest's data or demo, so Odoo never loads it",
-      "count": 1
-    },
-    {
-      "path": "odoo/addons/base/security/base_groups.xml",
-      "code": "OD303",
-      "message": "XML id 'default_user' is already defined earlier in this file",
-      "count": 1
-    },
-    {
-      "path": "odoo/addons/base/security/base_groups.xml",
-      "code": "OD303",
-      "message": "XML id 'group_user' is already defined earlier in this file",
       "count": 1
     },
     {

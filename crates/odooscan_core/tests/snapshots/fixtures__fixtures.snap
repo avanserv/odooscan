@@ -194,8 +194,6 @@ custom/cursor_state/models/sql_writes.py:209:9: OD122 DELETE on res_partner bypa
 custom/cursor_state/models/sql_writes.py:213:9: OD122 INSERT on x_partner_tier bypasses the ORM, so records this transaction already read keep stale values; call flush_model() before the query and invalidate_model() after it (flush() and invalidate_cache() before 16.0)
 custom/cycle_a/__manifest__.py:1:66: OD504 module 'cycle_b' depends back on cycle_a, so Odoo installs neither
 custom/cycle_b/__manifest__.py:1:58: OD504 module 'cycle_a' depends back on cycle_b, so Odoo installs neither
-custom/data_fields/data/fields.xml:64:5: OD303 XML id 'field_x_late' is already defined earlier in this file
-custom/data_fields/data/fields.xml:122:5: OD303 XML id 'field_x_partner_id' is already defined earlier in this file
 custom/data_fields/data/partners.xml:5:9: OD309 res.partner has no field 'x_unloaded'
 custom/data_fields/data/partners.xml:6:9: OD309 res.partner has no field 'x_demo'
 custom/data_fields/data/unlisted.xml:1:1: OD502 'data/unlisted.xml' is not in the manifest's data or demo, so Odoo never loads it
@@ -774,6 +772,16 @@ custom/registry_fields/models/shipment.py:11:17: OD205 'reference' is a Many2one
 custom/registry_fields/models/shipment.py:13:19: OD205 'carrier_ids' is a Many2one field elsewhere and is redefined here as Many2many
 custom/registry_fields/models/shipment.py:24:17: OD205 'reference' is a Char field elsewhere and is redefined here as Many2one
 custom/registry_fields/models/shipment.py:26:19: OD205 'carrier_ids' is a Many2many field elsewhere and is redefined here as Many2one
+custom/repeated_ids/data/phases.xml:50:5: OD303 XML id 'same_field' is already defined earlier in this file
+custom/repeated_ids/data/phases.xml:57:5: OD303 XML id 'new_and_shared' is already defined earlier in this file
+custom/repeated_ids/data/phases.xml:68:5: OD303 XML id 'third_repeats_first' is already defined earlier in this file
+custom/repeated_ids/data/phases.xml:75:5: OD303 XML id 'other_model' is already defined earlier in this file
+custom/repeated_ids/data/phases.xml:82:5: OD303 XML id 'record_then_menu' is already defined earlier in this file
+custom/repeated_ids/data/phases.xml:87:5: OD303 XML id 'past_the_tag' is already defined earlier in this file
+custom/repeated_ids/data/phases.xml:88:5: OD303 XML id 'past_the_tag' is already defined earlier in this file
+custom/repeated_ids/data/phases.xml:95:5: OD303 XML id 'replaced_twice' is already defined earlier in this file
+custom/repeated_ids/data/phases.xml:102:5: OD303 XML id 'declared_shared' is already defined earlier in this file
+custom/repeated_ids/data/res.partner.csv:4:1: OD303 XML id 'csv_twice' is already defined earlier in this file
 custom/report_actions/data/demo_writes.xml:5:35: OD311 no indexed module defines template 'report_actions.absent_demo_fixes'
 custom/report_actions/data/demo_writes.xml:11:35: OD311 no indexed module defines template 'report_actions.absent_demo_type'
 custom/report_actions/data/demo_writes.xml:18:46: OD319 Odoo refuses this expression when it prints the report: Unexpected token at the end of an expression
@@ -833,6 +841,7 @@ custom/report_tag11/data/reports.xml:8:71: OD311 no indexed module defines templ
 custom/report_tag11/data/reports.xml:10:125: OD319 Odoo refuses this expression when it prints the report: Unexpected token at the end of an expression
 custom/report_tag11/data/reports.xml:28:35: OD311 no indexed module defines template 'report_tag11.absent_record'
 custom/report_tag11/data/reports.xml:29:46: OD319 Odoo refuses this expression when it prints the report: Unexpected token at the end of an expression
+custom/report_tag11/data/reports.xml:45:5: OD303 XML id 'tag_then_paper' is already defined earlier in this file
 custom/report_tag11/data/updates.xml:2:5: OD323 XML id 'tag_replaces' is already defined in data/reports.xml, and this definition overwrites the fields both name; remove the copy when the two say the same thing, or rename one when both are meant to exist
 custom/report_tag11/data/updates.xml:4:5: OD323 XML id 'tag_then_record' is already a record of ir.actions.report in data/reports.xml, and this definition is one of ir.actions.report.xml; rename one
 custom/report_tag16/data/reports.xml:6:71: OD311 no indexed module defines template 'report_tag16.absent_tag'
