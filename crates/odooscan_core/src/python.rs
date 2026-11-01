@@ -1717,6 +1717,7 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
             methods: vec![],
             labels: vec![],
             domain: vec![],
+            domain_string: false,
             options: vec![],
             splat: true,
         }
@@ -1941,6 +1942,7 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
             methods: methods(&options),
             labels: selection_labels(ftype, call),
             domain: keyword(call, "domain").map(|d| self.domain(d)).unwrap_or_default(),
+            domain_string: keyword(call, "domain").is_some_and(|d| matches!(d, Expr::StringLiteral(_))),
             options,
             splat: hides_options(ftype, call),
         })

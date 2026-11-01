@@ -11,6 +11,14 @@ custom/access_rows/security/ir.model.access-rewrite.csv:2:1: OD323 XML id 'acces
 custom/access_rows/security/ir.model.access.csv:2:1: OD402 no group limits this row, so every user, public and portal included, gets write, create or unlink on model_access_desk; name a group
 custom/access_rows/security/ir.model.access.csv:3:1: OD402 no group limits this row, so every user, public and portal included, gets write, create or unlink on model_access_desk; name a group
 custom/access_rows/security/ir.model.access.csv:4:1: OD402 no group limits this row, so every user, public and portal included, gets write, create or unlink on model_access_desk; name a group
+custom/auto_scope_main/demo/rules.xml:11:36: OD210 'next_stamp': field 'next_stamp' of auto.scope.thing comes from module auto_scope_next, which is not in depends
+custom/auto_scope_main/thing.py:9:61: OD210 'next_stamp': field 'next_stamp' of auto.scope.thing comes from module auto_scope_next, which is not in depends
+custom/auto_scope_main/thing.py:18:23: OD210 'far_stamp': field 'far_stamp' of auto.scope.thing comes from module auto_scope_far, which is not in depends
+custom/auto_scope_main/thing.py:19:23: OD210 'country_stamp': field 'country_stamp' of auto.scope.thing comes from module auto_scope_country, which is not in depends
+custom/auto_scope_main/thing.py:20:23: OD210 'country_any_stamp': field 'country_any_stamp' of auto.scope.thing comes from module auto_scope_country_any, which is not in depends
+custom/auto_scope_main/thing.py:21:23: OD210 'both_next_id.no_past_both': auto.scope.thing has no field 'no_past_both'
+custom/auto_scope_main/views.xml:8:17: OD210 'next_stamp': field 'next_stamp' of auto.scope.thing comes from module auto_scope_next, which is not in depends
+custom/auto_scope_v131/data.xml:7:17: OD210 'next_stamp': field 'next_stamp' of auto.scope.thing comes from module auto_scope_next, which is not in depends
 custom/bad_sale/__manifest__.py:11:9: OD501 'data/missing.xml' does not exist
 custom/bad_sale/controllers/flows.py:14:9: OD701 route parameter 'term' reaches the query of cr.execute() through 'where', 'query'; pass it as a query parameter or build the query with odoo.tools.SQL
 custom/bad_sale/controllers/flows.py:15:9: OD701 route parameter 'kw' reaches the query of cr.execute(); pass it as a query parameter or build the query with odoo.tools.SQL
