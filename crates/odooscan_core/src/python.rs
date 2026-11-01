@@ -6,8 +6,8 @@ use ruff_text_size::{Ranged, TextSize};
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::facts::{
-    ClassFact, DefinitionSource, DomainFact, FieldFact, ModelKind, OptionValue, Pos, PyFacts, RawDiag, Receiver,
-    Spanned, SqlColumn, SqlView, XmlRef,
+    ClassFact, DefinitionSource, DomainFact, FieldClass, FieldFact, ModelKind, OptionValue, Pos, PyFacts, RawDiag,
+    Receiver, Spanned, SqlColumn, SqlView, UNREAD_TYPE, XmlRef,
 };
 use crate::series::Series;
 use crate::sql::{
@@ -39,7 +39,14 @@ const FIELD_TYPES: &[&str] = &[
     "Properties",
     "PropertiesDefinition",
     "Id",
+    "Serialized",
 ];
+
+/// The packages whose `fields` module holds the ORM's field classes, by series.
+const ORM_PACKAGES: &[&str] = &["odoo", "openerp"];
+
+/// The field classes a whole scan defines, by class name, each with its field type.
+pub type FieldClasses = FxHashMap<String, String>;
 
 /// Recordset methods whose first argument, or `domain`, is a domain on the recordset's model.
 const DOMAIN_METHODS: &[&str] = &[
@@ -159,14 +166,69 @@ fn format_spliced(c: &ast::ExprCall) -> bool {
         && !(c.arguments.args.iter().all(is_code_built) && c.arguments.keywords.iter().all(|k| is_code_built(&k.value)))
 }
 
-fn field_call(expr: &Expr) -> Option<(&str, &ast::ExprCall)> {
+/// The type of the field a call declares. Only the last name counts, since a module may reach the
+/// ORM's `fields` under any alias.
+fn field_call<'e>(expr: &'e Expr, known: &'e FieldClasses) -> Option<(&'e str, &'e ast::ExprCall)> {
     let Expr::Call(call) = expr else { return None };
-    let ftype = match &*call.func {
-        Expr::Attribute(a) if matches!(&*a.value, Expr::Name(n) if n.id.as_str() == "fields") => a.attr.as_str(),
-        Expr::Name(n) => n.id.as_str(),
-        _ => return None,
+    let name = tail_name(&call.func)?;
+    let ftype = if FIELD_TYPES.contains(&name) {
+        name
+    } else {
+        known.get(name)?.as_str()
     };
-    FIELD_TYPES.contains(&ftype).then_some((ftype, call))
+    Some((ftype, call))
+}
+
+/// A base class without its type arguments: from 18.0 `Field` is generic, as in `Field[list]`.
+fn generic_origin(base: &Expr) -> &Expr {
+    match base {
+        Expr::Subscript(s) => &s.value,
+        _ => base,
+    }
+}
+
+/// The field type a base class proves through the names the file imports from the ORM's packages:
+/// `Field` makes the subclass a type of its own. A bare `Char` proves nothing unless so imported,
+/// as other libraries name classes after field types.
+fn proven_type(base: &Expr, class: &str, imported: &[(&str, String)]) -> Option<String> {
+    let path = module_state::imported_path(base, imported)?;
+    match path.split('.').collect::<Vec<_>>().as_slice() {
+        [_, "fields", "Field"] => Some(class.to_owned()),
+        [_, "fields", ftype] if FIELD_TYPES.contains(ftype) => Some((*ftype).to_owned()),
+        _ => None,
+    }
+}
+
+/// The field classes of `facts`, those that reach the ORM through other classes of the scan among
+/// them, which may live in another file or module. A call names its class by name alone, so a name
+/// with two field types tells neither: it gets `UNREAD_TYPE`. A type only ever moves towards that,
+/// so the result does not depend on the order files are read in.
+pub fn field_classes<'f>(facts: impl Iterator<Item = &'f PyFacts>) -> FieldClasses {
+    let classes: Vec<&FieldClass> = facts.flat_map(|f| &f.field_classes).collect();
+    let mut known = FieldClasses::default();
+    let mut grew = true;
+    while grew {
+        grew = false;
+        for class in &classes {
+            let inherited = class.bases.iter().filter_map(|base| known.get(base));
+            let types: Vec<String> = class.ftype.iter().chain(inherited).cloned().collect();
+            for ftype in types {
+                grew |= add_type(&mut known, &class.name, ftype);
+            }
+        }
+    }
+    known
+}
+
+/// Gives `name` the type `ftype`, and tells whether that changed what `known` holds.
+fn add_type(known: &mut FieldClasses, name: &str, ftype: String) -> bool {
+    let merged = match known.get(name) {
+        None => ftype,
+        Some(held) if *held == ftype || held == UNREAD_TYPE => return false,
+        Some(_) => UNREAD_TYPE.to_owned(),
+    };
+    known.insert(name.to_owned(), merged);
+    true
 }
 
 /// The attributes a field type's constructor takes by position, in order.
@@ -178,6 +240,7 @@ fn positional_names(ftype: &str) -> &'static [&'static str] {
         "One2many" => &["comodel_name", "inverse_name", "string"],
         "Many2many" => &["comodel_name", "relation", "column1", "column2", "string"],
         "Selection" | "Reference" => &["selection", "string"],
+        UNREAD_TYPE => &[],
         _ => &["string"],
     }
 }
@@ -522,7 +585,7 @@ fn is_table_object(value: &Expr) -> bool {
 
 /// Whether a class attribute may hold a method: anything but a field, a table object or plain data.
 /// Counting too much costs little, since a typo matches no name the class binds.
-fn may_be_method(value: &Expr) -> bool {
+fn may_be_method(value: &Expr, known: &FieldClasses) -> bool {
     let data = value.is_literal_expr()
         || matches!(
             value,
@@ -537,7 +600,7 @@ fn may_be_method(value: &Expr) -> bool {
                 | Expr::DictComp(_)
                 | Expr::Generator(_)
         );
-    !data && field_call(value).is_none() && !is_table_object(value)
+    !data && field_call(value, known).is_none() && !is_table_object(value)
 }
 
 /// The query a `SQL()` or an `execute()` call is given, whatever runs it.
@@ -648,16 +711,25 @@ impl<'a> Visitor<'a> for Calls<'a> {
     }
 }
 
-fn is_delegate(value: &Expr) -> bool {
-    field_call(value)
+/// Whether a field call may set attributes it does not name.
+fn hides_options(ftype: &str, call: &ast::ExprCall) -> bool {
+    let args = &call.arguments.args;
+    args.iter().any(Expr::is_starred_expr)
+        || call.arguments.keywords.iter().any(|k| k.arg.is_none())
+        || (ftype == UNREAD_TYPE && !args.is_empty())
+}
+
+fn is_delegate(value: &Expr, known: &FieldClasses) -> bool {
+    field_call(value, known)
         .and_then(|(_, call)| keyword(call, "delegate"))
         .is_some_and(|d| matches!(d, Expr::BooleanLiteral(b) if b.value))
 }
 
 /// Whether the Many2one may delegate in a way `ClassFact::inherits` cannot hold: Odoo reads the truth
-/// of `delegate`, which a non-literal value or a `**` unpacking may give.
-fn may_delegate(value: &Expr) -> bool {
-    let Some(("Many2one", call)) = field_call(value) else {
+/// of `delegate`, which a non-literal value or a `**` unpacking may give, and the comodel of a field
+/// of unread type is unknown.
+fn may_delegate(value: &Expr, known: &FieldClasses) -> bool {
+    let Some(("Many2one" | UNREAD_TYPE, call)) = field_call(value, known) else {
         return false;
     };
     let falsy = |d: &Expr| matches!(option_value(d), OptionValue::Bool(false) | OptionValue::Falsy);
@@ -734,6 +806,11 @@ fn stores_inverse(write: &Write, table: Option<&str>, fields: &[&str]) -> bool {
 
 /// The facts of a Python file of a module of `series`, which names a class without `_name`.
 pub fn analyze(src: &str, series: Option<Series>) -> PyFacts {
+    analyze_with(src, series, &FieldClasses::default())
+}
+
+/// As `analyze`, reading a call of a class of `known` as a field.
+pub fn analyze_with(src: &str, series: Option<Series>, known: &FieldClasses) -> PyFacts {
     let loc = Locator::new(src);
     let parsed = match parse_module(src) {
         Ok(parsed) => parsed,
@@ -746,9 +823,11 @@ pub fn analyze(src: &str, series: Option<Series>) -> PyFacts {
         }
     };
     let body = &parsed.syntax().body;
+    let top = module_state::top_level(body);
     let mut v = PyVisitor {
         loc: &loc,
         series,
+        known,
         facts: PyFacts::default(),
         kinds: FxHashMap::default(),
         guarded: 0,
@@ -760,9 +839,13 @@ pub fn analyze(src: &str, series: Option<Series>) -> PyFacts {
         self_cursors: vec![],
         cursor_uses: vec![],
         in_view_maker: false,
-        odoo_names: module_state::odoo_names(&module_state::top_level(body))
+        odoo_names: module_state::odoo_names(&top)
             .into_iter()
             .map(|(local, _)| local)
+            .collect(),
+        orm_names: ORM_PACKAGES
+            .iter()
+            .flat_map(|package| module_state::imported_names(&top, package))
             .collect(),
     };
     v.visit_body(body);
@@ -796,10 +879,11 @@ fn method_name(func: &ast::StmtFunctionDef, fact: &mut ClassFact) {
 /// The method names an `if`, `try` or `with` block of a class body binds. Such a branch often
 /// serves another series, so its body stays out of the checks: `name_get` there must not report.
 fn conditional_methods(stmt: &Stmt, fact: &mut ClassFact) {
+    let unread = FieldClasses::default();
     for stmt in module_state::top_level(std::slice::from_ref(stmt)) {
         if let Stmt::FunctionDef(func) = stmt {
             method_name(func, fact);
-        } else if let Some((targets, _)) = assigned(stmt).filter(|(_, value)| may_be_method(value)) {
+        } else if let Some((targets, _)) = assigned(stmt).filter(|(_, value)| may_be_method(value, &unread)) {
             let names = targets.iter().filter_map(Expr::as_name_expr);
             fact.methods.extend(names.map(|name| name.id.to_string()));
         }
@@ -882,6 +966,7 @@ fn dotted(class_name: &str) -> String {
 struct PyVisitor<'a, 'ast> {
     loc: &'a Locator<'a>,
     series: Option<Series>,
+    known: &'a FieldClasses,
     facts: PyFacts,
     /// Model classes of the file by Python class name.
     kinds: FxHashMap<String, ModelKind>,
@@ -907,6 +992,8 @@ struct PyVisitor<'a, 'ast> {
     in_view_maker: bool,
     /// The names the file's imports from `odoo` bind at import.
     odoo_names: Vec<&'ast str>,
+    /// The names the file's imports from `ORM_PACKAGES` bind at import, each with its dotted path.
+    orm_names: Vec<(&'ast str, String)>,
 }
 
 impl<'ast> PyVisitor<'_, 'ast> {
@@ -925,6 +1012,7 @@ impl<'ast> PyVisitor<'_, 'ast> {
     fn class_fact(&mut self, class: &ast::StmtClassDef) -> Option<ClassFact> {
         let kind = model_kind(class, &self.kinds);
         if kind.is_none() && !declares_model(class) {
+            self.field_class(class);
             return None;
         }
         if let Some(kind) = kind {
@@ -983,6 +1071,26 @@ impl<'ast> PyVisitor<'_, 'ast> {
         fact.model = self.model_name(class.name.as_str(), &naming, &fact)?;
         fact.new_model = !fact.inherit.iter().any(|i| i.value == fact.model);
         Some(fact)
+    }
+
+    /// Records a class that is no model and has a base, which may be a field class.
+    fn field_class(&mut self, class: &ast::StmtClassDef) {
+        if class.bases().is_empty() {
+            return;
+        }
+        let name = class.name.as_str();
+        let mut fact = FieldClass {
+            name: name.to_owned(),
+            ftype: None,
+            bases: vec![],
+        };
+        for base in class.bases().iter().map(generic_origin) {
+            match proven_type(base, name, &self.orm_names) {
+                Some(ftype) => fact.ftype = fact.ftype.take().or(Some(ftype)),
+                None => fact.bases.extend(tail_name(base).map(str::to_owned)),
+            }
+        }
+        self.facts.field_classes.push(fact);
     }
 
     /// The model a class names: its `_name`, else the one Odoo derives in the module's series from
@@ -1089,8 +1197,8 @@ impl<'ast> PyVisitor<'_, 'ast> {
             }
             // Odoo registers a field under any attribute name, so a field so named replaces the
             // attribute or method and gives the model no table: `_auto_init` reads `_auto` alone.
-            "_check_company_domain" | "_table_query" | "_table_sql" if field_call(value).is_none() => {
-                fact.methods.push(target.id.to_string());
+            "_check_company_domain" | "_table_query" | "_table_sql" if field_call(value, self.known).is_none() => {
+                self.method_attr(target, value, fact);
             }
             "_sql_constraints" => {
                 self.diag(
@@ -1111,11 +1219,19 @@ impl<'ast> PyVisitor<'_, 'ast> {
             if let Some(definition) = value.as_call_expr().and_then(|c| c.arguments.args.first()) {
                 self.definition(DefinitionSource::TableObject, definition, fact);
             }
-        } else if may_be_method(value) {
-            fact.methods.push(target.id.to_string());
+        } else if may_be_method(value, self.known) {
+            self.method_attr(target, value, fact);
         } else {
             self.class_field(target, value, fact);
         }
+    }
+
+    /// Records a class attribute as a method, with what it calls: `attr_calls` tells which files a
+    /// scan must read again once it knows its field classes.
+    fn method_attr(&mut self, target: &ast::ExprName, value: &Expr, fact: &mut ClassFact) {
+        fact.methods.push(target.id.to_string());
+        let called = value.as_call_expr().and_then(|c| tail_name(&c.func));
+        self.facts.attr_calls.extend(called.map(str::to_owned));
     }
 
     /// The definition of each `(name, definition, message)` entry of a literal `_sql_constraints`.
@@ -1236,21 +1352,21 @@ impl<'ast> PyVisitor<'_, 'ast> {
         let Some(field) = self.field_fact(target, value) else {
             return;
         };
-        if is_delegate(value)
+        if is_delegate(value, self.known)
             && let Some(comodel) = &field.comodel
         {
             let pair = (comodel.value.clone(), field.name.clone());
             if !fact.inherits.contains(&pair) {
                 fact.inherits.push(pair);
             }
-        } else if may_delegate(value) {
+        } else if may_delegate(value, self.known) {
             fact.delegate_unknown = true;
         }
         fact.fields.push(field);
     }
 
     fn field_fact(&mut self, target: &ast::ExprName, value: &Expr) -> Option<FieldFact> {
-        let (ftype, call) = field_call(value)?;
+        let (ftype, call) = field_call(value, self.known)?;
         let relational = matches!(ftype, "Many2one" | "One2many" | "Many2many");
         let positional = |i: usize| call.arguments.args.get(i).and_then(|a| a.as_string_literal_expr());
         let kw_str = |k: &str| keyword(call, k).and_then(|e| e.as_string_literal_expr());
@@ -1286,8 +1402,7 @@ impl<'ast> PyVisitor<'_, 'ast> {
             labels: selection_labels(ftype, call),
             domain: keyword(call, "domain").map(|d| self.domain(d)).unwrap_or_default(),
             options,
-            splat: call.arguments.args.iter().any(Expr::is_starred_expr)
-                || call.arguments.keywords.iter().any(|k| k.arg.is_none()),
+            splat: hides_options(ftype, call),
         })
     }
 
@@ -1722,7 +1837,7 @@ impl<'ast> PyVisitor<'_, 'ast> {
         match &*call.func {
             Expr::Attribute(a) if a.attr.as_str() == "ref" && tail_name(&a.value) == Some("env") => self.env_ref(call),
             Expr::Attribute(a) if a.attr.as_str() == "has_group" => first.into_iter().for_each(|s| self.group_refs(s)),
-            _ if field_call(expr).is_some() => {
+            _ if field_call(expr, self.known).is_some() => {
                 if let Some(groups) = keyword(call, "groups").and_then(Expr::as_string_literal_expr) {
                     self.group_refs(groups);
                 }
@@ -2136,7 +2251,6 @@ mod tests {
             "api.depends('a')(_set)",
             "helper()",
             "Vector()",
-            "fields.Serialized()",
             "a if b else c",
             "H['x']",
         ] {
@@ -2145,6 +2259,9 @@ mod tests {
         for value in [
             "fields.Char()",
             "Char()",
+            "odoo.fields.Char()",
+            "f.Char()",
+            "fields.Serialized()",
             "models.Constraint('CHECK (a)')",
             "models.Index('(a)')",
             "models.UniqueIndex('(a)')",
@@ -2211,6 +2328,177 @@ mod tests {
         assert_eq!(class.private_methods, ["_hidden"]);
         assert!(class.super_calls.is_empty());
         assert!(!facts.diags.iter().any(|d| d.code == "OD106"));
+    }
+
+    /// The field classes of one file per source, sorted.
+    fn classes(sources: &[&str]) -> Vec<(String, String)> {
+        let facts: Vec<PyFacts> = sources.iter().map(|src| analyze(src, None)).collect();
+        let mut known: Vec<_> = field_classes(facts.iter()).into_iter().collect();
+        known.sort();
+        known
+    }
+
+    fn pair(name: &str, ftype: &str) -> (String, String) {
+        (name.to_owned(), ftype.to_owned())
+    }
+
+    #[test]
+    fn resolves_field_classes_through_bases_across_files() {
+        let base = "from odoo import fields\nclass A(fields.Field):\n    pass\nclass T(fields.Char):\n    pass\n";
+        let derived = "class B(A):\n    pass\n";
+        let further = "class C(Other, pkg.B):\n    pass\nclass D(T):\n    pass\nclass Lone(Other):\n    pass\n";
+        let expected = [
+            pair("A", "A"),
+            pair("B", "A"),
+            pair("C", "A"),
+            pair("D", "Char"),
+            pair("T", "Char"),
+        ];
+        assert_eq!(classes(&[further, derived, base]), expected);
+        assert_eq!(classes(&[base, derived, further]), expected);
+    }
+
+    #[test]
+    fn a_cycle_of_bases_proves_nothing() {
+        assert!(classes(&["class A(B):\n    pass\nclass B(A):\n    pass\n"]).is_empty());
+    }
+
+    #[test]
+    fn a_name_with_two_field_types_is_unread_whatever_the_file_order() {
+        let text = "from odoo import fields\nclass V(fields.Text):\n    pass\n";
+        let char = "from odoo import fields\nclass V(fields.Char):\n    pass\n";
+        let derived = "from odoo import fields\nclass A(fields.Char):\n    pass\nclass V(A):\n    pass\n";
+        let sub = "class W(V):\n    pass\n";
+        let expected = [pair("V", UNREAD_TYPE), pair("W", UNREAD_TYPE)];
+        assert_eq!(classes(&[text, char, sub]), expected);
+        assert_eq!(classes(&[sub, char, text]), expected);
+        let by_base = [pair("A", "Char"), pair("V", UNREAD_TYPE), pair("W", UNREAD_TYPE)];
+        assert_eq!(classes(&[sub, derived, text]), by_base);
+        assert_eq!(classes(&[text, sub, derived]), by_base);
+    }
+
+    #[test]
+    fn two_classes_of_a_name_and_type_keep_it() {
+        let char = "from odoo import fields\nclass V(fields.Char):\n    pass\n";
+        assert_eq!(classes(&[char, char]), [pair("V", "Char")]);
+        let field = "from odoo import fields\nclass V(fields.Field):\n    pass\n";
+        assert_eq!(classes(&[field, field]), [pair("V", "V")]);
+    }
+
+    #[test]
+    fn a_field_of_unread_type_gives_nothing_by_position() {
+        let known = FieldClasses::from_iter([pair("Mark", UNREAD_TYPE)]);
+        let src = "class X(models.Model):\n    _name = 'x'\n    a = Mark('p.q')\n    b = Mark(string='B')\n    \
+                   c = Mark('p.q', delegate=True)\n    d = Mark()\n";
+        let facts = analyze_with(src, None, &known);
+        let class = &facts.classes[0];
+        let [a, b, c, d] = class.fields.as_slice() else {
+            panic!("{:?}", class.fields);
+        };
+        assert!(a.option("string").is_none() && a.comodel.is_none() && a.splat);
+        assert!(b.option("string").is_some() && !b.splat);
+        assert!(c.comodel.is_none() && !d.splat);
+        assert!(class.inherits.is_empty());
+        assert!(class.delegate_unknown);
+    }
+
+    #[test]
+    fn a_subscripted_base_counts_as_the_class_it_subscripts() {
+        let base =
+            "from odoo import fields\nclass V(fields.Field[list]):\n    pass\nclass T(fields.Char[str]):\n    pass\n";
+        let derived = "class Sub(V[int]):\n    pass\nclass Deep(pkg.Sub[int]):\n    pass\n";
+        let expected = [pair("Deep", "V"), pair("Sub", "V"), pair("T", "Char"), pair("V", "V")];
+        assert_eq!(classes(&[derived, base]), expected);
+    }
+
+    #[test]
+    fn a_base_proves_only_through_an_import_of_the_orm() {
+        for (head, base, ftype) in [
+            ("from odoo import fields", "fields.Field", "V"),
+            ("from odoo import fields", "fields.Serialized", "Serialized"),
+            ("from odoo import fields as f", "f.Char", "Char"),
+            ("from openerp import fields as f", "f.Field", "V"),
+            ("from odoo.fields import Char", "Char", "Char"),
+            ("from odoo.fields import Char as C", "C", "Char"),
+            ("from odoo.fields import Field", "Field", "V"),
+            ("import odoo", "odoo.fields.Many2one", "Many2one"),
+            ("import openerp.fields", "openerp.fields.Text", "Text"),
+            ("import odoo.fields as f", "f.Field", "V"),
+        ] {
+            let src = format!("{head}\nclass V({base}):\n    pass\n");
+            assert_eq!(classes(&[src.as_str()]), [pair("V", ftype)], "{head} {base}");
+        }
+        for (head, base) in [
+            ("from generators import Char", "Char"),
+            ("", "Char"),
+            ("", "fields.Field"),
+            ("from wtforms import fields", "fields.Field"),
+            ("from odoo.addons.web import fields", "fields.Char"),
+            ("from odoo import fields", "fields.Unknown"),
+            ("from odoo import fields", "fields.Char.sub"),
+            ("from odoo import models", "models.Field"),
+            ("from odooish import fields", "fields.Field"),
+        ] {
+            let src = format!("{head}\nclass V({base}):\n    pass\n");
+            assert!(classes(&[src.as_str()]).is_empty(), "{head} {base}");
+        }
+    }
+
+    #[test]
+    fn a_model_class_or_one_without_a_base_is_no_field_class() {
+        let facts = analyze(
+            "from odoo import fields\nclass X(models.Model):\n    _name = 'x'\nclass Plain:\n    pass\n\
+             class Named(fields.Field):\n    _name = 'y'\n",
+            None,
+        );
+        assert!(facts.field_classes.is_empty());
+    }
+
+    #[test]
+    fn reads_a_call_of_a_field_class_only_once_the_scan_knows_it() {
+        let src = "class X(models.Model):\n    _name = 'x'\n    v = Vector(size=3)\n    w = pkg.Link('y', 'Label')\n    \
+                   z = Other()\n    alias = _set\n    if a:\n        u = Vector()\n";
+        let unknown = analyze(src, None);
+        assert_eq!(unknown.attr_calls, ["Vector", "Link", "Other"]);
+        assert!(unknown.classes[0].fields.is_empty());
+        let known = FieldClasses::from_iter([pair("Vector", "Vector"), pair("Link", "Many2one")]);
+        let facts = analyze_with(src, None, &known);
+        let class = &facts.classes[0];
+        let declared: Vec<_> = class
+            .fields
+            .iter()
+            .map(|f| (f.name.as_str(), f.ftype.as_str()))
+            .collect();
+        assert_eq!(declared, [("v", "Vector"), ("w", "Many2one")]);
+        assert_eq!(class.fields[1].comodel.as_ref().unwrap().value, "y");
+        assert_eq!(class.methods, ["z", "alias", "u"]);
+    }
+
+    #[test]
+    fn an_attribute_read_as_a_method_by_name_keeps_its_call_for_the_second_read() {
+        let src = "class X(models.Model):\n    _name = 'x'\n    _table_query = Tag()\n    \
+                   _table_sql = pkg.Link()\n    _check_company_domain = Other()\n";
+        let facts = analyze(src, None);
+        assert_eq!(facts.attr_calls, ["Tag", "Link", "Other"]);
+        assert_eq!(
+            facts.classes[0].methods,
+            ["_table_query", "_table_sql", "_check_company_domain"]
+        );
+    }
+
+    #[test]
+    fn a_field_class_counts_for_the_rules_of_a_field() {
+        let known = FieldClasses::from_iter([pair("Link", "Many2one"), pair("Tag", "Char")]);
+        let src = "class X(models.Model):\n    _name = 'x'\n    a = Link('p.q', delegate=True)\n    \
+                   b = Link('r.s', delegate=flag)\n    c = Tag(groups='base.group_user', default=fields.Date.today())\n    \
+                   _table_query = Tag()\n";
+        let facts = analyze_with(src, None, &known);
+        let class = &facts.classes[0];
+        assert_eq!(class.inherits, [("p.q".to_owned(), "a".to_owned())]);
+        assert!(class.delegate_unknown);
+        assert!(!class.methods.contains(&"_table_query".to_owned()));
+        assert_eq!(facts.group_refs[0].id, "base.group_user");
+        assert!(facts.diags.iter().any(|d| d.code == "OD104"));
     }
 
     #[test]

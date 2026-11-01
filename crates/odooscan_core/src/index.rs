@@ -4,7 +4,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use crate::facts::{
     ActionFact, Annotation, ArchElement, ArchEmptied, ArchSubview, ArchValued, ClassFact, DataFacts, FieldFact,
     FlowSummary, Heritage, JsClass, ModelKind, OptionValue, PyFacts, Receiver, RecordWrite, ReportFact, RuleFact,
-    ServerFact, ViewFact, WrittenValue,
+    ServerFact, UNREAD_TYPE, ViewFact, WrittenValue,
 };
 use crate::manifest::AutoInstall;
 use crate::project::{Module, SourceFile, code_loaded};
@@ -30,9 +30,6 @@ pub const RELATIONAL_TYPES: &[&str] = &["Many2one", "One2many", "Many2many"];
 /// Types a path cannot be followed through: the value is not a record of a fixed comodel, or, for
 /// `UNREAD_TYPE`, the scan cannot tell which comodel it is.
 const OPAQUE_TYPES: &[&str] = &["Reference", "Many2oneReference", "Properties", "Json", UNREAD_TYPE];
-
-/// The type of a field whose `ir.model.fields` record gives no `ttype` the scan can read.
-const UNREAD_TYPE: &str = "Unread";
 
 /// The class Odoo builds for each `ttype`.
 const FIELD_CLASSES: &[(&str, &str)] = &[

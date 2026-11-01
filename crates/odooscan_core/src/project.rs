@@ -168,7 +168,28 @@ pub fn load(paths: &[PathBuf], addons_paths: &[PathBuf], default_series: Option<
     modules
         .par_iter_mut()
         .for_each(|module| parse_module_files(module, default_series));
+    let known = python::field_classes(modules.iter().flat_map(|m| &m.python).map(|f| &f.facts));
+    if !known.is_empty() {
+        modules
+            .par_iter_mut()
+            .for_each(|module| read_field_calls(module, default_series, &known));
+    }
     Discovery { modules, notices }
+}
+
+/// Reads again the files whose class attributes call a field class of the scan. A class may live
+/// in any module, so the first pass takes such a call for a method.
+fn read_field_calls(module: &mut Module, default_series: Option<Series>, known: &python::FieldClasses) {
+    let series = module.series.or(default_series);
+    module
+        .python
+        .par_iter_mut()
+        .filter(|file| file.facts.attr_calls.iter().any(|name| known.contains_key(name)))
+        .for_each(|file| {
+            if let Ok(text) = std::fs::read_to_string(&file.path) {
+                file.facts = python::analyze_with(&text, series, known);
+            }
+        });
 }
 
 /// Module directories by name, with whether each is checked, keeping the first of each name.

@@ -9,7 +9,7 @@ use crate::facts::{
     AccessRow, ActionFact, ActionValue, ActionViewId, Annotation, ArchElement, ArchModifier, ArchSubview, ClassFact,
     DataFacts, DefinitionSource, DomainFact, FieldFact, FieldWrite, FunctionCall, JsFacts, JsName, ModelKind,
     OptionValue, OrmCall, Pos, RawDiag, RecordFact, RecordWrite, ReportFact, RuleFact, ServerFact, Spanned, SqlColumn,
-    SqlView, ViewFact, WrittenValue, XmlRef,
+    SqlView, UNREAD_TYPE, ViewFact, WrittenValue, XmlRef,
 };
 use crate::index::{
     BASE_MODEL_METHODS, Export, FieldDef, FieldInfo, Index, JsSpec, PathError, Placed, RELATIONAL_TYPES, Scope, Status,
@@ -24,8 +24,9 @@ use crate::{flows, manifest, modifier, module_state};
 /// Directories of upgrade scripts, which name XML ids of past versions.
 const UPGRADE_DIRS: &[&str] = &["migrations", "upgrades"];
 
-/// Types a One2many's inverse may have: an Integer holds the id of a `res_model`/`res_id` pair.
-const INVERSE_TYPES: &[&str] = &["Many2one", "Many2oneReference", "Integer"];
+/// Types a One2many's inverse may have: an Integer holds the id of a `res_model`/`res_id` pair, and
+/// an unread type cannot be judged.
+const INVERSE_TYPES: &[&str] = &["Many2one", "Many2oneReference", "Integer", UNREAD_TYPE];
 
 /// The longest identifier PostgreSQL keeps, which Odoo checks a relation table name against.
 const PG_NAME_MAX: usize = 63;
@@ -759,6 +760,11 @@ fn odoo_type(ftype: &str) -> &str {
     if ftype == "Image" { "Binary" } else { ftype }
 }
 
+/// Whether Odoo sees two field types as different, which a type the scan cannot tell may not be.
+fn types_differ(a: &str, b: &str) -> bool {
+    a != UNREAD_TYPE && b != UNREAD_TYPE && odoo_type(a) != odoo_type(b)
+}
+
 /// The registry creates the `ir.model` and `ir.model.fields` ids of a module's models before any of
 /// its data files load, so a record with such an id only updates it.
 fn registry_id(module: &Module, id: &str) -> bool {
@@ -1320,7 +1326,7 @@ impl<'m> Ctx<'_, 'm> {
         let Some(targets) = self.index.path_target(&class.model, &related.value, self.setup) else {
             return;
         };
-        if targets.iter().all(|t| odoo_type(&t.ftype) != odoo_type(&field.ftype)) {
+        if targets.iter().all(|t| types_differ(&t.ftype, &field.ftype)) {
             out.push(
                 path,
                 "OD207",
@@ -1355,12 +1361,15 @@ impl<'m> Ctx<'_, 'm> {
     /// A type another class of the same model in scope gives the field, when it differs from this
     /// one's. A new model, or one delegating through `_inherits`, may give a parent's field any type.
     fn other_type(&self, class: &ClassFact, field: &FieldFact) -> Option<&'m str> {
+        if field.ftype == UNREAD_TYPE {
+            return None;
+        }
         self.index
             .field_defs(&class.model, &field.name, Some(self.scope))
             .into_iter()
             .filter(|(_, c, _)| !std::ptr::eq(*c, class) && c.model == class.model)
             .map(|(_, _, f)| f.ftype.as_str())
-            .find(|t| *t != field.ftype)
+            .find(|t| *t != field.ftype && *t != UNREAD_TYPE)
     }
 
     fn data(&self, out: &mut Out<'m>) {
@@ -4676,11 +4685,12 @@ fn stored_column<'m>(field: &Field<'m>) -> Column<'m> {
     }
 }
 
-/// Whether a merged field certainly has a column: it is stored, and its column does not depend on
-/// `attachment` or the series, as `stored_column` says.
+/// Whether a merged field certainly has a column: it is stored, its column does not depend on
+/// `attachment` or the series, as `stored_column` says, and its type is read, as an unread one may
+/// be an x2many.
 fn has_certain_column(field: &Field) -> bool {
     let ftype = field.defs.first().map_or("", |d| d.2.ftype.as_str());
-    let typed = !matches!(ftype, "One2many" | "Many2many" | "Binary" | "Image");
+    let typed = !matches!(ftype, "One2many" | "Many2many" | "Binary" | "Image" | UNREAD_TYPE);
     typed && !company_dependent(field) && field.stored() == Some(true)
 }
 
