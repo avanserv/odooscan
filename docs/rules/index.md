@@ -16,6 +16,14 @@ The series of a rule is the range of Odoo versions it applies to. Each module is
 the series its manifest version names, and a module whose series is unknown gets only the rules
 that apply to every series.
 
+## Load failures
+
+Rule pages say a failure stops the install: that holds for a file of `data`. From saas~11.5 a
+failure while loading a file of `demo` stops neither the install nor the update: Odoo logs a
+warning and installs the module without its demo data. That covers the load alone: an update
+validates a view of that file again after it, so a view that no longer validates stops the
+update. Before saas~11.5 any failure in a `demo` file stops them like a data file.
+
 ## OD0: parsing
 
 A file that does not parse. Nothing else is checked in it.
