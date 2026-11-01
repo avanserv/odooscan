@@ -324,6 +324,7 @@ custom/form_patches/static/src/quick_form_card.xml:14:9: OD606 no <div> with cla
 custom/form_patches/static/src/quick_form_card.xml:15:9: OD606 <div> with class 'o_mail_chatter' is added by module mail, which is not in depends
 custom/form_patches/static/src/quick_form_card.xml:18:19: OD605 no indexed bundle defines template 'web.FormCompiler'
 custom/legacy10/data/calls.xml:5:34: OD320 res.partner has no method '_nope_default_code'
+custom/legacy10/models/columns.py:15:32: OD203 'holder_id.code': legacy10.columns has no field 'code'
 custom/legacy11/data/calls.xml:3:41: OD314 res.partner has no method 'delete_workflow'
 custom/legacy11/models/res_company.py:14:24: OD211 no parent class of res.company defines '_table_exist', so this super() call fails
 custom/legacy12/data/calls.xml:2:41: OD314 res.company has no method 'create_workflow'
@@ -412,10 +413,12 @@ custom/legacy17/views/partner_ported_views.xml:1:1: OD502 'views/partner_ported_
 custom/legacy9/data/calls.xml:4:41: OD314 res.partner has no method 'create_workflo'
 custom/legacy9/data/calls.xml:19:7: OD320 res.partner has no method '_nope_after_attrs'
 custom/legacy9/data/calls.xml:25:34: OD320 res.partner has no method '_nope_default_code'
+custom/legacy9/models/columns.py:31:33: OD203 'holder_id.ghost': legacy9.columns has no field 'ghost'
 custom/legacy9/models/res_company.py:14:40: OD211 no parent class of res.company defines '_auto_finish', so this super() call fails
 custom/legacy9/static/src/base_calls.js:7:45: OD604 model 'res.partner' has no method 'load_views'
 custom/legacy9/static/src/base_calls.js:8:45: OD604 model 'res.partner' has no method 'concat'
 custom/legacy9/static/src/base_calls.js:9:45: OD604 model 'res.partner' has no method 'ids'
+custom/legacy9/views/columns.xml:8:17: OD304 'ghost': legacy9.columns has no field 'ghost'
 custom/method_aliases/data/calls.xml:20:34: OD320 method.ticket has no method 'action_dnoe'
 custom/method_aliases/views/tickets.xml:21:45: OD312 method.ticket has no method 'action_dnoe'
 custom/method_aliases/views/tickets.xml:22:45: OD312 method.ticket has no method 'limit'

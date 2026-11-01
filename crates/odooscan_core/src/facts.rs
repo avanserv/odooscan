@@ -116,8 +116,9 @@ pub struct FieldFact {
     /// The label of each value of literal `selection` and `selection_add` lists, none where only a
     /// run tells it.
     pub labels: Vec<Option<String>>,
-    /// The call unpacks `*args` or `**kwargs`, so it may set any attribute it does not name, or
-    /// passes a field of unread type arguments by position, which name no known attribute.
+    /// The call unpacks `*args` or `**kwargs`, so it may set any attribute it does not name, passes
+    /// a field of unread type arguments by position, which name no known attribute, or there is no
+    /// call to read: a key of `_columns`.
     pub splat: bool,
 }
 
@@ -147,7 +148,9 @@ pub struct ClassFact {
     pub kind: ModelKind,
     pub inherit: Vec<Spanned<String>>,
     /// `_inherit` is neither `_name`, a string, nor a list or tuple of strings only, or the class is
-    /// `unread`, so which models it lists, and in which order, is unknown.
+    /// `unread`, so which models it lists, and in which order, is unknown. Also set below 10.0 and
+    /// on an unknown series by a `_columns` that is no dict, or has a `**` or computed key, as its
+    /// fields are as unknown.
     pub inherit_unknown: bool,
     /// Read from the tokens of a file that does not parse, so the model is known and nothing else.
     pub unread: bool,
@@ -281,7 +284,8 @@ impl ClassFact {
     }
 
     /// Whether the class has a parent the scan cannot see, which may give it fields and methods: a
-    /// plain Python base class, or an `_inherit` element that is not a literal.
+    /// plain Python base class, an `_inherit` element that is not a literal, or a `_columns` read no
+    /// better than one.
     pub fn hidden_parents(&self) -> bool {
         !self.plain_bases.is_empty() || self.inherit_unknown
     }

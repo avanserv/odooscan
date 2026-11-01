@@ -1,1 +1,6 @@
-{"name": "Legacy 10", "version": "10.0.1.0.0", "depends": ["base"], "data": ["data/calls.xml"]}
+{
+    "name": "Legacy 10",
+    "version": "10.0.1.0.0",
+    "depends": ["base"],
+    "data": ["security/ir.model.access.csv", "data/calls.xml"],
+}

@@ -1292,6 +1292,9 @@ fn conditional_methods(stmt: &Stmt, fact: &mut ClassFact) {
 /// `_inherit` is not one string (`saas~18.1`).
 const DOTTED_CLASS_NAME: Series = Series { major: 18, minor: 1 };
 
+/// The first series whose metaclass makes no fields of `_columns` (9.0 `openerp/models.py:255`).
+const COLUMNS_END: Series = Series { major: 10, minor: 0 };
+
 /// What a class body says about the name of its model.
 #[derive(Default)]
 struct Naming {
@@ -1304,6 +1307,9 @@ struct Naming {
     /// Odoo may register the class, so a name it reads as another model may be built.
     registers: bool,
     inherit: InheritShape,
+    /// `_columns` hides a key. Waits here for the name: `_inherit` assigns `inherit_unknown`, in any
+    /// order in the class, and the name reads that flag for what `_inherit` lists.
+    columns_hidden: bool,
 }
 
 /// The form of `_inherit`, which decides the name of a class without `_name`.
@@ -1565,6 +1571,7 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
         }
         fact.model = self.model_name(&fact.class_name, &naming, &fact)?;
         fact.new_model = !fact.inherit.iter().any(|i| i.value == fact.model);
+        fact.inherit_unknown |= naming.columns_hidden;
         Some(fact)
     }
 
@@ -1672,8 +1679,42 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
                     fact.rec_names_search = strings(value).into_iter().map(|s| self.spanned(s)).collect();
                 }
                 "_inherits" => self.inherits(value, fact),
+                "_columns" if self.series.is_none_or(|s| s < COLUMNS_END) => self.columns(value, fact, naming),
                 _ => self.attr_or_field(target, value, fact),
             }
+        }
+    }
+
+    /// The string keys of `_columns`, each a field of unread type: the entry may be any column,
+    /// computed or relational, so only its name is certain.
+    fn columns(&self, value: &Expr, fact: &mut ClassFact, naming: &mut Naming) {
+        let Expr::Dict(dict) = value else {
+            naming.columns_hidden = true;
+            return;
+        };
+        for item in &dict.items {
+            match item.key.as_ref().and_then(Expr::as_string_literal_expr) {
+                Some(key) => fact.fields.push(self.column(key)),
+                None => naming.columns_hidden = true,
+            }
+        }
+    }
+
+    fn column(&self, key: &ast::ExprStringLiteral) -> FieldFact {
+        let pos = self.loc.at(key);
+        FieldFact {
+            name: key.value.to_str().to_owned(),
+            name_pos: pos,
+            ftype: UNREAD_TYPE.to_owned(),
+            pos,
+            comodel: None,
+            inverse_name: None,
+            related: None,
+            methods: vec![],
+            labels: vec![],
+            domain: vec![],
+            options: vec![],
+            splat: true,
         }
     }
 
@@ -3647,6 +3688,80 @@ mod tests {
         for value in ["_name", "'a'", "['a', 'b']", "('a', 'b')", "[]"] {
             assert!(!unknown(value), "{value}");
         }
+    }
+
+    #[test]
+    fn reads_the_keys_of_a_literal_columns_as_fields_of_unread_type() {
+        let src = "class X(orm.Model):
+    _name = 'x'
+    _columns = {
+        'a': fields.char('A'),
+        u'b': fields.function(_b, type='many2one', relation='y'),
+    }
+";
+        let facts = analyze(src, Series::parse("9.0"));
+        let class = &facts.classes[0];
+        let names: Vec<&str> = class.fields.iter().map(|f| f.name.as_str()).collect();
+        assert_eq!(names, ["a", "b"]);
+        assert!(!class.inherit_unknown);
+        for field in &class.fields {
+            assert_eq!(field.ftype, UNREAD_TYPE);
+            assert!(field.splat && field.comodel.is_none() && field.options.is_empty());
+        }
+        assert_eq!((class.fields[0].name_pos.line, class.fields[1].name_pos.line), (4, 5));
+    }
+
+    #[test]
+    fn reads_columns_below_ten_and_in_an_unknown_series() {
+        let keys = |series: Option<&str>| {
+            let src = "class X(orm.Model):\n    _name = 'x'\n    _columns = {'a': fields.char('A')}\n";
+            analyze(src, series.and_then(Series::parse)).classes[0].fields.len()
+        };
+        for (series, want) in [
+            (Some("9.0"), 1),
+            (Some("saas~9.3"), 1),
+            (None, 1),
+            (Some("10.0"), 0),
+            (Some("18.0"), 0),
+        ] {
+            assert_eq!(keys(series), want, "{series:?}");
+        }
+    }
+
+    #[test]
+    fn marks_a_columns_that_hides_a_key_unknown_on_either_side_of_inherit() {
+        let unknown = |columns: &str, series: &str| {
+            [
+                format!("    _columns = {columns}\n    _inherit = 'a'\n"),
+                format!("    _inherit = 'a'\n    _columns = {columns}\n"),
+            ]
+            .map(|body| {
+                analyze(&format!("class X(orm.Model):\n{body}"), Series::parse(series)).classes[0].inherit_unknown
+            })
+        };
+        for columns in [
+            "COLUMNS",
+            "dict(COLUMNS)",
+            "{**COLUMNS}",
+            "{'a': 1, **COLUMNS}",
+            "{KEY: 1}",
+            "{'a' + 'b': 1}",
+            "{f'{a}': 1}",
+        ] {
+            assert_eq!(unknown(columns, "9.0"), [true, true], "{columns}");
+            assert_eq!(unknown(columns, "10.0"), [false, false], "{columns}");
+        }
+        for columns in ["{}", "{'a': MADE}", "{'a' 'b': MADE}"] {
+            assert_eq!(unknown(columns, "9.0"), [false, false], "{columns}");
+        }
+    }
+
+    #[test]
+    fn a_columns_that_hides_a_key_leaves_the_name_to_inherit() {
+        let src = "class X(orm.Model):\n    _inherit = ['a', 'b']\n    _columns = COLUMNS\n";
+        let facts = analyze(src, Series::parse("9.0"));
+        assert_eq!(facts.classes[0].model, "X");
+        assert!(facts.classes[0].inherit_unknown && !facts.dynamic_models);
     }
 
     /// The models a file that stops at a Python 2 `print` names: (model, new_model) of each class.
