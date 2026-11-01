@@ -663,6 +663,7 @@ struct IdDef<'m> {
     model: Option<&'m str>,
     /// None for a tag such as `<template>` or `<menuitem>`.
     write: Option<&'m RecordWrite>,
+    no_create: bool,
 }
 
 impl IdDef<'_> {
@@ -691,7 +692,8 @@ fn report_tag_model(model: &str, series: Option<Series>) -> &str {
 
 /// The finding on `later` repeating what a file before it defines under `id`, given those definitions
 /// in load order. A later `<record>` that adds a field, or adds to one, reads as a deliberate update,
-/// as does one that writes nothing or declares with `forcecreate` that the record exists.
+/// as does one that writes nothing. A `<record>` or `<template>` declares with `forcecreate` that the
+/// record exists, which says nothing of a record of another model.
 fn repeated(id: &str, earlier: &[&IdDef], later: &IdDef, series: Option<Series>) -> Option<String> {
     let first = earlier.first()?;
     if let (Some(model), Some(other)) = (first.model, later.model)
@@ -702,8 +704,11 @@ fn repeated(id: &str, earlier: &[&IdDef], later: &IdDef, series: Option<Series>)
             first.rel
         ));
     }
+    if later.no_create {
+        return None;
+    }
     let overwrites = match later.write {
-        Some(write) if write.no_create || write.fields.is_empty() => false,
+        Some(write) if write.fields.is_empty() => false,
         Some(write) => {
             let rewrites = |f: &FieldWrite| !f.incremental && earlier.iter().any(|e| e.writes(&f.name));
             earlier.iter().all(|e| e.write.is_some()) && write.fields.iter().all(rewrites)
@@ -735,6 +740,7 @@ fn ids_repeated_across_files<'m>(module: &'m Module, series: Option<Series>, out
                 rel: &file.rel,
                 model: def.model.as_deref().filter(|_| !(def.themed && themed)),
                 write: writes.get(&def.pos).copied(),
+                no_create: def.no_create,
             };
             let seen = defs.entry(full_id(&module.name, &def.id)).or_default();
             let earlier: Vec<&IdDef> = seen.iter().filter(|e| e.file != fi).collect();

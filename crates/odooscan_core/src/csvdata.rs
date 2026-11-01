@@ -71,6 +71,7 @@ fn row_ids(facts: &mut DataFacts, row: &csv::StringRecord, columns: &[(&str, boo
             pos,
             themed: false,
             assigned: false,
+            no_create: false,
         });
     }
     for (i, (_, is_ref)) in columns.iter().enumerate() {
