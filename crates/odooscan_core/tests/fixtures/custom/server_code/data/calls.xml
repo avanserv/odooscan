@@ -212,4 +212,14 @@ except UserError:
         <field name="model_id" ref="model_server_job"/>
         <field name="code">a = 1&#10;model._nope_w()  # odooscan: ignore[OD320]</field>
     </record>
+
+    <record id="cron_callable_attrs" model="ir.cron">
+        <field name="name">cron_callable_attrs</field>
+        <field name="model_id" ref="model_server_job"/>
+        <field name="code">model.env(su=True).action_close()
+records.env(context={})
+record.env(su=False)
+model.pool('server.job')
+model._nope_after_attrs()</field>
+    </record>
 </odoo>

@@ -9,4 +9,13 @@
         <field name="state">code</field>
         <field name="code">model.signal_workflow("go")</field>
     </record>
+
+    <record id="action_callable_attrs" model="ir.actions.server">
+        <field name="name">action_callable_attrs</field>
+        <field name="model_id" ref="base.model_res_partner"/>
+        <field name="state">code</field>
+        <field name="code">model.env(user=1)
+model.pool('res.partner')
+model._nope_after_attrs()</field>
+    </record>
 </odoo>

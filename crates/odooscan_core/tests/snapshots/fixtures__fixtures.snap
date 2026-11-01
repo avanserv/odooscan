@@ -121,8 +121,10 @@ custom/button_calls/views/buttons.xml:55:45: OD312 button.line has no method 'ac
 custom/button_calls/views/buttons.xml:71:45: OD312 button.ticket has no method 'action_confirm'
 custom/button_calls/views/buttons.xml:81:45: OD312 method 'action_follow' of res.partner comes from module mail, which is not in depends
 custom/button_calls/views/buttons.xml:111:9: OD301 module button_calls defines no XML id 'button_calls.order_nowhere'
+custom/button_calls/views/buttons.xml:124:45: OD312 button.order has no method 'env'
 custom/button_calls/views/calls.xml:5:42: OD314 button.order has no method '_run_misspelled'
 custom/button_calls/views/calls.xml:6:41: OD314 method 'action_follow' of res.partner comes from module mail, which is not in depends
+custom/button_calls/views/calls.xml:9:42: OD314 button.order has no method 'pool'
 custom/button_delegate/models/contacts.py:18:36: OD204 res.users has no method '_compute_nicknmae'
 custom/button_delegate/static/src/contacts.js:3:43: OD604 model 'res.users' has no method 'action_contact'
 custom/button_delegate/static/src/contacts.js:4:43: OD604 model 'res.users' has no method 'action_contcat'
@@ -389,6 +391,7 @@ custom/legacy17/views/partner_pages.xml:4:20: OD311 no indexed module defines te
 custom/legacy17/views/partner_pages.xml:5:20: OD311 no indexed module defines template 'legacy17.partner_ported_page'
 custom/legacy17/views/partner_ported_views.xml:1:1: OD502 'views/partner_ported_views.xml' is listed under update_xml, which Odoo ignores in this series; move it to data
 custom/legacy9/data/calls.xml:4:41: OD314 res.partner has no method 'create_workflo'
+custom/legacy9/data/calls.xml:19:7: OD320 res.partner has no method '_nope_after_attrs'
 custom/legacy9/models/res_company.py:14:40: OD211 no parent class of res.company defines '_auto_finish', so this super() call fails
 custom/method_aliases/data/calls.xml:20:34: OD320 method.ticket has no method 'action_dnoe'
 custom/method_aliases/views/tickets.xml:21:45: OD312 method.ticket has no method 'action_dnoe'
@@ -429,6 +432,7 @@ custom/model_attributes/models/plot.py:20:21: OD115 'partner_id.nickname': @api.
 custom/model_attributes/models/zone.py:9:5: OD217 garden.zone sets _parent_store but has no parent_path field, which Odoo logs as an error; add parent_path = fields.Char(index=True)
 custom/model_attributes/models/zone.py:22:5: OD217 garden.area sets _parent_store but its parent_path field has no index, which Odoo logs as an error; add index=True to it
 custom/model_attributes/models/zone.py:31:5: OD217 garden.terrace sets _parent_store but its parent_path field has no index, which Odoo logs as an error; add index=True to it
+custom/modern19/data/calls.xml:7:7: OD320 res.partner has no method 'pool'
 custom/modern19/models/partner.py:6:5: OD110 _sql_constraints is ignored; declare models.Constraint, models.Index or models.UniqueIndex attributes instead
 custom/modern19/models/partner.py:9:9: OD109 self._cr is deprecated; use self.env.cr
 custom/modern19/models/partner.py:9:9: OD122 UPDATE on res_partner bypasses the ORM, so records this transaction already read keep stale values; call flush_model() before the query and invalidate_model() after it (flush() and invalidate_cache() before 16.0)
@@ -439,6 +443,7 @@ custom/modern19/models/partner.py:49:73: OD213 'partner_id' is required, so Odoo
 custom/modern19/models/partner.py:63:30: OD220 'ref' has the label 'ID' of field 'id' of modern.seal, so Odoo logs a warning and users cannot tell them apart; give it another string
 custom/modern19/models/partner.py:69:21: OD120 'time' in an ormcache key is not a parameter of _quarter_hour_rates(), so every call raises NameError; key on a parameter or on self
 custom/modern19/models/views.py:15:5: OD226 _auto = False leaves modern.gauge without a table, and nothing creates the view modern_gauge; create it in init(), or drop _auto = False
+custom/modern20/data/calls.xml:7:7: OD320 res.partner has no method 'pool'
 custom/modern20/models/lamp.py:14:7: OD401 model 'modern.booth' has no ir.model.access rule, so only the superuser can use it
 custom/modern20/models/lamp.py:21:7: OD401 model 'modern.kiosk' has no ir.model.access rule, so only the superuser can use it
 custom/modern20/models/meter.py:7:5: OD226 _auto = False leaves modern.meter without a table, and nothing creates the view modern_meter; create it in init(), or drop _auto = False
@@ -869,6 +874,7 @@ custom/server_code/data/calls.xml:182:35: OD320 server.note has no method 'actio
 custom/server_code/data/calls.xml:195:44: OD320 server.job has no method '_nope_x'
 custom/server_code/data/calls.xml:201:48: OD320 server.job has no method '_nope_y'
 custom/server_code/data/calls.xml:207:53: OD320 server.job has no method '_nope_z'
+custom/server_code/data/calls.xml:223:7: OD320 server.job has no method '_nope_after_attrs'
 custom/server_code/data/demo_writes.xml:5:34: OD320 server.job has no method '_nope_demo_fixes'
 custom/server_code/data/demo_writes.xml:12:34: OD320 server.job has no method '_nope_demo_state'
 custom/server_code/data/demo_writes.xml:18:34: OD320 server.job has no method 'action_pin'
