@@ -954,21 +954,26 @@ impl<'m> Ctx<'_, 'm> {
     /// is the one to ask about, as a later step can be the one that hides the field. A parent or a
     /// data file only explains a missing field: one `depends` does not reach is found on the model,
     /// so it stays a gap unless the model is built here or a file in scope that does not parse may
-    /// add it. A dependency's file loads before the module, so it cannot add to a model the module
-    /// defines whole, while the module's own file can. Nothing explains a field found there that is
-    /// not relational.
+    /// add it. Nothing explains a field found there that is not relational.
     fn may_hide(&self, e: &PathError<'_>) -> bool {
         let unseen = match e {
             PathError::Missing { model, .. } => {
-                (self.lost && (self.module.lost_data() || self.may_add_field(model)))
-                    || self.built_here(model)
+                self.built_here(model)
                     || self.index.hidden_field_parents(model, self.scope)
                     || self.index.unread_delegate(model, self.scope)
             }
             PathError::Hidden { model, .. } => self.built_here(model),
             PathError::NotRelational { .. } => false,
         };
-        unseen || self.may_supply(e)
+        unseen || self.lost_field(e) || self.may_supply(e)
+    }
+
+    /// Whether a data file the scan cannot read may add the field a path lacks. A dependency's file
+    /// loads before the module, so it cannot add to a model the module defines whole, while the
+    /// module's own file can.
+    fn lost_field(&self, e: &PathError<'_>) -> bool {
+        matches!(e, PathError::Missing { model, .. }
+            if self.lost && (self.module.lost_data() || self.may_add_field(model)))
     }
 
     /// A dependency outside the index may load a model the scope does not reach.
@@ -989,6 +994,15 @@ impl<'m> Ctx<'_, 'm> {
                 model.pos,
                 format!("no indexed module defines model '{}'", model.value),
             ),
+        }
+    }
+
+    /// `model_ref` for a data file. An unread file in scope may hold the `ir.model` record of a model
+    /// no class defines, but not the class of one a module outside `depends` defines.
+    fn data_model_ref(&self, out: &mut Out<'m>, path: &'m Path, model: &Spanned<String>) {
+        let status = self.index.model_status(&model.value, self.scope, None);
+        if !(self.lost && matches!(status, Status::Missing)) {
+            self.model_ref(out, path, model, None);
         }
     }
 
@@ -1020,6 +1034,7 @@ impl<'m> Ctx<'_, 'm> {
     fn path(&self, out: &mut Out<'m>, file: &'m Path, model: &str, path: &Spanned<String>) {
         if let Err(e) = self.index.resolve_path(model, &path.value, self.scope)
             && !self.may_supply(&e)
+            && !self.lost_field(&e)
         {
             out.push(file, "OD203", path.pos, e.message(&path.value));
         }
@@ -1054,9 +1069,13 @@ impl<'m> Ctx<'_, 'm> {
     }
 
     /// OD203 on a path Odoo resolves as it sets up the model, when a failure refuses the install.
+    /// The module's own data files load after that, so only a dependency's unread file may add the
+    /// field, and not to a model the module defines whole.
     fn setup_path(&self, out: &mut Out<'m>, file: &'m Path, model: &str, path: &Spanned<String>) {
         if let Err(e) = self.index.resolve_path(model, &path.value, self.setup)
             && !self.may_supply(&e)
+            && !matches!(&e, PathError::Missing { model, .. }
+                if self.index.lost_scope(self.setup) && self.may_add_field(model))
         {
             out.push(file, "OD203", path.pos, e.message(&path.value));
         }
@@ -1793,7 +1812,9 @@ impl<'m> Ctx<'_, 'm> {
 
     /// OD321 and OD322 on what `write` gives the fields the record still holds once its scope loaded.
     fn record_write(&self, out: &mut Out<'m>, path: &'m Path, write: &'m RecordWrite) {
-        if !self.sees_whole_model(&write.model) {
+        // A dependency's unread file loads first and adds no Selection value, as a Python field wins
+        // over a manual one. The module's own file may replace what this write gives.
+        if self.module.lost_data() || !self.sees_all_classes(&write.model) {
             return;
         }
         for field in &write.fields {
@@ -1870,7 +1891,7 @@ impl<'m> Ctx<'_, 'm> {
         let Merged::Known(OptionValue::Str(comodel)) = field.get("comodel_name") else {
             return;
         };
-        if !self.sees_model(comodel) {
+        if !self.sees_classes(comodel) {
             return;
         }
         let fits = |m: &&str| self.index.stands_for(m, comodel, self.scope) != Some(false);
@@ -1949,7 +1970,7 @@ impl<'m> Ctx<'_, 'm> {
         let Some(model) = self.rule_model(&writes).filter(|_| holds && active != Some(false)) else {
             return;
         };
-        if self.sees_model(model) {
+        if self.sees_classes(model) {
             let reach = self.checked_reach(RULE_DOMAIN_VALIDATED);
             for field in &rule.fields {
                 self.domain_path(out, path, model, field, reach);
@@ -2115,7 +2136,7 @@ impl<'m> Ctx<'_, 'm> {
     fn actions(&self, out: &mut Out<'m>, path: &'m Path, actions: &'m [ActionFact]) {
         for action in actions {
             if let ActionValue::Literal(model) = &action.model {
-                self.model_ref(out, path, model, None);
+                self.data_model_ref(out, path, model);
             }
             if let ActionValue::Literal(mode) = &action.view_mode {
                 self.action_view_mode(out, path, action, mode);
@@ -2145,13 +2166,14 @@ impl<'m> Ctx<'_, 'm> {
             return;
         }
         if let Some(ActionValue::Literal(model)) = last(|a| &a.model)
-            && self.sees_model(&model.value)
+            && self.sees_classes(&model.value)
             && !self.index.merged_hidden_parents(&model.value, self.scope)
         {
             self.view_mode(out, path, &model.value, mode, writes);
         }
     }
 
+    /// An unread data file may hold a view, but not `activity_ids`: a field it adds is named `x_`.
     fn view_mode(
         &self,
         out: &mut Out<'m>,
@@ -2164,7 +2186,8 @@ impl<'m> Ctx<'_, 'm> {
         let kinds = mode.value.split(',').map(str::trim).filter(|k| !k.is_empty());
         for kind in kinds.filter(|k| seen.insert(*k)) {
             let gap = self.activity_gap(model, kind);
-            let gap = gap.or_else(|| self.view_gap(model, kind).filter(|_| !self.action_names(writes, kind)));
+            let held = |_: &String| !self.lost && !self.action_names(writes, kind);
+            let gap = gap.or_else(|| self.view_gap(model, kind).filter(held));
             if let Some(message) = gap {
                 out.push(path, "OD318", mode.pos, message);
             }
@@ -2378,7 +2401,7 @@ impl<'m> Ctx<'_, 'm> {
     fn view(&self, out: &mut Out<'m>, path: &'m Path, view: &ViewFact, trees: &mut FxHashMap<String, ViewTree<'m>>) {
         let model = match (&view.model, &view.inherit) {
             (Some(m), _) => {
-                self.model_ref(out, path, m, None);
+                self.data_model_ref(out, path, m);
                 Some(m.value.as_str())
             }
             (None, Some(parent)) => self.index.view_model(full_id(&self.module.name, parent)),
@@ -2512,12 +2535,12 @@ impl<'m> Ctx<'_, 'm> {
     /// silent on a model that is not visible: only the places that call `model_ref` raise OD201 or
     /// OD202.
     fn sees_whole_model(&self, model: &str) -> bool {
-        self.sees_model(model) && !self.index.hidden_parents(model, self.scope)
+        !self.lost && self.sees_all_classes(model)
     }
 
-    /// What `sees_whole_model` asks, short of the parents a class hides from the scan.
-    fn sees_model(&self, model: &str) -> bool {
-        !self.lost && self.sees_classes(model)
+    /// What `sees_whole_model` asks, short of the data files.
+    fn sees_all_classes(&self, model: &str) -> bool {
+        self.sees_classes(model) && !self.index.hidden_parents(model, self.scope)
     }
 
     /// Whether the scan reaches every class of `model`, short of the parents a class hides from it.
@@ -2770,7 +2793,7 @@ impl<'m> Ctx<'_, 'm> {
 
     /// Whether `field` may exist on `model`, even if only outside `depends` or the scan's reach.
     fn may_have(&self, model: &str, field: &str) -> bool {
-        !self.sees_whole_model(model) || !matches!(self.index.field(model, field, self.scope), Err(None))
+        !self.sees_all_classes(model) || !matches!(self.index.field(model, field, self.scope), Err(None))
     }
 
     /// Before saas~17.3 Odoo refuses a modifier on a field the view lacks. Any element of the tree
@@ -2845,19 +2868,18 @@ impl<'m> Ctx<'_, 'm> {
     }
 
     fn record(&self, out: &mut Out<'m>, path: &'m Path, record: &RecordFact) {
-        // A dependency outside the index or a data file the scan cannot read may add the model or
-        // the field.
-        if self.partial || self.lost {
+        // A dependency outside the index may add the model or the field.
+        if self.partial {
             return;
         }
         if !matches!(
             self.index.model_status(&record.model.value, self.scope, None),
             Status::Visible
         ) {
-            self.model_ref(out, path, &record.model, None);
+            self.data_model_ref(out, path, &record.model);
             return;
         }
-        if self.index.unread_class(&record.model.value, self.scope) {
+        if self.lost || self.index.unread_class(&record.model.value, self.scope) {
             return;
         }
         for field in &record.fields {

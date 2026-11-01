@@ -4,6 +4,13 @@
         <field name="parent_id" ref="encoded_lost.legacy_partner"/>
         <field name="added_by_lost_data">Yes</field>
     </record>
+    <record id="partner_side_wrong" model="res.partner">
+        <field name="name">Wrong</field>
+        <field name="parent_id" ref="encoded_lost.ledger_blank"/>
+    </record>
+    <record id="ledger_side_wrong" model="encoded.ledger">
+        <field name="stage">nope</field>
+    </record>
     <record id="ledger_side" model="encoded.ledger"/>
     <record id="ledger_side_form" model="ir.ui.view">
         <field name="name">encoded.ledger.side</field>
@@ -11,6 +18,7 @@
         <field name="arch" type="xml">
             <form>
                 <field name="code" invisible="added_by_lost_data"/>
+                <field name="added_by_lost_data"/>
             </form>
         </field>
     </record>

@@ -4,6 +4,14 @@
         <field name="name">Ledger</field>
         <field name="parent_id" ref="legacy_partner"/>
     </record>
+    <record id="partner_wrong" model="res.partner">
+        <field name="name">Wrong</field>
+        <field name="parent_id" ref="ledger_blank"/>
+    </record>
+    <record id="ledger_wrong" model="encoded.ledger">
+        <field name="stage">nope</field>
+    </record>
+    <record id="visit_outside" model="encoded.visit"/>
     <record id="ledger_form" model="ir.ui.view">
         <field name="name">encoded.ledger.form</field>
         <field name="model">encoded.ledger</field>

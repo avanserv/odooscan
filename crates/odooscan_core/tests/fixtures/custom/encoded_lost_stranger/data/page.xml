@@ -2,4 +2,8 @@
     <template id="stranger_page">
         <t t-call="encoded_lost.page"/>
     </template>
+    <record id="lost_model_action" model="ir.actions.act_window">
+        <field name="name">Lost model</field>
+        <field name="res_model">x_lost_model</field>
+    </record>
 </odoo>
