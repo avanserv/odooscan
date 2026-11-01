@@ -1,0 +1,11 @@
+<odoo>
+    <record id="after_unread" model="field.ids.after">
+        <field name="field_id" ref="field_ids_broken.field_field_ids_bin_name"/>
+    </record>
+    <record id="after_extension" model="field.ids.after">
+        <field name="field_id" ref="field_field_ids_bin_extra"/>
+    </record>
+    <record id="after_gone" model="field.ids.after">
+        <field name="field_id" ref="field_ids_broken.field_field_ids_gone_name"/>
+    </record>
+</odoo>

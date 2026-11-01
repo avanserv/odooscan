@@ -1,0 +1,23 @@
+<odoo>
+    <record id="bare_owner_by_table" model="field.ids.bare">
+        <field name="field_id" ref="field_ids_old.field_field_ids_stock_name"/>
+    </record>
+    <record id="bare_owner_by_name" model="field.ids.bare">
+        <field name="field_id" ref="field_ids_old.field_field_ids_old__name"/>
+    </record>
+    <record id="bare_base_by_table" model="field.ids.bare">
+        <field name="field_id" ref="base.field_res_partner_name"/>
+    </record>
+    <record id="bare_base_by_name" model="field.ids.bare">
+        <field name="field_id" ref="base.field_res_partner__name"/>
+    </record>
+    <record id="bare_own_by_table" model="field.ids.bare">
+        <field name="field_id" ref="field_field_ids_bare_name"/>
+    </record>
+    <record id="bare_own_by_name" model="field.ids.bare">
+        <field name="field_id" ref="field_field_ids_bare__name"/>
+    </record>
+    <record id="bare_unread_by_name" model="field.ids.bare">
+        <field name="field_id" ref="field_ids_broken.field_field_ids_broken__name"/>
+    </record>
+</odoo>

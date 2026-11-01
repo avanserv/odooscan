@@ -154,7 +154,8 @@ pub struct ClassFact {
     /// on an unknown series by a `_columns` that is no dict, or has a `**` or computed key, as its
     /// fields are as unknown.
     pub inherit_unknown: bool,
-    /// Read from the tokens of a file that does not parse, so the model is known and nothing else.
+    /// Read from the tokens of a file that does not parse, so the model and `table` are known and
+    /// nothing else.
     pub unread: bool,
     /// `_inherits` and `delegate=True` fields: parent model to delegating field.
     pub inherits: Vec<(String, String)>,

@@ -1,0 +1,8 @@
+<odoo>
+    <record id="later_by_name" model="field.ids.later">
+        <field name="field_id" ref="field_ids_old.field_field_ids_old__name"/>
+    </record>
+    <record id="later_by_table" model="field.ids.later">
+        <field name="field_id" ref="field_ids_old.field_field_ids_stock_name"/>
+    </record>
+</odoo>

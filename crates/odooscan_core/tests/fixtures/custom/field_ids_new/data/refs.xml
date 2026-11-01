@@ -1,0 +1,14 @@
+<odoo>
+    <record id="new_base" model="field.ids.new">
+        <field name="field_id" ref="base.field_res_partner__name"/>
+    </record>
+    <record id="new_by_name" model="field.ids.new">
+        <field name="field_id" ref="field_field_ids_new__name"/>
+    </record>
+    <record id="new_by_table" model="field.ids.new">
+        <field name="field_id" ref="field_field_ids_shelf_name"/>
+    </record>
+    <record id="new_base_by_table" model="field.ids.new">
+        <field name="field_id" ref="base.field_res_partner_name"/>
+    </record>
+</odoo>

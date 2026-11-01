@@ -21,6 +21,10 @@ const MAGIC_FIELDS: &[&str] = &[
     "__last_update",
 ];
 
+/// The first series that spells a field's XML id `field_<model>__<field>`, where earlier ones spell
+/// it `field_<table>_<field>` (saas-11.1 `base/models/ir_model.py:760`, `0c261df33d14`).
+const FIELD_ID_BY_NAME: Series = Series { major: 11, minor: 2 };
+
 /// The fields of `MAGIC_FIELDS` Odoo creates a column for when the model logs access: the ORM
 /// computes the others.
 const LOG_COLUMNS: &[&str] = &["create_uid", "create_date", "write_uid", "write_date"];
@@ -703,6 +707,7 @@ fn module_ids(module: &Module, base: usize, xmlids: &mut XmlIds) {
         .push(XmlIdDef {
             module: base,
             model: Some("ir.module.module"),
+            spelling: None,
         });
     let Some(category) = &module.manifest.category else {
         return;
@@ -716,6 +721,7 @@ fn module_ids(module: &Module, base: usize, xmlids: &mut XmlIds) {
             .push(XmlIdDef {
                 module: base,
                 model: Some("ir.module.category"),
+                spelling: None,
             });
     }
 }
@@ -737,14 +743,50 @@ fn class_ids<'m>(
         xmlids.entry(id).or_default().push(XmlIdDef {
             module: mi,
             model: Some("ir.model"),
+            spelling: None,
         });
-        let magic = MAGIC_FIELDS.iter().filter(|_| class.new_model).copied();
-        for field in class.fields.iter().map(|f| f.name.as_str()).chain(magic) {
-            let id = format!("{name}.field_{}__{field}", &prefix["model_".len()..]);
-            xmlids.entry(id).or_default().push(XmlIdDef {
-                module: mi,
-                model: Some("ir.model.fields"),
-            });
+    }
+}
+
+/// What the id of a field of `model` may start with, by spelling. Classes that set different tables
+/// leave each possible, as only the registry tells which wins.
+fn spelled_prefixes(model: &str, classes: &[(usize, &ClassFact)]) -> Vec<(FieldSpelling, String)> {
+    let tables = model_tables(model, literal_tables(classes).flatten().collect());
+    let by_table = tables
+        .into_iter()
+        .map(|t| (FieldSpelling::ByTable, format!("field_{t}_")));
+    let by_name = (FieldSpelling::ByName, format!("field_{}__", model.replace('.', "_")));
+    by_table.chain(std::iter::once(by_name)).collect()
+}
+
+/// What the id of a field of `model` starts with in `series`; without a series, in either spelling.
+fn field_id_prefixes(model: &str, classes: &[(usize, &ClassFact)], series: Option<Series>) -> Vec<String> {
+    let wanted = series.map(FieldSpelling::of);
+    let prefixes = spelled_prefixes(model, classes).into_iter();
+    prefixes
+        .filter(|(s, _)| wanted.is_none_or(|w| w == *s))
+        .map(|(_, p)| p)
+        .collect()
+}
+
+/// The ids of the fields each class declares, in both spellings: `Index::xmlid_defs` picks one by
+/// the module that reads the id, which a scan may place on another series than the field's module.
+/// A pass of its own, as a `_table` that spells them may come from any module that extends the model.
+fn field_ids<'m>(modules: &'m [Module], models: &Models<'m>, xmlids: &mut XmlIds<'m>) {
+    for (mi, module) in modules.iter().enumerate() {
+        for class in module.python.iter().flat_map(|f| &f.facts.classes) {
+            let prefixes = spelled_prefixes(&class.model, &models[class.model.as_str()]);
+            let magic = MAGIC_FIELDS.iter().filter(|_| class.new_model).copied();
+            for field in class.fields.iter().map(|f| f.name.as_str()).chain(magic) {
+                for (spelling, prefix) in &prefixes {
+                    let id = format!("{}.{prefix}{field}", module.name);
+                    xmlids.entry(id).or_default().push(XmlIdDef {
+                        module: mi,
+                        model: Some("ir.model.fields"),
+                        spelling: Some(*spelling),
+                    });
+                }
+            }
         }
     }
 }
@@ -799,7 +841,11 @@ fn data_ids<'m>(
                 .model
                 .as_deref()
                 .filter(|_| !(def.themed && name.starts_with("theme_")));
-            xmlids.entry(id).or_default().push(XmlIdDef { module: owner, model });
+            xmlids.entry(id).or_default().push(XmlIdDef {
+                module: owner,
+                model,
+                spelling: None,
+            });
         }
     }
 }
@@ -1188,6 +1234,33 @@ pub struct XmlIdDef<'m> {
     pub module: usize,
     /// The model of the record, none when only a run tells it.
     pub model: Option<&'m str>,
+    /// How the id spells its field when the registry creates it. Such an id exists in some series
+    /// only, where a record of a data file exists in all of them.
+    spelling: Option<FieldSpelling>,
+}
+
+impl XmlIdDef<'_> {
+    fn exists_in(&self, series: Option<Series>) -> bool {
+        self.spelling
+            .is_none_or(|own| series.is_none_or(|s| FieldSpelling::of(s) == own))
+    }
+}
+
+/// The two forms of the XML id of a field.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum FieldSpelling {
+    ByTable,
+    ByName,
+}
+
+impl FieldSpelling {
+    fn of(series: Series) -> Self {
+        if series >= FIELD_ID_BY_NAME {
+            Self::ByName
+        } else {
+            Self::ByTable
+        }
+    }
 }
 
 /// The modules a module may use: itself, its transitive depends and the always-installed modules.
@@ -1290,7 +1363,8 @@ pub struct Index<'m> {
     pub modules: &'m [Module],
     pub by_name: FxHashMap<&'m str, usize>,
     models: Models<'m>,
-    pub xmlids: XmlIds<'m>,
+    /// Read through `xmlid_defs`: it holds the field ids of every series.
+    xmlids: XmlIds<'m>,
     pub views: Inheritance<'m>,
     /// The (model, type) of every view of the files manifests load that is primary or may be, as
     /// Odoo looks a default view up among primary ones alone. None is a type only a run can tell.
@@ -1346,12 +1420,14 @@ impl<'m> Index<'m> {
             let series = module.series.or(default_series);
             data_ids(mi, module, &by_name, &mut xmlids, &mut views, &mut view_keys, series);
         }
+        field_ids(modules, &models, &mut xmlids);
         let mut derived = FxHashSet::default();
         for (id, mi, parent) in derived_ids(modules, &models, default_series) {
             derived.insert(id.clone());
             xmlids.entry(id).or_default().push(XmlIdDef {
                 module: mi,
                 model: Some(parent),
+                spelling: None,
             });
         }
         let models_with_access = access_models(modules, &model_by_xmlid, default_series);
@@ -1841,10 +1917,20 @@ impl<'m> Index<'m> {
         Some(file.facts.classes.iter().any(|c| c.class_name == class))
     }
 
-    /// The models of the records of a full XML id. None when the index does not know the id, or only
+    /// The definitions of a full XML id that a module of `series` can reach. A database runs one
+    /// series, so the reader's series picks the spelling of a field id, whatever the manifest of the
+    /// field's module says. A reader with none takes that module's, and with neither both spellings
+    /// stand.
+    pub fn xmlid_defs(&self, id: &str, series: Option<Series>) -> Vec<&XmlIdDef<'m>> {
+        let defs = self.xmlids.get(id).into_iter().flatten();
+        defs.filter(|d| d.exists_in(series.or(self.modules[d.module].series)))
+            .collect()
+    }
+
+    /// The models of the records of a full XML id, as a module of `series` reads it. None when only
     /// a run tells the model of one of them.
-    pub fn record_models(&self, id: &str) -> Option<Vec<&'m str>> {
-        self.xmlids.get(id)?.iter().map(|d| d.model).collect()
+    pub fn record_models(&self, id: &str, series: Option<Series>) -> Option<Vec<&'m str>> {
+        self.xmlid_defs(id, series).iter().map(|d| d.model).collect()
     }
 
     /// Whether a record of `model` may be one of `comodel`: the same model, a model that inherits it
@@ -2069,6 +2155,11 @@ impl<'m> Index<'m> {
             OptionValue::Str(t) if tables.all(|other| other == first) => Some(t.clone()),
             _ => None,
         }
+    }
+
+    /// What the id of a field of `model` may start with in `series`.
+    pub fn field_prefixes(&self, model: &str, series: Option<Series>) -> Vec<String> {
+        field_id_prefixes(model, self.classes(model), series)
     }
 
     /// The models a non-abstract class introduces with `_name` whose table may be `table`, in any
@@ -2561,28 +2652,34 @@ fn table_models<'m>(models: &Models<'m>) -> FxHashMap<String, Vec<&'m str>> {
         {
             continue;
         }
-        let set: Option<Vec<&str>> = classes
-            .iter()
-            .filter_map(|(_, c)| c.table.as_ref())
-            .map(|t| match t {
-                OptionValue::Str(t) => Some(t.as_str()),
-                _ => None,
-            })
-            .collect();
-        let Some(mut tables) = set else {
+        let Some(tables) = literal_tables(classes).collect() else {
             continue;
         };
-        let default = model.replace('.', "_");
-        if tables.is_empty() {
-            tables.push(&default);
-        }
-        tables.sort_unstable();
-        tables.dedup();
-        for table in tables {
-            by_table.entry(table.to_owned()).or_default().push(model);
+        for table in model_tables(model, tables) {
+            by_table.entry(table).or_default().push(model);
         }
     }
     by_table
+}
+
+/// Each `_table` of `classes`, as None where only a run tells the value.
+fn literal_tables<'c>(classes: &[(usize, &'c ClassFact)]) -> impl Iterator<Item = Option<&'c str>> {
+    let set = classes.iter().filter_map(|(_, c)| c.table.as_ref());
+    set.map(|t| match t {
+        OptionValue::Str(t) => Some(t.as_str()),
+        _ => None,
+    })
+}
+
+/// `set`, the tables a model's classes name, or else its name with dots made underscores.
+fn model_tables(model: &str, set: Vec<&str>) -> Vec<String> {
+    let mut tables: Vec<String> = set.into_iter().map(str::to_owned).collect();
+    if tables.is_empty() {
+        tables.push(model.replace('.', "_"));
+    }
+    tables.sort_unstable();
+    tables.dedup();
+    tables
 }
 
 fn method_flows(modules: &[Module]) -> MethodFlows<'_> {
@@ -2605,9 +2702,10 @@ fn method_flows(modules: &[Module]) -> MethodFlows<'_> {
 mod tests {
     use super::{
         BASE_MODEL_DUNDERS, BASE_MODEL_EXTRA, BASE_MODEL_METHODS, BASE_PRIVATE_METHODS, BASE_RPC_METHODS,
-        FIELD_CLASSES, OLD_BASE_METHODS, PlacedWrite, base_private_method, base_rpc_method, class_file, fold_writes,
-        last_text, old_base_method,
+        FIELD_CLASSES, FieldSpelling, OLD_BASE_METHODS, PlacedWrite, XmlIdDef, base_private_method, base_rpc_method,
+        class_file, field_id_prefixes, fold_writes, last_text, old_base_method,
     };
+    use crate::python;
     use crate::series::Series;
     use crate::xml;
 
@@ -2616,6 +2714,47 @@ mod tests {
         for (ttype, class) in FIELD_CLASSES {
             assert_eq!(class.to_lowercase(), ttype.replace('_', ""));
         }
+    }
+
+    #[test]
+    fn a_field_id_is_spelled_by_table_before_saas_11_2() {
+        let facts = python::analyze(
+            "class A(models.Model):\n    _name = 'a.b'\n\n\
+             class B(models.Model):\n    _name = 'c.d'\n    _table = 't'\n\n\
+             class C(models.Model):\n    _inherit = 'c.d'\n    _table = 'u'\n\n\
+             class D(models.Model):\n    _name = 'e.f'\n    _table = 't'\n\n\
+             class E(models.Model):\n    _inherit = 'e.f'\n    _table = TABLE\n",
+            Series::parse("10.0"),
+        );
+        let classes = |model: &str| -> Vec<_> {
+            let of_model = facts.classes.iter().filter(|c| c.model == model);
+            of_model.map(|c| (0, c)).collect()
+        };
+        let prefixes =
+            |model, series: Option<&str>| field_id_prefixes(model, &classes(model), series.and_then(Series::parse));
+        assert_eq!(prefixes("a.b", Some("saas~11.1")), ["field_a_b_"]);
+        assert_eq!(prefixes("a.b", Some("saas~11.2")), ["field_a_b__"]);
+        assert_eq!(prefixes("a.b", None), ["field_a_b_", "field_a_b__"]);
+        assert_eq!(prefixes("c.d", Some("saas~11.1")), ["field_t_", "field_u_"]);
+        assert_eq!(prefixes("c.d", Some("saas~11.2")), ["field_c_d__"]);
+        assert_eq!(prefixes("c.d", None), ["field_t_", "field_u_", "field_c_d__"]);
+        assert_eq!(prefixes("e.f", Some("10.0")), ["field_t_"]);
+    }
+
+    #[test]
+    fn a_field_id_holds_in_the_series_of_its_spelling() {
+        let def = |spelling| XmlIdDef {
+            module: 0,
+            model: None,
+            spelling,
+        };
+        let (old, new) = (Series::parse("saas~11.1"), Series::parse("saas~11.2"));
+        assert!(def(Some(FieldSpelling::ByTable)).exists_in(old));
+        assert!(!def(Some(FieldSpelling::ByTable)).exists_in(new));
+        assert!(def(Some(FieldSpelling::ByName)).exists_in(new));
+        assert!(!def(Some(FieldSpelling::ByName)).exists_in(old));
+        assert!(def(Some(FieldSpelling::ByName)).exists_in(None));
+        assert!(def(None).exists_in(old));
     }
 
     #[test]

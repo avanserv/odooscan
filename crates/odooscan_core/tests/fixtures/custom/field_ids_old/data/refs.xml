@@ -1,0 +1,38 @@
+<odoo>
+    <record id="old_base" model="field.ids.old">
+        <field name="code">a</field>
+        <field name="field_id" ref="base.field_res_partner_name"/>
+    </record>
+    <record id="old_table" model="field.ids.old">
+        <field name="code">b</field>
+        <field name="field_id" ref="field_field_ids_stock_name"/>
+    </record>
+    <record id="old_default_table" model="field.ids.old">
+        <field name="code">c</field>
+        <field name="field_id" ref="field_field_ids_plain_name"/>
+    </record>
+    <record id="old_magic" model="field.ids.old">
+        <field name="code">d</field>
+        <field name="field_id" ref="field_field_ids_stock_create_uid"/>
+    </record>
+    <record id="old_loaded_later" model="field.ids.old">
+        <field name="code">e</field>
+        <field name="field_id" ref="field_field_ids_stock_code"/>
+    </record>
+    <record id="old_by_name" model="field.ids.old">
+        <field name="code">f</field>
+        <field name="field_id" ref="field_field_ids_plain__name"/>
+    </record>
+    <record id="old_model_for_table" model="field.ids.old">
+        <field name="code">g</field>
+        <field name="field_id" ref="field_field_ids_old_name"/>
+    </record>
+    <record id="old_unread_undeclared" model="field.ids.old">
+        <field name="code">h</field>
+        <field name="field_id" ref="field_ids_broken.field_field_ids_bin_name"/>
+    </record>
+    <record id="old_base_by_name" model="field.ids.old">
+        <field name="code">i</field>
+        <field name="field_id" ref="base.field_res_partner__name"/>
+    </record>
+</odoo>

@@ -201,7 +201,7 @@ pub fn check_module<'m>(index: &Index<'m>, mi: usize, series: Option<Series>) ->
     unloaded_files(module, series, &mut out);
     ids_repeated_in_a_file(module, series, &mut out);
     ids_repeated_across_files(module, series, &mut out);
-    same_module_xmlids(module, series, &mut out);
+    same_module_xmlids(index, module, series, &mut out);
     shadowed_members(module, series, &mut out);
     legacy_hook_rollbacks(module, series, &mut out);
     cache_key_names(module, series, &mut out);
@@ -313,10 +313,7 @@ fn public_write_message(row: &AccessRow) -> Option<String> {
 fn public_writes<'m>(index: &Index<'m>, mi: usize, series: Option<Series>, out: &mut Out<'m>) {
     let module = &index.modules[mi];
     let scope = index.scope(mi);
-    let rewritten = |id: &String| {
-        let defs = index.xmlids.get(&full_id(&module.name, id));
-        defs.is_some_and(|d| d.len() > 1)
-    };
+    let rewritten = |id: &String| index.xmlid_defs(&full_id(&module.name, id), series).len() > 1;
     let kind = |row: &AccessRow| {
         let id = full_id(&module.name, &row.model);
         let model = if row.by_name {
@@ -726,7 +723,7 @@ fn unloaded(rel: &str, ignored: Option<&str>, series: Option<Series>) -> String 
     format!("'{rel}' is not in the manifest's {keys}, so Odoo never loads it")
 }
 
-fn same_module_xmlids<'m>(module: &'m Module, series: Option<Series>, out: &mut Out<'m>) {
+fn same_module_xmlids<'m>(index: &Index<'m>, module: &'m Module, series: Option<Series>, out: &mut Out<'m>) {
     // base_data.sql creates base's bootstrap records before any data file loads.
     let bootstrapped = module.name == "base";
     let first_def = first_defs(module);
@@ -737,7 +734,7 @@ fn same_module_xmlids<'m>(module: &'m Module, series: Option<Series>, out: &mut 
             if let Some(&(def_rank, def_line)) = first_def.get(&id)
                 && (def_rank, def_line) > (rank, r.pos.line)
                 && !bootstrapped
-                && !registry_id(module, &id)
+                && !registry_id(index, module, series, &id)
             {
                 let place = load_place(module, series, def_rank, rank);
                 out.push(
@@ -925,11 +922,11 @@ fn types_differ(a: &str, b: &str) -> bool {
 
 /// The registry creates the `ir.model` and `ir.model.fields` ids of a module's models before any of
 /// its data files load, so a record with such an id only updates it.
-fn registry_id(module: &Module, id: &str) -> bool {
+fn registry_id(index: &Index, module: &Module, series: Option<Series>, id: &str) -> bool {
     let local = id.split_once('.').map_or(id, |(_, l)| l);
     module.python.iter().flat_map(|f| &f.facts.classes).any(|c| {
-        let model = c.model.replace('.', "_");
-        local == format!("model_{model}") || local.starts_with(&format!("field_{model}__"))
+        let mut prefixes = index.field_prefixes(&c.model, series).into_iter();
+        local == format!("model_{}", c.model.replace('.', "_")) || prefixes.any(|p| local.starts_with(&p))
     })
 }
 
@@ -1739,7 +1736,7 @@ impl<'m> Ctx<'_, 'm> {
         self.module.name != "base"
             && at.is_some_and(|at| loaded.ids.get(&full) == Some(&at) && loaded.first_call.is_none_or(|c| at < c))
             && first.is_some_and(|w| std::ptr::eq(w.fact, write))
-            && !registry_id(self.module, &full)
+            && !registry_id(self.index, self.module, self.series, &full)
             && !self.index.derived.contains(&full)
     }
 
@@ -1980,7 +1977,7 @@ impl<'m> Ctx<'_, 'm> {
         let fits = |m: &&str| self.index.stands_for(m, comodel, self.scope) != Some(false);
         for id in ids {
             let full = full_id(&self.module.name, &id.value);
-            let models = self.index.record_models(&full).unwrap_or_default();
+            let models = self.index.record_models(&full, self.series).unwrap_or_default();
             if let Some(other) = models.first().filter(|_| !models.iter().any(&fits)) {
                 let message = format!(
                     "'{full}' is a record of {other}, but {}.{name} takes {comodel}",
@@ -2371,10 +2368,11 @@ impl<'m> Ctx<'_, 'm> {
     fn xml_ref(&self, out: &mut Out<'m>, path: &'m Path, r: &XmlRef) {
         let index = self.index;
         let id = full_id(&self.module.name, &r.id);
-        match index.xmlids.get(&id) {
-            Some(defs) if defs.iter().any(|d| self.scope.sees(d.module)) => {}
-            Some(_) if self.partial => {}
-            Some(defs) => {
+        match index.xmlid_defs(&id, self.series).as_slice() {
+            [] => self.undefined_ref(out, path, r.pos, &id),
+            defs if defs.iter().any(|d| self.scope.sees(d.module)) => {}
+            _ if self.partial => {}
+            defs => {
                 let m = &index.modules[defs[0].module].name;
                 out.push(
                     path,
@@ -2383,7 +2381,6 @@ impl<'m> Ctx<'_, 'm> {
                     format!("'{id}' is defined by module {m}; add it to depends"),
                 );
             }
-            None => self.undefined_ref(out, path, r.pos, &id),
         }
     }
 
@@ -2410,9 +2407,23 @@ impl<'m> Ctx<'_, 'm> {
         }
     }
 
+    /// Whether `local` may name a field of an unread class of `owner`, a module in scope: the id
+    /// may exist, but the scan has no field to build it from.
+    fn unread_field_id(&self, owner: &str, local: &str) -> bool {
+        let Some(&mi) = self.index.by_name.get(owner).filter(|&&mi| self.scope.sees(mi)) else {
+            return false;
+        };
+        let classes = self.index.modules[mi].python.iter().flat_map(|f| &f.facts.classes);
+        classes.filter(|c| c.unread).any(|c| {
+            let series = self.series.or(self.index.modules[mi].series);
+            let mut prefixes = self.index.field_prefixes(&c.model, series).into_iter();
+            prefixes.any(|p| local.starts_with(&p))
+        })
+    }
+
     fn undefined_ref(&self, out: &mut Out<'m>, path: &'m Path, pos: Pos, id: &str) {
         let (owner, local) = id.split_once('.').unwrap_or_default();
-        if self.runtime_id(owner, local) || self.open_owner(owner) {
+        if self.runtime_id(owner, local) || self.unread_field_id(owner, local) || self.open_owner(owner) {
             return;
         }
         match self.index.by_name.get(owner) {
@@ -2439,17 +2450,18 @@ impl<'m> Ctx<'_, 'm> {
     /// check covers, also reports those of modules missing from depends, unless a dependency outside
     /// the index may load one that holds the id.
     fn py_ref(&self, out: &mut Out<'m>, path: &'m Path, r: &XmlRef, hidden: bool) {
-        let owner = r.id.split_once('.').map_or("", |(m, _)| m);
+        let (owner, local) = r.id.split_once('.').unwrap_or_default();
         let Some(&mi) = self.index.by_name.get(owner) else {
             return;
         };
+        let defs = self.index.xmlid_defs(&r.id, self.series);
         if !self.scope.sees(mi) {
-            let loadable = self.partial && self.index.xmlids.contains_key(&r.id);
+            let loadable = self.partial && !defs.is_empty();
             if hidden && !loadable && !self.open_owner(owner) {
                 let message = format!("'{}' belongs to module {owner}; add it to depends", r.id);
                 out.push(path, "OD302", r.pos, message);
             }
-        } else if !self.index.xmlids.contains_key(&r.id) && !self.lost_owner(owner) {
+        } else if defs.is_empty() && !self.lost_owner(owner) && !self.unread_field_id(owner, local) {
             out.push(
                 path,
                 "OD301",
