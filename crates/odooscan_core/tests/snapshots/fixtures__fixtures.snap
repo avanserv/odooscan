@@ -584,6 +584,10 @@ custom/partial_sites/views/sites.xml:41:9: OD301 module base defines no XML id '
 custom/partial_sites/views/sites.xml:49:17: OD304 'nmae': site.visit has no field 'nmae'
 custom/partial_sites/views/sites.xml:57:13: OD310 no <field name="naem"> in view partial_sites.view_visit_form or the views that extend it
 custom/partial_sites/views/sites.xml:65:17: OD210 'nmae': site.visit has no field 'nmae'
+custom/partial_sites/views/sites.xml:73:20: OD311 template 'partial_sites_dependent.block' comes from module partial_sites_dependent, which is not in depends
+custom/partial_sites/views/sites.xml:74:20: OD311 no indexed module defines template 'partial_sites_dependent.blok'
+custom/partial_sites/views/sites.xml:75:20: OD311 template 'partial_sites.lent_block' comes from module partial_sites_dependent, which is not in depends
+custom/partial_sites/views/sites.xml:87:35: OD311 template 'partial_sites_dependent.block' comes from module partial_sites_dependent, which is not in depends
 custom/project_fork/data/projects.xml:7:9: OD309 field 'allow_timesheets' of project.project comes from module hr_timesheet, which is not in depends
 custom/project_fork/models/task.py:4:7: OD209 module project already defines model 'project.task', and this class replaces it; extend it with _inherit = 'project.task'
 custom/qweb_calls/data/pages.xml:1:1: OD502 'data/pages.xml' is not in the manifest's data or demo, so Odoo never loads it

@@ -66,4 +66,24 @@
             </search>
         </field>
     </record>
+
+    <template id="hidden_calls">
+        <t t-call="qweb_outside.page"/>
+        <t t-call="qweb_outside.alias"/>
+        <t t-call="partial_sites_dependent.block"/>
+        <t t-call="partial_sites_dependent.blok"/>
+        <t t-call="partial_sites.lent_block"/>
+    </template>
+
+    <record id="report_hidden" model="ir.actions.report">
+        <field name="name">Hidden</field>
+        <field name="model">res.partner</field>
+        <field name="report_name">qweb_outside.page</field>
+    </record>
+
+    <record id="report_dependent" model="ir.actions.report">
+        <field name="name">Dependent</field>
+        <field name="model">res.partner</field>
+        <field name="report_name">partial_sites_dependent.block</field>
+    </record>
 </odoo>
