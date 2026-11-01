@@ -154,6 +154,7 @@ fn company_check_severity_follows_the_module_series() {
 fn access_severity_follows_the_module_series() {
     let expected = [
         ("bad_sale", Severity::Warning),
+        ("encoded_lost_stranger", Severity::Warning),
         ("modern20", Severity::Info),
         ("saas132", Severity::Warning),
         ("saas193", Severity::Warning),

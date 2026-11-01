@@ -1,0 +1,4 @@
+<odoo>
+    <record id="partner_broken" model="res.partner">
+        <field name="name">Broken</field>
+</odoo>

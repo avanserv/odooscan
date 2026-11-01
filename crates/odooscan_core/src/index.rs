@@ -1665,6 +1665,19 @@ impl<'m> Index<'m> {
             .any(|d| !self.by_name.contains_key(d.value.as_str()))
     }
 
+    /// Whether a module in `scope` loads a data file the scan cannot read.
+    pub fn lost_scope(&self, scope: &Scope) -> bool {
+        let mut modules = self.modules.iter().enumerate();
+        modules.any(|(mi, m)| scope.sees(mi) && m.lost_data())
+    }
+
+    /// Whether `module`, or a module with it in its scope, loads a data file the scan cannot read that
+    /// may hold an access row. A dependency loads first, so its rows cannot name the model.
+    pub fn lost_access(&self, module: usize) -> bool {
+        let mut modules = self.modules.iter().enumerate();
+        modules.any(|(mi, m)| m.lost_access() && self.scope(mi).sees(module))
+    }
+
     /// Whether the class a dotted path such as `odoo.addons.sale.models.sale_order.SaleOrder` names
     /// is a model class of the file the path imports it from, none when that addon or file is not
     /// indexed. A class without facts there is no model, since the parser keeps facts only for those.

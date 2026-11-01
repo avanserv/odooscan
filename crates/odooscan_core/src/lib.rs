@@ -1,5 +1,6 @@
 mod checks;
 mod csvdata;
+mod decode;
 mod domain;
 mod facts;
 mod flows;

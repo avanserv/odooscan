@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::path::{Path, PathBuf};
 
 use ignore::WalkBuilder;
@@ -8,9 +9,11 @@ use crate::facts::{DataFacts, JsFacts, PyFacts, TemplateFacts};
 use crate::manifest::{self, Manifest, normalize};
 use crate::series::Series;
 use crate::suppress::Suppressions;
-use crate::{csvdata, js, owl, python, sql, xml};
+use crate::{csvdata, decode, js, owl, python, sql, xml};
 
 const MANIFESTS: &[&str] = &["__manifest__.py", "__openerp__.py"];
+
+const ACCESS_MODELS: &[&str] = &["ir.model.access", "ir.access"];
 
 /// Module subdirectories that hold neither models nor data loaded from the manifest.
 const SKIPPED_DIRS: &[&str] = &["static", "node_modules", "__pycache__"];
@@ -26,6 +29,19 @@ pub struct SourceFile<T> {
     pub demo: bool,
     pub facts: T,
     pub suppressions: Suppressions,
+}
+
+impl SourceFile<()> {
+    fn with<T>(self, facts: T) -> SourceFile<T> {
+        SourceFile {
+            path: self.path,
+            rel: self.rel,
+            rank: self.rank,
+            demo: self.demo,
+            facts,
+            suppressions: self.suppressions,
+        }
+    }
 }
 
 pub struct Module {
@@ -47,6 +63,25 @@ pub struct Module {
 }
 
 impl Module {
+    /// Whether the manifest loads a data file the scan cannot read, so that the records of the
+    /// module are not all known.
+    pub fn lost_data(&self) -> bool {
+        self.lost_files().next().is_some()
+    }
+
+    /// Whether `lost_data` covers a file that may hold an access row. A CSV loads into the model it
+    /// is named after, so one of another model holds none.
+    pub fn lost_access(&self) -> bool {
+        self.lost_files().any(|f| {
+            let path = Path::new(&f.rel);
+            path.extension().is_none_or(|e| e != "csv") || ACCESS_MODELS.contains(&loads_into(path).as_str())
+        })
+    }
+
+    fn lost_files(&self) -> impl Iterator<Item = &SourceFile<DataFacts>> {
+        self.data.iter().filter(|f| f.facts.unreadable && f.rank.is_some())
+    }
+
     /// The `.xml` and `.csv` file names the module's Python mentions, its manifest aside.
     pub fn code_mentions(&self) -> FxHashSet<&str> {
         let code = self.python.iter().filter(|f| f.path != self.manifest_path);
@@ -245,57 +280,89 @@ fn ranks(manifest: &Manifest, series: Option<Series>) -> FxHashMap<String, usize
     ranks
 }
 
+/// What reading a file of a module takes, besides the file.
+struct ModuleContext<'a> {
+    dir: &'a Path,
+    ranks: FxHashMap<String, usize>,
+    data_entries: usize,
+    series: Option<Series>,
+    checked: bool,
+}
+
+/// A Python file on the left, a data file on the right.
+type ParsedFile = Result<SourceFile<PyFacts>, SourceFile<DataFacts>>;
+
+impl ModuleContext<'_> {
+    /// Reads `path`, none when it cannot be read or is Python that does not decode. A data file that
+    /// does not decode stays, since what it may define matters to the rules.
+    fn file(&self, path: PathBuf) -> Option<ParsedFile> {
+        let bytes = std::fs::read(&path).ok()?;
+        let text = decoded(&path, &bytes);
+        let text = text.as_deref();
+        if path.extension().is_some_and(|e| e == "py") {
+            let facts = python::analyze(text?, self.series);
+            return Some(Ok(self.source(path, text)?.with(facts)));
+        }
+        let facts = self.data_facts(&path, text);
+        Some(Err(self.source(path, text)?.with(facts)))
+    }
+
+    /// `path` as a file of the module, its facts to come.
+    fn source(&self, path: PathBuf, text: Option<&str>) -> Option<SourceFile<()>> {
+        let rel = normalize(&path.strip_prefix(self.dir).ok()?.to_string_lossy());
+        let rank = self.ranks.get(&rel).copied();
+        let suppressions = text.filter(|_| self.checked).map(Suppressions::parse);
+        Some(SourceFile {
+            demo: rank.is_some_and(|r| r >= self.data_entries),
+            facts: (),
+            path,
+            rel,
+            rank,
+            suppressions: suppressions.unwrap_or_default(),
+        })
+    }
+
+    fn data_facts(&self, path: &Path, text: Option<&str>) -> DataFacts {
+        let Some(text) = text else {
+            return DataFacts {
+                unreadable: true,
+                ..DataFacts::default()
+            };
+        };
+        if path.extension().is_some_and(|e| e == "xml") {
+            return xml::analyze(text, self.series);
+        }
+        csvdata::analyze(text, &loads_into(path))
+    }
+}
+
+/// The model a CSV at `path` loads into: `model-suffix.csv` loads into model, so one model can have
+/// several files.
+fn loads_into(path: &Path) -> String {
+    let stem = path.file_stem().unwrap_or_default().to_string_lossy();
+    stem.split('-').next().unwrap_or_default().to_owned()
+}
+
+/// An XML file in the encoding it declares, any other as UTF-8.
+fn decoded<'b>(path: &Path, bytes: &'b [u8]) -> Option<Cow<'b, str>> {
+    if path.extension().is_some_and(|e| e == "xml") {
+        return decode::xml_text(bytes);
+    }
+    std::str::from_utf8(bytes).ok().map(Cow::Borrowed)
+}
+
 fn parse_module_files(module: &mut Module, default_series: Option<Series>) {
     let series = module.series.or(default_series);
-    let ranks = ranks(&module.manifest, series);
-    let data_entries = module.manifest.data_entries(series);
-    let files = module_files(&module.dir);
     let checked = module.checked;
-    let parsed: Vec<_> = files
-        .into_par_iter()
-        .filter_map(|path| {
-            let text = std::fs::read_to_string(&path).ok()?;
-            let rel = normalize(&path.strip_prefix(&module.dir).ok()?.to_string_lossy());
-            let rank = ranks.get(&rel).copied();
-            let demo = rank.is_some_and(|r| r >= data_entries);
-            let suppressions = if checked {
-                Suppressions::parse(&text)
-            } else {
-                Suppressions::default()
-            };
-            Some(match path.extension().and_then(|e| e.to_str()) {
-                Some("py") => Ok(SourceFile {
-                    facts: python::analyze(&text, series),
-                    path,
-                    rel,
-                    rank,
-                    demo,
-                    suppressions,
-                }),
-                Some("xml") => Err(SourceFile {
-                    facts: xml::analyze(&text, series),
-                    path,
-                    rel,
-                    rank,
-                    demo,
-                    suppressions,
-                }),
-                _ => {
-                    // `model-suffix.csv` loads into model, so one model can have several files.
-                    let stem = path.file_stem()?.to_string_lossy();
-                    let model = stem.split('-').next().unwrap_or_default().to_owned();
-                    Err(SourceFile {
-                        facts: csvdata::analyze(&text, &model),
-                        path,
-                        rel,
-                        rank,
-                        demo,
-                        suppressions,
-                    })
-                }
-            })
-        })
-        .collect();
+    let context = ModuleContext {
+        dir: &module.dir,
+        ranks: ranks(&module.manifest, series),
+        data_entries: module.manifest.data_entries(series),
+        series,
+        checked,
+    };
+    let files = module_files(&module.dir);
+    let parsed: Vec<_> = files.into_par_iter().filter_map(|path| context.file(path)).collect();
     for file in parsed {
         match file {
             Ok(py) => module.python.push(py),
@@ -328,6 +395,7 @@ fn parse_static_files<T: Send>(
     let mut files: Vec<_> = static_files(dir, extension)
         .into_par_iter()
         .filter_map(|path| {
+            // Odoo decodes assets as UTF-8 whatever they declare (18.0 `odoo/addons/base/models/assetsbundle.py:776`).
             let text = std::fs::read_to_string(&path).ok()?;
             Some(SourceFile {
                 rel: normalize(&path.strip_prefix(dir).ok()?.to_string_lossy()),

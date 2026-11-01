@@ -1,0 +1,29 @@
+<odoo>
+    <record id="ledger_blank" model="encoded.ledger"/>
+    <record id="partner_ledger" model="res.partner">
+        <field name="name">Ledger</field>
+        <field name="parent_id" ref="legacy_partner"/>
+    </record>
+    <record id="ledger_form" model="ir.ui.view">
+        <field name="name">encoded.ledger.form</field>
+        <field name="model">encoded.ledger</field>
+        <field name="arch" type="xml">
+            <form>
+                <field name="code"/>
+            </form>
+        </field>
+    </record>
+    <record id="ledger_form_legacy" model="ir.ui.view">
+        <field name="name">encoded.ledger.form.legacy</field>
+        <field name="model">encoded.ledger</field>
+        <field name="inherit_id" ref="ledger_form"/>
+        <field name="arch" type="xml">
+            <group name="legacy_group" position="inside">
+                <field name="code"/>
+            </group>
+        </field>
+    </record>
+    <template id="page">
+        <t t-call="encoded_lost.legacy_layout"/>
+    </template>
+</odoo>

@@ -1,0 +1,6 @@
+<?xml version='1.0' encoding='iso-8859-15'?>
+<odoo>
+    <record id="country_latin9" model="res.country">
+        <field name="name">Œuvre à 10 €</field>
+    </record>
+</odoo>

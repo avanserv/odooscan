@@ -1,0 +1,20 @@
+<odoo>
+    <record id="partner_side" model="res.partner">
+        <field name="name">Side</field>
+        <field name="parent_id" ref="encoded_lost.legacy_partner"/>
+        <field name="added_by_lost_data">Yes</field>
+    </record>
+    <record id="ledger_side" model="encoded.ledger"/>
+    <record id="ledger_side_form" model="ir.ui.view">
+        <field name="name">encoded.ledger.side</field>
+        <field name="model">encoded.ledger</field>
+        <field name="arch" type="xml">
+            <form>
+                <field name="code" invisible="added_by_lost_data"/>
+            </form>
+        </field>
+    </record>
+    <template id="side_page">
+        <t t-call="encoded_lost.legacy_layout"/>
+    </template>
+</odoo>
