@@ -115,4 +115,11 @@
         <field name="other_id" ref="parent_1"/>
         <field name="line_ids" eval="[(4, ref('other_1'))]"/>
     </record>
+
+    <record id="company_dependent_unstored" model="rv.thing">
+        <field name="unstored_agent_id" ref="base.main_company"/>
+        <field name="unstored_grade">zz</field>
+        <field name="computed_agent_id" ref="base.main_company"/>
+        <field name="computed_grade">zz</field>
+    </record>
 </odoo>

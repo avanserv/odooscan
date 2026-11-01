@@ -3250,7 +3250,8 @@ impl<'m> Field<'m> {
 
     /// Whether the field has a column, or for a Many2many a table: a related or computed one has
     /// none unless `store=True`. Odoo reads `related` and `compute` for their truth, so
-    /// `compute=None` leaves the field stored.
+    /// `compute=None` leaves the field stored. A company-dependent field with no `store=False`,
+    /// `compute` or `related` reads as stored because its value is written as a column's would be.
     fn stored(&self) -> Option<bool> {
         match self.get("store") {
             Merged::Known(OptionValue::Bool(b)) => Some(*b),

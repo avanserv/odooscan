@@ -780,6 +780,8 @@ custom/record_values/data/selections.xml:8:35: OD322 rv.thing.state has no value
 custom/record_values/data/selections.xml:12:30: OD322 rv.thing.state has no value ' a '
 custom/record_values/data/selections.xml:17:28: OD322 rv.child.kind has no value 'z'
 custom/record_values/data/selections.xml:21:29: OD322 rv.thing.added has no value 'q'
+custom/record_values/data/selections.xml:25:37: OD321 'base.main_company' is a record of res.company, but rv.thing.agent_id takes res.partner
+custom/record_values/data/selections.xml:26:29: OD322 rv.thing.grade has no value 'zz'
 custom/record_values/data/silent.xml:22:9: OD302 'ghost_addon.line_1' belongs to module ghost_addon, which is neither in depends nor on the addons path
 custom/record_values/data/targets.xml:11:5: OD201 no indexed module defines model 'rv.nowhere'
 custom/record_values/data/unloaded.xml:1:1: OD502 'data/unloaded.xml' is not in the manifest's data or demo, so Odoo never loads it
@@ -927,11 +929,19 @@ custom/saas193/security/ir.model.access.csv:3:1: OD402 base.group_portal gets wr
 custom/saas194/models/ledger.py:4:7: OD401 model 'saas.after.ledger' has no ir.access rule with a group, so only the superuser can use it
 custom/selection_values13/data/res.partner.csv:2:1: OD322 res.partner.sv13_state has no value 'DRAFT'
 custom/selection_values17/data/partners.xml:4:33: OD322 res.partner.sv17_mode has no value 'zz'
+custom/selection_values17/data/partners.xml:14:42: OD321 'base.main_company' is a record of res.company, but res.partner.sv17_agent_id takes res.partner
+custom/selection_values17/data/partners.xml:15:34: OD322 res.partner.sv17_grade has no value 'zz'
+custom/selection_values17/data/res.partner.csv:2:1: OD321 'base.main_company' is a record of res.company, but res.partner.sv17_agent_id takes res.partner
+custom/selection_values17/data/res.partner.csv:2:1: OD322 res.partner.sv17_grade has no value 'zz'
 custom/selection_values172/data/res.partner.csv:2:1: OD322 res.partner.sv172_mode has no value 'zz'
 custom/selection_values181/models/res_partner.py:14:49: OD216 'sv181_gate' is required, so Odoo refuses ondelete 'set null' for the selection_add value 'shut'; give it 'cascade', 'set default' or a function
 custom/selection_values193/data/partners.xml:4:34: OD322 res.partner.sv193_mode has no value 'zz'
 custom/selection_values9/data/partners.xml:4:32: OD322 res.partner.sv9_mode has no value 'zz'
+custom/selection_values9/data/partners.xml:9:41: OD321 'base.main_company' is a record of res.company, but res.partner.sv9_agent_id takes res.partner
+custom/selection_values9/data/partners.xml:10:33: OD322 res.partner.sv9_grade has no value 'zz'
 custom/selection_values9/data/res.partner.csv:2:1: OD322 res.partner.sv9_state has no value 'DRAFT'
+custom/selection_values9/data/res.partner.csv:3:1: OD321 'base.main_company' is a record of res.company, but res.partner.sv9_agent_id takes res.partner
+custom/selection_values9/data/res.partner.csv:3:1: OD322 res.partner.sv9_grade has no value 'zz'
 custom/server_children/views/actions.xml:17:43: OD320 child.plan has no method 'action_task'
 custom/server_children/views/actions.xml:22:43: OD320 child.plan has no method 'action_task'
 custom/server_children/views/actions.xml:27:43: OD320 child.task has no method 'action_plan'

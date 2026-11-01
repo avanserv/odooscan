@@ -20,4 +20,9 @@
     <record id="beyond_selection_add" model="rv.thing">
         <field name="added">q</field>
     </record>
+
+    <record id="company_dependent_values" model="rv.thing">
+        <field name="agent_id" ref="base.main_company"/>
+        <field name="grade">zz</field>
+    </record>
 </odoo>

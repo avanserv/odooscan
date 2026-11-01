@@ -8,4 +8,18 @@
         <field name="name">Listed</field>
         <field name="sv17_mode">draft</field>
     </record>
+
+    <record id="partner_company" model="res.partner">
+        <field name="name">Company</field>
+        <field name="sv17_agent_id" ref="base.main_company"/>
+        <field name="sv17_grade">zz</field>
+    </record>
+
+    <record id="partner_company_unstored" model="res.partner">
+        <field name="name">Company unstored</field>
+        <field name="sv17_unstored_agent_id" ref="base.main_company"/>
+        <field name="sv17_unstored_grade">zz</field>
+        <field name="sv17_computed_agent_id" ref="base.main_company"/>
+        <field name="sv17_computed_grade">zz</field>
+    </record>
 </odoo>

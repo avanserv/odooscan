@@ -1,2 +1,3 @@
-id,name,sv9_state
-cell_case,Case,DRAFT
+id,name,sv9_state,sv9_agent_id:id,sv9_grade
+cell_case,Case,DRAFT,,
+cell_company,Company,,base.main_company,zz
