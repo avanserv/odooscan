@@ -5,4 +5,5 @@
     "data": ["security/ir.model.access.csv", "data/tiers.xml", "data/calls.xml"],
     "init_xml": ["data/modern_digest_view.sql", "data/tier_pages.xml"],
     "update_xml": ["data/modern_gauge_view.sql"],
+    "assets": {"web.assets_backend": ["modern19/static/src/**/*"]},
 }

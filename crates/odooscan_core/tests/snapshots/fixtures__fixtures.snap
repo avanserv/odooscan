@@ -296,6 +296,9 @@ custom/field_options/models/site.py:53:48: OD222 'country_id' has check_company=
 custom/field_options/models/site.py:68:65: OD222 'country_ids' has check_company=True, but res.country has no company_id field to check; remove check_company
 custom/field_options/models/site.py:76:86: OD222 'origin_id' has check_company=True, but res.country has no company_id field to check; remove check_company
 custom/field_options/models/site.py:82:68: OD222 'home_country_id' has check_company=True, but res.country has no company_id field to check; remove check_company
+custom/form_patches/static/src/base_calls.js:7:43: OD604 model 'form.card' has no method 'ids'
+custom/form_patches/static/src/base_calls.js:8:43: OD604 model 'form.card' has no method 'concat'
+custom/form_patches/static/src/base_calls.js:9:43: OD604 model 'form.card' has no method 'name_get'
 custom/form_patches/static/src/partner_card.js:4:45: OD604 model 'res.partner' has no method 'action_unfollow'
 custom/form_patches/static/src/partner_card.js:5:45: OD604 method 'action_follow' of res.partner comes from module mail, which is not in depends
 custom/form_patches/static/src/partner_card.js:6:38: OD603 no indexed module defines model 'res.partner.title'
@@ -372,6 +375,8 @@ custom/legacy15/models/res_partner.py:49:24: OD211 no parent class of res.partne
 custom/legacy15/models/res_partner.py:65:24: OD211 no parent class of res.partner defines '__nope__', so this super() call fails
 custom/legacy15/security/rules.xml:4:36: OD210 'no_replaced': res.partner has no field 'no_replaced'
 custom/legacy15/security/second_writes.xml:2:5: OD323 XML id 'rule_partner_replaced' is already defined in security/rules.xml, and this definition overwrites the fields both name; remove the copy when the two say the same thing, or rename one when both are meant to exist
+custom/legacy15/static/src/base_calls.js:9:45: OD604 model 'res.partner' has no method 'ids'
+custom/legacy15/static/src/base_calls.js:10:45: OD604 model 'res.partner' has no method 'get_property_definition'
 custom/legacy154/data/calls.xml:4:41: OD314 res.partner has no method '_neutralized'
 custom/legacy154/models/res_company.py:14:24: OD211 no parent class of res.company defines '_neutralized', so this super() call fails
 custom/legacy16/models/gauge.py:7:5: OD226 _auto = False leaves legacy.gauge without a table, and nothing creates the view legacy_gauge; create it in init(), or drop _auto = False
@@ -393,6 +398,9 @@ custom/legacy17/views/partner_ported_views.xml:1:1: OD502 'views/partner_ported_
 custom/legacy9/data/calls.xml:4:41: OD314 res.partner has no method 'create_workflo'
 custom/legacy9/data/calls.xml:19:7: OD320 res.partner has no method '_nope_after_attrs'
 custom/legacy9/models/res_company.py:14:40: OD211 no parent class of res.company defines '_auto_finish', so this super() call fails
+custom/legacy9/static/src/base_calls.js:7:45: OD604 model 'res.partner' has no method 'load_views'
+custom/legacy9/static/src/base_calls.js:8:45: OD604 model 'res.partner' has no method 'concat'
+custom/legacy9/static/src/base_calls.js:9:45: OD604 model 'res.partner' has no method 'ids'
 custom/method_aliases/data/calls.xml:20:34: OD320 method.ticket has no method 'action_dnoe'
 custom/method_aliases/views/tickets.xml:21:45: OD312 method.ticket has no method 'action_dnoe'
 custom/method_aliases/views/tickets.xml:22:45: OD312 method.ticket has no method 'limit'
@@ -443,6 +451,8 @@ custom/modern19/models/partner.py:49:73: OD213 'partner_id' is required, so Odoo
 custom/modern19/models/partner.py:63:30: OD220 'ref' has the label 'ID' of field 'id' of modern.seal, so Odoo logs a warning and users cannot tell them apart; give it another string
 custom/modern19/models/partner.py:69:21: OD120 'time' in an ormcache key is not a parameter of _quarter_hour_rates(), so every call raises NameError; key on a parameter or on self
 custom/modern19/models/views.py:15:5: OD226 _auto = False leaves modern.gauge without a table, and nothing creates the view modern_gauge; create it in init(), or drop _auto = False
+custom/modern19/static/src/base_calls.js:4:45: OD604 model 'res.partner' has no method 'is_transient'
+custom/modern19/static/src/base_calls.js:5:45: OD604 model 'res.partner' has no method 'ids'
 custom/modern20/data/calls.xml:7:7: OD320 res.partner has no method 'pool'
 custom/modern20/models/lamp.py:14:7: OD401 model 'modern.booth' has no ir.model.access rule, so only the superuser can use it
 custom/modern20/models/lamp.py:21:7: OD401 model 'modern.kiosk' has no ir.model.access rule, so only the superuser can use it
@@ -462,6 +472,8 @@ custom/modern20/models/tariff.py:16:39: OD224 t.code: modern_tariff has no such 
 custom/modern20/security/access.xml:6:30: OD210 'no_xml_domain': modern.lamp has no field 'no_xml_domain'
 custom/modern20/security/ir.access-inactive.csv:3:1: OD402 base.group_portal gets write, create or unlink on modern.lamp; public and portal access should be read-only and go through controllers
 custom/modern20/security/ir.access.csv:2:1: OD210 'no_csv_name': modern.lamp has no field 'no_csv_name'
+custom/modern20/static/src/base_calls.js:5:45: OD604 model 'res.partner' has no method 'get_formview_action'
+custom/modern20/static/src/base_calls.js:6:45: OD604 model 'res.partner' has no method 'ids'
 custom/modifiers17/views/jobs.xml:7:47: OD317 invisible reads field 'state', which the view does not show
 custom/modifiers17/views/jobs.xml:54:47: OD317 invisible reads field 'note', which the view does not show
 custom/modifiers17/views/jobs.xml:76:51: OD317 invisible reads field 'phase', which the view does not show

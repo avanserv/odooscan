@@ -540,6 +540,64 @@ pub(crate) fn base_private_method(name: &str, series: Option<Series>) -> bool {
     })
 }
 
+/// The public methods of `BaseModel` that `BASE_MODEL_METHODS` lacks, by the range of series that
+/// has them, so OD604 keeps reporting a call a series cannot answer. Names only, read off each
+/// branch head: when adding a series, reread the methods of `BaseModel` and date what changed.
+/// `ids` stays out as a property and `lock_for_update` as private since it appeared.
+/// `OLD_BASE_METHODS` stays out: it ends at saas~11.4, and the `orm` service that OD604 reads starts
+/// on saas~14.5.
+const BASE_RPC_METHODS: &[(&str, &[&str])] = &[
+    (">=9.0", &["get_external_id", "get_metadata"]),
+    (">=10.0", &["concat", "union"]),
+    (">=17.0", &["get_property_definition"]),
+    (">=18.3", &["try_lock_for_update"]),
+    (">=19.1", &["check_field_access", "has_field_access"]),
+    (
+        "<=13.2",
+        &["resolve_2many_commands", "resolve_o2m_commands_to_record_dicts"],
+    ),
+    (
+        "<=14.3",
+        &["compute_concurrency_field", "compute_concurrency_field_with_access"],
+    ),
+    ("<=15.1", &["get_access_action", "view_init"]),
+    (
+        "<=15.4",
+        &[
+            "fields_view_get",
+            "get_empty_list_help",
+            "get_formview_action",
+            "get_formview_id",
+            "view_header_get",
+        ],
+    ),
+    (">=10.0,<=15.4", &["load_views"]),
+    (
+        "<=16.1",
+        &[
+            "fields_get_keys",
+            "get_xml_id",
+            "invalidate_cache",
+            "recompute",
+            "refresh",
+        ],
+    ),
+    (">=12.5,<=16.1", &["flush"]),
+    ("<=17.1", &["user_has_groups"]),
+    ("<=17.2", &["name_get"]),
+    ("<=18.0", &["clear_caches"]),
+    ("<=18.4", &["is_transient"]),
+];
+
+/// Whether a client may call `name` as a public method of `BaseModel` in `series`. A module of
+/// unknown series may run on any, so every listed name counts.
+pub(crate) fn base_rpc_method(name: &str, series: Option<Series>) -> bool {
+    !base_private_method(name, series)
+        && BASE_RPC_METHODS
+            .iter()
+            .any(|(spec, names)| names.contains(&name) && series.is_none_or(|s| series::matches(spec, s)))
+}
+
 pub fn full_id(module: &str, id: &str) -> String {
     if id.contains('.') {
         id.to_owned()
@@ -2152,15 +2210,18 @@ impl<'m> Index<'m> {
         introducers().find(|(m, _)| *m == mi).map(|(_, c)| c.kind)
     }
 
-    /// Whether a client may call `method` on `model`: a method of `BaseModel`, or of a class of the
-    /// model or of a model it inherits by `_inherit`, in scope or in a module that is always
-    /// installed. A parent it delegates to does not count, since RPC looks the name up on the
-    /// model's class, which gets the parent's fields, not its methods. The scoped walk skips a class
-    /// outside the scope with its `_inherit`, so a mixin of an always-installed module that only
-    /// such a class adds is found only by the unscoped walk; without the always-installed arm it
-    /// would be `Hidden` under a module the caller has.
-    pub fn rpc_method(&self, model: &str, method: &str, scope: &Scope) -> Status<'m> {
-        if BASE_MODEL_METHODS.contains(&method) || self.has_method(model, method, scope) {
+    /// Whether a client may call `method` on `model`: a method of `BaseModel`, the dated ones in
+    /// `series`, or of a class of the model or of a model it inherits by `_inherit`, in scope or in
+    /// a module that is always installed. A parent it delegates to does not count, since RPC looks
+    /// the name up on the model's class, which gets the parent's fields, not its methods. The scoped
+    /// walk skips a class outside the scope with its `_inherit`, so a mixin of an always-installed
+    /// module that only such a class adds is found only by the unscoped walk; without the
+    /// always-installed arm it would be `Hidden` under a module the caller has.
+    pub fn rpc_method(&self, model: &str, method: &str, scope: &Scope, series: Option<Series>) -> Status<'m> {
+        if BASE_MODEL_METHODS.contains(&method)
+            || base_rpc_method(method, series)
+            || self.has_method(model, method, scope)
+        {
             return Status::Visible;
         }
         let defining: Vec<usize> = self
@@ -2182,7 +2243,7 @@ impl<'m> Index<'m> {
         if BASE_MODEL_EXTRA.contains(&method) || old_base_method(method, series) {
             return Status::Visible;
         }
-        self.rpc_method(model, method, scope)
+        self.rpc_method(model, method, scope, series)
     }
 
     /// Whether a class in scope of `model` or of a model it inherits gives `kind` a default view. The
@@ -2434,8 +2495,9 @@ fn method_flows(modules: &[Module]) -> MethodFlows<'_> {
 #[cfg(test)]
 mod tests {
     use super::{
-        BASE_MODEL_DUNDERS, BASE_MODEL_EXTRA, BASE_MODEL_METHODS, BASE_PRIVATE_METHODS, FIELD_CLASSES,
-        OLD_BASE_METHODS, PlacedWrite, base_private_method, class_file, fold_writes, last_text, old_base_method,
+        BASE_MODEL_DUNDERS, BASE_MODEL_EXTRA, BASE_MODEL_METHODS, BASE_PRIVATE_METHODS, BASE_RPC_METHODS,
+        FIELD_CLASSES, OLD_BASE_METHODS, PlacedWrite, base_private_method, base_rpc_method, class_file, fold_writes,
+        last_text, old_base_method,
     };
     use crate::series::Series;
     use crate::xml;
@@ -2538,6 +2600,93 @@ mod tests {
                 BASE_MODEL_METHODS.contains(name) || BASE_MODEL_EXTRA.contains(name),
                 "{name} would raise OD312 on an earlier series"
             );
+        }
+    }
+
+    fn rpc(name: &str, series: &str) -> bool {
+        base_rpc_method(name, Series::parse(series))
+    }
+
+    #[test]
+    fn every_rpc_method_starts_at_its_row() {
+        let rows = [
+            ("get_external_id", "8.0", "9.0"),
+            ("get_metadata", "8.0", "9.0"),
+            ("concat", "9.0", "10.0"),
+            ("union", "9.0", "10.0"),
+            ("load_views", "9.0", "10.0"),
+            ("flush", "12.4", "12.5"),
+            ("get_property_definition", "16.4", "17.0"),
+            ("try_lock_for_update", "18.2", "18.3"),
+            ("check_field_access", "19.0", "19.1"),
+            ("has_field_access", "19.0", "19.1"),
+        ];
+        for (name, before, first) in rows {
+            assert!(!rpc(name, before), "{name} on {before}");
+            assert!(rpc(name, first), "{name} on {first}");
+        }
+    }
+
+    #[test]
+    fn every_rpc_method_stops_at_its_row() {
+        let rows = [
+            ("resolve_2many_commands", "13.2", "13.3"),
+            ("resolve_o2m_commands_to_record_dicts", "13.2", "13.3"),
+            ("compute_concurrency_field", "14.3", "14.4"),
+            ("compute_concurrency_field_with_access", "14.3", "14.4"),
+            ("get_access_action", "15.1", "15.2"),
+            ("view_init", "15.1", "15.2"),
+            ("fields_view_get", "15.4", "16.0"),
+            ("get_empty_list_help", "15.4", "16.0"),
+            ("get_formview_action", "15.4", "16.0"),
+            ("get_formview_id", "15.4", "16.0"),
+            ("view_header_get", "15.4", "16.0"),
+            ("load_views", "15.4", "16.0"),
+            ("fields_get_keys", "16.1", "16.2"),
+            ("get_xml_id", "16.1", "16.2"),
+            ("invalidate_cache", "16.1", "16.2"),
+            ("recompute", "16.1", "16.2"),
+            ("refresh", "16.1", "16.2"),
+            ("flush", "16.1", "16.2"),
+            ("user_has_groups", "17.1", "17.2"),
+            ("name_get", "17.2", "17.3"),
+            ("clear_caches", "18.0", "18.1"),
+            ("is_transient", "18.4", "19.0"),
+            ("try_lock_for_update", "18.4", "19.0"),
+        ];
+        for (name, last, after) in rows {
+            assert!(rpc(name, last), "{name} on {last}");
+            assert!(!rpc(name, after), "{name} on {after}");
+        }
+    }
+
+    #[test]
+    fn rpc_methods_follow_the_private_series() {
+        assert!(rpc("concat", "15.4"));
+        assert!(!rpc("concat", "16.0"));
+        assert!(rpc("concat", "16.1"));
+        assert!(rpc("union", "17.1"));
+        assert!(!rpc("union", "17.4"));
+    }
+
+    #[test]
+    fn unknown_series_counts_every_listed_rpc_method() {
+        assert!(base_rpc_method("name_get", None));
+        assert!(base_rpc_method("get_formview_action", None));
+        assert!(base_rpc_method("concat", None));
+        assert!(!base_rpc_method("ids", None));
+        assert!(!base_rpc_method("lock_for_update", None));
+    }
+
+    #[test]
+    fn every_public_extra_is_dated_or_named_out() {
+        let dated: Vec<&str> = BASE_RPC_METHODS.iter().flat_map(|(_, names)| *names).copied().collect();
+        for name in BASE_MODEL_EXTRA.iter().filter(|name| !name.starts_with('_')) {
+            let out = ["ids", "lock_for_update"].contains(name);
+            assert_ne!(dated.contains(name), out, "{name}");
+        }
+        for name in dated {
+            assert!(BASE_MODEL_EXTRA.contains(&name), "{name} is missing from the flat list");
         }
     }
 
