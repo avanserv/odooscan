@@ -2,7 +2,9 @@ id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
 access_rv_other,rv.other,model_rv_other,base.group_user,1,0,0,0
 access_rv_shared,rv.shared,model_rv_shared,base.group_user,1,0,0,0
 access_rv_computed,rv.computed,model_rv_computed,base.group_user,1,0,0,0
+access_rv_computed_twin,rv.computed.twin,model_rv_computed_twin,base.group_user,1,0,0,0
 access_rv_blended,rv.blended,model_rv_blended,base.group_user,1,0,0,0
+access_rv_blended_heir,rv.blended.heir,model_rv_blended_heir,base.group_user,1,0,0,0
 access_rv_action,rv.action,model_rv_action,base.group_user,1,0,0,0
 access_rv_action_window,rv.action.window,model_rv_action_window,base.group_user,1,0,0,0
 access_rv_parent,rv.parent,model_rv_parent,base.group_user,1,0,0,0

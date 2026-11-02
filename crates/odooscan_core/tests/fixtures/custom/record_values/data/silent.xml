@@ -22,6 +22,15 @@
         <field name="line_ids" eval="[(4, ref('ghost_addon.line_1')), (4, ref('assigned_too'))]"/>
     </record>
 
+    <record id="comodel_table_twin" model="rv.thing">
+        <field name="computed_id" ref="computed_twin_1"/>
+    </record>
+
+    <record id="comodel_table_unknown" model="rv.thing">
+        <field name="computed_id" ref="other_1"/>
+        <field name="blended_id" ref="other_1"/>
+    </record>
+
     <record id="only_a_run_tells" model="rv.thing">
         <field name="other_ids" search="[]" ref="parent_1"/>
         <field name="parent_id" eval="ref('other_1') or False"/>

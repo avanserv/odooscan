@@ -1686,7 +1686,8 @@ impl<'m> Index<'m> {
 
     /// Whether a record of `model` may be one of `comodel`: the same model, a model that inherits it
     /// by `_inherit` and so may share its ids, as `ir.actions.*` do for `ir.actions.actions`, or one
-    /// on the same table. None when a class of `model` is unknown to the index.
+    /// on the same table. A table only a run tells, on either model, counts as the same: a wrong
+    /// report costs more than a miss. None when a class of `model` is unknown to the index.
     pub fn stands_for(&self, model: &str, comodel: &str, scope: &Scope) -> Option<bool> {
         if model == comodel {
             return Some(true);
@@ -1696,8 +1697,18 @@ impl<'m> Index<'m> {
             return None;
         }
         let inherits = classes.iter().any(|(_, c)| c.model == comodel);
-        let table = self.table(model, scope);
-        Some(inherits || table.is_none() || table == self.table(comodel, scope))
+        let tables = self.table(model, scope).zip(self.table(comodel, scope));
+        Some(inherits || tables.is_none_or(|(a, b)| a == b) || self.plain_base_table(comodel, scope))
+    }
+
+    /// Whether a class in scope of `model` has a plain Python base, which may set a `_table` that
+    /// `table` cannot read. Only the model's own classes count: from 10.0 Odoo skips registry classes
+    /// when it reads `_table`, and a mixin in the chain may have a plain base of its own, as
+    /// `website.published.multi.mixin` does on `res.partner`.
+    fn plain_base_table(&self, model: &str, scope: &Scope) -> bool {
+        self.classes(model)
+            .iter()
+            .any(|(mi, c)| scope.sees(*mi) && !c.plain_bases.is_empty())
     }
 
     /// The model of the `ir.model` record Odoo generates under a full XML id.
