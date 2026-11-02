@@ -1,0 +1,105 @@
+<odoo>
+    <record id="home" model="res.country">
+        <field name="name">Home</field>
+    </record>
+
+    <record id="two_phases" model="res.partner">
+        <field name="name">Two phases</field>
+    </record>
+    <record id="two_phases" model="res.partner">
+        <field name="country_id" ref="home"/>
+    </record>
+
+    <record id="three_phases" model="res.partner">
+        <field name="name">Three phases</field>
+    </record>
+    <record id="three_phases" model="res.partner">
+        <field name="country_id" ref="home"/>
+    </record>
+    <record id="three_phases" model="res.partner">
+        <field name="parent_id" ref="two_phases"/>
+    </record>
+
+    <record id="empty_second" model="res.partner">
+        <field name="name">Empty second</field>
+    </record>
+    <record id="empty_second" model="res.partner"/>
+
+    <record id="linked_twice" model="res.partner">
+        <field name="child_ids" eval="[(4, ref('two_phases'))]"/>
+    </record>
+    <record id="linked_twice" model="res.partner">
+        <field name="child_ids" eval="[(4, ref('three_phases'))]"/>
+    </record>
+
+    <menuitem id="menu_then_record" name="Tag first"/>
+    <record id="menu_then_record" model="ir.ui.menu">
+        <field name="name">Record second</field>
+    </record>
+
+    <record id="declared_elsewhere" model="res.partner">
+        <field name="name">Declared</field>
+    </record>
+    <record id="declared_elsewhere" model="res.partner" forcecreate="0">
+        <field name="country_id" ref="home"/>
+    </record>
+
+    <record id="same_field" model="res.partner">
+        <field name="name">First</field>
+    </record>
+    <record id="same_field" model="res.partner">
+        <field name="name">Second</field>
+    </record>
+
+    <record id="new_and_shared" model="res.partner">
+        <field name="name">First</field>
+    </record>
+    <record id="new_and_shared" model="res.partner">
+        <field name="name">Second</field>
+        <field name="country_id" ref="home"/>
+    </record>
+
+    <record id="third_repeats_first" model="res.partner">
+        <field name="name">First</field>
+    </record>
+    <record id="third_repeats_first" model="res.partner">
+        <field name="country_id" ref="home"/>
+    </record>
+    <record id="third_repeats_first" model="res.partner">
+        <field name="name">Third</field>
+    </record>
+
+    <record id="other_model" model="res.partner">
+        <field name="name">Partner</field>
+    </record>
+    <record id="other_model" model="res.country">
+        <field name="code">XX</field>
+    </record>
+
+    <record id="record_then_menu" model="ir.ui.menu">
+        <field name="name">Record first</field>
+    </record>
+    <menuitem id="record_then_menu" name="Tag second"/>
+
+    <record id="past_the_tag" model="ir.ui.menu">
+        <field name="name">Record first</field>
+    </record>
+    <menuitem id="past_the_tag" name="Tag second"/>
+    <record id="past_the_tag" model="ir.ui.menu">
+        <field name="name">Record third</field>
+    </record>
+
+    <record id="replaced_twice" model="res.partner">
+        <field name="child_ids" eval="[(6, 0, [ref('two_phases')])]"/>
+    </record>
+    <record id="replaced_twice" model="res.partner">
+        <field name="child_ids" eval="[(6, 0, [ref('three_phases')])]"/>
+    </record>
+
+    <record id="declared_shared" model="res.partner">
+        <field name="name">First</field>
+    </record>
+    <record id="declared_shared" model="res.partner" forcecreate="0">
+        <field name="name">Second</field>
+    </record>
+</odoo>

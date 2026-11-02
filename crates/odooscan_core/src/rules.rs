@@ -152,7 +152,7 @@ rules! {
     "OD228" "delegate-without-ondelete" Correctness Error Some(">=saas~14.4,<saas~18.3"), true, "A delegate=True Many2one has no ondelete, so Odoo fails when it sets up the registry.";
     "OD301" "unresolved-xmlid" Correctness Error None, true, "The XML id is not defined by its module.";
     "OD302" "xmlid-not-in-depends" Correctness Error None, true, "The XML id comes from a module missing from depends.";
-    "OD303" "duplicate-xmlid" Correctness Warning None, false, "The same XML id is defined twice in one file.";
+    "OD303" "duplicate-xmlid" Correctness Warning None, false, "The same XML id is defined twice in one file, with another model or overwriting a field.";
     "OD304" "unknown-view-field" Correctness Error None, true, "A view references a field its model does not have.";
     "OD305" "attrs-states-removed" Deprecation Error Some(">=17.0"), false, "attrs and states are removed; use invisible, readonly and required expressions.";
     "OD306" "tree-renamed-list" Deprecation Warning Some(">=18.0"), false, "The tree view type is renamed list.";
