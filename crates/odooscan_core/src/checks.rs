@@ -12,8 +12,8 @@ use crate::facts::{
     ViewFact, WrittenValue, XmlRef,
 };
 use crate::index::{
-    BASE_MODEL_METHODS, Export, FieldDef, FieldInfo, Index, JsSpec, Placed, RELATIONAL_TYPES, Scope, Status, ViewTree,
-    base_private_method, full_id, js_module_path, located,
+    BASE_MODEL_METHODS, Export, FieldDef, FieldInfo, Index, JsSpec, PathError, Placed, RELATIONAL_TYPES, Scope, Status,
+    ViewTree, base_private_method, full_id, js_module_path, located,
 };
 use crate::project::{Module, SourceFile, code_loaded};
 use crate::rules::rule;
@@ -756,9 +756,21 @@ impl<'m> Ctx<'_, 'm> {
         }
     }
 
-    fn path(&self, out: &mut Out<'m>, file: &'m Path, code: &'static str, model: &str, path: &Spanned<String>) {
+    fn path(&self, out: &mut Out<'m>, file: &'m Path, model: &str, path: &Spanned<String>) {
         if let Err(e) = self.index.resolve_path(model, &path.value, self.scope) {
-            out.push(file, code, path.pos, e.message(&path.value));
+            out.push(file, "OD203", path.pos, e.message(&path.value));
+        }
+    }
+
+    /// OD210 on a path that fails, unless the field is missing from a model that may get it from a
+    /// parent the scan cannot read. That is the model where it fails, as a later step can be the
+    /// one that hides it, and a field found there fails whatever the parents hold.
+    fn domain_path(&self, out: &mut Out<'m>, file: &'m Path, model: &str, path: &Spanned<String>) {
+        let Err(e) = self.index.resolve_path(model, &path.value, self.scope) else {
+            return;
+        };
+        if !matches!(&e, PathError::Missing { model, .. } if self.index.hidden_field_parents(model, self.scope)) {
+            out.push(file, "OD210", path.pos, e.message(&path.value));
         }
     }
 
@@ -987,7 +999,7 @@ impl<'m> Ctx<'_, 'm> {
             .chain(&class.order_fields)
             .chain(self.rec_names_search(class));
         for p in paths.filter(|_| class.kind != ModelKind::Abstract) {
-            self.path(out, path, "OD203", &class.model, p);
+            self.path(out, path, &class.model, p);
         }
         let setup_paths = class
             .depends
@@ -1056,7 +1068,7 @@ impl<'m> Ctx<'_, 'm> {
     /// indexed, a model nobody indexes, and for a mixin, every model that inherits it.
     fn super_calls(&self, out: &mut Out<'m>, path: &'m Path, class: &ClassFact) {
         if class.super_calls.is_empty()
-            || class.plain_bases
+            || !class.plain_bases.is_empty()
             || self.partial
             || class.kind == ModelKind::Abstract
             || !self.index.has_model(&class.model)
@@ -1120,7 +1132,7 @@ impl<'m> Ctx<'_, 'm> {
         }
         if let Some(comodel) = &field.comodel {
             for f in &field.domain {
-                self.path(out, path, "OD210", &comodel.value, f);
+                self.domain_path(out, path, &comodel.value, f);
             }
         }
         self.missing_methods(out, path, class, field);
@@ -1170,7 +1182,7 @@ impl<'m> Ctx<'_, 'm> {
             if self.series.is_some_and(|s| s >= MODEL_FIELD_ASSERTED) {
                 self.setup_path(out, path, &class.model, &name);
             } else {
-                self.path(out, path, "OD203", &class.model, &name);
+                self.path(out, path, &class.model, &name);
             }
         }
     }
@@ -1629,7 +1641,7 @@ impl<'m> Ctx<'_, 'm> {
         };
         if self.sees_model(model) {
             for field in &rule.fields {
-                self.path(out, path, "OD210", model, field);
+                self.domain_path(out, path, model, field);
             }
         }
     }
@@ -1993,7 +2005,7 @@ impl<'m> Ctx<'_, 'm> {
     fn domains(&self, out: &mut Out<'m>, path: &'m Path, domains: &[DomainFact]) {
         for d in domains {
             for f in &d.fields {
-                self.path(out, path, "OD210", &d.model, f);
+                self.domain_path(out, path, &d.model, f);
             }
         }
     }
@@ -2011,7 +2023,7 @@ impl<'m> Ctx<'_, 'm> {
             let unsure = self.unsure_spec_subview(model, view, &d.path, trees);
             let target = self.arch_model(model, &d.path).filter(|_| !unsure);
             for f in target.iter().flat_map(|t| d.fields.iter().map(move |f| (t, f))) {
-                self.path(out, path, "OD210", f.0, f.1);
+                self.domain_path(out, path, f.0, f.1);
             }
         }
     }

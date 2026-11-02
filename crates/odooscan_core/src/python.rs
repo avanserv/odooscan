@@ -936,7 +936,12 @@ impl<'ast> PyVisitor<'_, 'ast> {
             views: vec![],
             own_view: false,
             definitions: vec![],
-            plain_bases: class.bases().iter().any(|b| tail_name(b).and_then(orm_kind).is_none()),
+            plain_bases: class
+                .bases()
+                .iter()
+                .filter(|b| tail_name(b).and_then(orm_kind).is_none())
+                .map(|b| b.as_name_expr().map_or("", |n| n.id.as_str()).to_owned())
+                .collect(),
         };
         for stmt in &class.body {
             if let Some((targets, value)) = assigned(stmt) {
@@ -2317,10 +2322,19 @@ mod tests {
             let facts = analyze(&format!("class X({base}):\n    _name = 'x'\n"), None);
             let class = &facts.classes[0];
             assert_eq!(class.kind, ModelKind::Model, "{base}");
-            assert!(!class.plain_bases, "{base}");
+            assert!(class.plain_bases.is_empty(), "{base}");
         }
         let facts = analyze("class X(models.CachedModel, Layout):\n    _name = 'x'\n", None);
-        assert!(facts.classes[0].plain_bases);
+        assert_eq!(facts.classes[0].plain_bases, ["Layout"]);
+    }
+
+    #[test]
+    fn names_a_plain_base_only_when_written_as_a_bare_name() {
+        let facts = analyze(
+            "class X(models.Model, Layout, mixins.Layout, Layout()):\n    _name = 'x'\n",
+            None,
+        );
+        assert_eq!(facts.classes[0].plain_bases, ["Layout", "", ""]);
     }
 
     #[test]
