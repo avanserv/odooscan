@@ -19,4 +19,8 @@
     <record id="unlisted_replaces_file" model="ir.actions.report">
         <field name="print_report_name">object.name</field>
     </record>
+
+    <template id="unlisted_sheet" key="report_actions.unlisted_sheet_key">
+        <div/>
+    </template>
 </odoo>

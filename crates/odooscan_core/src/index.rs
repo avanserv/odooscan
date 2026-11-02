@@ -6,7 +6,7 @@ use crate::facts::{
     OptionValue, PyFacts, Receiver, RecordWrite, ReportFact, RuleFact, ServerFact, ViewFact,
 };
 use crate::manifest::AutoInstall;
-use crate::project::{Module, SourceFile};
+use crate::project::{Module, SourceFile, code_loaded};
 use crate::series::Series;
 
 /// Fields every model has without declaring them.
@@ -482,12 +482,32 @@ fn data_ids<'m>(
     xmlids: &mut XmlIds<'m>,
     views: &mut Nodes<'m>,
     view_keys: &mut ViewKeys<'m>,
+    series: Option<Series>,
 ) {
     let name = module.name.as_str();
-    for file in &module.data {
+    let mentions = module.code_mentions();
+    for file in module
+        .data
+        .iter()
+        .filter(|f| f.rank.is_some() || code_loaded(&f.rel, &mentions, &module.manifest, series))
+    {
         for key in &file.facts.view_keys {
             view_keys.entry(key).or_default().push(mi);
         }
+        for view in &file.facts.views {
+            if let Some(id) = &view.id {
+                views.entry(full_id(name, id)).or_default().push(ViewNode {
+                    module: mi,
+                    inherit: view.inherit.as_deref().map(|i| full_id(name, i)),
+                    defines: true,
+                    fact: view,
+                });
+            }
+        }
+    }
+    // Every file feeds the ids: Python can load a whole folder without naming a file, so the filter
+    // above would turn correct refs into false OD301.
+    for file in &module.data {
         for def in &file.facts.defs {
             // `<record id="other.x">` creates or updates an id that belongs to module other.
             let id = full_id(name, &def.id);
@@ -502,16 +522,6 @@ fn data_ids<'m>(
                 .as_deref()
                 .filter(|_| !(def.themed && name.starts_with("theme_")));
             xmlids.entry(id).or_default().push(XmlIdDef { module: owner, model });
-        }
-        for view in &file.facts.views {
-            if let Some(id) = &view.id {
-                views.entry(full_id(name, id)).or_default().push(ViewNode {
-                    module: mi,
-                    inherit: view.inherit.as_deref().map(|i| full_id(name, i)),
-                    defines: true,
-                    fact: view,
-                });
-            }
         }
     }
 }
@@ -917,7 +927,8 @@ impl<'m> Index<'m> {
                 module_ids(module, b, &mut xmlids);
             }
             class_ids(mi, module, &mut models, &mut model_by_xmlid, &mut xmlids);
-            data_ids(mi, module, &by_name, &mut xmlids, &mut views, &mut view_keys);
+            let series = module.series.or(default_series);
+            data_ids(mi, module, &by_name, &mut xmlids, &mut views, &mut view_keys, series);
         }
         let mut derived = FxHashSet::default();
         for (id, mi, parent) in derived_ids(modules, &models) {
