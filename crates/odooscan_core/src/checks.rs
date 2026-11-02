@@ -1135,7 +1135,10 @@ impl<'m> Ctx<'_, 'm> {
     }
 
     fn record(&self, out: &mut Out<'m>, path: &'m Path, record: &RecordFact) {
-        if !self.index.has_model(&record.model.value) {
+        if !matches!(
+            self.index.model_status(&record.model.value, self.scope, None),
+            Status::Visible
+        ) {
             self.model_ref(out, path, &record.model, None);
             return;
         }

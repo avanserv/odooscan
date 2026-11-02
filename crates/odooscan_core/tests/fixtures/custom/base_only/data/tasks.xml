@@ -1,0 +1,9 @@
+<odoo>
+    <record id="task_kickoff" model="project.task">
+        <field name="name">Kickoff</field>
+        <field name="project_id" eval="False"/>
+        <field name="description">Agree on the scope</field>
+    </record>
+
+    <record id="task_empty" model="project.task"/>
+</odoo>

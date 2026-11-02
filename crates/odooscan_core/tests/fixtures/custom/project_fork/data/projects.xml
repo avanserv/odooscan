@@ -1,0 +1,9 @@
+<odoo>
+    <record id="project_plain" model="project.project">
+        <field name="name">Plain</field>
+    </record>
+
+    <record id="project_billed" model="project.project">
+        <field name="allow_timesheets" eval="True"/>
+    </record>
+</odoo>
