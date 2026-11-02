@@ -842,7 +842,7 @@ fn odoo_env<'a>(expr: &'a Expr, vars: Option<&QueryVars<'a>>) -> bool {
     }
 }
 
-fn is_self(expr: &Expr) -> bool {
+pub(crate) fn is_self(expr: &Expr) -> bool {
     matches!(expr, Expr::Name(n) if matches!(n.id.as_str(), "self" | "cls"))
 }
 

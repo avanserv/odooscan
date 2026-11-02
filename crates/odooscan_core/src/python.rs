@@ -1,5 +1,5 @@
 use ruff_python_ast::visitor::{self, Visitor};
-use ruff_python_ast::{self as ast, BoolOp, CmpOp, Expr, Operator, Stmt};
+use ruff_python_ast::{self as ast, BoolOp, CmpOp, Expr, Operator, Stmt, UnaryOp};
 use ruff_python_parser::parse_module;
 use ruff_source_file::LineIndex;
 use ruff_text_size::{Ranged, TextSize};
@@ -11,8 +11,8 @@ use crate::facts::{
 };
 use crate::series::Series;
 use crate::sql::{
-    self, Created, CursorUse, QueryVars, Write, odoo_cursor, query_head, query_source, query_text, self_cursor,
-    source_offset,
+    self, Created, CursorUse, QueryVars, Write, is_self, odoo_cursor, query_head, query_source, query_text,
+    self_cursor, source_offset,
 };
 use crate::taint::{self, Params};
 use crate::{domain, method_body, module_state};
@@ -373,30 +373,200 @@ impl<'a> Visitor<'a> for Finder<'_> {
     }
 }
 
-/// Whether an expression tests that a model, field or module is installed, as `'x' in self.env`,
-/// `'f' in self._fields`, `self.env.get('x')` or `ir.module.module._get('m')` do.
+/// Reads a runtime test of a model, field or module, with what holds such a result. `names` follow
+/// the walk of an outermost function, so a test reads them as they stand at its line. `attrs` hold
+/// across a class, whatever else its methods assign them, as methods run in no set order.
 #[derive(Default)]
-struct GuardFinder {
-    found: bool,
+struct GuardHolders<'a> {
+    names: FxHashMap<&'a str, Held>,
+    attrs: FxHashMap<&'a str, Held>,
 }
 
-impl<'a> Visitor<'a> for GuardFinder {
-    fn visit_expr(&mut self, expr: &'a Expr) {
-        self.found |= match expr {
-            Expr::Compare(c) => c
-                .ops
-                .iter()
-                .zip(c.comparators())
-                .any(|(op, right)| matches!(op, CmpOp::In | CmpOp::NotIn) && is_registry(right)),
-            Expr::Call(c) => match &*c.func {
-                Expr::Attribute(a) if a.attr.as_str() == "get" => is_registry(&a.value),
-                func => tail_name(func) == Some("_get"),
-            },
-            _ => false,
-        };
-        if !self.found {
-            visitor::walk_expr(self, expr);
+/// What a name or an attribute holds that a runtime test can read.
+#[derive(Clone, Copy, PartialEq)]
+enum Held {
+    /// A result that shows the thing there when it has this truth value.
+    Proof(bool),
+    /// `ir.module.module` or records of it, which only their state speaks for: a record exists for
+    /// every module the database has listed, installed or not.
+    Modules,
+    /// What `_installed()` returns.
+    Installed,
+}
+
+impl<'a> GuardHolders<'a> {
+    fn attrs_of(class: &'a ast::StmtClassDef) -> FxHashMap<&'a str, Held> {
+        let mut holders = Self::default();
+        for stmt in &class.body {
+            holders.names.clear();
+            holders.visit_stmt(stmt);
         }
+        holders.attrs
+    }
+
+    /// Whether `test` having the value `truth` shows the thing there.
+    fn proves(&self, test: &Expr, truth: bool) -> bool {
+        match test {
+            Expr::UnaryOp(u) if u.op == UnaryOp::Not => self.proves(&u.operand, !truth),
+            Expr::Named(n) => self.proves(&n.value, truth),
+            Expr::BoolOp(b) => self.chain_proves(b, truth),
+            Expr::Compare(c) => self.compare_sense(c) == Some(truth),
+            Expr::Call(c) if is_presence_call(c) || self.searches_installed(c) => truth,
+            _ => self.held(test) == Some(Held::Proof(truth)),
+        }
+    }
+
+    /// An `and` that holds and an `or` that fails fix every operand, so one proof is enough.
+    fn chain_proves(&self, chain: &ast::ExprBoolOp, truth: bool) -> bool {
+        let mut proofs = chain.values.iter().map(|v| self.proves(v, truth));
+        if (chain.op == BoolOp::And) == truth {
+            proofs.any(|proof| proof)
+        } else {
+            proofs.all(|proof| proof)
+        }
+    }
+
+    /// The truth value of a value that proves the thing there, if it proves it at all.
+    fn sense(&self, value: &Expr) -> Option<bool> {
+        [true, false].into_iter().find(|&truth| self.proves(value, truth))
+    }
+
+    fn compare_sense(&self, c: &ast::ExprCompare) -> Option<bool> {
+        let ([op], [left, right]) = (&*c.ops, &*c.operands) else {
+            return None;
+        };
+        let sense = match op {
+            CmpOp::In | CmpOp::NotIn => self.member_sense(left, right),
+            CmpOp::Eq | CmpOp::NotEq => self.state_sense(left, &[str_lit(right)?]),
+            CmpOp::Is | CmpOp::IsNot if right.is_none_literal_expr() => self.sense(left),
+            _ => None,
+        }?;
+        Some(sense == matches!(op, CmpOp::In | CmpOp::Eq | CmpOp::IsNot))
+    }
+
+    /// The truth value of `left in right` that shows the thing there.
+    fn member_sense(&self, left: &Expr, right: &Expr) -> Option<bool> {
+        if str_lit(left).is_some() && (is_name_set(right) || self.reads_installed(right)) {
+            return Some(true);
+        }
+        self.state_sense(left, &str_items(right)?)
+    }
+
+    /// The truth value of `left in states` that shows a module there, for `left` the state of one.
+    /// A set that leaves `uninstalled` out says nothing when it fails, as the module may be on its
+    /// way in, but one that holds it leaves only states of a module that is there, or nearly.
+    fn state_sense(&self, left: &Expr, states: &[&str]) -> Option<bool> {
+        let Expr::Attribute(a) = left else { return None };
+        if a.attr.as_str() != "state" || !self.reads_modules(&a.value) {
+            return None;
+        }
+        if states.contains(&"uninstalled") {
+            return Some(false);
+        }
+        let loaded = |state: &&str| matches!(*state, "installed" | "to upgrade" | "to remove");
+        (states.contains(&"installed") && states.iter().all(loaded)).then_some(true)
+    }
+
+    fn held(&self, expr: &Expr) -> Option<Held> {
+        match expr {
+            Expr::Name(n) => self.names.get(n.id.as_str()).copied(),
+            Expr::Attribute(a) if is_self(&a.value) => self.attrs.get(a.attr.as_str()).copied(),
+            _ => None,
+        }
+    }
+
+    /// What a value gives the name or the attribute assigned it.
+    fn holding(&self, value: &Expr) -> Option<Held> {
+        if self.reads_installed(value) {
+            return Some(Held::Installed);
+        }
+        let proof = self.sense(value).map(Held::Proof);
+        proof.or_else(|| self.reads_modules(value).then_some(Held::Modules))
+    }
+
+    /// Whether `expr` reads `ir.module.module` or a holder of it, in a chain such as
+    /// `.sudo()._get('m')`.
+    fn reads_modules(&self, expr: &Expr) -> bool {
+        self.held(expr) == Some(Held::Modules)
+            || match expr {
+                Expr::Attribute(a) => self.reads_modules(&a.value),
+                Expr::Call(c) => self.reads_modules(&c.func),
+                _ => env_literal(expr) == Some("ir.module.module"),
+            }
+    }
+
+    fn reads_installed(&self, expr: &Expr) -> bool {
+        self.held(expr) == Some(Held::Installed)
+            || matches!(expr, Expr::Call(c) if matches!(
+                &*c.func,
+                Expr::Attribute(a) if a.attr.as_str() == "_installed" && self.reads_modules(&a.value)
+            ))
+    }
+
+    /// Whether `call` searches `ir.module.module` under a domain that asks for installed modules.
+    fn searches_installed(&self, call: &ast::ExprCall) -> bool {
+        let Expr::Attribute(a) = &*call.func else { return false };
+        matches!(a.attr.as_str(), "search" | "search_count")
+            && self.reads_modules(&a.value)
+            && keyword(call, "domain")
+                .or_else(|| call.arguments.args.first())
+                .is_some_and(|domain| domain::requires(domain, "state", "installed"))
+    }
+
+    fn unbind(&mut self, target: &Expr) {
+        match target {
+            Expr::Name(n) => drop(self.names.remove(n.id.as_str())),
+            Expr::Tuple(t) => t.elts.iter().for_each(|e| self.unbind(e)),
+            _ => {}
+        }
+    }
+
+    /// Follows the names through `stmt`, once its value has been read.
+    fn rebind(&mut self, stmt: &'a Stmt) {
+        if let Stmt::AugAssign(a) = stmt {
+            return self.unbind(&a.target);
+        }
+        let Some((targets, value)) = assigned(stmt) else {
+            return;
+        };
+        let held = self.holding(value);
+        for target in targets {
+            match (target, held) {
+                (Expr::Name(n), Some(held)) => drop(self.names.insert(n.id.as_str(), held)),
+                _ => self.unbind(target),
+            }
+        }
+    }
+
+    fn hold_attrs(&mut self, stmt: &'a Stmt) {
+        let Some((targets, value)) = assigned(stmt) else {
+            return;
+        };
+        let Some(held) = self.holding(value) else {
+            return;
+        };
+        for target in targets {
+            if let Expr::Attribute(a) = target
+                && is_self(&a.value)
+            {
+                self.attrs.insert(a.attr.as_str(), held);
+            }
+        }
+    }
+}
+
+impl<'a> Visitor<'a> for GuardHolders<'a> {
+    /// A nested class holds its own attributes.
+    fn visit_stmt(&mut self, stmt: &'a Stmt) {
+        if matches!(stmt, Stmt::ClassDef(_)) {
+            return;
+        }
+        self.hold_attrs(stmt);
+        if let Stmt::For(f) = stmt {
+            self.unbind(&f.target);
+        }
+        visitor::walk_stmt(self, stmt);
+        self.rebind(stmt);
     }
 }
 
@@ -405,14 +575,82 @@ pub(crate) fn exits(body: &[Stmt]) -> bool {
     matches!(body.last(), Some(Stmt::Return(_) | Stmt::Raise(_) | Stmt::Continue(_)))
 }
 
-fn is_registry(expr: &Expr) -> bool {
-    matches!(tail_name(expr), Some("env" | "_fields" | "pool"))
+/// A block that ends with `skipTest`, which raises, so the code after it needs what it tested.
+fn skips(body: &[Stmt]) -> bool {
+    let Some(Stmt::Expr(last)) = body.last() else {
+        return false;
+    };
+    matches!(&*last.value, Expr::Call(c) if tail_name(&c.func) == Some("skipTest"))
 }
 
-fn is_guard(expr: &Expr) -> bool {
-    let mut finder = GuardFinder::default();
-    finder.visit_expr(expr);
-    finder.found
+fn is_registry(expr: &Expr) -> bool {
+    matches!(tail_name(expr), Some("env" | "_fields" | "pool" | "registry"))
+}
+
+/// A value that `in` tests for the name of a model or a field.
+fn is_name_set(expr: &Expr) -> bool {
+    is_registry(expr) || env_literal(expr).is_some()
+}
+
+/// The model `env['x']` names.
+fn env_literal(expr: &Expr) -> Option<&str> {
+    match expr {
+        Expr::Subscript(sub) if tail_name(&sub.value) == Some("env") => str_lit(&sub.slice),
+        _ => None,
+    }
+}
+
+/// The strings a literal collection holds, unless it holds anything else.
+fn str_items(expr: &Expr) -> Option<Vec<&str>> {
+    let items = match expr {
+        Expr::Set(s) => &*s.elts,
+        _ => domain::items(expr)?,
+    };
+    items.iter().map(str_lit).collect()
+}
+
+/// `env.get('x')`, or `hasattr` with what can name a field: a variable key says nothing of a literal
+/// use further on.
+fn is_presence_call(call: &ast::ExprCall) -> bool {
+    match &*call.func {
+        Expr::Attribute(a) if a.attr.as_str() == "get" => {
+            is_registry(&a.value) && call.arguments.args.first().is_some_and(|key| str_lit(key).is_some())
+        }
+        Expr::Name(n) if n.id.as_str() == "hasattr" => hasattr_guard(call),
+        _ => false,
+    }
+}
+
+/// `hasattr(x, 'name')`, but for `x` a `super()`, which tests what a method can extend, for `x` the
+/// `request`, which holds no model, and for a private name, which is more often a method or an
+/// internal attribute than a field.
+fn hasattr_guard(call: &ast::ExprCall) -> bool {
+    let [target, name] = &*call.arguments.args else {
+        return false;
+    };
+    let on_super = matches!(target, Expr::Call(c) if is_super(&c.func));
+    !on_super && tail_name(target) != Some("request") && str_lit(name).is_some_and(|n| !n.starts_with('_'))
+}
+
+/// Finds an `env.ref` or an `env[...]`, each of which raises when what it names is missing.
+#[derive(Default)]
+struct LookupFinder {
+    found: bool,
+}
+
+impl<'a> Visitor<'a> for LookupFinder {
+    fn visit_expr(&mut self, expr: &'a Expr) {
+        self.found |= match expr {
+            Expr::Call(c) => {
+                matches!(&*c.func, Expr::Attribute(a) if a.attr.as_str() == "ref" && tail_name(&a.value) == Some("env"))
+            }
+            Expr::Subscript(sub) => tail_name(&sub.value) == Some("env"),
+            _ => false,
+        };
+        if !self.found {
+            visitor::walk_expr(self, expr);
+        }
+    }
 }
 
 /// The methods called as `super().name(...)` or `super(Class, self).name(...)`, each with whether
@@ -831,6 +1069,7 @@ pub fn analyze_with(src: &str, series: Option<Series>, known: &FieldClasses) -> 
         facts: PyFacts::default(),
         kinds: FxHashMap::default(),
         guarded: 0,
+        holders: GuardHolders::default(),
         class_models: vec![],
         class_facts: vec![],
         owners: vec![],
@@ -972,6 +1211,8 @@ struct PyVisitor<'a, 'ast> {
     kinds: FxHashMap<String, ModelKind>,
     /// Depth of code that runs only once a guard has passed.
     guarded: u32,
+    /// The holders of a guard in reach: the outermost enclosing function's, the innermost class's.
+    holders: GuardHolders<'ast>,
     /// The model of each enclosing class, None for a mixin or a class that is no model.
     class_models: Vec<Option<String>>,
     /// Where the fact of each enclosing class sits in `facts.classes`, None for a class that is no
@@ -1442,12 +1683,11 @@ impl<'ast> PyVisitor<'_, 'ast> {
     fn receiver_model(&self, expr: &Expr) -> Option<String> {
         match expr {
             Expr::Name(n) if n.id.as_str() == "self" => self.class_models.last().cloned().flatten(),
-            Expr::Subscript(sub) if tail_name(&sub.value) == Some("env") => str_lit(&sub.slice).map(str::to_owned),
             Expr::Call(c) => match &*c.func {
                 Expr::Attribute(a) if SAME_MODEL.contains(&a.attr.as_str()) => self.receiver_model(&a.value),
                 _ => None,
             },
-            _ => None,
+            _ => env_literal(expr).map(str::to_owned),
         }
     }
 
@@ -1975,12 +2215,18 @@ impl<'ast> PyVisitor<'_, 'ast> {
         }
     }
 
-    fn guarded(&mut self, guard: &'ast Expr, then: impl FnOnce(&mut Self)) {
-        self.visit_expr(guard);
-        let depth = u32::from(is_guard(guard));
-        self.guarded += depth;
-        then(self);
-        self.guarded -= depth;
+    /// Visits `test`, then what runs when it holds and what runs when it does not.
+    fn branches(&mut self, test: &'ast Expr, then: impl FnOnce(&mut Self), otherwise: impl FnOnce(&mut Self)) {
+        self.visit_expr(test);
+        let (opened, closed) = (self.holders.proves(test, true), self.holders.proves(test, false));
+        self.guarded_by(opened, then);
+        self.guarded_by(closed, otherwise);
+    }
+
+    fn guarded_by(&mut self, guard: bool, visit: impl FnOnce(&mut Self)) {
+        self.guarded += u32::from(guard);
+        visit(self);
+        self.guarded -= u32::from(guard);
     }
 
     /// Operands of an `and` after a guard run only once it passed.
@@ -1988,7 +2234,7 @@ impl<'ast> PyVisitor<'_, 'ast> {
         let mut depth = 0;
         for value in values {
             self.visit_expr(value);
-            if depth == 0 && is_guard(value) {
+            if depth == 0 && self.holders.proves(value, true) {
                 depth = 1;
                 self.guarded += 1;
             }
@@ -2017,6 +2263,10 @@ impl<'ast> PyVisitor<'_, 'ast> {
         if outermost {
             self.query_vars = Some(QueryVars::of(func));
         }
+        let names = self.holders.names.clone();
+        if outermost {
+            self.holders.names.clear();
+        }
         let in_class = matches!(self.owners.last(), Some(Some(_)));
         let maker = in_class && matches!(func.name.as_str(), "init" | "_auto_init");
         let in_view_maker = self.in_view_maker;
@@ -2027,23 +2277,40 @@ impl<'ast> PyVisitor<'_, 'ast> {
         self.cursor_uses.pop();
         self.owners.pop();
         self.in_view_maker = in_view_maker;
+        self.holders.names = names;
         if outermost {
             self.query_vars = None;
+        }
+    }
+
+    /// Whether the statements after `stmt` in its block run only once a guard has passed: an `if`
+    /// that leaves or skips unless the thing is there, or a `try` that looks up what the rest needs
+    /// and skips from every handler.
+    fn guards_rest(&self, stmt: &Stmt) -> bool {
+        match stmt {
+            Stmt::If(i) => (exits(&i.body) || skips(&i.body)) && self.holders.proves(&i.test, false),
+            Stmt::Try(t) => {
+                let mut lookup = LookupFinder::default();
+                lookup.visit_body(&t.body);
+                lookup.found
+                    && !t.handlers.is_empty()
+                    && t.handlers
+                        .iter()
+                        .all(|ast::ExceptHandler::ExceptHandler(h)| skips(&h.body))
+            }
+            _ => false,
         }
     }
 }
 
 impl<'ast> Visitor<'ast> for PyVisitor<'_, 'ast> {
-    /// Statements after `if 'x' not in self.env: return` run only once the guard passed.
+    /// Statements after `if 'x' not in self.env: return` run only once the thing is there.
     fn visit_body(&mut self, body: &'ast [Stmt]) {
         let mut depth = 0;
         for stmt in body {
+            let guards = depth == 0 && self.guards_rest(stmt);
             self.visit_stmt(stmt);
-            if depth == 0
-                && let Stmt::If(i) = stmt
-                && is_guard(&i.test)
-                && exits(&i.body)
-            {
+            if guards {
                 depth = 1;
                 self.guarded += 1;
             }
@@ -2070,7 +2337,9 @@ impl<'ast> Visitor<'ast> for PyVisitor<'_, 'ast> {
                 self.facts.classes.extend(fact);
                 self.class_models.push(model);
                 self.self_cursors.push(self_cursor(class));
+                let attrs = std::mem::replace(&mut self.holders.attrs, GuardHolders::attrs_of(class));
                 visitor::walk_stmt(self, stmt);
+                self.holders.attrs = attrs;
                 self.self_cursors.pop();
                 self.class_models.pop();
                 self.class_facts.pop();
@@ -2079,15 +2348,17 @@ impl<'ast> Visitor<'ast> for PyVisitor<'_, 'ast> {
             }
             Stmt::FunctionDef(func) => return self.visit_function(func, stmt),
             Stmt::If(i) => {
-                self.guarded(&i.test, |v| v.visit_body(&i.body));
-                for clause in &i.elif_else_clauses {
-                    self.visit_elif_else_clause(clause);
-                }
-                return;
+                return self.branches(
+                    &i.test,
+                    |v| v.visit_body(&i.body),
+                    |v| i.elif_else_clauses.iter().for_each(|c| v.visit_elif_else_clause(c)),
+                );
             }
+            Stmt::For(f) => self.holders.unbind(&f.target),
             _ => {}
         }
         visitor::walk_stmt(self, stmt);
+        self.holders.rebind(stmt);
     }
 
     fn visit_expr(&mut self, expr: &'ast Expr) {
@@ -2096,8 +2367,7 @@ impl<'ast> Visitor<'ast> for PyVisitor<'_, 'ast> {
             Expr::Call(call) => self.call_checks(call, expr),
             Expr::BoolOp(b) if b.op == BoolOp::And => return self.and_chain(&b.values),
             Expr::If(i) => {
-                self.guarded(&i.test, |v| v.visit_expr(&i.body));
-                return self.visit_expr(&i.orelse);
+                return self.branches(&i.test, |v| v.visit_expr(&i.body), |v| v.visit_expr(&i.orelse));
             }
             Expr::Subscript(sub) => self.env_model(sub),
             Expr::Attribute(a) => self.private_attr(a, expr),
@@ -2567,6 +2837,352 @@ mod tests {
         assert!(class.super_calls.is_empty());
         assert_eq!(class.extended, ["write"]);
         assert!(facts.diags.iter().any(|d| d.code == "OD119"));
+    }
+
+    /// Whether `body`, a method of a class, looks up `x.y` outside a guard.
+    fn looks_up(body: &str) -> bool {
+        let lines: String = body.lines().map(|line| format!("        {line}\n")).collect();
+        let src = format!("class T(models.Model):\n    _name = 't'\n    def m(self):\n{lines}");
+        let facts = analyze(&src, None);
+        assert!(facts.diags.iter().all(|d| d.code != "OD000"), "{body}");
+        facts.env_models.iter().any(|m| m.value == "x.y")
+    }
+
+    #[test]
+    fn reads_a_runtime_test_of_a_soft_dependency_as_a_guard() {
+        for test in [
+            "'x.y' in self.env",
+            "'x.y' in self.env.registry",
+            "'f' in self._fields",
+            "self.env.get('x.y')",
+            "self.env.get('x.y') is not None",
+            "(m := self.env.get('x.y')) is not None",
+            "hasattr(self, 'f')",
+            "hasattr(record.partner_id, 'f')",
+            "x and hasattr(self, 'f')",
+            "'m' in self.env['ir.module.module']._installed()",
+            "self.env['ir.module.module']._get('m').state == 'installed'",
+            "self.env['ir.module.module']._get('m').state in ('installed',)",
+            "self.env['ir.module.module']._get('m').state != 'uninstalled'",
+            "self.env['ir.module.module']._get('m').state not in ('uninstalled',)",
+            "self.env['ir.module.module'].search([('name', '=', 'm')]).state == 'installed'",
+            "self.env['ir.module.module'].sudo().search([('name', '=', 'm'), ('state', '=', 'installed')])",
+            "self.env['ir.module.module'].search([('state', 'in', ['installed', 'to upgrade'])])",
+            "self.env['ir.module.module'].search(domain=[('state', 'in', ('installed',))])",
+            "request.env['ir.module.module'].search_count([('state', '=', 'installed')])",
+            "'f' in self.env['a.b']",
+            "not 'x.y' not in self.env",
+        ] {
+            assert!(!looks_up(&format!("if {test}:\n    self.env['x.y']")), "{test}");
+        }
+        for test in [
+            "x",
+            "hasattr(super(), 'f')",
+            "hasattr(super(T, self), 'f')",
+            "hasattr(self, name)",
+            "hasattr(self)",
+            "hasattr(request, 'f')",
+            "hasattr(http.request, 'f')",
+            "hasattr(self, '_f')",
+            "self.env['ir.model']._get('x.y')",
+            "self._get('m')",
+            "self.env['res.partner']",
+            "self.env[name]",
+            "'f' in self.env[name]",
+            "'f' in mapping['x.y']",
+            "name in self.env",
+            "name in self._fields",
+            "self.env.get(name)",
+            "self._fields.get(name)",
+            "name in self.env['ir.module.module']._installed()",
+            "self.env['ir.module.module']",
+            "self.env['ir.module.module']._get('m')",
+            "self.env['ir.module.module']._installed()",
+            "'m' in self.env['ir.module.module'].search([])",
+            "bool('x.y' in self.env)",
+            "any('x.y' in e for e in envs)",
+            "{'a': 'x.y' in self.env}",
+            "('x.y' in self.env) if y else z",
+        ] {
+            assert!(looks_up(&format!("if {test}:\n    self.env['x.y']")), "{test}");
+        }
+    }
+
+    #[test]
+    fn a_test_opens_only_the_branch_that_shows_the_thing_there() {
+        for reported in [
+            "'x.y' not in self.env",
+            "'f' not in request.env['a.b']",
+            "not hasattr(self, 'f')",
+            "not 'x.y' in self.env",
+            "'m' not in self.env['ir.module.module']._installed()",
+            "self.env['ir.module.module']._get('m').state != 'installed'",
+            "self.env['ir.module.module']._get('m').state == 'uninstalled'",
+            "self.env.get('x.y') is None",
+        ] {
+            assert!(looks_up(&format!("if {reported}:\n    self.env['x.y']")), "{reported}");
+            assert!(
+                !looks_up(&format!("if {reported}:\n    pass\nelse:\n    self.env['x.y']")),
+                "{reported}"
+            );
+        }
+        for silent in [
+            "if 'x.y' not in self.env:\n    pass\nelse:\n    self.env['x.y']",
+            "if not hasattr(self, 'f'):\n    pass\nelif y:\n    self.env['x.y']",
+            "if not hasattr(self, 'f'):\n    pass\nelif y:\n    pass\nelse:\n    self.env['x.y']",
+            "z = self.env['x.y'] if 'x.y' in self.env else None",
+            "z = None if 'x.y' not in self.env else self.env['x.y']",
+            "z = 'x.y' in self.env and self.env['x.y']",
+            "z = y and hasattr(self, 'f') and self.env['x.y']",
+        ] {
+            assert!(!looks_up(silent), "{silent}");
+        }
+        for reported in [
+            "if 'x.y' in self.env:\n    pass\nelse:\n    self.env['x.y']",
+            "if 'x.y' in self.env or y:\n    self.env['x.y']",
+            "if self.env['ir.module.module'].search_count([]) == 0:\n    self.env['x.y']",
+            "if not ('x.y' in self.env and y):\n    self.env['x.y']",
+            "z = self.env['x.y'] if 'x.y' not in self.env else None",
+            "z = None if 'x.y' in self.env else self.env['x.y']",
+            "z = 'x.y' not in self.env and self.env['x.y']",
+            "z = not hasattr(self, 'f') and self.env['x.y']",
+        ] {
+            assert!(looks_up(reported), "{reported}");
+        }
+    }
+
+    #[test]
+    fn a_module_on_its_way_out_is_still_loaded() {
+        let test = "self.env['ir.module.module']._get('m').state in ('installed', 'to upgrade', 'to remove')";
+        assert!(!looks_up(&format!("if {test}:\n    self.env['x.y']")));
+    }
+
+    #[test]
+    fn a_module_shows_itself_there_only_through_its_state() {
+        let get = "self.env['ir.module.module']._get('m')";
+        for test in [
+            "state == 'uninstallable'",
+            "state == 'to remove'",
+            "state == 'to upgrade'",
+            "state in ('to install', 'to upgrade')",
+            "state in ('installed', 'to install')",
+            "state in SOME_VARIABLE",
+            "state == SOME_VARIABLE",
+            "state in 'installed'",
+            "state in ('installed', y)",
+            "name == 'x'",
+            "name in ('x', 'y')",
+        ] {
+            let test = format!("{get}.{test}");
+            assert!(looks_up(&format!("if {test}:\n    self.env['x.y']")), "{test}");
+            assert!(looks_up(&format!("if {test}:\n    return\nself.env['x.y']")), "{test}");
+            assert!(
+                looks_up(&format!("if {test}:\n    pass\nelse:\n    self.env['x.y']")),
+                "{test}"
+            );
+        }
+        let absent = [
+            "m.state == 'uninstalled'",
+            "m.state != 'installed'",
+            "m.state in ('uninstalled', 'to remove')",
+            "m.state in {'uninstalled', 'to remove'}",
+            "m.state in ['uninstalled']",
+            "m.state not in ('installed',)",
+        ];
+        for test in absent {
+            assert!(
+                looks_up(&format!("m = {get}\nif {test}:\n    self.env['x.y']")),
+                "{test}"
+            );
+            assert!(
+                !looks_up(&format!("m = {get}\nif {test}:\n    return\nself.env['x.y']")),
+                "{test}"
+            );
+        }
+        let both = format!("m = {get}\nif m and m.state == 'uninstalled':\n    self.env['x.y']");
+        assert!(looks_up(&both));
+        let present = format!("m = {get}\nif m and m.state == 'installed':\n    self.env['x.y']");
+        assert!(!looks_up(&present));
+        let through_a_holder =
+            "m = self.env['ir.module.module']\nif m._get('m').state == 'installed':\n    self.env['x.y']";
+        assert!(!looks_up(through_a_holder));
+    }
+
+    #[test]
+    fn a_search_of_modules_shows_them_there_only_when_its_domain_asks_for_installed_ones() {
+        let search = "self.env['ir.module.module'].search";
+        for domain in [
+            "",
+            "[]",
+            "domain",
+            "[('name', '=', 'm')]",
+            "[('state', '=', 'uninstalled')]",
+            "[('name', '=', 'm'), ('state', '=', 'uninstalled')]",
+            "[('state', '!=', 'installed')]",
+            "[('state', 'not in', ['installed'])]",
+            "[('state', 'in', ['uninstalled', 'to remove'])]",
+            "[('state', '=', state)]",
+            "[('state', 'in', states)]",
+            "['|', ('state', '=', 'installed'), ('name', '=', 'm')]",
+            "['!', ('state', '=', 'installed')]",
+            "[term, ('state', '=', 'installed')]",
+        ] {
+            assert!(
+                looks_up(&format!("if {search}({domain}):\n    self.env['x.y']")),
+                "{domain}"
+            );
+        }
+        let domain = "[('name', '=', 'm'), ('state', '=', 'uninstalled')]";
+        assert!(looks_up(&format!(
+            "if {search}({domain}):\n    return\nself.env['x.y']"
+        )));
+        let absent = format!("if {search}([('state', '=', 'installed')]):\n    return\nself.env['x.y']");
+        assert!(looks_up(&absent));
+        let elsewhere = "if self.env['res.partner'].search([('state', '=', 'installed')]):\n    self.env['x.y']";
+        assert!(looks_up(elsewhere));
+        let left_without = format!("if not {search}([('state', '=', 'installed')]):\n    return\nself.env['x.y']");
+        assert!(!looks_up(&left_without));
+    }
+
+    #[test]
+    fn a_test_that_fails_when_the_thing_is_absent_guards_the_rest_of_the_block() {
+        for silent in [
+            "if 'x.y' not in self.env:\n    self.skipTest('m')\nself.env['x.y']",
+            "if 'x.y' not in cls.env:\n    cls.skipTest(cls, 'm')\ncls.env['x.y']",
+            "if 'x.y' not in self.env:\n    return\nself.env['x.y']",
+            "if 'x.y' not in self.env.registry:\n    return\nself.env['x.y']",
+            "if not hasattr(self, 'f'):\n    raise E\nself.env['x.y']",
+            "if self.env['ir.module.module']._get('m').state != 'installed':\n    return\nself.env['x.y']",
+            "if self.env['ir.module.module']._get('m').state == 'uninstalled':\n    return\nself.env['x.y']",
+            "if self.env.get('x.y') is None:\n    return\nself.env['x.y']",
+            "if y or 'x.y' not in self.env:\n    return\nself.env['x.y']",
+            "if not (y and 'x.y' in self.env):\n    return\nself.env['x.y']",
+            "if 'x.y' not in self.env and 'f' not in self._fields:\n    return\nself.env['x.y']",
+        ] {
+            assert!(!looks_up(silent), "{silent}");
+        }
+        for reported in [
+            "if x:\n    self.skipTest('m')\nself.env['x.y']",
+            "if 'x.y' in self.env:\n    self.skipTest('m')\nself.env['x.y']",
+            "if 'x.y' in self.env:\n    return\nself.env['x.y']",
+            "if hasattr(self, 'f'):\n    return\nself.env['x.y']",
+            "if self.env['ir.module.module']._get('m').state == 'installed':\n    return\nself.env['x.y']",
+            "if y and 'x.y' not in self.env:\n    return\nself.env['x.y']",
+            "if y and 'x.y' in self.env:\n    return\nself.env['x.y']",
+            "if y or 'x.y' in self.env:\n    return\nself.env['x.y']",
+            "if 'x.y' not in self.env:\n    pass\nself.env['x.y']",
+            "if 'x.y' not in self.env:\n    self.other('m')\nself.env['x.y']",
+            "self.env['x.y']\nif 'x.y' not in self.env:\n    self.skipTest('m')",
+            "if a:\n    if 'x.y' not in self.env:\n        self.skipTest('m')\nself.env['x.y']",
+        ] {
+            assert!(looks_up(reported), "{reported}");
+        }
+    }
+
+    #[test]
+    fn a_try_guards_the_rest_when_it_looks_up_what_it_needs_and_every_handler_skips() {
+        for silent in [
+            "try:\n    self.env.ref('m.r')\nexcept ValueError:\n    self.skipTest('m')\nself.env['x.y']",
+            "try:\n    z = self.env[name]\nexcept KeyError:\n    self.skipTest('m')\nself.env['x.y']",
+            "try:\n    self.env.ref('m.r')\nexcept ValueError:\n    self.skipTest('m')\nexcept KeyError:\n    \
+             self.skipTest('n')\nself.env['x.y']",
+        ] {
+            assert!(!looks_up(silent), "{silent}");
+        }
+        for reported in [
+            "try:\n    a()\nexcept ValueError:\n    pass\nself.env['x.y']",
+            "try:\n    requests.get(url)\nexcept ConnectionError:\n    self.skipTest('m')\nself.env['x.y']",
+            "try:\n    self.env.ref('m.r')\nexcept ValueError:\n    b()\nexcept KeyError:\n    \
+             self.skipTest('m')\nself.env['x.y']",
+            "try:\n    self.env.ref('m.r')\nfinally:\n    b()\nself.env['x.y']",
+            "try:\n    self.env['x.y']\nexcept ValueError:\n    self.skipTest('m')",
+        ] {
+            assert!(looks_up(reported), "{reported}");
+        }
+    }
+
+    #[test]
+    fn a_value_that_holds_a_guard_guards_like_the_guard() {
+        for silent in [
+            "a = 'x.y' in self.env\nif a:\n    self.env['x.y']",
+            "a: bool = 'x.y' in self.env\nif a:\n    self.env['x.y']",
+            "a = 'x.y' in self.env\nb = a and y\nif b:\n    self.env['x.y']",
+            "a = 'x.y' in self.env\nif y and a:\n    self.env['x.y']",
+            "a = 'x.y' in self.env\nif not a:\n    return\nself.env['x.y']",
+            "a = 'x.y' not in self.env\nif a:\n    return\nself.env['x.y']",
+            "a = 'x.y' not in self.env\nif not a:\n    self.env['x.y']",
+            "a = 'x.y' not in self.env\nb = a or y\nif b:\n    return\nself.env['x.y']",
+            "a = self.env['ir.module.module']._get('m')\nif a.state != 'installed':\n    return\nself.env['x.y']",
+            "a = self.env['ir.module.module'].sudo()\nif a.search([('state', '=', 'installed')]):\n    self.env['x.y']",
+            "a = self.env['ir.module.module'].search([('state', '=', 'installed')])\nif a:\n    self.env['x.y']",
+            "a = self.env['ir.module.module']._installed()\nif 'm' in a:\n    self.env['x.y']",
+            "a = False\nif y:\n    a = 'x.y' in self.env\nif a:\n    self.env['x.y']",
+            "self.a = 'x.y' in self.env\nif self.a:\n    self.env['x.y']",
+            "self.a = 'x.y' not in self.env\nif self.a:\n    return\nself.env['x.y']",
+            "self.a = 'x.y' in self.env\nself.a = False\nif self.a:\n    self.env['x.y']",
+            "self.a = self.env['ir.module.module']._installed()\nif 'm' in self.a:\n    self.env['x.y']",
+            "b = 'x.y' in self.env\ncls.a = b\nif self.a:\n    self.env['x.y']",
+            "a = 'x.y' in self.env\ndef f():\n    if a:\n        self.env['x.y']",
+            "a = 'x.y' in self.env\nif a:\n    self.env['x.y']\na = y",
+            "a = 'x.y' in self.env\ndef f():\n    a = y\nif a:\n    self.env['x.y']",
+        ] {
+            assert!(!looks_up(silent), "{silent}");
+        }
+        for reported in [
+            "a = y\nif a:\n    self.env['x.y']",
+            "self.a = y\nif self.a:\n    self.env['x.y']",
+            "other.a = 'x.y' in self.env\nif other.a:\n    self.env['x.y']",
+            "a = 'x.y' in self.env\na = y\nif a:\n    self.env['x.y']",
+            "a = 'x.y' in self.env\na += 1\nif a:\n    self.env['x.y']",
+            "a = 'x.y' in self.env\na, b = y\nif a:\n    self.env['x.y']",
+            "a = 'x.y' in self.env\nfor a in y:\n    if a:\n        self.env['x.y']",
+            "a = y\nif a:\n    self.env['x.y']\na = 'x.y' in self.env",
+            "a = 'x.y' in self.env\nif self.a:\n    self.env['x.y']",
+            "self.a = 'x.y' in self.env\nif a:\n    self.env['x.y']",
+            "a = 'x.y' not in self.env\nif a:\n    self.env['x.y']",
+            "a = 'x.y' not in self.env\nif not a:\n    return\nself.env['x.y']",
+            "a = hasattr(self, 'f') or y\nif a:\n    self.env['x.y']",
+            "self.a = 'x.y' not in self.env\nif self.a:\n    self.env['x.y']",
+            "a = self.env['ir.module.module']._get('m')\nif a:\n    self.env['x.y']",
+            "a = self.env['ir.module.module'].search([('name', '=', 'm')])\nif a:\n    self.env['x.y']",
+            "a = self.env['ir.module.module']._get('m')\nif not a:\n    return\nself.env['x.y']",
+            "a = self.env['ir.module.module']._get('m')\nif 'm' in a:\n    self.env['x.y']",
+            "a = self.env['ir.module.module']._installed()\nif a:\n    self.env['x.y']",
+            "a = self.env['ir.module.module']._installed()\nif a.state == 'installed':\n    self.env['x.y']",
+            "a = self._fields.get(name)\nif a:\n    self.env['x.y']",
+            "a = self._fields.get(name)\nif not a:\n    raise E\nself.env['x.y']",
+            "a = [n for n in y if 'x.y' in self.env]\nif a:\n    self.env['x.y']",
+            "a = {'b': 'x.y' in self.env}\nif a:\n    self.env['x.y']",
+            "a = b('x.y' in self.env)\nif a:\n    self.env['x.y']",
+            "a = y if 'x.y' in self.env else z\nif a:\n    self.env['x.y']",
+            "def f():\n    a = 'x.y' in self.env\nif a:\n    self.env['x.y']",
+        ] {
+            assert!(looks_up(reported), "{reported}");
+        }
+    }
+
+    #[test]
+    fn a_holder_stays_in_its_scope() {
+        let reached = |src: &str| analyze(src, None).env_models.iter().any(|m| m.value == "x.y");
+        let across_methods = "class T:\n    def a(self):\n        self.f = 'x.y' in self.env\n    \
+                              def b(self):\n        if self.f:\n            self.env['x.y']\n";
+        assert!(!reached(across_methods));
+        let local = "class T:\n    def a(self):\n        f = 'x.y' in self.env\n    \
+                     def b(self, f):\n        if f:\n            self.env['x.y']\n";
+        assert!(reached(local));
+        let other_class = "class S:\n    def a(self):\n        self.f = 'x.y' in self.env\n\
+                           class T:\n    def b(self):\n        if self.f:\n            self.env['x.y']\n";
+        assert!(reached(other_class));
+        let nested_class = "class S:\n    class N:\n        def a(self):\n            self.f = 'x.y' in self.env\n    \
+                            def b(self):\n        if self.f:\n            self.env['x.y']\n";
+        assert!(reached(nested_class));
+        let outside_a_class = "def a(self):\n    self.f = 'x.y' in self.env\n\
+                               def b(self):\n    if self.f:\n        self.env['x.y']\n";
+        assert!(reached(outside_a_class));
+        let cleared_in_a_method = "class T:\n    def a(self):\n        self.f = 'x.y' in self.env\n    \
+                                   def b(self):\n        self.f = False\n    \
+                                   def c(self):\n        if self.f:\n            self.env['x.y']\n";
+        assert!(!reached(cleared_in_a_method));
     }
 
     #[test]
