@@ -47,3 +47,19 @@ class ResPartnerNames(models.Model):
 
     def _name_gone(self):
         return super()._name_gone()
+
+
+class ResPartnerDunders(models.Model):
+    _inherit = "res.partner"
+
+    def __init__(self, env, ids, prefetch_ids):
+        super().__init__(env, ids, prefetch_ids)
+
+    def __getitem__(self, key):
+        return super().__getitem__(key)
+
+    def __setattr__(self, name, value):
+        super().__setattr__(name, value)
+
+    def __nope__(self):
+        return super().__nope__()

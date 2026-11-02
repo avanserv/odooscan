@@ -194,8 +194,9 @@ pub(crate) const BASE_MODEL_METHODS: &[&str] = &[
 ];
 
 /// The other methods of `BaseModel` in 12.0 to 20.0, by `def` or class-level alias, read off each
-/// series: a button, a `<function>` or a `super()` call may name any. Dunders stay out, as does any
-/// other `__` name, which is mangled, so `getattr` never finds it. Apart from `BASE_MODEL_METHODS`,
+/// series: a button, a `<function>` or a `super()` call may name any. Dunders stay out because
+/// buttons read this list, so `BASE_MODEL_DUNDERS` holds them for `super()` alone. Any other `__`
+/// name stays out too: it is mangled, so `getattr` never finds it. Apart from `BASE_MODEL_METHODS`,
 /// which OD116 reads as the members a field must not replace in every series.
 const BASE_MODEL_EXTRA: &[&str] = &[
     "_add_fake_fields",
@@ -364,6 +365,49 @@ const BASE_MODEL_EXTRA: &[&str] = &[
     "user_has_groups",
     "view_header_get",
     "view_init",
+];
+
+/// The dunder methods `super()` finds at the end of the MRO: those of `BaseModel` in any of 9.0 to
+/// 20.0, read off each series, then those `object` adds. Data dunders such as `__slots__` stay out:
+/// they are not methods.
+const BASE_MODEL_DUNDERS: &[&str] = &[
+    "__add__",
+    "__and__",
+    "__bool__",
+    "__contains__",
+    "__deepcopy__",
+    "__delattr__",
+    "__dir__",
+    "__eq__",
+    "__format__",
+    "__ge__",
+    "__getattribute__",
+    "__getitem__",
+    "__getstate__",
+    "__gt__",
+    "__hash__",
+    "__init__",
+    "__init_subclass__",
+    "__int__",
+    "__iter__",
+    "__le__",
+    "__len__",
+    "__lt__",
+    "__ne__",
+    "__new__",
+    "__nonzero__",
+    "__or__",
+    "__reduce__",
+    "__reduce_ex__",
+    "__repr__",
+    "__reversed__",
+    "__setattr__",
+    "__setitem__",
+    "__sizeof__",
+    "__str__",
+    "__sub__",
+    "__subclasshook__",
+    "__unicode__",
 ];
 
 /// Series that decorate `BaseModel` with `@api.private`: a February 2025 backport reached 16.0 and
@@ -1875,14 +1919,15 @@ impl<'m> Index<'m> {
         Some(model)
     }
 
-    /// Whether `BaseModel` or a class other than `except`, of `model` or of a model it inherits by
-    /// `_inherit`, defines `method`. A parent it delegates to does not count, since `super()`
-    /// follows the class bases, which Odoo builds from `_inherit` and `base`. Modules outside the
-    /// scope count: an override of a method from a module that is not in depends is called only by
-    /// that module.
+    /// Whether `BaseModel`, `object` or a class other than `except`, of `model` or of a model it
+    /// inherits by `_inherit`, defines `method`. A parent it delegates to does not count, since
+    /// `super()` follows the class bases, which Odoo builds from `_inherit` and `base`. Modules
+    /// outside the scope count: an override of a method from a module that is not in depends is
+    /// called only by that module.
     pub fn has_parent_method(&self, model: &str, method: &str, except: &ClassFact) -> bool {
         BASE_MODEL_METHODS.contains(&method)
             || BASE_MODEL_EXTRA.contains(&method)
+            || BASE_MODEL_DUNDERS.contains(&method)
             || self
                 .chain_classes(model)
                 .iter()

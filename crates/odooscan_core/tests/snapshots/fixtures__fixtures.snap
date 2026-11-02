@@ -306,6 +306,7 @@ custom/legacy15/models/card.py:10:58: OD218 'country_id' has delegate=True, so i
 custom/legacy15/models/res_partner.py:9:22: OD212 Monetary field 'parent_balance' has no currency: res.partner has no currency_id, and the field names no currency_field
 custom/legacy15/models/res_partner.py:13:18: OD221 'child_ids.total' makes 'total' depend on itself on other records, so Odoo logs a warning; declare 'total' with recursive=True
 custom/legacy15/models/res_partner.py:49:24: OD211 no parent class of res.partner defines '_name_gone', so this super() call fails
+custom/legacy15/models/res_partner.py:65:24: OD211 no parent class of res.partner defines '__nope__', so this super() call fails
 custom/legacy15/security/rules.xml:4:36: OD210 'no_replaced': res.partner has no field 'no_replaced'
 custom/legacy15/security/second_writes.xml:2:5: OD323 XML id 'rule_partner_replaced' is already defined in security/rules.xml, and this definition writes the fields it names over it; remove the copy when the two say the same thing, or rename one when both are meant to exist
 custom/legacy16/models/gauge.py:7:5: OD226 _auto = False leaves legacy.gauge without a table, and nothing creates the view legacy_gauge; create it in init(), or drop _auto = False
