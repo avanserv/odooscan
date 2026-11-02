@@ -18,7 +18,8 @@ pub fn written(eval: &Spanned<String>) -> WrittenValue {
     let spanned = |value: String| Spanned { value, pos: eval.pos };
     let ids = |ids: Vec<String>| WrittenValue::Ids(ids.into_iter().map(spanned).collect());
     match parsed.expr() {
-        // An empty string clears the field, as Odoo validates only what is true.
+        // Below saas~19.3 an empty string clears a selection, as Odoo validates only what is true.
+        // From there Odoo validates it too, a refusal OD322 leaves unreported.
         Expr::StringLiteral(s) if s.value.is_empty() => WrittenValue::Opaque,
         Expr::StringLiteral(s) => WrittenValue::Text(spanned(s.value.to_str().to_owned())),
         Expr::List(list) => commands(&list.elts).map_or(WrittenValue::Opaque, ids),
