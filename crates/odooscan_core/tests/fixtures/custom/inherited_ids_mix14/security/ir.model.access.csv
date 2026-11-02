@@ -1,0 +1,3 @@
+id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
+access_inherited_b14_delegate,inherited.b14.delegate,model_inherited_b14_delegate,,1,0,0,0
+access_inherited_b14_host,inherited.b14.host,model_inherited_b14_host,,1,0,0,0

@@ -1,0 +1,6 @@
+id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
+access_inherited_b10_tagged,inherited.b10.tagged,model_inherited_b10_tagged,,1,0,0,0
+access_inherited_b10_plain,inherited.b10.plain,model_inherited_b10_plain,,1,0,0,0
+access_inherited_b10_child,inherited.b10.child,model_inherited_b10_child,,1,0,0,0
+access_inherited_b10_forwarded,inherited.b10.forwarded,model_inherited_b10_forwarded,,1,0,0,0
+access_inherited_b10_late,inherited.b10.late,model_inherited_b10_late,,1,0,0,0

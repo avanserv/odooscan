@@ -1,0 +1,11 @@
+<odoo>
+    <record id="introducer" model="inherited.b9.badged">
+        <field name="field_id" ref="field_inherited_b9_badged_badge"/>
+    </record>
+    <record id="extender" model="inherited.b9.badged">
+        <field name="field_id" ref="field_inherited_b9_host_badge"/>
+    </record>
+    <record id="extender_delegated" model="inherited.b9.badged">
+        <field name="field_id" ref="field_inherited_b9_host_gift"/>
+    </record>
+</odoo>

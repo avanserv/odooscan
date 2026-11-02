@@ -2416,14 +2416,24 @@ impl<'m> Ctx<'_, 'm> {
         }
     }
 
-    /// Whether `local` may name a field of an unread class of `owner`, a module in scope: the id
-    /// may exist, but the scan has no field to build it from.
+    /// Whether a class of `class`'s model, or a parent or delegate of it, is out of the scan's sight,
+    /// so the model may hold fields the index does not list.
+    fn unread_fields(&self, class: &ClassFact) -> bool {
+        class.unread
+            || self.index.unread_class(&class.model, self.scope)
+            || self.index.hidden_field_parents(&class.model, self.scope)
+            || self.index.unread_delegate(&class.model, self.scope)
+    }
+
+    /// Whether `local` may name a field of an unread class of `owner`, a module in scope, or one that
+    /// a class of `owner` gets from a parent the scan cannot read: the id may exist, but the scan has
+    /// no field to build it from.
     fn unread_field_id(&self, owner: &str, local: &str) -> bool {
         let Some(&mi) = self.index.by_name.get(owner).filter(|&&mi| self.scope.sees(mi)) else {
             return false;
         };
         let classes = self.index.modules[mi].python.iter().flat_map(|f| &f.facts.classes);
-        classes.filter(|c| c.unread).any(|c| {
+        classes.filter(|c| self.unread_fields(c)).any(|c| {
             let series = self.series.or(self.index.modules[mi].series);
             let mut prefixes = self.index.field_prefixes(&c.model, series).into_iter();
             prefixes.any(|p| local.starts_with(&p))

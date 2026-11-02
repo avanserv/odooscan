@@ -1,0 +1,4 @@
+id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
+access_inherited_bare_tagged,inherited.bare.tagged,model_inherited_bare_tagged,,1,0,0,0
+access_inherited_bare_plain,inherited.bare.plain,model_inherited_bare_plain,,1,0,0,0
+access_inherited_bare_child,inherited.bare.child,model_inherited_bare_child,,1,0,0,0

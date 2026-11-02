@@ -1,0 +1,14 @@
+<odoo>
+    <record id="outside_parent" model="inherited.outside.hosted">
+        <field name="field_id" ref="field_inherited_outside_hosted__tag"/>
+    </record>
+    <record id="other_model" model="inherited.outside.hosted">
+        <field name="field_id" ref="field_inherited_outside_plain__tag"/>
+    </record>
+    <record id="outside_base" model="inherited.outside.hosted">
+        <field name="field_id" ref="field_inherited_outside_based__tag"/>
+    </record>
+    <record id="unparsed_parent" model="inherited.outside.hosted">
+        <field name="field_id" ref="field_inherited_outside_hazed__tag"/>
+    </record>
+</odoo>

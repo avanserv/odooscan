@@ -1,0 +1,11 @@
+<odoo>
+    <record id="introducer" model="inherited.bare.tagged">
+        <field name="field_id" ref="field_inherited_bare_tagged__tag"/>
+    </record>
+    <record id="mixin_module" model="inherited.bare.tagged">
+        <field name="field_id" ref="inherited_ids_bare_mix.field_inherited_bare_tagged__tag"/>
+    </record>
+    <record id="unrelated_model" model="inherited.bare.tagged">
+        <field name="field_id" ref="field_inherited_bare_plain__tag"/>
+    </record>
+</odoo>
