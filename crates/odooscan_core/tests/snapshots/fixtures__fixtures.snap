@@ -857,6 +857,7 @@ custom/view_modifiers/views/extensions.xml:359:49: OD316 readonly names 'false':
 custom/view_modifiers/views/extensions.xml:396:49: OD316 readonly names 'true': modifier.ticket has no field 'true'
 custom/view_modifiers/views/extensions.xml:399:49: OD316 readonly names 'true': modifier.ticket has no field 'true'
 custom/view_modifiers/views/extensions.xml:493:49: OD316 readonly names 'true': modifier.ticket has no field 'true'
+custom/view_modifiers/views/extensions.xml:508:45: OD315 invalid invisible expression: Expected an expression
 custom/view_modifiers/views/tickets.xml:7:47: OD315 invalid invisible expression: Expected an expression
 custom/view_modifiers/views/tickets.xml:8:46: OD316 readonly names 'stat': modifier.ticket has no field 'stat'
 custom/view_modifiers/views/tickets.xml:9:46: OD315 invalid required expression: Odoo does not read this construct, such as a comprehension, a set or a lambda
