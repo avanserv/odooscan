@@ -1,0 +1,12 @@
+<odoo>
+    <function model="res.partner" name="create_workflow"/>
+    <function model="res.partner" name="import_data"/>
+    <function model="res.partner" name="create_workflo"/>
+
+    <record id="action_signal" model="ir.actions.server">
+        <field name="name">action_signal</field>
+        <field name="model_id" ref="base.model_res_partner"/>
+        <field name="state">code</field>
+        <field name="code">model.signal_workflow("go")</field>
+    </record>
+</odoo>

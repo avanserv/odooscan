@@ -1,0 +1,9 @@
+<odoo>
+    <function model="res.company" name="create_workflow"/>
+
+    <record id="cron_signal" model="ir.cron">
+        <field name="name">cron_signal</field>
+        <field name="model_id" ref="base.model_res_company"/>
+        <field name="code">model.signal_workflow("go")</field>
+    </record>
+</odoo>
