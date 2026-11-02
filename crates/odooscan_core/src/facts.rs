@@ -153,9 +153,10 @@ pub struct ClassFact {
     /// it names is unknown.
     pub inherits_unknown: bool,
     pub fields: Vec<FieldFact>,
-    /// Methods the class defines, the names it binds to a name, an attribute or a lambda, as Python
-    /// finds those as it finds a method, and `_check_company_domain`, `_table_query` and `_table_sql`
-    /// when it assigns them anything but a field.
+    /// Methods the class defines, in its body or under an `if`, `try` or `with` block, the names it
+    /// binds to a value that may be a method, as Python finds those as it finds a method, and,
+    /// in its body, `_check_company_domain`, `_table_query` and `_table_sql` when it assigns them
+    /// anything but a field.
     pub methods: Vec<String>,
     /// Methods of the class decorated with `@api.private`.
     pub private_methods: Vec<String>,

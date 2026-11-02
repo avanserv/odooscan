@@ -962,13 +962,13 @@ impl<'ast> PyVisitor<'_, 'ast> {
                 );
                 self.sql_constraints(value, fact);
             }
-            _ => self.unnamed_attr(target, value, fact),
+            _ => self.value_attr(target, value, fact),
         }
     }
 
     /// A class attribute whose name means nothing to Odoo: its value tells a constraint or an index
     /// from an alias of a method and from a field.
-    fn unnamed_attr(&mut self, target: &ast::ExprName, value: &Expr, fact: &mut ClassFact) {
+    fn value_attr(&mut self, target: &ast::ExprName, value: &Expr, fact: &mut ClassFact) {
         if is_table_object(value) {
             if let Some(definition) = value.as_call_expr().and_then(|c| c.arguments.args.first()) {
                 self.definition(DefinitionSource::TableObject, definition, fact);
@@ -2032,15 +2032,15 @@ mod tests {
 
     #[test]
     fn reads_the_method_names_of_conditional_blocks() {
-        let body = "    if a:\n        def in_if(self):\n            pass\n\
-                    \x20   elif b:\n        def in_elif(self):\n            pass\n\
-                    \x20   else:\n        def in_else(self):\n            pass\n\
-                    \x20   try:\n        def in_try(self):\n            pass\n\
-                    \x20   except E:\n        def in_except(self):\n            pass\n\
-                    \x20   else:\n        def in_try_else(self):\n            pass\n\
-                    \x20   finally:\n        def in_finally(self):\n            pass\n\
-                    \x20   with c:\n        if d:\n            def in_with(self):\n                pass\n\
-                    \x20   if e:\n        alias: int = partialmethod(_set)\n        data = 3\n";
+        let body = "    if a:\n        def in_if(self):\n            pass\n    \
+                    elif b:\n        def in_elif(self):\n            pass\n    \
+                    else:\n        def in_else(self):\n            pass\n    \
+                    try:\n        def in_try(self):\n            pass\n    \
+                    except E:\n        def in_except(self):\n            pass\n    \
+                    else:\n        def in_try_else(self):\n            pass\n    \
+                    finally:\n        def in_finally(self):\n            pass\n    \
+                    with c:\n        if d:\n            def in_with(self):\n                pass\n    \
+                    if e:\n        alias: int = partialmethod(_set)\n        data = 3\n";
         assert_eq!(
             method_names(body),
             [
@@ -2060,9 +2060,9 @@ mod tests {
     #[test]
     fn reads_only_the_name_of_what_a_conditional_block_binds() {
         let facts = analyze(
-            "class X(models.Model):\n    _name = 'x'\n    if a:\n        state = fields.Char()\n\
-             \x20       def name_get(self):\n            return super().unlink()\n\
-             \x20       @api.private\n        def _hidden(self):\n            pass\n",
+            "class X(models.Model):\n    _name = 'x'\n    if a:\n        state = fields.Char()\n        \
+             def name_get(self):\n            return super().unlink()\n        \
+             @api.private\n        def _hidden(self):\n            pass\n",
             None,
         );
         let class = &facts.classes[0];
