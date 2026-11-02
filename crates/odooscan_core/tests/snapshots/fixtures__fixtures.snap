@@ -406,6 +406,25 @@ custom/modern20/security/ir.access.csv:2:1: OD210 'no_csv_name': modern.lamp has
 custom/modifiers17/views/jobs.xml:7:47: OD317 invisible reads field 'state', which the view does not show
 custom/modifiers17/views/jobs.xml:54:47: OD317 invisible reads field 'note', which the view does not show
 custom/modifiers17/views/jobs.xml:76:51: OD317 invisible reads field 'phase', which the view does not show
+custom/modifiers17/views/jobs.xml:90:55: OD317 invisible reads field 'state', which the view does not show
+custom/modifiers17/views/jobs.xml:138:55: OD317 invisible reads field 'phase', which the view does not show
+custom/modifiers17/views/jobs.xml:151:51: OD317 invisible reads field 'phase', which the view does not show
+custom/modifiers17/views/jobs.xml:179:51: OD317 invisible reads field 'phase', which the view does not show
+custom/modifiers17/views/jobs.xml:221:63: OD317 invisible reads field 'note', which the view does not show
+custom/modifiers17/views/jobs.xml:225:63: OD317 invisible reads field 'user_id', which the view does not show
+custom/modifiers17/views/jobs.xml:239:47: OD317 invisible reads field 'note', which the view does not show
+custom/modifiers17/views/jobs.xml:242:55: OD317 invisible reads field 'phase', which the view does not show
+custom/modifiers17/views/jobs.xml:256:55: OD317 invisible reads field 'phase', which the view does not show
+custom/modifiers17/views/jobs.xml:271:55: OD317 invisible reads field 'phase', which the view does not show
+custom/modifiers17/views/jobs.xml:276:55: OD317 invisible reads field 'phase', which the view does not show
+custom/modifiers17/views/jobs.xml:281:55: OD317 invisible reads field 'phase', which the view does not show
+custom/modifiers17/views/jobs.xml:295:55: OD317 invisible reads field 'phase', which the view does not show
+custom/modifiers17/views/jobs.xml:314:44: OD317 readonly reads field 'start', which the view does not show
+custom/modifiers17/views/jobs.xml:317:44: OD317 required reads field 'start', which the view does not show
+custom/modifiers17/views/jobs.xml:346:55: OD317 invisible reads field 'phase', which the view does not show
+custom/modifiers17/views/jobs.xml:349:63: OD317 invisible reads field 'phase', which the view does not show
+custom/modifiers17/views/jobs.xml:364:47: OD317 invisible reads field 'phase', which the view does not show
+custom/modifiers17/views/jobs.xml:368:47: OD317 invisible reads field 'phase', which the view does not show
 custom/modifiers17/views/unlisted.xml:1:1: OD502 'views/unlisted.xml' is not in the manifest's data or demo, so Odoo never loads it
 custom/modifiers173/views/tasks.xml:8:47: OD316 invisible names 'active_id': modifier.task has no field 'active_id'
 custom/orm_overrides/models/caches.py:7:21: OD120 'lang' in an ormcache key is not a parameter of _greeting_for(), so every call raises NameError; key on a parameter or on self

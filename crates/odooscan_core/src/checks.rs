@@ -6,9 +6,10 @@ use std::rc::Rc;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::facts::{
-    ActionFact, ActionValue, Annotation, ArchElement, ArchModifier, ClassFact, DataFacts, DefinitionSource, DomainFact,
-    FieldFact, FieldWrite, FunctionCall, JsFacts, JsName, ModelKind, OptionValue, OrmCall, Pos, RawDiag, RecordFact,
-    RecordWrite, ReportFact, RuleFact, ServerFact, Spanned, SqlColumn, SqlView, ViewFact, WrittenValue, XmlRef,
+    ActionFact, ActionValue, Annotation, ArchElement, ArchModifier, ArchSubview, ClassFact, DataFacts,
+    DefinitionSource, DomainFact, FieldFact, FieldWrite, FunctionCall, JsFacts, JsName, ModelKind, OptionValue,
+    OrmCall, Pos, RawDiag, RecordFact, RecordWrite, ReportFact, RuleFact, ServerFact, Spanned, SqlColumn, SqlView,
+    ViewFact, WrittenValue, XmlRef,
 };
 use crate::index::{
     BASE_MODEL_METHODS, Export, FieldDef, FieldInfo, Index, JsSpec, RELATIONAL_TYPES, Scope, Status, ViewTree,
@@ -39,6 +40,11 @@ const ACTIVE_NAMES_UNTIL: Series = Series { major: 17, minor: 1 };
 /// View types whose arch elements list every field the view has. The others also take fields from
 /// attributes, as a calendar does from `date_start`.
 const VIEW_FIELD_KINDS: &[&str] = &["form", "tree", "kanban"];
+
+/// The one subview with fields its `<field>` elements do not list: Odoo checks a graph on those alone
+/// (`odoo/addons/base/models/ir_ui_view.py:1407` on 17.0), and any tag it does not nest (`:1473`) on
+/// the outer view.
+const ATTRIBUTE_SUBVIEW: &str = "calendar";
 
 /// View types Odoo generates for any model. `activity` is `BaseModel`'s in 12.0, which no scan
 /// indexes, and `mail`'s after it.
@@ -93,6 +99,10 @@ struct ModifierName<'a> {
     name: &'a str,
     owner: String,
     field: &'a str,
+    /// The subview steps left after each `parent.`: the level whose fields Odoo checks the name on.
+    level: Vec<String>,
+    /// The subviews the modifier's own arch shows, which take precedence over `ViewTree::subviews`.
+    arch_subviews: &'a [ArchSubview],
     /// The field a spec locates to open the enclosing subview, which may match in any subview.
     locator: Option<&'a str>,
 }
@@ -2107,7 +2117,7 @@ impl<'m> Ctx<'_, 'm> {
         name: &'a str,
     ) -> Option<ModifierName<'a>> {
         self.arch_model(model, &m.path)?;
-        let mut steps: Vec<String> = m.path.iter().filter(|s| !s.starts_with(LOCATOR)).cloned().collect();
+        let mut steps: Vec<String> = subview_steps(&m.path).cloned().collect();
         let mut field = name;
         while let Some(rest) = field.strip_prefix("parent.") {
             steps.pop()?;
@@ -2123,6 +2133,8 @@ impl<'m> Ctx<'_, 'm> {
             name,
             owner,
             field,
+            level: steps,
+            arch_subviews: &m.subviews,
             locator: spec_locator(&m.path),
         })
     }
@@ -2193,7 +2205,7 @@ impl<'m> Ctx<'_, 'm> {
         Some(
             tree.subviews
                 .iter()
-                .any(|subview| self.arch_model(model, subview).is_none_or(has)),
+                .any(|subview| self.arch_model(model, &subview.path).is_none_or(has)),
         )
     }
 
@@ -2218,7 +2230,8 @@ impl<'m> Ctx<'_, 'm> {
             };
             tree.visible.contains(&element) || tree.hidden.contains_key(&element)
         });
-        (!shown).then(|| format!("{} reads field '{}', which the view does not show", n.attr, n.field))
+        (!shown && !takes_attribute_field(tree, n))
+            .then(|| format!("{} reads field '{}', which the view does not show", n.attr, n.field))
     }
 
     /// Whether the view renders on the server. The tree's root decides, since a kanban arch runs
@@ -2304,6 +2317,26 @@ impl<'m> Ctx<'_, 'm> {
                 ),
             }
         }
+    }
+}
+
+/// The x2many fields of an arch position, without the locators a spec leaves in it.
+fn subview_steps(path: &[String]) -> impl Iterator<Item = &String> {
+    path.iter().filter(|s| !s.starts_with(LOCATOR))
+}
+
+/// Whether the subview the name lands on loads that field itself. Odoo checks each subview apart
+/// (`odoo/addons/base/models/ir_ui_view.py:1473` on 17.0), so this counts only on its own level. The
+/// subview the arch shows there decides, or for a calendar an xpath only names, the calendars of the
+/// tree. A spec that reaches in unnamed may land in any subview of the level, so all must load it.
+fn takes_attribute_field(tree: &ViewTree, n: &ModifierName) -> bool {
+    let at_level = |s: &&ArchSubview| subview_steps(&s.path).eq(&n.level);
+    let loads = |s: &ArchSubview| s.attribute_fields.iter().any(|field| field == n.field);
+    let mut subviews = tree.subviews.iter().copied().filter(at_level).peekable();
+    match n.arch_subviews.iter().rev().find(at_level) {
+        Some(shown) if shown.tag == ATTRIBUTE_SUBVIEW && shown.attribute_fields.is_empty() => subviews.any(loads),
+        Some(shown) => loads(shown),
+        None => subviews.peek().is_some() && subviews.all(loads),
     }
 }
 

@@ -414,8 +414,21 @@ pub struct ArchButton {
 #[derive(Debug)]
 pub struct ArchModifier {
     pub path: Vec<String>,
+    /// The subviews its own arch shows around it, innermost last: those the arch opens and those an
+    /// xpath names on its way in.
+    pub subviews: Vec<ArchSubview>,
     pub attr: &'static str,
     pub value: Spanned<String>,
+}
+
+/// A subview at its arch position: opened inline, on a `<groupby>` or inside a field a spec locates,
+/// which keeps the locator in its `path`, or only named by an xpath, whose arch lacks its content.
+#[derive(Clone, Debug)]
+pub struct ArchSubview {
+    pub path: Vec<String>,
+    pub tag: String,
+    /// The fields it loads without showing them in a `<field>`.
+    pub attribute_fields: Vec<String>,
 }
 
 #[derive(Debug, Default)]
@@ -433,9 +446,7 @@ pub struct ViewFact {
     pub domains: Vec<ArchDomain>,
     pub buttons: Vec<ArchButton>,
     pub modifiers: Vec<ArchModifier>,
-    /// The arch position of each subview the arch opens: inline, on a `<groupby>`, or inside a field
-    /// a spec locates, which keeps the locator in its path.
-    pub subviews: Vec<Vec<String>>,
+    pub subviews: Vec<ArchSubview>,
     /// Literal targets of `t-call`, in the arch or set by an `<attribute>` spec.
     pub calls: Vec<Spanned<String>>,
     /// The view's type, as its `type` field or the root of its arch says. A root that Odoo does not
