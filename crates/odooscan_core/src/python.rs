@@ -1068,6 +1068,7 @@ pub fn analyze_with(src: &str, series: Option<Series>, known: &FieldClasses) -> 
         known,
         facts: PyFacts::default(),
         kinds: FxHashMap::default(),
+        fieldless: fieldless_classes(body),
         guarded: 0,
         holders: GuardHolders::default(),
         class_models: vec![],
@@ -1187,6 +1188,85 @@ fn may_reach_orm(class: &ast::StmtClassDef) -> bool {
         .any(|base| !matches!(base, Expr::Name(n) if n.id.as_str() == "object"))
 }
 
+/// The names a statement of the module binds. It stops at a function or a class, whose body binds
+/// names of its own.
+#[derive(Default)]
+struct BoundNames<'a>(Vec<&'a str>);
+
+impl<'a> Visitor<'a> for BoundNames<'a> {
+    fn visit_stmt(&mut self, stmt: &'a Stmt) {
+        match stmt {
+            Stmt::ClassDef(class) => self.0.push(class.name.as_str()),
+            Stmt::FunctionDef(func) => self.0.push(func.name.as_str()),
+            Stmt::Import(import) => self.aliases(&import.names),
+            Stmt::ImportFrom(import) => self.aliases(&import.names),
+            _ => visitor::walk_stmt(self, stmt),
+        }
+    }
+
+    fn visit_expr(&mut self, expr: &'a Expr) {
+        if let Expr::Name(name) = expr
+            && name.ctx.is_store()
+        {
+            self.0.push(name.id.as_str());
+        }
+        visitor::walk_expr(self, expr);
+    }
+}
+
+impl<'a> BoundNames<'a> {
+    fn aliases(&mut self, aliases: &'a [ast::Alias]) {
+        for alias in aliases {
+            let name = alias.asname.as_ref().unwrap_or(&alias.name);
+            self.0.push(name.as_str().split('.').next().unwrap_or_default());
+        }
+    }
+}
+
+/// Where each class that can give a subclass no field ends, by name. Only a class at the top of the
+/// file counts, and only until something rebinds its name: a fallback beside an import names a
+/// class the file cannot tell.
+fn fieldless_classes(body: &[Stmt]) -> FxHashMap<&str, TextSize> {
+    let mut classes = FxHashMap::default();
+    for stmt in body {
+        let mut bound = BoundNames::default();
+        bound.visit_stmt(stmt);
+        for name in bound.0 {
+            classes.remove(name);
+        }
+        if let Stmt::ClassDef(class) = stmt
+            && holds_no_field(class)
+        {
+            classes.insert(class.name.as_str(), class.end());
+        }
+    }
+    classes
+}
+
+/// Whether a class can give a subclass no field: no base but `object` to get one from, nothing that
+/// runs on creating it, and a body of methods and literals. Any other value may be a field, of a
+/// class the index does not know, and a `_name` or an `_inherit` passes on to the subclass.
+fn holds_no_field(class: &ast::StmtClassDef) -> bool {
+    let plain = !may_reach_orm(class) && class.decorator_list.is_empty() && !declares_model(class);
+    plain && class.arguments.as_ref().is_none_or(|a| a.keywords.is_empty()) && class.body.iter().all(no_field_stmt)
+}
+
+fn no_field_stmt(stmt: &Stmt) -> bool {
+    match stmt {
+        Stmt::FunctionDef(_) | Stmt::Pass(_) | Stmt::AnnAssign(ast::StmtAnnAssign { value: None, .. }) => true,
+        Stmt::Expr(e) => matches!(*e.value, Expr::StringLiteral(_) | Expr::EllipsisLiteral(_)),
+        _ => assigned(stmt).is_some_and(|(_, value)| literal(value)),
+    }
+}
+
+fn literal(value: &Expr) -> bool {
+    match value {
+        Expr::Tuple(t) => t.elts.iter().all(literal),
+        Expr::List(l) => l.elts.iter().all(literal),
+        _ => value.is_literal_expr(),
+    }
+}
+
 /// The name Odoo gives a class without `_name` from saas~18.1: a dot before each ASCII capital that
 /// follows a character other than `_`, then lowercased, so `ResPartner` names `res.partner`.
 fn dotted(class_name: &str) -> String {
@@ -1209,6 +1289,8 @@ struct PyVisitor<'a, 'ast> {
     facts: PyFacts,
     /// Model classes of the file by Python class name.
     kinds: FxHashMap<String, ModelKind>,
+    /// What `fieldless_classes` reads of the file.
+    fieldless: FxHashMap<&'ast str, TextSize>,
     /// Depth of code that runs only once a guard has passed.
     guarded: u32,
     /// The holders of a guard in reach: the outermost enclosing function's, the innermost class's.
@@ -1260,6 +1342,14 @@ impl<'ast> PyVisitor<'_, 'ast> {
             self.kinds.insert(class.name.to_string(), kind);
         }
         let mut naming = Naming::default();
+        let plain_bases: Vec<String> = class
+            .bases()
+            .iter()
+            .filter(|b| tail_name(b).and_then(orm_kind).is_none())
+            .map(|b| b.as_name_expr().map_or("", |n| n.id.as_str()).to_owned())
+            .collect();
+        let above = |base: &str| self.fieldless.get(base).is_some_and(|end| *end <= class.start());
+        let field_bases = plain_bases.iter().filter(|base| !above(base)).cloned().collect();
         let mut fact = ClassFact {
             pos: self.loc.at(&class.name),
             class_name: class.name.to_string(),
@@ -1288,12 +1378,8 @@ impl<'ast> PyVisitor<'_, 'ast> {
             views: vec![],
             own_view: false,
             definitions: vec![],
-            plain_bases: class
-                .bases()
-                .iter()
-                .filter(|b| tail_name(b).and_then(orm_kind).is_none())
-                .map(|b| b.as_name_expr().map_or("", |n| n.id.as_str()).to_owned())
-                .collect(),
+            plain_bases,
+            field_bases,
         };
         for stmt in &class.body {
             if let Some((targets, value)) = assigned(stmt) {
@@ -3280,6 +3366,55 @@ mod tests {
             None,
         );
         assert_eq!(facts.classes[0].plain_bases, ["Layout", "", ""]);
+    }
+
+    #[test]
+    fn keeps_a_class_of_the_file_that_holds_no_field_from_the_field_bases() {
+        let class = "class X(models.Model, Layout):\n    _name = 'x'\n";
+        for layout in [
+            "class Layout:\n    pass\n",
+            "class Layout(object):\n    \"\"\"Doc.\"\"\"\n    __slots__ = ()\n    kind: str\n    def a(self):\n        pass\n",
+            "class Layout:\n    ...\n",
+            "class Layout:\n    pass\nclass Layout:\n    size = 1\n",
+        ] {
+            let facts = analyze(&format!("{layout}{class}"), None);
+            assert_eq!(facts.classes[0].plain_bases, ["Layout"], "{layout}");
+            assert!(facts.classes[0].field_bases.is_empty(), "{layout}");
+        }
+    }
+
+    #[test]
+    fn keeps_a_plain_base_that_may_hold_a_field_in_the_field_bases() {
+        let class = "class X(models.Model, Layout):\n    _name = 'x'\n";
+        for layout in [
+            "",
+            "from .mixins import Layout\n",
+            "class Layout:\n    name = fields.Char()\n",
+            "class Layout:\n    name = MADE\n",
+            "class Layout:\n    if MADE:\n        name = fields.Char()\n",
+            "class Layout:\n    _columns = {'name': MADE}\n",
+            "class Layout:\n    _inherit = 'res.partner'\n",
+            "class Layout(Other):\n    pass\n",
+            "class Layout(metaclass=Made):\n    pass\n",
+            "@made\nclass Layout:\n    pass\n",
+            "if MADE:\n    class Layout:\n        pass\n",
+            "try:\n    from .mixins import Layout\nexcept ImportError:\n    class Layout:\n        pass\n",
+            "class Layout:\n    pass\nfrom .mixins import Layout\n",
+            "class Layout:\n    pass\nLayout = make(Layout)\n",
+            "class Layout:\n    pass\nclass Layout:\n    name = fields.Char()\n",
+        ] {
+            let facts = analyze(&format!("{layout}{class}"), None);
+            assert_eq!(facts.classes.last().unwrap().field_bases, ["Layout"], "{layout}");
+        }
+    }
+
+    #[test]
+    fn reads_a_class_of_the_file_below_the_class_as_a_field_base() {
+        let facts = analyze(
+            "class X(models.Model, Layout):\n    _name = 'x'\nclass Layout:\n    pass\n",
+            None,
+        );
+        assert_eq!(facts.classes[0].field_bases, ["Layout"]);
     }
 
     #[test]

@@ -1885,11 +1885,17 @@ impl<'m> Index<'m> {
     }
 
     /// Whether a class in scope of `model`, or of a model it inherits or delegates to, may get fields
-    /// from a parent the scan cannot read. Unlike `hidden_parents`, a Python base defined above the
-    /// class in its file that is another class of the chain counts as read: mixins subclass each
-    /// other along their `_inherit`, and Odoo merges that class's fields either way. Every chain
-    /// holds `base`, so its classes prove nothing.
+    /// from a parent the scan cannot read.
     pub fn hidden_field_parents(&self, model: &str, scope: &Scope) -> bool {
+        self.unread_bases(model, scope, |c| &c.field_bases)
+    }
+
+    /// Whether a class of the chain of `model` has a non-literal `_inherit` element or one of the
+    /// `bases` the scan does not read. Unlike `hidden_parents`, a Python base defined above the class
+    /// in its file that is another class of the chain counts as read: mixins subclass each other
+    /// along their `_inherit`, and Odoo merges that class's fields either way. Every chain holds
+    /// `base`, so its classes prove nothing.
+    fn unread_bases(&self, model: &str, scope: &Scope, bases: impl Fn(&ClassFact) -> &[String]) -> bool {
         let chain = self.chain(model, Some(scope), true);
         let read = |mi: usize, class: &ClassFact, base: &str| {
             self.class_above(mi, class, base).is_some_and(|above| {
@@ -1898,7 +1904,7 @@ impl<'m> Index<'m> {
         };
         chain
             .iter()
-            .any(|&(mi, c)| c.inherit_unknown || c.plain_bases.iter().any(|base| !read(mi, c, base)))
+            .any(|&(mi, c)| c.inherit_unknown || bases(c).iter().any(|base| !read(mi, c, base)))
     }
 
     /// The class `name` holds where `class` is defined, when its own file defines it above. The
@@ -1930,10 +1936,16 @@ impl<'m> Index<'m> {
         })
     }
 
-    /// Whether `module` introduces `model` and holds all of it: every class in scope of `model` and of
-    /// the models it inherits or delegates to, and every parent they name. `base` is in every chain,
-    /// so as a parent it proves nothing.
+    /// What `holds_fields` asks, and no plain base the scan does not read, which may hold methods
+    /// whatever its fields.
     pub fn holds_model(&self, module: usize, model: &str, scope: &Scope) -> bool {
+        self.holds_fields(module, model, scope) && !self.unread_bases(model, scope, |c| &c.plain_bases)
+    }
+
+    /// Whether `module` introduces `model` and holds all its fields: every class in scope of `model`
+    /// and of the models it inherits or delegates to, and every parent they name. `base` is in every
+    /// chain, so as a parent it proves nothing.
+    pub fn holds_fields(&self, module: usize, model: &str, scope: &Scope) -> bool {
         let introduces = |m: &str| m == "base" || self.classes(m).iter().any(|(mi, c)| *mi == module && c.new_model);
         let chain = self.chain(model, Some(scope), true);
         model != "base"

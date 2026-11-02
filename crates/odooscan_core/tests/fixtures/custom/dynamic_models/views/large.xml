@@ -3,16 +3,41 @@
         <field name="name">bad.generated.large.form</field>
         <field name="model">bad.generated.large</field>
         <field name="arch" type="xml">
-            <form/>
+            <form>
+                <field name="name"/>
+                <field name="scale"/>
+            </form>
         </field>
     </record>
 
     <record id="action_generated_large" model="ir.actions.act_window">
         <field name="name">Large</field>
         <field name="res_model">bad.generated.large</field>
+        <field name="domain">[('scale', '=', 1)]</field>
     </record>
 
     <record id="generated_large_first" model="bad.generated.large">
         <field name="name">First</field>
+    </record>
+
+    <record id="generated_huge_form" model="ir.ui.view">
+        <field name="name">bad.generated.huge.form</field>
+        <field name="model">bad.generated.huge</field>
+        <field name="arch" type="xml">
+            <form>
+                <field name="name"/>
+            </form>
+        </field>
+    </record>
+
+    <record id="generated_user_scale" model="ir.ui.view">
+        <field name="name">bad.generated.user.form</field>
+        <field name="model">bad.generated.user</field>
+        <field name="arch" type="xml">
+            <form>
+                <field name="large_id"/>
+                <field name="scale"/>
+            </form>
+        </field>
     </record>
 </odoo>

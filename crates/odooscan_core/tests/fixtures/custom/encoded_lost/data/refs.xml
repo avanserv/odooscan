@@ -10,6 +10,7 @@
         <field name="arch" type="xml">
             <form>
                 <field name="code"/>
+                <field name="x_lost"/>
             </form>
         </field>
     </record>
