@@ -1,0 +1,7 @@
+<odoo>
+    <record id="cron_ledger" model="ir.cron">
+        <field name="name">cron_ledger</field>
+        <field name="model_id" ref="model_legacy_ledger"/>
+        <field name="code">model._post_legacy()</field>
+    </record>
+</odoo>

@@ -6,8 +6,8 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::facts::{
     ActionFact, ActionValue, Annotation, ArchElement, ArchModifier, ClassFact, DefinitionSource, DomainFact, FieldFact,
-    FunctionCall, JsFacts, JsName, ModelKind, OptionValue, OrmCall, Pos, RawDiag, RecordFact, RuleFact, Spanned,
-    SqlColumn, SqlView, ViewFact, XmlRef,
+    FunctionCall, JsFacts, JsName, ModelKind, OptionValue, OrmCall, Pos, RawDiag, RecordFact, RuleFact, ServerFact,
+    Spanned, SqlColumn, SqlView, ViewFact, XmlRef,
 };
 use crate::index::{
     BASE_MODEL_METHODS, Export, FieldDef, FieldInfo, Index, JsSpec, RELATIONAL_TYPES, Scope, Status, ViewTree, full_id,
@@ -103,6 +103,7 @@ pub fn check_module<'m>(index: &Index<'m>, mi: usize, series: Option<Series>) ->
     cache_key_names(module, series, &mut out);
     import_patches(index, module, &mut out);
     global_writes(index, mi, series, &mut out);
+    refused_server_code(module, &mut out);
     for (_, file) in es_modules(index, mi, series) {
         if let Some(e) = &file.facts.syntax_error {
             out.push(&file.path, "OD000", e.pos, e.value.clone());
@@ -173,6 +174,17 @@ fn global_writes<'m>(index: &Index<'m>, mi: usize, series: Option<Series>, out: 
                 );
                 out.push(&file.path, "OD402", row.pos, message);
             }
+        }
+    }
+}
+
+/// OD319 on the code of what the manifest loads. Only a loaded record reaches the constraint that
+/// compiles it, and compiling needs no index, so this runs without base.
+fn refused_server_code<'m>(module: &'m Module, out: &mut Out<'m>) {
+    for file in module.data.iter().filter(|f| f.rank.is_some()) {
+        for refused in file.facts.servers.iter().filter_map(|s| s.refused.as_ref()) {
+            let message = format!("Odoo refuses this code when it loads the record: {}", refused.value);
+            out.push(&file.path, "OD319", refused.pos, message);
         }
     }
 }
@@ -1044,6 +1056,9 @@ impl<'m> Ctx<'_, 'm> {
             for rule in &file.facts.rules {
                 self.rule_domain(out, path, rule);
             }
+            for server in &file.facts.servers {
+                self.server_code(out, path, server);
+            }
             self.domains(out, path, &file.facts.action_domains);
             self.actions(out, path, &file.facts.actions);
         }
@@ -1098,14 +1113,48 @@ impl<'m> Ctx<'_, 'm> {
             .iter()
             .rev()
             .find(|(_, r)| !matches!(r.model, ActionValue::Unset))?;
-        let ActionValue::Literal(model) = &rule.model else {
+        self.written_model(*mi, &rule.model, rule.by_name)
+    }
+
+    /// The model a `model_id` written by the module `mi` names.
+    fn written_model(&self, mi: usize, model: &'m ActionValue, by_name: bool) -> Option<&'m str> {
+        let ActionValue::Literal(model) = model else {
             return None;
         };
-        if rule.by_name {
+        if by_name {
             return Some(&model.value);
         }
         self.index
-            .model_of_xmlid(&full_id(&self.index.modules[*mi].name, &model.value))
+            .model_of_xmlid(&full_id(&self.index.modules[mi].name, &model.value))
+    }
+
+    /// Checks the calls `server` makes, if the record still holds that code and runs it. Each field
+    /// holds the last value `scope` gave it: what a module depending on this one replaces later does
+    /// not mend a database without that module. A cron runs code without saying so.
+    fn server_code(&self, out: &mut Out<'m>, path: &'m Path, server: &'m ServerFact) {
+        if server.calls.is_empty() {
+            return;
+        }
+        let own = [(self.index.by_name[self.module.name.as_str()], server)];
+        let id = server.id.as_ref().map(|id| full_id(&self.module.name, id));
+        let writes = id.and_then(|id| self.index.server_writes.get(&id));
+        let writes = writes.map_or(&own[..], Vec::as_slice);
+        let last = || writes.iter().rev().filter(|(mi, _)| self.scope.sees(*mi));
+        let holds = last()
+            .find(|(_, s)| s.writes_code)
+            .is_some_and(|(_, s)| std::ptr::eq(*s, server));
+        let runs = last().find_map(|(_, s)| s.state).unwrap_or(server.cron);
+        let model = last()
+            .find(|(_, s)| !matches!(s.model, ActionValue::Unset))
+            .and_then(|(mi, s)| self.written_model(*mi, &s.model, s.by_name));
+        let Some(model) = model.filter(|_| holds && runs) else {
+            return;
+        };
+        for call in &server.calls {
+            if let Some(message) = self.method_gap(model, &call.value) {
+                out.push(path, "OD320", call.pos, message);
+            }
+        }
     }
 
     fn actions(&self, out: &mut Out<'m>, path: &'m Path, actions: &'m [ActionFact]) {

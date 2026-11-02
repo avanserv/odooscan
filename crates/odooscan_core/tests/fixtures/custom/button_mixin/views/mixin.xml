@@ -38,4 +38,16 @@
         <field name="model_id" ref="model_button_ghosted"/>
         <field name="domain_force">[('no_unindexed_parent', '=', 1)]</field>
     </record>
+
+    <record id="cron_plain" model="ir.cron">
+        <field name="name">cron_plain</field>
+        <field name="model_id" ref="model_button_plain"/>
+        <field name="code">model.action_hook()</field>
+    </record>
+
+    <record id="cron_ghosted" model="ir.cron">
+        <field name="name">cron_ghosted</field>
+        <field name="model_id" ref="model_button_ghosted"/>
+        <field name="code">model.action_ghost()</field>
+    </record>
 </odoo>

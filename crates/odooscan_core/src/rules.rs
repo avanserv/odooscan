@@ -167,6 +167,8 @@ rules! {
     // (`:1156`).
     "OD317" "modifier-field-not-in-view" Correctness Error Some(">=17.0,<saas~17.3"), true, "A view modifier reads a field the view does not show.";
     "OD318" "view-mode-without-view" Correctness Error None, true, "A window action lists a view type its model has no view for.";
+    "OD319" "python-field-syntax-error" Correctness Error None, false, "The code of a server action or a cron is not Python that Odoo compiles.";
+    "OD320" "unknown-server-code-method" Correctness Error None, true, "The code of a server action or a cron calls a method its model does not have.";
     "OD401" "model-without-access" Security Warning None, true, "A new model has no ir.model.access rule.";
     "OD402" "public-write-access" Security Warning None, false, "An access row gives public or portal users write, create or unlink, through their group or no group.";
     "OD501" "manifest-data-missing" Correctness Error None, false, "A file listed in the manifest does not exist.";

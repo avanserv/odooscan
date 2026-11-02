@@ -6,8 +6,9 @@ use roxmltree::{Document, Node, ParsingOptions};
 use crate::domain;
 use crate::facts::{
     AccessRow, ActionFact, ActionValue, ArchButton, ArchDomain, ArchElement, ArchField, ArchModifier, DataFacts,
-    DomainFact, FunctionCall, Lines, Pos, RawDiag, RecordFact, RuleFact, Spanned, ViewFact, XmlDef, XmlRef,
+    DomainFact, FunctionCall, Lines, Pos, RawDiag, RecordFact, RuleFact, ServerFact, Spanned, ViewFact, XmlDef, XmlRef,
 };
+use crate::server_code;
 
 /// A `False` second argument makes `ref()` return nothing for an unknown id instead of failing.
 static EVAL_REF: LazyLock<Regex> = LazyLock::new(|| {
@@ -55,6 +56,11 @@ const MODIFIERS: [&str; 4] = ["column_invisible", "invisible", "readonly", "requ
 
 /// Tags a spec may locate in the main view or in the subview of any x2many field.
 const AMBIGUOUS_SPECS: &[&str] = &["list", "tree", "kanban", "column"];
+
+const CRON: &str = "ir.cron";
+
+/// What opens a CDATA section, which a text node's range starts on.
+const CDATA: &str = "<![CDATA[";
 
 /// The view type of a `<template>`, and the type a `t-call` target must have on the server.
 pub const QWEB: &str = "qweb";
@@ -307,6 +313,9 @@ impl Walker<'_> {
         if let Some(domain) = rule_domain_field(model) {
             self.rule(node, domain);
         }
+        if matches!(model, "ir.actions.server" | CRON) {
+            self.server(node, model == CRON);
+        }
         self.facts.records.push(record);
     }
 
@@ -355,6 +364,39 @@ impl Walker<'_> {
             domain,
             active: field_of(node, "active").map(rule_active),
         });
+    }
+
+    fn server(&mut self, node: Node, cron: bool) {
+        let last = |name: &str| last_field_of(node, name);
+        let (model, by_name) = last("model_id").map_or((ActionValue::Unset, false), |f| rule_model(f, self.lines));
+        let code = last("code");
+        let (refused, calls) = code.map_or_else(Default::default, |f| self.server_code(f));
+        self.facts.servers.push(ServerFact {
+            id: node.attribute("id").map(str::to_owned),
+            cron,
+            model,
+            by_name,
+            state: last("state").map(|f| !indirect_value(f) && f.text() == Some("code")),
+            writes_code: code.is_some(),
+            refused,
+            calls,
+        });
+    }
+
+    /// Reads `field` as Odoo does, which validates the stripped text up to the first child: why it
+    /// refuses the code, and the calls of code it accepts.
+    fn server_code(&self, field: Node) -> (Option<Spanned<String>>, Vec<Spanned<String>>) {
+        let Some(text) = field.first_child().filter(|t| t.is_text() && !indirect_value(field)) else {
+            return (None, vec![]);
+        };
+        let raw = text.text().unwrap_or_default();
+        let lead = raw.len() - raw.trim_start().len();
+        let read = server_code::read(raw.trim());
+        let spanned = |(value, at): (String, usize)| Spanned {
+            value,
+            pos: code_pos(text, raw, lead + at, self.lines),
+        };
+        (read.error.map(spanned), read.calls.into_iter().map(spanned).collect())
     }
 
     /// The tag Odoo reads through 16.0. It writes `view_mode` even without the attribute, as Odoo
@@ -631,6 +673,12 @@ fn field_of<'a, 'i>(node: Node<'a, 'i>, name: &str) -> Option<Node<'a, 'i>> {
         .find(|c| c.has_tag_name("field") && c.attribute("name") == Some(name))
 }
 
+/// The field Odoo keeps of those of a name: each one replaces the value of the one before.
+fn last_field_of<'a, 'i>(node: Node<'a, 'i>, name: &str) -> Option<Node<'a, 'i>> {
+    node.children()
+        .rfind(|c| c.has_tag_name("field") && c.attribute("name") == Some(name))
+}
+
 /// The field holding the domain of a model of record rules.
 pub fn rule_domain_field(model: &str) -> Option<&'static str> {
     match model {
@@ -638,6 +686,13 @@ pub fn rule_domain_field(model: &str) -> Option<&'static str> {
         "ir.access" => Some("domain"),
         _ => None,
     }
+}
+
+/// Whether Odoo takes the value of `field` from elsewhere than its text. It tests each attribute for
+/// truth, an empty one included, but reads the text by `type` whenever that attribute is there.
+fn indirect_value(field: Node) -> bool {
+    let set = |attr: &&str| field.attribute(*attr).is_some_and(|v| *attr == "type" || !v.is_empty());
+    INDIRECT_VALUE.iter().chain(&["eval"]).any(set)
 }
 
 /// Whether the `ir.access` record of a `model_id` field gives `group_id` a value. Without one the
@@ -851,6 +906,29 @@ fn spec_text(node: Node, lines: &Lines) -> Option<Spanned<String>> {
         value: raw.trim().to_owned(),
         pos: lines.pos(text.range().start + (raw.len() - raw.trim_start().len())),
     })
+}
+
+/// Where the byte `at` of `decoded`, the value of the node `text`, sits. The node holds no offsets of
+/// its own past its start, so newlines give the line, which entities and CDATA leave as they are, and
+/// the column counts from the last one, short of any entity or CDATA opening earlier on the line.
+fn code_pos(text: Node, decoded: &str, at: usize, lines: &Lines) -> Pos {
+    let start = text.range().start;
+    let first = lines.pos(start);
+    let before = &decoded[..at];
+    match before.rfind('\n') {
+        Some(newline) => Pos {
+            line: first.line + before.matches('\n').count() as u32,
+            col: (at - newline) as u32,
+        },
+        None => {
+            let opened = text.document().input_text()[start..].starts_with(CDATA);
+            let skipped = if opened { CDATA.len() } else { 0 };
+            Pos {
+                col: first.col + (skipped + at) as u32,
+                ..first
+            }
+        }
+    }
 }
 
 fn literal_target(value: &str) -> bool {
@@ -1404,6 +1482,137 @@ mod tests {
         assert_eq!(access("ir.access", r#"<field name="group_id" ref=""/>"#), 0);
         assert_eq!(access("ir.access", r#"<field name="group_id" ref="g"/>"#), 1);
         assert_eq!(access("ir.access", r#"<field name="group_id" eval="ref('g')"/>"#), 1);
+    }
+
+    fn server_facts(model: &str, fields: &str) -> DataFacts {
+        analyze(&format!(
+            "<odoo>\n<record id=\"s\" model=\"{model}\">\n{fields}</record>\n</odoo>"
+        ))
+    }
+
+    fn server(fields: &str) -> ServerFact {
+        server_facts("ir.actions.server", fields).servers.remove(0)
+    }
+
+    fn at(call: &Spanned<String>) -> (&str, u32, u32) {
+        (call.value.as_str(), call.pos.line, call.pos.col)
+    }
+
+    #[test]
+    fn reads_a_record_of_both_models() {
+        let fields = r#"<field name="model_id" ref="model_a"/><field name="code">model.a()</field>"#;
+        let server = server_facts("ir.actions.server", fields).servers.remove(0);
+        assert!(!server.cron && server.writes_code);
+        assert_eq!(server.id.as_deref(), Some("s"));
+        assert_eq!(literal_of(&server.model).value, "model_a");
+        assert!(server_facts("ir.cron", fields).servers[0].cron);
+        assert!(server_facts("base.automation", fields).servers.is_empty());
+    }
+
+    #[test]
+    fn a_call_sits_on_its_line_past_decoded_newlines() {
+        let code = |text: &str| server(&format!(r#"<field name="code">{text}</field>"#)).calls;
+        assert_eq!(at(&code("model.a()")[0]), ("a", 3, 26));
+        assert_eq!(at(&code("\n\n  \nmodel.a()\n")[0]), ("a", 6, 7));
+        assert_eq!(at(&code("x = 1\nif x:\n    model.a()\n")[0]), ("a", 5, 11));
+    }
+
+    #[test]
+    fn cdata_and_entities_keep_the_line() {
+        let code = |text: &str| server(&format!(r#"<field name="code">{text}</field>"#)).calls;
+        assert_eq!(at(&code("<![CDATA[model.a()]]>")[0]), ("a", 3, 35));
+        assert_eq!(at(&code("<![CDATA[\n\n  model.a()\n]]>")[0]), ("a", 5, 9));
+        assert_eq!(at(&code("\n<![CDATA[\nmodel.a()]]>")[0]), ("a", 5, 7));
+        assert_eq!(at(&code("x = 1 &lt; 2\nmodel.a()")[0]), ("a", 4, 7));
+        assert_eq!(at(&code("&#32;\nmodel.a()")[0]), ("a", 4, 7));
+    }
+
+    #[test]
+    fn only_the_first_line_of_the_text_is_stripped() {
+        let refused = |text: &str| {
+            let fact = server_facts("ir.cron", &format!(r#"<field name="code">{text}</field>"#));
+            fact.servers[0].refused.as_ref().map(|r| r.pos.line)
+        };
+        assert_eq!(refused("\n    a()\n    b()\n"), Some(5));
+        assert_eq!(refused("\n    a()\nb()\n"), None);
+    }
+
+    #[test]
+    fn reads_a_syntax_error_in_any_state() {
+        let fact = server(r#"<field name="state">object_write</field><field name="code">return</field>"#);
+        let refused = fact.refused.unwrap();
+        assert_eq!((refused.pos.line, refused.pos.col), (3, 60));
+        assert_eq!(refused.value, "'return' outside function");
+    }
+
+    #[test]
+    fn keeps_the_last_field_of_a_name() {
+        let fact = server(
+            r#"<field name="model_id" ref="a"/><field name="model_id" ref="b"/>
+<field name="state">other</field><field name="state">code</field>
+<field name="code">model.a()</field><field name="code">model.b()</field>"#,
+        );
+        assert_eq!(literal_of(&fact.model).value, "b");
+        assert_eq!(fact.state, Some(true));
+        assert_eq!(fact.calls.iter().map(|c| c.value.as_str()).collect::<Vec<_>>(), ["b"]);
+        let cleared = server(r#"<field name="code">model.a()</field><field name="code"/>"#);
+        assert!(cleared.writes_code && cleared.calls.is_empty());
+    }
+
+    #[test]
+    fn a_value_from_elsewhere_than_the_text_reads_no_code() {
+        for field in [
+            r#"<field name="code" eval="'a'">(</field>"#,
+            r#"<field name="code" ref="a">(</field>"#,
+            r#"<field name="code" search="[]">(</field>"#,
+            r#"<field name="code" file="a.py">(</field>"#,
+            r#"<field name="code" type="char">(</field>"#,
+            r#"<field name="code" type="">(</field>"#,
+            r#"<field name="code"><function model="m" name="n"><value>(</value></function></field>"#,
+            r#"<field name="code"><!-- a -->(</field>"#,
+            r#"<field name="code"><?a b?>(</field>"#,
+            r#"<field name="code">a()<!-- a -->(</field>"#,
+            r#"<field name="code"> </field>"#,
+            r#"<field name="code"/>"#,
+        ] {
+            let facts = server_facts("ir.cron", field);
+            assert!(facts.servers[0].refused.is_none(), "{field}");
+            assert!(facts.servers[0].writes_code, "{field}");
+        }
+    }
+
+    #[test]
+    fn an_empty_attribute_leaves_the_text_to_read() {
+        let fact = server(r#"<field name="code" eval="" ref="" search="" file="">model.a()</field>"#);
+        assert_eq!(fact.calls[0].value, "a");
+    }
+
+    #[test]
+    fn tells_a_state_that_runs_code() {
+        let state = |fields: &str| server(fields).state;
+        assert_eq!(state(r#"<field name="name">a</field>"#), None);
+        assert_eq!(state(r#"<field name="state">code</field>"#), Some(true));
+        for field in [
+            r#"<field name="state">multi</field>"#,
+            r#"<field name="state"> code </field>"#,
+            r#"<field name="state"/>"#,
+            r#"<field name="state" eval="'code'"/>"#,
+            r#"<field name="state" eval="'code'">code</field>"#,
+            r#"<field name="state" type="char">code</field>"#,
+        ] {
+            assert_eq!(state(field), Some(false), "{field}");
+        }
+    }
+
+    #[test]
+    fn reads_a_nested_server_action() {
+        let facts = analyze(
+            r#"<odoo><record id="p" model="ir.actions.server"><field name="child_ids">
+            <record id="c" model="ir.actions.server"><field name="model_id" ref="m"/></record>
+        </field></record></odoo>"#,
+        );
+        assert_eq!(facts.servers.len(), 2);
+        assert_eq!(literal_of(&facts.servers[0].model).value, "m");
     }
 
     #[test]

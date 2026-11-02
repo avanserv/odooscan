@@ -1,0 +1,68 @@
+<odoo>
+    <record id="code_replaced" model="ir.cron">
+        <field name="name">code_replaced</field>
+        <field name="model_id" ref="model_server_job"/>
+        <field name="code">model._silent_code_replaced()</field>
+    </record>
+
+    <record id="code_cleared" model="ir.cron">
+        <field name="name">code_cleared</field>
+        <field name="model_id" ref="model_server_job"/>
+        <field name="code">model._silent_code_cleared()</field>
+    </record>
+
+    <record id="code_hidden" model="ir.cron">
+        <field name="name">code_hidden</field>
+        <field name="model_id" ref="model_server_job"/>
+        <field name="code">model._silent_code_hidden()</field>
+    </record>
+
+    <record id="code_kept" model="ir.cron">
+        <field name="name">code_kept</field>
+        <field name="model_id" ref="model_server_job"/>
+        <field name="code">model._nope_code_kept()</field>
+    </record>
+
+    <record id="state_replaced" model="ir.actions.server">
+        <field name="name">state_replaced</field>
+        <field name="model_id" ref="model_server_job"/>
+        <field name="state">code</field>
+        <field name="code">model._silent_state_replaced()</field>
+    </record>
+
+    <record id="state_given" model="ir.actions.server">
+        <field name="name">state_given</field>
+        <field name="model_id" ref="model_server_job"/>
+        <field name="code">model._nope_state_given()</field>
+    </record>
+
+    <record id="model_replaced" model="ir.cron">
+        <field name="name">model_replaced</field>
+        <field name="model_id" ref="model_server_job"/>
+        <field name="code">model.action_pin()</field>
+    </record>
+
+    <record id="model_hidden" model="ir.cron">
+        <field name="name">model_hidden</field>
+        <field name="model_id" ref="model_server_job"/>
+        <field name="code">model._silent_model_hidden()</field>
+    </record>
+
+    <record id="model_given" model="ir.cron">
+        <field name="name">model_given</field>
+        <field name="code">model._nope_model_given()</field>
+    </record>
+
+    <record id="updated_in_extension" model="ir.cron">
+        <field name="name">updated_in_extension</field>
+        <field name="model_id" ref="model_server_job"/>
+        <field name="code">model._nope_before_extension()</field>
+    </record>
+
+    <record id="updated_by_extension" model="ir.actions.server">
+        <field name="name">updated_by_extension</field>
+        <field name="model_id" ref="model_server_job"/>
+        <field name="state">code</field>
+        <field name="code">model.action_close()</field>
+    </record>
+</odoo>

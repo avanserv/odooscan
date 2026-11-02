@@ -21,4 +21,10 @@
         <field name="model_id" ref="model_bad_generated_user"/>
         <field name="domain_force">[('no_dynamic', '=', 1)]</field>
     </record>
+
+    <record id="cron_generated" model="ir.cron">
+        <field name="name">cron_generated</field>
+        <field name="model_id" ref="model_bad_generated_user"/>
+        <field name="code">model.action_generated()</field>
+    </record>
 </odoo>

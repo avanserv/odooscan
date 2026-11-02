@@ -499,6 +499,24 @@ pub struct RuleFact {
     pub active: Option<bool>,
 }
 
+/// One write to an `ir.actions.server` or an `ir.cron`, by a `<record>`.
+#[derive(Debug)]
+pub struct ServerFact {
+    pub id: Option<String>,
+    pub cron: bool,
+    /// What it gives `model_id`: an `ir.model` XML id, or a model name when `by_name`.
+    pub model: ActionValue,
+    pub by_name: bool,
+    /// Whether what it gives `state` is `code`, where a value only a run tells counts as false.
+    pub state: Option<bool>,
+    /// It gives `code` a value, which replaces the last one even when no call can be read from it.
+    pub writes_code: bool,
+    /// Why Odoo refuses the code, in any `state`.
+    pub refused: Option<Spanned<String>>,
+    /// The methods the code calls on the records of `model_id`.
+    pub calls: Vec<Spanned<String>>,
+}
+
 /// Facts from an XML or CSV data file.
 #[derive(Debug, Default)]
 pub struct DataFacts {
@@ -515,6 +533,7 @@ pub struct DataFacts {
     pub actions: Vec<ActionFact>,
     pub access: Vec<AccessRow>,
     pub rules: Vec<RuleFact>,
+    pub servers: Vec<ServerFact>,
     pub functions: Vec<FunctionCall>,
     pub diags: Vec<RawDiag>,
 }

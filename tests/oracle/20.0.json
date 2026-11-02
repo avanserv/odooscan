@@ -2227,6 +2227,12 @@
       "count": 1
     },
     {
+      "path": "addons/purchase/views/purchase_views.xml",
+      "code": "OD320",
+      "message": "purchase.order.line has no method 'action_open_accrual_wizard'",
+      "count": 1
+    },
+    {
       "path": "addons/rpc/controllers/xmlrpc.py",
       "code": "OD112",
       "message": "csrf=False lets other sites submit this form on the user's behalf",
@@ -2284,6 +2290,12 @@
       "path": "addons/sale/populate/populate_demo.xml",
       "code": "OD502",
       "message": "'populate/populate_demo.xml' is not in the manifest's data or demo, so Odoo never loads it",
+      "count": 1
+    },
+    {
+      "path": "addons/sale/wizard/account_accrued_orders_wizard_views.xml",
+      "code": "OD320",
+      "message": "sale.order.line has no method 'action_open_accrual_wizard'",
       "count": 1
     },
     {
