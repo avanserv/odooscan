@@ -297,7 +297,7 @@ impl ModuleContext<'_> {
     /// does not decode stays, since what it may define matters to the rules.
     fn file(&self, path: PathBuf) -> Option<ParsedFile> {
         let bytes = std::fs::read(&path).ok()?;
-        let text = decoded(&path, &bytes);
+        let text = decoded(&path, &bytes, self.series);
         let text = text.as_deref();
         if path.extension().is_some_and(|e| e == "py") {
             let facts = python::analyze(text?, self.series);
@@ -343,12 +343,13 @@ fn loads_into(path: &Path) -> String {
     stem.split('-').next().unwrap_or_default().to_owned()
 }
 
-/// An XML file in the encoding it declares, any other as UTF-8.
-fn decoded<'b>(path: &Path, bytes: &'b [u8]) -> Option<Cow<'b, str>> {
-    if path.extension().is_some_and(|e| e == "xml") {
-        return decode::xml_text(bytes);
+/// An XML file in the encoding it declares, a CSV as `series` reads it, any other as UTF-8.
+fn decoded<'b>(path: &Path, bytes: &'b [u8], series: Option<Series>) -> Option<Cow<'b, str>> {
+    match path.extension().and_then(|e| e.to_str()) {
+        Some("xml") => decode::xml_text(bytes),
+        Some("csv") => decode::csv_text(bytes, series),
+        _ => std::str::from_utf8(bytes).ok().map(Cow::Borrowed),
     }
-    std::str::from_utf8(bytes).ok().map(Cow::Borrowed)
 }
 
 fn parse_module_files(module: &mut Module, default_series: Option<Series>) {

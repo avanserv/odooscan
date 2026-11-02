@@ -275,6 +275,11 @@ custom/dynamic_models_unknown/models/partner.py:16:31: OD202 model 'sideline.not
 custom/dynamic_models_unknown/models/partner.py:20:17: OD202 model 'bad.generated.huge' comes from module dynamic_models_side; add it to depends
 custom/dynamic_models_unknown/models/partner.py:24:17: OD202 model 'side.order' comes from module dynamic_models_side; add it to depends
 custom/encoded_broken/data/broken.xml:4:1: OD000 expected 'record' tag, not 'odoo' at 4:1
+custom/encoded_csv10/data/refs.xml:8:9: OD301 module encoded_csv10 defines no XML id 'encoded_csv10.country_gone'
+custom/encoded_csv10/data/res.country.csv:1:1: OD309 res.country has no field 'no_such_field'
+custom/encoded_csv9/data/refs.xml:8:9: OD301 module encoded_csv9 defines no XML id 'encoded_csv9.country_gone'
+custom/encoded_csv9/data/res.country.csv:1:1: OD309 res.country has no field 'no_such_field'
+custom/encoded_csv9/data/stray.csv:1:1: OD502 'data/stray.csv' is not in the manifest's init_xml, update_xml, data, demo_xml or demo, so Odoo never loads it
 custom/encoded_lost_code/models/ledger.py:7:15: OD212 Monetary field 'balance' has no currency: encoded.ledger has no currency_id, and the field names no currency_field
 custom/encoded_lost_code/models/ledger.py:10:24: OD211 no parent class of encoded.ledger defines 'action_settle', so this super() call fails
 custom/encoded_lost_code/models/ledger.py:13:39: OD224 t.no_such_column: encoded_ledger has no such column, since encoded.ledger has no field no_such_column; name the column of a stored field of encoded.ledger
