@@ -1,0 +1,22 @@
+<odoo>
+    <record id="columns_form" model="ir.ui.view">
+        <field name="name">legacy9.columns.form</field>
+        <field name="model">legacy9.columns</field>
+        <field name="arch" type="xml">
+            <form>
+                <field name="code"/>
+                <field name="ghost"/>
+            </form>
+        </field>
+    </record>
+
+    <record id="columns_hidden_form" model="ir.ui.view">
+        <field name="name">legacy9.columns.hidden.form</field>
+        <field name="model">legacy9.columns.hidden</field>
+        <field name="arch" type="xml">
+            <form>
+                <field name="ghost"/>
+            </form>
+        </field>
+    </record>
+</odoo>
