@@ -69,7 +69,7 @@ const QWEB_REPORT: &str = "qweb-";
 /// What opens a CDATA section, which a text node's range starts on.
 const CDATA: &str = "<![CDATA[";
 
-/// The view type of a `<template>`, and the type a `t-call` target must have on the server.
+/// The view type of a `<template>`.
 pub const QWEB: &str = "qweb";
 
 /// Arch roots that name no view type: QWeb's own, and those of inheriting specs.
