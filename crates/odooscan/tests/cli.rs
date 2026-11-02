@@ -77,6 +77,57 @@ fn check_expands_a_tilde_from_the_file() {
     assert_eq!(out.status.code(), Some(0), "{}", String::from_utf8_lossy(&out.stderr));
 }
 
+/// The OD203 findings of a scan of `cycles/<module>`. A stack overflow aborts the process and would
+/// take a test binary with it, so the scan is spawned: a signal gives no exit code.
+fn cycle_paths(module: &str) -> Vec<String> {
+    let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("../odooscan_core/tests/fixtures");
+    let target = format!("cycles/{module}");
+    let out = check_in(&fixtures, &[&target, "--addons-path", "core"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1), "{}", String::from_utf8_lossy(&out.stderr));
+    String::from_utf8(out.stdout)
+        .unwrap()
+        .lines()
+        .filter_map(|line| {
+            line.split_once(": OD203 '")?
+                .1
+                .split_once('\'')
+                .map(|(path, _)| path.to_owned())
+        })
+        .collect()
+}
+
+#[test]
+fn a_shadowed_related_field_of_a_delegate_is_not_followed() {
+    assert_eq!(cycle_paths("related_shadow"), ["size.name"]);
+}
+
+#[test]
+fn two_fields_related_to_each_other_end() {
+    assert!(cycle_paths("related_pair").is_empty());
+}
+
+#[test]
+fn a_ring_of_related_fields_ends() {
+    assert!(cycle_paths("related_ring").is_empty());
+}
+
+#[test]
+fn a_related_field_through_a_delegation_ring_ends() {
+    assert!(cycle_paths("delegate_ring").is_empty());
+}
+
+#[test]
+fn a_long_related_chain_keeps_its_comodel() {
+    assert_eq!(cycle_paths("related_chain"), ["end_id.missing", "twice_id.missing"]);
+}
+
+#[test]
+fn a_ring_of_inherited_views_ends() {
+    assert!(cycle_paths("views_ring").is_empty());
+}
+
 #[test]
 fn explain_prints_the_page_of_a_code() {
     let out = oscn(&["explain", "OD203"]);

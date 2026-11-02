@@ -1484,12 +1484,29 @@ impl<'m> Index<'m> {
         MAGIC_FIELDS.contains(&field)
     }
 
-    /// `Err(Some(module))` when the field exists only outside the scope.
+    /// `field` of `model`: the model's own definitions, which shadow those of a model it delegates
+    /// to. `Err(Some(module))` when the field exists only outside the scope.
     pub fn field(&self, model: &str, field: &str, scope: &Scope) -> Result<Option<FieldInfo<'m>>, Option<&'m str>> {
+        self.field_from(model, field, scope, &mut vec![])
+    }
+
+    /// `field`, where `open` holds the related definitions being followed. One met again has no
+    /// comodel: Odoo cannot resolve a related cycle either, and refuses it unless it is manual.
+    fn field_from(
+        &self,
+        model: &str,
+        field: &str,
+        scope: &Scope,
+        open: &mut Vec<&'m FieldFact>,
+    ) -> Result<Option<FieldInfo<'m>>, Option<&'m str>> {
         if self.magic_field(field) || EXTRA_FIELDS.contains(&(model, field)) {
             return Ok(None);
         }
-        let defs = self.field_defs(model, field, Some(scope));
+        let mut defs = self.merged_fields(model, scope);
+        defs.retain(|d| d.2.name == field);
+        if defs.is_empty() {
+            defs = self.field_defs(model, field, Some(scope));
+        }
         let Some((_, _, first)) = defs.first() else {
             return Err(self
                 .field_defs(model, field, None)
@@ -1501,7 +1518,15 @@ impl<'m> Index<'m> {
             .find_map(|(_, _, f)| f.comodel.as_ref().map(|c| c.value.clone()))
             .or_else(|| {
                 let (_, class, related) = defs.iter().find(|(_, _, f)| f.related.is_some())?;
-                self.related_comodel(&class.model, &related.related.as_ref()?.value, scope, 0)
+                let path = &related.related.as_ref()?.value;
+                if open.iter().any(|f| std::ptr::eq(*f, *related)) {
+                    return None;
+                }
+                open.push(related);
+                let comodel = self.related_comodel(&class.model, path, scope, open);
+                // A path may repeat a field, so only the fields being followed stay open.
+                open.pop();
+                comodel
             });
         Ok(Some(FieldInfo {
             ftype: &first.ftype,
@@ -1513,7 +1538,7 @@ impl<'m> Index<'m> {
     /// resolve or ends on a field every model has.
     pub fn path_target(&self, model: &str, path: &str, scope: &Scope) -> Option<Vec<&'m FieldFact>> {
         let (head, last) = match path.rsplit_once('.') {
-            Some((head, last)) => (self.related_comodel(model, head, scope, 0)?, last),
+            Some((head, last)) => (self.path_comodel(model, head, scope)?, last),
             None => (model.to_owned(), path),
         };
         let defs: Vec<_> = self
@@ -1526,16 +1551,13 @@ impl<'m> Index<'m> {
 
     /// The comodel a dotted path of relational fields ends on.
     pub fn path_comodel(&self, model: &str, path: &str, scope: &Scope) -> Option<String> {
-        self.related_comodel(model, path, scope, 0)
+        self.related_comodel(model, path, scope, &mut vec![])
     }
 
-    fn related_comodel(&self, model: &str, path: &str, scope: &Scope, depth: u8) -> Option<String> {
-        if depth > 8 {
-            return None;
-        }
+    fn related_comodel(&self, model: &str, path: &str, scope: &Scope, open: &mut Vec<&'m FieldFact>) -> Option<String> {
         let mut model = model.to_owned();
         for segment in path.split('.') {
-            let info = self.field(&model, segment, scope).ok()??;
+            let info = self.field_from(&model, segment, scope, open).ok()??;
             model = info.comodel?;
         }
         Some(model)
