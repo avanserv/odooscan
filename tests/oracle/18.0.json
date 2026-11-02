@@ -447,7 +447,7 @@
     {
       "path": "addons/hr_contract/views/hr_employee_views.xml",
       "code": "OD323",
-      "message": "XML id 'hr_employee_view_search' is already defined in views/hr_contract_views.xml, and this definition writes the fields it names over it; remove the copy when the two say the same thing, or rename one when both are meant to exist",
+      "message": "XML id 'hr_employee_view_search' is already defined in views/hr_contract_views.xml, and this definition overwrites the fields both name; remove the copy when the two say the same thing, or rename one when both are meant to exist",
       "count": 1
     },
     {
@@ -885,7 +885,7 @@
     {
       "path": "addons/l10n_es_edi_facturae/wizard/account_move_reversal_view.xml",
       "code": "OD323",
-      "message": "XML id 'view_tax_tree_inherit_l10n_es_edi_facturae' is already defined in views/account_tax_views.xml, and this definition writes the fields it names over it; remove the copy when the two say the same thing, or rename one when both are meant to exist",
+      "message": "XML id 'view_tax_tree_inherit_l10n_es_edi_facturae' is already defined in views/account_tax_views.xml, and this definition overwrites the fields both name; remove the copy when the two say the same thing, or rename one when both are meant to exist",
       "count": 1
     },
     {
@@ -1803,7 +1803,7 @@
     {
       "path": "addons/point_of_sale/views/account_move_views.xml",
       "code": "OD323",
-      "message": "XML id 'view_account_journal_pos_user_form' is already defined in views/account_statement_view.xml, and this definition writes the fields it names over it; remove the copy when the two say the same thing, or rename one when both are meant to exist",
+      "message": "XML id 'view_account_journal_pos_user_form' is already defined in views/account_statement_view.xml, and this definition overwrites the fields both name; remove the copy when the two say the same thing, or rename one when both are meant to exist",
       "count": 1
     },
     {
@@ -2133,7 +2133,7 @@
     {
       "path": "addons/stock/views/res_config_settings_views.xml",
       "code": "OD323",
-      "message": "XML id 'menu_stock_config_settings' is already defined in views/stock_menu_views.xml, and this definition writes the fields it names over it; remove the copy when the two say the same thing, or rename one when both are meant to exist",
+      "message": "XML id 'menu_stock_config_settings' is already defined in views/stock_menu_views.xml, and this definition overwrites the fields both name; remove the copy when the two say the same thing, or rename one when both are meant to exist",
       "count": 1
     },
     {
@@ -2295,7 +2295,7 @@
     {
       "path": "addons/website_blog/data/website_blog_data.xml",
       "code": "OD323",
-      "message": "XML id 'mt_blog_blog_published' is already defined in data/mail_message_subtype_data.xml, and this definition writes the fields it names over it; remove the copy when the two say the same thing, or rename one when both are meant to exist",
+      "message": "XML id 'mt_blog_blog_published' is already defined in data/mail_message_subtype_data.xml, and this definition overwrites the fields both name; remove the copy when the two say the same thing, or rename one when both are meant to exist",
       "count": 1
     },
     {
@@ -2331,13 +2331,13 @@
     {
       "path": "addons/website_event/views/snippets/snippets.xml",
       "code": "OD323",
-      "message": "XML id 'snippet_options' is already defined in views/event_snippets.xml, and this definition writes the fields it names over it; remove the copy when the two say the same thing, or rename one when both are meant to exist",
+      "message": "XML id 'snippet_options' is already defined in views/event_snippets.xml, and this definition overwrites the fields both name; remove the copy when the two say the same thing, or rename one when both are meant to exist",
       "count": 1
     },
     {
       "path": "addons/website_event/views/snippets/snippets.xml",
       "code": "OD323",
-      "message": "XML id 'snippets' is already defined in views/event_snippets.xml, and this definition writes the fields it names over it; remove the copy when the two say the same thing, or rename one when both are meant to exist",
+      "message": "XML id 'snippets' is already defined in views/event_snippets.xml, and this definition overwrites the fields both name; remove the copy when the two say the same thing, or rename one when both are meant to exist",
       "count": 1
     },
     {
