@@ -509,42 +509,42 @@ custom/qweb_partial/__manifest__.py:4:24: OD503 module 'ghost_enterprise' is not
 custom/qweb_partial/views/partial.xml:5:20: OD311 no indexed module defines template 'web.layot'
 custom/qweb_partial/views/partial.xml:23:35: OD311 no indexed module defines template 'web.layot_report'
 custom/qweb_partial/views/partial.xml:28:24: OD311 no indexed module defines template 'web.layot_inside_enterprise'
-custom/record_required/data/creates.xml:2:5: OD324 rr.thing.name is required and has no default, so Odoo cannot create this record; give the field a value
-custom/record_required/data/creates.xml:3:5: OD324 rr.thing.name is required and has no default, so Odoo cannot create this record; give the field a value
-custom/record_required/data/creates.xml:6:5: OD324 rr.thing.name is required and has no default, so Odoo cannot create this record; give the field a value
-custom/record_required/data/creates.xml:7:5: OD324 rr.thing.name is required and has no default, so Odoo cannot create this record; give the field a value
-custom/record_required/data/creates.xml:8:5: OD324 rr.thing.name is required and has no default, so Odoo cannot create this record; give the field a value
-custom/record_required/data/creates.xml:9:5: OD324 rr.thing.name is required and has no default, so Odoo cannot create this record; give the field a value
-custom/record_required/data/creates.xml:10:5: OD324 rr.thing.name is required and has no default, so Odoo cannot create this record; give the field a value
-custom/record_required/data/creates.xml:13:5: OD324 rr.line.label is required and has no default, so Odoo cannot create this record; give the field a value
-custom/record_required/data/creates.xml:19:13: OD324 rr.line.label is required and has no default, so Odoo cannot create this record; give the field a value
-custom/record_required/data/creates.xml:22:5: OD324 rr.mixed.mixed is required and has no default, so Odoo cannot create this record; give the field a value
-custom/record_required/data/creates.xml:23:5: OD324 rr.scoped.name is required and has no default, so Odoo cannot create this record; give the field a value
-custom/record_required/data/creates.xml:24:5: OD324 rr.defaulted.name is required and has no default, so Odoo cannot create this record; give the field a value
-custom/record_required/data/creates.xml:25:5: OD324 rr.defaulted.name is required and has no default, so Odoo cannot create this record; give the field a value
-custom/record_required/data/creates.xml:26:5: OD324 rr.named.code is required and has no default, so Odoo cannot create this record; give the field a value
-custom/record_required/data/creates.xml:27:5: OD324 rr.legacy.code is required and has no default, so Odoo cannot create this record; give the field a value
-custom/record_required/data/creates.xml:28:5: OD324 rr.legacy.hidden.code is required and has no default, so Odoo cannot create this record; give the field a value
-custom/record_required/data/creates.xml:29:5: OD324 rr.blind.name is required and has no default, so Odoo cannot create this record; give the field a value
-custom/record_required/data/delegates.xml:5:5: OD324 rr.parent.label is required and has no default, so Odoo cannot create this record; give the field a value
-custom/record_required/data/delegates.xml:15:5: OD324 rr.parent.label is required and has no default, so Odoo cannot create this record; give the field a value
-custom/record_required/data/delegates.xml:22:5: OD324 rr.parent.label is required and has no default, so Odoo cannot create this record; give the field a value
-custom/record_required/data/delegates.xml:25:5: OD324 rr.loop.a.name_a is required and has no default, so Odoo cannot create this record; give the field a value
-custom/record_required/data/delegates.xml:25:5: OD324 rr.loop.b.name_b is required and has no default, so Odoo cannot create this record; give the field a value
-custom/record_required/data/delegates.xml:28:5: OD324 rr.parent.label is required and has no default, so Odoo cannot create this record; give the field a value
+custom/record_required/data/creates.xml:2:5: OD324 rr.thing.name is required and has no default, so creating this record fails if the column is NOT NULL; give the field a value
+custom/record_required/data/creates.xml:3:5: OD324 rr.thing.name is required and has no default, so creating this record fails if the column is NOT NULL; give the field a value
+custom/record_required/data/creates.xml:6:5: OD324 rr.thing.name is required and has no default, so creating this record fails if the column is NOT NULL; give the field a value
+custom/record_required/data/creates.xml:7:5: OD324 rr.thing.name is required and has no default, so creating this record fails if the column is NOT NULL; give the field a value
+custom/record_required/data/creates.xml:8:5: OD324 rr.thing.name is required and has no default, so creating this record fails if the column is NOT NULL; give the field a value
+custom/record_required/data/creates.xml:9:5: OD324 rr.thing.name is required and has no default, so creating this record fails if the column is NOT NULL; give the field a value
+custom/record_required/data/creates.xml:10:5: OD324 rr.thing.name is required and has no default, so creating this record fails if the column is NOT NULL; give the field a value
+custom/record_required/data/creates.xml:13:5: OD324 rr.line.label is required and has no default, so creating this record fails if the column is NOT NULL; give the field a value
+custom/record_required/data/creates.xml:19:13: OD324 rr.line.label is required and has no default, so creating this record fails if the column is NOT NULL; give the field a value
+custom/record_required/data/creates.xml:22:5: OD324 rr.mixed.mixed is required and has no default, so creating this record fails if the column is NOT NULL; give the field a value
+custom/record_required/data/creates.xml:23:5: OD324 rr.scoped.name is required and has no default, so creating this record fails if the column is NOT NULL; give the field a value
+custom/record_required/data/creates.xml:24:5: OD324 rr.defaulted.name is required and has no default, so creating this record fails if the column is NOT NULL; give the field a value
+custom/record_required/data/creates.xml:25:5: OD324 rr.defaulted.name is required and has no default, so creating this record fails if the column is NOT NULL; give the field a value
+custom/record_required/data/creates.xml:26:5: OD324 rr.named.code is required and has no default, so creating this record fails if the column is NOT NULL; give the field a value
+custom/record_required/data/creates.xml:27:5: OD324 rr.legacy.code is required and has no default, so creating this record fails if the column is NOT NULL; give the field a value
+custom/record_required/data/creates.xml:28:5: OD324 rr.legacy.hidden.code is required and has no default, so creating this record fails if the column is NOT NULL; give the field a value
+custom/record_required/data/creates.xml:29:5: OD324 rr.blind.name is required and has no default, so creating this record fails if the column is NOT NULL; give the field a value
+custom/record_required/data/delegates.xml:5:5: OD324 rr.parent.label is required and has no default, so creating this record fails if the column is NOT NULL; give the field a value
+custom/record_required/data/delegates.xml:15:5: OD324 rr.parent.label is required and has no default, so creating this record fails if the column is NOT NULL; give the field a value
+custom/record_required/data/delegates.xml:22:5: OD324 rr.parent.label is required and has no default, so creating this record fails if the column is NOT NULL; give the field a value
+custom/record_required/data/delegates.xml:25:5: OD324 rr.loop.a.name_a is required and has no default, so creating this record fails if the column is NOT NULL; give the field a value
+custom/record_required/data/delegates.xml:25:5: OD324 rr.loop.b.name_b is required and has no default, so creating this record fails if the column is NOT NULL; give the field a value
+custom/record_required/data/delegates.xml:28:5: OD324 rr.parent.label is required and has no default, so creating this record fails if the column is NOT NULL; give the field a value
 custom/record_required/data/first.xml:85:5: OD308 'late_name' is defined in data/second.xml, which loads after this reference
-custom/record_required/data/rooted.xml:6:5: OD324 rr.named.code is required and has no default, so Odoo cannot create this record; give the field a value
+custom/record_required/data/rooted.xml:6:5: OD324 rr.named.code is required and has no default, so creating this record fails if the column is NOT NULL; give the field a value
 custom/record_required/data/rr.note.csv:2:1: OD323 XML id 'rewritten_by_row' is already defined in data/first.xml, and this definition overwrites the fields both name; remove the copy when the two say the same thing, or rename one when both are meant to exist
-custom/record_required/data/rr.thing-bare.csv:2:1: OD324 rr.thing.name is required and has no default, so Odoo cannot create this record; give the field a value
-custom/record_required/data/rr.thing-bare.csv:3:1: OD324 rr.thing.name is required and has no default, so Odoo cannot create this record; give the field a value
-custom/record_required/data/rr.thing-lines.csv:2:1: OD324 rr.thing.name is required and has no default, so Odoo cannot create this record; give the field a value
-custom/record_required/data/rr.thing-rows.csv:3:1: OD324 rr.thing.name is required and has no default, so Odoo cannot create this record; give the field a value
+custom/record_required/data/rr.thing-bare.csv:2:1: OD324 rr.thing.name is required and has no default, so creating this record fails if the column is NOT NULL; give the field a value
+custom/record_required/data/rr.thing-bare.csv:3:1: OD324 rr.thing.name is required and has no default, so creating this record fails if the column is NOT NULL; give the field a value
+custom/record_required/data/rr.thing-lines.csv:2:1: OD324 rr.thing.name is required and has no default, so creating this record fails if the column is NOT NULL; give the field a value
+custom/record_required/data/rr.thing-rows.csv:3:1: OD324 rr.thing.name is required and has no default, so creating this record fails if the column is NOT NULL; give the field a value
 custom/record_required/data/second.xml:2:5: OD323 XML id 'rewritten' is already defined in data/first.xml, and this definition overwrites the fields both name; remove the copy when the two say the same thing, or rename one when both are meant to exist
 custom/record_required/data/second.xml:5:5: OD323 XML id 'record_required.rewritten_by_prefix' is already defined in data/first.xml, and this definition overwrites the fields both name; remove the copy when the two say the same thing, or rename one when both are meant to exist
 custom/record_required/data/second.xml:8:5: OD323 XML id 'prefixed_first' is already defined in data/first.xml, and this definition overwrites the fields both name; remove the copy when the two say the same thing, or rename one when both are meant to exist
 custom/record_required/data/second.xml:12:9: OD323 XML id 'rewritten_noupdate' is already defined in data/first.xml, and this definition overwrites the fields both name; remove the copy when the two say the same thing, or rename one when both are meant to exist
-custom/record_required/data/second.xml:16:5: OD323 XML id 'other_model' is already a record of rr.note in data/first.xml, so it cannot name one of rr.tag; rename one
-custom/record_required/data/second.xml:19:5: OD323 XML id 'other_model_by_tag' is already a record of ir.ui.view in data/first.xml, so it cannot name one of ir.ui.menu; rename one
+custom/record_required/data/second.xml:16:5: OD323 XML id 'other_model' is already a record of rr.note in data/first.xml, and this definition is one of rr.tag; rename one
+custom/record_required/data/second.xml:19:5: OD323 XML id 'other_model_by_tag' is already a record of ir.ui.view in data/first.xml, and this definition is one of ir.ui.menu; rename one
 custom/record_required/data/second.xml:20:5: OD323 XML id 'template_twice' is already defined in data/first.xml, and this definition overwrites the fields both name; remove the copy when the two say the same thing, or rename one when both are meant to exist
 custom/record_required/data/second.xml:23:5: OD323 XML id 'record_then_template' is already defined in data/first.xml, and this definition overwrites the fields both name; remove the copy when the two say the same thing, or rename one when both are meant to exist
 custom/record_required/data/second.xml:26:5: OD323 XML id 'menu_twice' is already defined in data/first.xml, and this definition overwrites the fields both name; remove the copy when the two say the same thing, or rename one when both are meant to exist
@@ -557,12 +557,12 @@ custom/record_required/data/second.xml:73:5: OD323 XML id 'by_id_then_name' is a
 custom/record_required/data/second.xml:76:5: OD323 XML id 'by_name_then_id' is already defined in data/first.xml, and this definition overwrites the fields both name; remove the copy when the two say the same thing, or rename one when both are meant to exist
 custom/record_required/data/second.xml:88:5: OD303 XML id 'name_in_one_file' is already defined earlier in this file
 custom/record_required/data/unlisted.xml:1:1: OD502 'data/unlisted.xml' is not in the manifest's data or demo, so Odoo never loads it
-custom/record_required/demo/first.xml:11:5: OD324 rr.thing.name is required and has no default, so Odoo cannot create this record; give the field a value
-custom/record_required_ext/data/after.xml:3:5: OD324 rr.thing.name is required and has no default, so Odoo cannot create this record; give the field a value
-custom/record_required_ext/data/before.xml:3:5: OD324 rr.thing.name is required and has no default, so Odoo cannot create this record; give the field a value
-custom/record_required_ext/data/before.xml:4:5: OD324 rr.scoped.added is required and has no default, so Odoo cannot create this record; give the field a value
-custom/record_required_ext/data/over_demo.xml:2:5: OD324 rr.thing.name is required and has no default, so Odoo cannot create this record; give the field a value
-custom/record_required_nine/data/legacy.xml:2:5: OD324 rn.legacy.other is required and has no default, so Odoo cannot create this record; give the field a value
+custom/record_required/demo/first.xml:11:5: OD324 rr.thing.name is required and has no default, so creating this record fails if the column is NOT NULL; give the field a value
+custom/record_required_ext/data/after.xml:3:5: OD324 rr.thing.name is required and has no default, so creating this record fails if the column is NOT NULL; give the field a value
+custom/record_required_ext/data/before.xml:3:5: OD324 rr.thing.name is required and has no default, so creating this record fails if the column is NOT NULL; give the field a value
+custom/record_required_ext/data/before.xml:4:5: OD324 rr.scoped.added is required and has no default, so creating this record fails if the column is NOT NULL; give the field a value
+custom/record_required_ext/data/over_demo.xml:2:5: OD324 rr.thing.name is required and has no default, so creating this record fails if the column is NOT NULL; give the field a value
+custom/record_required_nine/data/legacy.xml:2:5: OD324 rn.legacy.other is required and has no default, so creating this record fails if the column is NOT NULL; give the field a value
 custom/record_rules/security/active_forms.xml:4:36: OD210 'no_active_eval': rule.ticket has no field 'no_active_eval'
 custom/record_rules/security/active_forms.xml:9:36: OD210 'no_active_one': rule.ticket has no field 'no_active_one'
 custom/record_rules/security/active_forms.xml:14:36: OD210 'no_active_text': rule.ticket has no field 'no_active_text'
@@ -720,7 +720,7 @@ custom/report_tag11/data/reports.xml:10:125: OD319 Odoo refuses this expression 
 custom/report_tag11/data/reports.xml:28:35: OD311 no indexed module defines template 'report_tag11.absent_record'
 custom/report_tag11/data/reports.xml:29:46: OD319 Odoo refuses this expression when it prints the report: Unexpected token at the end of an expression
 custom/report_tag11/data/updates.xml:2:5: OD323 XML id 'tag_replaces' is already defined in data/reports.xml, and this definition overwrites the fields both name; remove the copy when the two say the same thing, or rename one when both are meant to exist
-custom/report_tag11/data/updates.xml:4:5: OD323 XML id 'tag_then_record' is already a record of ir.actions.report in data/reports.xml, so it cannot name one of ir.actions.report.xml; rename one
+custom/report_tag11/data/updates.xml:4:5: OD323 XML id 'tag_then_record' is already a record of ir.actions.report in data/reports.xml, and this definition is one of ir.actions.report.xml; rename one
 custom/report_tag16/data/reports.xml:6:71: OD311 no indexed module defines template 'report_tag16.absent_tag'
 custom/report_tag16/data/reports.xml:8:71: OD311 no indexed module defines template 'report_tag16.absent_type'
 custom/report_tag16/data/reports.xml:10:125: OD319 Odoo refuses this expression when it prints the report: Unexpected token at the end of an expression

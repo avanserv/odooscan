@@ -698,7 +698,7 @@ fn repeated(id: &str, earlier: &[&IdDef], later: &IdDef, series: Option<Series>)
         && report_tag_model(model, series) != report_tag_model(other, series)
     {
         return Some(format!(
-            "XML id '{id}' is already a record of {model} in {}, so it cannot name one of {other}; rename one",
+            "XML id '{id}' is already a record of {model} in {}, and this definition is one of {other}; rename one",
             first.rel
         ));
     }
@@ -1424,7 +1424,7 @@ impl<'m> Ctx<'_, 'm> {
         self.required_gaps(&write.model, given, memo, &mut seen, &mut gaps);
         for (model, field) in gaps {
             let message = format!(
-                "{model}.{field} is required and has no default, so Odoo cannot create this record; give the field a value"
+                "{model}.{field} is required and has no default, so creating this record fails if the column is NOT NULL; give the field a value"
             );
             out.push(path, "OD324", write.pos, message);
         }

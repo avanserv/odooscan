@@ -61,8 +61,8 @@ Models, fields and methods checked against every module in the dependency graph.
 `Model`, `TransientModel`, `AbstractModel` or, from 20.0, `CachedModel` among its bases, and any
 other base is a plain Python base class, which the rules whose page says so skip, since only Python
 knows its fields and methods. As each page says, they also skip a model when a class of it, or of a
-model it inherits or delegates to, has an `_inherit` element that is not a literal, such as a
-variable, since the scan cannot tell which model it names.
+model it inherits or, for a rule reading fields, delegates to, has an `_inherit` element that is
+not a literal, such as a variable, since the scan cannot tell which model it names.
 
 | Code | Name | Reports |
 | --- | --- | --- |
