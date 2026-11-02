@@ -117,8 +117,8 @@ fn delegate_without_ondelete_waits_for_a_known_series() {
     assert_eq!(code(Series::parse("18.0")), Some("OD228"));
 }
 
-#[test]
-fn company_check_severity_follows_the_module_series() {
+/// The severity each module of the fixtures reports `code` at, in scan order.
+fn severities(code: &str) -> Vec<(String, Severity)> {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
     let report = scan(&ScanOptions {
         paths: vec![root.join("custom")],
@@ -128,13 +128,18 @@ fn company_check_severity_follows_the_module_series() {
     let mut found: Vec<(String, Severity)> = report
         .diagnostics
         .iter()
-        .filter(|d| d.code == "OD222")
+        .filter(|d| d.code == code)
         .map(|d| {
             let module = d.path.strip_prefix(root.join("custom")).unwrap().iter().next().unwrap();
             (module.to_string_lossy().into_owned(), d.severity)
         })
         .collect();
     found.dedup();
+    found
+}
+
+#[test]
+fn company_check_severity_follows_the_module_series() {
     let expected = [
         ("field_options", Severity::Error),
         ("legacy13", Severity::Warning),
@@ -142,7 +147,20 @@ fn company_check_severity_follows_the_module_series() {
         ("legacy17", Severity::Error),
         ("saas125", Severity::Warning),
     ];
-    assert_eq!(found, expected.map(|(m, s)| (m.to_owned(), s)));
+    assert_eq!(severities("OD222"), expected.map(|(m, s)| (m.to_owned(), s)));
+}
+
+#[test]
+fn access_severity_follows_the_module_series() {
+    let expected = [
+        ("bad_sale", Severity::Warning),
+        ("modern20", Severity::Info),
+        ("saas132", Severity::Warning),
+        ("saas193", Severity::Warning),
+        ("saas194", Severity::Info),
+        ("sql_columns", Severity::Warning),
+    ];
+    assert_eq!(severities("OD401"), expected.map(|(m, s)| (m.to_owned(), s)));
 }
 
 #[test]

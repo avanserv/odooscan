@@ -739,7 +739,9 @@ custom/saas182/models/res_partner.py:7:5: OD118 @api.model on create() passes a 
 custom/saas183/models/ticket.py:7:33: OD218 _inherits delegates to 'partner_id', which must be required with ondelete 'cascade' or 'restrict'; give it ondelete="cascade"
 custom/saas183/models/ticket.py:9:73: OD213 'partner_id' is required, so Odoo refuses ondelete='set null'; use 'restrict' or 'cascade'
 custom/saas183/models/ticket.py:10:88: OD213 'country_id' is required, so Odoo refuses ondelete='set null'; use 'restrict' or 'cascade'
+custom/saas193/models/ledger.py:4:7: OD401 model 'saas.before.ledger' has no ir.model.access rule, so only the superuser can use it
 custom/saas193/models/memo.py:8:34: OD219 'stage' sets tracking, but saas.memo does not inherit mail.thread, so Odoo ignores it and logs a warning; inherit mail.thread or remove tracking
+custom/saas194/models/ledger.py:4:7: OD401 model 'saas.after.ledger' has no ir.model.access rule, so only the superuser can use it
 custom/server_code/data/calls.xml:5:34: OD320 server.job has no method '_run_misspelled'
 custom/server_code/data/calls.xml:12:36: OD320 server.job has no method 'action_opne'
 custom/server_code/data/calls.xml:19:35: OD320 server.job has no method 'action_clsoe'
