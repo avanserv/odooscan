@@ -47,6 +47,7 @@ pub fn analyze(text: &str, model: &str) -> DataFacts {
                 pos: at(1),
             })
             .collect(),
+        csv: true,
     });
     for row in reader.records() {
         let Ok(row) = row else { continue };

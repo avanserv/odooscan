@@ -2,7 +2,7 @@
     "name": "Legacy 17",
     "version": "17.0.1.0.0",
     "depends": ["base"],
-    "data": ["views/partner_pages.xml"],
+    "data": ["views/partner_pages.xml", "data/properties.xml"],
     "init_xml": ["views/partner_nickname_views.xml"],
     "update_xml": [
         "views/partner_motto_views.xml",

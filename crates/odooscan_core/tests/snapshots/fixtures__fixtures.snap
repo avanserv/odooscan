@@ -234,6 +234,8 @@ custom/data_fields_dep/models/ticket.py:11:45: OD207 'dep_wrong_type' is a Integ
 custom/data_fields_dep/models/ticket.py:16:36: OD203 'x_demo_text': data.ticket has no field 'x_demo_text'
 custom/data_fields_dep/models/ticket.py:23:18: OD221 'x_parent_id.dep_depth' makes 'dep_depth' depend on itself on other records, so Odoo logs a warning; declare 'dep_depth' with recursive=True
 custom/data_fields_dep/views/partner_views.xml:8:17: OD304 'x_demo': res.partner has no field 'x_demo'
+custom/data_fields_old/data/properties.xml:4:9: OD309 ir.property has no field 'value'
+custom/data_fields_old/data/properties.xml:5:9: OD309 ir.property has no field 'ghost'
 custom/data_fields_side/views/partner_views.xml:7:17: OD304 'x_flag': field 'x_flag' of res.partner comes from module data_fields, which is not in depends
 custom/domain_bases/models/domain_models.py:23:23: OD210 'whole_id.no_past_base': domain.whole has no field 'no_past_base'
 custom/domain_bases/models/domain_models.py:53:30: OD210 'no_chained': domain.chained has no field 'no_chained'
@@ -457,6 +459,9 @@ custom/legacy9/data/calls.xml:25:34: OD320 res.partner has no method '_nope_defa
 custom/legacy9/data/calls.xml:45:41: OD319 Odoo refuses this code when the action runs: unexpected EOF while parsing
 custom/legacy9/data/calls.xml:51:30: OD319 Odoo refuses this code when the action runs: Expected an expression
 custom/legacy9/data/calls.xml:77:9: OD309 ir.cron has no field 'no_such_field'
+custom/legacy9/data/ir.property.csv:1:1: OD309 ir.property has no field 'value'
+custom/legacy9/data/properties.xml:10:9: OD309 ir.property has no field 'ghost'
+custom/legacy9/data/properties.xml:14:9: OD309 ir.property has no field 'value'
 custom/legacy9/data/rewrites.xml:2:5: OD323 XML id 'rewritten_code' is already defined in data/calls.xml, and this definition overwrites the fields both name; remove the copy when the two say the same thing, or rename one when both are meant to exist
 custom/legacy9/data/rewrites.xml:6:5: OD323 XML id 'rewritten_state' is already defined in data/calls.xml, and this definition overwrites the fields both name; remove the copy when the two say the same thing, or rename one when both are meant to exist
 custom/legacy9/models/columns.py:31:33: OD203 'holder_id.ghost': legacy9.columns has no field 'ghost'

@@ -135,6 +135,9 @@ const REGISTRY_UNCALLABLE: Series = Series { major: 19, minor: 0 };
 /// `ir.model.access` row fails.
 const IR_ACCESS: Series = Series { major: 19, minor: 4 };
 
+/// The first series without `ir.property` (`de302c2d3630`, in no saas-17 branch).
+const IR_PROPERTY_GONE: Series = Series { major: 18, minor: 0 };
+
 /// The first series with `ir.actions.report`. Through 10.0 the model is `ir.actions.report.xml`, and
 /// a `render_html` replaces the template (`addons/report/models/report.py:138` on 10.0).
 const REPORT_MODEL: Series = Series { major: 11, minor: 0 };
@@ -2962,7 +2965,11 @@ impl<'m> Ctx<'_, 'm> {
         if self.lost || self.index.unread_class(&record.model.value, self.scope) {
             return;
         }
-        for field in &record.fields {
+        for field in record
+            .fields
+            .iter()
+            .filter(|f| !popped_value(record, &f.value, self.series))
+        {
             // `name@fr` sets the French translation of name.
             let fname = field.value.split('@').next().unwrap_or_default();
             match self.index.field(&record.model.value, fname, self.scope) {
@@ -2985,6 +2992,15 @@ impl<'m> Ctx<'_, 'm> {
             }
         }
     }
+}
+
+/// Whether `name` is the `value` that `create` and `write` of `ir.property` pop into the column of
+/// the property's type (`odoo/addons/base/models/ir_property.py:79,118,139` on 17.0), where the XML
+/// loader sends a record. An import refuses the column before `create` (`odoo/models.py:1353` on
+/// 17.0), and `ir.property` in the index of an unknown series means a base that pops it. A name
+/// with a language stays apart: nothing pops `value@fr`.
+fn popped_value(record: &RecordFact, name: &str, series: Option<Series>) -> bool {
+    !record.csv && record.model.value == "ir.property" && name == "value" && series.is_none_or(|s| s < IR_PROPERTY_GONE)
 }
 
 /// The x2many fields of an arch position, without the locators a spec leaves in it.

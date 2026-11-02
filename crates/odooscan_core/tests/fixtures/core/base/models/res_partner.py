@@ -139,6 +139,13 @@ class IrAccess(models.Model):
     domain = fields.Char()
 
 
+class IrProperty(models.Model):
+    _name = "ir.property"
+
+    name = fields.Char()
+    value_text = fields.Text()
+
+
 class IrModel(models.Model):
     _name = "ir.model"
 
