@@ -96,3 +96,13 @@ class SuperGuarded(models.Model):
         if hasattr(super(), "_guard_other"):
             super()._guard_unchecked()
         return super()._guard_gone()
+
+
+class SuperAttributes(models.Model):
+    _inherit = "bad.super"
+
+    def __getattr__(self, name):
+        return super().__getattr__(name)
+
+    def _lookup(self, name):
+        return super().__getattr__(name)

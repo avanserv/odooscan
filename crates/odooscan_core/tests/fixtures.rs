@@ -199,6 +199,26 @@ fn a_file_a_hook_loads_reports_its_rows() {
 }
 
 #[test]
+fn a_calendar_the_client_registers_still_needs_a_date_field() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+    // Scanned alone, as the rest of the fixtures hold a calendar view and so keep `calendar` served.
+    let report = scan(&ScanOptions {
+        paths: vec![root.join("custom/legacy9")],
+        addons_paths: vec![root.join("core")],
+        default_series: None,
+    });
+    let reported = |message: &str| {
+        let od318 = report.diagnostics.iter().filter(|d| d.code == "OD318");
+        od318.filter(|d| d.message.contains(message)).count()
+    };
+    assert_eq!(
+        reported("legacy9.gauge has no primary calendar view, and no date field"),
+        1
+    );
+    assert_eq!(reported("legacy9_compare"), 0);
+}
+
+#[test]
 fn a_public_row_needs_no_base() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
     let report = scan(&ScanOptions {

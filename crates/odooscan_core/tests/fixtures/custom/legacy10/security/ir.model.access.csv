@@ -1,3 +1,5 @@
 id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
 access_columns,columns,model_legacy10_columns,base.group_user,1,1,1,1
 access_columns_user,columns user,model_legacy10_columns_user,base.group_user,1,1,1,1
+access_node,node,model_legacy10_node,base.group_user,1,1,1,1
+access_arrow,arrow,model_legacy10_arrow,base.group_user,1,1,1,1

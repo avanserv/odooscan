@@ -186,13 +186,14 @@ pub struct ClassFact {
     /// The field paths of `_rec_names_search`.
     pub rec_names_search: Vec<Spanned<String>>,
     /// Methods the class's methods call through `super()`, leaving out a call inside a `hasattr`
-    /// test on that same `super()` and name.
+    /// test on that same `super()` and name, and `__getattr__` called from `__getattr__`.
     pub super_calls: Vec<Spanned<String>>,
     /// Methods of the class that call the method they override through `super()`.
     pub extended: Vec<String>,
     /// The base classes that are plain Python classes, whose methods only Python knows: any base
-    /// but `Model`, `TransientModel`, `AbstractModel` and `CachedModel`. Each is its bare name, or
-    /// empty for a base a class of the file cannot be, such as `Layout()` or `mixins.Layout`.
+    /// but `Model`, `TransientModel`, `AbstractModel`, `CachedModel` and the `osv` aliases of the
+    /// first three. Each is its bare name, or empty for a base a class of the file cannot be, such
+    /// as `Layout()` or `mixins.Layout`.
     pub plain_bases: Vec<String>,
     /// The entries of `plain_bases` that may give the class a field: all but the classes its file
     /// defines above it that can hold none. Those still hide methods, so they stay in `plain_bases`.
@@ -837,6 +838,8 @@ pub struct JsFacts {
     pub classes: Vec<JsClass>,
     pub patches: Vec<JsPatch>,
     pub orm_calls: Vec<OrmCall>,
+    /// The literal view kinds the file gives `view_registry.add`.
+    pub view_kinds: Vec<String>,
     pub syntax_error: Option<Spanned<String>>,
 }
 

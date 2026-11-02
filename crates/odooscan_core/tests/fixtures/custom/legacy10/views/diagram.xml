@@ -1,0 +1,15 @@
+<odoo>
+    <record id="columns_diagram" model="ir.ui.view">
+        <field name="name">legacy10.columns.diagram</field>
+        <field name="model">legacy10.columns.user</field>
+        <field name="arch" type="xml">
+            <diagram>
+                <node object="legacy10.node"><field name="kind"/></node>
+                <arrow object="legacy10.arrow" source="source_id" destination="target_id">
+                    <field name="signal"/>
+                </arrow>
+                <field name="kind"/>
+            </diagram>
+        </field>
+    </record>
+</odoo>

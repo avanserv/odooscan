@@ -1270,6 +1270,9 @@ pub struct Index<'m> {
     /// The (model, type) of every view of the files manifests load that is primary or may be, as
     /// Odoo looks a default view up among primary ones alone. None is a type only a run can tell.
     pub view_types: FxHashSet<(&'m str, Option<&'m str>)>,
+    /// The kinds `view_registry.add` names that no entry of `view_types` has: on 9.0 the web client
+    /// draws those from a view of another kind, so an action lists them with no view of their own.
+    pub client_views: FxHashSet<&'m str>,
     pub action_writes: Writes<'m, ActionFact>,
     pub rule_writes: Writes<'m, RuleFact>,
     pub server_writes: Writes<'m, ServerFact>,
@@ -1331,6 +1334,7 @@ impl<'m> Index<'m> {
             xmlids,
             views: Inheritance::new(views),
             view_types: FxHashSet::default(),
+            client_views: FxHashSet::default(),
             action_writes: record_writes(modules, &by_name, |f| &f.actions, |a| a.id.as_ref()),
             rule_writes: record_writes(modules, &by_name, |f| &f.rules, |r| r.id.as_ref()),
             server_writes: record_writes(modules, &by_name, |f| &f.servers, |s| s.id.as_ref()),
@@ -1357,6 +1361,7 @@ impl<'m> Index<'m> {
         index.patched = index.patched_classes();
         index.template_bases = index.template_bases();
         index.view_types = index.view_types();
+        index.client_views = index.client_views();
         index.data_fields = index.data_fields(default_series);
         index
     }
@@ -1425,6 +1430,19 @@ impl<'m> Index<'m> {
             types.extend(views.filter_map(|view| self.view_type(module, view)));
         }
         types
+    }
+
+    fn client_views(&self) -> FxHashSet<&'m str> {
+        let served: FxHashSet<&str> = self.view_types.iter().filter_map(|(_, kind)| *kind).collect();
+        let registered = self
+            .modules
+            .iter()
+            .flat_map(|m| &m.js)
+            .flat_map(|f| &f.facts.view_kinds);
+        registered
+            .map(String::as_str)
+            .filter(|kind| !served.contains(kind))
+            .collect()
     }
 
     /// The entry of `view` in `view_types`, if it has one. Odoo gives a view with a parent the type

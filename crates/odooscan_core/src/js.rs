@@ -229,6 +229,7 @@ impl<'a> Visit<'a> for Collector<'_> {
         if let Some(orm) = orm_call(call, self.lines) {
             self.facts.orm_calls.push(orm);
         }
+        self.facts.view_kinds.extend(view_kind(call));
         walk_call_expression(self, call);
     }
 }
@@ -273,6 +274,33 @@ fn orm_call(call: &CallExpression, lines: &Lines) -> Option<OrmCall> {
         method: if method == "call" { literal(1) } else { None },
     };
     (call.model.is_some() || call.method.is_some()).then_some(call)
+}
+
+/// The kind a `view_registry.add("kind", View)` call registers.
+fn view_kind(call: &CallExpression) -> Option<String> {
+    let Expression::StaticMemberExpression(callee) = &call.callee else {
+        return None;
+    };
+    if callee.property.name != "add" || !is_view_registry(&callee.object) {
+        return None;
+    }
+    let Argument::StringLiteral(kind) = call.arguments.first()? else {
+        return None;
+    };
+    Some(kind.value.as_str()?.to_owned())
+}
+
+/// `view_registry`, `x.view_registry`, and those through a chain of `.add()`.
+fn is_view_registry(e: &Expression) -> bool {
+    match e {
+        Expression::Identifier(i) => i.name == "view_registry",
+        Expression::StaticMemberExpression(m) => m.property.name == "view_registry",
+        Expression::CallExpression(c) => match &c.callee {
+            Expression::StaticMemberExpression(m) => m.property.name == "add" && is_view_registry(&m.object),
+            _ => false,
+        },
+        _ => false,
+    }
 }
 
 /// A string's value, placed after its opening quote.
@@ -357,6 +385,19 @@ fn defines(program: &Program) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reads_the_kinds_the_view_registry_adds() {
+        let source = r#"
+            view_registry.add("a", A);
+            core.view_registry.add("b", B);
+            view_registry.add("c", C).add("d", D);
+            view_registry.add(kind, E);
+            core.one2many_view_registry.add("f", F);
+            registry.add("g", G);
+        "#;
+        assert_eq!(analyze(source).view_kinds, ["a", "b", "d", "c"]);
+    }
 
     #[test]
     fn reads_the_annotation_from_the_leading_comments() {
