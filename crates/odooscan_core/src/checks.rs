@@ -95,6 +95,11 @@ const VIEWS_BY_ACTION_KIND: Series = Series { major: 10, minor: 0 };
 /// rule (`:149`), so only the last write can fail.
 const RULE_DOMAIN_VALIDATED: Series = Series { major: 15, minor: 0 };
 
+/// The first series that looks the fields of a view's domains and `group_by` up on their model
+/// (`aae1d5782968`, `_get_server_domain_variables`), and those of a string `domain` on a field the
+/// view lets a user edit. Before it a domain names only what the view must hold.
+const VIEW_DOMAIN_VALIDATED: Series = Series { major: 13, minor: 1 };
+
 /// The first series whose access check reads the rows of a transient model (`6d8688bb124d`; saas~13.1
 /// lets every user through, `odoo/addons/base/models/ir_model.py:1500`).
 const TRANSIENT_ACCESS: Series = Series { major: 13, minor: 2 };
@@ -203,6 +208,8 @@ pub fn check_module<'m>(index: &Index<'m>, mi: usize, series: Option<Series>) ->
     if index.has_base {
         let scope = index.scope(mi);
         let setup = index.setup_scope(mi);
+        let installs = index.install_scope(mi);
+        let loaded = index.loaded_scope(mi, &scope, &installs);
         let built = BuiltModels::of(module);
         let ctx = Ctx {
             index,
@@ -210,6 +217,8 @@ pub fn check_module<'m>(index: &Index<'m>, mi: usize, series: Option<Series>) ->
             module,
             scope: &scope,
             setup: &setup,
+            installs: &installs,
+            loaded: &loaded,
             dynamic: module.python.iter().any(|f| f.facts.dynamic_models),
             built: &built,
             partial: index.partial_scope(&scope),
@@ -860,6 +869,10 @@ struct Ctx<'a, 'm> {
     /// The scope of what Odoo reads as it sets up the module's Python fields and attributes, and of
     /// the queries of `init()` and `_auto_init()`.
     setup: &'a Scope,
+    /// `scope` and what installing the module auto-installs with it.
+    installs: &'a Scope,
+    /// `installs`, short of what loads after the module.
+    loaded: &'a Scope,
     /// The module builds model names at runtime, so its models and their ids cannot be listed.
     dynamic: bool,
     /// What the module may build, outside `tests/`.
@@ -980,9 +993,29 @@ impl<'m> Ctx<'_, 'm> {
         }
     }
 
-    fn domain_path(&self, out: &mut Out<'m>, file: &'m Path, model: &str, path: &Spanned<String>) {
-        if let Err(e) = self.index.resolve_path(model, &path.value, self.scope)
-            && !self.may_hide(&e)
+    /// What a domain finds where Odoo checks it as the module loads from `validated` on. Before that
+    /// it runs once the install is done, with all of `installs` there.
+    fn checked_reach(&self, validated: Series) -> &Scope {
+        if self.series.is_some_and(|s| s < validated) {
+            self.installs
+        } else {
+            self.loaded
+        }
+    }
+
+    /// OD210 on a path that fails on `scope` and past it on `reach`, which holds what is there when
+    /// the domain is read. `scope` keeps its say: a model built here on it may be spelled out by a
+    /// module only `reach` holds, which says nothing of the model this module builds.
+    fn domain_path(&self, out: &mut Out<'m>, file: &'m Path, model: &str, path: &Spanned<String>, reach: &Scope) {
+        let Err(near) = self.index.resolve_path(model, &path.value, self.scope) else {
+            return;
+        };
+        if self.may_hide(&near) {
+            return;
+        }
+        let wider = Ctx { scope: reach, ..*self };
+        if let Err(e) = self.index.resolve_path(model, &path.value, reach)
+            && !wider.may_hide(&e)
         {
             out.push(file, "OD210", path.pos, e.message(&path.value));
         }
@@ -1360,8 +1393,14 @@ impl<'m> Ctx<'_, 'm> {
             self.inverse(out, path, comodel, inverse);
         }
         if let Some(comodel) = &field.comodel {
+            // A view validates a string, and leaves a list to the client.
+            let reach = if field.domain_string {
+                self.checked_reach(VIEW_DOMAIN_VALIDATED)
+            } else {
+                self.installs
+            };
             for f in &field.domain {
-                self.domain_path(out, path, &comodel.value, f);
+                self.domain_path(out, path, &comodel.value, f, reach);
             }
         }
         self.missing_methods(out, path, class, field);
@@ -1482,8 +1521,12 @@ impl<'m> Ctx<'_, 'm> {
         let loaded = Loaded::of(self.module);
         let mut required = FxHashMap::default();
         let demo_scope = self.scope.in_demo();
+        let demo_installs = self.installs.in_demo();
+        let demo_loaded = self.loaded.in_demo();
         let demo = Ctx {
             scope: &demo_scope,
+            installs: &demo_installs,
+            loaded: &demo_loaded,
             ..*self
         };
         // Files the manifest does not load, such as chart template CSVs read by Python code, are skipped.
@@ -1875,8 +1918,9 @@ impl<'m> Ctx<'_, 'm> {
             return;
         };
         if self.sees_model(model) {
+            let reach = self.checked_reach(RULE_DOMAIN_VALIDATED);
             for field in &rule.fields {
-                self.domain_path(out, path, model, field);
+                self.domain_path(out, path, model, field, reach);
             }
         }
     }
@@ -2334,7 +2378,7 @@ impl<'m> Ctx<'_, 'm> {
     fn domains(&self, out: &mut Out<'m>, path: &'m Path, domains: &[DomainFact]) {
         for d in domains {
             for f in &d.fields {
-                self.domain_path(out, path, &d.model, f);
+                self.domain_path(out, path, &d.model, f, self.installs);
             }
         }
     }
@@ -2348,11 +2392,13 @@ impl<'m> Ctx<'_, 'm> {
         view: &ViewFact,
         trees: &mut FxHashMap<String, ViewTree<'m>>,
     ) {
+        let validated = self.checked_reach(VIEW_DOMAIN_VALIDATED);
         for d in &view.domains {
             let unsure = self.unsure_spec_subview(model, view, &d.path, trees);
             let target = self.arch_model(model, &d.path).filter(|_| !unsure);
+            let reach = if d.validated { validated } else { self.installs };
             for f in target.iter().flat_map(|t| d.fields.iter().map(move |f| (t, f))) {
-                self.domain_path(out, path, f.0, f.1);
+                self.domain_path(out, path, f.0, f.1, reach);
             }
         }
     }

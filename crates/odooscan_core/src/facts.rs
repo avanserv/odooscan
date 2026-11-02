@@ -111,6 +111,8 @@ pub struct FieldFact {
     pub methods: Vec<Spanned<String>>,
     /// Fields the literal `domain` of a relational field names on its comodel.
     pub domain: Vec<Spanned<String>>,
+    /// The `domain` is a string rather than a list.
+    pub domain_string: bool,
     /// Attributes given by keyword, or by position under the name the field type gives it.
     pub options: Vec<(String, Spanned<OptionValue>)>,
     /// The label of each value of literal `selection` and `selection_add` lists, none where only a
@@ -472,6 +474,9 @@ pub struct ArchField {
 pub struct ArchDomain {
     pub path: Vec<String>,
     pub fields: Vec<Spanned<String>>,
+    /// Odoo looks the fields up as it validates the view. It never does for a `filter_domain`, which
+    /// waits for a search.
+    pub validated: bool,
 }
 
 /// An arch element as an inheriting view locates it: its tag and its `name`, `id` or `t-call`.

@@ -697,7 +697,7 @@ impl Walker<'_> {
         }
         if tag == "filter" {
             let fields = domain_attr(node, "domain").chain(group_by_attr(node));
-            arch_domain(pos, path.clone(), fields, view);
+            arch_domain(pos, path.clone(), fields, true, view);
         }
         self.arch_context(node, tag, path, view);
         for child in node.children().filter(Node::is_element) {
@@ -824,8 +824,8 @@ impl Walker<'_> {
         }
         let field_path: Vec<String> = path.iter().cloned().chain([name.to_owned()]).collect();
         // A field's domain filters its comodel; its filter_domain, in a search view, the view's model.
-        arch_domain(pos, field_path.clone(), domain_attr(node, "domain"), view);
-        arch_domain(pos, path.clone(), domain_attr(node, "filter_domain"), view);
+        arch_domain(pos, field_path.clone(), domain_attr(node, "domain"), true, view);
+        arch_domain(pos, path.clone(), domain_attr(node, "filter_domain"), false, view);
         view.fields.push(ArchField { path: field_path, pos });
         for child in node.children().filter(Node::is_element) {
             let tag = child.tag_name().name();
@@ -1193,10 +1193,20 @@ fn group_by_attr(node: Node) -> impl Iterator<Item = String> {
         .into_iter()
 }
 
-fn arch_domain(pos: Pos, path: Vec<String>, fields: impl Iterator<Item = String>, view: &mut ViewFact) {
+fn arch_domain(
+    pos: Pos,
+    path: Vec<String>,
+    fields: impl Iterator<Item = String>,
+    validated: bool,
+    view: &mut ViewFact,
+) {
     let fields: Vec<Spanned<String>> = fields.map(|value| Spanned { value, pos }).collect();
     if !fields.is_empty() {
-        view.domains.push(ArchDomain { path, fields });
+        view.domains.push(ArchDomain {
+            path,
+            fields,
+            validated,
+        });
     }
 }
 

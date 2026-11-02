@@ -1,0 +1,22 @@
+<odoo>
+    <record id="thing_view_form" model="ir.ui.view">
+        <field name="name">auto.scope.thing.form</field>
+        <field name="model">auto.scope.thing</field>
+        <field name="arch" type="xml">
+            <form>
+                <field name="peer_id" domain="[('both_stamp', '=', 'a')]"/>
+                <field name="client_id" domain="[('next_stamp', '=', 'a')]"/>
+            </form>
+        </field>
+    </record>
+
+    <record id="thing_view_search" model="ir.ui.view">
+        <field name="name">auto.scope.thing.search</field>
+        <field name="model">auto.scope.thing</field>
+        <field name="arch" type="xml">
+            <search>
+                <field name="peer_id" filter_domain="[('next_stamp', '=', self)]"/>
+            </search>
+        </field>
+    </record>
+</odoo>

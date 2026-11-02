@@ -1,0 +1,7 @@
+<odoo>
+    <record id="field_x_both_demo" model="ir.model.fields">
+        <field name="name">x_both_demo</field>
+        <field name="model_id" ref="auto_scope_left.model_auto_scope_thing"/>
+        <field name="ttype">char</field>
+    </record>
+</odoo>

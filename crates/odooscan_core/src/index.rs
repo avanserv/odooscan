@@ -935,30 +935,46 @@ fn js_paths(modules: &[Module]) -> FxHashMap<String, JsTarget> {
 /// The first series that reads a list-form `auto_install` as its triggers (`saas~12.4`).
 const LISTED_TRIGGERS: Series = Series { major: 12, minor: 4 };
 
-/// `base`, and what Odoo always installs with it: each auto-install module whose triggers (see
-/// `triggers` for how a series reads them) are all such modules and whose depends closure is indexed,
-/// with that closure dragged in.
-/// `default_series` stands in for a manifest version without a series, as it does for the checks.
+/// The first series whose `must_install` keeps a module with `countries` off a database with no company
+/// in those countries (`saas~17.1`). Before it the key decides nothing.
+const COUNTRY_GATE: Series = Series { major: 17, minor: 1 };
+
+/// `base`, and what Odoo always installs with it. `default_series` stands in for a manifest version
+/// without a series, as it does for the checks.
 /// The manifest `countries` key is ignored on purpose, because Odoo creates a database without reading it.
 fn always_installed(modules: &[Module], by_name: &FxHashMap<&str, usize>, default_series: Option<Series>) -> Vec<bool> {
-    let mut always: Vec<bool> = modules.iter().map(|m| m.name == "base").collect();
+    let seeds = modules.iter().map(|m| m.name == "base").collect();
+    install_closure(modules, by_name, seeds, default_series, |_| true)
+}
+
+/// `seeds`, and each auto-install module `joins` admits whose triggers (see `triggers` for how a series
+/// reads them) lie among them and whose depends closure is indexed, with that closure dragged in,
+/// repeating until nothing is added.
+fn install_closure(
+    modules: &[Module],
+    by_name: &FxHashMap<&str, usize>,
+    seeds: Vec<bool>,
+    default_series: Option<Series>,
+    joins: impl Fn(&Module) -> bool,
+) -> Vec<bool> {
+    let mut installed = seeds;
     loop {
-        let installed = |name: &str| by_name.get(name).is_some_and(|&di| always[di]);
+        let holds = |name: &str| by_name.get(name).is_some_and(|&di| installed[di]);
         let ready: Vec<usize> = (0..modules.len())
-            .filter(|&mi| !always[mi])
-            .filter(|&mi| triggers(&modules[mi], default_series).is_some_and(|t| t.into_iter().all(installed)))
+            .filter(|&mi| !installed[mi] && joins(&modules[mi]))
+            .filter(|&mi| triggers(&modules[mi], default_series).is_some_and(|t| t.into_iter().all(holds)))
             .collect();
         let mut grew = false;
         for mi in ready {
             // Odoo cannot load a module whose depends closure is incomplete, so nothing joins through it.
             let (closure, complete) = depends_closure(modules, by_name, [mi]);
             if complete {
-                always.iter_mut().zip(closure).for_each(|(a, c)| *a |= c);
+                installed.iter_mut().zip(closure).for_each(|(a, c)| *a |= c);
                 grew = true;
             }
         }
         if !grew {
-            return always;
+            return installed;
         }
     }
 }
@@ -1024,6 +1040,15 @@ fn load_order(modules: &[Module], by_name: &FxHashMap<&str, usize>) -> Vec<usize
     let mut order: Vec<usize> = (0..modules.len()).collect();
     order.sort_unstable_by_key(|&mi| (depth[mi], modules[mi].name.as_str()));
     order
+}
+
+/// The place of each module in `load_order`.
+fn load_rank(modules: &[Module], by_name: &FxHashMap<&str, usize>) -> Vec<usize> {
+    let mut ranks = vec![0; modules.len()];
+    for (rank, mi) in load_order(modules, by_name).into_iter().enumerate() {
+        ranks[mi] = rank;
+    }
+    ranks
 }
 
 /// Folds writes of `(module name, write)`, in load order, into records: those of one id make one
@@ -1291,6 +1316,9 @@ pub struct Index<'m> {
     js_loaded: Loaded,
     templates_loaded: Loaded,
     always_installed: Vec<bool>,
+    default_series: Option<Series>,
+    /// Each module's place in `load_order`.
+    load_rank: Vec<usize>,
     patched: Patched<'m>,
     /// Classes a subclass with a template of its own extends.
     template_bases: FxHashSet<ClassKey>,
@@ -1351,6 +1379,8 @@ impl<'m> Index<'m> {
             js_loaded,
             templates_loaded,
             always_installed: always_installed(modules, &by_name, default_series),
+            default_series,
+            load_rank: load_rank(modules, &by_name),
             by_name,
             patched: FxHashMap::default(),
             template_bases: FxHashSet::default(),
@@ -1687,6 +1717,35 @@ impl<'m> Index<'m> {
     pub fn scope(&self, module: usize) -> Scope {
         let always = (0..self.modules.len()).filter(|&mi| self.always_installed(mi));
         let (visible, _) = depends_closure(self.modules, &self.by_name, std::iter::once(module).chain(always));
+        Scope {
+            records: visible.clone(),
+            visible,
+            demo: false,
+        }
+    }
+
+    /// What `scope` of `module` grows to on the database that installs it: each module its install
+    /// auto-installs, as `triggers` reads them, repeated until nothing is added. A module with
+    /// `countries` stays out where the key counts, as whether it installs depends on the companies.
+    pub fn install_scope(&self, module: usize) -> Scope {
+        let series = self.default_series;
+        let gated = |m: &Module| m.manifest.countries && m.series.or(series).is_none_or(|s| s >= COUNTRY_GATE);
+        let seeds = self.scope(module).visible;
+        let visible = install_closure(self.modules, &self.by_name, seeds, series, |m| !gated(m));
+        Scope {
+            records: visible.clone(),
+            visible,
+            demo: false,
+        }
+    }
+
+    /// `scope` of `module`, and of its `installs` what loads first, for a check that runs as `module`
+    /// loads. The rest arrives too late on the database that installs them together, though one
+    /// that already holds them passes.
+    pub fn loaded_scope(&self, module: usize, scope: &Scope, installs: &Scope) -> Scope {
+        let first = |mi: usize| self.load_rank[mi] < self.load_rank[module];
+        let held = |mi: usize| scope.visible[mi] || (installs.visible[mi] && first(mi));
+        let visible: Vec<bool> = (0..self.modules.len()).map(held).collect();
         Scope {
             records: visible.clone(),
             visible,

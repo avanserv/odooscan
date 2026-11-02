@@ -1,0 +1,17 @@
+<odoo>
+    <record id="thing_view_search" model="ir.ui.view">
+        <field name="name">auto.scope.thing.search</field>
+        <field name="model">auto.scope.thing</field>
+        <field name="arch" type="xml">
+            <search>
+                <filter name="next" domain="[('next_stamp', '=', 'a')]"/>
+            </search>
+        </field>
+    </record>
+
+    <record id="rule_next" model="ir.rule">
+        <field name="name">by a field of an auto-install module that loads after</field>
+        <field name="model_id" ref="auto_scope_left.model_auto_scope_thing"/>
+        <field name="domain_force">[('next_stamp', '=', 'a')]</field>
+    </record>
+</odoo>

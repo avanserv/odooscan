@@ -1,0 +1,19 @@
+<odoo>
+    <record id="rule_both_demo" model="ir.rule">
+        <field name="name">by a demo field of an auto-install module that loads first</field>
+        <field name="model_id" ref="auto_scope_left.model_auto_scope_thing"/>
+        <field name="domain_force">[('x_both_demo', '=', 'a')]</field>
+    </record>
+
+    <record id="rule_next" model="ir.rule">
+        <field name="name">by a field of an auto-install module that loads after</field>
+        <field name="model_id" ref="auto_scope_left.model_auto_scope_thing"/>
+        <field name="domain_force">[('next_stamp', '=', 'a')]</field>
+    </record>
+
+    <record id="action_both_demo" model="ir.actions.act_window">
+        <field name="name">Things by a demo field of an auto-install module</field>
+        <field name="res_model">auto.scope.thing</field>
+        <field name="domain">[('x_both_demo', '=', 'a')]</field>
+    </record>
+</odoo>

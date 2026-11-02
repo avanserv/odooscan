@@ -75,6 +75,8 @@ pub struct Manifest {
     pub category: Option<String>,
     pub installable: bool,
     pub auto_install: AutoInstall,
+    /// The `countries` key lists a name.
+    pub countries: bool,
     /// Globs the `assets` bundles add, relative to the addons directory.
     pub assets: Vec<String>,
     /// Entries of the list keys Odoo loads nothing from, such as `other_files`, normalized.
@@ -145,8 +147,16 @@ impl Manifest {
             "category" => self.category = str_lit(value).map(str::to_owned),
             "installable" => self.installable = !matches!(value, Expr::BooleanLiteral(b) if !b.value),
             "assets" => self.assets = asset_globs(value),
-            "auto_install" => self.auto_install = AutoInstall::read(value),
+            "auto_install" | "countries" => self.set_install(loc, key, value),
             _ => self.unread.extend(names(loc, value).iter().map(|f| normalize(f))),
+        }
+    }
+
+    fn set_install(&mut self, loc: &Locator, key: &str, value: &Expr) {
+        match key {
+            "auto_install" => self.auto_install = AutoInstall::read(value),
+            "countries" => self.countries = !list(loc, value).is_empty(),
+            _ => {}
         }
     }
 
@@ -326,6 +336,15 @@ mod tests {
         let m = parse(r#"{"data": {"views/a.xml"}, "demo": {"data/b.xml"}}"#).unwrap();
         let files: Vec<_> = m.loaded_files(Series::parse("16.0")).collect();
         assert_eq!(files, ["views/a.xml", "data/b.xml"]);
+    }
+
+    #[test]
+    fn reads_countries() {
+        let countries = |src: &str| parse(src).unwrap().countries;
+        assert!(countries(r#"{"countries": ["be"]}"#));
+        assert!(!countries(r#"{"countries": []}"#));
+        assert!(!countries(r#"{"countries": COUNTRIES}"#));
+        assert!(!countries("{}"));
     }
 
     #[test]
