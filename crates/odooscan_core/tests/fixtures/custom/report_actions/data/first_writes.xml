@@ -1,0 +1,93 @@
+<odoo>
+    <record id="name_replaced" model="ir.actions.report">
+        <field name="name">name_replaced</field>
+        <field name="model">res.partner</field>
+        <field name="report_name">report_actions.absent_replaced</field>
+    </record>
+
+    <record id="name_hidden_later" model="ir.actions.report">
+        <field name="name">name_hidden_later</field>
+        <field name="model">res.partner</field>
+        <field name="report_name">report_actions.absent_hidden_later</field>
+    </record>
+
+    <record id="name_kept" model="ir.actions.report">
+        <field name="name">name_kept</field>
+        <field name="model">res.partner</field>
+        <field name="report_name">report_actions.absent_kept</field>
+    </record>
+
+    <record id="name_type_later" model="ir.actions.report">
+        <field name="name">name_type_later</field>
+        <field name="model">res.partner</field>
+        <field name="report_name">report_actions.absent_type_later</field>
+    </record>
+
+    <record id="name_type_earlier" model="ir.actions.report">
+        <field name="name">name_type_earlier</field>
+        <field name="model">res.partner</field>
+        <field name="report_name">report_actions.absent_type_earlier</field>
+        <field name="report_type">controller</field>
+    </record>
+
+    <record id="file_replaced" model="ir.actions.report">
+        <field name="name">file_replaced</field>
+        <field name="model">res.partner</field>
+        <field name="report_name">report_actions.sheet</field>
+        <field name="print_report_name">name = 5</field>
+    </record>
+
+    <record id="file_cleared" model="ir.actions.report">
+        <field name="name">file_cleared</field>
+        <field name="model">res.partner</field>
+        <field name="report_name">report_actions.sheet</field>
+        <field name="print_report_name">name = 6</field>
+    </record>
+
+    <record id="file_hidden" model="ir.actions.report">
+        <field name="name">file_hidden</field>
+        <field name="model">res.partner</field>
+        <field name="report_name">report_actions.sheet</field>
+        <field name="print_report_name">name = 7</field>
+    </record>
+
+    <record id="file_kept" model="ir.actions.report">
+        <field name="name">file_kept</field>
+        <field name="model">res.partner</field>
+        <field name="report_name">report_actions.sheet</field>
+        <field name="print_report_name">name = 8</field>
+    </record>
+
+    <record id="unlisted_replaces_name" model="ir.actions.report">
+        <field name="name">unlisted_replaces_name</field>
+        <field name="model">res.partner</field>
+        <field name="report_name">report_actions.absent_unlisted_replaces</field>
+    </record>
+
+    <record id="unlisted_replaces_file" model="ir.actions.report">
+        <field name="name">unlisted_replaces_file</field>
+        <field name="model">res.partner</field>
+        <field name="report_name">report_actions.sheet</field>
+        <field name="print_report_name">name = 9</field>
+    </record>
+
+    <record id="ext_replaces_name" model="ir.actions.report">
+        <field name="name">ext_replaces_name</field>
+        <field name="model">res.partner</field>
+        <field name="report_name">report_actions.absent_before_extension</field>
+    </record>
+
+    <record id="ext_replaces_file" model="ir.actions.report">
+        <field name="name">ext_replaces_file</field>
+        <field name="model">res.partner</field>
+        <field name="report_name">report_actions.sheet</field>
+        <field name="print_report_name">name = 10</field>
+    </record>
+
+    <record id="ext_changes_type" model="ir.actions.report">
+        <field name="name">ext_changes_type</field>
+        <field name="model">res.partner</field>
+        <field name="report_name">report_actions.absent_before_type</field>
+        <field name="report_type">controller</field>
+    </record>
+</odoo>

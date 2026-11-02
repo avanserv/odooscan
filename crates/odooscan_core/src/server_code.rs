@@ -1,10 +1,11 @@
-//! The `code` of server actions and crons, read as Odoo compiles it when it loads a record.
+//! The Python of data records: the `code` of server actions and crons, read as Odoo compiles it when
+//! it loads a record, and the expressions `safe_eval` compiles when something reads them.
 
 use std::mem::replace;
 
 use ruff_python_ast::visitor::{self, Visitor};
 use ruff_python_ast::{self as ast, ExceptHandler, Expr, ExprContext, Pattern, Stmt};
-use ruff_python_parser::parse_module;
+use ruff_python_parser::{parse_expression, parse_module};
 use ruff_text_size::{Ranged, TextRange};
 use rustc_hash::FxHashSet;
 
@@ -40,6 +41,18 @@ pub fn read(code: &str) -> ServerCode {
         error: None,
         calls: trusted.map(|c| (c.method.to_owned(), c.at)).collect(),
     }
+}
+
+/// Why `compile()` in `eval` mode refuses `text`, which it takes stripped, and where.
+pub fn expression_error(text: &str) -> Option<(String, usize)> {
+    let parsed = match parse_expression(text) {
+        Ok(parsed) => parsed,
+        Err(e) => return Some((e.error.to_string(), e.location.start().to_usize())),
+    };
+    let mut walk = Walk::default();
+    walk.visit_expr(parsed.expr());
+    walk.error
+        .map(|(message, at)| (message.to_owned(), at.start().to_usize()))
 }
 
 struct Call<'a> {
@@ -428,6 +441,44 @@ mod tests {
             "action = {'type': 'ir.actions.act_window'}",
         ] {
             assert_eq!(read(code), ServerCode::default(), "{code}");
+        }
+    }
+
+    #[test]
+    fn an_expression_takes_no_statement_and_ends_with_its_line() {
+        for text in ["a\n+ b", "a\nb", "x = 1", "import a", "return", "a;", "", "a +"] {
+            assert!(expression_error(text).is_some(), "{text}");
+        }
+        assert_eq!(expression_error("a\n+ b").map(|(_, at)| at), Some(2));
+        assert_eq!(expression_error("x = 1").map(|(_, at)| at), Some(2));
+    }
+
+    #[test]
+    fn an_expression_refuses_what_only_compile_refuses() {
+        for (text, message, at) in [
+            ("(yield)", "'yield' outside function", 1),
+            ("a + (yield from b)", "'yield from' outside function", 5),
+            ("f(await a)", "'await' outside function", 2),
+        ] {
+            assert_eq!(expression_error(text), Some((message.to_owned(), at)), "{text}");
+        }
+    }
+
+    #[test]
+    fn an_expression_may_run_over_lines_in_brackets() {
+        for text in [
+            "a",
+            "'Report - %s' % (object.name)",
+            "(a\n+ b)",
+            "[\n    a,\n    b,\n]",
+            "f(\n    a\n)",
+            "a if b else c",
+            "(x := 1)",
+            "lambda: (yield)",
+            "# a comment\na",
+            "a # a comment",
+        ] {
+            assert_eq!(expression_error(text), None, "{text}");
         }
     }
 

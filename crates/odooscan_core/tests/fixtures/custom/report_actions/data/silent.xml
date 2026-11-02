@@ -1,0 +1,251 @@
+<odoo>
+    <record id="quiet_full_id" model="ir.actions.report">
+        <field name="name">quiet_full_id</field>
+        <field name="model">res.partner</field>
+        <field name="report_name">report_actions.sheet</field>
+        <field name="print_report_name">'Sheet - %s' % (object.name)</field>
+    </record>
+
+    <record id="quiet_key" model="ir.actions.report">
+        <field name="name">quiet_key</field>
+        <field name="model">res.partner</field>
+        <field name="report_name">report_actions.alias</field>
+    </record>
+
+    <record id="quiet_other_module" model="ir.actions.report">
+        <field name="name">quiet_other_module</field>
+        <field name="model">res.partner</field>
+        <field name="report_name">web.layout</field>
+    </record>
+
+    <record id="quiet_spaces" model="ir.actions.report">
+        <field name="name">quiet_spaces</field>
+        <field name="model">res.partner</field>
+        <field name="report_name">
+            report_actions.sheet
+        </field>
+    </record>
+
+    <record id="quiet_brackets" model="ir.actions.report">
+        <field name="name">quiet_brackets</field>
+        <field name="model">res.partner</field>
+        <field name="report_name">report_actions.sheet</field>
+        <field name="print_report_name">(
+            'Sheet - '
+            + object.name
+        )</field>
+    </record>
+
+    <record id="quiet_comment_only" model="ir.actions.report">
+        <field name="name">quiet_comment_only</field>
+        <field name="model">res.partner</field>
+        <field name="report_name">report_actions.sheet</field>
+        <field name="print_report_name">object.name # the partner</field>
+    </record>
+
+    <record id="quiet_blank_name" model="ir.actions.report">
+        <field name="name">quiet_blank_name</field>
+        <field name="model">res.partner</field>
+        <field name="report_name">   </field>
+    </record>
+
+    <record id="quiet_empty_name" model="ir.actions.report">
+        <field name="name">quiet_empty_name</field>
+        <field name="model">res.partner</field>
+        <field name="report_name"/>
+    </record>
+
+    <record id="quiet_digits" model="ir.actions.report">
+        <field name="name">quiet_digits</field>
+        <field name="model">res.partner</field>
+        <field name="report_name">42</field>
+    </record>
+
+    <record id="quiet_path" model="ir.actions.report">
+        <field name="name">quiet_path</field>
+        <field name="model">res.partner</field>
+        <field name="report_name">report_actions/data/absent.xml</field>
+    </record>
+
+    <record id="quiet_format" model="ir.actions.report">
+        <field name="name">quiet_format</field>
+        <field name="model">res.partner</field>
+        <field name="report_name">report_actions.{{ absent }}</field>
+    </record>
+
+    <record id="quiet_name_eval" model="ir.actions.report">
+        <field name="name">quiet_name_eval</field>
+        <field name="model">res.partner</field>
+        <field name="report_name" eval="'report_actions.' + 'absent'">report_actions.absent_eval</field>
+    </record>
+
+    <record id="quiet_name_ref" model="ir.actions.report">
+        <field name="name">quiet_name_ref</field>
+        <field name="model">res.partner</field>
+        <field name="report_name" ref="sheet">report_actions.absent_ref</field>
+    </record>
+
+    <record id="quiet_name_search" model="ir.actions.report">
+        <field name="name">quiet_name_search</field>
+        <field name="model">res.partner</field>
+        <field name="report_name" search="[('id', '=', 1)]" model="ir.ui.view">report_actions.absent_search</field>
+    </record>
+
+    <record id="quiet_name_file" model="ir.actions.report">
+        <field name="name">quiet_name_file</field>
+        <field name="model">res.partner</field>
+        <field name="report_name" file="data/report_name.txt">report_actions.absent_file</field>
+    </record>
+
+    <record id="quiet_name_type" model="ir.actions.report">
+        <field name="name">quiet_name_type</field>
+        <field name="model">res.partner</field>
+        <field name="report_name" type="char">report_actions.absent_type</field>
+    </record>
+
+    <record id="quiet_name_comment" model="ir.actions.report">
+        <field name="name">quiet_name_comment</field>
+        <field name="model">res.partner</field>
+        <field name="report_name"><!-- a note -->report_actions.absent_comment</field>
+    </record>
+
+    <record id="quiet_no_name" model="ir.actions.report">
+        <field name="name">quiet_no_name</field>
+        <field name="model">res.partner</field>
+    </record>
+
+    <record id="quiet_controller" model="ir.actions.report">
+        <field name="name">quiet_controller</field>
+        <field name="model">res.partner</field>
+        <field name="report_name">report_actions.absent_controller</field>
+        <field name="report_type">controller</field>
+    </record>
+
+    <record id="quiet_type_empty" model="ir.actions.report">
+        <field name="name">quiet_type_empty</field>
+        <field name="model">res.partner</field>
+        <field name="report_name">report_actions.absent_type_empty</field>
+        <field name="report_type"/>
+    </record>
+
+    <record id="quiet_type_spaces" model="ir.actions.report">
+        <field name="name">quiet_type_spaces</field>
+        <field name="model">res.partner</field>
+        <field name="report_name">report_actions.absent_type_spaces</field>
+        <field name="report_type"> qweb-pdf </field>
+    </record>
+
+    <record id="quiet_type_eval" model="ir.actions.report">
+        <field name="name">quiet_type_eval</field>
+        <field name="model">res.partner</field>
+        <field name="report_name">report_actions.absent_type_eval</field>
+        <field name="report_type" eval="'qweb-' + 'pdf'"/>
+    </record>
+
+    <record id="quiet_type_text_eval" model="ir.actions.report">
+        <field name="name">quiet_type_text_eval</field>
+        <field name="model">res.partner</field>
+        <field name="report_name">report_actions.absent_type_text_eval</field>
+        <field name="report_type" eval="'controller'">qweb-pdf</field>
+    </record>
+
+    <record id="quiet_type_attribute" model="ir.actions.report">
+        <field name="name">quiet_type_attribute</field>
+        <field name="model">res.partner</field>
+        <field name="report_name">report_actions.absent_type_attribute</field>
+        <field name="report_type" type="char">qweb-pdf</field>
+    </record>
+
+    <record id="quiet_type_last" model="ir.actions.report">
+        <field name="name">quiet_type_last</field>
+        <field name="model">res.partner</field>
+        <field name="report_name">report_actions.absent_type_last_other</field>
+        <field name="report_type">qweb-pdf</field>
+        <field name="report_type">controller</field>
+    </record>
+
+    <record id="quiet_python_other_type" model="ir.actions.report">
+        <field name="name">quiet_python_other_type</field>
+        <field name="model">res.partner</field>
+        <field name="report_name">report_actions.sheet_values</field>
+        <field name="report_type">controller</field>
+    </record>
+
+    <record id="quiet_report_file" model="ir.actions.report">
+        <field name="name">quiet_report_file</field>
+        <field name="model">res.partner</field>
+        <field name="report_name">report_actions.sheet</field>
+        <field name="report_file">report_actions.absent_file_name</field>
+    </record>
+
+    <record id="quiet_empty_file" model="ir.actions.report">
+        <field name="name">quiet_empty_file</field>
+        <field name="model">res.partner</field>
+        <field name="report_name">report_actions.sheet</field>
+        <field name="print_report_name"/>
+    </record>
+
+    <record id="quiet_empty_cdata" model="ir.actions.report">
+        <field name="name">quiet_empty_cdata</field>
+        <field name="model">res.partner</field>
+        <field name="report_name">report_actions.sheet</field>
+        <field name="print_report_name"><![CDATA[]]></field>
+    </record>
+
+    <record id="quiet_file_eval" model="ir.actions.report">
+        <field name="name">quiet_file_eval</field>
+        <field name="model">res.partner</field>
+        <field name="report_name">report_actions.sheet</field>
+        <field name="print_report_name" eval="'object.name'">name = 1</field>
+    </record>
+
+    <record id="quiet_file_ref" model="ir.actions.report">
+        <field name="name">quiet_file_ref</field>
+        <field name="model">res.partner</field>
+        <field name="report_name">report_actions.sheet</field>
+        <field name="print_report_name" ref="sheet">name = 1</field>
+    </record>
+
+    <record id="quiet_file_search" model="ir.actions.report">
+        <field name="name">quiet_file_search</field>
+        <field name="model">res.partner</field>
+        <field name="report_name">report_actions.sheet</field>
+        <field name="print_report_name" search="[('id', '=', 1)]" model="ir.ui.view">name = 1</field>
+    </record>
+
+    <record id="quiet_file_file" model="ir.actions.report">
+        <field name="name">quiet_file_file</field>
+        <field name="model">res.partner</field>
+        <field name="report_name">report_actions.sheet</field>
+        <field name="print_report_name" file="data/file_name.txt">name = 1</field>
+    </record>
+
+    <record id="quiet_file_type" model="ir.actions.report">
+        <field name="name">quiet_file_type</field>
+        <field name="model">res.partner</field>
+        <field name="report_name">report_actions.sheet</field>
+        <field name="print_report_name" type="char">name = 1</field>
+    </record>
+
+    <record id="quiet_file_comment" model="ir.actions.report">
+        <field name="name">quiet_file_comment</field>
+        <field name="model">res.partner</field>
+        <field name="report_name">report_actions.sheet</field>
+        <field name="print_report_name"><!-- a note -->name = 1</field>
+    </record>
+
+    <record id="quiet_file_first" model="ir.actions.report">
+        <field name="name">quiet_file_first</field>
+        <field name="model">res.partner</field>
+        <field name="report_name">report_actions.sheet</field>
+        <field name="print_report_name">name = 3</field>
+        <field name="print_report_name">object.name</field>
+    </record>
+
+    <record id="quiet_name_first" model="ir.actions.report">
+        <field name="name">quiet_name_first</field>
+        <field name="model">res.partner</field>
+        <field name="report_name">report_actions.absent_name_first</field>
+        <field name="report_name">report_actions.sheet</field>
+    </record>
+</odoo>

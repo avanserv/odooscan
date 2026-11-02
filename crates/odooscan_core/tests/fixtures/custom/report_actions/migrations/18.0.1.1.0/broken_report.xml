@@ -1,0 +1,14 @@
+<odoo>
+    <record id="name_broken" model="ir.actions.report">
+        <field name="name">name_broken</field>
+        <field name="model">res.partner</field>
+        <field name="report_name">report_actions.absent_outside_data</field>
+    </record>
+
+    <record id="file_broken" model="ir.actions.report">
+        <field name="name">file_broken</field>
+        <field name="model">res.partner</field>
+        <field name="report_name">report_actions.sheet</field>
+        <field name="print_report_name">name = 12</field>
+    </record>
+</odoo>

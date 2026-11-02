@@ -6,7 +6,8 @@ use roxmltree::{Document, Node, ParsingOptions};
 use crate::domain;
 use crate::facts::{
     AccessRow, ActionFact, ActionValue, ArchButton, ArchDomain, ArchElement, ArchField, ArchModifier, DataFacts,
-    DomainFact, FunctionCall, Lines, Pos, RawDiag, RecordFact, RuleFact, ServerFact, Spanned, ViewFact, XmlDef, XmlRef,
+    DomainFact, FunctionCall, Lines, Pos, RawDiag, RecordFact, ReportFact, RuleFact, ServerFact, Spanned, ViewFact,
+    XmlDef, XmlRef,
 };
 use crate::server_code;
 
@@ -58,6 +59,9 @@ const MODIFIERS: [&str; 4] = ["column_invisible", "invisible", "readonly", "requ
 const AMBIGUOUS_SPECS: &[&str] = &["list", "tree", "kanban", "column"];
 
 const CRON: &str = "ir.cron";
+
+/// What every `report_type` that renders a QWeb template starts with.
+const QWEB_REPORT: &str = "qweb-";
 
 /// What opens a CDATA section, which a text node's range starts on.
 const CDATA: &str = "<![CDATA[";
@@ -221,15 +225,7 @@ impl Walker<'_> {
                     self.unsafe_qweb(child);
                 }
                 "menuitem" => self.menuitem(child),
-                "act_window" => {
-                    self.def(child);
-                    self.groups(child);
-                    self.act_window(child);
-                }
-                "report" | "asset" => {
-                    self.def(child);
-                    self.groups(child);
-                }
+                "act_window" | "report" | "asset" => self.shorthand(child),
                 "function" => {
                     self.update_xmlids(child);
                     self.eval_refs(child);
@@ -237,6 +233,17 @@ impl Walker<'_> {
                 }
                 _ => {}
             }
+        }
+    }
+
+    /// The tags that stand for a record, with the id and the groups of one.
+    fn shorthand(&mut self, node: Node) {
+        self.def(node);
+        self.groups(node);
+        match node.tag_name().name() {
+            "act_window" => self.act_window(node),
+            "report" => self.report_tag(node),
+            _ => {}
         }
     }
 
@@ -303,20 +310,25 @@ impl Walker<'_> {
         if model == "ir.ui.view" {
             self.facts.views.push(view);
         }
-        if model == "ir.actions.act_window" {
-            self.action_domain(node);
-            self.action(node);
-        }
-        if model == "ir.actions.act_window.view" {
-            self.action_view(node);
+        self.model_facts(node, model);
+        self.facts.records.push(record);
+    }
+
+    /// What a record means to the rules of its model, read from the record as a whole.
+    fn model_facts(&mut self, node: Node, model: &str) {
+        match model {
+            "ir.actions.act_window" => {
+                self.action_domain(node);
+                self.action(node);
+            }
+            "ir.actions.act_window.view" => self.action_view(node),
+            "ir.actions.server" | CRON => self.server(node, model == CRON),
+            "ir.actions.report" => self.report(node),
+            _ => {}
         }
         if let Some(domain) = rule_domain_field(model) {
             self.rule(node, domain);
         }
-        if matches!(model, "ir.actions.server" | CRON) {
-            self.server(node, model == CRON);
-        }
-        self.facts.records.push(record);
     }
 
     /// Odoo takes an `eval` over the text next to it, and only a run tells what that gives.
@@ -386,7 +398,7 @@ impl Walker<'_> {
     /// Reads `field` as Odoo does, which validates the stripped text up to the first child: why it
     /// refuses the code, and the calls of code it accepts.
     fn server_code(&self, field: Node) -> (Option<Spanned<String>>, Vec<Spanned<String>>) {
-        let Some(text) = field.first_child().filter(|t| t.is_text() && !indirect_value(field)) else {
+        let Some(text) = direct_text(field) else {
             return (None, vec![]);
         };
         let raw = text.text().unwrap_or_default();
@@ -397,6 +409,47 @@ impl Walker<'_> {
             pos: code_pos(text, raw, lead + at, self.lines),
         };
         (read.error.map(spanned), read.calls.into_iter().map(spanned).collect())
+    }
+
+    fn report(&mut self, node: Node) {
+        let last = |name: &str| last_field_of(node, name);
+        let file_name = last("print_report_name");
+        let name = last("report_name");
+        self.facts.reports.push(ReportFact {
+            id: node.attribute("id").map(str::to_owned),
+            tag: false,
+            template: name.map_or(ActionValue::Unset, |f| report_target(direct_value(f, self.lines))),
+            qweb: last("report_type").map(|f| !indirect_value(f) && f.text().is_some_and(qweb_report)),
+            writes_file_name: file_name.is_some(),
+            refused: file_name.and_then(|f| self.refused_file_name(f)),
+        });
+    }
+
+    /// Print tests the value for truth, so it never compiles an empty one.
+    fn refused_file_name(&self, field: Node) -> Option<Spanned<String>> {
+        let text = direct_text(field)?;
+        let raw = text.text().filter(|raw| !raw.is_empty())?;
+        refused_expression(raw, |at| code_pos(text, raw, at, self.lines))
+    }
+
+    /// Odoo tests each attribute of the tag for truth, so an empty one writes nothing.
+    fn report_tag(&mut self, node: Node) {
+        let set = |name: &str| attr_value(node, name, self.lines).filter(|a| !a.value.is_empty());
+        let file_name = set("print_report_name");
+        let refused = file_name.as_ref().and_then(|name| {
+            refused_expression(&name.value, |at| Pos {
+                col: name.pos.col + at as u32,
+                ..name.pos
+            })
+        });
+        self.facts.reports.push(ReportFact {
+            id: node.attribute("id").map(str::to_owned),
+            tag: true,
+            template: set("name").map_or(ActionValue::Unset, |name| report_target(Some(name))),
+            qweb: set("report_type").map(|t| qweb_report(&t.value)),
+            writes_file_name: file_name.is_some(),
+            refused,
+        });
     }
 
     /// The tag Odoo reads through 16.0. It writes `view_mode` even without the attribute, as Odoo
@@ -693,6 +746,44 @@ pub fn rule_domain_field(model: &str) -> Option<&'static str> {
 fn indirect_value(field: Node) -> bool {
     let set = |attr: &&str| field.attribute(*attr).is_some_and(|v| *attr == "type" || !v.is_empty());
     INDIRECT_VALUE.iter().chain(&["eval"]).any(set)
+}
+
+/// The text Odoo reads from `field`, up to its first child, unless it takes the value from elsewhere.
+fn direct_text<'a, 'i>(field: Node<'a, 'i>) -> Option<Node<'a, 'i>> {
+    field.first_child().filter(|t| t.is_text() && !indirect_value(field))
+}
+
+/// What `direct_text` holds, at its first character.
+fn direct_value(field: Node, lines: &Lines) -> Option<Spanned<String>> {
+    let text = direct_text(field)?;
+    let raw = text.text()?;
+    Some(Spanned {
+        value: raw.to_owned(),
+        pos: code_pos(text, raw, raw.len() - raw.trim_start().len(), lines),
+    })
+}
+
+/// A `report_name` no scan can look up holds no literal, as the target of a `t-call`.
+fn report_target(name: Option<Spanned<String>>) -> ActionValue {
+    let trimmed = name.map(|n| Spanned {
+        value: n.value.trim().to_owned(),
+        ..n
+    });
+    literal(trimmed.filter(|n| literal_target(&n.value)))
+}
+
+fn qweb_report(report_type: &str) -> bool {
+    report_type.starts_with(QWEB_REPORT)
+}
+
+/// Why Odoo refuses `text` as an expression, which it strips first, where `at` places a byte of it.
+fn refused_expression(text: &str, at: impl Fn(usize) -> Pos) -> Option<Spanned<String>> {
+    let lead = text.len() - text.trim_start().len();
+    let (value, offset) = server_code::expression_error(text.trim())?;
+    Some(Spanned {
+        value,
+        pos: at(lead + offset),
+    })
 }
 
 /// Whether the `ir.access` record of a `model_id` field gives `group_id` a value. Without one the
@@ -1613,6 +1704,160 @@ mod tests {
         );
         assert_eq!(facts.servers.len(), 2);
         assert_eq!(literal_of(&facts.servers[0].model).value, "m");
+    }
+
+    fn report_facts(fields: &str) -> ReportFact {
+        let facts = analyze(&format!(
+            "<odoo>\n<record id=\"r\" model=\"ir.actions.report\">\n{fields}</record>\n</odoo>"
+        ));
+        facts.reports.into_iter().next().unwrap()
+    }
+
+    fn report_tag(attrs: &str) -> ReportFact {
+        let facts = analyze(&format!("<odoo>\n<report id=\"r\" {attrs}/>\n</odoo>"));
+        facts.reports.into_iter().next().unwrap()
+    }
+
+    #[test]
+    fn reads_a_report_record_at_its_text() {
+        let fact = report_facts(
+            r#"<field name="report_name"> a.b </field><field name="report_type">qweb-text</field>
+<field name="print_report_name">x = 1</field>"#,
+        );
+        assert!(!fact.tag && fact.writes_file_name);
+        assert_eq!(fact.id.as_deref(), Some("r"));
+        assert_eq!(at(literal_of(&fact.template)), ("a.b", 3, 28));
+        assert_eq!(fact.qweb, Some(true));
+        assert_eq!(fact.refused.unwrap().pos.line, 4);
+    }
+
+    #[test]
+    fn a_report_keeps_the_last_field_of_a_name() {
+        let fact = report_facts(
+            r#"<field name="report_name">a.b</field><field name="report_name">c.d</field>
+<field name="report_type">qweb-pdf</field><field name="report_type">controller</field>
+<field name="print_report_name">(</field><field name="print_report_name">a</field>"#,
+        );
+        assert_eq!(literal_of(&fact.template).value, "c.d");
+        assert_eq!(fact.qweb, Some(false));
+        assert!(fact.refused.is_none());
+    }
+
+    #[test]
+    fn a_report_name_keeps_its_place_under_cdata() {
+        let name = report_facts("<field name=\"report_name\"><![CDATA[\n  a.b\n]]></field>\n");
+        assert_eq!(at(literal_of(&name.template)), ("a.b", 4, 3));
+    }
+
+    #[test]
+    fn a_report_name_a_scan_cannot_look_up_holds_no_literal() {
+        for field in [
+            r#"<field name="report_name"/>"#,
+            r#"<field name="report_name">  </field>"#,
+            r#"<field name="report_name">42</field>"#,
+            r#"<field name="report_name">a/b.xml</field>"#,
+            r#"<field name="report_name">{{ a }}</field>"#,
+            r#"<field name="report_name" eval="'a.b'">c.d</field>"#,
+            r#"<field name="report_name" ref="a.b">c.d</field>"#,
+            r#"<field name="report_name" search="[]">c.d</field>"#,
+            r#"<field name="report_name" file="a.xml">c.d</field>"#,
+            r#"<field name="report_name" type="char">c.d</field>"#,
+            r#"<field name="report_name"><!-- a -->c.d</field>"#,
+        ] {
+            assert!(matches!(report_facts(field).template, ActionValue::Opaque), "{field}");
+        }
+    }
+
+    #[test]
+    fn tells_a_report_type_that_renders_qweb() {
+        let qweb = |fields: &str| report_facts(fields).qweb;
+        assert_eq!(qweb(r#"<field name="name">a</field>"#), None);
+        for value in ["qweb-pdf", "qweb-html", "qweb-text"] {
+            assert_eq!(
+                qweb(&format!(r#"<field name="report_type">{value}</field>"#)),
+                Some(true)
+            );
+        }
+        for field in [
+            r#"<field name="report_type">controller</field>"#,
+            r#"<field name="report_type"> qweb-pdf </field>"#,
+            r#"<field name="report_type"/>"#,
+            r#"<field name="report_type" eval="'qweb-pdf'"/>"#,
+            r#"<field name="report_type" eval="'py3o'">qweb-pdf</field>"#,
+            r#"<field name="report_type" type="char">qweb-pdf</field>"#,
+        ] {
+            assert_eq!(qweb(field), Some(false), "{field}");
+        }
+    }
+
+    #[test]
+    fn a_file_name_refused_sits_past_cdata_and_entities() {
+        let refused = |text: &str| {
+            let fact = report_facts(&format!(r#"<field name="print_report_name">{text}</field>"#));
+            let refused = fact.refused.unwrap();
+            (refused.pos.line, refused.pos.col)
+        };
+        assert_eq!(refused("x = 1"), (3, 35));
+        assert_eq!(refused("\n\n   x = 1\n"), (5, 6));
+        assert_eq!(refused("<![CDATA[x = 1]]>"), (3, 44));
+        assert_eq!(refused("<![CDATA[\n  x = 1\n]]>"), (4, 5));
+        assert_eq!(refused("a &lt;\nb"), (3, 36));
+    }
+
+    #[test]
+    fn a_blank_file_name_is_refused_and_an_empty_one_unset() {
+        let refused = |field: &str| report_facts(field).refused.is_some();
+        assert!(refused(r#"<field name="print_report_name">   </field>"#));
+        assert!(refused("<field name=\"print_report_name\">\n</field>"));
+        for field in [
+            r#"<field name="print_report_name"/>"#,
+            r#"<field name="print_report_name"></field>"#,
+            r#"<field name="print_report_name"><![CDATA[]]></field>"#,
+        ] {
+            assert!(!refused(field), "{field}");
+            assert!(report_facts(field).writes_file_name, "{field}");
+        }
+    }
+
+    #[test]
+    fn a_file_name_from_elsewhere_than_the_text_counts_as_a_write_only() {
+        for field in [
+            r#"<field name="print_report_name" eval="'a'">(</field>"#,
+            r#"<field name="print_report_name" ref="a">(</field>"#,
+            r#"<field name="print_report_name" search="[]">(</field>"#,
+            r#"<field name="print_report_name" file="a.txt">(</field>"#,
+            r#"<field name="print_report_name" type="char">(</field>"#,
+            r#"<field name="print_report_name"><!-- a -->(</field>"#,
+        ] {
+            let fact = report_facts(field);
+            assert!(fact.refused.is_none() && fact.writes_file_name, "{field}");
+        }
+        assert!(
+            report_facts(r#"<field name="print_report_name" eval="">(</field>"#)
+                .refused
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn reads_a_report_tag_at_its_attributes() {
+        let fact = report_tag(r#"string="A" model="m" name="a.b" report_type="qweb-html" print_report_name="x = 1""#);
+        assert!(fact.tag && fact.writes_file_name);
+        assert_eq!(at(literal_of(&fact.template)), ("a.b", 2, 43));
+        assert_eq!(fact.qweb, Some(true));
+        assert_eq!(fact.refused.unwrap().pos.col, 93);
+    }
+
+    #[test]
+    fn an_empty_attribute_of_a_report_tag_writes_nothing() {
+        let fact = report_tag(r#"name="" report_type="" print_report_name="""#);
+        assert!(matches!(fact.template, ActionValue::Unset));
+        assert_eq!(fact.qweb, None);
+        assert!(!fact.writes_file_name);
+        assert!(report_tag(r#"print_report_name="  ""#).refused.is_some());
+        assert!(matches!(report_tag(r#"name="a/b.xml""#).template, ActionValue::Opaque));
+        assert_eq!(report_tag(r#"report_type="controller""#).qweb, Some(false));
+        assert_eq!(literal_of(&report_tag(r#"name=" a.b ""#).template).value, "a.b");
     }
 
     #[test]

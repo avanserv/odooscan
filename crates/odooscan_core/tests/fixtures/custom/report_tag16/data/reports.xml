@@ -1,0 +1,31 @@
+<odoo>
+    <template id="sheet">
+        <div/>
+    </template>
+
+    <report id="tag_name" string="tag_name" model="res.partner" name="report_tag16.absent_tag" file="report_tag16.absent_tag"/>
+
+    <report id="tag_type" string="tag_type" model="res.partner" name="report_tag16.absent_type" report_type="qweb-html"/>
+
+    <report id="tag_file_name" string="tag_file_name" model="res.partner" name="report_tag16.sheet" print_report_name="name = 1"/>
+
+    <report id="tag_empty" string="tag_empty" model="res.partner" name="report_tag16.sheet" report_type="" print_report_name=""/>
+
+    <report id="tag_controller" string="tag_controller" model="res.partner" name="report_tag16.absent_controller" report_type="controller"/>
+
+    <report id="tag_path" string="tag_path" model="res.partner" name="report_tag16/absent.xml"/>
+
+    <record id="tag_replaces" model="ir.actions.report">
+        <field name="name">tag_replaces</field>
+        <field name="model">res.partner</field>
+        <field name="report_name">report_tag16.absent_replaced</field>
+        <field name="print_report_name">name = 2</field>
+    </record>
+
+    <record id="record_there" model="ir.actions.report">
+        <field name="name">record_there</field>
+        <field name="model">res.partner</field>
+        <field name="report_name">report_tag16.absent_record</field>
+        <field name="print_report_name">name = 3</field>
+    </record>
+</odoo>

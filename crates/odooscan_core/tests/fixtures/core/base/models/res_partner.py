@@ -144,6 +144,17 @@ class IrActionsServer(models.Model):
     child_ids = fields.One2many("ir.actions.server", "parent_id")
 
 
+class IrActionsReport(models.Model):
+    _name = "ir.actions.report"
+
+    name = fields.Char()
+    model = fields.Char()
+    report_type = fields.Char()
+    report_name = fields.Char()
+    report_file = fields.Char()
+    print_report_name = fields.Char()
+
+
 class IrCron(models.Model):
     _name = "ir.cron"
     _inherits = {"ir.actions.server": "ir_actions_server_id"}

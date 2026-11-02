@@ -156,7 +156,7 @@ rules! {
     "OD308" "xmlid-used-before-definition" Correctness Error None, false, "An XML id is referenced before the file that defines it is loaded.";
     "OD309" "unknown-record-field" Correctness Error None, true, "A data record sets a field its model does not have.";
     "OD310" "unmatched-view-locator" Correctness Error None, true, "An inherited view locates an element its parent views do not have.";
-    "OD311" "unknown-qweb-template" Correctness Error None, true, "A QWeb view calls a template no module in scope defines.";
+    "OD311" "unknown-qweb-template" Correctness Error None, true, "A QWeb view or a report names a template no module in scope defines.";
     "OD312" "unknown-button-method" Correctness Error None, true, "A button calls a method its model does not have.";
     "OD313" "private-button-method" Correctness Error None, true, "A button calls a private method, which Odoo refuses.";
     "OD314" "unknown-function-method" Correctness Error None, true, "A <function> of a data file calls a method its model does not have.";
@@ -167,7 +167,7 @@ rules! {
     // (`:1156`).
     "OD317" "modifier-field-not-in-view" Correctness Error Some(">=17.0,<saas~17.3"), true, "A view modifier reads a field the view does not show.";
     "OD318" "view-mode-without-view" Correctness Error None, true, "A window action lists a view type its model has no view for.";
-    "OD319" "python-field-syntax-error" Correctness Error None, false, "The code of a server action or a cron is not Python that Odoo compiles.";
+    "OD319" "python-field-syntax-error" Correctness Error None, false, "The code of a server action or a cron, or the file name of a report, is not Python that Odoo compiles.";
     "OD320" "unknown-server-code-method" Correctness Error None, true, "The code of a server action or a cron calls a method its model does not have.";
     "OD401" "model-without-access" Security Warning None, true, "A new model has no ir.model.access rule.";
     "OD402" "public-write-access" Security Warning None, false, "An access row gives public or portal users write, create or unlink, through their group or no group.";
