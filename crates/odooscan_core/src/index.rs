@@ -1648,8 +1648,13 @@ impl<'m> Index<'m> {
     /// calling module, so an undotted name can only find a key. That counts on every series, though
     /// through saas~18.3 Odoo refuses an undotted name, and from 10.0 a website lookup is exempt.
     pub fn qweb_status(&self, name: &str, scope: &Scope) -> Status<'m> {
+        self.definer_status(self.qweb_definers(name), scope)
+    }
+
+    /// The modules with a view that answers to `name`, as `qweb_status` counts them.
+    pub fn qweb_definers(&self, name: &str) -> impl Iterator<Item = usize> {
         let keys = self.view_keys.get(name).map(Vec::as_slice).unwrap_or_default();
-        self.definer_status(self.views.definers(name).chain(keys.iter().copied()), scope)
+        self.views.definers(name).chain(keys.iter().copied())
     }
 
     fn definer_status(&self, definers: impl Iterator<Item = usize>, scope: &Scope) -> Status<'m> {

@@ -2615,6 +2615,12 @@ impl<'m> Ctx<'_, 'm> {
         self.partial && self.index.views.definers(root).any(|m| m != self.mi)
     }
 
+    /// Whether a dependency outside the index may define template `name` by loading a module that
+    /// does. It cannot load one that depends on this module: Odoo leaves a circular `depends` out.
+    fn may_load_template(&self, name: &str) -> bool {
+        self.partial && self.index.qweb_definers(name).any(|m| !self.index.reaches(m, self.mi))
+    }
+
     /// The tree of views `id` belongs to, or None when the elements of some view on the way to its
     /// root are unknown.
     fn view_tree<'t>(&self, id: String, trees: &'t mut FxHashMap<String, ViewTree<'m>>) -> Option<&'t ViewTree<'m>> {
@@ -2840,6 +2846,7 @@ impl<'m> Ctx<'_, 'm> {
         }
         let message = match self.index.qweb_status(&name.value, self.scope) {
             Status::Visible => return,
+            Status::Hidden(_) if self.may_load_template(&name.value) => return,
             Status::Hidden(m) => format!(
                 "template '{}' comes from module {m}, which is not in depends",
                 name.value

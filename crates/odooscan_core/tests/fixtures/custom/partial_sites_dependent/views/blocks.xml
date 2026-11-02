@@ -1,0 +1,14 @@
+<odoo>
+    <template id="block">
+        <div/>
+    </template>
+
+    <template id="partial_sites.lent_block">
+        <div/>
+    </template>
+
+    <!-- The key's other definer, qweb_outside, does not depend on partial_sites, so it may load. -->
+    <template id="twin" key="qweb_outside.page">
+        <div/>
+    </template>
+</odoo>
