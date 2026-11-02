@@ -1,0 +1,4 @@
+id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
+access_unparsed_summary,unparsed.summary,model_unparsed_summary,base.group_user,1,1,1,1
+access_unparsed_copy,unparsed.copy,model_unparsed_copy,base.group_user,1,1,1,1
+access_unparsed_wrap,unparsed.wrap,model_unparsed_wrap,base.group_user,1,1,1,1

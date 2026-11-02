@@ -880,12 +880,12 @@ impl<'m> Ctx<'_, 'm> {
         !self.index.holds_fields(self.mi, model, self.scope)
     }
 
-    /// Whether a dependency outside the index may supply what a path lacks. It cannot change the
-    /// type of a field found on the way.
+    /// Whether a dependency outside the index, or a file in scope that does not parse, may supply
+    /// what a path lacks. Neither can change the type of a field found on the way.
     fn may_supply(&self, e: &PathError<'_>) -> bool {
         match e {
             PathError::Missing { model, .. } | PathError::Hidden { model, .. } => {
-                self.partial && self.may_add_field(model)
+                (self.partial && self.may_add_field(model)) || self.index.unread_class(model, self.scope)
             }
             PathError::NotRelational { .. } => false,
         }
@@ -901,9 +901,10 @@ impl<'m> Ctx<'_, 'm> {
     /// Whether the model where a path fails may hold the field out of the scan's sight. That model
     /// is the one to ask about, as a later step can be the one that hides the field. A parent or a
     /// data file only explains a missing field: one `depends` does not reach is found on the model,
-    /// so it stays a gap unless the model is built here. A dependency's file loads before the module,
-    /// so it cannot add to a model the module defines whole, while the module's own file can. Nothing
-    /// explains a field found there that is not relational.
+    /// so it stays a gap unless the model is built here or a file in scope that does not parse may
+    /// add it. A dependency's file loads before the module, so it cannot add to a model the module
+    /// defines whole, while the module's own file can. Nothing explains a field found there that is
+    /// not relational.
     fn may_hide(&self, e: &PathError<'_>) -> bool {
         let unseen = match e {
             PathError::Missing { model, .. } => {
@@ -992,7 +993,7 @@ impl<'m> Ctx<'_, 'm> {
     fn python(&self, out: &mut Out<'m>) {
         for file in &self.module.python {
             let path = file.path.as_path();
-            for class in &file.facts.classes {
+            for class in file.facts.classes.iter().filter(|c| !c.unread) {
                 self.class(out, path, class);
             }
             if !UPGRADE_DIRS.contains(&file.rel.split('/').next().unwrap_or_default()) {
@@ -1278,8 +1279,9 @@ impl<'m> Ctx<'_, 'm> {
     }
 
     /// Parents the index cannot see: a plain Python base of this class, an `_inherit` element that
-    /// is not a literal in any class of the model or of a model it inherits, a module that is not
-    /// indexed, a model nobody indexes, and for a mixin, every model that inherits it.
+    /// is not a literal in any class of the model or of a model it inherits, a class in scope in a
+    /// file that does not parse, a module that is not indexed, a model nobody indexes, and for a
+    /// mixin, every model that inherits it.
     fn super_calls(&self, out: &mut Out<'m>, path: &'m Path, class: &ClassFact) {
         if class.super_calls.is_empty()
             || !class.plain_bases.is_empty()
@@ -1288,7 +1290,7 @@ impl<'m> Ctx<'_, 'm> {
             || !self.index.has_model(&class.model)
             || self
                 .index
-                .chain_classes(&class.model)
+                .chain_read_from(&class.model, self.scope)
                 .iter()
                 .any(|(_, c)| c.inherit_unknown)
         {
@@ -2759,6 +2761,9 @@ impl<'m> Ctx<'_, 'm> {
             Status::Visible
         ) {
             self.model_ref(out, path, &record.model, None);
+            return;
+        }
+        if self.index.unread_class(&record.model.value, self.scope) {
             return;
         }
         for field in &record.fields {
@@ -4642,16 +4647,18 @@ impl<'m> Ctx<'_, 'm> {
     }
 
     /// Whether something may give `model` the relation `table`: a class of it or of a model it
-    /// inherits, in any indexed module, defines `init()` or `_auto_init()`, sets a table query,
-    /// creates a view whose whole name is `self._table` or has a parent the scan cannot see; another
-    /// model, or a Many2many in scope, has that table; an indexed module creates a view of that name
-    /// in Python or SQL; or this module, not a dependency, creates a view it names at runtime.
-    /// `table_models` leaves out an abstract model.
+    /// inherits, in any indexed module but for one that does not parse outside the scope, defines
+    /// `init()` or `_auto_init()`, sets a table query, creates a view whose whole name is
+    /// `self._table` or has a parent the scan cannot see; another model, or a Many2many in scope,
+    /// has that table; an indexed module creates a view of that name in Python or SQL; or this
+    /// module, not a dependency, creates a view it names at runtime. `table_models` leaves out an
+    /// abstract model.
     fn view_made(&self, model: &str, table: &str) -> bool {
         let creates = |c: &ClassFact| {
             c.hidden_parents() || c.own_view || c.methods.iter().any(|m| VIEW_MAKERS.contains(&m.as_str()))
         };
-        self.index.chain_classes(model).iter().any(|(_, c)| creates(c))
+        let chain = self.index.chain_read_from(model, self.scope);
+        chain.iter().any(|(_, c)| creates(c))
             || self.index.table_models(table) != [model]
             || self.index.relation_table(table, self.scope)
             || self.index.creates_view(table)
