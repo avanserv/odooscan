@@ -18,4 +18,8 @@
     <record id="action_demo_gantt_named" model="ir.actions.act_window">
         <field name="view_mode">gantt</field>
     </record>
+
+    <record id="action_demo_view_undone" model="ir.actions.act_window">
+        <field name="view_id" eval="False"/>
+    </record>
 </odoo>

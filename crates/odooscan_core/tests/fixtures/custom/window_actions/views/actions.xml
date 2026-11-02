@@ -205,4 +205,28 @@
         <field name="res_model">window.lent</field>
         <field name="view_mode">calendar</field>
     </record>
+
+    <record id="action_undone_outside" model="ir.actions.act_window">
+        <field name="name">action_undone_outside</field>
+        <field name="res_model">window.plain</field>
+        <field name="view_mode">gantt</field>
+        <field name="view_id" ref="view_shown_gantt"/>
+    </record>
+
+    <record id="view_plain_own_list" model="ir.ui.view">
+        <field name="name">window.plain.own.list</field>
+        <field name="model">window.plain</field>
+        <field name="arch" type="xml">
+            <list>
+                <field name="name"/>
+            </list>
+        </field>
+    </record>
+
+    <record id="action_own_list" model="ir.actions.act_window">
+        <field name="name">action_own_list</field>
+        <field name="res_model">window.plain</field>
+        <field name="view_mode">list</field>
+        <field name="view_id" ref="view_plain_own_list"/>
+    </record>
 </odoo>

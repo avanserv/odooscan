@@ -38,8 +38,12 @@ fn falsy(expr: &Expr) -> bool {
 
 /// The rows of an `eval` of `view_ids` that carry a view: one item each, none when its type does not
 /// read. A row without a view names none, so Odoo still looks a view up for its type. An item
-/// that may hide a view counts as such a row.
+/// that may hide a view counts as such a row. Odoo tests `eval` for truth, so an empty one writes no
+/// expression.
 pub fn view_rows(eval: &str) -> Vec<Option<String>> {
+    if eval.is_empty() {
+        return vec![];
+    }
     let Ok(parsed) = parse_expression(eval.trim()) else {
         return vec![None];
     };
@@ -369,7 +373,6 @@ mod tests {
     fn counts_a_view_row_only_with_a_view() {
         let mode = |m: &str| Some(m.to_owned());
         for eval in [
-            "",
             "ref(",
             "ref('a')",
             "((5, 0, 0),)",
@@ -397,6 +400,7 @@ mod tests {
             assert_eq!(view_rows(eval), [None], "{eval}");
         }
         for eval in [
+            "",
             "False",
             " None ",
             "[]",

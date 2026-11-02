@@ -2190,9 +2190,14 @@ impl<'m> Index<'m> {
     }
 
     /// The type of the view at the root of `id`'s inheritance, which Odoo gives every view of the
-    /// tree. None when a view on the way is not indexed.
+    /// tree. None when a view on the way is not indexed. A top with a parent out of reach is no root,
+    /// so what its own arch opens with, such as a `<field>` spec, is no type.
     pub fn view_kind(&self, id: String) -> Option<&'m str> {
-        self.view_top(id)?.iter().find_map(|n| n.fact.kind.as_deref())
+        let top = self.view_top(id)?;
+        if top.iter().any(|n| n.fact.unread_parent) {
+            return None;
+        }
+        top.iter().find_map(|n| n.fact.kind.as_deref())
     }
 
     /// The nodes of the view at the root of `id`'s inheritance.

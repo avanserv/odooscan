@@ -2,4 +2,16 @@
     <record id="action_view_id_later" model="ir.actions.act_window">
         <field name="view_id" ref="window_actions.view_shown_gantt"/>
     </record>
+
+    <record id="action_view_id_undone" model="ir.actions.act_window">
+        <field name="view_id" eval="False"/>
+    </record>
+
+    <record id="action_context_undone" model="ir.actions.act_window">
+        <field name="context">{}</field>
+    </record>
+
+    <record id="window_actions.action_undone_outside" model="ir.actions.act_window">
+        <field name="view_id" eval="False"/>
+    </record>
 </odoo>

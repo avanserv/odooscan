@@ -46,4 +46,8 @@
         <field name="name">action_own</field>
         <field name="res_model">window.plain</field>
     </record>
+
+    <record id="window_actions.action_own_list" model="ir.actions.act_window">
+        <field name="view_mode">gantt</field>
+    </record>
 </odoo>

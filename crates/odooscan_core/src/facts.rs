@@ -561,6 +561,19 @@ pub enum ActionValue {
     Opaque,
 }
 
+/// What one write gives the `view_id` of a window action. `Cleared` replaces the view an earlier
+/// write gave, which `Unset` leaves.
+#[derive(Debug, Default, PartialEq)]
+pub enum ActionViewId {
+    #[default]
+    Unset,
+    Cleared,
+    /// An XML id, which the module of the write resolves.
+    Ref(String),
+    /// A view only a run tells.
+    Unread,
+}
+
 /// One write to a window action: a `<record>`, an `<act_window>`, or a row of its `view_ids` in a
 /// `<record>` of its own, whose `id` here is that of the action.
 #[derive(Debug, Default)]
@@ -568,9 +581,12 @@ pub struct ActionFact {
     pub id: Option<String>,
     pub model: ActionValue,
     pub view_mode: ActionValue,
-    /// The types it names a view for, through `view_ids` or a `<kind>_view_ref` context key.
+    pub view_id: ActionViewId,
+    /// The types of the `<kind>_view_ref` keys of the `context` it writes, None without a write.
+    pub context_kinds: Option<Vec<String>>,
+    /// The types its rows of `view_ids` name a view for.
     pub view_kinds: Vec<String>,
-    /// It names a view without saying the type: a `view_id`, or `view_ids` that an `eval` hides.
+    /// A row of `view_ids` names a view without saying the type, or an `eval` may hide such a row.
     pub view_of_any_kind: bool,
     /// As `view_kinds`, from a record nested in `view_ids`, which not every series loads.
     pub nested_view_kinds: Vec<String>,
@@ -579,8 +595,8 @@ pub struct ActionFact {
 }
 
 impl ActionFact {
-    /// Whether it names a view of `kind`, counting the records nested in `view_ids` when `nested`.
-    pub fn names_view(&self, kind: &str, nested: bool) -> bool {
+    /// Whether a row names a view of `kind`, counting the records nested in `view_ids` when `nested`.
+    pub fn row_names_view(&self, kind: &str, nested: bool) -> bool {
         let of_kind = |kinds: &[String]| kinds.iter().any(|k| k == kind);
         self.view_of_any_kind
             || of_kind(&self.view_kinds)
