@@ -117,6 +117,11 @@ custom/button_calls/views/buttons.xml:81:45: OD312 method 'action_follow' of res
 custom/button_calls/views/buttons.xml:111:9: OD301 module button_calls defines no XML id 'button_calls.order_nowhere'
 custom/button_calls/views/calls.xml:5:42: OD314 button.order has no method '_run_misspelled'
 custom/button_calls/views/calls.xml:6:41: OD314 method 'action_follow' of res.partner comes from module mail, which is not in depends
+custom/button_delegate/models/contacts.py:18:36: OD204 res.users has no method '_compute_nicknmae'
+custom/button_delegate/views/delegate.xml:7:45: OD312 res.users has no method 'action_contcat'
+custom/button_delegate/views/delegate.xml:12:39: OD314 res.users has no method '_run_misspelled'
+custom/button_delegate/views/delegate.xml:13:39: OD314 res.users has no method 'action_contact'
+custom/button_delegate/views/delegate.xml:20:34: OD320 res.users has no method 'action_contcat'
 custom/button_mixin/models/hooks.py:19:17: OD201 no indexed module defines model 'ghost.mixin'
 custom/button_partial/__manifest__.py:4:25: OD503 module 'ghost_enterprise' is not on the addons path
 custom/button_partial/views/partial.xml:8:45: OD313 method '_from_enterprise' of button.visit is private, so Odoo refuses to call it from a button

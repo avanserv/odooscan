@@ -1386,6 +1386,15 @@ impl<'m> Index<'m> {
             .any(|(_, c)| c.hidden_parents())
     }
 
+    /// Whether a class merged into `model` has a parent the scan cannot see. A parent reached through
+    /// `_inherits` does not count: it gives the model its fields, so its hidden methods do not reach
+    /// the model.
+    pub fn merged_hidden_parents(&self, model: &str, scope: &Scope) -> bool {
+        self.merged_classes(model, scope)
+            .iter()
+            .any(|(_, c)| c.hidden_parents())
+    }
+
     /// Whether the class that introduces `model` with `_name` is in scope. When it is not, the
     /// definitions that give its fields their first attributes are missing from the index.
     pub fn introduced(&self, model: &str, scope: &Scope) -> bool {

@@ -1081,7 +1081,7 @@ impl<'m> Ctx<'_, 'm> {
     /// Odoo replaces the compute and inverse of a related field with its own, and a parent the scan
     /// cannot see may hold methods only Python knows.
     fn missing_methods(&self, out: &mut Out<'m>, path: &'m Path, class: &ClassFact, field: &FieldFact) {
-        if field.related.is_some() || self.index.hidden_parents(&class.model, self.scope) {
+        if field.related.is_some() || self.index.merged_hidden_parents(&class.model, self.scope) {
             return;
         }
         for method in &field.methods {
@@ -1918,9 +1918,9 @@ impl<'m> Ctx<'_, 'm> {
     }
 
     /// Why `model` lacks the method a data file calls, when the scan sees every class that could
-    /// define it.
+    /// define it: a delegate's hidden parent cannot, since `_inherits` passes on fields only.
     fn method_gap(&self, model: &str, method: &str) -> Option<String> {
-        if !self.sees_whole_model(model) {
+        if !self.sees_model(model) || self.index.merged_hidden_parents(model, self.scope) {
             return None;
         }
         match self.index.data_method(model, method, self.scope) {
