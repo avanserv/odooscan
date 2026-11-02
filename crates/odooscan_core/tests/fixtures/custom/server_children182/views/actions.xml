@@ -1,0 +1,15 @@
+<odoo>
+    <record id="plan_action" model="ir.actions.server">
+        <field name="name">plan_action</field>
+        <field name="model_id" ref="model_child182_plan"/>
+        <field name="state">multi</field>
+        <field name="child_ids">
+            <record id="nested_against_parent" model="ir.actions.server">
+                <field name="name">nested_against_parent</field>
+                <field name="model_id" ref="model_child182_task"/>
+                <field name="state">code</field>
+                <field name="code">record.action_task()</field>
+            </record>
+        </field>
+    </record>
+</odoo>

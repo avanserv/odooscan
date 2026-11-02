@@ -459,6 +459,7 @@ impl Walker<'_> {
             cron,
             model,
             by_name,
+            parent: server_parent(node, self.lines),
             state: last("state").map(|f| !indirect_value(f) && f.text() == Some("code")),
             writes_code: code.is_some(),
             refused,
@@ -1029,6 +1030,24 @@ fn rule_domain(field: Node, lines: &Lines) -> ActionValue {
         return ActionValue::Opaque;
     }
     literal(attr_value(field, "eval", lines).or_else(|| spec_text(field, lines)))
+}
+
+/// The parent a `<record>` gives a server action. Odoo sets the inverse of a one2many over whatever
+/// the record nested in it says, unless the enclosing id names no `ir.actions.server` record.
+fn server_parent(node: Node, lines: &Lines) -> ActionValue {
+    let enclosing = node.parent_element().filter(|p| p.has_tag_name("field"));
+    if let Some(field) = enclosing.filter(|f| f.attribute("name") == Some("child_ids")) {
+        let parent = field.parent_element();
+        let parent = parent.filter(|r| r.attribute("model") == Some("ir.actions.server"));
+        return literal(parent.and_then(|r| attr_value(r, "id", lines)));
+    }
+    let Some(field) = last_field_of(node, "parent_id") else {
+        return ActionValue::Unset;
+    };
+    match written(field, lines) {
+        WrittenValue::Ids(mut ids) if ids.len() == 1 => ActionValue::Literal(ids.remove(0)),
+        _ => ActionValue::Opaque,
+    }
 }
 
 /// An `eval` that is no constant counts as false. Odoo tests the text of a boolean untrimmed, so
@@ -2746,6 +2765,52 @@ mod tests {
         );
         assert_eq!(facts.servers.len(), 2);
         assert_eq!(literal_of(&facts.servers[0].model).value, "m");
+        assert_eq!(literal_of(&facts.servers[0].parent).value, "p");
+        assert!(matches!(facts.servers[1].parent, ActionValue::Unset));
+    }
+
+    #[test]
+    fn reads_the_parent_of_a_server_action() {
+        let parent = |fields: &str| server(fields).parent;
+        assert!(matches!(parent(r#"<field name="name">a</field>"#), ActionValue::Unset));
+        for field in [
+            r#"<field name="parent_id" ref="p"/>"#,
+            r#"<field name="parent_id" eval="ref('p')"/>"#,
+            r#"<field name="parent_id" ref="q"/><field name="parent_id" ref="p"/>"#,
+        ] {
+            assert_eq!(literal_of(&parent(field)).value, "p", "{field}");
+        }
+        for field in [
+            r#"<field name="parent_id" eval="False"/>"#,
+            r#"<field name="parent_id" search="[]"/>"#,
+            r#"<field name="parent_id">3</field>"#,
+            r#"<field name="parent_id"/>"#,
+            r#"<field name="parent_id" ref="p"/><field name="parent_id" eval="False"/>"#,
+        ] {
+            assert!(matches!(parent(field), ActionValue::Opaque), "{field}");
+        }
+    }
+
+    #[test]
+    fn a_nested_server_action_takes_the_enclosing_record_as_parent() {
+        let nested = |outer: &str, field: &str| {
+            let fields = r#"<field name="parent_id" ref="q"/>"#;
+            let text = format!(
+                r#"<odoo><record {outer}><field name="{field}">
+                <record id="c" model="ir.actions.server">{fields}</record>
+            </field></record></odoo>"#
+            );
+            analyze(&text).servers.remove(0).parent
+        };
+        let server = r#"id="p" model="ir.actions.server""#;
+        assert_eq!(literal_of(&nested(server, "child_ids")).value, "p");
+        assert_eq!(literal_of(&nested(server, "other_ids")).value, "q");
+        for outer in [r#"model="ir.actions.server""#, r#"id="" model="ir.actions.server""#] {
+            assert!(matches!(nested(outer, "child_ids"), ActionValue::Opaque), "{outer}");
+        }
+        for outer in [r#"id="p" model="ir.cron""#, r#"id="p" model="base.automation""#] {
+            assert!(matches!(nested(outer, "child_ids"), ActionValue::Opaque), "{outer}");
+        }
     }
 
     fn report_facts(fields: &str) -> ReportFact {

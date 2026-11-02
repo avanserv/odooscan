@@ -160,4 +160,32 @@ except UserError:
             </record>
         </field>
     </record>
+
+    <record id="child_keeps_model_parent" model="ir.actions.server">
+        <field name="name">child_keeps_model_parent</field>
+        <field name="model_id" ref="model_server_job"/>
+        <field name="state">multi</field>
+        <field name="child_ids">
+            <record id="nested_child_keeps_model" model="ir.actions.server">
+                <field name="name">nested_child_keeps_model</field>
+                <field name="model_id" ref="model_server_note"/>
+                <field name="state">code</field>
+                <field name="code">record.action_close()</field>
+            </record>
+        </field>
+    </record>
+
+    <record id="linked_child_keeps_model" model="ir.actions.server">
+        <field name="name">linked_child_keeps_model</field>
+        <field name="model_id" ref="model_server_note"/>
+        <field name="state">code</field>
+        <field name="code">record.action_close()</field>
+    </record>
+
+    <record id="child_keeps_model_linker" model="ir.actions.server">
+        <field name="name">child_keeps_model_linker</field>
+        <field name="model_id" ref="model_server_job"/>
+        <field name="state">multi</field>
+        <field name="child_ids" eval="[(4, ref('linked_child_keeps_model'))]"/>
+    </record>
 </odoo>

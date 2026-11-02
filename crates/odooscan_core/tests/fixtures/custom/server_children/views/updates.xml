@@ -1,0 +1,13 @@
+<odoo>
+    <record id="nested_then_given_model" model="ir.actions.server">
+        <field name="model_id" ref="model_child_task"/>
+    </record>
+
+    <record id="linked_by_child" model="ir.actions.server">
+        <field name="parent_id" ref="plan_action"/>
+    </record>
+
+    <record id="rewritten_action" model="ir.actions.server">
+        <field name="model_id" ref="model_child_task"/>
+    </record>
+</odoo>
