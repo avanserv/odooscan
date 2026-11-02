@@ -3184,6 +3184,14 @@ const REC_NAMES_SEARCH: Series = Series { major: 15, minor: 3 };
 /// `saas~13.4`, before OD219 starts, in `addons/mail/models/ir_model.py:11` until `saas~14.3`.
 const MIXIN_TRACKING: Series = Series { major: 19, minor: 3 };
 
+/// The first series that keeps a hierarchy in `parent_path` (`saas~11.3`, `odoo/models.py:2308`;
+/// `saas~11.2` asks for `parent_left` and `parent_right`, `odoo/models.py:2236`).
+const PARENT_PATH: Series = Series { major: 11, minor: 3 };
+
+/// The first series that warns of a repeated label as it reflects a model (`saas~11.2`,
+/// `odoo/addons/base/models/ir_model.py:807`; `saas~11.1` says nothing).
+const LABEL_WARNING: Series = Series { major: 11, minor: 2 };
+
 /// An `_inherits` entry of a class: its module, the class, the parent model and the field.
 type Entry<'m> = (usize, &'m ClassFact, &'m str, &'m Spanned<String>);
 
@@ -3372,6 +3380,16 @@ fn fetches_own_view(series: Option<Series>) -> bool {
 /// Whether Odoo adds `__last_update`. Not for an unknown series, as the newest series lack it.
 fn has_last_update(series: Option<Series>) -> bool {
     series.is_some_and(|s| s < NO_LAST_UPDATE)
+}
+
+/// Whether a hierarchy of `series` needs `parent_path`: an unknown series may.
+fn stores_parent_path(series: Option<Series>) -> bool {
+    series.is_none_or(|s| s >= PARENT_PATH)
+}
+
+/// Whether Odoo warns of a repeated label in `series`: an unknown series may.
+fn warns_on_labels(series: Option<Series>) -> bool {
+    series.is_none_or(|s| s >= LABEL_WARNING)
 }
 
 fn unlogged(class: &ClassFact) -> bool {
@@ -3965,6 +3983,7 @@ impl<'m> Ctx<'_, 'm> {
         let sets = |c: &ClassFact| c.attr("_parent_store").is_some();
         let Some(at) = class
             .attr("_parent_store")
+            .filter(|_| stores_parent_path(self.series))
             .filter(|_| self.first_class(class, sets) && self.parent_store_table(&class.model))
         else {
             return;
@@ -4161,6 +4180,9 @@ impl<'m> Ctx<'_, 'm> {
     /// definition of this module that decides a label is reported, against a label decided by
     /// another module or one this module loads earlier.
     fn duplicate_label(&self, out: &mut Out<'m>, path: &'m Path, fields: &ModelFields<'m>, own: &FieldFact) {
+        if !warns_on_labels(self.series) {
+            return;
+        }
         let Some((label, key)) = fields.labels.iter().find_map(|l| match l.here {
             Some((def, key)) if std::ptr::eq(def, own) => Some((l, key)),
             _ => None,
@@ -5081,7 +5103,8 @@ mod tests {
 
     use super::{
         MagicEra, applies, cache_global, callable_attr, csv_label, derived_label, fetches_own_view, has_last_update,
-        magic_era, no_access_message, reads_model_access, shadowed_member, tuple_checked, tuple_listed,
+        magic_era, no_access_message, reads_model_access, shadowed_member, stores_parent_path, tuple_checked,
+        tuple_listed, warns_on_labels,
     };
     use crate::facts::DefinitionSource;
     use crate::series::Series;
@@ -5092,6 +5115,22 @@ mod tests {
         assert!(reads_model_access(None));
         assert!(reads("18.0") && reads("saas~19.3"));
         assert!(!reads("saas~19.4") && !reads("20.0"));
+    }
+
+    #[test]
+    fn parent_path_counts_from_saas_11_3_and_on_an_unknown_series() {
+        let stores = |series: &str| stores_parent_path(Series::parse(series));
+        assert!(stores_parent_path(None));
+        assert!(!stores("9.0") && !stores("10.0") && !stores("11.0") && !stores("saas~11.2"));
+        assert!(stores("saas~11.3") && stores("saas~11.4") && stores("12.0"));
+    }
+
+    #[test]
+    fn repeated_labels_warn_from_saas_11_2_and_on_an_unknown_series() {
+        let warns = |series: &str| warns_on_labels(Series::parse(series));
+        assert!(warns_on_labels(None));
+        assert!(!warns("9.0") && !warns("10.0") && !warns("11.0") && !warns("saas~11.1"));
+        assert!(warns("saas~11.2") && warns("saas~11.3") && warns("12.0"));
     }
 
     #[test]
