@@ -894,7 +894,7 @@ impl<'ast> PyVisitor<'_, 'ast> {
     fn attr_or_field(&mut self, target: &ast::ExprName, value: &Expr, fact: &mut ClassFact) {
         match target.id.as_str() {
             "_table" => fact.table = Some(option_value(value)),
-            "_parent_store" | "_auto" | "_log_access" | "_register" | "_date_name" => {
+            "_parent_store" | "_auto" | "_log_access" | "_register" | "_date_name" | "_defaults" => {
                 let attr = Spanned {
                     value: option_value(value),
                     pos: self.loc.at(target),

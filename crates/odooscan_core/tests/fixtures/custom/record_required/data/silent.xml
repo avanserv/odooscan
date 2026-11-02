@@ -1,0 +1,41 @@
+<odoo>
+    <record id="thing_complete" model="rr.thing">
+        <field name="name">Complete</field>
+    </record>
+    <record id="thing_empty" model="rr.thing"/>
+    <record id="thing_filled_later" model="rr.thing">
+        <field name="name">Late</field>
+    </record>
+    <record id="thing_declared" model="rr.thing" forcecreate="False"/>
+    <record id="thing_declared_off" model="rr.thing" forcecreate="off"/>
+    <record id="base.thing_elsewhere" model="rr.thing"/>
+    <record id="record_required_ext.written_here_first" model="rr.thing"/>
+    <record id="model_rr_thing" model="rr.thing"/>
+    <record id="field_rr_thing__name" model="rr.thing"/>
+    <record model="rr.thing">
+        <field name="id" eval="7"/>
+    </record>
+    <record id="thing_by_context" model="rr.thing" context="{'default_name': 'x'}"/>
+    <record id="view_on_a_view" model="rr.view"/>
+    <record id="hidden_empty" model="rr.hidden"/>
+    <record id="unread_child_empty" model="rr.unread.child"/>
+    <record id="hook_default_get" model="rr.hook.default_get"/>
+    <record id="hook_create" model="rr.hook.create"/>
+    <record id="hook_load" model="rr.hook.load"/>
+    <record id="hook_missing" model="rr.hook.missing"/>
+    <record id="hook_prepare" model="rr.hook.prepare"/>
+    <record id="hook_records" model="rr.hook.records"/>
+    <record id="hook_records_create" model="rr.hook.records_create"/>
+    <record id="field_hooked" model="rr.field.hooked"/>
+    <record id="thing_with_lines" model="rr.thing">
+        <field name="name">Holder</field>
+        <field name="line_ids">
+            <record id="line_of_holder" model="rr.line">
+                <field name="label">Nested</field>
+            </record>
+        </field>
+        <field name="tag_id">
+            <record id="never_created" model="rr.line"/>
+        </field>
+    </record>
+</odoo>

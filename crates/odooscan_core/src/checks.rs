@@ -1,13 +1,14 @@
 //! Rules that need facts from more than one file.
 
 use std::path::Path;
+use std::rc::Rc;
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::facts::{
-    ActionFact, ActionValue, Annotation, ArchElement, ArchModifier, ClassFact, DefinitionSource, DomainFact, FieldFact,
-    FunctionCall, JsFacts, JsName, ModelKind, OptionValue, OrmCall, Pos, RawDiag, RecordFact, RecordWrite, ReportFact,
-    RuleFact, ServerFact, Spanned, SqlColumn, SqlView, ViewFact, WrittenValue, XmlRef,
+    ActionFact, ActionValue, Annotation, ArchElement, ArchModifier, ClassFact, DataFacts, DefinitionSource, DomainFact,
+    FieldFact, FieldWrite, FunctionCall, JsFacts, JsName, ModelKind, OptionValue, OrmCall, Pos, RawDiag, RecordFact,
+    RecordWrite, ReportFact, RuleFact, ServerFact, Spanned, SqlColumn, SqlView, ViewFact, WrittenValue, XmlRef,
 };
 use crate::index::{
     BASE_MODEL_METHODS, Export, FieldDef, FieldInfo, Index, JsSpec, RELATIONAL_TYPES, Scope, Status, ViewTree, full_id,
@@ -105,6 +106,8 @@ pub fn check_module<'m>(index: &Index<'m>, mi: usize, series: Option<Series>) ->
     let mut out = Out { diags: vec![] };
     manifest_files(module, &mut out);
     unloaded_files(module, series, &mut out);
+    ids_repeated_in_a_file(module, &mut out);
+    ids_repeated_across_files(module, &mut out);
     same_module_xmlids(module, series, &mut out);
     shadowed_members(module, series, &mut out);
     legacy_hook_rollbacks(module, series, &mut out);
@@ -512,7 +515,7 @@ fn unloaded(rel: &str, ignored: Option<&str>, series: Option<Series>) -> String 
 fn same_module_xmlids<'m>(module: &'m Module, series: Option<Series>, out: &mut Out<'m>) {
     // base_data.sql creates base's bootstrap records before any data file loads.
     let bootstrapped = module.name == "base";
-    let first_def = first_defs(module, out);
+    let first_def = first_defs(module);
     for file in &module.data {
         let Some(rank) = file.rank else { continue };
         for r in &file.facts.refs {
@@ -535,22 +538,11 @@ fn same_module_xmlids<'m>(module: &'m Module, series: Option<Series>, out: &mut 
 }
 
 /// Where each of the module's own XML ids is first defined, as (load rank, line).
-fn first_defs<'m>(module: &'m Module, out: &mut Out<'m>) -> FxHashMap<String, (usize, u32)> {
+fn first_defs(module: &Module) -> FxHashMap<String, (usize, u32)> {
     let mut first_def: FxHashMap<String, (usize, u32)> = FxHashMap::default();
     for file in &module.data {
-        let mut in_file: FxHashSet<&str> = FxHashSet::default();
         for def in &file.facts.defs {
-            if !def.assigned && !in_file.insert(&def.id) {
-                out.push(
-                    &file.path,
-                    "OD303",
-                    def.pos,
-                    format!("XML id '{}' is already defined earlier in this file", def.id),
-                );
-            }
-            // A dotted id naming another module overrides that module's record; it defines nothing here.
-            let own = def.id.split_once('.').is_none_or(|(m, _)| m == module.name);
-            if let Some(rank) = file.rank.filter(|_| own) {
+            if let Some(rank) = file.rank.filter(|_| own_id(module, &def.id)) {
                 first_def
                     .entry(full_id(&module.name, &def.id))
                     .or_insert((rank, def.pos.line));
@@ -558,6 +550,100 @@ fn first_defs<'m>(module: &'m Module, out: &mut Out<'m>) -> FxHashMap<String, (u
         }
     }
     first_def
+}
+
+/// A dotted id naming another module overrides that module's record, and defines nothing here.
+fn own_id(module: &Module, id: &str) -> bool {
+    id.split_once('.').is_none_or(|(m, _)| m == module.name)
+}
+
+/// OD303 on each id an earlier element of its file defines.
+fn ids_repeated_in_a_file<'m>(module: &'m Module, out: &mut Out<'m>) {
+    for file in &module.data {
+        let mut in_file: FxHashSet<&str> = FxHashSet::default();
+        for def in file.facts.defs.iter().filter(|d| !d.assigned) {
+            if !in_file.insert(&def.id) {
+                let message = format!("XML id '{}' is already defined earlier in this file", def.id);
+                out.push(&file.path, "OD303", def.pos, message);
+            }
+        }
+    }
+}
+
+/// What one element defines an XML id as, for the definitions of later files to compare with.
+struct IdDef<'m> {
+    file: usize,
+    rel: &'m str,
+    /// None when only a run tells it.
+    model: Option<&'m str>,
+    /// None for a tag such as `<template>` or `<menuitem>`.
+    write: Option<&'m RecordWrite>,
+}
+
+impl IdDef<'_> {
+    fn writes(&self, name: &str) -> bool {
+        self.write.is_some_and(|w| w.fields.iter().any(|f| f.name == name))
+    }
+}
+
+/// Values are not compared, so a plain copy is reported too, and renaming it would duplicate the
+/// record: the hint has to offer both fixes.
+const REPEATED_ID_HINT: &str =
+    "remove the copy when the two say the same thing, or rename one when both are meant to exist";
+
+/// The finding on `later` repeating what a file before it defines under `id`, given those definitions
+/// in load order. A later `<record>` that adds a field, or adds to one, reads as a deliberate update,
+/// as does one that writes nothing or declares with `forcecreate` that the record exists.
+fn repeated(id: &str, earlier: &[&IdDef], later: &IdDef) -> Option<String> {
+    let first = earlier.first()?;
+    if let (Some(model), Some(other)) = (first.model, later.model)
+        && model != other
+    {
+        return Some(format!(
+            "XML id '{id}' is already a record of {model} in {}, so it cannot name one of {other}; {REPEATED_ID_HINT}",
+            first.rel
+        ));
+    }
+    let overwrites = match later.write {
+        Some(write) if write.no_create || write.fields.is_empty() => false,
+        Some(write) => {
+            let rewrites = |f: &FieldWrite| !f.incremental && earlier.iter().any(|e| e.writes(&f.name));
+            earlier.iter().all(|e| e.write.is_some()) && write.fields.iter().all(rewrites)
+        }
+        None => true,
+    };
+    overwrites.then(|| {
+        format!(
+            "XML id '{id}' is already defined in {}, and this definition writes the fields it names over it; {REPEATED_ID_HINT}",
+            first.rel
+        )
+    })
+}
+
+/// OD323 on what loaded data files define under an id of the module that another of them defines.
+/// Installing writes every definition, so each field ends up as the last definition naming it left
+/// it. Demo data is meant to update what the data created.
+fn ids_repeated_across_files<'m>(module: &'m Module, out: &mut Out<'m>) {
+    let mut defs: FxHashMap<String, Vec<IdDef<'m>>> = FxHashMap::default();
+    let files = module.data.iter().enumerate();
+    for (fi, file) in files.filter(|(_, f)| f.rank.is_some() && !f.demo) {
+        let writes: FxHashMap<Pos, &RecordWrite> = file.facts.writes.iter().map(|w| (w.pos, w)).collect();
+        let themed = module.name.starts_with("theme_");
+        for def in file.facts.defs.iter().filter(|d| !d.assigned && own_id(module, &d.id)) {
+            let later = IdDef {
+                file: fi,
+                rel: &file.rel,
+                model: def.model.as_deref().filter(|_| !(def.themed && themed)),
+                write: writes.get(&def.pos).copied(),
+            };
+            let seen = defs.entry(full_id(&module.name, &def.id)).or_default();
+            let earlier: Vec<&IdDef> = seen.iter().filter(|e| e.file != fi).collect();
+            if let Some(message) = repeated(&def.id, &earlier, &later) {
+                out.push(&file.path, "OD323", def.pos, message);
+            }
+            seen.push(later);
+        }
+    }
 }
 
 /// An Image field is a Binary one to Odoo, which compares field types by that name.
@@ -1095,6 +1181,8 @@ impl<'m> Ctx<'_, 'm> {
 
     fn data(&self, out: &mut Out<'m>) {
         let mut trees: FxHashMap<String, ViewTree<'m>> = FxHashMap::default();
+        let loaded = Loaded::of(self.module);
+        let mut required = FxHashMap::default();
         // Files the manifest does not load, such as chart template CSVs read by Python code, are skipped.
         for file in self.module.data.iter().filter(|f| f.rank.is_some()) {
             let path = file.path.as_path();
@@ -1112,6 +1200,7 @@ impl<'m> Ctx<'_, 'm> {
             for write in &file.facts.writes {
                 self.record_write(out, path, write);
             }
+            self.created_records(out, file, &loaded, &mut required);
             for call in &file.facts.functions {
                 self.function_call(out, path, call);
             }
@@ -1127,6 +1216,189 @@ impl<'m> Ctx<'_, 'm> {
             self.domains(out, path, &file.facts.action_domains);
             self.actions(out, path, &file.facts.actions);
         }
+    }
+
+    /// OD324 on the records of a loaded `file` that Odoo creates.
+    fn created_records(
+        &self,
+        out: &mut Out<'m>,
+        file: &'m SourceFile<DataFacts>,
+        loaded: &Loaded,
+        memo: &mut RequiredFields<'m>,
+    ) {
+        for write in file.facts.writes.iter().filter(|w| self.creates(w, file, loaded)) {
+            self.missing_required(out, &file.path, write, file.demo, memo);
+        }
+    }
+
+    /// Whether `write` of a loaded `file` reaches `create`: it has no id, or Odoo finds no record under
+    /// its id. Anything before it may have made that record: a definition, a module that writes the
+    /// id, the registry, a parent record, `base_data.sql`, or a `<function>` of the module. An id of
+    /// another module is none of `first_defs`.
+    fn creates(&self, write: &RecordWrite, file: &SourceFile<DataFacts>, loaded: &Loaded) -> bool {
+        if write.no_create || write.fields.iter().any(database_id) {
+            return false;
+        }
+        let Some(id) = &write.id else { return true };
+        let full = full_id(&self.module.name, id);
+        let at = file.rank.map(|rank| (rank, write.pos.line));
+        let writes = self.index.value_writes.get(&full).map_or(&[][..], Vec::as_slice);
+        let first = writes.iter().find(|(mi, _)| self.scope.sees(*mi));
+        self.module.name != "base"
+            && at.is_some_and(|at| loaded.ids.get(&full) == Some(&at) && loaded.first_call.is_none_or(|c| at < c))
+            && first.is_some_and(|(_, w)| std::ptr::eq(*w, write))
+            && !registry_id(self.module, &full)
+            && !self.index.derived.contains(&full)
+    }
+
+    /// OD324 on each required field a create of `write.model` leaves without a value.
+    fn missing_required(
+        &self,
+        out: &mut Out<'m>,
+        path: &'m Path,
+        write: &'m RecordWrite,
+        demo: bool,
+        memo: &mut RequiredFields<'m>,
+    ) {
+        let given = Given {
+            write,
+            demo,
+            models: vec![],
+        };
+        let mut seen = FxHashSet::default();
+        let mut gaps = vec![];
+        self.required_gaps(&write.model, given, memo, &mut seen, &mut gaps);
+        for (model, field) in gaps {
+            let message = format!(
+                "{model}.{field} is required and has no default, so Odoo cannot create this record; give the field a value"
+            );
+            out.push(path, "OD324", write.pos, message);
+        }
+    }
+
+    /// The required fields a create of `model` leaves empty, and those of each parent it creates. A
+    /// parent takes what the child's values and defaults give the field; a delegate field that gets
+    /// a value leaves that parent alone. `_inherits` cycles end at the seen model.
+    fn required_gaps(
+        &self,
+        model: &'m str,
+        mut given: Given<'m>,
+        memo: &mut RequiredFields<'m>,
+        seen: &mut FxHashSet<&'m str>,
+        gaps: &mut Vec<(&'m str, &'m str)>,
+    ) {
+        if !seen.insert(model) {
+            return;
+        }
+        given.models.push(model);
+        let required = self.required_of(model, memo);
+        let left = required.fields.iter().filter(|f| !self.gives(&given, f));
+        gaps.extend(left.map(|f| (model, *f)));
+        for (parent, via) in &required.delegates {
+            if !self.gives(&given, via) {
+                self.required_gaps(parent, given.clone(), memo, seen, gaps);
+            }
+        }
+    }
+
+    /// Whether the record has a value for `name` without a default of the field: it writes it, its
+    /// context, an `ir.default` of the model or a child, or a default of a child gives it, or the
+    /// record it sits in does.
+    fn gives(&self, given: &Given<'m>, name: &str) -> bool {
+        let write = given.write;
+        let children = given.models.split_last().map_or(&[][..], |(_, c)| c);
+        write.fields.iter().any(|f| f.name == name)
+            || write.context_defaults.iter().any(|d| d == name)
+            || given
+                .models
+                .iter()
+                .any(|m| self.index.ir_default(m, name, self.scope, given.demo))
+            || self.parent_decides(write, name)
+            || children.iter().any(|m| self.hands_down_default(m, name))
+    }
+
+    /// Whether `child` redeclares the delegated field `name` with a default: `default_get` reads it
+    /// and `create` passes it to the parent. Without `inherited` the field only shadows the parent's,
+    /// so its value never reaches the parent (`odoo/models.py:5021` on 18.0).
+    fn hands_down_default(&self, child: &'m str, name: &str) -> bool {
+        self.merged(child, name).is_some_and(|f| {
+            f.get("default") != Merged::Unset
+                && f.get("inherited") != Merged::Unset
+                && !f.is("inherited", &OptionValue::Bool(false))
+        })
+    }
+
+    /// `read_required`, once per model.
+    fn required_of(&self, model: &'m str, memo: &mut RequiredFields<'m>) -> Rc<Required<'m>> {
+        let known = memo.get(model).cloned();
+        known.unwrap_or_else(|| {
+            let required = Rc::new(self.read_required(model));
+            memo.insert(model, required.clone());
+            required
+        })
+    }
+
+    /// What nothing fills on a create of `model`. Empty when only a run tells: a class hides from the
+    /// scan, the table has no constraints of Odoo's, or the model itself has a hook, which may fill
+    /// any field, its parents' included.
+    fn read_required(&self, model: &'m str) -> Required<'m> {
+        let classes = self.index.merged_classes(model, self.scope);
+        let no_table = |c: &ClassFact| c.attr("_auto").is_some_and(|a| a.value != OptionValue::Bool(true));
+        let unread = |c: &ClassFact| c.inherits_unknown || no_table(c) || (c.model == model && fills_on_create(c));
+        if !self.sees_whole_model(model) || classes.iter().any(|(_, c)| unread(c)) {
+            return Required::default();
+        }
+        let delegates: Vec<(&'m str, &'m str)> = classes
+            .iter()
+            .flat_map(|(_, c)| &c.inherits)
+            .map(|(parent, via)| (parent.as_str(), via.as_str()))
+            .collect();
+        let creates_parent = |via: &str| {
+            self.merged(model, via)
+                .is_none_or(|f| f.get("default") == Merged::Unset)
+        };
+        Required {
+            fields: self.fields_without_default(model, &classes, &delegates),
+            delegates: delegates
+                .iter()
+                .copied()
+                .filter(|(_, via)| creates_parent(via))
+                .collect(),
+        }
+    }
+
+    /// The required fields of `model` that no default fills, sorted, but the delegating ones, which
+    /// Odoo fills with the parent it creates.
+    fn fields_without_default(
+        &self,
+        model: &'m str,
+        classes: &[(usize, &'m ClassFact)],
+        delegates: &[(&'m str, &'m str)],
+    ) -> Vec<&'m str> {
+        let mut by_name: FxHashMap<&'m str, Vec<FieldDef<'m>>> = FxHashMap::default();
+        for def in self.index.merged_fields(model, self.scope) {
+            by_name.entry(def.2.name.as_str()).or_default().push(def);
+        }
+        by_name.retain(|name, _| !LOADER_FILLS.contains(name) && !delegates.iter().any(|(_, via)| via == name));
+        by_name.retain(|_, defs| defs.iter().any(|d| d.2.splat || d.2.option("required").is_some()));
+        let mut fields: Vec<&'m str> = by_name
+            .into_iter()
+            .filter_map(|(name, defs)| Some((name, self.merge(model, defs)?)))
+            .filter(|(name, field)| takes_no_default(field) && !self.parent_fills(classes, name))
+            .map(|(name, _)| name)
+            .collect();
+        fields.sort_unstable();
+        fields
+    }
+
+    /// Whether a class has a default for `name` that no `Field` tells: a hook of a parent class whose
+    /// model has the field, or the `_defaults` of a series that reads them.
+    fn parent_fills(&self, classes: &[(usize, &'m ClassFact)], name: &str) -> bool {
+        let hooked = |c: &ClassFact| fills_on_create(c) && self.index.defines_field(&c.model, name);
+        let legacy = self.series.is_none_or(|s| s < DEFAULTS_GONE);
+        classes
+            .iter()
+            .any(|(_, c)| hooked(c) || (legacy && legacy_default(c, name)))
     }
 
     /// OD321 and OD322 on what `write` gives the fields the record still holds once its scope loaded.
@@ -1925,6 +2197,92 @@ impl<'m> Ctx<'_, 'm> {
             }
         }
     }
+}
+
+/// Fields of a record the XML loader fills itself (`odoo/tools/convert.py:472,476` on 20.0).
+const LOADER_FILLS: [&str; 2] = ["sequence", "xmlid"];
+
+/// Methods that may give a record the values its data does not, on the way to `INSERT`.
+const CREATE_HOOKS: [&str; 7] = [
+    "default_get",
+    "create",
+    "load",
+    "_add_missing_default_values",
+    "_prepare_create_values",
+    "_load_records",
+    "_load_records_create",
+];
+
+/// The first series whose ORM ignores `_defaults` (10.0; 9.0 merges it in `openerp/models.py:3012`).
+const DEFAULTS_GONE: Series = Series { major: 10, minor: 0 };
+
+/// Where the module may have made a record before its data asks for it.
+struct Loaded {
+    /// Where each of the module's own XML ids is first defined, as `first_defs` says.
+    ids: FxHashMap<String, (usize, u32)>,
+    /// The first `<function>` of the files the manifest loads, as (load rank, line).
+    first_call: Option<(usize, u32)>,
+}
+
+impl Loaded {
+    fn of(module: &Module) -> Self {
+        let calls = module.data.iter().flat_map(|f| {
+            let rank = f.rank.into_iter();
+            rank.flat_map(|r| f.facts.functions.iter().map(move |c| (r, c.method.pos.line)))
+        });
+        Self {
+            ids: first_defs(module),
+            first_call: calls.min(),
+        }
+    }
+}
+
+/// What a create of a model must get from elsewhere than its fields.
+#[derive(Default)]
+struct Required<'m> {
+    /// The required fields with a column and no default, sorted.
+    fields: Vec<&'m str>,
+    /// The `_inherits` parents Odoo creates for a record, with the field that names each.
+    delegates: Vec<(&'m str, &'m str)>,
+}
+
+type RequiredFields<'m> = FxHashMap<&'m str, Rc<Required<'m>>>;
+
+/// What gives the fields of a record, in `Ctx::required_gaps`.
+#[derive(Clone)]
+struct Given<'m> {
+    write: &'m RecordWrite,
+    /// It sits in a demo file.
+    demo: bool,
+    /// The model of the record, then each parent down to the one read.
+    models: Vec<&'m str>,
+}
+
+/// A value for `.id` makes Odoo update that row (`odoo/models.py:5489` on 18.0).
+fn database_id(field: &FieldWrite) -> bool {
+    field.name == "id" || (field.name == ".id" && matches!(field.value, WrittenValue::Text(_)))
+}
+
+fn fills_on_create(class: &ClassFact) -> bool {
+    CREATE_HOOKS.iter().any(|h| class.methods.iter().any(|m| m == h))
+}
+
+/// Whether the `_defaults` of `class` may hold `name`. An expression may hold anything.
+fn legacy_default(class: &ClassFact, name: &str) -> bool {
+    class.attr("_defaults").is_some_and(|d| match &d.value {
+        OptionValue::Dict(keys) => keys.iter().any(|(key, _)| key == name),
+        _ => true,
+    })
+}
+
+/// Whether a create leaves the column of `field` to the record, to fail on NOT NULL. Odoo computes a
+/// `compute` or `related` field after the `INSERT` or with it, which only a run tells.
+fn takes_no_default(field: &Field) -> bool {
+    field.is("required", &OptionValue::Bool(true))
+        && field.get("default") == Merged::Unset
+        && field.get("compute") == Merged::Unset
+        && field.get("related") == Merged::Unset
+        && has_certain_column(field)
 }
 
 /// What the registry makes of an attribute of a field, as far as literals tell.

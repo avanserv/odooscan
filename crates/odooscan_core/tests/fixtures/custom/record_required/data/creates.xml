@@ -1,0 +1,30 @@
+<odoo>
+    <record id="thing_empty" model="rr.thing"/>
+    <record model="rr.thing">
+        <field name="note">No id</field>
+    </record>
+    <record id="thing_forced" model="rr.thing" forcecreate="True"/>
+    <record id="thing_filled_later" model="rr.thing"/>
+    <record id="thing_filled_by_demo" model="rr.thing"/>
+    <record id="thing_in_foreign_context" model="rr.thing" context="{'default_note': 'x'}"/>
+    <record id="thing_translated" model="rr.thing">
+        <field name="name@fr">Chose</field>
+    </record>
+    <record model="rr.line">
+        <field name="thing_id" ref="thing_empty"/>
+    </record>
+    <record id="thing_with_nested" model="rr.thing">
+        <field name="name">Holder</field>
+        <field name="line_ids">
+            <record id="line_without_label" model="rr.line"/>
+        </field>
+    </record>
+    <record id="mixed_empty" model="rr.mixed"/>
+    <record id="scoped_empty" model="rr.scoped"/>
+    <record id="defaulted_empty" model="rr.defaulted"/>
+    <record id="defaulted_by_demo" model="rr.defaulted"/>
+    <record id="named_empty" model="rr.named"/>
+    <record id="legacy_empty" model="rr.legacy"/>
+    <record id="legacy_hidden_empty" model="rr.legacy.hidden"/>
+    <record id="blind_empty" model="rr.blind"/>
+</odoo>

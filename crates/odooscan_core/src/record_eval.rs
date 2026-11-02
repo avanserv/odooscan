@@ -25,6 +25,43 @@ pub fn written(eval: &Spanned<String>) -> WrittenValue {
     }
 }
 
+/// Whether an `eval` is a list of x2many commands that all keep the other rows of the field.
+pub fn incremental(eval: &str) -> bool {
+    let Ok(parsed) = parse_expression(eval.trim()) else {
+        return false;
+    };
+    let Expr::List(list) = parsed.expr() else {
+        return false;
+    };
+    !list.elts.is_empty() && list.elts.iter().all(keeps_rows)
+}
+
+fn keeps_rows(item: &Expr) -> bool {
+    match item {
+        Expr::Tuple(t) => matches!(command_code(&t.elts), Some(0..=4)),
+        Expr::Call(c) => matches!(
+            command_name(c),
+            Some("create" | "update" | "delete" | "unlink" | "link")
+        ),
+        _ => false,
+    }
+}
+
+/// The items of a tuple or a list, each none unless it is a string literal.
+pub fn strings(eval: &str) -> Vec<Option<String>> {
+    let Ok(parsed) = parse_expression(eval.trim()) else {
+        return vec![];
+    };
+    let (Expr::Tuple(ast::ExprTuple { elts, .. }) | Expr::List(ast::ExprList { elts, .. })) = parsed.expr() else {
+        return vec![];
+    };
+    let text = |item: &Expr| match item {
+        Expr::StringLiteral(s) => Some(s.value.to_str().to_owned()),
+        _ => None,
+    };
+    elts.iter().map(text).collect()
+}
+
 /// The id of a `ref()` call: its second argument only says what a missing id gives.
 fn ref_id(expr: &Expr) -> Option<String> {
     let Expr::Call(call) = expr else { return None };
@@ -54,13 +91,7 @@ fn commands(items: &[Expr]) -> Option<Vec<String>> {
 
 /// `(0, ...)` creates a record and `(5, ...)` clears the field, so neither names one.
 fn tuple_command(elts: &[Expr], ids: &mut Vec<String>) -> Option<()> {
-    let Expr::NumberLiteral(code) = elts.first()? else {
-        return None;
-    };
-    let ast::Number::Int(code) = &code.value else {
-        return None;
-    };
-    match code.as_u64()? {
+    match command_code(elts)? {
         0 | 5 => Some(()),
         1..=4 => push_ref(elts.get(1)?, ids),
         6 => push_refs(elts.get(2)?, ids),
@@ -68,15 +99,27 @@ fn tuple_command(elts: &[Expr], ids: &mut Vec<String>) -> Option<()> {
     }
 }
 
-fn call_command(call: &ast::ExprCall, ids: &mut Vec<String>) -> Option<()> {
+fn command_code(elts: &[Expr]) -> Option<u64> {
+    let Expr::NumberLiteral(code) = elts.first()? else {
+        return None;
+    };
+    let ast::Number::Int(code) = &code.value else {
+        return None;
+    };
+    code.as_u64()
+}
+
+/// The method of a `Command.x()` call.
+fn command_name(call: &ast::ExprCall) -> Option<&str> {
     let Expr::Attribute(method) = &*call.func else {
         return None;
     };
-    if !matches!(&*method.value, Expr::Name(n) if n.id.as_str() == "Command") {
-        return None;
-    }
+    matches!(&*method.value, Expr::Name(n) if n.id.as_str() == "Command").then(|| method.attr.as_str())
+}
+
+fn call_command(call: &ast::ExprCall, ids: &mut Vec<String>) -> Option<()> {
     let first = call.arguments.args.first();
-    match method.attr.as_str() {
+    match command_name(call)? {
         "create" | "clear" => Some(()),
         "link" | "unlink" | "update" | "delete" => push_ref(first?, ids),
         "set" => push_refs(first?, ids),
@@ -158,6 +201,51 @@ mod tests {
         assert_eq!(read("\"ref(x)\""), ids(&["text:ref(x)"]));
         assert_eq!(read("'a' 'b'"), ids(&["text:ab"]));
         assert_eq!(read("' a '"), ids(&["text: a "]));
+    }
+
+    #[test]
+    fn reads_commands_that_keep_the_other_rows() {
+        for eval in [
+            "[(0, 0, {'a': 1})]",
+            " [(1, 7, {}), (2, 7), (3, 7), (4, ref('a'))] ",
+            "[Command.create({}), Command.update(7, {})]",
+            "[Command.delete(7), Command.unlink(7), Command.link(ref('a'))]",
+        ] {
+            assert!(incremental(eval), "{eval}");
+        }
+    }
+
+    #[test]
+    fn commands_that_replace_the_rows_are_not_incremental() {
+        for eval in [
+            "",
+            "[]",
+            "False",
+            "ref('a')",
+            "((4, 7),)",
+            "[(5, 0, 0)]",
+            "[(6, 0, [7])]",
+            "[(5, 0, 0), (4, 7)]",
+            "[(4, 7), (6, 0, [])]",
+            "[(7, 0)]",
+            "[(x, 0)]",
+            "[7]",
+            "[Command.set([7])]",
+            "[Command.clear(), Command.link(7)]",
+            "[Other.link(7)]",
+            "[(4, ",
+        ] {
+            assert!(!incremental(eval), "{eval}");
+        }
+    }
+
+    #[test]
+    fn reads_the_strings_of_a_tuple_or_a_list() {
+        let some = |s: &str| Some(s.to_owned());
+        assert_eq!(strings("('a', 'b', 1)"), [some("a"), some("b"), None]);
+        assert_eq!(strings("['a', ref('b')]"), [some("a"), None]);
+        assert!(strings("'a'").is_empty());
+        assert!(strings("('a'").is_empty());
     }
 
     #[test]

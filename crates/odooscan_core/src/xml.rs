@@ -22,6 +22,8 @@ static WHOLE_EVAL_REF: LazyLock<Regex> =
 /// The ids `ir.model.data._update_xmlids` gives to records that Python expressions select.
 static UPDATE_XMLID: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r#"['"]xml_id['"]\s*:\s*['"]([\w.]+)['"]"#).unwrap());
+/// A key of a context that gives a field its value on create.
+static CONTEXT_DEFAULT: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\bdefault_(\w+)").unwrap());
 /// The key of a context that makes Odoo take a view for a type by its id.
 static CONTEXT_VIEW_REF: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(\w+)_view_ref\b").unwrap());
 /// The type of a row an `eval` writes to `view_ids`, as a dict literal or `dict()` gives it.
@@ -197,6 +199,7 @@ impl Walker<'_> {
             self.facts.functions.push(FunctionCall {
                 model: model.to_owned(),
                 method,
+                default_of: default_of(node),
             });
         }
     }
@@ -331,6 +334,7 @@ impl Walker<'_> {
             fields.push(FieldWrite {
                 name: name.to_owned(),
                 value: written(field, self.lines),
+                incremental: incremental(field),
             });
         }
         let enclosing = node.parent_element().filter(|p| p.has_tag_name("field"));
@@ -341,9 +345,12 @@ impl Walker<'_> {
         self.facts.writes.push(RecordWrite {
             id: node.attribute("id").map(str::to_owned),
             model: model.to_owned(),
+            pos: self.pos(node),
             fields,
             nested_in,
             csv: false,
+            context_defaults: context_defaults(node),
+            no_create: no_create(node),
         });
     }
 
@@ -775,6 +782,51 @@ fn written(field: Node, lines: &Lines) -> WrittenValue {
     }
 }
 
+/// Whether `field` adds to what the record holds: a `search` or a `ref` wins over an `eval`, and Odoo
+/// writes nothing to a field for the records nested in it.
+fn incremental(field: Node) -> bool {
+    let by_commands = !["search", "ref"]
+        .iter()
+        .any(|a| field.attribute(*a).is_some_and(|v| !v.is_empty()))
+        && field.attribute("eval").is_some_and(record_eval::incremental);
+    by_commands || field.children().any(|c| c.has_tag_name("record"))
+}
+
+/// The fields `default_*` keys name where Odoo reads a `context` for `node`: on it, and on the roots
+/// around it. An enclosing `<record>` passes its own to nothing nested in it. Any mention counts, as
+/// what a context evaluates to takes a run.
+fn context_defaults(node: Node) -> Vec<String> {
+    let roots = node
+        .ancestors()
+        .skip(1)
+        .filter(|n| !n.has_tag_name("record") && !n.has_tag_name("field"));
+    let contexts = std::iter::once(node)
+        .chain(roots)
+        .filter_map(|n| n.attribute("context"));
+    let keys = contexts.flat_map(|c| CONTEXT_DEFAULT.captures_iter(c));
+    keys.map(|c| c[1].to_owned()).collect()
+}
+
+/// Whether `forcecreate` reads as false, as Odoo reads it: an empty value keeps the default.
+fn no_create(node: Node) -> bool {
+    let value = node.attribute("forcecreate").map(|v| v.trim().to_lowercase());
+    value.is_some_and(|v| matches!(v.as_str(), "0" | "false" | "off"))
+}
+
+/// The model and the field of an `ir.default.set()`, whose arguments are those of the `eval` then
+/// the unnamed `<value>` children.
+fn default_of(node: Node) -> Option<(String, String)> {
+    if node.attribute("model") != Some("ir.default") || node.attribute("name") != Some("set") {
+        return None;
+    }
+    let mut args = node.attribute("eval").map(record_eval::strings).unwrap_or_default();
+    let values = node
+        .children()
+        .filter(|c| c.has_tag_name("value") && !c.has_attribute("name"));
+    args.extend(values.map(|v| v.text().map(str::to_owned)));
+    Some((args.first()?.clone()?, args.get(1)?.clone()?))
+}
+
 /// The field Odoo keeps of those of a name: each one replaces the value of the one before.
 fn last_field_of<'a, 'i>(node: Node<'a, 'i>, name: &str) -> Option<Node<'a, 'i>> {
     node.children()
@@ -1143,6 +1195,99 @@ mod tests {
             WrittenValue::Text(text) => format!("text:{}", text.value),
             WrittenValue::Opaque => "opaque".to_owned(),
         }
+    }
+
+    fn first_write(data: &str) -> RecordWrite {
+        analyze(&format!("<odoo>{data}</odoo>")).writes.swap_remove(0)
+    }
+
+    #[test]
+    fn places_a_write_at_its_record() {
+        let write = first_write("\n  <record id=\"r\" model=\"m\"/>");
+        assert_eq!(write.pos, Pos { line: 2, col: 3 });
+    }
+
+    #[test]
+    fn a_later_field_of_a_name_decides_whether_it_adds() {
+        let incremental = |fields: &str| {
+            let write = first_write(&format!("<record id=\"r\" model=\"m\">{fields}</record>"));
+            write.fields[0].incremental
+        };
+        assert!(incremental(r#"<field name="f" eval="[(4, ref('a'))]"/>"#));
+        assert!(incremental(r#"<field name="f" ref="" eval="[(0, 0, {})]"/>"#));
+        assert!(incremental(r#"<field name="f"><record model="n"/></field>"#));
+        assert!(incremental(
+            r#"<field name="f" ref="a"/><field name="f" eval="[(3, 1)]"/>"#
+        ));
+        assert!(!incremental(
+            r#"<field name="f" eval="[(3, 1)]"/><field name="f" ref="a"/>"#
+        ));
+        assert!(!incremental(r#"<field name="f" eval="[(6, 0, [])]"/>"#));
+        assert!(!incremental(r#"<field name="f" ref="a" eval="[(4, 1)]"/>"#));
+        assert!(!incremental(r#"<field name="f" search="[]" eval="[(4, 1)]"/>"#));
+        assert!(!incremental(r#"<field name="f">[(4, 1)]</field>"#));
+    }
+
+    #[test]
+    fn reads_the_context_of_a_record_and_of_its_roots() {
+        let text = r#"<odoo context="{'default_a': 1}"><data context="{'default_b': 1}">
+            <record model="m" context="{'default_c': 1, 'other': 2}">
+                <field name="f"><record model="n" context="{'default_d': ref('x')}"/></field>
+            </record>
+        </data></odoo>"#;
+        let facts = analyze(text);
+        assert_eq!(facts.writes[0].context_defaults, ["c", "b", "a"]);
+        assert_eq!(facts.writes[1].context_defaults, ["d", "b", "a"]);
+        assert!(first_write(r#"<record model="m"/>"#).context_defaults.is_empty());
+    }
+
+    #[test]
+    fn reads_forcecreate_as_odoo_does() {
+        let no_create = |attr: &str| first_write(&format!("<record model=\"m\" {attr}/>")).no_create;
+        for off in ["0", "False", "false", " OFF "] {
+            assert!(no_create(&format!("forcecreate=\"{off}\"")), "{off}");
+        }
+        for on in ["", " ", "1", "True", "x"] {
+            assert!(!no_create(&format!("forcecreate=\"{on}\"")), "{on}");
+        }
+        assert!(!no_create(""));
+    }
+
+    #[test]
+    fn reads_the_field_of_an_ir_default() {
+        let default_of = |function: &str| {
+            let facts = analyze(&format!("<odoo>{function}</odoo>"));
+            facts.functions[0].default_of.clone()
+        };
+        let found = Some(("a.b".to_owned(), "c".to_owned()));
+        let set = r#"model="ir.default" name="set""#;
+        assert_eq!(
+            default_of(&format!(r#"<function {set} eval="('a.b', 'c', ref('d'))"/>"#)),
+            found
+        );
+        assert_eq!(default_of(&format!(r#"<function {set} eval="['a.b', 'c']"/>"#)), found);
+        assert_eq!(
+            default_of(&format!(
+                r#"<function {set}><value>a.b</value><value>c</value><value name="user_id">1</value></function>"#
+            )),
+            found
+        );
+        assert_eq!(
+            default_of(&format!(
+                r#"<function {set} eval="('a.b',)"><value>c</value></function>"#
+            )),
+            found
+        );
+        assert_eq!(default_of(&format!(r#"<function {set} eval="(name, 'c')"/>"#)), None);
+        assert_eq!(default_of(&format!(r#"<function {set} eval="('a.b',)"/>"#)), None);
+        assert_eq!(
+            default_of(r#"<function model="ir.default" name="other" eval="('a.b', 'c')"/>"#),
+            None
+        );
+        assert_eq!(
+            default_of(r#"<function model="x" name="set" eval="('a.b', 'c')"/>"#),
+            None
+        );
     }
 
     #[test]

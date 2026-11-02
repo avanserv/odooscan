@@ -829,6 +829,12 @@
       "count": 1
     },
     {
+      "path": "addons/l10n_es_edi_facturae/wizard/account_move_reversal_view.xml",
+      "code": "OD323",
+      "message": "XML id 'view_tax_tree_inherit_l10n_es_edi_facturae' is already defined in views/account_tax_views.xml, and this definition writes the fields it names over it; remove the copy when the two say the same thing, or rename one when both are meant to exist",
+      "count": 1
+    },
+    {
       "path": "addons/l10n_es_edi_sii/models/account_move.py",
       "code": "OD103",
       "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
@@ -2407,6 +2413,12 @@
       "count": 1
     },
     {
+      "path": "addons/sale_timesheet/views/project_portal_templates.xml",
+      "code": "OD323",
+      "message": "XML id 'portal_timesheet_table_inherit' is already defined in views/sale_timesheet_portal_templates.xml, and this definition writes the fields it names over it; remove the copy when the two say the same thing, or rename one when both are meant to exist",
+      "count": 1
+    },
+    {
       "path": "addons/sms/controllers/main.py",
       "code": "OD111",
       "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
@@ -2476,6 +2488,12 @@
       "path": "addons/stock/populate/populate_demo.xml",
       "code": "OD502",
       "message": "'populate/populate_demo.xml' is not in the manifest's data or demo, so Odoo never loads it",
+      "count": 1
+    },
+    {
+      "path": "addons/stock/views/res_config_settings_views.xml",
+      "code": "OD323",
+      "message": "XML id 'menu_stock_config_settings' is already defined in views/stock_menu_views.xml, and this definition writes the fields it names over it; remove the copy when the two say the same thing, or rename one when both are meant to exist",
       "count": 1
     },
     {
@@ -2632,6 +2650,12 @@
       "path": "addons/website_blog/controllers/main.py",
       "code": "OD111",
       "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
+      "count": 1
+    },
+    {
+      "path": "addons/website_blog/data/website_blog_data.xml",
+      "code": "OD323",
+      "message": "XML id 'mt_blog_blog_published' is already defined in data/mail_message_subtype_data.xml, and this definition writes the fields it names over it; remove the copy when the two say the same thing, or rename one when both are meant to exist",
       "count": 1
     },
     {

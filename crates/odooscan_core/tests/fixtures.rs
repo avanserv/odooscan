@@ -30,6 +30,23 @@ fn fixtures() {
 }
 
 #[test]
+fn base_creates_none_of_its_ids() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+    let report = scan(&ScanOptions {
+        paths: vec![root.join("bootstrap")],
+        addons_paths: vec![],
+        default_series: None,
+    });
+    let lines: Vec<u32> = report
+        .diagnostics
+        .iter()
+        .filter(|d| d.code == "OD324")
+        .map(|d| d.line)
+        .collect();
+    assert_eq!(lines, [3]);
+}
+
+#[test]
 fn series_notice_only_without_default() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
     let notices = |default_series| {

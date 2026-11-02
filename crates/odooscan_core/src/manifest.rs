@@ -91,6 +91,11 @@ impl Manifest {
             .chain(self.read_files(&DEMO_KEYS, series))
     }
 
+    /// How many entries of `loaded_files` come from the data keys, ahead of the demo keys.
+    pub fn data_entries(&self, series: Option<Series>) -> usize {
+        self.read_files(&DATA_KEYS, series).count()
+    }
+
     /// The SQL files Odoo runs when it loads the data of the module in `series`, in load order.
     pub fn sql_files(&self, series: Option<Series>) -> impl Iterator<Item = &str> {
         self.read_files(&DATA_KEYS, series).filter(|f| f.ends_with(".sql"))

@@ -1,0 +1,4 @@
+<odoo>
+    <record id="legacy_named" model="rn.legacy"/>
+    <record id="legacy_hidden" model="rn.legacy.hidden"/>
+</odoo>

@@ -83,9 +83,19 @@ fn row_ids(facts: &mut DataFacts, row: &csv::StringRecord, columns: &[(&str, boo
     }
 }
 
+/// Whether a column holds a field of the rows nested in a field of the record.
+fn nested_column(column: &str) -> bool {
+    database_field(column).is_none() && column.contains('/')
+}
+
 /// What a row writes to the fields of its record. A database id or a nested `a/b` column replaces
-/// the field with what only a run tells, and an empty cell clears it.
+/// the field with what only a run tells, and an empty cell clears it. A row with values only in
+/// nested columns continues the record above, and Odoo skips a row of empty cells.
 fn row_write(facts: &mut DataFacts, row: &csv::StringRecord, columns: &[(&str, bool)], model: &str, pos: Pos) {
+    let mut cells = columns.iter().zip(row.iter());
+    if !cells.any(|((column, _), cell)| !nested_column(column) && !cell.is_empty()) {
+        return;
+    }
     let mut fields = vec![];
     for (i, (column, is_ref)) in columns.iter().enumerate().filter(|(_, (c, _))| *c != "id") {
         let spanned = |value: &str| Spanned {
@@ -104,14 +114,18 @@ fn row_write(facts: &mut DataFacts, row: &csv::StringRecord, columns: &[(&str, b
         fields.push(FieldWrite {
             name: name.unwrap_or(column).to_owned(),
             value,
+            incremental: false,
         });
     }
     facts.writes.push(RecordWrite {
         id: row_id(row, columns),
         model: model.to_owned(),
+        pos,
         fields,
         nested_in: None,
         csv: true,
+        context_defaults: vec![],
+        no_create: false,
     });
 }
 
@@ -262,6 +276,13 @@ mod tests {
         assert_eq!(row("id,a/.id,b.id", "r,3,4"), ["a?", "b?"]);
         assert_eq!(row("id,a/b:id,a/c/id,c/d", "r,x,y,z"), ["a?", "a?", "c?"]);
         assert_eq!(row("id,a,b:id", "r,,"), ["a?", "b?"]);
+    }
+
+    #[test]
+    fn a_row_with_nothing_of_its_own_writes_nothing() {
+        assert!(analyze("id,name\n,\n", "m").writes.is_empty());
+        let facts = analyze("id,lines/name\nr,x\n,y\n", "m");
+        assert_eq!(facts.writes.len(), 1);
     }
 
     fn access(header: &str, row: &str) -> DataFacts {

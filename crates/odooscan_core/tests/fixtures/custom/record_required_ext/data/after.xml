@@ -1,0 +1,6 @@
+<odoo>
+    <record id="made_by_a_call" model="rr.thing"/>
+    <record model="rr.thing"/>
+    <record model="rr.defaulted"/>
+    <record model="rr.child"/>
+</odoo>

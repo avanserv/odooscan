@@ -1,0 +1,7 @@
+<odoo context="{'default_name': 'x'}">
+    <record id="thing_by_root" model="rr.thing"/>
+    <data context="{'default_code': 'x'}">
+        <record id="named_by_data" model="rr.named"/>
+    </data>
+    <record id="named_outside_data" model="rr.named"/>
+</odoo>
