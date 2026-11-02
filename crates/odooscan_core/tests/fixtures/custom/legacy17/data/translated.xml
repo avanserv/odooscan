@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="partner_translated" model="res.partner">
+        <field name="name">Translated</field>
+        <field name="name@fr">Traduit</field>
+    </record>
+</odoo>
