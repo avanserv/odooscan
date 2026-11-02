@@ -1,0 +1,5 @@
+<odoo>
+    <record id="badge_hooked" model="unlisted.badge">
+        <field name="code">hooked</field>
+    </record>
+</odoo>

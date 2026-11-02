@@ -1,0 +1,5 @@
+id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
+access_room_listed,listed,model_unlisted_room_listed,base.group_user,1,0,0,0
+access_plate,plate,model_unlisted_plate,base.group_user,1,0,0,0
+access_badge,badge,model_unlisted_badge,base.group_user,1,0,0,0
+access_sign,sign,model_unlisted_sign,base.group_user,1,0,0,0

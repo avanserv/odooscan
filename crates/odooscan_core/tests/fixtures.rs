@@ -160,6 +160,7 @@ fn access_severity_follows_the_module_series() {
         ("saas193", Severity::Warning),
         ("saas194", Severity::Info),
         ("sql_columns", Severity::Warning),
+        ("unlisted_data", Severity::Warning),
     ];
     assert_eq!(severities("OD401"), expected.map(|(m, s)| (m.to_owned(), s)));
 }

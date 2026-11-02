@@ -724,8 +724,9 @@ fn data_ids<'m>(
             }
         }
     }
-    // Every file feeds the ids: Python can load a whole folder without naming a file, so the filter
-    // above would turn correct refs into false OD301.
+    // Every file feeds the ids it spells out: Python can load a whole folder without naming a file,
+    // so the filter above would turn correct refs into false OD301. Ids derived from a record need
+    // the record loaded, so `derived_ids` keeps that filter.
     for file in &module.data {
         for def in &file.facts.defs {
             // `<record id="other.x">` creates or updates an id that belongs to module other.
@@ -760,13 +761,19 @@ fn ir_defaults(modules: &[Module]) -> IrDefaults<'_> {
     defaults
 }
 
-/// Ids of records Odoo creates alongside others, with their module and model.
-fn derived_ids<'m>(modules: &'m [Module], models: &Models<'m>) -> Vec<(String, usize, &'m str)> {
+/// Ids of records Odoo creates alongside the records of the files it loads, with their module and
+/// model.
+fn derived_ids<'m>(
+    modules: &'m [Module],
+    models: &Models<'m>,
+    default_series: Option<Series>,
+) -> Vec<(String, usize, &'m str)> {
     // A record of a model with _inherits also gets an id for each parent record Odoo creates,
     // e.g. <cron id>_ir_actions_server for an ir.cron.
     let mut derived = vec![];
     for (mi, module) in modules.iter().enumerate() {
-        for def in module.data.iter().flat_map(|f| &f.facts.defs) {
+        let files = loaded_data(module, module.series.or(default_series));
+        for def in files.flat_map(|f| &f.facts.defs) {
             let Some(classes) = def.model.as_deref().and_then(|m| models.get(m)) else {
                 continue;
             };
@@ -782,10 +789,15 @@ fn derived_ids<'m>(modules: &'m [Module], models: &Models<'m>) -> Vec<(String, u
     derived
 }
 
-fn access_models(modules: &[Module], model_by_xmlid: &FxHashMap<String, &str>) -> FxHashSet<String> {
+fn access_models(
+    modules: &[Module],
+    model_by_xmlid: &FxHashMap<String, &str>,
+    default_series: Option<Series>,
+) -> FxHashSet<String> {
     let mut models_with_access = FxHashSet::default();
     for m in modules {
-        for access in m.data.iter().flat_map(|f| &f.facts.access) {
+        let files = loaded_data(m, m.series.or(default_series));
+        for access in files.flat_map(|f| &f.facts.access) {
             if access.by_name {
                 models_with_access.insert(access.model.clone());
             } else if let Some(model) = model_by_xmlid.get(&full_id(&m.name, &access.model)) {
@@ -1246,14 +1258,14 @@ impl<'m> Index<'m> {
             data_ids(mi, module, &by_name, &mut xmlids, &mut views, &mut view_keys, series);
         }
         let mut derived = FxHashSet::default();
-        for (id, mi, parent) in derived_ids(modules, &models) {
+        for (id, mi, parent) in derived_ids(modules, &models, default_series) {
             derived.insert(id.clone());
             xmlids.entry(id).or_default().push(XmlIdDef {
                 module: mi,
                 model: Some(parent),
             });
         }
-        let models_with_access = access_models(modules, &model_by_xmlid);
+        let models_with_access = access_models(modules, &model_by_xmlid, default_series);
         let (js_loaded, templates_loaded) = loaded_static(modules);
         let mut index = Self {
             modules,

@@ -989,6 +989,16 @@ custom/supers/models/supers.py:74:24: OD211 no parent class of bad.super.child d
 custom/supers/models/supers.py:85:31: OD211 no parent class of bad.super defines '_own_gone', so this super() call fails
 custom/supers/models/supers.py:97:21: OD211 no parent class of bad.super defines '_guard_unchecked', so this super() call fails
 custom/supers/models/supers.py:98:24: OD211 no parent class of bad.super defines '_guard_gone', so this super() call fails
+custom/unlisted_data/data/signs.xml:3:9: OD301 module unlisted_data defines no XML id 'unlisted_data.badge_hidden_unlisted_plate'
+custom/unlisted_data/data/signs.xml:11:5: OD324 unlisted.plate.code is required and has no default, so creating this record fails if the column is NOT NULL; give the field a value
+custom/unlisted_data/extra/access.xml:1:1: OD502 'extra/access.xml' is not in the manifest's data or demo, so Odoo never loads it
+custom/unlisted_data/extra/badges.xml:1:1: OD502 'extra/badges.xml' is not in the manifest's data or demo, so Odoo never loads it
+custom/unlisted_data/models/rooms.py:14:7: OD401 model 'unlisted.room.unlisted' has no ir.model.access rule, so only the superuser can use it
+custom/unlisted_data/models/rooms.py:19:7: OD401 model 'unlisted.room.tests' has no ir.model.access rule, so only the superuser can use it
+custom/unlisted_data/models/rooms.py:24:7: OD401 model 'unlisted.room.xml' has no ir.model.access rule, so only the superuser can use it
+custom/unlisted_data/models/rooms.py:29:7: OD401 model 'unlisted.room.legacy' has no ir.model.access rule, so only the superuser can use it
+custom/unlisted_data/security/ir.model.access-legacy.csv:1:1: OD502 'security/ir.model.access-legacy.csv' is listed under update_xml, which Odoo ignores in this series; move it to data
+custom/unlisted_data/security/ir.model.access-unlisted.csv:1:1: OD502 'security/ir.model.access-unlisted.csv' is not in the manifest's data or demo, so Odoo never loads it
 custom/unversioned_logs/data/reports.xml:7:35: OD311 no indexed module defines template 'unversioned_logs.absent_record'
 custom/unversioned_logs/data/reports.xml:8:46: OD319 Odoo refuses this expression when it prints the report: Unexpected token at the end of an expression
 custom/unversioned_logs/models/probes.py:39:39: OD224 s.create_uid: drift_sensor has no such column, since drift.sensor.create_uid is not created, as drift.sensor sets _log_access to False; drop it from the query, or log access on the model
