@@ -1,0 +1,71 @@
+<odoo>
+    <record id="view_outside_gantt" model="ir.ui.view">
+        <field name="name">window.outside.gantt</field>
+        <field name="model">window.outside</field>
+        <field name="inherit_id" ref="ghost_enterprise.view_ghost"/>
+        <field name="mode">primary</field>
+        <field name="arch" type="xml">
+            <xpath expr="." position="attributes">
+                <attribute name="string">Outside</attribute>
+            </xpath>
+        </field>
+    </record>
+
+    <record id="view_rooted_gantt" model="ir.ui.view">
+        <field name="name">window.rooted.gantt</field>
+        <field name="model">window.rooted</field>
+        <field name="inherit_id" ref="ghost_enterprise.view_ghost"/>
+        <field name="mode">primary</field>
+        <field name="arch" type="xml">
+            <field name="name" position="attributes">
+                <attribute name="string">Rooted</attribute>
+            </field>
+        </field>
+    </record>
+
+    <record id="view_stepped_extension" model="ir.ui.view">
+        <field name="name">window.stepped.extension</field>
+        <field name="model">window.stepped</field>
+        <field name="inherit_id" ref="ghost_enterprise.view_ghost"/>
+        <field name="arch" type="xml">
+            <xpath expr="." position="attributes">
+                <attribute name="string">Extended</attribute>
+            </xpath>
+        </field>
+    </record>
+
+    <record id="view_stepped_gantt" model="ir.ui.view">
+        <field name="name">window.stepped.gantt</field>
+        <field name="model">window.stepped</field>
+        <field name="inherit_id" ref="view_stepped_extension"/>
+        <field name="mode">primary</field>
+        <field name="arch" type="xml">
+            <xpath expr="." position="attributes">
+                <attribute name="string">Stepped</attribute>
+            </xpath>
+        </field>
+    </record>
+
+    <record id="view_ghosted_extension" model="ir.ui.view">
+        <field name="name">window.ghosted.extension</field>
+        <field name="model">window.ghosted</field>
+        <field name="inherit_id" ref="ghost_enterprise.view_ghost"/>
+        <field name="arch" type="xml">
+            <xpath expr="." position="attributes">
+                <attribute name="string">Ghosted</attribute>
+            </xpath>
+        </field>
+    </record>
+
+    <record model="ir.ui.view">
+        <field name="name">window.nameless.gantt</field>
+        <field name="model">window.nameless</field>
+        <field name="inherit_id" ref="window_actions.view_shown_gantt"/>
+        <field name="mode">primary</field>
+        <field name="arch" type="xml">
+            <xpath expr="." position="attributes">
+                <attribute name="string">Nameless</attribute>
+            </xpath>
+        </field>
+    </record>
+</odoo>

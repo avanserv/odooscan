@@ -14,3 +14,8 @@ access_window_sought,window.sought,model_window_sought,base.group_user,1,1,1,1
 access_window_sifted,window.sifted,model_window_sifted,base.group_user,1,1,1,1
 access_window_bridged,window.bridged,model_window_bridged,base.group_user,1,1,1,1
 access_window_extended,window.extended,model_window_extended,base.group_user,1,1,1,1
+access_window_outside,window.outside,model_window_outside,base.group_user,1,1,1,1
+access_window_rooted,window.rooted,model_window_rooted,base.group_user,1,1,1,1
+access_window_stepped,window.stepped,model_window_stepped,base.group_user,1,1,1,1
+access_window_ghosted,window.ghosted,model_window_ghosted,base.group_user,1,1,1,1
+access_window_nameless,window.nameless,model_window_nameless,base.group_user,1,1,1,1
