@@ -15,7 +15,7 @@ use crate::index::{
 use crate::manifest;
 use crate::project::{Module, SourceFile};
 use crate::series::{self, Series};
-use crate::xml::{LOCATOR, UNKNOWN_CONTEXT};
+use crate::xml::{LOCATOR, QWEB, UNKNOWN_CONTEXT};
 use crate::{flows, module_state};
 
 /// Directories of upgrade scripts, which name XML ids of past versions.
@@ -649,6 +649,9 @@ impl<'m> Ctx<'_, 'm> {
                 continue;
             }
             for t in &file.facts.templates {
+                for call in &t.arch.calls {
+                    self.template_ref(out, &file.path, call);
+                }
                 if let Some(parent) = &t.inherit
                     && self.template_ref(out, &file.path, parent)
                 {
@@ -947,6 +950,7 @@ impl<'m> Ctx<'_, 'm> {
             for view in &file.facts.views {
                 self.view(out, path, view);
                 self.locators(out, path, view, &mut trees);
+                self.qweb_calls(out, path, view);
             }
             for record in &file.facts.records {
                 self.record(out, path, record);
@@ -1115,6 +1119,36 @@ impl<'m> Ctx<'_, 'm> {
                 None => format!("no {element} in view {} or the views that extend it", tree.root),
             };
             out.push(path, "OD310", locator.pos, message);
+        }
+    }
+
+    /// Whether the view renders on the server. The tree's root decides, since a kanban arch runs
+    /// `t-call` in the client whatever the type of a view extending it.
+    fn qweb_view(&self, view: &ViewFact) -> bool {
+        let start = view.inherit.as_deref().or(view.id.as_deref());
+        let root = start.and_then(|id| self.index.view_kind(full_id(&self.module.name, id)));
+        root.or(view.kind.as_deref()) == Some(QWEB)
+    }
+
+    fn qweb_calls(&self, out: &mut Out<'m>, path: &'m Path, view: &ViewFact) {
+        if !self.qweb_view(view) {
+            return;
+        }
+        for call in &view.calls {
+            // A module outside the index, such as an Enterprise one, may define the target.
+            let owner = call.value.split_once('.').map(|(m, _)| m);
+            if self.partial && !owner.is_some_and(|m| self.index.by_name.contains_key(m)) {
+                continue;
+            }
+            let message = match self.index.qweb_status(&call.value, self.scope) {
+                Status::Visible => continue,
+                Status::Hidden(m) => format!(
+                    "template '{}' comes from module {m}, which is not in depends",
+                    call.value
+                ),
+                Status::Missing => format!("no indexed module defines template '{}'", call.value),
+            };
+            out.push(path, "OD311", call.pos, message);
         }
     }
 

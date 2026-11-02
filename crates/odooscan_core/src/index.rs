@@ -189,6 +189,9 @@ fn model_xmlid(model: &str) -> String {
 
 type Models<'m> = FxHashMap<&'m str, Vec<(usize, &'m ClassFact)>>;
 
+/// The modules whose data give a view each `key`.
+type ViewKeys<'m> = FxHashMap<&'m str, Vec<usize>>;
+
 type XmlIds = FxHashMap<String, Vec<XmlIdDef>>;
 
 /// The flow summary of a function, with the file and module it is in.
@@ -289,9 +292,13 @@ fn data_ids<'m>(
     by_name: &FxHashMap<&str, usize>,
     xmlids: &mut XmlIds,
     views: &mut Nodes<'m>,
+    view_keys: &mut ViewKeys<'m>,
 ) {
     let name = module.name.as_str();
     for file in &module.data {
+        for key in &file.facts.view_keys {
+            view_keys.entry(key).or_default().push(mi);
+        }
         for def in &file.facts.defs {
             // `<record id="other.x">` creates or updates an id that belongs to module other.
             let id = full_id(name, &def.id);
@@ -613,6 +620,7 @@ pub struct Index<'m> {
     models: Models<'m>,
     pub xmlids: FxHashMap<String, Vec<XmlIdDef>>,
     pub views: Inheritance<'m>,
+    view_keys: ViewKeys<'m>,
     pub templates: Inheritance<'m>,
     pub models_with_access: FxHashSet<String>,
     pub has_base: bool,
@@ -636,6 +644,7 @@ impl<'m> Index<'m> {
         let mut xmlids: XmlIds = FxHashMap::default();
         let mut model_by_xmlid: FxHashMap<String, &str> = FxHashMap::default();
         let mut views = FxHashMap::default();
+        let mut view_keys = FxHashMap::default();
         let base = by_name.get("base").copied();
 
         for (mi, module) in modules.iter().enumerate() {
@@ -643,7 +652,7 @@ impl<'m> Index<'m> {
                 module_ids(module, b, &mut xmlids);
             }
             class_ids(mi, module, &mut models, &mut model_by_xmlid, &mut xmlids);
-            data_ids(mi, module, &by_name, &mut xmlids, &mut views);
+            data_ids(mi, module, &by_name, &mut xmlids, &mut views, &mut view_keys);
         }
         for (id, mi) in derived_ids(modules, &models) {
             xmlids.entry(id).or_default().push(XmlIdDef { module: mi });
@@ -655,6 +664,7 @@ impl<'m> Index<'m> {
             has_base: base.is_some(),
             xmlids,
             views: Inheritance::new(views),
+            view_keys,
             templates: Inheritance::new(template_nodes(modules, &templates_loaded)),
             models_with_access,
             js_paths: js_paths(modules),
@@ -821,7 +831,18 @@ impl<'m> Index<'m> {
 
     /// Whether some loaded template file registers `name` in scope.
     pub fn template_status(&self, name: &str, scope: &Scope) -> Status<'m> {
-        let mut definers = self.templates.definers(name).peekable();
+        self.definer_status(self.templates.definers(name), scope)
+    }
+
+    /// Whether a view answers to `name` in scope. Odoo matches a `t-call` against the whole `key`
+    /// and XML id and never adds the calling module, so an undotted name only finds a key.
+    pub fn qweb_status(&self, name: &str, scope: &Scope) -> Status<'m> {
+        let keys = self.view_keys.get(name).map(Vec::as_slice).unwrap_or_default();
+        self.definer_status(self.views.definers(name).chain(keys.iter().copied()), scope)
+    }
+
+    fn definer_status(&self, definers: impl Iterator<Item = usize>, scope: &Scope) -> Status<'m> {
+        let mut definers = definers.peekable();
         let Some(&first) = definers.peek() else {
             return Status::Missing;
         };
@@ -1308,6 +1329,19 @@ impl<'m> Index<'m> {
                 return Some(&model.value);
             }
             id = nodes.iter().find_map(|n| n.inherit.clone())?;
+        }
+        None
+    }
+
+    /// The type of the view at the root of `id`'s inheritance, which Odoo gives every view of the
+    /// tree. None when a view on the way is not indexed.
+    pub fn view_kind(&self, mut id: String) -> Option<&'m str> {
+        for _ in 0..32 {
+            let nodes = self.views.nodes.get(&id)?;
+            match nodes.iter().find_map(|n| n.inherit.clone()) {
+                Some(parent) => id = parent,
+                None => return nodes.iter().find_map(|n| n.fact.kind.as_deref()),
+            }
         }
         None
     }

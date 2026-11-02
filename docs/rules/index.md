@@ -111,6 +111,7 @@ XML ids, views and data records, within a file and across the dependency graph.
 | [OD308](OD308.md) | `xmlid-used-before-definition` | An XML id is referenced before the file that defines it is loaded. |
 | [OD309](OD309.md) | `unknown-record-field` | A data record sets a field its model does not have. |
 | [OD310](OD310.md) | `unmatched-view-locator` | An inherited view locates an element its parent views do not have. |
+| [OD311](OD311.md) | `unknown-qweb-template` | A QWeb view calls a template no module in scope defines. |
 
 ## OD4: access
 
@@ -143,7 +144,7 @@ module.
 | [OD602](OD602.md) | `orphan-patch-super` | A patch calls a super method the class it patches does not have. |
 | [OD603](OD603.md) | `unknown-rpc-model` | An ORM call from JS names a model no indexed module defines. |
 | [OD604](OD604.md) | `unknown-rpc-method` | orm.call() names a method its model does not have. |
-| [OD605](OD605.md) | `unknown-template` | A component or a t-inherit names a template no indexed bundle defines. |
+| [OD605](OD605.md) | `unknown-template` | A component, a t-inherit or a t-call names a template no indexed bundle defines. |
 | [OD606](OD606.md) | `unmatched-template-locator` | A template locates an element its parent templates do not have. |
 | [OD607](OD607.md) | `private-rpc-method` | orm.call() names a private method, which Odoo refuses to call over RPC. |
 

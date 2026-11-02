@@ -1,0 +1,70 @@
+<odoo>
+    <template id="home">
+        <t t-call="web.layout">
+            <t t-call="web.layot"/>
+            <t t-call="local"/>
+            <t t-call="qweb_outside.page"/>
+            <t t-call="ghost_addon.page"/>
+            <t t-call="qweb_calls.alias"/>
+            <t t-call="qweb_calls.record_alias"/>
+            <t t-call="{{ template_name }}"/>
+            <t t-call="qweb_calls.#{suffix}"/>
+            <t t-call="33"/>
+            <t t-call="a/templates/b.xml"/>
+        </t>
+    </template>
+
+    <template id="keyed" key="qweb_calls.alias">
+        <div/>
+    </template>
+
+    <template id="home_layout" inherit_id="home">
+        <xpath expr="//t" position="attributes">
+            <attribute name="t-call">web.layot_extended</attribute>
+        </xpath>
+    </template>
+
+    <record id="keyed_record" model="ir.ui.view">
+        <field name="name">keyed.record</field>
+        <field name="type">qweb</field>
+        <field name="key">qweb_calls.record_alias</field>
+        <field name="arch" type="xml">
+            <t t-name="keyed_record">
+                <t t-call="web.layot_record"/>
+            </t>
+        </field>
+    </record>
+
+    <record id="home_appended" model="ir.ui.view">
+        <field name="name">home.appended</field>
+        <field name="inherit_id" ref="home"/>
+        <field name="arch" type="xml">
+            <xpath expr="//t" position="inside">
+                <t t-call="web.layot_appended"/>
+            </xpath>
+        </field>
+    </record>
+
+    <record id="partner_kanban" model="ir.ui.view">
+        <field name="name">partner.kanban</field>
+        <field name="model">res.partner</field>
+        <field name="arch" type="xml">
+            <kanban>
+                <templates>
+                    <t t-name="card">
+                        <t t-call="kanban_block"/>
+                    </t>
+                    <t t-name="kanban_block">
+                        <div/>
+                    </t>
+                </templates>
+            </kanban>
+        </field>
+    </record>
+
+    <template id="partner_kanban_card" inherit_id="partner_kanban">
+        <xpath expr="//t" position="inside">
+            <t t-call="kanban_extra"/>
+        </xpath>
+    </template>
+</odoo>

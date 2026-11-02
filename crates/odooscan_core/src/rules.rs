@@ -156,6 +156,7 @@ rules! {
     "OD308" "xmlid-used-before-definition" Correctness Error None, false, "An XML id is referenced before the file that defines it is loaded.";
     "OD309" "unknown-record-field" Correctness Error None, true, "A data record sets a field its model does not have.";
     "OD310" "unmatched-view-locator" Correctness Error None, true, "An inherited view locates an element its parent views do not have.";
+    "OD311" "unknown-qweb-template" Correctness Error None, true, "A QWeb view calls a template no module in scope defines.";
     "OD401" "model-without-access" Security Warning None, true, "A new model has no ir.model.access rule.";
     "OD402" "public-write-access" Security Warning None, false, "Public or portal users get write, create or unlink access.";
     "OD501" "manifest-data-missing" Correctness Error None, false, "A file listed in the manifest does not exist.";
@@ -166,7 +167,7 @@ rules! {
     "OD602" "orphan-patch-super" Correctness Error Some(">=17.0"), true, "A patch calls a super method the class it patches does not have.";
     "OD603" "unknown-rpc-model" Correctness Error None, true, "An ORM call from JS names a model no indexed module defines.";
     "OD604" "unknown-rpc-method" Correctness Error None, true, "orm.call() names a method its model does not have.";
-    "OD605" "unknown-template" Correctness Error Some(">=17.0"), true, "A component or a t-inherit names a template no indexed bundle defines.";
+    "OD605" "unknown-template" Correctness Error Some(">=17.0"), true, "A component, a t-inherit or a t-call names a template no indexed bundle defines.";
     "OD606" "unmatched-template-locator" Correctness Error Some(">=17.0"), true, "A template locates an element its parent templates do not have.";
     "OD607" "private-rpc-method" Correctness Error None, false, "orm.call() names a private method, which Odoo refuses to call over RPC.";
     "OD701" "sql-injection-flow" Security Error None, false, "Data a user controls reaches the text of an SQL query.";

@@ -399,6 +399,11 @@ pub struct ViewFact {
     /// Elements the arch's specs (`position` elements and xpaths) must find in the parent views.
     pub locators: Vec<Spanned<ArchElement>>,
     pub domains: Vec<ArchDomain>,
+    /// Literal targets of `t-call`, in the arch or set by an `<attribute>` spec.
+    pub calls: Vec<Spanned<String>>,
+    /// The view's type, as its `type` field or the root of its arch says. A root that Odoo does not
+    /// take as a type, such as an inherited view's `<xpath>`, says nothing.
+    pub kind: Option<String>,
 }
 
 #[derive(Debug)]
@@ -422,6 +427,8 @@ pub struct DataFacts {
     pub defs: Vec<XmlDef>,
     pub refs: Vec<XmlRef>,
     pub views: Vec<ViewFact>,
+    /// The `key` of each view or page, a name `t-call` finds apart from the XML id.
+    pub view_keys: Vec<String>,
     pub records: Vec<RecordFact>,
     /// Domains and `group_by` fields of window actions, on their `res_model`.
     pub action_domains: Vec<DomainFact>,
