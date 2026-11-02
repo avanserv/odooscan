@@ -643,7 +643,10 @@ impl Walker<'_> {
         let pos = self.pos(node);
         let tag = node.tag_name().name();
         arch_element(node, pos, view);
-        view.subviews.extend(spec_subview(tag, path));
+        let depth = path.len();
+        let opened = spec_subview(node, path);
+        view.subviews.extend(opened.clone());
+        path.extend(opened.into_iter().flatten().skip(depth));
         view.calls.extend(t_call(node, self.lines));
         self.arch_button(node, path, view);
         self.arch_modifiers(node, path, view);
@@ -660,7 +663,6 @@ impl Walker<'_> {
             let fields = domain_attr(node, "domain").chain(group_by_attr(node));
             arch_domain(pos, path.clone(), fields, view);
         }
-        let depth = path.len();
         match tag {
             "xpath" => xpath_steps(node.attribute("expr").unwrap_or_default(), path),
             _ if AMBIGUOUS_SPECS.contains(&tag) && node.has_attribute("position") => {
@@ -1218,12 +1220,16 @@ fn xpath_locators(expr: &str, pos: Pos) -> Vec<Spanned<ArchElement>> {
         .collect()
 }
 
-/// Where a subview tag opens when `path` ends on a locator: in that field, which the spec gives a
-/// subview. Fields, domains and buttons in it keep the locator's own position.
-fn spec_subview(tag: &str, path: &[String]) -> Option<Vec<String>> {
+/// The path of the subview `node` opens when a spec puts it inside the field `path` locates. Odoo
+/// reads only a field's direct children on the comodel, so a subview beside the field or wrapped in
+/// another element stays on the model around it.
+fn spec_subview(node: Node, path: &[String]) -> Option<Vec<String>> {
     let field = path.last()?.strip_prefix(LOCATOR)?;
+    let spec = node.parent_element()?;
+    let is_spec = spec.has_tag_name("xpath") || spec.has_attribute("position");
+    let inside = matches!(spec.attribute("position"), None | Some("inside"));
     let opened = path.iter().map(String::as_str).chain([field]);
-    SUBVIEWS.contains(&tag).then(|| opened.map(str::to_owned).collect())
+    (is_spec && inside && SUBVIEWS.contains(&node.tag_name().name())).then(|| opened.map(str::to_owned).collect())
 }
 
 /// Extends `path` with where an xpath's target sits: the subviews it reaches into and the field it
@@ -1743,10 +1749,22 @@ mod tests {
         assert_eq!(subviews(spec), [vec!["~a", "a"]]);
         let xpath = r#"<xpath expr="//field[@name='b']//field[@name='a']" position="inside"><form/></xpath>"#;
         assert_eq!(subviews(xpath), [vec!["b", "~a", "a"]]);
+        let bare = r#"<xpath expr="//field[@name='a']"><form/></xpath>"#;
+        assert_eq!(subviews(bare), [vec!["~a", "a"]]);
         assert_eq!(
             subviews(r#"<field name="a" position="after"><field name="b"/></field>"#),
             [[""; 0]; 0]
         );
+        assert_eq!(
+            subviews(r#"<field name="a" position="after"><list/></field>"#),
+            [[""; 0]; 0]
+        );
+        assert_eq!(
+            subviews(r#"<field name="a" position="inside"><group><list/></group></field>"#),
+            [[""; 0]; 0]
+        );
+        let nested = r#"<field name="a" position="inside"><list><field name="b"><form/></field></list></field>"#;
+        assert_eq!(subviews(nested), [vec!["~a", "a"], vec!["~a", "a", "b"]]);
     }
 
     #[test]

@@ -11,7 +11,7 @@
                 <attribute name="invisible" add="stat == 'done'" separator=" or "/>
                 <attribute name="required">state ==</attribute>
             </xpath>
-            <xpath expr="//field[@name='state']" position="after">
+            <xpath expr="//field[@name='name']" position="after">
                 <field name="name" invisible="stat"/>
             </xpath>
             <field name="state" invisible="stat ==" position="before"/>
@@ -122,6 +122,202 @@
             <group name="heading" position="inside">
                 <field name="name" readonly="quantity"/>
             </group>
+        </field>
+    </record>
+
+    <record id="ticket_nested" model="ir.ui.view">
+        <field name="name">modifier.ticket.nested</field>
+        <field name="model">modifier.ticket</field>
+        <field name="arch" type="xml">
+            <form>
+                <field name="line_ids"/>
+            </form>
+        </field>
+    </record>
+
+    <record id="ticket_nested_lines" model="ir.ui.view">
+        <field name="name">modifier.ticket.nested.lines</field>
+        <field name="model">modifier.ticket</field>
+        <field name="inherit_id" ref="ticket_nested"/>
+        <field name="arch" type="xml">
+            <field name="line_ids" position="inside">
+                <list>
+                    <field name="name" readonly="state"/>
+                    <field name="name" readonly="parent.stat"/>
+                    <field name="quantity" readonly="quantity"/>
+                    <field name="name" readonly="parent.state"/>
+                    <field name="state"/>
+                    <field name="ticket_id" domain="[('stat', '=', 'new')]"/>
+                    <button type="object" name="action_close"/>
+                    <button type="object" name="action_split"/>
+                    <field name="tag_ids">
+                        <list>
+                            <field name="name" invisible="color"/>
+                            <field name="name" invisible="nowhere"/>
+                        </list>
+                    </field>
+                </list>
+            </field>
+        </field>
+    </record>
+
+    <record id="ticket_placed" model="ir.ui.view">
+        <field name="name">modifier.ticket.placed</field>
+        <field name="model">modifier.ticket</field>
+        <field name="arch" type="xml">
+            <form>
+                <field name="line_ids"/>
+            </form>
+        </field>
+    </record>
+
+    <record id="ticket_placed_lists" model="ir.ui.view">
+        <field name="name">modifier.ticket.placed.lists</field>
+        <field name="model">modifier.ticket</field>
+        <field name="inherit_id" ref="ticket_placed"/>
+        <field name="arch" type="xml">
+            <field name="line_ids" position="after">
+                <list>
+                    <field name="name" invisible="state"/>
+                </list>
+            </field>
+            <field name="line_ids" position="inside">
+                <group>
+                    <list>
+                        <field name="name" invisible="state"/>
+                    </list>
+                </group>
+            </field>
+        </field>
+    </record>
+
+    <record id="ticket_tagged" model="ir.ui.view">
+        <field name="name">modifier.ticket.tagged</field>
+        <field name="model">modifier.ticket</field>
+        <field name="arch" type="xml">
+            <form>
+                <field name="line_ids">
+                    <list>
+                        <field name="tag_ids"/>
+                    </list>
+                </field>
+                <field name="tag_ids"/>
+                <field name="name"/>
+            </form>
+        </field>
+    </record>
+
+    <record id="ticket_tagged_list" model="ir.ui.view">
+        <field name="name">modifier.ticket.tagged.list</field>
+        <field name="model">modifier.ticket</field>
+        <field name="inherit_id" ref="ticket_tagged"/>
+        <field name="arch" type="xml">
+            <field name="tag_ids" position="inside">
+                <list>
+                    <field name="name" invisible="color"/>
+                    <field name="color"/>
+                    <field name="owner_id" domain="[('quantity', '=', 1)]"/>
+                    <button type="object" name="action_tint"/>
+                    <button type="object" name="action_fade"/>
+                </list>
+            </field>
+            <field name="name" position="after">
+                <field name="line_ids">
+                    <list>
+                        <field name="nowhere"/>
+                    </list>
+                </field>
+            </field>
+        </field>
+    </record>
+
+    <record id="ticket_hooked" model="ir.ui.view">
+        <field name="name">modifier.ticket.hooked</field>
+        <field name="model">modifier.ticket</field>
+        <field name="arch" type="xml">
+            <form>
+                <field name="hook_ids"/>
+            </form>
+        </field>
+    </record>
+
+    <record id="ticket_hooked_list" model="ir.ui.view">
+        <field name="name">modifier.ticket.hooked.list</field>
+        <field name="model">modifier.ticket</field>
+        <field name="inherit_id" ref="ticket_hooked"/>
+        <field name="arch" type="xml">
+            <field name="hook_ids" position="inside">
+                <list>
+                    <field name="name" invisible="hooked"/>
+                </list>
+            </field>
+            <field name="hook_ids" position="after">
+                <field name="name" invisible="hooked"/>
+            </field>
+        </field>
+    </record>
+
+    <record id="ticket_bound" model="ir.ui.view">
+        <field name="name">modifier.ticket.bound</field>
+        <field name="model">modifier.ticket</field>
+        <field name="arch" type="xml">
+            <form>
+                <field name="bound_ids"/>
+            </form>
+        </field>
+    </record>
+
+    <record id="ticket_bound_list" model="ir.ui.view">
+        <field name="name">modifier.ticket.bound.list</field>
+        <field name="model">modifier.ticket</field>
+        <field name="inherit_id" ref="ticket_bound"/>
+        <field name="arch" type="xml">
+            <field name="bound_ids" position="inside">
+                <list>
+                    <field name="name" invisible="bounded"/>
+                </list>
+            </field>
+            <field name="bound_ids" position="after">
+                <field name="name" invisible="bounded"/>
+            </field>
+        </field>
+    </record>
+
+    <record id="ticket_loose" model="ir.ui.view">
+        <field name="name">modifier.ticket.loose</field>
+        <field name="model">modifier.ticket</field>
+        <field name="arch" type="xml">
+            <form>
+                <field name="loose_ids"/>
+            </form>
+        </field>
+    </record>
+
+    <record id="ticket_loose_list" model="ir.ui.view">
+        <field name="name">modifier.ticket.loose.list</field>
+        <field name="model">modifier.ticket</field>
+        <field name="inherit_id" ref="ticket_loose"/>
+        <field name="arch" type="xml">
+            <field name="loose_ids" position="inside">
+                <list>
+                    <field name="name" invisible="nowhere"/>
+                    <field name="nowhere"/>
+                    <button type="object" name="action_nowhere"/>
+                </list>
+            </field>
+        </field>
+    </record>
+
+    <record id="ticket_orphan_list" model="ir.ui.view">
+        <field name="name">modifier.ticket.orphan.list</field>
+        <field name="model">modifier.ticket</field>
+        <field name="inherit_id" ref="ticket_missing"/>
+        <field name="arch" type="xml">
+            <field name="line_ids" position="inside">
+                <list>
+                    <field name="state"/>
+                </list>
+            </field>
         </field>
     </record>
 </odoo>

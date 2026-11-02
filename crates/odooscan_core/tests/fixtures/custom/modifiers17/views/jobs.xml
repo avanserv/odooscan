@@ -55,4 +55,27 @@
             </form>
         </field>
     </record>
+
+    <record id="job_steps" model="ir.ui.view">
+        <field name="name">modifier.job.steps</field>
+        <field name="model">modifier.job</field>
+        <field name="arch" type="xml">
+            <form>
+                <field name="step_ids"/>
+            </form>
+        </field>
+    </record>
+
+    <record id="job_steps_form" model="ir.ui.view">
+        <field name="name">modifier.job.steps.form</field>
+        <field name="model">modifier.job</field>
+        <field name="inherit_id" ref="job_steps"/>
+        <field name="arch" type="xml">
+            <field name="step_ids" position="inside">
+                <form>
+                    <field name="name" invisible="phase"/>
+                </form>
+            </field>
+        </field>
+    </record>
 </odoo>
