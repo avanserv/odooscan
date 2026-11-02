@@ -187,14 +187,13 @@ pub fn check_module<'m>(index: &Index<'m>, mi: usize, series: Option<Series>) ->
     if index.has_base {
         let scope = index.scope(mi);
         let setup = index.setup_scope(mi);
-        let dep_names = module.manifest.depends.iter().map(|d| d.value.as_str()).collect();
         let built = BuiltModels::of(module);
         let ctx = Ctx {
             index,
+            mi,
             module,
             scope: &scope,
             setup: &setup,
-            dep_names: &dep_names,
             dynamic: module.python.iter().any(|f| f.facts.dynamic_models),
             built: &built,
             partial: index.partial_scope(&scope),
@@ -821,12 +820,12 @@ impl<'m> BuiltModels<'m> {
 #[derive(Clone, Copy)]
 struct Ctx<'a, 'm> {
     index: &'a Index<'m>,
+    mi: usize,
     module: &'m Module,
     scope: &'a Scope,
     /// The scope of what Odoo reads as it sets up the module's Python fields and attributes, and of
     /// the queries of `init()` and `_auto_init()`.
     setup: &'a Scope,
-    dep_names: &'a FxHashSet<&'m str>,
     /// The module builds model names at runtime, so its models and their ids cannot be listed.
     dynamic: bool,
     /// What the module may build, outside `tests/`.
@@ -841,10 +840,27 @@ struct Ctx<'a, 'm> {
 }
 
 impl<'m> Ctx<'_, 'm> {
+    /// Whether a dependency outside the index may add a field or a method to `model`. It loads before
+    /// this module, and Odoo refuses to extend a model the registry does not hold yet, so it reaches
+    /// a model of this module only through a class or a parent the module does not hold.
+    fn may_gain(&self, model: &str) -> bool {
+        self.partial && !self.index.holds_model(self.mi, model, self.scope)
+    }
+
+    /// Whether a dependency outside the index may supply what a path lacks. It cannot change the
+    /// type of a field found on the way.
+    fn may_supply(&self, e: &PathError<'_>) -> bool {
+        match e {
+            PathError::Missing { model, .. } | PathError::Hidden { model, .. } => self.may_gain(model),
+            PathError::NotRelational { .. } => false,
+        }
+    }
+
+    /// A dependency outside the index may load a model the scope does not reach.
     fn model_ref(&self, out: &mut Out<'m>, path: &'m Path, model: &Spanned<String>, except: Option<&ClassFact>) {
         match self.index.model_status(&model.value, self.scope, except) {
             Status::Visible => {}
-            Status::Hidden(_) if self.built.fit(&model.value) => {}
+            Status::Hidden(_) if self.partial || self.built.fit(&model.value) => {}
             Status::Hidden(m) => out.push(
                 path,
                 "OD202",
@@ -887,18 +903,24 @@ impl<'m> Ctx<'_, 'm> {
     }
 
     fn path(&self, out: &mut Out<'m>, file: &'m Path, model: &str, path: &Spanned<String>) {
-        if let Err(e) = self.index.resolve_path(model, &path.value, self.scope) {
+        if let Err(e) = self.index.resolve_path(model, &path.value, self.scope)
+            && !self.may_supply(&e)
+        {
             out.push(file, "OD203", path.pos, e.message(&path.value));
         }
     }
 
-    /// OD210 on a path that fails, unless the field is missing from a model that may get it from a
-    /// parent the scan cannot read. That is the model where it fails, as a later step can be the
-    /// one that hides it, and a field found there fails whatever the parents hold.
+    /// OD210 on a path that fails, unless the model where it fails may get the field from a
+    /// dependency outside the index, or a missing one from a parent the scan cannot read. That model
+    /// is the one to ask about, as a later step can be the one that hides the field, and a field
+    /// found there that is not relational fails whatever either of them holds.
     fn domain_path(&self, out: &mut Out<'m>, file: &'m Path, model: &str, path: &Spanned<String>) {
         let Err(e) = self.index.resolve_path(model, &path.value, self.scope) else {
             return;
         };
+        if self.may_supply(&e) {
+            return;
+        }
         if !matches!(&e, PathError::Missing { model, .. } if self.index.hidden_field_parents(model, self.scope)) {
             out.push(file, "OD210", path.pos, e.message(&path.value));
         }
@@ -906,7 +928,9 @@ impl<'m> Ctx<'_, 'm> {
 
     /// OD203 on a path Odoo resolves as it sets up the model, when a failure refuses the install.
     fn setup_path(&self, out: &mut Out<'m>, file: &'m Path, model: &str, path: &Spanned<String>) {
-        if let Err(e) = self.index.resolve_path(model, &path.value, self.setup) {
+        if let Err(e) = self.index.resolve_path(model, &path.value, self.setup)
+            && !self.may_supply(&e)
+        {
             out.push(file, "OD203", path.pos, e.message(&path.value));
         }
     }
@@ -952,11 +976,13 @@ impl<'m> Ctx<'_, 'm> {
         }
     }
 
+    /// A dependency outside the index may load the module a specifier names. It cannot add a file
+    /// to that module, so a missing file is reported whatever the scope.
     fn js_specifier(&self, out: &mut Out<'m>, path: &'m Path, from: &str, specifier: &Spanned<String>) {
         let module = |mi: usize| &self.index.modules[mi].name;
         let message = match self.index.js_resolve(from, &specifier.value) {
             JsSpec::Missing(mi) => format!("no file of module {} provides '{}'", module(mi), specifier.value),
-            JsSpec::Found(t) if !self.scope.sees(t.module) => format!(
+            JsSpec::Found(t) if !self.partial && !self.scope.sees(t.module) => format!(
                 "'{}' comes from module {}, which is not in depends",
                 specifier.value,
                 module(t.module)
@@ -1008,7 +1034,12 @@ impl<'m> Ctx<'_, 'm> {
         }
     }
 
+    /// A module outside the index, such as an Enterprise one, may load the model or be the one that
+    /// defines the method called.
     fn orm_call(&self, out: &mut Out<'m>, path: &'m Path, call: &OrmCall) {
+        if self.partial {
+            return;
+        }
         let Some(model) = &call.model else {
             return;
         };
@@ -1023,13 +1054,12 @@ impl<'m> Ctx<'_, 'm> {
         out.push(path, "OD603", model.pos, message);
     }
 
-    /// A method from a module outside the index, such as an Enterprise one, may be the one called.
     /// A private method is OD607's, whether the model has it or not.
     fn orm_method(&self, out: &mut Out<'m>, path: &'m Path, call: &OrmCall, model: &str) {
         let Some(method) = call
             .method
             .as_ref()
-            .filter(|m| !self.partial && !self.dynamic && !m.value.starts_with('_'))
+            .filter(|m| !self.dynamic && !m.value.starts_with('_'))
         else {
             return;
         };
@@ -1287,10 +1317,13 @@ impl<'m> Ctx<'_, 'm> {
         }
     }
 
-    /// Odoo replaces the compute and inverse of a related field with its own, and a parent the scan
-    /// cannot see may hold methods only Python knows.
+    /// Odoo replaces the compute and inverse of a related field with its own, and a dependency
+    /// outside the index or a parent the scan cannot see may hold methods only Python knows.
     fn missing_methods(&self, out: &mut Out<'m>, path: &'m Path, class: &ClassFact, field: &FieldFact) {
-        if field.related.is_some() || self.index.merged_hidden_parents(&class.model, self.scope) {
+        if field.related.is_some()
+            || self.index.merged_hidden_parents(&class.model, self.scope)
+            || self.may_gain(&class.model)
+        {
             return;
         }
         for method in &field.methods {
@@ -2089,11 +2122,13 @@ impl<'m> Ctx<'_, 'm> {
         })
     }
 
+    /// A dependency outside the index may load the module that defines an id out of scope.
     fn xml_ref(&self, out: &mut Out<'m>, path: &'m Path, r: &XmlRef) {
         let index = self.index;
         let id = full_id(&self.module.name, &r.id);
         match index.xmlids.get(&id) {
             Some(defs) if defs.iter().any(|d| self.scope.sees(d.module)) => {}
+            Some(_) if self.partial => {}
             Some(defs) => {
                 let m = &index.modules[defs[0].module].name;
                 out.push(
@@ -2113,20 +2148,29 @@ impl<'m> Ctx<'_, 'm> {
     }
 
     /// Whether `owner` is a module in scope that loads a data file the scan cannot read, so the XML
-    /// ids under its name are not all known. A module out of scope is a missing dependency either
-    /// way.
+    /// ids under its name are not all known. On a complete scan a module out of scope is a missing
+    /// dependency either way.
     fn lost_owner(&self, owner: &str) -> bool {
         let module = self.index.by_name.get(owner).filter(|&&mi| self.scope.sees(mi));
         module.is_some_and(|&mi| self.index.modules[mi].lost_data())
     }
 
+    /// Whether `owner` may hold ids the index lacks: the module is not indexed and a dependency
+    /// outside the index may be or load it, or it loads a data file the scan cannot read and is in
+    /// scope or may be loaded the same way.
+    fn open_owner(&self, owner: &str) -> bool {
+        match self.index.by_name.get(owner) {
+            Some(&mi) => self.lost_owner(owner) || (self.partial && self.index.modules[mi].lost_data()),
+            None => self.partial,
+        }
+    }
+
     fn undefined_ref(&self, out: &mut Out<'m>, path: &'m Path, pos: Pos, id: &str) {
         let (owner, local) = id.split_once('.').unwrap_or_default();
-        if self.runtime_id(owner, local) {
+        if self.runtime_id(owner, local) || self.open_owner(owner) {
             return;
         }
         match self.index.by_name.get(owner) {
-            Some(_) if self.lost_owner(owner) => {}
             Some(&mi) if self.scope.sees(mi) => {
                 out.push(path, "OD301", pos, format!("module {owner} defines no XML id '{id}'"))
             }
@@ -2136,28 +2180,27 @@ impl<'m> Ctx<'_, 'm> {
                 pos,
                 format!("'{id}' belongs to module {owner}; add it to depends"),
             ),
-            None if !self.dep_names.contains(owner) => {
-                out.push(
-                    path,
-                    "OD302",
-                    pos,
-                    format!("'{id}' belongs to module {owner}, which is neither in depends nor on the addons path"),
-                );
-            }
-            None => {}
+            None => out.push(
+                path,
+                "OD302",
+                pos,
+                format!("'{id}' belongs to module {owner}, which is neither in depends nor on the addons path"),
+            ),
         }
     }
 
     /// Python code may name ids of modules outside the index, such as Enterprise ones, behind a
     /// runtime check, so only ids of indexed modules are checked; `hidden` also reports those of
-    /// modules missing from depends.
+    /// modules missing from depends, unless a dependency outside the index may load one that holds
+    /// the id.
     fn py_ref(&self, out: &mut Out<'m>, path: &'m Path, r: &XmlRef, hidden: bool) {
         let owner = r.id.split_once('.').map_or("", |(m, _)| m);
         let Some(&mi) = self.index.by_name.get(owner) else {
             return;
         };
         if !self.scope.sees(mi) {
-            if hidden {
+            let loadable = self.partial && self.index.xmlids.contains_key(&r.id);
+            if hidden && !loadable && !self.open_owner(owner) {
                 let message = format!("'{}' belongs to module {owner}; add it to depends", r.id);
                 out.push(path, "OD302", r.pos, message);
             }
@@ -2195,7 +2238,9 @@ impl<'m> Ctx<'_, 'm> {
             let Some(joined) = self.arch_path(model, &field.path) else {
                 continue;
             };
-            if let Err(e) = self.index.resolve_path(model, &joined, self.scope) {
+            if let Err(e) = self.index.resolve_path(model, &joined, self.scope)
+                && !self.may_supply(&e)
+            {
                 out.push(path, "OD304", field.pos, e.message(&joined));
             }
         }
@@ -2337,7 +2382,8 @@ impl<'m> Ctx<'_, 'm> {
     }
 
     /// Specs of a view must each find their element in the tree of views it extends, which is
-    /// built once per root and module.
+    /// built once per root and module. A dependency outside the index loads first, so it cannot add
+    /// a view to a tree whose root the module defines.
     fn locators(
         &self,
         out: &mut Out<'m>,
@@ -2349,13 +2395,16 @@ impl<'m> Ctx<'_, 'm> {
             return;
         };
         let parent = full_id(&self.module.name, parent);
-        // A parent outside depends is already reported by OD302.
+        // A parent outside depends is OD302's to report.
         if !self.index.views.visible(&parent, |m| self.scope.sees(m)) {
             return;
         }
         let Some(tree) = self.view_tree(parent, trees) else {
             return;
         };
+        if self.may_extend(&tree.root) {
+            return;
+        }
         for locator in &view.locators {
             let e = located(&locator.value, &self.module.name);
             if tree.visible.contains(&e) {
@@ -2369,6 +2418,11 @@ impl<'m> Ctx<'_, 'm> {
             };
             out.push(path, "OD310", locator.pos, message);
         }
+    }
+
+    /// Whether a dependency outside the index may add a view to the tree under `root`.
+    fn may_extend(&self, root: &str) -> bool {
+        self.partial && self.index.views.definers(root).any(|m| m != self.mi)
     }
 
     /// The tree of views `id` belongs to, or None when the elements of some view on the way to its

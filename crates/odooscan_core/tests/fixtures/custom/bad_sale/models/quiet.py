@@ -26,6 +26,5 @@ class QuietWizard(models.TransientModel):
             self.env["bad.other"].search([])
         return "other_id" in self._fields and self.env["bad.third"]
 
-    def action_x_partner_names(self):
-        self.env.cr.execute("SELECT p.x_bogus FROM res_partner p")
-        return self.env.cr.fetchall()
+    def action_lost(self):
+        self.env.ref("encoded_lost.no_such_id")

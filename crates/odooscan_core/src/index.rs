@@ -1860,6 +1860,23 @@ impl<'m> Index<'m> {
         })
     }
 
+    /// Whether `module` introduces `model` and holds all of it: every class in scope of `model` and of
+    /// the models it inherits or delegates to, and every parent they name. `base` is in every chain,
+    /// so as a parent it proves nothing.
+    pub fn holds_model(&self, module: usize, model: &str, scope: &Scope) -> bool {
+        let introduces = |m: &str| m == "base" || self.classes(m).iter().any(|(mi, c)| *mi == module && c.new_model);
+        let chain = self.chain(model, Some(scope), true);
+        model != "base"
+            && introduces(model)
+            && chain.iter().filter(|(_, c)| c.model != "base").all(|(mi, c)| {
+                let delegates = c.inherits.iter().map(|(parent, _)| parent);
+                let mut parents = delegates.chain(c.inherit.iter().map(|parent| &parent.value));
+                *mi == module && parents.all(|parent| introduces(parent))
+            })
+            && !self.hidden_field_parents(model, scope)
+            && !self.unread_delegate(model, scope)
+    }
+
     /// Whether the class that introduces `model` with `_name` is in scope. When it is not, the
     /// definitions that give its fields their first attributes are missing from the index.
     pub fn introduced(&self, model: &str, scope: &Scope) -> bool {

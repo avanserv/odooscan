@@ -11,7 +11,6 @@ custom/access_rows/security/ir.model.access-rewrite.csv:2:1: OD323 XML id 'acces
 custom/access_rows/security/ir.model.access.csv:2:1: OD402 no group limits this row, so every user, public and portal included, gets write, create or unlink on model_access_desk; name a group
 custom/access_rows/security/ir.model.access.csv:3:1: OD402 no group limits this row, so every user, public and portal included, gets write, create or unlink on model_access_desk; name a group
 custom/access_rows/security/ir.model.access.csv:4:1: OD402 no group limits this row, so every user, public and portal included, gets write, create or unlink on model_access_desk; name a group
-custom/bad_sale/__manifest__.py:5:25: OD503 module 'not_installed' is not on the addons path
 custom/bad_sale/__manifest__.py:11:9: OD501 'data/missing.xml' does not exist
 custom/bad_sale/controllers/flows.py:14:9: OD701 route parameter 'term' reaches the query of cr.execute() through 'where', 'query'; pass it as a query parameter or build the query with odoo.tools.SQL
 custom/bad_sale/controllers/flows.py:15:9: OD701 route parameter 'kw' reaches the query of cr.execute(); pass it as a query parameter or build the query with odoo.tools.SQL
@@ -60,6 +59,7 @@ custom/bad_sale/models/models.py:64:12: OD205 'name' is a Char field elsewhere a
 custom/bad_sale/models/projects.py:7:34: OD202 model 'project.project' comes from module project; add it to depends
 custom/bad_sale/models/projects.py:8:31: OD202 model 'project.task' comes from module project; add it to depends
 custom/bad_sale/models/projects.py:9:36: OD202 model 'account.analytic.line' comes from module hr_timesheet; add it to depends
+custom/bad_sale/models/quiet.py:30:22: OD302 'encoded_lost.no_such_id' belongs to module encoded_lost; add it to depends
 custom/bad_sale/models/registry.py:6:14: OD203 'stat': bad.registry has no field 'stat'
 custom/bad_sale/models/registry.py:7:17: OD203 'titel': bad.registry has no field 'titel'
 custom/bad_sale/models/registry.py:10:40: OD207 'country_name' is a Char field related to 'partner_id.country_id', which is a Many2one field
@@ -77,6 +77,9 @@ custom/bad_sale/views/domains.xml:13:17: OD210 'nam': bad.order has no field 'na
 custom/bad_sale/views/domains.xml:14:17: OD210 'is_company': res.partner has no field 'is_company'
 custom/bad_sale/views/domains.xml:15:17: OD210 'partner_id.nmae': res.partner has no field 'nmae'
 custom/bad_sale/views/domains.xml:16:17: OD210 'partnr_id': bad.order has no field 'partnr_id'
+custom/bad_sale/views/late.xml:16:9: OD202 model 'project.project' comes from module project; add it to depends
+custom/bad_sale/views/late.xml:23:9: OD302 'mail.no_such_id' belongs to module mail; add it to depends
+custom/bad_sale/views/late.xml:24:9: OD302 'encoded_lost.no_such_id' belongs to module encoded_lost; add it to depends
 custom/bad_sale/views/locators.xml:8:17: OD310 no <field name="nmae"> in view base.view_partner_simple or the views that extend it
 custom/bad_sale/views/locators.xml:9:17: OD310 no <group name="mian"> in view base.view_partner_simple or the views that extend it
 custom/bad_sale/views/locators.xml:10:17: OD310 <page name="mail_page"> is added by module mail, which is not in depends
@@ -89,6 +92,7 @@ custom/bad_sale/views/views.xml:15:17: OD302 'mail.mail_menu' is defined by modu
 custom/bad_sale/views/views.xml:15:17: OD308 'action_late' is defined in views/late.xml, which loads after this reference
 custom/bad_sale/views/views.xml:22:9: OD301 module base defines no XML id 'base.view_partner_form'
 custom/bad_sale/views/views.xml:26:17: OD304 'vat': res.partner has no field 'vat'
+custom/bad_sale/views/views.xml:34:9: OD309 res.partner has no field 'email'
 custom/bad_sale/views/views.xml:36:5: OD303 XML id 'partner_demo' is already defined earlier in this file
 custom/bad_sale/views/views.xml:49:9: OD307 t-raw renders unescaped HTML; use t-out and wrap trusted HTML in Markup
 custom/bad_sale/views/views.xml:53:9: OD306 view_mode 'tree' is renamed 'list'
@@ -496,6 +500,24 @@ custom/orm_overrides/models/computes.py:395:9: OD223 _compute_named_child() can 
 custom/orm_overrides/models/overrides.py:7:9: OD119 write() calls super() but returns nothing, so callers get None instead of True; return what super().write() returns
 custom/orm_overrides/models/overrides.py:14:9: OD119 copy() calls super() but returns nothing, so callers get None instead of the new records; return what super().copy() returns
 custom/orm_overrides/models/overrides.py:24:5: OD117 @api.model on create() makes Odoo call it once per record; decorate it with @api.model_create_multi and take a list of dicts
+custom/partial_sites/__manifest__.py:5:25: OD503 module 'ghost_enterprise' is not on the addons path
+custom/partial_sites/models/sites.py:24:22: OD301 module base defines no XML id 'base.no_such_id'
+custom/partial_sites/models/sites.py:25:22: OD302 'mail.no_such_id' belongs to module mail; add it to depends
+custom/partial_sites/models/sites.py:32:18: OD203 'name.x': res.partner.name is not a relational field, so the path cannot continue
+custom/partial_sites/models/sites.py:47:14: OD203 'nmae': site.visit has no field 'nmae'
+custom/partial_sites/models/sites.py:51:72: OD210 'nmae': site.visit.line has no field 'nmae'
+custom/partial_sites/models/sites.py:52:34: OD204 site.visit has no method '_compute_typo'
+custom/partial_sites/models/sites.py:55:18: OD203 'nmae': site.visit has no field 'nmae'
+custom/partial_sites/models/sites.py:55:26: OD203 'line_ids.nmae': site.visit.line has no field 'nmae'
+custom/partial_sites/models/sites.py:55:63: OD203 'name.x': site.visit.name is not a relational field, so the path cannot continue
+custom/partial_sites/models/sites.py:60:41: OD210 'nmae': site.visit has no field 'nmae'
+custom/partial_sites/static/src/sites.js:2:22: OD601 no file of module web provides '@web/core/gone'
+custom/partial_sites/static/src/sites.js:3:26: OD601 '@web/views/form/form_controller' does not export 'Missing'
+custom/partial_sites/views/sites.xml:37:9: OD302 'mail.no_such_id' belongs to module mail; add it to depends
+custom/partial_sites/views/sites.xml:41:9: OD301 module base defines no XML id 'base.no_such_id'
+custom/partial_sites/views/sites.xml:49:17: OD304 'nmae': site.visit has no field 'nmae'
+custom/partial_sites/views/sites.xml:57:13: OD310 no <field name="naem"> in view partial_sites.view_visit_form or the views that extend it
+custom/partial_sites/views/sites.xml:65:17: OD210 'nmae': site.visit has no field 'nmae'
 custom/project_fork/data/projects.xml:7:9: OD309 field 'allow_timesheets' of project.project comes from module hr_timesheet, which is not in depends
 custom/project_fork/models/task.py:4:7: OD209 module project already defines model 'project.task', and this class replaces it; extend it with _inherit = 'project.task'
 custom/qweb_calls/data/pages.xml:1:1: OD502 'data/pages.xml' is not in the manifest's data or demo, so Odoo never loads it
