@@ -475,6 +475,12 @@ pub struct ViewFact {
     /// The view's type, as its `type` field or the root of its arch says. A root that Odoo does not
     /// take as a type, such as an inherited view's `<xpath>`, says nothing.
     pub kind: Option<String>,
+    /// Whether the view can be the default of its model and type, which only a `primary` one is.
+    /// None when only a run can tell.
+    pub primary: Option<bool>,
+    /// `inherit_id` holds a parent `inherit` does not read, so what the view takes from it, such as
+    /// its type, is out of reach.
+    pub unread_parent: bool,
 }
 
 #[derive(Debug)]

@@ -1761,8 +1761,10 @@ impl<'m> Ctx<'_, 'm> {
     /// not, as a bridge module that depends on this one may be what adds it. A default counts in
     /// scope only: it comes with a module such as `web_gantt`, which nothing else installs.
     fn view_gap(&self, model: &str, kind: &str) -> Option<String> {
+        let types = &self.index.view_types;
         if GENERATED_VIEWS.contains(&kind)
-            || self.index.view_types.contains(&(model, kind))
+            || types.contains(&(model, Some(kind)))
+            || types.contains(&(model, None))
             || self.index.default_view(model, kind, self.scope)
         {
             return None;
@@ -1770,7 +1772,7 @@ impl<'m> Ctx<'_, 'm> {
         if kind == "calendar" {
             return self.calendar_gap(model);
         }
-        Some(format!("{model} has no {kind} view, and nothing generates one"))
+        Some(format!("{model} has no primary {kind} view, and nothing generates one"))
     }
 
     /// What Odoo misses to generate a calendar for `model`. A field only a module outside `depends`
@@ -1787,12 +1789,13 @@ impl<'m> Ctx<'_, 'm> {
         let has = |field: &&str| !matches!(self.index.field(model, field, self.scope), Err(None));
         if !starts.iter().any(has) {
             return Some(format!(
-                "{model} has no calendar view, and no date field to generate one from"
+                "{model} has no primary calendar view, and no date field to generate one from"
             ));
         }
         let needs_stop = self.series.is_some_and(|s| s < CALENDAR_STOP_OPTIONAL);
-        (needs_stop && !CALENDAR_STOPS.iter().any(has))
-            .then(|| format!("{model} has no calendar view, and no stop or duration field to generate one from"))
+        (needs_stop && !CALENDAR_STOPS.iter().any(has)).then(|| {
+            format!("{model} has no primary calendar view, and no stop or duration field to generate one from")
+        })
     }
 
     fn xml_ref(&self, out: &mut Out<'m>, path: &'m Path, r: &XmlRef) {

@@ -17,4 +17,60 @@
             </xpath>
         </field>
     </record>
+
+    <record id="view_cloned_gantt" model="ir.ui.view">
+        <field name="name">window.cloned.gantt</field>
+        <field name="model">window.cloned</field>
+        <field name="inherit_id" ref="view_shown_gantt"/>
+        <field name="mode">primary</field>
+        <field name="arch" type="xml">
+            <xpath expr="." position="attributes">
+                <attribute name="string">Cloned</attribute>
+            </xpath>
+        </field>
+    </record>
+
+    <record id="view_adopted_gantt" model="ir.ui.view">
+        <field name="name">window.adopted.gantt</field>
+        <field name="model">window.adopted</field>
+        <field name="inherit_id" eval="ref('view_shown_gantt')"/>
+        <field name="mode">primary</field>
+        <field name="arch" type="xml">
+            <xpath expr="." position="attributes">
+                <attribute name="string">Adopted</attribute>
+            </xpath>
+        </field>
+    </record>
+
+    <record id="view_relayed_gantt" model="ir.ui.view">
+        <field name="name">window.relayed.gantt</field>
+        <field name="model">window.relayed</field>
+        <field name="inherit_id" ref="view_adopted_gantt"/>
+        <field name="mode">primary</field>
+        <field name="arch" type="xml">
+            <xpath expr="." position="attributes">
+                <attribute name="string">Relayed</attribute>
+            </xpath>
+        </field>
+    </record>
+
+    <record id="view_sought_gantt" model="ir.ui.view">
+        <field name="name">window.sought.gantt</field>
+        <field name="model">window.sought</field>
+        <field name="inherit_id" model="ir.ui.view" search="[('name', '=', 'window.absent.gantt')]"/>
+        <field name="arch" type="xml">
+            <gantt string="Sought"/>
+        </field>
+    </record>
+
+    <record id="view_sifted_gantt" model="ir.ui.view">
+        <field name="name">window.sifted.gantt</field>
+        <field name="model">window.sifted</field>
+        <field name="inherit_id" model="ir.ui.view" search="[('name', '=', 'window.shown.gantt')]"/>
+        <field name="arch" type="xml">
+            <xpath expr="." position="attributes">
+                <attribute name="string">Sifted</attribute>
+            </xpath>
+        </field>
+    </record>
 </odoo>

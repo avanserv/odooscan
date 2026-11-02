@@ -303,7 +303,7 @@ custom/legacy14/security/second_writes.xml:2:5: OD323 XML id 'rule_ledger_replac
 custom/legacy14/security/second_writes.xml:5:5: OD323 XML id 'rule_ledger_deactivated' is already defined in security/rules.xml, and this definition writes the fields it names over it; remove the copy when the two say the same thing, or rename one when both are meant to exist
 custom/legacy14/views/ledger_archive.xml:1:1: OD502 'views/ledger_archive.xml' is not in the manifest's init_xml, update_xml, data, demo_xml or demo, so Odoo never loads it
 custom/legacy14/views/ledger_reports.xml:19:71: OD201 no indexed module defines model 'legacy.ledgr'
-custom/legacy14/views/ledger_updates.xml:4:33: OD318 legacy.ledger has no gantt view, and nothing generates one
+custom/legacy14/views/ledger_updates.xml:4:33: OD318 legacy.ledger has no primary gantt view, and nothing generates one
 custom/legacy14/views/ledger_updates.xml:7:5: OD323 XML id 'action_ledger_default' is already defined in views/ledger_reports.xml, and this definition writes the fields it names over it; remove the copy when the two say the same thing, or rename one when both are meant to exist
 custom/legacy14/views/ledger_views.xml:8:17: OD304 'x_opening_balance': legacy.ledger has no field 'x_opening_balance'
 custom/legacy14/views/ledger_views.xml:9:17: OD308 'action_ledger_report' is defined in views/ledger_reports.xml, which loads after this reference
@@ -867,29 +867,31 @@ custom/view_modifiers/views/tickets.xml:21:62: OD316 column_invisible names 'par
 custom/view_modifiers/views/tickets.xml:23:54: OD316 readonly names 'state': modifier.line has no field 'state'
 custom/view_modifiers/views/unlisted.xml:1:1: OD502 'views/unlisted.xml' is not in the manifest's data or demo, so Odoo never loads it
 custom/window_actions/views/actions.xml:4:33: OD201 no indexed module defines model 'sale.ordr'
-custom/window_actions/views/actions.xml:11:33: OD318 window.plain has no gantt view, and nothing generates one
-custom/window_actions/views/actions.xml:11:33: OD318 window.plain has no map view, and nothing generates one
-custom/window_actions/views/actions.xml:11:33: OD318 window.plain has no hierarchy view, and nothing generates one
-custom/window_actions/views/actions.xml:11:33: OD318 window.plain has no grid view, and nothing generates one
-custom/window_actions/views/actions.xml:17:33: OD318 window.plain has no calendar view, and no date field to generate one from
-custom/window_actions/views/actions.xml:23:33: OD318 window.dated has no calendar view, and no stop or duration field to generate one from
+custom/window_actions/views/actions.xml:11:33: OD318 window.plain has no primary gantt view, and nothing generates one
+custom/window_actions/views/actions.xml:11:33: OD318 window.plain has no primary map view, and nothing generates one
+custom/window_actions/views/actions.xml:11:33: OD318 window.plain has no primary hierarchy view, and nothing generates one
+custom/window_actions/views/actions.xml:11:33: OD318 window.plain has no primary grid view, and nothing generates one
+custom/window_actions/views/actions.xml:17:33: OD318 window.plain has no primary calendar view, and no date field to generate one from
+custom/window_actions/views/actions.xml:23:33: OD318 window.dated has no primary calendar view, and no stop or duration field to generate one from
+custom/window_actions/views/actions.xml:65:33: OD318 window.derived has no primary gantt view, and nothing generates one
+custom/window_actions/views/actions.xml:128:33: OD318 window.sought has no primary map view, and nothing generates one
 custom/window_actions/views/unlisted.xml:1:1: OD502 'views/unlisted.xml' is not in the manifest's data or demo, so Odoo never loads it
 custom/window_hidden/views/actions.xml:4:33: OD202 model 'window.plain' comes from module window_actions; add it to depends
-custom/window_named/views/actions.xml:19:33: OD318 window.plain has no gantt view, and nothing generates one
-custom/window_named/views/actions.xml:32:33: OD318 window.plain has no map view, and nothing generates one
-custom/window_named/views/actions.xml:39:33: OD318 window.plain has no map view, and nothing generates one
-custom/window_named/views/actions.xml:58:33: OD318 window.plain has no gantt view, and nothing generates one
-custom/window_named/views/actions.xml:69:33: OD318 window.plain has no map view, and nothing generates one
-custom/window_named/views/actions.xml:89:33: OD318 window.plain has no map view, and nothing generates one
-custom/window_named/views/actions.xml:101:33: OD318 window.plain has no gantt view, and nothing generates one
-custom/window_named/views/actions.xml:112:33: OD318 window.plain has no map view, and nothing generates one
-custom/window_named/views/actions.xml:131:33: OD318 window.plain has no map view, and nothing generates one
-custom/window_named/views/actions.xml:143:33: OD318 window.plain has no map view, and nothing generates one
+custom/window_named/views/actions.xml:19:33: OD318 window.plain has no primary gantt view, and nothing generates one
+custom/window_named/views/actions.xml:32:33: OD318 window.plain has no primary map view, and nothing generates one
+custom/window_named/views/actions.xml:39:33: OD318 window.plain has no primary map view, and nothing generates one
+custom/window_named/views/actions.xml:58:33: OD318 window.plain has no primary gantt view, and nothing generates one
+custom/window_named/views/actions.xml:69:33: OD318 window.plain has no primary map view, and nothing generates one
+custom/window_named/views/actions.xml:89:33: OD318 window.plain has no primary map view, and nothing generates one
+custom/window_named/views/actions.xml:101:33: OD318 window.plain has no primary gantt view, and nothing generates one
+custom/window_named/views/actions.xml:112:33: OD318 window.plain has no primary map view, and nothing generates one
+custom/window_named/views/actions.xml:131:33: OD318 window.plain has no primary map view, and nothing generates one
+custom/window_named/views/actions.xml:143:33: OD318 window.plain has no primary map view, and nothing generates one
 custom/window_update/views/a_last.xml:2:5: OD323 XML id 'action_ranked' is already defined in views/z_first.xml, and this definition writes the fields it names over it; remove the copy when the two say the same thing, or rename one when both are meant to exist
 custom/window_update/views/a_last.xml:6:5: OD323 XML id 'action_model_replaced' is already defined in views/z_first.xml, and this definition writes the fields it names over it; remove the copy when the two say the same thing, or rename one when both are meant to exist
 custom/window_update/views/a_last.xml:10:5: OD323 XML id 'action_mode_replaced' is already defined in views/updates.xml, and this definition writes the fields it names over it; remove the copy when the two say the same thing, or rename one when both are meant to exist
 custom/window_update/views/a_last.xml:14:5: OD323 XML id 'action_mode_grown' is already defined in views/updates.xml, and this definition writes the fields it names over it; remove the copy when the two say the same thing, or rename one when both are meant to exist
-custom/window_update/views/a_last.xml:15:33: OD318 window.plain has no map view, and nothing generates one
+custom/window_update/views/a_last.xml:15:33: OD318 window.plain has no primary map view, and nothing generates one
 custom/window_update/views/a_last.xml:18:5: OD323 XML id 'action_mode_hidden' is already defined in views/updates.xml, and this definition writes the fields it names over it; remove the copy when the two say the same thing, or rename one when both are meant to exist
-custom/window_update/views/updates.xml:3:33: OD318 window.plain has no gantt view, and nothing generates one
+custom/window_update/views/updates.xml:3:33: OD318 window.plain has no primary gantt view, and nothing generates one
 custom/window_update/views/updates.xml:18:5: OD323 XML id 'action_model_replaced' is already defined in views/z_first.xml, and this definition writes the fields it names over it; remove the copy when the two say the same thing, or rename one when both are meant to exist
