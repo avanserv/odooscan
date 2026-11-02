@@ -97,6 +97,11 @@ const TRANSIENT_ACCESS: Series = Series { major: 13, minor: 2 };
 /// model alone (`:714` on 20.0), so this says nothing of a child linked after its creation.
 const CHILD_ACTION_MODEL: Series = Series { major: 18, minor: 2 };
 
+/// The first series whose server action defaults to `object_write`, where 10.0 defaults to `code`
+/// (`odoo/addons/base/ir/ir_actions.py:495`). `c56b74622141` changed it on saas-15, which no `Series`
+/// names.
+const OBJECT_WRITE_DEFAULT: Series = Series { major: 11, minor: 0 };
+
 /// The first series whose `Registry` has no `__call__` (`e6f99537f3aa`; saas~18.4 keeps it at
 /// `odoo/orm/registry.py:311`), so calling `model.pool` fails.
 const REGISTRY_UNCALLABLE: Series = Series { major: 19, minor: 0 };
@@ -1912,7 +1917,7 @@ impl<'m> Ctx<'_, 'm> {
     /// Checks the calls `server` makes, if the record still holds that code and runs it. Each field
     /// holds the last value `scope` gave it: what a module depending on this one replaces later does
     /// not mend a database without that module. `server_model` gives a created child's model. A cron
-    /// runs code without saying so.
+    /// runs code without saying so, and so does a server action `created_as_code`.
     fn server_code(&self, out: &mut Out<'m>, path: &'m Path, server: &'m ServerFact) {
         if server.calls.is_empty() {
             return;
@@ -1925,7 +1930,8 @@ impl<'m> Ctx<'_, 'm> {
         let holds = last()
             .find(|w| w.fact.writes_code)
             .is_some_and(|w| std::ptr::eq(w.fact, server));
-        let runs = last().find_map(|w| w.fact.state).unwrap_or(server.cron);
+        let runs = last().find_map(|w| w.fact.state);
+        let runs = runs.unwrap_or(server.cron || self.created_as_code(writes));
         if !holds || !runs {
             return;
         }
@@ -1938,6 +1944,18 @@ impl<'m> Ctx<'_, 'm> {
                 out.push(path, "OD320", call.pos, message);
             }
         }
+    }
+
+    /// Whether `writes` create the action on a series that fills an unset `state` with `code`. A first
+    /// write to another module's action creates nothing: the action may hold any state, and an update
+    /// leaves it. An unknown series may be on either side of `OBJECT_WRITE_DEFAULT`.
+    fn created_as_code(&self, writes: &[Placed<&'m ServerFact>]) -> bool {
+        let creates = |w: &Placed<&'m ServerFact>| {
+            let module = &self.index.modules[w.module];
+            w.fact.id.as_ref().is_none_or(|id| own_id(module, id))
+        };
+        self.series.is_some_and(|s| s < OBJECT_WRITE_DEFAULT)
+            && writes.iter().find(|w| self.scope.reads(w)).is_some_and(creates)
     }
 
     /// The model `writes` leave a server action on: that of the last write after the one creating

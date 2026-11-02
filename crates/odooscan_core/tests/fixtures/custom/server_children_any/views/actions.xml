@@ -23,4 +23,10 @@
             </record>
         </field>
     </record>
+
+    <record id="action_no_state" model="ir.actions.server">
+        <field name="name">action_no_state</field>
+        <field name="model_id" ref="base.model_res_partner"/>
+        <field name="code">model._nope_default_code()</field>
+    </record>
 </odoo>
