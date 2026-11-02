@@ -12,3 +12,8 @@ series reads it as before saas~18.1, and where the two readings differ, the modu
 built at runtime, as with a `_name` given by an expression: a model or model id that no indexed
 module defines is not reported, and [OD604](rules/OD604.md) checks no method the module's scripts
 call.
+
+[OD202](rules/OD202.md) and [OD603](rules/OD603.md) stay silent on a model only a module missing
+from `depends` defines when its name fits what code outside `tests/` may build: the start an
+expression shows, every name when it shows no literal start, and for a class of unknown series the
+name the other reading gives it, unless that name is one of the class's parents.

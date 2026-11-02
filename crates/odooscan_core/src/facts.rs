@@ -330,6 +330,12 @@ pub struct PyFacts {
     /// A class names its model with an expression, so models and their ids are built at runtime,
     /// or lacks `_name` in a module of unknown series and is named apart before and from saas~18.1.
     pub dynamic_models: bool,
+    /// The literal start of each name the file's classes may give a model at runtime, empty when
+    /// the expression shows none, which fits every name.
+    pub built_model_starts: Vec<String>,
+    /// The whole name of the reading a class of unknown series does not take, which fits that name
+    /// alone.
+    pub built_model_names: Vec<String>,
     /// Literal model names in `env['x']` outside code guarded by a test that the model exists.
     pub env_models: Vec<Spanned<String>>,
     /// Literal domains given to `search()` and the like on `self` or `env['x']`.
