@@ -48,7 +48,7 @@ pub(crate) fn check(body: &[Stmt], loc: &Locator) -> (Vec<ImportPatch>, Vec<RawD
     (patches(&top, loc), filled_caches(body, &top, loc))
 }
 
-/// The statements that run at import: the module body, into `if` and `try` blocks.
+/// The statements that run at import: the module body, into `if`, `try` and `with` blocks.
 pub(crate) fn top_level(body: &[Stmt]) -> Vec<&Stmt> {
     let mut stmts = vec![];
     for stmt in body {
@@ -69,6 +69,7 @@ pub(crate) fn top_level(body: &[Stmt]) -> Vec<&Stmt> {
                     stmts.extend(top_level(&h.body));
                 }
             }
+            Stmt::With(w) => stmts.extend(top_level(&w.body)),
             _ => {}
         }
     }
@@ -402,6 +403,13 @@ mod tests {
                    web.x = 1\nmisc.y += 'a'\nlocal.z = 2\njson.w = 3\nsetattr(misc, 'v', 4)\n\
                    while True:\n    misc.u = 5\n";
         assert_eq!(codes(src), [("OD123", 5), ("OD123", 6), ("OD123", 9)]);
+    }
+
+    #[test]
+    fn reads_a_with_block_at_import() {
+        let src = "from odoo.tools import misc\nwith guard():\n    misc.x = 1\n    X = {}\n\
+                   def fill():\n    X['k'] = 1\n";
+        assert_eq!(codes(src), [("OD123", 3), ("OD124", 4)]);
     }
 
     #[test]

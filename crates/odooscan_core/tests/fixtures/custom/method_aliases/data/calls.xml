@@ -1,0 +1,22 @@
+<odoo>
+    <function model="method.ticket" name="action_done"/>
+    <function model="method.ticket" name="action_if"/>
+
+    <record id="cron_alias" model="ir.cron">
+        <field name="name">cron_alias</field>
+        <field name="model_id" ref="model_method_ticket"/>
+        <field name="code">model.action_done()</field>
+    </record>
+
+    <record id="cron_conditional" model="ir.cron">
+        <field name="name">cron_conditional</field>
+        <field name="model_id" ref="model_method_ticket"/>
+        <field name="code">model.action_if()</field>
+    </record>
+
+    <record id="cron_typo" model="ir.cron">
+        <field name="name">cron_typo</field>
+        <field name="model_id" ref="model_method_ticket"/>
+        <field name="code">model.action_dnoe()</field>
+    </record>
+</odoo>

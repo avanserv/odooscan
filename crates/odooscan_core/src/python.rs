@@ -445,6 +445,26 @@ fn is_table_object(value: &Expr) -> bool {
         .is_some_and(|c| matches!(tail_name(&c.func), Some("Constraint" | "Index" | "UniqueIndex")))
 }
 
+/// Whether a class attribute may hold a method: anything but a field, a table object or plain data.
+/// Counting too much costs little, since a typo matches no name the class binds.
+fn may_be_method(value: &Expr) -> bool {
+    let data = value.is_literal_expr()
+        || matches!(
+            value,
+            Expr::FString(_)
+                | Expr::TString(_)
+                | Expr::List(_)
+                | Expr::Tuple(_)
+                | Expr::Dict(_)
+                | Expr::Set(_)
+                | Expr::ListComp(_)
+                | Expr::SetComp(_)
+                | Expr::DictComp(_)
+                | Expr::Generator(_)
+        );
+    !data && field_call(value).is_none() && !is_table_object(value)
+}
+
 /// The query a `SQL()` or an `execute()` call is given, whatever runs it.
 fn run_query(call: &ast::ExprCall) -> Option<&Expr> {
     matches!(tail_name(&call.func), Some("SQL" | "execute"))
@@ -667,6 +687,40 @@ pub fn analyze(src: &str, series: Option<Series>) -> PyFacts {
     v.facts
 }
 
+/// The targets and the value of an assignment that gives one.
+fn assigned(stmt: &Stmt) -> Option<(&[Expr], &Expr)> {
+    match stmt {
+        Stmt::Assign(a) => Some((&a.targets, &a.value)),
+        Stmt::AnnAssign(ast::StmtAnnAssign {
+            target,
+            value: Some(value),
+            ..
+        }) => Some((std::slice::from_ref(&**target), value)),
+        _ => None,
+    }
+}
+
+/// Records that a class has a method, and whether `@api.private` marks it.
+fn method_name(func: &ast::StmtFunctionDef, fact: &mut ClassFact) {
+    fact.methods.push(func.name.to_string());
+    if func.decorator_list.iter().any(|d| is_api(&d.expression, "private")) {
+        fact.private_methods.push(func.name.to_string());
+    }
+}
+
+/// The method names an `if`, `try` or `with` block of a class body binds. Such a branch often
+/// serves another series, so its body stays out of the checks: `name_get` there must not report.
+fn conditional_methods(stmt: &Stmt, fact: &mut ClassFact) {
+    for stmt in module_state::top_level(std::slice::from_ref(stmt)) {
+        if let Stmt::FunctionDef(func) = stmt {
+            method_name(func, fact);
+        } else if let Some((targets, _)) = assigned(stmt).filter(|(_, value)| may_be_method(value)) {
+            let names = targets.iter().filter_map(Expr::as_name_expr);
+            fact.methods.extend(names.map(|name| name.id.to_string()));
+        }
+    }
+}
+
 /// The first series that names a class without `_name` after the class, dotted, whenever
 /// `_inherit` is not one string (`saas~18.1`).
 const DOTTED_CLASS_NAME: Series = Series { major: 18, minor: 1 };
@@ -798,15 +852,12 @@ impl<'ast> PyVisitor<'_, 'ast> {
             plain_bases: class.bases().iter().any(|b| tail_name(b).and_then(orm_kind).is_none()),
         };
         for stmt in &class.body {
-            match stmt {
-                Stmt::Assign(assign) => self.class_attrs(&assign.targets, &assign.value, &mut fact, &mut naming),
-                Stmt::AnnAssign(ast::StmtAnnAssign {
-                    target,
-                    value: Some(value),
-                    ..
-                }) => self.class_attrs(std::slice::from_ref(&**target), value, &mut fact, &mut naming),
-                Stmt::FunctionDef(func) => self.method_fact(func, &mut fact),
-                _ => {}
+            if let Some((targets, value)) = assigned(stmt) {
+                self.class_attrs(targets, value, &mut fact, &mut naming);
+            } else if let Stmt::FunctionDef(func) = stmt {
+                self.method_fact(func, &mut fact);
+            } else {
+                conditional_methods(stmt, &mut fact);
             }
         }
         fact.unassigned_computes = self.unassigned_computes(class, &fact);
@@ -846,10 +897,7 @@ impl<'ast> PyVisitor<'_, 'ast> {
     /// it makes, whether it calls the method it overrides through `super()`, and for `init()` the
     /// views it creates.
     fn method_fact(&mut self, func: &ast::StmtFunctionDef, fact: &mut ClassFact) {
-        fact.methods.push(func.name.to_string());
-        if func.decorator_list.iter().any(|d| is_api(&d.expression, "private")) {
-            fact.private_methods.push(func.name.to_string());
-        }
+        method_name(func, fact);
         if func.name.as_str() == "init" {
             fact.views = self.init_views(func);
         }
@@ -925,7 +973,7 @@ impl<'ast> PyVisitor<'_, 'ast> {
             if let Some(definition) = value.as_call_expr().and_then(|c| c.arguments.args.first()) {
                 self.definition(DefinitionSource::TableObject, definition, fact);
             }
-        } else if matches!(value, Expr::Name(_) | Expr::Attribute(_) | Expr::Lambda(_)) {
+        } else if may_be_method(value) {
             fact.methods.push(target.id.to_string());
         } else {
             self.class_field(target, value, fact);
@@ -1928,6 +1976,106 @@ mod tests {
             ["sequence", "id", "up_id", "folded", "x_active"]
         );
         assert_eq!(values(&class.rec_names_search), ["name", "partner_id.ref"]);
+    }
+
+    /// The method names of a model class with the body `body`.
+    fn method_names(body: &str) -> Vec<String> {
+        let src = format!("class X(models.Model):\n    _name = 'x'\n{body}");
+        analyze(&src, None).classes.remove(0).methods
+    }
+
+    #[test]
+    fn counts_every_class_value_but_a_field_a_table_object_and_data_as_a_method() {
+        for value in [
+            "_set",
+            "tools.a",
+            "lambda self: 1",
+            "partialmethod(_set, 'a')",
+            "functools.partial(_set)",
+            "api.model(_set)",
+            "api.depends('a')(_set)",
+            "helper()",
+            "Vector()",
+            "fields.Serialized()",
+            "a if b else c",
+            "H['x']",
+        ] {
+            assert_eq!(method_names(&format!("    alias = {value}\n")), ["alias"], "{value}");
+        }
+        for value in [
+            "fields.Char()",
+            "Char()",
+            "models.Constraint('CHECK (a)')",
+            "models.Index('(a)')",
+            "models.UniqueIndex('(a)')",
+            "Index('(a)')",
+            "3",
+            "'a'",
+            "b'a'",
+            "None",
+            "True",
+            "...",
+            "f'{a}'",
+            "t'{a}'",
+            "[]",
+            "()",
+            "{}",
+            "{1}",
+            "[a for a in b]",
+            "{a for a in b}",
+            "{a: 1 for a in b}",
+            "(a for a in b)",
+        ] {
+            assert!(method_names(&format!("    alias = {value}\n")).is_empty(), "{value}");
+        }
+    }
+
+    #[test]
+    fn reads_the_method_names_of_conditional_blocks() {
+        let body = "    if a:\n        def in_if(self):\n            pass\n\
+                    \x20   elif b:\n        def in_elif(self):\n            pass\n\
+                    \x20   else:\n        def in_else(self):\n            pass\n\
+                    \x20   try:\n        def in_try(self):\n            pass\n\
+                    \x20   except E:\n        def in_except(self):\n            pass\n\
+                    \x20   else:\n        def in_try_else(self):\n            pass\n\
+                    \x20   finally:\n        def in_finally(self):\n            pass\n\
+                    \x20   with c:\n        if d:\n            def in_with(self):\n                pass\n\
+                    \x20   if e:\n        alias: int = partialmethod(_set)\n        data = 3\n";
+        assert_eq!(
+            method_names(body),
+            [
+                "in_if",
+                "in_elif",
+                "in_else",
+                "in_try",
+                "in_try_else",
+                "in_finally",
+                "in_except",
+                "in_with",
+                "alias"
+            ]
+        );
+    }
+
+    #[test]
+    fn reads_only_the_name_of_what_a_conditional_block_binds() {
+        let facts = analyze(
+            "class X(models.Model):\n    _name = 'x'\n    if a:\n        state = fields.Char()\n\
+             \x20       def name_get(self):\n            return super().unlink()\n\
+             \x20       @api.private\n        def _hidden(self):\n            pass\n",
+            None,
+        );
+        let class = &facts.classes[0];
+        assert!(class.fields.is_empty());
+        assert_eq!(class.methods, ["name_get", "_hidden"]);
+        assert_eq!(class.private_methods, ["_hidden"]);
+        assert!(class.super_calls.is_empty());
+        assert!(!facts.diags.iter().any(|d| d.code == "OD106"));
+    }
+
+    #[test]
+    fn a_for_block_binds_no_method() {
+        assert!(method_names("    for a in b:\n        def in_for(self):\n            pass\n").is_empty());
     }
 
     #[test]

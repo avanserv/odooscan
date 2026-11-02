@@ -276,6 +276,10 @@ custom/legacy17/views/partner_nickname_views.xml:1:1: OD502 'views/partner_nickn
 custom/legacy17/views/partner_pages.xml:4:20: OD311 no indexed module defines template 'legacy17.partner_motto_page'
 custom/legacy17/views/partner_pages.xml:5:20: OD311 no indexed module defines template 'legacy17.partner_ported_page'
 custom/legacy17/views/partner_ported_views.xml:1:1: OD502 'views/partner_ported_views.xml' is listed under update_xml, which Odoo ignores in this series; move it to data
+custom/method_aliases/data/calls.xml:20:34: OD320 method.ticket has no method 'action_dnoe'
+custom/method_aliases/views/tickets.xml:21:45: OD312 method.ticket has no method 'action_dnoe'
+custom/method_aliases/views/tickets.xml:22:45: OD312 method.ticket has no method 'limit'
+custom/method_aliases/views/tickets.xml:23:45: OD312 method.ticket has no method 'state'
 custom/model_attributes/models/bed.py:7:20: OD203 'parent_bed_id': garden.bed has no field 'parent_bed_id'
 custom/model_attributes/models/bed.py:8:18: OD203 'folded': garden.bed has no field 'folded'
 custom/model_attributes/models/bed.py:9:20: OD203 'x_active': garden.bed has no field 'x_active'

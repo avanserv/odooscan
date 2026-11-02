@@ -1,0 +1,28 @@
+<odoo>
+    <record id="ticket_form" model="ir.ui.view">
+        <field name="name">method.ticket.form</field>
+        <field name="model">method.ticket</field>
+        <field name="arch" type="xml">
+            <form>
+                <button type="object" name="action_done"/>
+                <button type="object" name="action_partial"/>
+                <button type="object" name="action_model"/>
+                <button type="object" name="action_cached"/>
+                <button type="object" name="action_stamped"/>
+                <button type="object" name="action_either"/>
+                <button type="object" name="action_if"/>
+                <button type="object" name="action_guarded"/>
+                <button type="object" name="action_elif"/>
+                <button type="object" name="action_else"/>
+                <button type="object" name="action_try"/>
+                <button type="object" name="action_except"/>
+                <button type="object" name="action_try_else"/>
+                <button type="object" name="action_with"/>
+                <button type="object" name="action_dnoe"/>
+                <button type="object" name="limit"/>
+                <button type="object" name="state"/>
+                <field name="name"/>
+            </form>
+        </field>
+    </record>
+</odoo>
