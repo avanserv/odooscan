@@ -1,0 +1,11 @@
+id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
+access_window_plain,window.plain,model_window_plain,base.group_user,1,1,1,1
+access_window_dated,window.dated,model_window_dated,base.group_user,1,1,1,1
+access_window_span,window.span,model_window_span,base.group_user,1,1,1,1
+access_window_timed,window.timed,model_window_timed,base.group_user,1,1,1,1
+access_window_named,window.named,model_window_named,base.group_user,1,1,1,1
+access_window_drawn,window.drawn,model_window_drawn,base.group_user,1,1,1,1
+access_window_shown,window.shown,model_window_shown,base.group_user,1,1,1,1
+access_window_derived,window.derived,model_window_derived,base.group_user,1,1,1,1
+access_window_bridged,window.bridged,model_window_bridged,base.group_user,1,1,1,1
+access_window_extended,window.extended,model_window_extended,base.group_user,1,1,1,1

@@ -21,4 +21,16 @@
 
     <function model="button.plain" name="action_hook"/>
     <function model="button.ghosted" name="action_ghost"/>
+
+    <record id="action_plain" model="ir.actions.act_window">
+        <field name="name">action_plain</field>
+        <field name="res_model">button.plain</field>
+        <field name="view_mode">gantt</field>
+    </record>
+
+    <record id="action_ghosted" model="ir.actions.act_window">
+        <field name="name">action_ghosted</field>
+        <field name="res_model">button.ghosted</field>
+        <field name="view_mode">gantt</field>
+    </record>
 </odoo>

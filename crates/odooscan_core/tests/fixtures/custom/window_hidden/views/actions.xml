@@ -1,0 +1,7 @@
+<odoo>
+    <record id="action_hidden" model="ir.actions.act_window">
+        <field name="name">action_hidden</field>
+        <field name="res_model">window.plain</field>
+        <field name="view_mode">gantt</field>
+    </record>
+</odoo>

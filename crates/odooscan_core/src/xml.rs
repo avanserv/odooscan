@@ -5,8 +5,8 @@ use roxmltree::{Document, Node, ParsingOptions};
 
 use crate::domain;
 use crate::facts::{
-    AccessRow, ArchButton, ArchDomain, ArchElement, ArchField, ArchModifier, DataFacts, DomainFact, FunctionCall,
-    Lines, Pos, RawDiag, RecordFact, Spanned, ViewFact, XmlDef, XmlRef,
+    AccessRow, ActionFact, ActionValue, ArchButton, ArchDomain, ArchElement, ArchField, ArchModifier, DataFacts,
+    DomainFact, FunctionCall, Lines, Pos, RawDiag, RecordFact, Spanned, ViewFact, XmlDef, XmlRef,
 };
 
 /// A `False` second argument makes `ref()` return nothing for an unknown id instead of failing.
@@ -16,6 +16,11 @@ static EVAL_REF: LazyLock<Regex> = LazyLock::new(|| {
 /// The ids `ir.model.data._update_xmlids` gives to records that Python expressions select.
 static UPDATE_XMLID: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r#"['"]xml_id['"]\s*:\s*['"]([\w.]+)['"]"#).unwrap());
+/// The key of a context that makes Odoo take a view for a type by its id.
+static CONTEXT_VIEW_REF: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(\w+)_view_ref\b").unwrap());
+/// The type of a row an `eval` writes to `view_ids`, as a dict literal or `dict()` gives it.
+static VIEW_ROW_MODE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"\bview_mode['"]?\s*[:=]\s*['"](\w+)['"]"#).unwrap());
 /// A field step followed by more steps, as in `//field[@name='line_ids']//field[...]`, reaches into
 /// the subview of line_ids.
 static XPATH_CONTAINER: LazyLock<Regex> =
@@ -204,7 +209,12 @@ impl Walker<'_> {
                     self.unsafe_qweb(child);
                 }
                 "menuitem" => self.menuitem(child),
-                "act_window" | "report" | "asset" => {
+                "act_window" => {
+                    self.def(child);
+                    self.groups(child);
+                    self.act_window(child);
+                }
+                "report" | "asset" => {
                     self.def(child);
                     self.groups(child);
                 }
@@ -283,8 +293,75 @@ impl Walker<'_> {
         }
         if model == "ir.actions.act_window" {
             self.action_domain(node);
+            self.action(node);
+        }
+        if model == "ir.actions.act_window.view" {
+            self.action_view(node);
         }
         self.facts.records.push(record);
+    }
+
+    /// Odoo takes an `eval` over the text next to it, and only a run tells what that gives.
+    fn action(&mut self, node: Node) {
+        let field = |name: &str| field_of(node, name);
+        let written = |name: &str| match field(name) {
+            None => ActionValue::Unset,
+            Some(f) if f.has_attribute("eval") => ActionValue::Opaque,
+            Some(f) => literal(spec_text(f, self.lines)),
+        };
+        let mut action = ActionFact {
+            id: node.attribute("id").map(str::to_owned),
+            model: written("res_model"),
+            view_mode: written("view_mode"),
+            view_of_any_kind: field("view_id").is_some_and(names_a_view),
+            view_kinds: vec![],
+        };
+        if let Some(f) = field("context") {
+            action.view_kinds = context_view_kinds(f.attribute("eval").or_else(|| f.text()));
+        }
+        if let Some(eval) = field("view_ids").and_then(|f| f.attribute("eval")) {
+            let rows: Vec<String> = VIEW_ROW_MODE.captures_iter(eval).map(|c| c[1].to_owned()).collect();
+            action.view_of_any_kind |= rows.is_empty();
+            action.view_kinds.extend(rows);
+        }
+        for row in field("view_ids").iter().flat_map(|f| f.children()).filter(is_view_row) {
+            name_row_view(&mut action, row);
+        }
+        self.facts.actions.push(action);
+    }
+
+    /// The tag Odoo reads through 16.0. It writes `view_mode` even without the attribute, as Odoo
+    /// then gives the default.
+    fn act_window(&mut self, node: Node) {
+        let written = |name: &str| literal(attr_value(node, name, self.lines));
+        let action = ActionFact {
+            id: node.attribute("id").map(str::to_owned),
+            model: written("res_model"),
+            view_mode: written("view_mode"),
+            view_kinds: context_view_kinds(node.attribute("context")),
+            view_of_any_kind: node.attribute("view_id").is_some_and(|id| !id.is_empty()),
+        };
+        self.facts.actions.push(action);
+    }
+
+    /// A row of the `view_ids` of the action its `act_window_id` names. Odoo overwrites that field on
+    /// a row nested in `view_ids`, so such a row belongs to the enclosing action, which `action` reads.
+    fn action_view(&mut self, node: Node) {
+        if node.parent_element().is_some_and(|p| p.has_tag_name("field")) {
+            return;
+        }
+        let action = field_of(node, "act_window_id").and_then(|f| f.attribute("ref"));
+        let Some(action) = action.filter(|id| !id.is_empty()) else {
+            return;
+        };
+        let mut row = ActionFact {
+            id: Some(action.to_owned()),
+            ..ActionFact::default()
+        };
+        name_row_view(&mut row, node);
+        if row.view_of_any_kind || !row.view_kinds.is_empty() {
+            self.facts.actions.push(row);
+        }
     }
 
     fn action_domain(&mut self, node: Node) {
@@ -510,6 +587,48 @@ impl Walker<'_> {
             }
         }
     }
+}
+
+fn field_of<'a, 'i>(node: Node<'a, 'i>, name: &str) -> Option<Node<'a, 'i>> {
+    node.children()
+        .find(|c| c.has_tag_name("field") && c.attribute("name") == Some(name))
+}
+
+/// The value of a field of an action that is present: a blank one holds no literal.
+fn literal(text: Option<Spanned<String>>) -> ActionValue {
+    text.filter(|t| !t.value.trim().is_empty())
+        .map_or(ActionValue::Opaque, ActionValue::Literal)
+}
+
+/// Whether a `view_id` field holds a view: Odoo reads an empty ref as no value, and modules clear
+/// the field with `eval="False"`.
+fn names_a_view(field: Node) -> bool {
+    field.attribute("ref").is_some_and(|id| !id.is_empty())
+        || field
+            .attribute("eval")
+            .is_some_and(|e| !matches!(e.trim(), "" | "False" | "None"))
+}
+
+fn is_view_row(node: &Node) -> bool {
+    node.has_tag_name("record") && node.attribute("model") == Some("ir.actions.act_window.view")
+}
+
+/// Adds what a row of `view_ids` names to `action`. A row without a view only orders the type, so
+/// Odoo still looks a view up for it.
+fn name_row_view(action: &mut ActionFact, row: Node) {
+    if !field_of(row, "view_id").is_some_and(names_a_view) {
+        return;
+    }
+    let kind = field_of(row, "view_mode").and_then(|f| f.text()).map(str::trim);
+    match kind.filter(|k| !k.is_empty()) {
+        Some(kind) => action.view_kinds.push(kind.to_owned()),
+        None => action.view_of_any_kind = true,
+    }
+}
+
+fn context_view_kinds(context: Option<&str>) -> Vec<String> {
+    let keys = CONTEXT_VIEW_REF.captures_iter(context.unwrap_or_default());
+    keys.map(|c| c[1].to_owned()).collect()
 }
 
 fn attr_value(node: Node, name: &str, lines: &Lines) -> Option<Spanned<String>> {
@@ -888,6 +1007,164 @@ mod tests {
             })
             .collect();
         assert_eq!(found, [("m", "a", 2, 27)]);
+    }
+
+    fn action_facts(records: &str) -> Vec<ActionFact> {
+        analyze(&format!("<odoo>{records}</odoo>")).actions
+    }
+
+    fn actions(records: &str) -> Vec<(Option<String>, Option<String>)> {
+        let value = |v: &ActionValue| match v {
+            ActionValue::Literal(s) => Some(s.value.clone()),
+            _ => None,
+        };
+        let read = |a: &ActionFact| (value(&a.model), value(&a.view_mode));
+        action_facts(records).iter().map(read).collect()
+    }
+
+    fn action_record(fields: &str) -> String {
+        format!(r#"<record id="a" model="ir.actions.act_window">{fields}</record>"#)
+    }
+
+    fn literal_of(value: &ActionValue) -> &Spanned<String> {
+        match value {
+            ActionValue::Literal(s) => s,
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn reads_an_action_record_at_its_text() {
+        let facts = analyze(&format!(
+            "<odoo>\n{}</odoo>",
+            action_record("<field name=\"res_model\">\n  a.b\n</field><field name=\"view_mode\">list,gantt</field>")
+        ));
+        let action = &facts.actions[0];
+        let model = literal_of(&action.model);
+        assert_eq!((model.value.as_str(), model.pos.line, model.pos.col), ("a.b", 3, 3));
+        assert_eq!(literal_of(&action.view_mode).value, "list,gantt");
+        assert_eq!(action.id.as_deref(), Some("a"));
+    }
+
+    #[test]
+    fn tells_a_write_that_is_no_literal_from_no_write() {
+        for fields in [
+            r#"<field name="res_model" eval="'a.b'"/><field name="view_mode" eval="'list'"/>"#,
+            r#"<field name="res_model" eval="'a.b'">a.b</field><field name="view_mode" eval="'list'">list</field>"#,
+            r#"<field name="res_model"/><field name="view_mode"></field>"#,
+            r#"<field name="res_model">  </field><field name="view_mode"> </field>"#,
+        ] {
+            let actions = action_facts(&action_record(fields));
+            assert!(matches!(actions[0].model, ActionValue::Opaque), "{fields}");
+            assert!(matches!(actions[0].view_mode, ActionValue::Opaque), "{fields}");
+        }
+        let actions = action_facts(&action_record(""));
+        assert!(matches!(actions[0].model, ActionValue::Unset));
+        assert!(matches!(actions[0].view_mode, ActionValue::Unset));
+    }
+
+    #[test]
+    fn reads_an_act_window_tag_at_its_attributes() {
+        let text = "<odoo>\n<act_window id=\"a\" res_model=\"a.b\" view_mode=\"gantt\"/>\n</odoo>";
+        let facts = analyze(text);
+        let action = &facts.actions[0];
+        let model = literal_of(&action.model);
+        assert_eq!((model.value.as_str(), model.pos.line, model.pos.col), ("a.b", 2, 31));
+        assert_eq!(literal_of(&action.view_mode).value, "gantt");
+        assert_eq!(
+            actions(r#"<act_window id="a" res_model=" " view_mode=""/>"#),
+            [(None, None)]
+        );
+        let bare = action_facts(r#"<act_window id="a"/>"#);
+        assert!(matches!(bare[0].view_mode, ActionValue::Opaque));
+    }
+
+    #[test]
+    fn reads_the_views_an_action_names() {
+        let named = |fields: &str| {
+            let action = action_facts(&action_record(fields)).remove(0);
+            (action.view_kinds, action.view_of_any_kind)
+        };
+        let none = (vec![], false);
+        let kinds = |k: &[&str]| (k.iter().map(|k| (*k).to_owned()).collect::<Vec<_>>(), false);
+        assert_eq!(named(r#"<field name="view_id" ref="v"/>"#), (vec![], true));
+        assert_eq!(named(r#"<field name="view_id" eval="ref('v')"/>"#), (vec![], true));
+        assert_eq!(named(r#"<field name="view_id" eval="False"/>"#), none);
+        assert_eq!(named(r#"<field name="view_id" ref=""/>"#), none);
+        assert_eq!(named(r#"<field name="view_id"/>"#), none);
+        assert_eq!(
+            named(r#"<field name="context">{'gantt_view_ref': 'm.v', 'x': 1}</field>"#),
+            kinds(&["gantt"])
+        );
+        assert_eq!(
+            named(r#"<field name="context" eval="dict(map_view_ref='m.v')"/>"#),
+            kinds(&["map"])
+        );
+        assert_eq!(
+            named(
+                r#"<field name="view_ids" eval="[(5, 0, 0), (0, 0, {'view_mode': 'gantt', 'view_id': ref('v')}), Command.create(dict(view_mode='map'))]"/>"#
+            ),
+            kinds(&["gantt", "map"])
+        );
+        assert_eq!(
+            named(r#"<field name="view_ids" eval="[(6, 0, [ref('row')])]"/>"#),
+            (vec![], true)
+        );
+        assert_eq!(named(r#"<field name="view_ids"/>"#), none);
+    }
+
+    #[test]
+    fn reads_the_views_an_act_window_tag_names() {
+        let action = action_facts(r#"<act_window id="a" view_id="v" context="{'map_view_ref': 'm.v'}"/>"#).remove(0);
+        assert_eq!(action.view_kinds, ["map"]);
+        assert!(action.view_of_any_kind);
+        assert!(!action_facts(r#"<act_window id="a" view_id=""/>"#)[0].view_of_any_kind);
+    }
+
+    #[test]
+    fn reads_a_view_row_as_a_write_to_its_action() {
+        let row = |fields: &str| format!(r#"<record id="r" model="ir.actions.act_window.view">{fields}</record>"#);
+        let rows = action_facts(&row(
+            r#"<field name="view_mode">gantt</field><field name="view_id" ref="v"/><field name="act_window_id" ref="m.a"/>"#,
+        ));
+        assert_eq!(rows[0].id.as_deref(), Some("m.a"));
+        assert_eq!(rows[0].view_kinds, ["gantt"]);
+        assert!(!rows[0].view_of_any_kind);
+        let hidden = action_facts(&row(
+            r#"<field name="view_mode" eval="'gantt'"/><field name="view_id" ref="v"/><field name="act_window_id" ref="a"/>"#,
+        ));
+        assert!(hidden[0].view_of_any_kind);
+        let no_view = row(r#"<field name="view_mode">gantt</field><field name="act_window_id" ref="a"/>"#);
+        assert!(action_facts(&no_view).is_empty());
+        let no_action = row(r#"<field name="view_mode">gantt</field><field name="view_id" ref="v"/>"#);
+        assert!(action_facts(&no_action).is_empty());
+    }
+
+    #[test]
+    fn reads_a_row_nested_in_view_ids_for_the_enclosing_action() {
+        let nested = |row: &str| {
+            let record = format!(r#"<record model="ir.actions.act_window.view">{row}</record>"#);
+            action_facts(&action_record(&format!(r#"<field name="view_ids">{record}</field>"#)))
+        };
+        let actions = nested(r#"<field name="view_mode">gantt</field><field name="view_id" ref="v"/>"#);
+        assert_eq!(actions.len(), 1);
+        assert_eq!(actions[0].id.as_deref(), Some("a"));
+        assert_eq!(actions[0].view_kinds, ["gantt"]);
+        assert!(!actions[0].view_of_any_kind);
+
+        let hidden = nested(r#"<field name="view_mode" eval="'gantt'"/><field name="view_id" ref="v"/>"#);
+        assert!(hidden[0].view_of_any_kind);
+
+        let no_view = nested(r#"<field name="view_mode">gantt</field>"#);
+        assert!(no_view[0].view_kinds.is_empty());
+        assert!(!no_view[0].view_of_any_kind);
+
+        let elsewhere = nested(
+            r#"<field name="view_mode">gantt</field><field name="view_id" ref="v"/><field name="act_window_id" ref="b"/>"#,
+        );
+        assert_eq!(elsewhere.len(), 1);
+        assert_eq!(elsewhere[0].id.as_deref(), Some("a"));
+        assert_eq!(elsewhere[0].view_kinds, ["gantt"]);
     }
 
     #[test]

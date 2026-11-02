@@ -1,0 +1,106 @@
+<odoo>
+    <record id="action_typo" model="ir.actions.act_window">
+        <field name="name">action_typo</field>
+        <field name="res_model">sale.ordr</field>
+        <field name="view_mode">list,form</field>
+    </record>
+
+    <record id="action_types" model="ir.actions.act_window">
+        <field name="name">action_types</field>
+        <field name="res_model">window.plain</field>
+        <field name="view_mode">list,gantt,map,hierarchy,grid,gantt</field>
+    </record>
+
+    <record id="action_no_date" model="ir.actions.act_window">
+        <field name="name">action_no_date</field>
+        <field name="res_model">window.plain</field>
+        <field name="view_mode">calendar</field>
+    </record>
+
+    <record id="action_date_alone" model="ir.actions.act_window">
+        <field name="name">action_date_alone</field>
+        <field name="res_model">window.dated</field>
+        <field name="view_mode">calendar</field>
+    </record>
+
+    <record id="action_start_stop" model="ir.actions.act_window">
+        <field name="name">action_start_stop</field>
+        <field name="res_model">window.span</field>
+        <field name="view_mode">calendar</field>
+    </record>
+
+    <record id="action_date_name" model="ir.actions.act_window">
+        <field name="name">action_date_name</field>
+        <field name="res_model">window.timed</field>
+        <field name="view_mode">calendar</field>
+    </record>
+
+    <record id="action_computed_date_name" model="ir.actions.act_window">
+        <field name="name">action_computed_date_name</field>
+        <field name="res_model">window.named</field>
+        <field name="view_mode">calendar</field>
+    </record>
+
+    <record id="action_outside_field" model="ir.actions.act_window">
+        <field name="name">action_outside_field</field>
+        <field name="res_model">window.extended</field>
+        <field name="view_mode">calendar</field>
+    </record>
+
+    <record id="action_own_default" model="ir.actions.act_window">
+        <field name="name">action_own_default</field>
+        <field name="res_model">window.drawn</field>
+        <field name="view_mode">gantt</field>
+    </record>
+
+    <record id="action_own_view" model="ir.actions.act_window">
+        <field name="name">action_own_view</field>
+        <field name="res_model">window.shown</field>
+        <field name="view_mode">gantt</field>
+    </record>
+
+    <record id="action_derived_view" model="ir.actions.act_window">
+        <field name="name">action_derived_view</field>
+        <field name="res_model">window.derived</field>
+        <field name="view_mode">gantt</field>
+    </record>
+
+    <record id="action_bridged_view" model="ir.actions.act_window">
+        <field name="name">action_bridged_view</field>
+        <field name="res_model">window.bridged</field>
+        <field name="view_mode">gantt</field>
+    </record>
+
+    <record id="action_named_later" model="ir.actions.act_window">
+        <field name="name">action_named_later</field>
+        <field name="res_model">window.plain</field>
+        <field name="view_mode">gantt</field>
+    </record>
+
+    <record id="action_generated" model="ir.actions.act_window">
+        <field name="name">action_generated</field>
+        <field name="res_model">window.plain</field>
+        <field name="view_mode">form,search,list,pivot,kanban,graph,activity</field>
+    </record>
+
+    <record id="action_eval_model" model="ir.actions.act_window">
+        <field name="name">action_eval_model</field>
+        <field name="res_model" eval="'window.plain'">sale.ordr</field>
+    </record>
+
+    <record id="action_eval_mode" model="ir.actions.act_window">
+        <field name="name">action_eval_mode</field>
+        <field name="res_model">window.plain</field>
+        <field name="view_mode" eval="'list'">map</field>
+    </record>
+
+    <record id="action_empty" model="ir.actions.act_window">
+        <field name="name">action_empty</field>
+        <field name="res_model"> </field>
+    </record>
+
+    <record id="action_no_model" model="ir.actions.act_window">
+        <field name="name">action_no_model</field>
+        <field name="view_mode">gantt</field>
+    </record>
+</odoo>

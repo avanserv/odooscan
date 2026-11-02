@@ -1,0 +1,20 @@
+<odoo>
+    <record id="view_shown_gantt" model="ir.ui.view">
+        <field name="name">window.shown.gantt</field>
+        <field name="model">window.shown</field>
+        <field name="arch" type="xml">
+            <gantt string="Shown"/>
+        </field>
+    </record>
+
+    <record id="view_derived_gantt" model="ir.ui.view">
+        <field name="name">window.derived.gantt</field>
+        <field name="model">window.derived</field>
+        <field name="inherit_id" ref="view_shown_gantt"/>
+        <field name="arch" type="xml">
+            <xpath expr="." position="attributes">
+                <attribute name="string">Derived</attribute>
+            </xpath>
+        </field>
+    </record>
+</odoo>

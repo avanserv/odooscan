@@ -1,0 +1,21 @@
+<odoo>
+    <record id="action_ranked" model="ir.actions.act_window">
+        <field name="view_mode">list</field>
+    </record>
+
+    <record id="action_model_replaced" model="ir.actions.act_window">
+        <field name="view_mode">gantt</field>
+    </record>
+
+    <record id="action_mode_replaced" model="ir.actions.act_window">
+        <field name="view_mode">list</field>
+    </record>
+
+    <record id="action_mode_grown" model="ir.actions.act_window">
+        <field name="view_mode">list,map</field>
+    </record>
+
+    <record id="action_mode_hidden" model="ir.actions.act_window">
+        <field name="view_mode" eval="'list'"/>
+    </record>
+</odoo>

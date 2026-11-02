@@ -856,7 +856,7 @@ impl<'ast> PyVisitor<'_, 'ast> {
     fn attr_or_field(&mut self, target: &ast::ExprName, value: &Expr, fact: &mut ClassFact) {
         match target.id.as_str() {
             "_table" => fact.table = Some(option_value(value)),
-            "_parent_store" | "_auto" | "_log_access" | "_register" => {
+            "_parent_store" | "_auto" | "_log_access" | "_register" | "_date_name" => {
                 let attr = Spanned {
                     value: option_value(value),
                     pos: self.loc.at(target),
@@ -1878,6 +1878,24 @@ mod tests {
             ["sequence", "id", "up_id", "folded", "x_active"]
         );
         assert_eq!(values(&class.rec_names_search), ["name", "partner_id.ref"]);
+    }
+
+    #[test]
+    fn reads_date_name_as_an_attribute() {
+        let date_name = |value: &str| {
+            let facts = analyze(
+                &format!("class X(models.Model):\n    _name = 'x'\n    _date_name = {value}\n"),
+                None,
+            );
+            let class = &facts.classes[0];
+            assert!(class.methods.is_empty() && class.fields.is_empty());
+            class.attr("_date_name").map(|a| a.value.clone())
+        };
+        assert_eq!(
+            date_name("'planned_on'"),
+            Some(OptionValue::Str("planned_on".to_owned()))
+        );
+        assert_eq!(date_name("DATE_FIELD"), Some(OptionValue::Other));
     }
 
     #[test]

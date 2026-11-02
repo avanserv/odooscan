@@ -11,4 +11,10 @@
     </record>
 
     <function model="button.visit" name="action_from_enterprise"/>
+
+    <record id="action_visits" model="ir.actions.act_window">
+        <field name="name">action_visits</field>
+        <field name="res_model">button.visit</field>
+        <field name="view_mode">gantt</field>
+    </record>
 </odoo>

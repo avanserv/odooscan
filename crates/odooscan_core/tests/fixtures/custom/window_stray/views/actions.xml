@@ -1,0 +1,5 @@
+<odoo>
+    <record id="window_update.action_own" model="ir.actions.act_window">
+        <field name="view_mode">gantt</field>
+    </record>
+</odoo>

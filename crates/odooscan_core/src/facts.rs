@@ -174,7 +174,7 @@ pub struct ClassFact {
     pub plain_bases: bool,
     /// The value of `_table`, when the class sets it.
     pub table: Option<OptionValue>,
-    /// `_parent_store`, `_auto`, `_log_access` and `_register`, when the class sets them.
+    /// `_parent_store`, `_auto`, `_log_access`, `_register` and `_date_name`, when the class sets them.
     pub attrs: Vec<(String, Spanned<OptionValue>)>,
     /// Compute methods, at their name, with the fields of the class they compute and can leave
     /// unassigned on a record.
@@ -451,6 +451,35 @@ pub struct FunctionCall {
     pub method: Spanned<String>,
 }
 
+/// What one element writes to a field of a window action. A write that is no literal still replaces
+/// what an earlier one gave, so it differs from no write at all.
+#[derive(Debug, Default)]
+pub enum ActionValue {
+    #[default]
+    Unset,
+    Literal(Spanned<String>),
+    Opaque,
+}
+
+/// One write to a window action: a `<record>`, an `<act_window>`, or a row of its `view_ids` in a
+/// `<record>` of its own, whose `id` here is that of the action.
+#[derive(Debug, Default)]
+pub struct ActionFact {
+    pub id: Option<String>,
+    pub model: ActionValue,
+    pub view_mode: ActionValue,
+    /// The types it names a view for, through `view_ids` or a `<kind>_view_ref` context key.
+    pub view_kinds: Vec<String>,
+    /// It names a view without saying the type: a `view_id`, or `view_ids` that an `eval` hides.
+    pub view_of_any_kind: bool,
+}
+
+impl ActionFact {
+    pub fn names_view(&self, kind: &str) -> bool {
+        self.view_of_any_kind || self.view_kinds.iter().any(|k| k == kind)
+    }
+}
+
 /// Facts from an XML or CSV data file.
 #[derive(Debug, Default)]
 pub struct DataFacts {
@@ -464,6 +493,7 @@ pub struct DataFacts {
     pub records: Vec<RecordFact>,
     /// Domains and `group_by` fields of window actions, on their `res_model`.
     pub action_domains: Vec<DomainFact>,
+    pub actions: Vec<ActionFact>,
     pub access: Vec<AccessRow>,
     pub functions: Vec<FunctionCall>,
     pub diags: Vec<RawDiag>,

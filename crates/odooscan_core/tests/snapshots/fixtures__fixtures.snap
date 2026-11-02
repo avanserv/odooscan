@@ -224,6 +224,8 @@ custom/legacy14/models/res_partner.py:22:9: OD223 _compute_initials() can leave 
 custom/legacy14/models/res_partner.py:33:41: OD220 'stamped_on' has the label 'Create Date' of field 'create_date' of res.partner, so Odoo logs a warning and users cannot tell them apart; give it another string
 custom/legacy14/models/res_partner.py:35:41: OD220 'touched_on' has the label 'Last Modified on' of field '__last_update' of res.partner, so Odoo logs a warning and users cannot tell them apart; give it another string
 custom/legacy14/views/ledger_archive.xml:1:1: OD502 'views/ledger_archive.xml' is not in the manifest's init_xml, update_xml, data, demo_xml or demo, so Odoo never loads it
+custom/legacy14/views/ledger_reports.xml:19:71: OD201 no indexed module defines model 'legacy.ledgr'
+custom/legacy14/views/ledger_updates.xml:4:33: OD318 legacy.ledger has no gantt view, and nothing generates one
 custom/legacy14/views/ledger_views.xml:8:17: OD304 'x_opening_balance': legacy.ledger has no field 'x_opening_balance'
 custom/legacy14/views/ledger_views.xml:9:17: OD308 'action_ledger_report' is defined in views/ledger_reports.xml, which loads after this reference
 custom/legacy15/models/card.py:7:33: OD218 _inherits delegates to 'partner_id', which must be required with ondelete 'cascade' or 'restrict'; give it ondelete="cascade"
@@ -448,3 +450,21 @@ custom/view_modifiers/views/tickets.xml:10:47: OD316 invisible names 'true': mod
 custom/view_modifiers/views/tickets.xml:20:62: OD316 column_invisible names 'parent.stat': modifier.ticket has no field 'stat'
 custom/view_modifiers/views/tickets.xml:21:62: OD316 column_invisible names 'parent.state.x': Odoo refuses a composed field
 custom/view_modifiers/views/tickets.xml:23:54: OD316 readonly names 'state': modifier.line has no field 'state'
+custom/window_actions/views/actions.xml:4:33: OD201 no indexed module defines model 'sale.ordr'
+custom/window_actions/views/actions.xml:11:33: OD318 window.plain has no gantt view, and nothing generates one
+custom/window_actions/views/actions.xml:11:33: OD318 window.plain has no map view, and nothing generates one
+custom/window_actions/views/actions.xml:11:33: OD318 window.plain has no hierarchy view, and nothing generates one
+custom/window_actions/views/actions.xml:11:33: OD318 window.plain has no grid view, and nothing generates one
+custom/window_actions/views/actions.xml:17:33: OD318 window.plain has no calendar view, and no date field to generate one from
+custom/window_actions/views/actions.xml:23:33: OD318 window.dated has no calendar view, and no stop or duration field to generate one from
+custom/window_actions/views/unlisted.xml:1:1: OD502 'views/unlisted.xml' is not in the manifest's data or demo, so Odoo never loads it
+custom/window_hidden/views/actions.xml:4:33: OD202 model 'window.plain' comes from module window_actions; add it to depends
+custom/window_named/views/actions.xml:19:33: OD318 window.plain has no gantt view, and nothing generates one
+custom/window_named/views/actions.xml:32:33: OD318 window.plain has no map view, and nothing generates one
+custom/window_named/views/actions.xml:39:33: OD318 window.plain has no map view, and nothing generates one
+custom/window_named/views/actions.xml:58:33: OD318 window.plain has no gantt view, and nothing generates one
+custom/window_named/views/actions.xml:69:33: OD318 window.plain has no map view, and nothing generates one
+custom/window_named/views/actions.xml:89:33: OD318 window.plain has no map view, and nothing generates one
+custom/window_named/views/actions.xml:101:33: OD318 window.plain has no gantt view, and nothing generates one
+custom/window_update/views/a_last.xml:15:33: OD318 window.plain has no map view, and nothing generates one
+custom/window_update/views/updates.xml:3:33: OD318 window.plain has no gantt view, and nothing generates one
