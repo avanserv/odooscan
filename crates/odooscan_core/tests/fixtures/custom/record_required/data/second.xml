@@ -70,4 +70,22 @@
     <record id="twice_in_one_file" model="rr.note">
         <field name="name">Two</field>
     </record>
+    <template t-name="by_id_then_name">
+        <div>second</div>
+    </template>
+    <template id="by_name_then_id">
+        <div>second</div>
+    </template>
+    <template id="name_beside_id">
+        <div>second</div>
+    </template>
+    <template t-name="late_name">
+        <div>second</div>
+    </template>
+    <template t-name="name_in_one_file">
+        <div>one</div>
+    </template>
+    <template t-name="name_in_one_file">
+        <div>two</div>
+    </template>
 </odoo>

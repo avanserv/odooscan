@@ -6,4 +6,12 @@
     <template id="keyed" key="report_actions.alias">
         <div/>
     </template>
+
+    <template t-name="named_sheet">
+        <div/>
+    </template>
+
+    <template id="id_sheet" t-name="ignored_sheet">
+        <div/>
+    </template>
 </odoo>

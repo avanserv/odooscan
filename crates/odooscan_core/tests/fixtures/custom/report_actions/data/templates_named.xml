@@ -93,4 +93,22 @@
         <field name="model">res.partner</field>
         <field name="report_name">report_actions.absent_no_id</field>
     </record>
+
+    <record id="name_by_t_name" model="ir.actions.report">
+        <field name="name">name_by_t_name</field>
+        <field name="model">res.partner</field>
+        <field name="report_name">report_actions.named_sheet</field>
+    </record>
+
+    <record id="name_beside_id" model="ir.actions.report">
+        <field name="name">name_beside_id</field>
+        <field name="model">res.partner</field>
+        <field name="report_name">report_actions.ignored_sheet</field>
+    </record>
+
+    <record id="name_undotted_t_name" model="ir.actions.report">
+        <field name="name">name_undotted_t_name</field>
+        <field name="model">res.partner</field>
+        <field name="report_name">named_sheet</field>
+    </record>
 </odoo>
