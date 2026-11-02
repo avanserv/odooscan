@@ -328,7 +328,10 @@ fn hierarchy_and_label_rules_wait_for_their_series_but_not_for_an_unknown_one() 
     assert_eq!(codes(Series::parse("10.0")), [""; 0]);
     assert_eq!(codes(Series::parse("saas~11.1")), [""; 0]);
     assert_eq!(codes(Series::parse("saas~11.2")), ["OD220"]);
-    assert_eq!(codes(Series::parse("saas~11.3")), ["OD217", "OD220"]);
+    assert_eq!(
+        codes(Series::parse("saas~11.3")),
+        ["OD217", "OD220", "OD217", "OD217", "OD217"]
+    );
 }
 
 #[test]

@@ -4002,12 +4002,13 @@ impl<'m> Ctx<'_, 'm> {
     /// Odoo logs an error when it creates the table of a model with `_parent_store` and no indexed
     /// `parent_path` field. A model without a table of its own, or with a class that sets either
     /// attribute otherwise, is left alone, and one set in several classes of this module is reported
-    /// at the first.
+    /// at the first. Only series below `PARENT_PATH` ask for `parent_left`, so a module of unknown
+    /// series whose model holds that field is taken to be on one of them.
     fn parent_store(&self, out: &mut Out<'m>, path: &'m Path, class: &'m ClassFact) {
         let sets = |c: &ClassFact| c.attr("_parent_store").is_some();
         let Some(at) = class
             .attr("_parent_store")
-            .filter(|_| stores_parent_path(self.series))
+            .filter(|_| stores_parent_path(self.series) && !self.older_hierarchy(&class.model))
             .filter(|_| self.first_class(class, sets) && self.parent_store_table(&class.model))
         else {
             return;
@@ -4025,6 +4026,12 @@ impl<'m> Ctx<'_, 'm> {
             },
         };
         out.push(path, "OD217", at.pos, message);
+    }
+
+    /// Whether `model`, in a module of unknown series, holds the `parent_left` field of a hierarchy
+    /// from before `PARENT_PATH`. A module outside `depends` does not count, as for `parent_path`.
+    fn older_hierarchy(&self, model: &str) -> bool {
+        self.series.is_none() && self.index.field(model, "parent_left", self.scope).is_ok()
     }
 
     /// Whether every class of `model` in scope leaves it a table with `_parent_store`: it has a
