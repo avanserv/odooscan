@@ -254,6 +254,29 @@ mod tests {
     }
 
     #[test]
+    fn a_spec_locates_a_call_and_its_content_calls() {
+        let facts = analyze(
+            r#"<templates>
+    <t t-inherit="x.A" t-inherit-mode="extension">
+        <t t-call="x.Old" position="replace"><t t-call="x.New" position="'top'"/></t>
+        <t t-call="x.Bare"/>
+    </t>
+    <t t-name="x.Plain"><t t-call="x.Kept" position="'top'"/></t>
+</templates>"#,
+        );
+        let calls = |t: &OwlTemplate| t.arch.calls.iter().map(|c| c.value.clone()).collect::<Vec<_>>();
+        assert_eq!(calls(&facts.templates[0]), ["x.New"]);
+        assert_eq!(calls(&facts.templates[1]), ["x.Kept"]);
+        let locators: Vec<_> = facts.templates[0]
+            .arch
+            .locators
+            .iter()
+            .map(|l| show(&l.value))
+            .collect();
+        assert_eq!(locators, ["t[t-call=x.Old]", "t[t-call=x.Bare]"]);
+    }
+
+    #[test]
     fn reads_a_file_that_is_one_template() {
         let facts = analyze(r#"<t t-name="x.Single"><span class="o_s"/></t>"#);
         assert_eq!(facts.templates.len(), 1);

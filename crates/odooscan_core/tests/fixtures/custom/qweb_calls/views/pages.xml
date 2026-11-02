@@ -137,4 +137,104 @@
     <template id="unread_key">
         <t t-call="qweb_calls.other_page"/>
     </template>
+
+    <template id="stale_call" inherit_id="home">
+        <t t-call="web.layot_stale" position="replace">
+            <t t-call="web.layot_replacement"/>
+        </t>
+    </template>
+
+    <template id="stale_call_xpath" inherit_id="home">
+        <xpath expr="//t[@t-call='web.layot_stale_xpath']" position="inside">
+            <span/>
+        </xpath>
+    </template>
+
+    <template id="moved_call" inherit_id="home">
+        <xpath expr="//t" position="inside">
+            <t t-call="web.layot_moved" position="move"/>
+        </xpath>
+    </template>
+
+    <record id="stale_call_record" model="ir.ui.view">
+        <field name="name">stale.call.record</field>
+        <field name="arch" type="xml">
+            <data>
+                <t t-call="web.layot_stale_record" position="replace"/>
+            </data>
+        </field>
+        <field name="inherit_id" ref="home"/>
+    </record>
+
+    <template id="positioned_content" inherit_id="home">
+        <xpath expr="//t" position="inside">
+            <t t-call="web.layot_positioned" position="'top'"/>
+        </xpath>
+    </template>
+
+    <template id="positioned_call">
+        <t t-call="web.layot_positioned_plain" position="'top'"/>
+    </template>
+
+    <!-- home calls web.layot itself, so these locate it, and read as calls they would report. -->
+    <template id="located_call" inherit_id="home">
+        <t t-call="web.layot" position="attributes">
+            <attribute name="t-call">web.layot_set</attribute>
+        </t>
+    </template>
+
+    <template id="located_call_bare" inherit_id="home">
+        <t t-call="web.layot"/>
+    </template>
+
+    <template id="root_call" t-call="web.layout"/>
+
+    <template id="root_call_located" inherit_id="root_call">
+        <t t-call="web.layout" position="inside">
+            <span/>
+        </t>
+    </template>
+
+    <!-- Each record has no parent, so its root is an element the template after it finds. -->
+    <record id="no_parent_eval" model="ir.ui.view">
+        <field name="name">no.parent.eval</field>
+        <field name="inherit_id" eval="False"/>
+        <field name="arch" type="xml">
+            <t t-call="web.layout"/>
+        </field>
+    </record>
+
+    <template id="no_parent_eval_located" inherit_id="no_parent_eval">
+        <t t-call="web.layout" position="inside">
+            <span/>
+        </t>
+    </template>
+
+    <record id="no_parent_ref" model="ir.ui.view">
+        <field name="name">no.parent.ref</field>
+        <field name="inherit_id" ref=""/>
+        <field name="arch" type="xml">
+            <t t-call="web.layout"/>
+        </field>
+    </record>
+
+    <template id="no_parent_ref_located" inherit_id="no_parent_ref">
+        <t t-call="web.layout" position="inside">
+            <span/>
+        </t>
+    </template>
+
+    <record id="no_parent_bare" model="ir.ui.view">
+        <field name="name">no.parent.bare</field>
+        <field name="inherit_id"/>
+        <field name="arch" type="xml">
+            <t t-call="web.layout"/>
+        </field>
+    </record>
+
+    <template id="no_parent_bare_located" inherit_id="no_parent_bare">
+        <t t-call="web.layout" position="inside">
+            <span/>
+        </t>
+    </template>
 </odoo>

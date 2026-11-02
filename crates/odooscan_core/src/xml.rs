@@ -42,11 +42,11 @@ static XPATH_AMBIGUOUS: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(^|/)(li
 pub const UNKNOWN_CONTEXT: &str = "?";
 /// Prefix of a path segment naming a `<field position="...">` locator rather than a subview.
 pub const LOCATOR: char = '~';
-/// An xpath step that names its element, as in `field[@name='x']` or `div[@id="x"]`.
+/// An xpath step that names its element, as in `field[@name='x']` or `t[@t-call="x"]`.
 static XPATH_NAMED_STEP: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r#"([A-Za-z][\w-]*)\[@(name|id)=['"]([^'"]+)['"]\]"#).unwrap());
+    LazyLock::new(|| Regex::new(r#"([A-Za-z][\w-]*)\[@(name|id|t-call)=['"]([^'"]+)['"]\]"#).unwrap());
 /// Attributes by which a spec names the element it locates.
-const LOCATING_ATTRS: [&str; 2] = ["name", "id"];
+const LOCATING_ATTRS: [&str; 3] = ["name", "id", "t-call"];
 static ACTION_REF: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"%\(([\w.]+)\)d").unwrap());
 
 /// Attributes that make the value of a `<field>` something other than its `eval` or its text.
@@ -281,6 +281,14 @@ impl Walker<'_> {
         let extends = node.attribute("inherit_id").is_some_and(|p| !p.is_empty());
         let body = node.descendants().skip(usize::from(extends));
         view.calls.extend(body.filter_map(|n| t_call(n, self.lines)));
+        // That root is a `<t>` in the arch, and a spec can locate it by its call.
+        if let Some(value) = node.attribute("t-call").filter(|_| !extends) {
+            view.elements.push(ArchElement {
+                tag: "t".to_owned(),
+                attr: "t-call".to_owned(),
+                value: value.to_owned(),
+            });
+        }
         for n in node.descendants().skip(1).filter(Node::is_element) {
             let pos = self.pos(n);
             arch_element(n, pos, &mut view);
@@ -614,7 +622,7 @@ impl Walker<'_> {
                     pos,
                 });
             }
-            "inherit_id" => view.inherit = field.attribute("ref").map(str::to_owned),
+            "inherit_id" => view.inherit = field.attribute("ref").filter(|r| !r.is_empty()).map(str::to_owned),
             // A `type` wins over the arch's root wherever the record sets it.
             "type" => view.kind = field.text().map(|t| t.trim().to_owned()),
             "arch" | "arch_db" => {
@@ -1072,12 +1080,12 @@ fn arch_element(node: Node, pos: Pos, view: &mut ViewFact) {
             .extend(xpath_locators(node.attribute("expr").unwrap_or_default(), pos)),
         // An attribute spec can rename the element it locates; any other attribute it sets is no element.
         "attribute" => view.elements.extend(renamed(node)),
-        _ if node.has_attribute("position") => view.locators.extend(named.take(1).map(|value| Spanned { value, pos })),
+        _ if locates(node) => view.locators.extend(named.take(1).map(|value| Spanned { value, pos })),
         _ => view.elements.extend(named),
     }
 }
 
-/// The element an `<attribute name="name">` spec gives a new name to.
+/// The element an `<attribute>` spec gives a new value of an attribute that locates it.
 fn renamed(node: Node) -> Option<ArchElement> {
     let attr = LOCATING_ATTRS.into_iter().find(|a| node.attribute("name") == Some(a))?;
     Some(ArchElement {
@@ -1087,14 +1095,55 @@ fn renamed(node: Node) -> Option<ArchElement> {
     })
 }
 
-/// The template a node calls by a literal name: its `t-call` at the value, or the text of an
-/// `<attribute name="t-call">` spec. An empty, numeric, formatted or path target names no template
-/// a scan can look up: Odoo reads digits as a view id, and `{{ }}` and `#{}` only at render time.
+/// Whether Odoo looks `node` up in the parent view rather than adding it: a spec, or the child of a
+/// spec that `position="move"` takes from elsewhere in that view.
+fn locates(node: Node) -> bool {
+    spec(node) || node.attribute("position") == Some("move") && node.parent_element().is_some_and(spec)
+}
+
+/// Whether `node` is a spec of an inheriting view, which only its place tells: a spec needs no
+/// `position`, and `position` elsewhere is a parameter of a `t-call` from 19.0 on. `<data>` lends
+/// its children to the inheritance and locates nothing itself.
+fn spec(node: Node) -> bool {
+    let owner = node.ancestors().skip(1).find(|a| !a.has_tag_name("data"));
+    !node.has_tag_name("data") && owner.is_some_and(inheriting_root)
+}
+
+/// Whether the children of `node` are specs. A record may write `inherit_id` after its arch, and
+/// writing it does not give the record a parent.
+fn inheriting_root(node: Node) -> bool {
+    let record_arch = || {
+        node.has_tag_name("field")
+            && matches!(node.attribute("name"), Some("arch" | "arch_db"))
+            && node
+                .parent_element()
+                .is_some_and(|r| r.has_tag_name("record") && field_of(r, "inherit_id").is_some_and(gives_parent))
+    };
+    node.has_attribute("t-inherit") || node.attribute("inherit_id").is_some_and(|p| !p.is_empty()) || record_arch()
+}
+
+/// Whether an `inherit_id` field holds a parent, read in the order of `written`. An `eval` only a
+/// run can tell counts, as the arch of such a record is written to extend.
+fn gives_parent(field: Node) -> bool {
+    let set = |attr: &str| field.attribute(attr).filter(|v| !v.is_empty());
+    if set("search").is_some() || set("ref").is_some() {
+        return true;
+    }
+    match set("eval") {
+        Some(eval) => !record_eval::is_false(eval),
+        None => field.text().is_some_and(|t| !t.trim().is_empty()),
+    }
+}
+
+/// The template a node calls by a literal name: its `t-call` at the value, unless that locates a
+/// call of the parent view, or the text of an `<attribute name="t-call">` spec. An empty, numeric,
+/// formatted or path target names no template a scan can look up: Odoo reads digits as a view id,
+/// and `{{ }}` and `#{}` only at render time.
 pub fn t_call(node: Node, lines: &Lines) -> Option<Spanned<String>> {
-    let target = if node.has_attribute("t-call") {
-        attr_value(node, "t-call", lines)?
-    } else if node.has_tag_name("attribute") && node.attribute("name") == Some("t-call") {
+    let target = if node.has_tag_name("attribute") && node.attribute("name") == Some("t-call") {
         spec_text(node, lines)?
+    } else if node.has_attribute("t-call") && !locates(node) {
+        attr_value(node, "t-call", lines)?
     } else {
         return None;
     };
@@ -1394,6 +1443,148 @@ mod tests {
         assert_eq!(calls(r#"<attribute name="t-call"> </attribute>"#), []);
     }
 
+    fn view(data: &str) -> ViewFact {
+        analyze(&format!("<odoo>{data}</odoo>")).views.swap_remove(0)
+    }
+
+    fn call_names(view: &ViewFact) -> Vec<&str> {
+        view.calls.iter().map(|c| c.value.as_str()).collect()
+    }
+
+    fn located_values(view: &ViewFact) -> Vec<String> {
+        let shown = |l: &Spanned<ArchElement>| format!("{}[{}={}]", l.value.tag, l.value.attr, l.value.value);
+        view.locators.iter().map(shown).collect()
+    }
+
+    fn extension(arch: &str) -> ViewFact {
+        view(&format!(r#"<template id="x" inherit_id="y">{arch}</template>"#))
+    }
+
+    #[test]
+    fn a_spec_locates_a_call_and_its_content_calls() {
+        let spec = extension(r#"<t t-call="a.old" position="replace"><t t-call="a.new" position="'top'"/></t>"#);
+        assert_eq!(call_names(&spec), ["a.new"]);
+        assert_eq!(located_values(&spec), ["t[t-call=a.old]"]);
+    }
+
+    #[test]
+    fn a_spec_needs_no_position() {
+        let spec = extension(r#"<t t-call="a.old"/><div name="b"/>"#);
+        assert_eq!(call_names(&spec), [""; 0]);
+        assert_eq!(located_values(&spec), ["t[t-call=a.old]", "div[name=b]"]);
+    }
+
+    #[test]
+    fn an_attribute_of_a_spec_on_a_call_still_calls() {
+        let spec =
+            extension(r#"<t t-call="a.old" position="attributes"><attribute name="t-call">a.new</attribute></t>"#);
+        assert_eq!(call_names(&spec), ["a.new"]);
+        assert!(spec.elements.iter().any(|e| e.attr == "t-call" && e.value == "a.new"));
+        let unwrapped = extension(r#"<attribute name="t-call">a.new</attribute>"#);
+        assert_eq!(call_names(&unwrapped), ["a.new"]);
+    }
+
+    #[test]
+    fn a_moved_call_locates_and_a_deeper_one_is_content() {
+        let moved = r#"<xpath expr="//a" position="after"><t t-call="a.moved" position="move"/></xpath>"#;
+        let spec = extension(moved);
+        assert_eq!(call_names(&spec), [""; 0]);
+        assert_eq!(located_values(&spec), ["t[t-call=a.moved]"]);
+        let deeper = r#"<xpath expr="//a"><div><t t-call="a.kept" position="move"/></div></xpath>"#;
+        assert_eq!(call_names(&extension(deeper)), ["a.kept"]);
+    }
+
+    #[test]
+    fn a_position_in_a_plain_template_is_a_parameter() {
+        let plain = view(r#"<template id="x"><t t-call="a.b" position="'top'"/></template>"#);
+        assert_eq!(call_names(&plain), ["a.b"]);
+        assert!(plain.locators.is_empty());
+        let unset = view(r#"<template id="x" inherit_id=""><t t-call="a.b"/></template>"#);
+        assert_eq!(call_names(&unset), ["a.b"]);
+    }
+
+    #[test]
+    fn a_data_wrapper_lends_its_children_whatever_the_order_of_the_fields() {
+        for field in ["arch", "arch_db"] {
+            let arch = format!(
+                r#"<field name="{field}" type="xml"><data><data><t t-call="a.old" position="replace"/></data></data></field>"#
+            );
+            let spec = view(&format!(
+                r#"<record id="x" model="ir.ui.view">{arch}<field name="inherit_id" ref="y"/></record>"#
+            ));
+            assert_eq!(call_names(&spec), [""; 0]);
+            assert_eq!(located_values(&spec), ["t[t-call=a.old]"]);
+        }
+    }
+
+    #[test]
+    fn the_root_of_an_extending_arch_is_a_spec() {
+        let spec = view(
+            r#"<record id="x" model="ir.ui.view"><field name="inherit_id" ref="y"/><field name="arch" type="xml"><t t-call="a.old"/></field></record>"#,
+        );
+        assert_eq!(call_names(&spec), [""; 0]);
+        assert_eq!(located_values(&spec), ["t[t-call=a.old]"]);
+    }
+
+    #[test]
+    fn a_record_without_a_parent_holds_no_specs() {
+        for unset in [r#"eval="False""#, r#"eval="None""#, r#"ref="""#, ""] {
+            let inherit = format!(r#"<field name="inherit_id" {unset}/>"#);
+            let arch = r#"<field name="arch" type="xml"><t t-call="a.b"/></field>"#;
+            for fields in [format!("{inherit}{arch}"), format!("{arch}{inherit}")] {
+                let root = view(&format!(r#"<record id="x" model="ir.ui.view">{fields}</record>"#));
+                assert_eq!(call_names(&root), ["a.b"]);
+                assert!(root.locators.is_empty());
+                assert!(root.elements.iter().any(|e| e.attr == "t-call" && e.value == "a.b"));
+                assert_eq!(root.inherit, None);
+            }
+        }
+    }
+
+    #[test]
+    fn a_record_with_a_parent_holds_specs_however_it_writes_it() {
+        for inherit in [
+            r#"<field name="inherit_id" eval="ref('y')"/>"#,
+            r#"<field name="inherit_id" ref="" eval="ref('y')"/>"#,
+            r#"<field name="inherit_id" model="ir.ui.view" search="[('key', '=', 'y')]"/>"#,
+            r#"<field name="inherit_id">12</field>"#,
+        ] {
+            let spec = view(&format!(
+                r#"<record id="x" model="ir.ui.view">{inherit}<field name="arch" type="xml"><t t-call="a.old"/></field></record>"#
+            ));
+            assert_eq!(call_names(&spec), [""; 0]);
+            assert_eq!(located_values(&spec), ["t[t-call=a.old]"]);
+        }
+    }
+
+    #[test]
+    fn a_field_of_a_view_named_arch_holds_no_specs() {
+        let form = view(
+            r#"<record id="x" model="ir.ui.view"><field name="arch" type="xml"><form><field name="inherit_id"/><field name="arch"><t t-call="a.b"/></field></form></field></record>"#,
+        );
+        assert_eq!(call_names(&form), ["a.b"]);
+    }
+
+    #[test]
+    fn an_xpath_step_locates_a_call() {
+        let spec = extension(r#"<xpath expr="//t[@t-call='a.old']/div[@id='b']" position="inside"/>"#);
+        assert_eq!(located_values(&spec), ["t[t-call=a.old]", "div[id=b]"]);
+    }
+
+    #[test]
+    fn a_spec_can_locate_the_call_of_a_template_root() {
+        let found = |attrs: &str| {
+            let facts = view(&format!(r#"<template id="x" {attrs} t-call="a.b"/>"#));
+            facts
+                .elements
+                .iter()
+                .any(|e| (e.tag.as_str(), e.attr.as_str(), e.value.as_str()) == ("t", "t-call", "a.b"))
+        };
+        assert!(found(""));
+        assert!(found(r#"inherit_id="""#));
+        assert!(!found(r#"inherit_id="y""#));
+    }
+
     #[test]
     fn a_template_root_calls_too() {
         let facts = analyze(r#"<odoo><template id="x" t-call="a.b"/></odoo>"#);
@@ -1404,7 +1595,7 @@ mod tests {
     fn an_extending_template_root_calls_nothing() {
         let calls = |attrs: &str| {
             let facts = analyze(&format!(
-                r#"<odoo><template id="x" {attrs} t-call="a.root"><t t-call="a.inner"/></template></odoo>"#
+                r#"<odoo><template id="x" {attrs} t-call="a.root"><xpath expr="//a"><t t-call="a.inner"/></xpath></template></odoo>"#
             ));
             facts.views[0].calls.iter().map(|c| c.value.clone()).collect::<Vec<_>>()
         };

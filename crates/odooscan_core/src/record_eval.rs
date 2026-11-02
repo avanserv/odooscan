@@ -1,5 +1,6 @@
 //! What an `eval` writes, as far as it reads without a run: `ref()`, x2many commands, a string.
 
+use ruff_python_ast::helpers::Truthiness;
 use ruff_python_ast::{self as ast, Expr};
 use ruff_python_parser::parse_expression;
 
@@ -23,6 +24,12 @@ pub fn written(eval: &Spanned<String>) -> WrittenValue {
         Expr::List(list) => commands(&list.elts).map_or(WrittenValue::Opaque, ids),
         expr => ref_id(expr).map_or(WrittenValue::Opaque, |id| ids(vec![id])),
     }
+}
+
+/// Whether an `eval` is a literal that tests false, which writes no value to a many2one. A name or a
+/// call only a run can tell is not one.
+pub fn is_false(eval: &str) -> bool {
+    parse_expression(eval.trim()).is_ok_and(|p| Truthiness::from_expr(p.expr(), |_| false).into_bool() == Some(false))
 }
 
 /// Whether an `eval` is a list of x2many commands that all keep the other rows of the field.
@@ -273,6 +280,16 @@ mod tests {
             "ref(",
         ] {
             assert_eq!(read(eval), None, "{eval}");
+        }
+    }
+
+    #[test]
+    fn a_false_literal_is_told_from_what_only_a_run_tells() {
+        for eval in ["False", " None ", "0", "''", "[]"] {
+            assert!(is_false(eval), "{eval}");
+        }
+        for eval in ["True", "1", "'a'", "ref('a')", "x", "bool(0)", "ref("] {
+            assert!(!is_false(eval), "{eval}");
         }
     }
 }
