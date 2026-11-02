@@ -97,6 +97,10 @@ const TRANSIENT_ACCESS: Series = Series { major: 13, minor: 2 };
 /// model alone (`:714` on 20.0), so this says nothing of a child linked after its creation.
 const CHILD_ACTION_MODEL: Series = Series { major: 18, minor: 2 };
 
+/// The first series whose `Registry` has no `__call__` (`e6f99537f3aa`; saas~18.4 keeps it at
+/// `odoo/orm/registry.py:311`), so calling `model.pool` fails.
+const REGISTRY_UNCALLABLE: Series = Series { major: 19, minor: 0 };
+
 /// The first series without `ir.model.access`: `odoo/addons/base/__manifest__.py:81` loads
 /// `ir.access.csv` where saas~19.3 loads `ir.model.access.csv` (`:78`). The loader calls `env[model]`
 /// on the model of the file name (`odoo/tools/convert.py:776` on saas~19.4), so loading an
@@ -235,6 +239,14 @@ fn ignores_access(kind: Option<ModelKind>, series: Option<Series>) -> bool {
 /// Whether a module of `series` can load a row of `ir.model.access`: an unknown series may.
 fn reads_model_access(series: Option<Series>) -> bool {
     series.is_none_or(|s| s < IR_ACCESS)
+}
+
+/// Whether a model's `name` holds a callable object in `series`, so calling it needs no method: an
+/// `Environment` on every series, and a `Registry` before `REGISTRY_UNCALLABLE`, which an unknown
+/// series may be. Only code running on records needs this: no series lets a button call them, and
+/// a `<function>` that can, from saas~18.1, gains nothing by it, so `method_gap` still reports both.
+fn callable_attr(name: &str, series: Option<Series>) -> bool {
+    name == "env" || (name == "pool" && series.is_none_or(|s| s < REGISTRY_UNCALLABLE))
 }
 
 /// What OD402 says of a row, if it writes for public or portal users.
@@ -1891,7 +1903,8 @@ impl<'m> Ctx<'_, 'm> {
         let Some(model) = self.server_model(writes, &mut id.into_iter().collect()) else {
             return;
         };
-        for call in &server.calls {
+        let calls = server.calls.iter().filter(|c| !callable_attr(&c.value, self.series));
+        for call in calls {
             if let Some(message) = self.method_gap(model, &call.value) {
                 out.push(path, "OD320", call.pos, message);
             }
@@ -4795,8 +4808,8 @@ mod tests {
     use rustc_hash::FxHashSet;
 
     use super::{
-        MagicEra, applies, cache_global, csv_label, derived_label, has_last_update, magic_era, reads_model_access,
-        shadowed_member, tuple_checked, tuple_listed,
+        MagicEra, applies, cache_global, callable_attr, csv_label, derived_label, has_last_update, magic_era,
+        reads_model_access, shadowed_member, tuple_checked, tuple_listed,
     };
     use crate::facts::DefinitionSource;
     use crate::series::Series;
@@ -4920,5 +4933,16 @@ mod tests {
             Some("attribute _table_query")
         );
         assert_eq!(shadowed_member("copy", eighteen).as_deref(), Some("method copy()"));
+    }
+
+    #[test]
+    fn calls_env_on_every_series_and_pool_while_the_registry_is_callable() {
+        let callable = |name: &str, series: &str| callable_attr(name, Series::parse(series));
+        assert!(callable_attr("env", None) && callable_attr("pool", None));
+        assert!(callable("env", "9.0") && callable("env", "10.0") && callable("env", "20.0"));
+        assert!(callable("pool", "9.0") && callable("pool", "10.0") && callable("pool", "saas~18.4"));
+        assert!(!callable("pool", "19.0") && !callable("pool", "saas~19.1") && !callable("pool", "20.0"));
+        assert!(!callable_attr("ids", None) && !callable_attr("_cr", None));
+        assert!(!callable("ids", "18.0") && !callable("_cr", "18.0"));
     }
 }

@@ -116,6 +116,16 @@
         </field>
     </record>
 
+    <record id="order_callable_attrs" model="ir.ui.view">
+        <field name="name">button.order.callable.attrs</field>
+        <field name="model">button.order</field>
+        <field name="arch" type="xml">
+            <form>
+                <button type="object" name="env"/>
+            </form>
+        </field>
+    </record>
+
     <template id="order_snippet">
         <button type="object" name="action_nothing"/>
     </template>

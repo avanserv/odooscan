@@ -6,4 +6,5 @@
     <function model="res.partner" name="action_follow"/>
     <function model="button.nowhere" name="action_nothing"/>
     <function model="mail.thread" name="action_nothing"/>
+    <function model="button.order" name="pool" eval="[[]]"/>
 </odoo>
