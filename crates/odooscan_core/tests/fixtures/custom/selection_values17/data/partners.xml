@@ -1,0 +1,11 @@
+<odoo>
+    <record id="partner_unlisted" model="res.partner">
+        <field name="name">Unlisted</field>
+        <field name="sv17_mode">zz</field>
+    </record>
+
+    <record id="partner_listed" model="res.partner">
+        <field name="name">Listed</field>
+        <field name="sv17_mode">draft</field>
+    </record>
+</odoo>

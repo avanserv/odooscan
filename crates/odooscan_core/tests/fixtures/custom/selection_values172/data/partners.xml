@@ -1,0 +1,6 @@
+<odoo>
+    <record id="partner_tuple" model="res.partner">
+        <field name="name">Tuple</field>
+        <field name="sv172_mode">zz</field>
+    </record>
+</odoo>

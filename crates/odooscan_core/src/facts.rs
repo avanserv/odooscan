@@ -82,7 +82,7 @@ pub enum OptionValue {
     Bool(bool),
     /// A list of strings, or of tuples whose first item is a string, as selection values.
     Strs(Vec<String>),
-    /// A tuple of the same, which Odoo before 19.0 does not take as a `selection` list, so a
+    /// A tuple of the same, which Odoo before saas~18.1 does not take as a `selection` list, so a
     /// `selection_add` next to it fails.
     Tuple(Vec<String>),
     /// A dict with string keys; a value other than a string literal is none.
