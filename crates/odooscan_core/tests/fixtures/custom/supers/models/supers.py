@@ -72,3 +72,14 @@ class SuperChild(models.Model):
 
     def _stamp(self):
         return super()._stamp()
+
+
+class SuperNested(models.Model):
+    _inherit = "bad.super"
+
+    def _nest(self):
+        class Proxy(dict):
+            def _nested_gone(self):
+                return super()._nested_gone()
+
+        return Proxy, super()._own_gone()
