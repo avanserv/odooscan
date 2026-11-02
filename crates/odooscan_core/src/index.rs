@@ -194,9 +194,9 @@ pub(crate) const BASE_MODEL_METHODS: &[&str] = &[
 ];
 
 /// The other methods of `BaseModel` in 12.0 to 20.0, by `def` or class-level alias, read off each
-/// series: a button or a `<function>` may name any. Dunders stay out, as does any other `__` name,
-/// which is mangled, so `getattr` never finds it. Apart from `BASE_MODEL_METHODS`, which OD116 reads
-/// as the members a field must not replace in every series.
+/// series: a button, a `<function>` or a `super()` call may name any. Dunders stay out, as does any
+/// other `__` name, which is mangled, so `getattr` never finds it. Apart from `BASE_MODEL_METHODS`,
+/// which OD116 reads as the members a field must not replace in every series.
 const BASE_MODEL_EXTRA: &[&str] = &[
     "_add_fake_fields",
     "_add_field",
@@ -1882,6 +1882,7 @@ impl<'m> Index<'m> {
     /// that module.
     pub fn has_parent_method(&self, model: &str, method: &str, except: &ClassFact) -> bool {
         BASE_MODEL_METHODS.contains(&method)
+            || BASE_MODEL_EXTRA.contains(&method)
             || self
                 .chain_classes(model)
                 .iter()
