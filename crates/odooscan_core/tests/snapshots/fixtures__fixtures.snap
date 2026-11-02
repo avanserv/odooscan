@@ -12,6 +12,10 @@ custom/access_rows/security/ir.model.access.csv:2:1: OD402 no group limits this 
 custom/access_rows/security/ir.model.access.csv:3:1: OD402 no group limits this row, so every user, public and portal included, gets write, create or unlink on model_access_desk; name a group
 custom/access_rows/security/ir.model.access.csv:4:1: OD402 no group limits this row, so every user, public and portal included, gets write, create or unlink on model_access_desk; name a group
 custom/auto_scope_main/demo/rules.xml:11:36: OD210 'next_stamp': field 'next_stamp' of auto.scope.thing comes from module auto_scope_next, which is not in depends
+custom/auto_scope_main/pages.xml:6:20: OD311 template 'auto_scope_wide.page' comes from module auto_scope_wide, which is not in depends
+custom/auto_scope_main/pages.xml:7:20: OD311 template 'auto_scope_far.page' comes from module auto_scope_far, which is not in depends
+custom/auto_scope_main/pages.xml:8:20: OD311 template 'auto_scope_country.page' comes from module auto_scope_country, which is not in depends
+custom/auto_scope_main/pages.xml:20:35: OD311 template 'auto_scope_wide.page' comes from module auto_scope_wide, which is not in depends
 custom/auto_scope_main/thing.py:9:61: OD210 'next_stamp': field 'next_stamp' of auto.scope.thing comes from module auto_scope_next, which is not in depends
 custom/auto_scope_main/thing.py:19:23: OD210 'far_stamp': field 'far_stamp' of auto.scope.thing comes from module auto_scope_far, which is not in depends
 custom/auto_scope_main/thing.py:20:23: OD210 'country_stamp': field 'country_stamp' of auto.scope.thing comes from module auto_scope_country, which is not in depends

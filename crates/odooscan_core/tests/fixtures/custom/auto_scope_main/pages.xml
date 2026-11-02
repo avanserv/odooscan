@@ -1,0 +1,22 @@
+<odoo>
+    <template id="sheet">
+        <t t-call="auto_scope_both.page"/>
+        <t t-call="auto_scope_next.page"/>
+        <t t-call="auto_scope_country_old.page"/>
+        <t t-call="auto_scope_wide.page"/>
+        <t t-call="auto_scope_far.page"/>
+        <t t-call="auto_scope_country.page"/>
+    </template>
+
+    <record id="report_both" model="ir.actions.report">
+        <field name="name">Both</field>
+        <field name="model">auto.scope.thing</field>
+        <field name="report_name">auto_scope_both.page</field>
+    </record>
+
+    <record id="report_wide" model="ir.actions.report">
+        <field name="name">Wide</field>
+        <field name="model">auto.scope.thing</field>
+        <field name="report_name">auto_scope_wide.page</field>
+    </record>
+</odoo>

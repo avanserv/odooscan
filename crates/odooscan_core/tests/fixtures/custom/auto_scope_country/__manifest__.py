@@ -4,4 +4,5 @@
     "depends": ["auto_scope_left"],
     "auto_install": True,
     "countries": ["be"],
+    "data": ["pages.xml"],
 }

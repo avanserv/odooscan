@@ -2913,14 +2913,15 @@ impl<'m> Ctx<'_, 'm> {
         }
     }
 
-    /// OD311 on `name`, the target of a server render, unless a view in scope answers to it.
+    /// OD311 on `name`, the target of a server render, unless a view answers to it once the install
+    /// is done: Odoo resolves the target at render, so a view of an auto-installed module counts.
     fn qweb_call(&self, out: &mut Out<'m>, path: &'m Path, name: &Spanned<String>) {
         // A module outside the index, such as an Enterprise one, may define the target.
         let owner = name.value.split_once('.').map(|(m, _)| m);
         if self.partial && !owner.is_some_and(|m| self.index.by_name.contains_key(m)) {
             return;
         }
-        let message = match self.index.qweb_status(&name.value, self.scope) {
+        let message = match self.index.qweb_status(&name.value, self.installs) {
             Status::Visible => return,
             Status::Hidden(_) if self.may_load_template(&name.value) => return,
             Status::Hidden(m) => format!(
