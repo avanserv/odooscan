@@ -1,0 +1,50 @@
+<odoo>
+    <record id="note_ledgers" model="ir.ui.view">
+        <field name="name">encoded.note.ledgers</field>
+        <field name="model">encoded.note</field>
+        <field name="arch" type="xml">
+            <form>
+                <field name="ledger_ids">
+                    <list>
+                        <field name="code"/>
+                    </list>
+                </field>
+            </form>
+        </field>
+    </record>
+    <record id="note_ledgers_buttons" model="ir.ui.view">
+        <field name="name">encoded.note.ledgers.buttons</field>
+        <field name="model">encoded.note</field>
+        <field name="inherit_id" ref="note_ledgers"/>
+        <field name="arch" type="xml">
+            <field name="ledger_ids" position="inside">
+                <list>
+                    <button type="object" name="action_nope"/>
+                    <button type="object" name="_nope"/>
+                </list>
+            </field>
+        </field>
+    </record>
+    <record id="note_action" model="ir.actions.act_window">
+        <field name="name">Notes</field>
+        <field name="res_model">encoded.note</field>
+        <field name="view_mode">activity,pivot,gantt</field>
+    </record>
+    <record id="note_rule" model="ir.rule">
+        <field name="model_id" ref="model_encoded_note"/>
+        <field name="domain_force">[('no_note_rule', '=', 1)]</field>
+    </record>
+    <record id="lost_model_form" model="ir.ui.view">
+        <field name="name">x_lost_model.form</field>
+        <field name="model">x_lost_model</field>
+        <field name="arch" type="xml">
+            <form>
+                <field name="x_name"/>
+            </form>
+        </field>
+    </record>
+    <record id="lost_model_action" model="ir.actions.act_window">
+        <field name="name">Lost model</field>
+        <field name="res_model">x_lost_model</field>
+    </record>
+</odoo>

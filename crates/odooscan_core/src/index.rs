@@ -1812,10 +1812,11 @@ impl<'m> Index<'m> {
             .any(|d| !self.by_name.contains_key(d.value.as_str()))
     }
 
-    /// Whether a module in `scope` loads a data file the scan cannot read.
+    /// Whether a module whose records have loaded when the reader of `scope` runs loads a data file
+    /// the scan cannot read.
     pub fn lost_scope(&self, scope: &Scope) -> bool {
         let mut modules = self.modules.iter().enumerate();
-        modules.any(|(mi, m)| scope.sees(mi) && m.lost_data())
+        modules.any(|(mi, m)| scope.records[mi] && m.lost_data())
     }
 
     /// Whether `module`, or a module with it in its scope, loads a data file the scan cannot read that

@@ -278,10 +278,15 @@ custom/encoded_csv10/data/res.country.csv:1:1: OD309 res.country has no field 'n
 custom/encoded_csv9/data/refs.xml:8:9: OD301 module encoded_csv9 defines no XML id 'encoded_csv9.country_gone'
 custom/encoded_csv9/data/res.country.csv:1:1: OD309 res.country has no field 'no_such_field'
 custom/encoded_csv9/data/stray.csv:1:1: OD502 'data/stray.csv' is not in the manifest's init_xml, update_xml, data, demo_xml or demo, so Odoo never loads it
-custom/encoded_lost_code/models/ledger.py:7:15: OD212 Monetary field 'balance' has no currency: encoded.ledger has no currency_id, and the field names no currency_field
-custom/encoded_lost_code/models/ledger.py:10:24: OD211 no parent class of encoded.ledger defines 'action_settle', so this super() call fails
-custom/encoded_lost_code/models/ledger.py:13:39: OD224 t.no_such_column: encoded_ledger has no such column, since encoded.ledger has no field no_such_column; name the column of a stored field of encoded.ledger
-custom/encoded_lost_code/models/ledger.py:24:30: OD210 'no_note_search': encoded.note has no field 'no_note_search'
+custom/encoded_lost/data/refs.xml:14:5: OD202 model 'encoded.visit' comes from module encoded_lost_stranger; add it to depends
+custom/encoded_lost/models/ledger.py:19:18: OD203 'x_lost': encoded.ledger has no field 'x_lost'
+custom/encoded_lost/models/ledger.py:29:18: OD203 'x_lost': res.partner has no field 'x_lost'
+custom/encoded_lost_code/models/ledger.py:8:15: OD212 Monetary field 'balance' has no currency: encoded.ledger has no currency_id, and the field names no currency_field
+custom/encoded_lost_code/models/ledger.py:12:24: OD211 no parent class of encoded.ledger defines 'action_settle', so this super() call fails
+custom/encoded_lost_code/models/ledger.py:15:39: OD224 t.no_such_column: encoded_ledger has no such column, since encoded.ledger has no field no_such_column; name the column of a stored field of encoded.ledger
+custom/encoded_lost_code/models/ledger.py:28:14: OD203 'x_lost': encoded.note has no field 'x_lost'
+custom/encoded_lost_code/models/ledger.py:34:30: OD210 'no_note_search': encoded.note has no field 'no_note_search'
+custom/encoded_lost_code/models/ledger.py:36:18: OD203 'x_lost': encoded.note has no field 'x_lost'
 custom/encoded_lost_code/static/src/ledger_form.js:9:22: OD602 neither LedgerForm nor its parents have 'discard', so super.discard() fails
 custom/encoded_lost_code/static/src/ledger_form.js:14:24: OD605 no indexed bundle defines template 'encoded_lost_code.Gone'
 custom/encoded_lost_code/static/src/ledger_form.js:17:48: OD604 model 'encoded.ledger' has no method 'action_gone'
@@ -289,7 +294,14 @@ custom/encoded_lost_code/views/ledger.xml:7:45: OD312 encoded.ledger has no meth
 custom/encoded_lost_code/views/ledger.xml:17:17: OD304 'no_note_field': encoded.note has no field 'no_note_field'
 custom/encoded_lost_code/views/ledger.xml:22:44: OD314 encoded.ledger has no method 'no_such_method'
 custom/encoded_lost_code/views/ledger.xml:27:34: OD320 encoded.ledger has no method 'action_clsoe'
+custom/encoded_lost_code/views/note.xml:22:49: OD312 encoded.ledger has no method 'action_nope'
+custom/encoded_lost_code/views/note.xml:23:49: OD313 method '_nope' of encoded.ledger is private, so Odoo refuses to call it from a button
+custom/encoded_lost_code/views/note.xml:31:33: OD318 encoded.note has no field activity_ids, which the activity view searches; inherit mail.activity.mixin
+custom/encoded_lost_code/views/note.xml:35:36: OD210 'no_note_rule': encoded.note has no field 'no_note_rule'
+custom/encoded_lost_side/data/refs.xml:9:38: OD321 'encoded_lost.ledger_blank' is a record of encoded.ledger, but res.partner.parent_id takes res.partner
+custom/encoded_lost_side/data/refs.xml:12:29: OD322 encoded.ledger.stage has no value 'nope'
 custom/encoded_lost_stranger/data/page.xml:3:20: OD311 template 'encoded_lost.page' comes from module encoded_lost, which is not in depends
+custom/encoded_lost_stranger/data/page.xml:7:33: OD201 no indexed module defines model 'x_lost_model'
 custom/encoded_lost_stranger/models/visit.py:4:7: OD401 model 'encoded.visit' has no ir.model.access rule, so only the superuser can use it
 custom/encoded_ok/data/latin1.xml:5:9: OD309 res.country has no field 'no_such_field'
 custom/encoded_ok/data/refs.xml:12:9: OD301 module encoded_ok defines no XML id 'encoded_ok.country_gone'
