@@ -3,4 +3,10 @@
         <field name="name">Tuple</field>
         <field name="sv9_mode">zz</field>
     </record>
+
+    <record id="partner_company" model="res.partner">
+        <field name="name">Company</field>
+        <field name="sv9_agent_id" ref="base.main_company"/>
+        <field name="sv9_grade">zz</field>
+    </record>
 </odoo>

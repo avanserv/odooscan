@@ -149,3 +149,20 @@ class RvThing(models.Model):
 
     def _list_kinds(self):
         return STATES
+
+
+class RvThingByCompany(models.Model):
+    _inherit = "rv.thing"
+
+    agent_id = fields.Many2one("res.partner", company_dependent=True)
+    grade = fields.Selection([("gold", "Gold"), ("silver", "Silver")], company_dependent=True)
+    unstored_agent_id = fields.Many2one("res.partner", company_dependent=True, store=False)
+    unstored_grade = fields.Selection([("gold", "Gold")], company_dependent=True, store=False)
+    computed_agent_id = fields.Many2one("res.partner", company_dependent=True, compute="_compute_agent_id")
+    computed_grade = fields.Selection([("gold", "Gold")], company_dependent=True, compute="_compute_grade")
+
+    def _compute_agent_id(self):
+        self.computed_agent_id = False
+
+    def _compute_grade(self):
+        self.computed_grade = "gold"
