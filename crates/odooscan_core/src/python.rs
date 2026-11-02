@@ -1,6 +1,5 @@
 use ruff_python_ast::visitor::{self, Visitor};
 use ruff_python_ast::{self as ast, BoolOp, CmpOp, Expr, Operator, Stmt, UnaryOp};
-use ruff_python_parser::parse_module;
 use ruff_source_file::LineIndex;
 use ruff_text_size::{Ranged, TextSize};
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -15,7 +14,7 @@ use crate::sql::{
     self_cursor, source_offset,
 };
 use crate::taint::{self, Params};
-use crate::{domain, method_body, module_state};
+use crate::{async_names, domain, method_body, module_state};
 
 const FIELD_TYPES: &[&str] = &[
     "Boolean",
@@ -1050,8 +1049,8 @@ pub fn analyze(src: &str, series: Option<Series>) -> PyFacts {
 /// As `analyze`, reading a call of a class of `known` as a field.
 pub fn analyze_with(src: &str, series: Option<Series>, known: &FieldClasses) -> PyFacts {
     let loc = Locator::new(src);
-    let parsed = match parse_module(src) {
-        Ok(parsed) => parsed,
+    let module = match async_names::parse(src, series) {
+        Ok(module) => module,
         Err(e) => {
             let diag = RawDiag::new("OD000", loc.pos(e.location.start()), e.error.to_string());
             return PyFacts {
@@ -1060,7 +1059,7 @@ pub fn analyze_with(src: &str, series: Option<Series>, known: &FieldClasses) -> 
             };
         }
     };
-    let body = &parsed.syntax().body;
+    let body = &module.body;
     let top = module_state::top_level(body);
     let mut v = PyVisitor {
         loc: &loc,
@@ -3986,5 +3985,34 @@ mod tests {
             )
             .creates_any_view
         );
+    }
+
+    fn codes(src: &str, series: Option<Series>) -> Vec<&'static str> {
+        analyze(src, series).diags.iter().map(|d| d.code).collect()
+    }
+
+    #[test]
+    fn async_and_await_are_names_below_15_0_and_keywords_from_it() {
+        for src in ["def f(async=False):\n    pass\n", "async = 1\n", "a.async\n"] {
+            assert_eq!(codes(src, Series::parse("13.0")), [""; 0], "{src}");
+            assert_eq!(codes(src, None), [""; 0], "{src}");
+            assert_eq!(codes(src, Series::parse("15.0")), ["OD000"], "{src}");
+        }
+    }
+
+    #[test]
+    fn a_name_keeps_the_position_of_an_error_after_it() {
+        let facts = analyze("async = 1\n(", Series::parse("13.0"));
+        assert_eq!((facts.diags[0].pos.line, facts.diags[0].pos.col), (2, 2));
+    }
+
+    #[test]
+    fn the_class_facts_hold_each_name_as_the_file_spells_it() {
+        let src = "class X(models.Model):\n    _name = 'x'\n    async = fields.Boolean()\n    \
+                   ASYNC = fields.Boolean()\n    def await(self):\n        pass\n    def AWAIT(self):\n        pass\n";
+        let class = analyze(src, Series::parse("13.0")).classes.remove(0);
+        let fields: Vec<_> = class.fields.iter().map(|f| f.name.as_str()).collect();
+        assert_eq!(fields, ["async", "ASYNC"]);
+        assert_eq!(class.methods, ["await", "AWAIT"]);
     }
 }

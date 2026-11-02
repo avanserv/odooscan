@@ -24,4 +24,15 @@
         <field name="res_model">legacy.stamp</field>
         <field name="view_mode">tree,activity</field>
     </record>
+
+    <record id="stamp_async_form" model="ir.ui.view">
+        <field name="name">legacy.stamp.async.form</field>
+        <field name="model">legacy.stamp</field>
+        <field name="arch" type="xml">
+            <form>
+                <field name="async"/>
+                <button type="object" name="await"/>
+            </form>
+        </field>
+    </record>
 </odoo>

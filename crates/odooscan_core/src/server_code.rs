@@ -1,24 +1,19 @@
 //! The Python of data records: the `code` of server actions and crons, read as Odoo compiles it when
 //! it loads a record, and the expressions `safe_eval` compiles when something reads them.
 
-use std::borrow::Cow;
 use std::mem::replace;
 
-use ruff_python_ast::token::{Token, TokenKind};
 use ruff_python_ast::visitor::{self, Visitor};
 use ruff_python_ast::{self as ast, ExceptHandler, Expr, ExprContext, Pattern, Stmt};
-use ruff_python_parser::{Mode, parse_expression, parse_module, parse_unchecked};
+use ruff_python_parser::{parse_expression, parse_module};
 use ruff_text_size::{Ranged, TextRange};
 use rustc_hash::FxHashSet;
 
+use crate::async_names::names_async;
 use crate::series::Series;
 
 /// The names Odoo sets from the record's `model_id` before it runs the code, in every series.
 const FROM_MODEL_ID: [&str; 3] = ["model", "records", "record"];
-
-/// The first series whose floor is Python 3.7, which reserves `async` and `await`: `setup.py:58` on
-/// 15.0 asks for `>=3.7` where `setup.py:59` on saas~14.5 asks for `>=3.6`.
-const ASYNC_RESERVED: Series = Series { major: 15, minor: 0 };
 
 /// What `read` finds in code, at byte offsets into it.
 #[derive(Debug, Default, PartialEq, Eq)]
@@ -71,64 +66,6 @@ pub fn expression_error(text: &str, series: Option<Series>) -> Option<(String, u
     walk.visit_expr(parsed.expr());
     walk.error
         .map(|(message, at)| (message.to_owned(), at.start().to_usize()))
-}
-
-/// `code` as a module of `series` reads it. Ruff's lexer reserves `async` and `await` at any target,
-/// so where they are names their tokens are renamed before the parse that counts, in uppercase to
-/// keep every offset, which `spelled` reads the word back by. An unknown series takes the names
-/// reading, so a finding never rests on a Python the module may not run on.
-fn names_async(code: &str, series: Option<Series>) -> Cow<'_, str> {
-    let reserved = series.is_some_and(|series| series >= ASYNC_RESERVED);
-    if reserved || !(code.contains("async") || code.contains("await")) {
-        return Cow::Borrowed(code);
-    }
-    let parsed = parse_unchecked(code, Mode::Module.into());
-    let tokens = parsed.tokens();
-    let mut named = code.to_owned();
-    let mut scope = AsyncScope::default();
-    for (i, token) in tokens.iter().enumerate() {
-        let inside = scope.step(token.kind(), tokens.get(i + 1).map(Token::kind));
-        if !inside && matches!(token.kind(), TokenKind::Async | TokenKind::Await) {
-            named[token.range()].make_ascii_uppercase();
-        }
-    }
-    Cow::Owned(named)
-}
-
-/// Where Python before 3.7 reserves both words: from `async def` through its block, which a nested
-/// `async def` does not extend.
-#[derive(Default)]
-struct AsyncScope {
-    indent: usize,
-    /// The indent of the open `async def`.
-    open: Option<usize>,
-    /// Whether the open `async def` has passed a logical newline: its signature sits at its indent
-    /// without ending it.
-    past_signature: bool,
-}
-
-impl AsyncScope {
-    /// Moves past a token of `kind`, and says whether both words are reserved at it.
-    fn step(&mut self, kind: TokenKind, next: Option<TokenKind>) -> bool {
-        match kind {
-            TokenKind::Indent => self.indent += 1,
-            TokenKind::Dedent => self.indent = self.indent.saturating_sub(1),
-            TokenKind::Newline => self.past_signature = true,
-            TokenKind::NonLogicalNewline | TokenKind::Comment => {}
-            _ => self.code_token(kind, next),
-        }
-        self.open.is_some()
-    }
-
-    fn code_token(&mut self, kind: TokenKind, next: Option<TokenKind>) {
-        if self.past_signature && self.open.is_some_and(|indent| self.indent <= indent) {
-            self.open = None;
-        }
-        if self.open.is_none() && kind == TokenKind::Async && next == Some(TokenKind::Def) {
-            self.open = Some(self.indent);
-            self.past_signature = false;
-        }
-    }
 }
 
 struct Call<'a> {
@@ -349,6 +286,7 @@ impl<'a> Visitor<'a> for Walk<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::async_names::ASYNC_RESERVED;
 
     const RESERVED: Option<Series> = Some(ASYNC_RESERVED);
     const NAMES: Option<Series> = Some(Series { major: 14, minor: 5 });
