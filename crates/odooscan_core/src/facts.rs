@@ -2,6 +2,10 @@
 
 use std::path::PathBuf;
 
+/// The type of a field the scan cannot tell: an `ir.model.fields` record gives no `ttype` it can
+/// read, or a field class's name stands for two types.
+pub(crate) const UNREAD_TYPE: &str = "Unread";
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Pos {
     pub line: u32,
@@ -112,7 +116,8 @@ pub struct FieldFact {
     /// The label of each value of literal `selection` and `selection_add` lists, none where only a
     /// run tells it.
     pub labels: Vec<Option<String>>,
-    /// The call unpacks `*args` or `**kwargs`, so it may set any attribute it does not name.
+    /// The call unpacks `*args` or `**kwargs`, so it may set any attribute it does not name, or
+    /// passes a field of unread type arguments by position, which name no known attribute.
     pub splat: bool,
 }
 
@@ -324,9 +329,24 @@ pub struct SqlColumn {
     pub before_data: bool,
 }
 
+/// A class that is no model and has a base, so it may be a field class: Odoo takes any instance of
+/// a subclass of `fields.Field` as a field of the class that holds it.
+#[derive(Debug)]
+pub struct FieldClass {
+    pub name: String,
+    /// The field type a base of the ORM's `fields` proves.
+    pub ftype: Option<String>,
+    /// The last name of each other base, which only the whole scan can resolve.
+    pub bases: Vec<String>,
+}
+
 #[derive(Debug, Default)]
 pub struct PyFacts {
     pub classes: Vec<ClassFact>,
+    pub field_classes: Vec<FieldClass>,
+    /// The last name of each call a class attribute holds where the class counted it as a method:
+    /// it declares a field instead when the scan finds a field class of that name.
+    pub attr_calls: Vec<String>,
     /// A class names its model with an expression, so models and their ids are built at runtime,
     /// or lacks `_name` in a module of unknown series and is named apart before and from saas~18.1.
     pub dynamic_models: bool,

@@ -248,6 +248,11 @@ custom/dynamic_models_unknown/models/partner.py:15:31: OD202 model 'side.order.l
 custom/dynamic_models_unknown/models/partner.py:16:31: OD202 model 'sideline.note' comes from module dynamic_models_side; add it to depends
 custom/dynamic_models_unknown/models/partner.py:20:17: OD202 model 'bad.generated.huge' comes from module dynamic_models_side; add it to depends
 custom/dynamic_models_unknown/models/partner.py:24:17: OD202 model 'side.order' comes from module dynamic_models_side; add it to depends
+custom/field_classes/models/lens.py:20:25: OD104 this default is computed once at import; pass the function itself, e.g. default=fields.Date.today
+custom/field_classes/models/lens.py:49:23: OD210 'embeding': x.lens has no field 'embeding'
+custom/field_classes/models/lens.py:50:23: OD210 'link.missing': res.partner has no field 'missing'
+custom/field_classes/models/lens.py:51:30: OD210 'opaque': x.lens has no field 'opaque'
+custom/field_classes/views/lens_views.xml:7:45: OD312 x.lens has no method 'embedding'
 custom/field_options/models/bench.py:9:19: OD220 'partner_ids' has the label 'Partner' of field 'partner_id' of greenhouse.bench, so Odoo logs a warning and users cannot tell them apart; give it another string
 custom/field_options/models/bench.py:10:34: OD220 'planted_on' has the label 'Created on' of field 'create_date' of greenhouse.bench, so Odoo logs a warning and users cannot tell them apart; give it another string
 custom/field_options/models/bench.py:44:38: OD220 'common_name' has the label 'Name' of field 'name' of res.partner, so Odoo logs a warning and users cannot tell them apart; give it another string

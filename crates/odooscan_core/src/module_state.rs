@@ -79,19 +79,31 @@ pub(crate) fn top_level(body: &[Stmt]) -> Vec<&Stmt> {
 /// The names an import of `odoo`, or of a module under it, binds, each with the dotted path of
 /// what it names.
 pub(crate) fn odoo_names<'a>(top: &[&'a Stmt]) -> Vec<(&'a str, String)> {
-    let from_odoo = |module: &str| module == "odoo" || module.starts_with("odoo.");
+    imported_names(top, "odoo")
+}
+
+/// The names an import of `package`, or of a module under it, binds, each with the dotted path of
+/// what it names.
+pub(crate) fn imported_names<'a>(top: &[&'a Stmt], package: &'a str) -> Vec<(&'a str, String)> {
+    let from_package = |module: &str| {
+        module
+            .strip_prefix(package)
+            .is_some_and(|r| r.is_empty() || r.starts_with('.'))
+    };
     let mut names = vec![];
     for stmt in top {
         match stmt {
-            Stmt::Import(i) => names.extend(i.names.iter().filter(|a| from_odoo(&a.name)).map(|a| match &a.asname {
-                Some(alias) => (alias.as_str(), a.name.to_string()),
-                None => ("odoo", "odoo".to_owned()),
-            })),
+            Stmt::Import(i) => names.extend(i.names.iter().filter(|a| from_package(&a.name)).map(
+                |a| match &a.asname {
+                    Some(alias) => (alias.as_str(), a.name.to_string()),
+                    None => (package, package.to_owned()),
+                },
+            )),
             Stmt::ImportFrom(ast::StmtImportFrom {
                 module: Some(module),
                 names: aliases,
                 ..
-            }) if from_odoo(module) => names.extend(aliases.iter().map(|a| {
+            }) if from_package(module) => names.extend(aliases.iter().map(|a| {
                 let local = a.asname.as_ref().unwrap_or(&a.name).as_str();
                 (local, format!("{module}.{}", a.name))
             })),
@@ -118,6 +130,15 @@ fn dotted(expr: &Expr) -> String {
         Expr::Attribute(a) => format!("{}.{}", dotted(&a.value), a.attr),
         e => format!("{}...", root(e).unwrap_or_default()),
     }
+}
+
+/// The dotted path of what `expr` names, when it starts from one of the imported `names`.
+pub(crate) fn imported_path(expr: &Expr, names: &[(&str, String)]) -> Option<String> {
+    let (_, source) = names.iter().find(|(name, _)| root(expr) == Some(name))?;
+    let rest = dotted(expr)
+        .split_once('.')
+        .map_or(String::new(), |(_, rest)| format!(".{rest}"));
+    Some(format!("{source}{rest}"))
 }
 
 /// An attribute an import-time statement sets: on what object, and its name, `...` when the code
@@ -197,15 +218,9 @@ fn patches(top: &[&Stmt], loc: &Locator) -> Vec<ImportPatch> {
         let Some((object, attr)) = set_attribute(stmt) else {
             continue;
         };
-        let Some((_, source)) = odoo.iter().find(|(name, _)| root(object) == Some(name)) else {
+        let Some(path) = imported_path(object, &odoo) else {
             continue;
         };
-        let path = format!(
-            "{source}{}",
-            dotted(object)
-                .split_once('.')
-                .map_or(String::new(), |(_, rest)| format!(".{rest}"))
-        );
         if attr == "__doc__" || path == "odoo.addons" {
             continue;
         }
