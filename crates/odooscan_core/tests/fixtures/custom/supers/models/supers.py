@@ -83,3 +83,16 @@ class SuperNested(models.Model):
                 return super()._nested_gone()
 
         return Proxy, super()._own_gone()
+
+
+class SuperGuarded(models.Model):
+    _inherit = "bad.super"
+
+    def _guarded(self):
+        if hasattr(super(), "_guard_gone"):
+            super()._guard_gone()
+        if hasattr(super(SuperGuarded, self), "_guard_old"):
+            super(SuperGuarded, self)._guard_old()
+        if hasattr(super(), "_guard_other"):
+            super()._guard_unchecked()
+        return super()._guard_gone()

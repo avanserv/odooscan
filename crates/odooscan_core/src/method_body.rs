@@ -396,7 +396,8 @@ fn join(flows: impl IntoIterator<Item = Flow>) -> Flow {
     flows.into_iter().fold(Flow::Filled, Flow::max)
 }
 
-fn same(x: &Expr, y: &Expr) -> bool {
+/// Whether two expressions are written alike: `super()` and `super(Class, self)` are not.
+pub(crate) fn same(x: &Expr, y: &Expr) -> bool {
     ComparableExpr::from(x) == ComparableExpr::from(y)
 }
 
