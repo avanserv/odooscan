@@ -1,5 +1,5 @@
-//! The Python of data records: the `code` of server actions and crons, read as Odoo compiles it when
-//! it loads a record, and the expressions `safe_eval` compiles when something reads them.
+//! The Python of data records: the `code` of server actions and crons, read as Odoo compiles it, and
+//! the expressions `safe_eval` compiles when something reads them.
 
 use std::mem::replace;
 

@@ -4,4 +4,17 @@
         <field name="model_id" ref="base.model_res_partner"/>
         <field name="code">model._nope_default_code()</field>
     </record>
+
+    <record id="syntax_written_state" model="ir.actions.server">
+        <field name="name">syntax_written_state</field>
+        <field name="model_id" ref="base.model_res_partner"/>
+        <field name="state">object_write</field>
+        <field name="code">if</field>
+    </record>
+
+    <record id="syntax_cron" model="ir.cron">
+        <field name="name">syntax_cron</field>
+        <field name="model_id" ref="base.model_res_partner"/>
+        <field name="code">if</field>
+    </record>
 </odoo>

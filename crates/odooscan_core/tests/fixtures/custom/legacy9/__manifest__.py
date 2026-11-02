@@ -5,6 +5,7 @@
     "data": [
         "security/ir.model.access.csv",
         "data/calls.xml",
+        "data/rewrites.xml",
         "views/buttons.xml",
         "views/columns.xml",
         "views/aliases.xml",

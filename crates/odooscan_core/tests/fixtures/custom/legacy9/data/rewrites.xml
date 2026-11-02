@@ -1,0 +1,9 @@
+<odoo>
+    <record id="rewritten_code" model="ir.actions.server">
+        <field name="code">model.write({})</field>
+    </record>
+
+    <record id="rewritten_state" model="ir.actions.server">
+        <field name="state">object_write</field>
+    </record>
+</odoo>
