@@ -73,3 +73,81 @@ class TestSoftGuards(TransactionCase):
         except KeyError:
             pass
         self.assertTrue(self.env["soft.thing"].search([("code", "=", "one handler")]))
+
+    def test_ref_in_a_guarding_try(self):
+        try:
+            self.assertTrue(self.env.ref("soft_guards_side.in_the_body"))
+        except ValueError:
+            self.skipTest("needs soft_guards_side")
+
+    def test_ref_after_a_guarding_try(self):
+        try:
+            self.env.ref("soft_guards_side.looked_up")
+        except ValueError:
+            self.skipTest("needs soft_guards_side")
+        self.assertTrue(self.env.ref("soft_guards_side.after_the_try"))
+
+    def test_ref_in_the_else_of_a_guarding_try(self):
+        try:
+            self.env.ref("soft_guards_side.looked_up")
+        except ValueError:
+            self.skipTest("needs soft_guards_side")
+        else:
+            self.assertTrue(self.env.ref("soft_guards_side.in_the_else"))
+
+    def test_ref_under_a_test_of_the_model(self):
+        if "soft.thing" in self.env:
+            self.assertTrue(self.env.ref("soft_guards_side.under_a_test"))
+
+    def test_ref_after_a_skip(self):
+        if "soft.thing" not in self.env:
+            self.skipTest("needs soft_guards_side")
+        self.assertTrue(self.env.ref("soft_guards_side.after_a_skip"))
+
+    def test_lookups_in_a_guarding_try(self):
+        try:
+            self.assertFalse(self.env["soft.absent"].search([]))
+            self.assertTrue(self.env["soft.thing"].search([("code", "=", "in the try")]))
+        except KeyError:
+            self.skipTest("needs soft_guards_side")
+
+    def test_ref_unguarded(self):
+        self.assertTrue(self.env.ref("soft_guards_side.unguarded"))
+
+    def test_ref_in_a_try_that_passes(self):
+        try:
+            self.env.ref("soft_guards_side.passed")
+        except ValueError:
+            pass
+
+    def test_ref_in_a_try_with_one_handler_of_two_skipping(self):
+        try:
+            self.env.ref("soft_guards_side.one_handler")
+        except ValueError:
+            self.skipTest("needs soft_guards_side")
+        except KeyError:
+            pass
+
+    def test_ref_in_a_handler(self):
+        try:
+            self.env.ref(SIDE_RECORD)
+        except ValueError:
+            self.env.ref("soft_guards_side.in_a_handler")
+            self.skipTest("needs soft_guards_side")
+
+    def test_ref_in_finally(self):
+        try:
+            self.env.ref(SIDE_RECORD)
+        except ValueError:
+            self.skipTest("needs soft_guards_side")
+        finally:
+            self.env.ref("soft_guards_side.in_finally")
+
+    def test_ref_before_a_guard(self):
+        self.env.ref("soft_guards_side.before_a_guard")
+        if "soft.thing" not in self.env:
+            self.skipTest("needs soft_guards_side")
+
+    def test_missing_id_under_a_guard(self):
+        if "soft.thing" in self.env:
+            self.assertTrue(self.env.ref("base.no_such_guarded_id"))

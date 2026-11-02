@@ -1041,7 +1041,7 @@ impl<'m> Ctx<'_, 'm> {
                 for r in &file.facts.xml_refs {
                     self.py_ref(out, path, r, true);
                 }
-                for r in &file.facts.group_refs {
+                for r in file.facts.guarded_refs.iter().chain(&file.facts.group_refs) {
                     self.py_ref(out, path, r, false);
                 }
                 self.domains(out, path, &file.facts.domains);
@@ -2319,9 +2319,9 @@ impl<'m> Ctx<'_, 'm> {
     }
 
     /// Python code may name ids of modules outside the index, such as Enterprise ones, behind a
-    /// runtime check, so only ids of indexed modules are checked; `hidden` also reports those of
-    /// modules missing from depends, unless a dependency outside the index may load one that holds
-    /// the id.
+    /// runtime check, so only ids of indexed modules are checked; `hidden`, for a reference no such
+    /// check covers, also reports those of modules missing from depends, unless a dependency outside
+    /// the index may load one that holds the id.
     fn py_ref(&self, out: &mut Out<'m>, path: &'m Path, r: &XmlRef, hidden: bool) {
         let owner = r.id.split_once('.').map_or("", |(m, _)| m);
         let Some(&mi) = self.index.by_name.get(owner) else {

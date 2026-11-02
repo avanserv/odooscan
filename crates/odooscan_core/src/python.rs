@@ -636,22 +636,47 @@ fn hasattr_guard(call: &ast::ExprCall) -> bool {
 /// Finds an `env.ref` or an `env[...]`, each of which raises when what it names is missing.
 #[derive(Default)]
 struct LookupFinder {
-    found: bool,
+    record: bool,
+    model: bool,
 }
 
 impl<'a> Visitor<'a> for LookupFinder {
     fn visit_expr(&mut self, expr: &'a Expr) {
-        self.found |= match expr {
+        match expr {
             Expr::Call(c) => {
-                matches!(&*c.func, Expr::Attribute(a) if a.attr.as_str() == "ref" && tail_name(&a.value) == Some("env"))
+                self.record |= matches!(
+                    &*c.func,
+                    Expr::Attribute(a) if a.attr.as_str() == "ref" && tail_name(&a.value) == Some("env")
+                );
             }
-            Expr::Subscript(sub) => tail_name(&sub.value) == Some("env"),
-            _ => false,
-        };
-        if !self.found {
-            visitor::walk_expr(self, expr);
+            Expr::Subscript(sub) => self.model |= tail_name(&sub.value) == Some("env"),
+            _ => {}
         }
+        visitor::walk_expr(self, expr);
     }
+}
+
+/// Whether a handler catches `error`: by name, as a bare `except`, or through a base of every error.
+fn catches(handler: &ast::ExceptHandlerExceptHandler, error: &str) -> bool {
+    let names =
+        |name: &Expr| matches!(tail_name(name), Some(n) if n == error || n == "Exception" || n == "BaseException");
+    match handler.type_.as_deref() {
+        None => true,
+        Some(Expr::Tuple(types)) => types.iter().any(names),
+        Some(name) => names(name),
+    }
+}
+
+/// A `try` that looks something up, catches what the lookup raises and skips from every handler, so
+/// a run that gets past it found what it looked up: `env.ref` raises `ValueError` and `env[...]`
+/// raises `KeyError`.
+fn try_guards(t: &ast::StmtTry) -> bool {
+    let mut lookup = LookupFinder::default();
+    lookup.visit_body(&t.body);
+    let handlers = || t.handlers.iter().map(|ast::ExceptHandler::ExceptHandler(h)| h);
+    let caught = |error| handlers().any(|h| catches(h, error));
+    ((lookup.record && caught("ValueError")) || (lookup.model && caught("KeyError")))
+        && handlers().all(|h| skips(&h.body))
 }
 
 /// The methods called as `super().name(...)` or `super(Class, self).name(...)`, each with whether
@@ -2395,7 +2420,12 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
             && id.value.to_str().contains('.')
         {
             let pos = self.loc.at(id);
-            self.facts.xml_refs.push(XmlRef {
+            let refs = if self.guarded > 0 {
+                &mut self.facts.guarded_refs
+            } else {
+                &mut self.facts.xml_refs
+            };
+            refs.push(XmlRef {
                 id: id.value.to_str().to_owned(),
                 pos,
             });
@@ -2590,17 +2620,18 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
     fn guards_rest(&self, stmt: &Stmt) -> bool {
         match stmt {
             Stmt::If(i) => (exits(&i.body) || skips(&i.body)) && self.holders.proves(&i.test, false),
-            Stmt::Try(t) => {
-                let mut lookup = LookupFinder::default();
-                lookup.visit_body(&t.body);
-                lookup.found
-                    && !t.handlers.is_empty()
-                    && t.handlers
-                        .iter()
-                        .all(|ast::ExceptHandler::ExceptHandler(h)| skips(&h.body))
-            }
+            Stmt::Try(t) => try_guards(t),
             _ => false,
         }
+    }
+
+    /// The handlers run once the lookup has failed, and `finally` runs either way.
+    fn visit_try(&mut self, t: &'ast ast::StmtTry) {
+        let guards = try_guards(t);
+        self.guarded_by(guards, |v| v.visit_body(&t.body));
+        t.handlers.iter().for_each(|h| self.visit_except_handler(h));
+        self.guarded_by(guards, |v| v.visit_body(&t.orelse));
+        self.visit_body(&t.finalbody);
     }
 }
 
@@ -2655,6 +2686,7 @@ impl<'ast> Visitor<'ast> for PyVisitor<'_, 'ast> {
                     |v| i.elif_else_clauses.iter().for_each(|c| v.visit_elif_else_clause(c)),
                 );
             }
+            Stmt::Try(t) => return self.visit_try(t),
             Stmt::For(f) => self.holders.unbind(&f.target),
             _ => {}
         }
@@ -3387,6 +3419,12 @@ mod tests {
             "try:\n    z = self.env[name]\nexcept KeyError:\n    self.skipTest('m')\nself.env['x.y']",
             "try:\n    self.env.ref('m.r')\nexcept ValueError:\n    self.skipTest('m')\nexcept KeyError:\n    \
              self.skipTest('n')\nself.env['x.y']",
+            "try:\n    self.env['x.y']\nexcept KeyError:\n    self.skipTest('m')",
+            "try:\n    self.env['x.y']\nexcept (KeyError, ValueError):\n    self.skipTest('m')",
+            "try:\n    self.env['x.y']\nexcept Exception:\n    self.skipTest('m')",
+            "try:\n    self.env['x.y']\nexcept:\n    self.skipTest('m')",
+            "try:\n    self.env.ref('m.r')\n    self.env['x.y']\nexcept ValueError:\n    self.skipTest('m')",
+            "try:\n    self.env.ref('m.r')\nexcept ValueError:\n    self.skipTest('m')\nelse:\n    self.env['x.y']",
         ] {
             assert!(!looks_up(silent), "{silent}");
         }
@@ -3396,10 +3434,31 @@ mod tests {
             "try:\n    self.env.ref('m.r')\nexcept ValueError:\n    b()\nexcept KeyError:\n    \
              self.skipTest('m')\nself.env['x.y']",
             "try:\n    self.env.ref('m.r')\nfinally:\n    b()\nself.env['x.y']",
+            "try:\n    self.env['x.y']\nexcept KeyError:\n    pass",
             "try:\n    self.env['x.y']\nexcept ValueError:\n    self.skipTest('m')",
+            "try:\n    self.env['x.y']\nexcept requests.ConnectionError:\n    self.skipTest('m')",
+            "try:\n    self.env.ref('m.r')\nexcept KeyError:\n    self.skipTest('m')\nself.env['x.y']",
+            "try:\n    self.env.ref('m.r')\nexcept ValueError:\n    self.env['x.y']\n    self.skipTest('m')",
+            "try:\n    self.env.ref('m.r')\nexcept ValueError:\n    self.skipTest('m')\nfinally:\n    self.env['x.y']",
         ] {
             assert!(looks_up(reported), "{reported}");
         }
+    }
+
+    #[test]
+    fn a_ref_behind_a_guard_is_kept_apart() {
+        let ids = |refs: &[XmlRef]| refs.iter().map(|r| r.id.clone()).collect::<Vec<_>>();
+        let facts = analyze(
+            "class T(models.Model):\n    _name = 't'\n    def m(self):\n        \
+             self.env.ref('a.before')\n        \
+             if 'x.y' in self.env:\n            self.env.ref('a.opened')\n        \
+             try:\n            self.env.ref('a.tried')\n        \
+             except ValueError:\n            self.env.ref('a.caught')\n            self.skipTest('m')\n        \
+             self.env.ref('a.after')\n",
+            None,
+        );
+        assert_eq!(ids(&facts.xml_refs), ["a.before", "a.caught"]);
+        assert_eq!(ids(&facts.guarded_refs), ["a.opened", "a.tried", "a.after"]);
     }
 
     #[test]

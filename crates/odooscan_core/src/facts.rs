@@ -410,8 +410,10 @@ pub struct PyFacts {
     pub env_models: Vec<Spanned<String>>,
     /// Literal domains given to `search()` and the like on `self` or `env['x']`.
     pub domains: Vec<DomainFact>,
-    /// XML ids named by `env.ref()`.
+    /// XML ids named by `env.ref()` outside code that runs once a runtime test has passed.
     pub xml_refs: Vec<XmlRef>,
+    /// XML ids named by `env.ref()` in such code, which may come from modules that are not installed.
+    pub guarded_refs: Vec<XmlRef>,
     /// Groups named by `has_group()` and the `groups` of fields, which may come from modules
     /// that are not installed.
     pub group_refs: Vec<XmlRef>,
