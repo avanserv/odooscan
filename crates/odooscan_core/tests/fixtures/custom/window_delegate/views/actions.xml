@@ -1,0 +1,37 @@
+<odoo>
+    <record id="action_borrower_gantt" model="ir.actions.act_window">
+        <field name="name">action_borrower_gantt</field>
+        <field name="res_model">window.borrower</field>
+        <field name="view_mode">list,gantt</field>
+    </record>
+
+    <record id="action_borrower_calendar" model="ir.actions.act_window">
+        <field name="name">action_borrower_calendar</field>
+        <field name="res_model">window.borrower</field>
+        <field name="view_mode">calendar</field>
+    </record>
+
+    <record id="action_borrower_activity" model="ir.actions.act_window">
+        <field name="name">action_borrower_activity</field>
+        <field name="res_model">window.borrower</field>
+        <field name="view_mode">list,activity</field>
+    </record>
+
+    <record id="action_shared_gantt" model="ir.actions.act_window">
+        <field name="name">action_shared_gantt</field>
+        <field name="res_model">window.shared</field>
+        <field name="view_mode">gantt</field>
+    </record>
+
+    <record id="action_copied_gantt" model="ir.actions.act_window">
+        <field name="name">action_copied_gantt</field>
+        <field name="res_model">window.copied</field>
+        <field name="view_mode">gantt</field>
+    </record>
+
+    <record id="action_dated_child" model="ir.actions.act_window">
+        <field name="name">action_dated_child</field>
+        <field name="res_model">window.dated.child</field>
+        <field name="view_mode">calendar</field>
+    </record>
+</odoo>

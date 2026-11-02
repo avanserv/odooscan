@@ -1,0 +1,15 @@
+<odoo>
+    <record id="view_borrower_activity" model="ir.ui.view">
+        <field name="name">window.borrower.activity</field>
+        <field name="model">window.borrower</field>
+        <field name="arch" type="xml">
+            <activity string="Borrower">
+                <templates>
+                    <div t-name="activity-box">
+                        <field name="name"/>
+                    </div>
+                </templates>
+            </activity>
+        </field>
+    </record>
+</odoo>
