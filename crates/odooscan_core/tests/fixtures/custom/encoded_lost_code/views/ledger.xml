@@ -1,0 +1,19 @@
+<odoo>
+    <record id="ledger_buttons" model="ir.ui.view">
+        <field name="name">encoded.ledger.buttons</field>
+        <field name="model">encoded.ledger</field>
+        <field name="arch" type="xml">
+            <form>
+                <button type="object" name="action_confrim"/>
+            </form>
+        </field>
+    </record>
+
+    <function model="encoded.ledger" name="no_such_method"/>
+
+    <record id="cron_ledger" model="ir.cron">
+        <field name="name">Ledger</field>
+        <field name="model_id" ref="encoded_lost.model_encoded_ledger"/>
+        <field name="code">model.action_clsoe()</field>
+    </record>
+</odoo>

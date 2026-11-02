@@ -105,6 +105,7 @@ pub fn analyze(text: &str, series: Option<Series>) -> DataFacts {
     let doc = match Document::parse_with_options(text, opts) {
         Ok(doc) => doc,
         Err(e) => {
+            facts.unreadable = true;
             let p = e.pos();
             facts.diags.push(RawDiag::new(
                 "OD000",

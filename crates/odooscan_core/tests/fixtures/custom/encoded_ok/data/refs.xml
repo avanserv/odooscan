@@ -1,0 +1,14 @@
+<odoo>
+    <record id="partner_latin1" model="res.partner">
+        <field name="name">Latin-1</field>
+        <field name="country_id" ref="country_latin1"/>
+    </record>
+    <record id="partner_latin9" model="res.partner">
+        <field name="name">Latin-9</field>
+        <field name="country_id" ref="country_latin9"/>
+    </record>
+    <record id="partner_gone" model="res.partner">
+        <field name="name">Gone</field>
+        <field name="country_id" ref="country_gone"/>
+    </record>
+</odoo>

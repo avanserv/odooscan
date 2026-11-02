@@ -198,6 +198,7 @@ pub fn check_module<'m>(index: &Index<'m>, mi: usize, series: Option<Series>) ->
             dynamic: module.python.iter().any(|f| f.facts.dynamic_models),
             built: &built,
             partial: index.partial_scope(&scope),
+            lost: index.lost_scope(&scope),
             series,
         };
         ctx.dependencies(&mut out);
@@ -830,8 +831,12 @@ struct Ctx<'a, 'm> {
     dynamic: bool,
     /// What the module may build, outside `tests/`.
     built: &'a BuiltModels<'m>,
-    /// A module in scope depends on one that is not indexed, such as an Enterprise module.
+    /// A module in scope depends on one that is not indexed, such as an Enterprise module, which
+    /// may hold anything a rule misses.
     partial: bool,
+    /// A module in scope loads a data file the scan cannot read, which may hold a model, a field, an
+    /// XML id, a view element, an access row or a value of a record, but no Python or JS.
+    lost: bool,
     series: Option<Series>,
 }
 
@@ -1138,12 +1143,7 @@ impl<'m> Ctx<'_, 'm> {
         }
         self.redefinition(out, path, class);
         self.super_calls(out, path, class);
-        if class.new_model
-            && class.kind != ModelKind::Abstract
-            && class.registered()
-            && !ignores_access(Some(class.kind), self.series)
-            && !self.index.models_with_access.contains(class.model.as_str())
-        {
+        if self.lacks_access(class) {
             out.push(
                 path,
                 "OD401",
@@ -1154,6 +1154,17 @@ impl<'m> Ctx<'_, 'm> {
                 ),
             );
         }
+    }
+
+    /// Whether `class` makes a model that needs an access row and has none. A data file the scan
+    /// cannot read may hold that row, in the scope or in a module that depends on this one.
+    fn lacks_access(&self, class: &ClassFact) -> bool {
+        class.new_model
+            && class.kind != ModelKind::Abstract
+            && class.registered()
+            && !ignores_access(Some(class.kind), self.series)
+            && !self.index.models_with_access.contains(class.model.as_str())
+            && !self.index.lost_access(self.index.by_name[self.module.name.as_str()])
     }
 
     /// `_rec_names_search` is read from saas~15.3 on.
@@ -1443,7 +1454,7 @@ impl<'m> Ctx<'_, 'm> {
 
     /// Whether `write` of a loaded `file` reaches `create`: it has no id, or Odoo finds no record under
     /// its id. Anything before it may have made that record: a definition, a write the scope reads,
-    /// the registry, a parent record, `base_data.sql`, or a `<function>` of the module. An id of
+    /// the registry, a parent record, `base_data.sql` or a `<function>` of the module. An id of
     /// another module is none of `first_defs`.
     fn creates(&self, write: &RecordWrite, file: &SourceFile<DataFacts>, loaded: &Loaded) -> bool {
         if write.no_create || write.fields.iter().any(database_id) {
@@ -2101,12 +2112,21 @@ impl<'m> Ctx<'_, 'm> {
         self.dynamic && owner == self.module.name && (local.starts_with("model_") || local.starts_with("field_"))
     }
 
+    /// Whether `owner` is a module in scope that loads a data file the scan cannot read, so the XML
+    /// ids under its name are not all known. A module out of scope is a missing dependency either
+    /// way.
+    fn lost_owner(&self, owner: &str) -> bool {
+        let module = self.index.by_name.get(owner).filter(|&&mi| self.scope.sees(mi));
+        module.is_some_and(|&mi| self.index.modules[mi].lost_data())
+    }
+
     fn undefined_ref(&self, out: &mut Out<'m>, path: &'m Path, pos: Pos, id: &str) {
         let (owner, local) = id.split_once('.').unwrap_or_default();
         if self.runtime_id(owner, local) {
             return;
         }
         match self.index.by_name.get(owner) {
+            Some(_) if self.lost_owner(owner) => {}
             Some(&mi) if self.scope.sees(mi) => {
                 out.push(path, "OD301", pos, format!("module {owner} defines no XML id '{id}'"))
             }
@@ -2141,7 +2161,7 @@ impl<'m> Ctx<'_, 'm> {
                 let message = format!("'{}' belongs to module {owner}; add it to depends", r.id);
                 out.push(path, "OD302", r.pos, message);
             }
-        } else if !self.index.xmlids.contains_key(&r.id) {
+        } else if !self.index.xmlids.contains_key(&r.id) && !self.lost_owner(owner) {
             out.push(
                 path,
                 "OD301",
@@ -2280,14 +2300,21 @@ impl<'m> Ctx<'_, 'm> {
         }
     }
 
-    /// Whether the scan sees every class that could add to `model`. A caller stays silent on a
-    /// model that is not visible: only the places that call `model_ref` raise OD201 or OD202.
+    /// Whether the scan sees every class and data file that could add to `model`. A caller stays
+    /// silent on a model that is not visible: only the places that call `model_ref` raise OD201 or
+    /// OD202.
     fn sees_whole_model(&self, model: &str) -> bool {
         self.sees_model(model) && !self.index.hidden_parents(model, self.scope)
     }
 
     /// What `sees_whole_model` asks, short of the parents a class hides from the scan.
     fn sees_model(&self, model: &str) -> bool {
+        !self.lost && self.sees_classes(model)
+    }
+
+    /// Whether the scan reaches every class of `model`. That is all a question on a method needs,
+    /// since no data file adds one.
+    fn sees_classes(&self, model: &str) -> bool {
         !self.partial
             && !self.dynamic
             && matches!(self.index.model_status(model, self.scope, None), Status::Visible)
@@ -2297,7 +2324,7 @@ impl<'m> Ctx<'_, 'm> {
     /// Why `model` lacks the method a data file calls, when the scan sees every class that could
     /// define it: a delegate's hidden parent cannot, since `_inherits` passes on fields only.
     fn method_gap(&self, model: &str, method: &str) -> Option<String> {
-        if !self.sees_model(model) || self.index.merged_hidden_parents(model, self.scope) {
+        if !self.sees_classes(model) || self.index.merged_hidden_parents(model, self.scope) {
             return None;
         }
         match self.index.data_method(model, method, self.scope, self.series) {
@@ -2337,6 +2364,7 @@ impl<'m> Ctx<'_, 'm> {
             let element = format!("<{} {}=\"{}\">", e.tag, e.attr, e.value);
             let message = match tree.hidden.get(&e) {
                 Some(m) => format!("{element} is added by module {m}, which is not in depends"),
+                None if self.lost => continue,
                 None => format!("no {element} in view {} or the views that extend it", tree.root),
             };
             out.push(path, "OD310", locator.pos, message);
@@ -2572,6 +2600,8 @@ impl<'m> Ctx<'_, 'm> {
                 "template '{}' comes from module {m}, which is not in depends",
                 name.value
             ),
+            // A key without a module prefix may be in any lost file.
+            Status::Missing if owner.map_or(self.lost, |m| self.lost_owner(m)) => return,
             Status::Missing => format!("no indexed module defines template '{}'", name.value),
         };
         out.push(path, "OD311", name.pos, message);
@@ -2594,8 +2624,9 @@ impl<'m> Ctx<'_, 'm> {
     }
 
     fn record(&self, out: &mut Out<'m>, path: &'m Path, record: &RecordFact) {
-        // A dependency outside the index may load the model or add the field.
-        if self.partial {
+        // A dependency outside the index or a data file the scan cannot read may add the model or
+        // the field.
+        if self.partial || self.lost {
             return;
         }
         if !matches!(

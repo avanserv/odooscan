@@ -1,0 +1,5 @@
+<odoo>
+    <template id="stranger_page">
+        <t t-call="encoded_lost.page"/>
+    </template>
+</odoo>

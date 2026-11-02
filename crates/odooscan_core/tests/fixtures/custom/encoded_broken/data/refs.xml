@@ -1,0 +1,6 @@
+<odoo>
+    <record id="partner_child" model="res.partner">
+        <field name="name">Child</field>
+        <field name="parent_id" ref="partner_broken"/>
+    </record>
+</odoo>

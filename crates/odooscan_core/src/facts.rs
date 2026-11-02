@@ -710,6 +710,8 @@ pub struct DataFacts {
     pub reports: Vec<ReportFact>,
     pub functions: Vec<FunctionCall>,
     pub diags: Vec<RawDiag>,
+    /// The file does not decode or parse, so these facts say nothing of what it holds.
+    pub unreadable: bool,
 }
 
 /// What the leading comment of a JS file says about it.

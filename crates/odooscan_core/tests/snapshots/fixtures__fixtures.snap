@@ -248,6 +248,20 @@ custom/dynamic_models_unknown/models/partner.py:15:31: OD202 model 'side.order.l
 custom/dynamic_models_unknown/models/partner.py:16:31: OD202 model 'sideline.note' comes from module dynamic_models_side; add it to depends
 custom/dynamic_models_unknown/models/partner.py:20:17: OD202 model 'bad.generated.huge' comes from module dynamic_models_side; add it to depends
 custom/dynamic_models_unknown/models/partner.py:24:17: OD202 model 'side.order' comes from module dynamic_models_side; add it to depends
+custom/encoded_broken/data/broken.xml:4:1: OD000 expected 'record' tag, not 'odoo' at 4:1
+custom/encoded_lost_code/models/ledger.py:7:15: OD212 Monetary field 'balance' has no currency: encoded.ledger has no currency_id, and the field names no currency_field
+custom/encoded_lost_code/models/ledger.py:10:24: OD211 no parent class of encoded.ledger defines 'action_settle', so this super() call fails
+custom/encoded_lost_code/models/ledger.py:13:39: OD224 t.no_such_column: encoded_ledger has no such column, since encoded.ledger has no field no_such_column; name the column of a stored field of encoded.ledger
+custom/encoded_lost_code/static/src/ledger_form.js:9:22: OD602 neither LedgerForm nor its parents have 'discard', so super.discard() fails
+custom/encoded_lost_code/static/src/ledger_form.js:14:24: OD605 no indexed bundle defines template 'encoded_lost_code.Gone'
+custom/encoded_lost_code/static/src/ledger_form.js:17:48: OD604 model 'encoded.ledger' has no method 'action_gone'
+custom/encoded_lost_code/views/ledger.xml:7:45: OD312 encoded.ledger has no method 'action_confrim'
+custom/encoded_lost_code/views/ledger.xml:12:44: OD314 encoded.ledger has no method 'no_such_method'
+custom/encoded_lost_code/views/ledger.xml:17:34: OD320 encoded.ledger has no method 'action_clsoe'
+custom/encoded_lost_stranger/data/page.xml:3:20: OD311 template 'encoded_lost.page' comes from module encoded_lost, which is not in depends
+custom/encoded_lost_stranger/models/visit.py:4:7: OD401 model 'encoded.visit' has no ir.model.access rule, so only the superuser can use it
+custom/encoded_ok/data/latin1.xml:5:9: OD309 res.country has no field 'no_such_field'
+custom/encoded_ok/data/refs.xml:12:9: OD301 module encoded_ok defines no XML id 'encoded_ok.country_gone'
 custom/field_classes/models/lens.py:20:25: OD104 this default is computed once at import; pass the function itself, e.g. default=fields.Date.today
 custom/field_classes/models/lens.py:49:23: OD210 'embeding': x.lens has no field 'embeding'
 custom/field_classes/models/lens.py:50:23: OD210 'link.missing': res.partner has no field 'missing'

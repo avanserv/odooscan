@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="ISO-8859-1"?>
+<odoo>
+    <record id="country_latin1" model="res.country">
+        <field name="name">Côte fictive</field>
+        <field name="no_such_field">Déjà lu</field>
+    </record>
+</odoo>
