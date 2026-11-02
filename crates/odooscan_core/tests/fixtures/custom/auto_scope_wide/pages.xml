@@ -1,0 +1,5 @@
+<odoo>
+    <template id="page">
+        <p>Wide</p>
+    </template>
+</odoo>
