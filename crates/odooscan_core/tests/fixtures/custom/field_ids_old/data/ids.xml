@@ -1,0 +1,3 @@
+<odoo>
+    <record id="field_field_ids_stock_code" model="field.ids.old"/>
+</odoo>

@@ -1081,8 +1081,8 @@ struct UnreadClass {
     may_reach_orm: bool,
 }
 
-/// A file that does not parse, walked over its tokens. Each assignment that names a model parses
-/// alone, so it reads as the class body of a file that parses does. It parses in place in the file,
+/// A file that does not parse, walked over its tokens. Each assignment to a `NAMING_ATTRS` name
+/// parses alone, so it reads as the class body of a file that parses does. It parses in place in the file,
 /// as `PyVisitor` hands every offset to a `Locator` of the file, which panics inside a character.
 struct UnreadFile<'s, 'a, 'ast> {
     src: &'s str,
@@ -1141,7 +1141,7 @@ impl UnreadFile<'_, '_, '_> {
         }
     }
 
-    /// Reads an assignment to what names the model of the class whose body the statement sits in.
+    /// Reads an assignment to a `NAMING_ATTRS` name of the class whose body the statement sits in.
     fn attribute(&mut self, tokens: &[Token]) {
         let body = self.open.last().copied();
         let Some(at) = body.filter(|&at| self.classes[at].depth + 1 == self.depth) else {
@@ -1200,9 +1200,10 @@ impl UnreadFile<'_, '_, '_> {
     }
 }
 
-/// The class attributes a file that does not parse is read for: the two that name a model, and the
-/// one that keeps a class out of the registry.
-const NAMING_ATTRS: [&str; 3] = ["_name", "_inherit", "_register"];
+/// The class attributes a file that does not parse is read for: the two that name a model, the one
+/// that keeps a class out of the registry, and the one that spells the ids of its fields before
+/// saas~11.2.
+const NAMING_ATTRS: [&str; 4] = ["_name", "_inherit", "_register", "_table"];
 
 /// A name in place of a value that does not parse, as both hide what they hold.
 fn hidden_value(range: TextRange) -> Expr {
@@ -3844,10 +3845,16 @@ mod tests {
         assert!(facts.classes[0].inherit_unknown && !facts.dynamic_models);
     }
 
-    /// The models a file that stops at a Python 2 `print` names: (model, new_model) of each class.
-    fn unread(body: &str) -> (Vec<(String, bool)>, bool, Vec<String>) {
+    /// The facts of a file that stops at a Python 2 `print`.
+    fn unparsed(body: &str) -> PyFacts {
         let facts = analyze(&format!("{body}\nprint 'x'\n"), Series::parse("10.0"));
         assert_eq!(facts.diags.len(), 1);
+        facts
+    }
+
+    /// The models a file that stops at a Python 2 `print` names: (model, new_model) of each class.
+    fn unread(body: &str) -> (Vec<(String, bool)>, bool, Vec<String>) {
+        let facts = unparsed(body);
         assert!(
             facts
                 .classes
@@ -3856,6 +3863,35 @@ mod tests {
         );
         let models = facts.classes.iter().map(|c| (c.model.clone(), c.new_model)).collect();
         (models, facts.dynamic_models, facts.built_model_starts)
+    }
+
+    #[test]
+    fn a_file_that_does_not_parse_still_gives_the_table() {
+        let table = |body: &str| unparsed(body).classes.remove(0).table;
+        let literal = Some(OptionValue::Str("t".to_owned()));
+        assert_eq!(
+            table("class X(models.Model):\n    _name = 'a'\n    _table = 't'"),
+            literal
+        );
+        assert_eq!(
+            table("class X(models.Model):\n    _table = 't'\n    _name = 'a'"),
+            literal
+        );
+        assert_eq!(table("class X(models.Model):\n    _name = _table = 't'"), literal);
+        assert_eq!(
+            table("class X(models.Model):\n    _inherit = 'a'\n    _table = 't'"),
+            literal
+        );
+        let computed = Some(OptionValue::Other);
+        assert_eq!(
+            table("class X(models.Model):\n    _name = 'a'\n    _table = TABLE"),
+            computed
+        );
+        assert_eq!(
+            table("class X(models.Model):\n    _name = 'a'\n    _table = 1 +"),
+            computed
+        );
+        assert_eq!(table("class X(models.Model):\n    _name = 'a'"), None);
     }
 
     #[test]
