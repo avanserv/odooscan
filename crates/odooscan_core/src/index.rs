@@ -1977,6 +1977,25 @@ impl<'m> Index<'m> {
         }
     }
 
+    /// What `scope` of `module` grows to once a runtime test has shown the `named` modules installed:
+    /// their depends, and each module that auto-installs once its triggers are in that or in scope,
+    /// as Odoo installs one when the last of its triggers comes in, so long as one trigger lies
+    /// outside scope. One whose triggers all lie in scope owes nothing to the test, and an unguarded
+    /// id of it reports. A module with `countries` joins too: the scan cannot see the companies.
+    pub fn guard_scope(&self, module: usize, named: impl IntoIterator<Item = usize>, series: Option<Series>) -> Scope {
+        let scope = self.scope(module).visible;
+        let (proven, _) = depends_closure(self.modules, &self.by_name, named);
+        let seeds = scope.iter().zip(proven).map(|(&a, b)| a || b).collect();
+        let in_scope = |name: &str| self.by_name.get(name).is_some_and(|&mi| scope[mi]);
+        let owed = |m: &Module| triggers(m, series).is_none_or(|t| !t.into_iter().all(in_scope));
+        let visible = install_closure(self.modules, &self.by_name, seeds, series, owed);
+        Scope {
+            records: visible.clone(),
+            visible,
+            demo: false,
+        }
+    }
+
     /// `scope` of `module`, and of its `installs` what loads first, for a check that runs as `module`
     /// loads. The rest arrives too late on the database that installs them together, though one
     /// that already holds them passes.
@@ -2855,11 +2874,15 @@ fn method_flows(modules: &[Module]) -> MethodFlows<'_> {
 
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
+
     use super::{
         BASE_MODEL_DUNDERS, BASE_MODEL_EXTRA, BASE_MODEL_METHODS, BASE_PRIVATE_METHODS, BASE_RPC_METHODS,
-        FIELD_CLASSES, FieldHolder, FieldSpelling, OLD_BASE_METHODS, PlacedWrite, XmlIdDef, base_private_method,
-        base_rpc_method, class_file, field_id_prefixes, fold_writes, last_text, old_base_method, unseen_table_id,
+        FIELD_CLASSES, FieldHolder, FieldSpelling, Index, Module, OLD_BASE_METHODS, PlacedWrite, Scope, XmlIdDef,
+        base_private_method, base_rpc_method, class_file, field_id_prefixes, fold_writes, last_text, old_base_method,
+        unseen_table_id,
     };
+    use crate::manifest;
     use crate::python;
     use crate::series::Series;
     use crate::xml;
@@ -3186,6 +3209,55 @@ mod tests {
         let count = "_check_record_rules_result_count";
         assert!(has(count, "saas~11.4") && !has(count, "saas~11.5"));
         assert!(!old_base_method("create_workflow", None));
+    }
+
+    fn module(name: &str, text: &str) -> Module {
+        let manifest = manifest::parse(text).unwrap();
+        Module {
+            name: name.to_owned(),
+            dir: PathBuf::new(),
+            manifest_path: PathBuf::new(),
+            series: manifest.series(),
+            manifest,
+            checked: true,
+            python: vec![],
+            data: vec![],
+            js: vec![],
+            templates: vec![],
+            sql_views: vec![],
+        }
+    }
+
+    #[test]
+    fn an_heir_of_the_module_and_of_a_proven_one_joins_the_guard_scope() {
+        let manifest = |depends: &str, extra: &str| format!("{{'version': '18.0.1.0', 'depends': [{depends}]{extra}}}");
+        let modules = [
+            module("base", &manifest("", "")),
+            module("main", &manifest("'base'", "")),
+            module("side", &manifest("'base'", "")),
+            module("far", &manifest("'base'", "")),
+            module("heir", &manifest("'main', 'side'", ", 'auto_install': True")),
+            module(
+                "local",
+                &manifest("'main', 'side'", ", 'auto_install': True, 'countries': ['be']"),
+            ),
+            module("other", &manifest("'side', 'far'", ", 'auto_install': True")),
+            module("own", &manifest("'main'", ", 'auto_install': True")),
+            module("own_heir", &manifest("'own', 'side'", ", 'auto_install': True")),
+        ];
+        let index = Index::build(&modules, None);
+        let sees = |scope: &Scope| -> Vec<&str> {
+            let seen = modules.iter().enumerate().filter(|(mi, _)| scope.sees(*mi));
+            seen.map(|(_, m)| m.name.as_str()).collect()
+        };
+        let series = Series::parse("18.0");
+        assert_eq!(
+            sees(&index.guard_scope(1, [2], series)),
+            ["base", "main", "side", "heir", "local"]
+        );
+        assert_eq!(sees(&index.guard_scope(1, [], series)), ["base", "main"]);
+        assert_eq!(sees(&index.guard_scope(1, [3], series)), ["base", "main", "far"]);
+        assert_eq!(sees(&index.install_scope(1, series)), ["base", "main", "own"]);
     }
 
     #[test]

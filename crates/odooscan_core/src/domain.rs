@@ -48,6 +48,33 @@ pub(crate) fn requires(expr: &Expr, field: &str, value: &str) -> bool {
     items(expr).is_some_and(|terms| terms.iter().all(|t| items(t).is_some()) && terms.iter().any(keeps))
 }
 
+/// The literal values a domain of terms alone allows in `field`, from its first term on it with
+/// `=` or `in`. None when no such term is there or it holds anything but strings.
+pub(crate) fn values<'a>(expr: &'a Expr, field: &str) -> Option<Vec<&'a str>> {
+    let terms = items(expr)?;
+    if !terms.iter().all(|t| items(t).is_some()) {
+        return None;
+    }
+    let right = terms.iter().find_map(|term| match items(term) {
+        Some([Expr::StringLiteral(name), Expr::StringLiteral(op), right])
+            if name.value.to_str() == field && matches!(op.value.to_str(), "=" | "in") =>
+        {
+            Some((op.value.to_str() == "in", right))
+        }
+        _ => None,
+    })?;
+    let strings = |values: &'a [Expr]| {
+        values
+            .iter()
+            .map(|v| v.as_string_literal_expr().map(|s| s.value.to_str()))
+            .collect()
+    };
+    match right {
+        (true, list) => strings(items(list)?),
+        (false, value) => strings(std::slice::from_ref(value)),
+    }
+}
+
 /// The field paths of a domain written as text, as XML and string field attributes hold it.
 pub fn parse(text: &str) -> Option<Vec<String>> {
     let parsed = parse_expression(text.trim()).ok()?;
@@ -174,6 +201,34 @@ mod tests {
             "[",
         ] {
             assert_eq!(searched_model(search), None, "{search}");
+        }
+    }
+
+    #[test]
+    fn reads_the_values_a_term_allows() {
+        let values = |text: &str| {
+            let parsed = parse_expression(text).unwrap();
+            values(parsed.expr(), "name").map(|v| v.join(","))
+        };
+        assert_eq!(
+            values("[('state', '=', 'installed'), ('name', '=', 'a')]").as_deref(),
+            Some("a")
+        );
+        assert_eq!(
+            values("[('name', 'in', ['a', 'b']), ('name', '=', 'c')]").as_deref(),
+            Some("a,b")
+        );
+        assert_eq!(values("[('name', 'in', ('a',))]").as_deref(), Some("a"));
+        for text in [
+            "[('state', '=', 'installed')]",
+            "[('name', '!=', 'a')]",
+            "[('name', '=', name)]",
+            "[('name', 'in', ['a', name])]",
+            "[('name', 'in', names)]",
+            "['|', ('name', '=', 'a'), ('name', '=', 'b')]",
+            "[('name', '=', 'a')] + extra",
+        ] {
+            assert_eq!(values(text), None, "{text}");
         }
     }
 

@@ -198,3 +198,67 @@ class TestSoftGuards(TransactionCase):
     def test_lookups_without_ensure_installed(self):
         self.assertFalse(self.env["soft.absent"].search([]))
         self.assertTrue(self.env["soft.thing"].search([("code", "=", "no helper")]))
+
+    def test_ref_of_another_module_after_ensure_installed_of_an_indexed_one(self):
+        self.ensure_installed("base_only")
+        self.assertTrue(self.env.ref("soft_guards_side.after_an_unrelated_helper"))
+
+    def test_ref_after_a_test_of_an_unrelated_model(self):
+        if "web.palette" not in self.env:
+            self.skipTest("needs web")
+        self.assertTrue(self.env.ref("soft_guards_side.after_an_unrelated_model"))
+
+    def test_ref_after_a_state_of_an_unrelated_module(self):
+        if self.env["ir.module.module"]._get("base_only").state != "installed":
+            self.skipTest("needs base_only")
+        self.assertTrue(self.env.ref("soft_guards_side.after_an_unrelated_state"))
+
+    def test_heir_ref_after_ensure_installed(self):
+        self.ensure_installed("soft_guards_side")
+        self.assertTrue(self.env.ref("soft_guards_heir.heir_thing"))
+
+    def test_heir_ref_after_a_test_of_the_model(self):
+        if "soft.thing" not in self.env:
+            self.skipTest("needs soft_guards_side")
+        self.assertTrue(self.env.ref("soft_guards_heir.heir_thing"))
+
+    def test_ref_after_ensure_installed_of_two_modules(self):
+        self.ensure_installed("base_only")
+        self.ensure_installed("soft_guards_side")
+        self.assertTrue(self.env.ref("soft_guards_side.after_both_helpers"))
+
+    def test_ref_under_a_test_of_the_model_after_ensure_installed(self):
+        self.ensure_installed("base_only")
+        if "soft.thing" in self.env:
+            self.assertTrue(self.env.ref("soft_guards_side.under_a_test_after_a_helper"))
+
+    def test_ref_after_hasattr(self):
+        if not hasattr(self.env.user, "thing_ids"):
+            self.skipTest("needs soft_guards_side")
+        self.assertTrue(self.env.ref("soft_guards_side.after_hasattr"))
+
+    def test_ref_after_a_test_of_a_model_no_module_defines(self):
+        if "soft.absent" not in self.env:
+            self.skipTest("needs a module that defines it")
+        self.assertTrue(self.env.ref("soft_guards_side.after_an_absent_model"))
+
+    def test_ref_after_ensure_installed_of_a_module_with_a_dependency_outside_the_scan(self):
+        self.ensure_installed("soft_guards_open")
+        self.assertTrue(self.env.ref("soft_guards_side.access_soft_thing"))
+
+    def test_ref_after_a_try_with_a_lookup_that_does_not_raise(self):
+        try:
+            self.env.ref("soft_guards_side.thing", raise_if_not_found=False)
+            self.env.ref("base_only.view_partner_color")
+        except ValueError:
+            self.skipTest("needs base_only")
+        self.assertTrue(self.env.ref("soft_guards_side.after_a_lookup_that_does_not_raise"))
+
+    def test_ref_after_a_try_with_a_lookup_under_a_branch(self):
+        try:
+            if self.env.user.active:
+                self.env.ref("soft_guards_side.thing")
+            self.env.ref("base_only.view_partner_color")
+        except ValueError:
+            self.skipTest("needs base_only")
+        self.assertTrue(self.env.ref("soft_guards_side.after_a_lookup_under_a_branch"))

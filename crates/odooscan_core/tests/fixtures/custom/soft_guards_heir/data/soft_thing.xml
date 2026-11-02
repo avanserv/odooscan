@@ -1,0 +1,5 @@
+<odoo>
+    <record id="heir_thing" model="soft.thing">
+        <field name="code">heir</field>
+    </record>
+</odoo>
