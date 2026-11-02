@@ -1,0 +1,17 @@
+<odoo>
+    <record id="field_x_demo" model="ir.model.fields">
+        <field name="name">x_demo</field>
+        <field name="model_id" ref="base.model_res_partner"/>
+        <field name="ttype">boolean</field>
+    </record>
+    <record id="field_x_demo_text" model="ir.model.fields">
+        <field name="name">x_demo_text</field>
+        <field name="model_id" ref="model_data_ticket"/>
+        <field name="ttype">char</field>
+    </record>
+    <record id="field_x_demo_column" model="ir.model.fields">
+        <field name="name">x_demo_column</field>
+        <field name="model_id" ref="model_data_ticket"/>
+        <field name="ttype">char</field>
+    </record>
+</odoo>

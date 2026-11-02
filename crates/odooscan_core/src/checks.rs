@@ -76,6 +76,10 @@ const TRANSIENT_ACCESS: Series = Series { major: 13, minor: 2 };
 /// a `render_html` replaces the template (`addons/report/models/report.py:138` on 10.0).
 const REPORT_MODEL: Series = Series { major: 11, minor: 0 };
 
+/// The first series that asserts a `model_field` as it sets the field up (`37d701c153fe`, in no saas
+/// branch). Before, only a run reads it.
+const MODEL_FIELD_ASSERTED: Series = Series { major: 20, minor: 0 };
+
 /// The series whose loader reads `<report>` as a write to `ir.actions.report`. 18446f23f11e removes
 /// the tag in saas~16.1 (`_tag_report`, `odoo/tools/convert.py:275` on 16.0).
 const REPORT_TAG: &str = ">=11.0,<saas~16.1";
@@ -127,11 +131,14 @@ pub fn check_module<'m>(index: &Index<'m>, mi: usize, series: Option<Series>) ->
     flows::check(index, mi, &index.scope(mi), &mut out);
     if index.has_base {
         let scope = index.scope(mi);
+        let setup = index.setup_scope(mi);
+        let dep_names = module.manifest.depends.iter().map(|d| d.value.as_str()).collect();
         let ctx = Ctx {
             index,
             module,
             scope: &scope,
-            dep_names: module.manifest.depends.iter().map(|d| d.value.as_str()).collect(),
+            setup: &setup,
+            dep_names: &dep_names,
             dynamic: module.python.iter().any(|f| f.facts.dynamic_models),
             partial: index.partial_scope(&scope),
             series,
@@ -659,11 +666,15 @@ fn load_place(module: &Module, series: Option<Series>, def_rank: usize, rank: us
     format!("in {}", file.unwrap_or_default())
 }
 
+#[derive(Clone, Copy)]
 struct Ctx<'a, 'm> {
     index: &'a Index<'m>,
     module: &'m Module,
     scope: &'a Scope,
-    dep_names: FxHashSet<&'m str>,
+    /// The scope of what Odoo reads as it sets up the module's Python fields and attributes, and of
+    /// the queries of `init()` and `_auto_init()`.
+    setup: &'a Scope,
+    dep_names: &'a FxHashSet<&'m str>,
     /// The module builds model names at runtime, so its models and their ids cannot be listed.
     dynamic: bool,
     /// A module in scope depends on one that is not indexed, such as an Enterprise module.
@@ -719,6 +730,13 @@ impl<'m> Ctx<'_, 'm> {
     fn path(&self, out: &mut Out<'m>, file: &'m Path, code: &'static str, model: &str, path: &Spanned<String>) {
         if let Err(e) = self.index.resolve_path(model, &path.value, self.scope) {
             out.push(file, code, path.pos, e.message(&path.value));
+        }
+    }
+
+    /// OD203 on a path Odoo resolves as it sets up the model, when a failure refuses the install.
+    fn setup_path(&self, out: &mut Out<'m>, file: &'m Path, model: &str, path: &Spanned<String>) {
+        if let Err(e) = self.index.resolve_path(model, &path.value, self.setup) {
+            out.push(file, "OD203", path.pos, e.message(&path.value));
         }
     }
 
@@ -937,11 +955,18 @@ impl<'m> Ctx<'_, 'm> {
         let paths = class
             .paths
             .iter()
-            .chain(class.depends.iter().flat_map(|(_, paths)| paths))
             .chain(&class.order_fields)
             .chain(self.rec_names_search(class));
         for p in paths.filter(|_| class.kind != ModelKind::Abstract) {
             self.path(out, path, "OD203", &class.model, p);
+        }
+        let setup_paths = class
+            .depends
+            .iter()
+            .flat_map(|(_, paths)| paths)
+            .chain(&class.setup_fields);
+        for p in setup_paths.filter(|_| class.kind != ModelKind::Abstract) {
+            self.setup_path(out, path, &class.model, p);
         }
         self.redefinition(out, path, class);
         self.super_calls(out, path, class);
@@ -1051,14 +1076,14 @@ impl<'m> Ctx<'_, 'm> {
         // A mixin's paths name fields of the models that inherit it.
         let mixin = class.kind == ModelKind::Abstract;
         if let Some(related) = field.related.as_ref().filter(|_| !mixin) {
-            self.path(out, path, "OD203", &class.model, related);
+            self.setup_path(out, path, &class.model, related);
             self.related_type(out, path, class, field, related);
         }
         self.model_field(out, path, class, field);
         if let (Some(comodel), Some(inverse)) = (&field.comodel, &field.inverse_name)
             && index.has_model(&comodel.value)
         {
-            self.path(out, path, "OD203", &comodel.value, inverse);
+            self.setup_path(out, path, &comodel.value, inverse);
             self.inverse(out, path, comodel, inverse);
         }
         if let Some(comodel) = &field.comodel {
@@ -1110,7 +1135,11 @@ impl<'m> Ctx<'_, 'm> {
                 value: name.clone(),
                 pos: *pos,
             };
-            self.path(out, path, "OD203", &class.model, &name);
+            if self.series.is_some_and(|s| s >= MODEL_FIELD_ASSERTED) {
+                self.setup_path(out, path, &class.model, &name);
+            } else {
+                self.path(out, path, "OD203", &class.model, &name);
+            }
         }
     }
 
@@ -1123,7 +1152,7 @@ impl<'m> Ctx<'_, 'm> {
         field: &FieldFact,
         related: &Spanned<String>,
     ) {
-        let Some(targets) = self.index.path_target(&class.model, &related.value, self.scope) else {
+        let Some(targets) = self.index.path_target(&class.model, &related.value, self.setup) else {
             return;
         };
         if targets.iter().all(|t| odoo_type(&t.ftype) != odoo_type(&field.ftype)) {
@@ -1173,39 +1202,56 @@ impl<'m> Ctx<'_, 'm> {
         let mut trees: FxHashMap<String, ViewTree<'m>> = FxHashMap::default();
         let loaded = Loaded::of(self.module);
         let mut required = FxHashMap::default();
+        let demo_scope = self.scope.in_demo();
+        let demo = Ctx {
+            scope: &demo_scope,
+            ..*self
+        };
         // Files the manifest does not load, such as chart template CSVs read by Python code, are skipped.
         for file in self.module.data.iter().filter(|f| f.rank.is_some()) {
-            let path = file.path.as_path();
-            for r in &file.facts.refs {
-                self.xml_ref(out, path, r);
-            }
-            for view in &file.facts.views {
-                self.view(out, path, view, &mut trees);
-                self.locators(out, path, view, &mut trees);
-                self.qweb_calls(out, path, view);
-            }
-            for record in &file.facts.records {
-                self.record(out, path, record);
-            }
-            for write in &file.facts.writes {
-                self.record_write(out, path, write);
-            }
-            self.created_records(out, file, &loaded, &mut required);
-            for call in &file.facts.functions {
-                self.function_call(out, path, call);
-            }
-            for rule in &file.facts.rules {
-                self.rule_domain(out, path, rule);
-            }
-            for server in &file.facts.servers {
-                self.server_code(out, path, server);
-            }
-            for report in &file.facts.reports {
-                self.report_template(out, path, report);
-            }
-            self.domains(out, path, &file.facts.action_domains);
-            self.actions(out, path, &file.facts.actions);
+            let ctx = if file.demo { &demo } else { self };
+            ctx.data_file(out, file, &mut trees, &loaded, &mut required);
         }
+    }
+
+    fn data_file(
+        &self,
+        out: &mut Out<'m>,
+        file: &'m SourceFile<DataFacts>,
+        trees: &mut FxHashMap<String, ViewTree<'m>>,
+        loaded: &Loaded,
+        required: &mut RequiredFields<'m>,
+    ) {
+        let path = file.path.as_path();
+        for r in &file.facts.refs {
+            self.xml_ref(out, path, r);
+        }
+        for view in &file.facts.views {
+            self.view(out, path, view, trees);
+            self.locators(out, path, view, trees);
+            self.qweb_calls(out, path, view);
+        }
+        for record in &file.facts.records {
+            self.record(out, path, record);
+        }
+        for write in &file.facts.writes {
+            self.record_write(out, path, write);
+        }
+        self.created_records(out, file, loaded, required);
+        for call in &file.facts.functions {
+            self.function_call(out, path, call);
+        }
+        for rule in &file.facts.rules {
+            self.rule_domain(out, path, rule);
+        }
+        for server in &file.facts.servers {
+            self.server_code(out, path, server);
+        }
+        for report in &file.facts.reports {
+            self.report_template(out, path, report);
+        }
+        self.domains(out, path, &file.facts.action_domains);
+        self.actions(out, path, &file.facts.actions);
     }
 
     /// OD324 on the records of a loaded `file` that Odoo creates.
@@ -1384,7 +1430,7 @@ impl<'m> Ctx<'_, 'm> {
     /// Whether a class has a default for `name` that no `Field` tells: a hook of a parent class whose
     /// model has the field, or the `_defaults` of a series that reads them.
     fn parent_fills(&self, classes: &[(usize, &'m ClassFact)], name: &str) -> bool {
-        let hooked = |c: &ClassFact| fills_on_create(c) && self.index.defines_field(&c.model, name);
+        let hooked = |c: &ClassFact| fills_on_create(c) && self.index.defines_field(&c.model, name, self.scope);
         let legacy = self.series.is_none_or(|s| s < DEFAULTS_GONE);
         classes
             .iter()
@@ -1397,7 +1443,7 @@ impl<'m> Ctx<'_, 'm> {
             return;
         }
         for field in &write.fields {
-            let known = !matches!(field.value, WrittenValue::Opaque);
+            let known = !matches!(field.value, WrittenValue::Opaque | WrittenValue::Model(_));
             if !known || !self.holds(write, &field.name) || self.parent_decides(write, &field.name) {
                 continue;
             }
@@ -1407,7 +1453,7 @@ impl<'m> Ctx<'_, 'm> {
             match &field.value {
                 WrittenValue::Ids(ids) => self.written_ids(out, path, write, field.name.as_str(), &target, ids),
                 WrittenValue::Text(text) => self.written_text(out, path, write, field.name.as_str(), &target, text),
-                WrittenValue::Opaque => {}
+                WrittenValue::Model(_) | WrittenValue::Opaque => {}
             }
         }
     }
@@ -3000,7 +3046,7 @@ impl<'m> Ctx<'_, 'm> {
             return;
         }
         let model = field.model;
-        let missing = |name: &str| matches!(self.index.field(model, name, self.scope), Err(None));
+        let missing = |name: &str| matches!(self.index.field(model, name, self.setup), Err(None));
         let name = &own.name;
         let message = match field.get("currency_field") {
             Merged::Known(OptionValue::Str(currency)) if missing(currency) => {
@@ -3588,7 +3634,7 @@ impl<'m> Ctx<'_, 'm> {
             }
             let Ok(Some(FieldInfo {
                 comodel: Some(next), ..
-            })) = self.index.field(&model, segment, self.scope)
+            })) = self.index.field(&model, segment, self.setup)
             else {
                 return false;
             };
@@ -3847,8 +3893,13 @@ impl<'m> Ctx<'_, 'm> {
         if self.partial {
             return;
         }
+        let setup = Ctx {
+            scope: self.setup,
+            ..*self
+        };
         for column in columns {
-            if let Some(message) = self.unknown_column(column) {
+            let ctx = if column.before_data { &setup } else { self };
+            if let Some(message) = ctx.unknown_column(column) {
                 out.push(path, "OD224", column.pos, message);
             }
         }
@@ -3930,7 +3981,8 @@ impl<'m> Ctx<'_, 'm> {
     }
 
     /// Why the `table` of `model` has no column `name`, None when it has one or may have one: a
-    /// module adds it by hand, or one outside the scope defines the field.
+    /// module adds it by hand, one outside the scope defines the field, or an `ir.model.fields`
+    /// record adds it.
     fn lack(&self, model: &'m str, table: &str, name: &str) -> Option<Lack<'m>> {
         if self.index.hand_made_column(model, table, name, self.scope) {
             return None;
@@ -3946,17 +3998,17 @@ impl<'m> Ctx<'_, 'm> {
     }
 
     /// What a table lacks for a name no field of `model` in scope has, unless a module outside the
-    /// scope defines it.
+    /// scope defines it or an `ir.model.fields` record adds it.
     fn undefined_column(&self, model: &'m str, name: &str) -> Option<Lack<'m>> {
-        if self.index.defines_field(model, name) {
+        if self.index.defines_field(model, name, self.scope) {
             return None;
         }
         if let Some((parent, via)) = self.delegated_field(model, name) {
             return Some(Lack::Delegated(parent, via));
         }
         let suggested = format!("{name}_id");
-        let stored =
-            matches!(self.column(model, &suggested), Column::Present) && self.index.defines_field(model, &suggested);
+        let stored = matches!(self.column(model, &suggested), Column::Present)
+            && self.index.defines_field(model, &suggested, self.scope);
         Some(Lack::Undefined(stored.then_some(suggested)))
     }
 

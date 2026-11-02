@@ -795,7 +795,7 @@ struct PyVisitor<'a, 'ast> {
     /// What each enclosing function does with cursors, innermost last.
     cursor_uses: Vec<CursorUse<'ast>>,
     /// Whether the code is in the `init()` or `_auto_init()` of a class, which creates the view of
-    /// the model the class is or is mixed into.
+    /// the model the class is or is mixed into, and which Odoo runs ahead of the module's data.
     in_view_maker: bool,
     /// The names the file's imports from `odoo` bind at import.
     odoo_names: Vec<&'ast str>,
@@ -840,6 +840,7 @@ impl<'ast> PyVisitor<'_, 'ast> {
             paths: vec![],
             depends: vec![],
             order_fields: vec![],
+            setup_fields: vec![],
             rec_names_search: vec![],
             super_calls: vec![],
             extended: vec![],
@@ -924,9 +925,8 @@ impl<'ast> PyVisitor<'_, 'ast> {
                     self.facts.dynamic_models |= naming.name.is_none();
                 }
                 "_inherit" => naming.inherit = self.inherit(value, fact, naming.name.as_deref()),
-                "_order" | "_rec_name" | "_parent_name" | "_fold_name" | "_active_name" => {
-                    self.order_fields(value, fact);
-                }
+                "_order" | "_parent_name" | "_fold_name" => fact.order_fields.extend(self.term_fields(value)),
+                "_rec_name" | "_active_name" => fact.setup_fields.extend(self.term_fields(value)),
                 "_rec_names_search" => {
                     fact.rec_names_search = strings(value).into_iter().map(|s| self.spanned(s)).collect();
                 }
@@ -1078,20 +1078,20 @@ impl<'ast> PyVisitor<'_, 'ast> {
     }
 
     /// The field of each `field [asc|desc]` term; a term that is an SQL expression is not one.
-    fn order_fields(&mut self, value: &Expr, fact: &mut ClassFact) {
+    fn term_fields(&self, value: &Expr) -> Vec<Spanned<String>> {
         let Some(s) = value.as_string_literal_expr() else {
-            return;
+            return vec![];
         };
         let pos = self.loc.at(s);
-        for term in s.value.to_str().split(',') {
+        let fields = s.value.to_str().split(',').filter_map(|term| {
             let field = term.split_whitespace().next().unwrap_or_default();
-            if !field.is_empty() && field.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '.') {
-                fact.order_fields.push(Spanned {
-                    value: field.to_owned(),
-                    pos,
-                });
-            }
-        }
+            let named = !field.is_empty() && field.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '.');
+            named.then(|| Spanned {
+                value: field.to_owned(),
+                pos,
+            })
+        });
+        fields.collect()
     }
 
     fn class_field(&mut self, target: &ast::ExprName, value: &Expr, fact: &mut ClassFact) {
@@ -1572,6 +1572,7 @@ impl<'ast> PyVisitor<'_, 'ast> {
                 column: column.column,
                 text: column.text,
                 pos,
+                before_data: self.in_view_maker,
             });
         }
     }
@@ -1966,15 +1967,14 @@ mod tests {
     fn reads_the_fields_model_attributes_name() {
         let facts = analyze(
             "class X(models.Model):\n    _name = 'x'\n    _order = 'sequence desc, id'\n    _parent_name = 'up_id'\n    \
-             _fold_name = 'folded'\n    _active_name = 'x_active'\n    _rec_names_search = ['name', 'partner_id.ref']\n",
+             _fold_name = 'folded'\n    _rec_name = 'code'\n    _active_name = 'x_active'\n    \
+             _rec_names_search = ['name', 'partner_id.ref']\n",
             None,
         );
         let values = |v: &[Spanned<String>]| v.iter().map(|s| s.value.clone()).collect::<Vec<_>>();
         let class = &facts.classes[0];
-        assert_eq!(
-            values(&class.order_fields),
-            ["sequence", "id", "up_id", "folded", "x_active"]
-        );
+        assert_eq!(values(&class.order_fields), ["sequence", "id", "up_id", "folded"]);
+        assert_eq!(values(&class.setup_fields), ["code", "x_active"]);
         assert_eq!(values(&class.rec_names_search), ["name", "partner_id.ref"]);
     }
 
@@ -2415,6 +2415,21 @@ mod tests {
                         remote.execute(sql.SQL('SELECT e.x FROM t e'))\n    \
                         env.cr.execute(sql.SQL('SELECT f.y FROM t f'))\n";
         assert_eq!(read_columns(psycopg2), ["t.y"]);
+    }
+
+    #[test]
+    fn marks_the_queries_of_init_and_auto_init_as_ahead_of_the_data() {
+        let src = "class X(models.Model):\n    _name = 'x'\n\n    \
+                   def init(self):\n        self.env.cr.execute('SELECT a.x FROM t a')\n\n    \
+                   def _auto_init(self):\n        self.env.cr.execute('SELECT b.y FROM t b')\n\n    \
+                   def f(self):\n        self.env.cr.execute('SELECT c.z FROM t c')\n";
+        let facts = analyze(src, None);
+        let found: Vec<_> = facts
+            .sql_columns
+            .iter()
+            .map(|c| (c.column.as_str(), c.before_data))
+            .collect();
+        assert_eq!(found, [("x", true), ("y", true), ("z", false)]);
     }
 
     /// The table and column of each query column a source reads, in order.

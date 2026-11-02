@@ -1,0 +1,30 @@
+<odoo>
+    <record id="view_partner_form" model="ir.ui.view">
+        <field name="name">partner form</field>
+        <field name="model">res.partner</field>
+        <field name="arch" type="xml">
+            <form>
+                <field name="x_flag"/>
+                <field name="x_by_eval"/>
+                <field name="x_by_search"/>
+                <field name="x_by_name"/>
+                <field name="x_by_run"/>
+                <field name="x_idless"/>
+                <field name="x_idless_too"/>
+                <field name="x_manual_state"/>
+                <field name="x_late"/>
+                <field name="x_from_csv"/>
+                <field name="x_mentioned"/>
+                <field name="name" invisible="x_flag" readonly="x_manual_state"/>
+                <field name="x_unloaded"/>
+                <field name="x_base_state"/>
+                <field name="no_prefix"/>
+                <field name="short_name" invisible="x_unloaded"/>
+                <field name="x_no_model_id"/>
+                <field name="x_nested"/>
+                <field name="x_demo"/>
+                <field name="short_name" readonly="x_demo"/>
+            </form>
+        </field>
+    </record>
+</odoo>

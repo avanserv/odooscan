@@ -1,0 +1,8 @@
+<odoo>
+    <record id="partner_flagged" model="res.partner">
+        <field name="name">Flagged</field>
+        <field name="x_flag" eval="True"/>
+        <field name="x_unloaded" eval="True"/>
+        <field name="x_demo" eval="True"/>
+    </record>
+</odoo>
