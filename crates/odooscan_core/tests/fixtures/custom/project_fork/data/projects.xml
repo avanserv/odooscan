@@ -6,4 +6,14 @@
     <record id="project_billed" model="project.project">
         <field name="allow_timesheets" eval="True"/>
     </record>
+
+    <record id="project_form" model="ir.ui.view">
+        <field name="name">project.project.form.fork</field>
+        <field name="model">project.project</field>
+        <field name="arch" type="xml">
+            <form>
+                <field name="name" invisible="allow_timesheets"/>
+            </form>
+        </field>
+    </record>
 </odoo>

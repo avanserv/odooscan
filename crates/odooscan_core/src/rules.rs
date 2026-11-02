@@ -160,6 +160,12 @@ rules! {
     "OD312" "unknown-button-method" Correctness Error None, true, "A button calls a method its model does not have.";
     "OD313" "private-button-method" Correctness Error None, true, "A button calls a private method, which Odoo refuses.";
     "OD314" "unknown-function-method" Correctness Error None, true, "A <function> of a data file calls a method its model does not have.";
+    // saas-16.4 has no `VIEW_MODIFIERS`, and 17.0 validates them (`odoo/addons/base/models/ir_ui_view.py:1892`).
+    "OD315" "invalid-modifier" Correctness Error Some(">=17.0"), true, "A view modifier is not an expression Odoo reads.";
+    "OD316" "unknown-modifier-name" Correctness Error Some(">=17.0"), true, "A view modifier names a field its model does not have.";
+    // saas-17.2 refuses a field the view lacks (`odoo/addons/base/models/ir_ui_view.py:2894`), saas-17.3 adds it
+    // (`:1156`).
+    "OD317" "modifier-field-not-in-view" Correctness Error Some(">=17.0,<saas~17.3"), true, "A view modifier reads a field the view does not show.";
     "OD401" "model-without-access" Security Warning None, true, "A new model has no ir.model.access rule.";
     "OD402" "public-write-access" Security Warning None, false, "Public or portal users get write, create or unlink access.";
     "OD501" "manifest-data-missing" Correctness Error None, false, "A file listed in the manifest does not exist.";
@@ -269,12 +275,15 @@ mod tests {
 
     #[test]
     fn series_gates_follow_source() {
-        let gates: [(&str, &[&str], &[&str]); 5] = [
+        let gates: [(&str, &[&str], &[&str]); 8] = [
             ("OD117", &["saas~15.1", "saas~18.2"], &["saas~15.2", "saas~18.1"]),
             ("OD118", &["saas~18.1"], &["saas~18.2"]),
             ("OD219", &["saas~13.5"], &["14.0"]),
             ("OD221", &["saas~14.3"], &["saas~14.4"]),
             ("OD222", &["saas~12.4"], &["saas~12.5"]),
+            ("OD315", &["saas~16.4"], &["17.0", "20.0"]),
+            ("OD316", &["saas~16.4"], &["17.0", "20.0"]),
+            ("OD317", &["saas~16.4", "saas~17.3"], &["17.0", "saas~17.2"]),
         ];
         for (code, silent, reported) in gates {
             let r = rule(code);

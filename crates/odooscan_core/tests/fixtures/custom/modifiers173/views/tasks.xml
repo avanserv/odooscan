@@ -1,0 +1,12 @@
+<odoo>
+    <record id="task_form" model="ir.ui.view">
+        <field name="name">modifier.task.form</field>
+        <field name="model">modifier.task</field>
+        <field name="arch" type="xml">
+            <form>
+                <field name="name" invisible="state == 'done'"/>
+                <field name="name" invisible="active_id"/>
+            </form>
+        </field>
+    </record>
+</odoo>

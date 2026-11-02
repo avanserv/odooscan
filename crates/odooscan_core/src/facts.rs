@@ -397,6 +397,15 @@ pub struct ArchButton {
     pub method: Spanned<String>,
 }
 
+/// An expression of a view modifier, or the text an `<attribute>` spec gives one, at its arch
+/// position `path` (the x2many fields whose subviews enclose it, as in `ArchField`).
+#[derive(Debug)]
+pub struct ArchModifier {
+    pub path: Vec<String>,
+    pub attr: &'static str,
+    pub value: Spanned<String>,
+}
+
 #[derive(Debug, Default)]
 pub struct ViewFact {
     pub id: Option<String>,
@@ -411,6 +420,10 @@ pub struct ViewFact {
     pub locators: Vec<Spanned<ArchElement>>,
     pub domains: Vec<ArchDomain>,
     pub buttons: Vec<ArchButton>,
+    pub modifiers: Vec<ArchModifier>,
+    /// The arch position of each subview the arch opens: inline, on a `<groupby>`, or inside a field
+    /// a spec locates, which keeps the locator in its path.
+    pub subviews: Vec<Vec<String>>,
     /// Literal targets of `t-call`, in the arch or set by an `<attribute>` spec.
     pub calls: Vec<Spanned<String>>,
     /// The view's type, as its `type` field or the root of its arch says. A root that Odoo does not

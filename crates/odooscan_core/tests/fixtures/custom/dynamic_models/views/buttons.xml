@@ -4,7 +4,7 @@
         <field name="model">bad.generated.user</field>
         <field name="arch" type="xml">
             <form>
-                <button type="object" name="action_generated"/>
+                <button type="object" name="action_generated" invisible="generated"/>
             </form>
         </field>
     </record>

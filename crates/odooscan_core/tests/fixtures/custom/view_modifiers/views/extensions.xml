@@ -1,0 +1,95 @@
+<odoo>
+    <record id="ticket_form_specs" model="ir.ui.view">
+        <field name="name">modifier.ticket.form.specs</field>
+        <field name="model">modifier.ticket</field>
+        <field name="inherit_id" ref="ticket_form"/>
+        <field name="arch" type="xml">
+            <xpath expr="//field[@name='state']" position="attributes">
+                <attribute name="readonly">
+                    stat == 'done'
+                </attribute>
+                <attribute name="invisible" add="stat == 'done'" separator=" or "/>
+                <attribute name="required">state ==</attribute>
+            </xpath>
+            <xpath expr="//field[@name='state']" position="after">
+                <field name="name" invisible="stat"/>
+            </xpath>
+            <field name="state" invisible="stat ==" position="before"/>
+        </field>
+    </record>
+
+    <record id="ticket_form_subviews" model="ir.ui.view">
+        <field name="name">modifier.ticket.form.subviews</field>
+        <field name="model">modifier.ticket</field>
+        <field name="inherit_id" ref="ticket_form"/>
+        <field name="arch" type="xml">
+            <xpath expr="//list" position="inside">
+                <field name="name" readonly="nowhere"/>
+            </xpath>
+            <xpath expr="//field[@name='quantity']" position="attributes">
+                <attribute name="readonly">nowhere</attribute>
+            </xpath>
+            <xpath expr="//button[@name='unlink']" position="after">
+                <field name="name" readonly="quantity"/>
+            </xpath>
+        </field>
+    </record>
+
+    <record id="ticket_summary" model="ir.ui.view">
+        <field name="name">modifier.ticket.summary</field>
+        <field name="model">modifier.ticket</field>
+        <field name="arch" type="xml">
+            <form>
+                <field name="line_ids"/>
+            </form>
+        </field>
+    </record>
+
+    <record id="ticket_summary_lines" model="ir.ui.view">
+        <field name="name">modifier.ticket.summary.lines</field>
+        <field name="model">modifier.ticket</field>
+        <field name="inherit_id" ref="ticket_summary"/>
+        <field name="arch" type="xml">
+            <field name="line_ids" position="inside">
+                <list>
+                    <field name="name" readonly="quantity"/>
+                    <field name="name" readonly="nowhere"/>
+                </list>
+            </field>
+        </field>
+    </record>
+
+    <record id="ticket_summary_anchored" model="ir.ui.view">
+        <field name="name">modifier.ticket.summary.anchored</field>
+        <field name="model">modifier.ticket</field>
+        <field name="inherit_id" ref="ticket_summary"/>
+        <field name="arch" type="xml">
+            <xpath expr="//field[@name='name']" position="after">
+                <field name="name" invisible="quantity"/>
+            </xpath>
+        </field>
+    </record>
+
+    <record id="ticket_digest" model="ir.ui.view">
+        <field name="name">modifier.ticket.digest</field>
+        <field name="model">modifier.ticket</field>
+        <field name="arch" type="xml">
+            <form>
+                <field name="line_ids"/>
+            </form>
+        </field>
+    </record>
+
+    <record id="ticket_digest_lines" model="ir.ui.view">
+        <field name="name">modifier.ticket.digest.lines</field>
+        <field name="model">modifier.ticket</field>
+        <field name="inherit_id" ref="ticket_digest"/>
+        <field name="arch" type="xml">
+            <xpath expr="//field[@name='line_ids']" position="inside">
+                <form>
+                    <field name="name" required="quantity"/>
+                </form>
+            </xpath>
+        </field>
+    </record>
+</odoo>

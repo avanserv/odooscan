@@ -7,6 +7,7 @@ mod index;
 mod js;
 mod manifest;
 mod method_body;
+mod modifier;
 mod module_state;
 mod owl;
 mod project;

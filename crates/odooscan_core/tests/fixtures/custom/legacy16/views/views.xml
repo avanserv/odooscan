@@ -4,7 +4,17 @@
         <field name="arch" type="xml">
             <tree>
                 <field name="name" attrs="{'invisible': [('parent_id', '=', False)]}"/>
+                <field name="name" invisible="parent_id ==" readonly="nickname == 1"/>
             </tree>
+        </field>
+    </record>
+
+    <record id="view_gauge_form" model="ir.ui.view">
+        <field name="model">legacy.gauge</field>
+        <field name="arch" type="xml">
+            <form>
+                <group invisible="level == 0"/>
+            </form>
         </field>
     </record>
 </odoo>

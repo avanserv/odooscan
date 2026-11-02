@@ -115,6 +115,9 @@ XML ids, views and data records, within a file and across the dependency graph.
 | [OD312](OD312.md) | `unknown-button-method` | A button calls a method its model does not have. |
 | [OD313](OD313.md) | `private-button-method` | A button calls a private method, which Odoo refuses. |
 | [OD314](OD314.md) | `unknown-function-method` | A `<function>` of a data file calls a method its model does not have. |
+| [OD315](OD315.md) | `invalid-modifier` | A view modifier is not an expression Odoo reads. |
+| [OD316](OD316.md) | `unknown-modifier-name` | A view modifier names a field its model does not have. |
+| [OD317](OD317.md) | `modifier-field-not-in-view` | A view modifier reads a field the view does not show. |
 
 ## OD4: access
 

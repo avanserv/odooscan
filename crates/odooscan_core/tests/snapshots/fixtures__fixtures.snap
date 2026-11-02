@@ -301,6 +301,8 @@ custom/modern20/models/res_partner.py:111:7: OD401 model 'modern.lamp.shade' has
 custom/modern20/models/res_partner.py:117:39: OD224 l.x_shade: modern_lamp has no such column, since modern.lamp has no field x_shade; name the column of a stored field of modern.lamp
 custom/modern20/models/tariff.py:13:45: OD212 Monetary field 'amount' takes its currency from 'x_tariff_currency_id', which modern.tariff does not have
 custom/modern20/models/tariff.py:16:39: OD224 t.code: modern_tariff has no such column, since modern.tariff has no field code; name the column of a stored field of modern.tariff
+custom/modifiers17/views/jobs.xml:7:47: OD317 invisible reads field 'state', which the view does not show
+custom/modifiers173/views/tasks.xml:8:47: OD316 invisible names 'active_id': modifier.task has no field 'active_id'
 custom/orm_overrides/models/caches.py:7:21: OD120 'lang' in an ormcache key is not a parameter of _greeting_for(), so every call raises NameError; key on a parameter or on self
 custom/orm_overrides/models/caches.py:11:29: OD120 'country' in an ormcache key is not a parameter of _country_label(), so every call raises NameError; key on a parameter or on self
 custom/orm_overrides/models/caches.py:31:21: OD120 'method' in an ormcache key is not a parameter of _named_by_method(), so every call raises NameError; key on a parameter or on self
@@ -434,3 +436,15 @@ custom/supers/models/supers.py:29:24: OD211 no parent class of bad.super defines
 custom/supers/models/supers.py:74:24: OD211 no parent class of bad.super.child defines '_stamp', so this super() call fails
 custom/unversioned_logs/models/probes.py:39:39: OD224 s.create_uid: drift_sensor has no such column, since drift.sensor.create_uid is not created, as drift.sensor sets _log_access to False; drop it from the query, or log access on the model
 custom/unversioned_logs/models/probes.py:59:58: OD218 'country_id' has delegate=True, so it must be required with ondelete 'cascade' or 'restrict'; give it ondelete="cascade"
+custom/view_modifiers/views/extensions.xml:9:21: OD316 readonly names 'stat': modifier.ticket has no field 'stat'
+custom/view_modifiers/views/extensions.xml:11:50: OD316 invisible names 'stat': modifier.ticket has no field 'stat'
+custom/view_modifiers/views/extensions.xml:12:44: OD315 invalid required expression: Expected an expression
+custom/view_modifiers/views/extensions.xml:15:47: OD316 invisible names 'stat': modifier.ticket has no field 'stat'
+custom/view_modifiers/views/extensions.xml:56:50: OD316 readonly names 'nowhere': modifier.ticket has no field 'nowhere'
+custom/view_modifiers/views/tickets.xml:7:47: OD315 invalid invisible expression: Expected an expression
+custom/view_modifiers/views/tickets.xml:8:46: OD316 readonly names 'stat': modifier.ticket has no field 'stat'
+custom/view_modifiers/views/tickets.xml:9:46: OD315 invalid required expression: Odoo does not read this construct, such as a comprehension, a set or a lambda
+custom/view_modifiers/views/tickets.xml:10:47: OD316 invisible names 'true': modifier.ticket has no field 'true'
+custom/view_modifiers/views/tickets.xml:20:62: OD316 column_invisible names 'parent.stat': modifier.ticket has no field 'stat'
+custom/view_modifiers/views/tickets.xml:21:62: OD316 column_invisible names 'parent.state.x': Odoo refuses a composed field
+custom/view_modifiers/views/tickets.xml:23:54: OD316 readonly names 'state': modifier.line has no field 'state'
