@@ -1,0 +1,38 @@
+<odoo>
+    <record id="away_declared" model="field.ids.old">
+        <field name="code">a</field>
+        <field name="field_id" ref="field_rack_table_stock"/>
+    </record>
+    <record id="away_declared_later" model="field.ids.old">
+        <field name="code">b</field>
+        <field name="field_id" ref="field_rack_table_shelf"/>
+    </record>
+    <record id="away_undeclared_later" model="field.ids.old">
+        <field name="code">c</field>
+        <field name="field_id" ref="field_rack_table_custom"/>
+    </record>
+    <record id="away_undeclared" model="field.ids.old">
+        <field name="code">d</field>
+        <field name="field_id" ref="field_rack_table_tally"/>
+    </record>
+    <record id="away_by_name" model="field.ids.old">
+        <field name="code">e</field>
+        <field name="field_id" ref="field_ghost_rack__stock"/>
+    </record>
+    <record id="away_guessed_table" model="field.ids.old">
+        <field name="code">f</field>
+        <field name="field_id" ref="field_field_ids_old_tally"/>
+    </record>
+    <record id="away_known_table" model="field.ids.old">
+        <field name="code">g</field>
+        <field name="field_id" ref="field_field_ids_stock_tally"/>
+    </record>
+    <record id="away_indexed_table" model="field.ids.old">
+        <field name="code">h</field>
+        <field name="field_id" ref="field_res_partner_name"/>
+    </record>
+    <record id="away_indexed_table_later" model="field.ids.old">
+        <field name="code">i</field>
+        <field name="field_id" ref="field_res_partner_shelf"/>
+    </record>
+</odoo>

@@ -1,0 +1,5 @@
+<odoo>
+    <record id="field_crate_table_x_custom" model="ir.model.fields">
+        <field name="name">x_custom</field>
+    </record>
+</odoo>

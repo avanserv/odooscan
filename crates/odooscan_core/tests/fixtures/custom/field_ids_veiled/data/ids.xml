@@ -1,0 +1,5 @@
+<odoo>
+    <record id="field_bay_table_depth" model="ir.model.fields">
+        <field name="name">depth</field>
+    </record>
+</odoo>

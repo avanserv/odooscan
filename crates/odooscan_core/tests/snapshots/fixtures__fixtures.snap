@@ -323,8 +323,20 @@ custom/field_classes/models/lens.py:51:30: OD210 'opaque': x.lens has no field '
 custom/field_classes/views/lens_views.xml:7:45: OD312 x.lens has no method 'embedding'
 custom/field_ids_after/data/refs.xml:9:9: OD301 module field_ids_broken defines no XML id 'field_ids_broken.field_field_ids_gone_name'
 custom/field_ids_after/models/bin.py:18:22: OD301 module field_ids_broken defines no XML id 'field_ids_broken.field_field_ids_gone_name'
+custom/field_ids_away/__manifest__.py:4:42: OD503 module 'ghost_racks' is not on the addons path
+custom/field_ids_away/data/refs.xml:12:9: OD308 'field_rack_table_custom' is defined in data/ids.xml, which loads after this reference
+custom/field_ids_away/data/refs.xml:16:9: OD301 module field_ids_away defines no XML id 'field_ids_away.field_rack_table_tally'
+custom/field_ids_away/data/refs.xml:20:9: OD301 module field_ids_away defines no XML id 'field_ids_away.field_ghost_rack__stock'
+custom/field_ids_away/data/refs.xml:24:9: OD301 module field_ids_away defines no XML id 'field_ids_away.field_field_ids_old_tally'
+custom/field_ids_away/data/refs.xml:32:9: OD301 module field_ids_away defines no XML id 'field_ids_away.field_res_partner_name'
+custom/field_ids_away/data/refs.xml:36:9: OD308 'field_res_partner_shelf' is defined in data/ids.xml, which loads after this reference
+custom/field_ids_away/models/rack.py:13:22: OD301 module field_ids_away defines no XML id 'field_ids_away.field_rack_table_tally'
+custom/field_ids_away12/__manifest__.py:4:25: OD503 module 'ghost_racks' is not on the addons path
+custom/field_ids_away12/models/rack.py:11:22: OD301 module field_ids_away12 defines no XML id 'field_ids_away12.field_rack_table_stock'
 custom/field_ids_bare/data/refs.xml:6:9: OD301 module field_ids_old defines no XML id 'field_ids_old.field_field_ids_old__name'
 custom/field_ids_bare/data/refs.xml:21:9: OD301 module field_ids_broken defines no XML id 'field_ids_broken.field_field_ids_broken__name'
+custom/field_ids_blind/__manifest__.py:4:42: OD503 module 'ghost_racks' is not on the addons path
+custom/field_ids_blind/models/crate.py:8:11: OD000 Simple statements must be separated by newlines or semicolons
 custom/field_ids_broken/models/bin.py:11:15: OD000 Simple statements must be separated by newlines or semicolons
 custom/field_ids_later/data/refs.xml:6:9: OD301 module field_ids_old defines no XML id 'field_ids_old.field_field_ids_stock_name'
 custom/field_ids_new/data/refs.xml:9:9: OD301 module field_ids_new defines no XML id 'field_ids_new.field_field_ids_shelf_name'
@@ -334,6 +346,13 @@ custom/field_ids_old/data/refs.xml:24:9: OD301 module field_ids_old defines no X
 custom/field_ids_old/data/refs.xml:28:9: OD301 module field_ids_old defines no XML id 'field_ids_old.field_field_ids_old_name'
 custom/field_ids_old/data/refs.xml:32:9: OD302 'field_ids_broken.field_field_ids_bin_name' belongs to module field_ids_broken; add it to depends
 custom/field_ids_old/data/refs.xml:36:9: OD301 module base defines no XML id 'base.field_res_partner__name'
+custom/field_ids_stray/data/ids.xml:5:5: OD324 field.ids.old.code is required and has no default, so creating this record fails if the column is NOT NULL; give the field a value
+custom/field_ids_stray/data/refs.xml:4:9: OD301 module field_ids_stray defines no XML id 'field_ids_stray.field_rack_table_stock'
+custom/field_ids_stray/data/refs.xml:8:9: OD308 'field_rack_table_shelf' is defined in data/ids.xml, which loads after this reference
+custom/field_ids_stray/models/rack.py:5:16: OD202 model 'ghost.rack' comes from module field_ids_away; add it to depends
+custom/field_ids_veiled/__manifest__.py:4:42: OD503 module 'ghost_racks' is not on the addons path
+custom/field_ids_veiled/models/bay.py:5:16: OD201 no indexed module defines model 'ghost.bay'
+custom/field_ids_veiled/models/bay.py:8:32: OD201 no indexed module defines model 'ghost.frame'
 custom/field_options/models/bench.py:9:19: OD220 'partner_ids' has the label 'Partner' of field 'partner_id' of greenhouse.bench, so Odoo logs a warning and users cannot tell them apart; give it another string
 custom/field_options/models/bench.py:10:34: OD220 'planted_on' has the label 'Created on' of field 'create_date' of greenhouse.bench, so Odoo logs a warning and users cannot tell them apart; give it another string
 custom/field_options/models/bench.py:44:38: OD220 'common_name' has the label 'Name' of field 'name' of res.partner, so Odoo logs a warning and users cannot tell them apart; give it another string

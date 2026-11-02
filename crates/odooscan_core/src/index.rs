@@ -772,6 +772,32 @@ fn field_id_prefixes(model: &str, classes: &[(usize, &ClassFact)], series: Optio
         .collect()
 }
 
+/// Whether `local` may be the id of a field of `class`, spelled from a table the index cannot tell:
+/// Odoo spells it by table in `series`, and none of `classes`, those of the model, sets the table or
+/// introduces the model. Only a declared field counts, so a typo on the common extension of an
+/// outside model stays reported, and only after a table that is not `known_table`, so an id of an
+/// indexed model without its module does too. `any_field` is for a class that may hold fields the
+/// scan lacks: with no field to end on, `local` tells no table from a name.
+fn unseen_table_id(
+    classes: &[(usize, &ClassFact)],
+    class: &ClassFact,
+    local: &str,
+    series: Option<Series>,
+    known_table: impl Fn(&str) -> bool,
+    any_field: bool,
+) -> bool {
+    let by_table = series.is_none_or(|s| FieldSpelling::of(s) == FieldSpelling::ByTable);
+    let unseen = classes.iter().all(|(_, c)| !c.new_model && c.table.is_none());
+    let Some(rest) = local.strip_prefix("field_").filter(|_| by_table && unseen) else {
+        return false;
+    };
+    let names = |f: &FieldFact| {
+        let table = rest.strip_suffix(f.name.as_str()).and_then(|t| t.strip_suffix('_'));
+        table.is_some_and(|t| !t.is_empty() && !t.ends_with('_') && !known_table(t))
+    };
+    any_field || class.fields.iter().any(names)
+}
+
 /// The ids of the fields each class declares, in both spellings: `Index::xmlid_defs` picks one by
 /// the module that reads the id, which a scan may place on another series than the field's module.
 /// A pass of its own, as a `_table` that spells them may come from any module that extends the model.
@@ -2212,6 +2238,15 @@ impl<'m> Index<'m> {
             .any(|(_, c)| c.hidden_parents())
     }
 
+    /// Whether a class of `class`'s model, or a parent or delegate of it, is out of the scan's sight,
+    /// so the model may hold fields the index does not list.
+    pub fn unread_fields(&self, class: &ClassFact, scope: &Scope) -> bool {
+        class.unread
+            || self.unread_class(&class.model, scope)
+            || self.hidden_field_parents(&class.model, scope)
+            || self.unread_delegate(&class.model, scope)
+    }
+
     /// Whether a class in scope of `model`, or of a model it inherits or delegates to, delegates to a
     /// parent the scan cannot read, or is such a parent, so the fields `model` has through `_inherits`
     /// are not all known. `hidden_parents` asks of methods too, which a delegate does not pass on.
@@ -2272,6 +2307,14 @@ impl<'m> Index<'m> {
     /// What the id of a field of `model` may start with in `series`.
     pub fn field_prefixes(&self, model: &str, series: Option<Series>) -> Vec<String> {
         field_id_prefixes(model, self.classes(model), series)
+    }
+
+    /// Whether `local` may be the id of a field of `class`, for a reader in `scope`, spelled from a
+    /// table outside the index.
+    pub fn unseen_table_id(&self, class: &ClassFact, local: &str, series: Option<Series>, scope: &Scope) -> bool {
+        let known_table = |table: &str| !self.table_models(table).is_empty();
+        let any_field = self.unread_fields(class, scope);
+        unseen_table_id(self.classes(&class.model), class, local, series, known_table, any_field)
     }
 
     /// The models a non-abstract class introduces with `_name` whose table may be `table`, in any
@@ -2815,7 +2858,7 @@ mod tests {
     use super::{
         BASE_MODEL_DUNDERS, BASE_MODEL_EXTRA, BASE_MODEL_METHODS, BASE_PRIVATE_METHODS, BASE_RPC_METHODS,
         FIELD_CLASSES, FieldHolder, FieldSpelling, OLD_BASE_METHODS, PlacedWrite, XmlIdDef, base_private_method,
-        base_rpc_method, class_file, field_id_prefixes, fold_writes, last_text, old_base_method,
+        base_rpc_method, class_file, field_id_prefixes, fold_writes, last_text, old_base_method, unseen_table_id,
     };
     use crate::python;
     use crate::series::Series;
@@ -2851,6 +2894,54 @@ mod tests {
         assert_eq!(prefixes("c.d", Some("saas~11.2")), ["field_c_d__"]);
         assert_eq!(prefixes("c.d", None), ["field_t_", "field_u_", "field_c_d__"]);
         assert_eq!(prefixes("e.f", Some("10.0")), ["field_t_"]);
+    }
+
+    #[test]
+    fn a_table_outside_the_index_names_only_declared_fields() {
+        let source = "class A(models.Model):\n    _inherit = 'a.b'\n    stock = fields.Integer()\n";
+        let facts = python::analyze(source, Series::parse("10.0"));
+        let class = &facts.classes[0];
+        let id = |local, series: Option<&str>, any_field| {
+            let series = series.and_then(Series::parse);
+            unseen_table_id(&[(0, class)], class, local, series, |t| t == "known", any_field)
+        };
+        assert!(id("field_rack_stock", Some("saas~11.1"), false));
+        assert!(!id("field_rack_stock", Some("saas~11.2"), false));
+        assert!(!id("field_rack_stock", Some("saas~11.2"), true));
+        assert!(id("field_rack_stock", None, false));
+        assert!(!id("field_known_stock", Some("10.0"), false));
+        assert!(id("field_known_stock", Some("10.0"), true));
+        assert!(!id("field_rack_other", Some("10.0"), false));
+        assert!(id("field_rack_other", Some("10.0"), true));
+        assert!(!id("field_a_b__stock", Some("10.0"), false));
+        assert!(!id("field_stock", Some("10.0"), false));
+        assert!(!id("field__stock", Some("10.0"), false));
+        assert!(!id("rack_stock", Some("10.0"), false));
+        assert!(!id("rack_stock", Some("10.0"), true));
+
+        let source = "class B(models.Model):\n    _name = 'a.b'\n";
+        let introduced = python::analyze(source, Series::parse("10.0"));
+        let classes = [(0, &introduced.classes[0]), (0, class)];
+        assert!(!unseen_table_id(
+            &classes,
+            class,
+            "field_rack_stock",
+            Series::parse("10.0"),
+            |_| false,
+            true
+        ));
+
+        let source = "class C(models.Model):\n    _inherit = 'a.b'\n    _table = 'rack'\n";
+        let tabled = python::analyze(source, Series::parse("10.0"));
+        let classes = [(0, class), (0, &tabled.classes[0])];
+        assert!(!unseen_table_id(
+            &classes,
+            class,
+            "field_rack_stock",
+            Series::parse("10.0"),
+            |_| false,
+            true
+        ));
     }
 
     #[test]

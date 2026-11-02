@@ -1,0 +1,10 @@
+<odoo>
+    <record id="blind_unread" model="field.ids.old">
+        <field name="code">a</field>
+        <field name="field_id" ref="field_crate_table_weight"/>
+    </record>
+    <record id="blind_unread_later" model="field.ids.old">
+        <field name="code">b</field>
+        <field name="field_id" ref="field_crate_table_x_custom"/>
+    </record>
+</odoo>
