@@ -1,0 +1,52 @@
+<odoo>
+    <record id="by_attribute_and_eval" model="rv.thing">
+        <field name="parent_id" ref="other_1"/>
+        <field name="other_id" eval="ref('parent_1')"/>
+        <field name="action_id" eval="ref('other_1', False)"/>
+    </record>
+
+    <record id="by_tuple_commands" model="rv.thing">
+        <field name="other_ids" eval="[(1, ref('parent_1'), {}), (2, ref('parent_1')), (3, ref('parent_1')), (4, ref('parent_1'))]"/>
+        <field name="line_ids" eval="[(0, 0, {}), (5, 0, 0), (6, 0, [ref('parent_1'), ref('other_1')])]"/>
+    </record>
+
+    <record id="by_command_calls" model="rv.thing">
+        <field name="other_ids" eval="[Command.link(ref('parent_1')), Command.unlink(ref('parent_1')), Command.delete(ref('parent_1'))]"/>
+        <field name="line_ids" eval="[Command.update(ref('other_1'), {}), Command.create({}), Command.clear(), Command.set([ref('other_1')])]"/>
+    </record>
+
+    <record id="child_for_parent" model="rv.thing">
+        <field name="parent_id" ref="child_1"/>
+    </record>
+
+    <record id="child_delegates" model="rv.child">
+        <field name="parent_id" ref="parent_1"/>
+        <field name="twin_id" ref="parent_1"/>
+        <field name="shade_id" ref="other_1"/>
+    </record>
+
+    <record id="other_targets" model="rv.thing">
+        <field name="other_ids" eval="[(4, ref('menu_1')), (4, ref('template_1')), (4, ref('model_rv_other')), (4, ref('child_1_rv_parent'))]"/>
+        <field name="parent_id" ref="later_1"/>
+        <field name="action_id" ref="base.main_company"/>
+        <field name="line_ids" eval="[(4, ref('base.module_record_values'))]"/>
+    </record>
+
+    <record id="holds_a_line" model="rv.thing">
+        <field name="line_ids">
+            <record id="nested_line" model="rv.line">
+                <field name="other_id" ref="parent_1"/>
+                <field name="state">zz</field>
+            </record>
+        </field>
+    </record>
+
+    <record id="replaced_in_ext" model="rv.thing">
+        <field name="other_id" ref="parent_1"/>
+        <field name="state">zz</field>
+    </record>
+
+    <record id="replaced_unloaded" model="rv.thing">
+        <field name="other_id" ref="parent_1"/>
+    </record>
+</odoo>

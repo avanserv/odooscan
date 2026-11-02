@@ -73,3 +73,9 @@ class ResPartnerCachedRates(models.Model):
     @tools.ormcache("method.__name__")
     def _named_by_method(self):
         return self._name
+
+
+class PartnerTier(models.Model):
+    _inherit = "res.partner"
+
+    tier = fields.Selection(selection=(("gold", "Gold"), ("silver", "Silver")))

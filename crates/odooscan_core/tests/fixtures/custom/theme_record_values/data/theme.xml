@@ -1,0 +1,8 @@
+<odoo>
+    <template id="home"><div/></template>
+    <asset id="styles" name="Styles"/>
+
+    <record id="points_at_theme_records" model="rv.thing">
+        <field name="other_ids" eval="[(4, ref('home')), (4, ref('styles'))]"/>
+    </record>
+</odoo>

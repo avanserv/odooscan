@@ -1,5 +1,8 @@
 use crate::domain;
-use crate::facts::{AccessRow, ActionValue, DataFacts, Pos, RawDiag, RecordFact, RuleFact, Spanned, XmlDef, XmlRef};
+use crate::facts::{
+    AccessRow, ActionValue, DataFacts, FieldWrite, Pos, RawDiag, RecordFact, RecordWrite, RuleFact, Spanned,
+    WrittenValue, XmlDef, XmlRef,
+};
 use crate::xml::{literal, rule_domain_field};
 
 const PUBLIC_GROUPS: &[&str] = &["base.group_public", "base.group_portal", "group_public", "group_portal"];
@@ -49,6 +52,7 @@ pub fn analyze(text: &str, model: &str) -> DataFacts {
         let Ok(row) = row else { continue };
         let pos = at(row.position().map_or(1, |p| p.line()));
         row_ids(&mut facts, &row, &columns, model, pos);
+        row_write(&mut facts, &row, &columns, model, pos);
         access_row(&mut facts, &row, &columns, model, pos);
         rule_row(&mut facts, &row, &columns, model, pos);
     }
@@ -65,6 +69,7 @@ fn row_ids(facts: &mut DataFacts, row: &csv::StringRecord, columns: &[(&str, boo
             id: id.to_owned(),
             model: Some(model.to_owned()),
             pos,
+            themed: false,
             assigned: false,
         });
     }
@@ -72,16 +77,47 @@ fn row_ids(facts: &mut DataFacts, row: &csv::StringRecord, columns: &[(&str, boo
         if !is_ref {
             continue;
         }
-        for id in row
-            .get(i)
-            .unwrap_or("")
-            .split(',')
-            .map(str::trim)
-            .filter(|v| !v.is_empty())
-        {
+        for id in ref_ids(row.get(i).unwrap_or("")) {
             facts.refs.push(XmlRef { id: id.to_owned(), pos });
         }
     }
+}
+
+/// What a row writes to the fields of its record. A database id or a nested `a/b` column replaces
+/// the field with what only a run tells, and an empty cell clears it.
+fn row_write(facts: &mut DataFacts, row: &csv::StringRecord, columns: &[(&str, bool)], model: &str, pos: Pos) {
+    let mut fields = vec![];
+    for (i, (column, is_ref)) in columns.iter().enumerate().filter(|(_, (c, _))| *c != "id") {
+        let spanned = |value: &str| Spanned {
+            value: value.to_owned(),
+            pos,
+        };
+        let name = database_field(column).or_else(|| column.split_once('/').map(|(field, _)| field));
+        let cell = row.get(i).unwrap_or_default();
+        let value = if name.is_some() || cell.is_empty() {
+            WrittenValue::Opaque
+        } else if *is_ref {
+            WrittenValue::Ids(ref_ids(cell).map(spanned).collect())
+        } else {
+            WrittenValue::Text(spanned(cell))
+        };
+        fields.push(FieldWrite {
+            name: name.unwrap_or(column).to_owned(),
+            value,
+        });
+    }
+    facts.writes.push(RecordWrite {
+        id: row_id(row, columns),
+        model: model.to_owned(),
+        fields,
+        nested_in: None,
+        csv: true,
+    });
+}
+
+/// The ids of a `:id` cell.
+fn ref_ids(cell: &str) -> impl Iterator<Item = &str> {
+    cell.split(',').map(str::trim).filter(|v| !v.is_empty())
 }
 
 /// The field of a `field/.id` or `field.id` column, which holds a database id.
@@ -196,6 +232,37 @@ fn rule_row(facts: &mut DataFacts, row: &csv::StringRecord, columns: &[(&str, bo
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Each field of the row as `name=value`, in the order of the columns.
+    fn row(header: &str, row: &str) -> Vec<String> {
+        let facts = analyze(&format!("{header}\n{row}\n"), "m");
+        let shown = |f: &FieldWrite| match &f.value {
+            WrittenValue::Ids(ids) => {
+                let ids: Vec<&str> = ids.iter().map(|i| i.value.as_str()).collect();
+                format!("{}={}", f.name, ids.join("+"))
+            }
+            WrittenValue::Text(text) => format!("{}='{}'", f.name, text.value),
+            WrittenValue::Opaque => format!("{}?", f.name),
+        };
+        facts.writes[0].fields.iter().map(shown).collect()
+    }
+
+    #[test]
+    fn writes_ids_and_text_by_column() {
+        assert_eq!(row("id,a:id,b/id,c", "r,x, y , z "), ["a=x", "b=y", "c=' z '"]);
+    }
+
+    #[test]
+    fn a_cell_of_several_ids_splits_at_commas() {
+        assert_eq!(row("id,a:id", "r,\"x, y,,z\""), ["a=x+y+z"]);
+    }
+
+    #[test]
+    fn replaces_a_field_by_what_only_a_run_tells() {
+        assert_eq!(row("id,a/.id,b.id", "r,3,4"), ["a?", "b?"]);
+        assert_eq!(row("id,a/b:id,a/c/id,c/d", "r,x,y,z"), ["a?", "a?", "c?"]);
+        assert_eq!(row("id,a,b:id", "r,,"), ["a?", "b?"]);
+    }
 
     fn access(header: &str, row: &str) -> DataFacts {
         analyze(&format!("{header}\n{row}\n"), "ir.model.access")

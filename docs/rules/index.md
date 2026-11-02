@@ -121,6 +121,8 @@ XML ids, views and data records, within a file and across the dependency graph.
 | [OD318](OD318.md) | `view-mode-without-view` | A window action lists a view type its model has no view for. |
 | [OD319](OD319.md) | `python-field-syntax-error` | The code of a server action or a cron, or the file name of a report, is not Python that Odoo compiles. |
 | [OD320](OD320.md) | `unknown-server-code-method` | The code of a server action or a cron calls a method its model does not have. |
+| [OD321](OD321.md) | `wrong-model-reference` | A data record gives a relational field a record of another model. |
+| [OD322](OD322.md) | `unknown-selection-value` | A data record gives a Selection field a value it does not list. |
 
 ## OD4: access
 

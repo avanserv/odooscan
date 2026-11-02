@@ -6,8 +6,8 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::facts::{
     ActionFact, ActionValue, Annotation, ArchElement, ArchModifier, ClassFact, DefinitionSource, DomainFact, FieldFact,
-    FunctionCall, JsFacts, JsName, ModelKind, OptionValue, OrmCall, Pos, RawDiag, RecordFact, ReportFact, RuleFact,
-    ServerFact, Spanned, SqlColumn, SqlView, ViewFact, XmlRef,
+    FunctionCall, JsFacts, JsName, ModelKind, OptionValue, OrmCall, Pos, RawDiag, RecordFact, RecordWrite, ReportFact,
+    RuleFact, ServerFact, Spanned, SqlColumn, SqlView, ViewFact, WrittenValue, XmlRef,
 };
 use crate::index::{
     BASE_MODEL_METHODS, Export, FieldDef, FieldInfo, Index, JsSpec, RELATIONAL_TYPES, Scope, Status, ViewTree, full_id,
@@ -1109,6 +1109,9 @@ impl<'m> Ctx<'_, 'm> {
             for record in &file.facts.records {
                 self.record(out, path, record);
             }
+            for write in &file.facts.writes {
+                self.record_write(out, path, write);
+            }
             for call in &file.facts.functions {
                 self.function_call(out, path, call);
             }
@@ -1124,6 +1127,147 @@ impl<'m> Ctx<'_, 'm> {
             self.domains(out, path, &file.facts.action_domains);
             self.actions(out, path, &file.facts.actions);
         }
+    }
+
+    /// OD321 and OD322 on what `write` gives the fields the record still holds once its scope loaded.
+    fn record_write(&self, out: &mut Out<'m>, path: &'m Path, write: &'m RecordWrite) {
+        if !self.sees_whole_model(&write.model) {
+            return;
+        }
+        for field in &write.fields {
+            let known = !matches!(field.value, WrittenValue::Opaque);
+            if !known || !self.holds(write, &field.name) || self.parent_decides(write, &field.name) {
+                continue;
+            }
+            let Some(target) = self.written_field(&write.model, &field.name) else {
+                continue;
+            };
+            match &field.value {
+                WrittenValue::Ids(ids) => self.written_ids(out, path, write, field.name.as_str(), &target, ids),
+                WrittenValue::Text(text) => self.written_text(out, path, write, field.name.as_str(), &target, text),
+                WrittenValue::Opaque => {}
+            }
+        }
+    }
+
+    /// Whether `write` makes the last write of `name` its scope sees: what a module depending on this
+    /// one replaces later does not mend a database without that module.
+    fn holds(&self, write: &'m RecordWrite, name: &str) -> bool {
+        let id = write.id.as_ref().map(|id| full_id(&self.module.name, id));
+        let Some(writes) = id.and_then(|id| self.index.value_writes.get(&id)) else {
+            return true;
+        };
+        let writes_it = |w: &RecordWrite| w.fields.iter().any(|f| f.name == name);
+        let last = writes.iter().rev().find(|(mi, w)| self.scope.sees(*mi) && writes_it(w));
+        last.is_none_or(|(_, w)| std::ptr::eq(*w, write))
+    }
+
+    /// Whether the record enclosing `write` overrides or drops `name`. Odoo gives a record nested in
+    /// a one2many its inverse field whatever it says, and creates none nested in any other field.
+    fn parent_decides(&self, write: &'m RecordWrite, name: &str) -> bool {
+        let Some((model, field)) = &write.nested_in else {
+            return false;
+        };
+        let enclosing = self.written_field(model, field);
+        let Some(enclosing) = enclosing.filter(|f| f.defs[0].2.ftype == "One2many") else {
+            return true;
+        };
+        !matches!(enclosing.get("inverse_name"), Merged::Known(OptionValue::Str(i)) if i != name)
+    }
+
+    /// The field `name` of `model` as a record writes it: its own, or that of the model it delegates
+    /// to, which an own field of that name shadows. `_inherits` cycles end at the seen model.
+    fn written_field(&self, model: &'m str, name: &str) -> Option<Field<'m>> {
+        let mut seen = FxHashSet::default();
+        let mut model = model;
+        while seen.insert(model) {
+            let mut defs = self.index.merged_fields(model, self.scope);
+            defs.retain(|d| d.2.name == name);
+            if !defs.is_empty() {
+                return self.merge(model, defs);
+            }
+            model = self.delegated_field(model, name)?.0;
+        }
+        None
+    }
+
+    /// OD321 on each id of `ids` none of whose records fits the comodel of `field`.
+    fn written_ids(
+        &self,
+        out: &mut Out<'m>,
+        path: &'m Path,
+        write: &RecordWrite,
+        name: &str,
+        field: &Field<'m>,
+        ids: &[Spanned<String>],
+    ) {
+        if !RELATIONAL_TYPES.contains(&field.defs[0].2.ftype.as_str()) || field.stored() != Some(true) {
+            return;
+        }
+        let Merged::Known(OptionValue::Str(comodel)) = field.get("comodel_name") else {
+            return;
+        };
+        if !self.sees_model(comodel) {
+            return;
+        }
+        let fits = |m: &&str| self.index.stands_for(m, comodel, self.scope) != Some(false);
+        for id in ids {
+            let full = full_id(&self.module.name, &id.value);
+            let models = self.index.record_models(&full).unwrap_or_default();
+            if let Some(other) = models.first().filter(|_| !models.iter().any(&fits)) {
+                let message = format!(
+                    "'{full}' is a record of {other}, but {}.{name} takes {comodel}",
+                    write.model
+                );
+                out.push(path, "OD321", id.pos, message);
+            }
+        }
+    }
+
+    /// OD322 on a value no indexed definition of the field lists: one only a module outside the
+    /// scope adds may still load first, as an auto-installed bridge does.
+    fn written_text(
+        &self,
+        out: &mut Out<'m>,
+        path: &'m Path,
+        write: &RecordWrite,
+        name: &str,
+        field: &Field<'m>,
+        text: &Spanned<String>,
+    ) {
+        let validated = matches!(
+            field.get("validate"),
+            Merged::Unset | Merged::Known(OptionValue::Bool(true))
+        );
+        if field.defs[0].2.ftype != "Selection" || !validated {
+            return;
+        }
+        if field.get("related") != Merged::Unset || field.stored() != Some(true) {
+            return;
+        }
+        let defs = self.index.field_defs(&write.model, name, None);
+        let Some(values) = self.listed_values(&defs) else {
+            return;
+        };
+        if values.contains(text.value.as_str()) || (write.csv && csv_label(&defs, &values, &text.value)) {
+            return;
+        }
+        let message = format!("{}.{name} has no value '{}'", write.model, text.value.escape_debug());
+        out.push(path, "OD322", text.pos, message);
+    }
+
+    /// The values `defs` list between them. None when one of them only tells a run, or none sets
+    /// `selection`, which leaves the base of a `selection_add` out of the index.
+    fn listed_values(&self, defs: &[FieldDef<'m>]) -> Option<FxHashSet<&'m str>> {
+        let tuples = self.series.is_some_and(|s| s >= Series { major: 19, minor: 0 });
+        let mut values = FxHashSet::default();
+        for (_, _, def) in defs {
+            if def.splat {
+                return None;
+            }
+            selection_values(def, tuples, &mut values)?;
+        }
+        defs.iter().any(|d| d.2.option("selection").is_some()).then_some(values)
     }
 
     /// Checks the domain `rule` writes, if the record still holds it when Odoo reads it.
@@ -3210,6 +3354,14 @@ fn selection_values<'m>(def: &'m FieldFact, tuples: bool, values: &mut FxHashSet
         }
     }
     Some(())
+}
+
+/// Whether Odoo's import takes `cell` for a value of `defs`: it compares each value and each label
+/// in any case. A label only a run tells may be the cell.
+fn csv_label(defs: &[FieldDef], values: &FxHashSet<&str>, cell: &str) -> bool {
+    let same = |known: &str| known.to_lowercase() == cell.to_lowercase();
+    let mut labels = defs.iter().flat_map(|d| &d.2.labels);
+    values.iter().any(|v| same(v)) || labels.any(|l| l.as_deref().is_none_or(same))
 }
 
 /// The values a literal list gives, or a literal tuple when `tuples`.

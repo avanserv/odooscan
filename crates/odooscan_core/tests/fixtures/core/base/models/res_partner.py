@@ -72,6 +72,18 @@ class IrUiView(models.Model):
     inherit_id = fields.Many2one("ir.ui.view")
 
 
+class IrUiMenu(models.Model):
+    _name = "ir.ui.menu"
+
+    name = fields.Char()
+
+
+class IrModuleModule(models.Model):
+    _name = "ir.module.module"
+
+    name = fields.Char()
+
+
 class IrActionsActWindow(models.Model):
     _name = "ir.actions.act_window"
 

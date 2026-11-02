@@ -1,0 +1,109 @@
+<odoo>
+    <record id="not_relational" model="rv.thing">
+        <field name="target_named" ref="parent_1"/>
+        <field name="res_named_id" ref="parent_1"/>
+        <field name="count_named" ref="parent_1"/>
+    </record>
+
+    <record id="comodel_unknown" model="rv.thing">
+        <field name="related_other_id" ref="parent_1"/>
+        <field name="computed_other_id" ref="parent_1"/>
+        <field name="named_id" ref="parent_1"/>
+        <field name="spread_id" ref="parent_1"/>
+        <field name="spread_bare_id" ref="parent_1"/>
+        <field name="side_id" ref="parent_1"/>
+    </record>
+
+    <record id="target_may_fit" model="rv.thing">
+        <field name="action_id" ref="window_1"/>
+        <field name="other_ids" eval="[(4, ref('shared_1')), (4, ref('computed_1')), (4, ref('blended_1')), (4, ref('nowhere_1'))]"/>
+        <field name="other_id" ref="both_models"/>
+        <field name="parent_id" ref="both_models"/>
+        <field name="line_ids" eval="[(4, ref('ghost_addon.line_1')), (4, ref('assigned_too'))]"/>
+    </record>
+
+    <record id="only_a_run_tells" model="rv.thing">
+        <field name="other_ids" search="[]" ref="parent_1"/>
+        <field name="parent_id" eval="ref('other_1') or False"/>
+        <field name="other_id" eval="obj().env.ref('record_values.parent_1').id"/>
+        <field name="retyped_id" eval="obj().env.ref('record_values.parent_1')"/>
+        <field name="line_ids" eval="[ref('parent_1')]"/>
+        <field name="action_id" eval="[(4, ref('parent_1')), (4, 7)]"/>
+        <field name="state" type="char">zz</field>
+        <field name="rated" file="data/rated.txt">zz</field>
+        <field name="state@fr">zz</field>
+        <field name="added" eval="'q' + 'r'"/>
+    </record>
+
+    <record id="last_of_a_name" model="rv.thing">
+        <field name="parent_id" ref="other_1"/>
+        <field name="parent_id" ref="parent_1"/>
+        <field name="other_id" ref="parent_1"/>
+        <field name="other_id" eval="False"/>
+        <field name="state">zz</field>
+        <field name="state"/>
+    </record>
+
+    <record id="selection_only_a_run_tells" model="rv.thing">
+        <field name="by_method">zz</field>
+        <field name="by_lambda">zz</field>
+        <field name="by_variable">zz</field>
+        <field name="by_int">1</field>
+        <field name="by_tuple">zz</field>
+        <field name="unchecked">zz</field>
+        <field name="related_kind">y</field>
+        <field name="computed_kind">zz</field>
+        <field name="lone">zz</field>
+        <field name="spread_kind">zz</field>
+    </record>
+
+    <record id="listed_by_any_module" model="rv.thing">
+        <field name="state">a</field>
+        <field name="added">z</field>
+    </record>
+
+    <record id="empty_values" model="rv.thing">
+        <field name="state" eval="''"/>
+        <field name="rated"></field>
+    </record>
+
+    <record id="delegates_silently" model="rv.child">
+        <field name="parent_id" ref="parent_1"/>
+        <field name="shade_id" ref="parent_1"/>
+        <field name="kind">y</field>
+    </record>
+
+    <record id="inverse_of_parent" model="rv.thing">
+        <field name="line_ids">
+            <record id="inverse_line" model="rv.line">
+                <field name="thing_id" ref="parent_1"/>
+            </record>
+        </field>
+        <field name="loose_line_ids">
+            <record id="loose_line" model="rv.line">
+                <field name="other_id" ref="parent_1"/>
+            </record>
+        </field>
+        <field name="parent_id">
+            <record id="never_created" model="rv.line">
+                <field name="other_id" ref="parent_1"/>
+                <field name="state">zz</field>
+            </record>
+        </field>
+    </record>
+
+    <record id="hides_a_parent" model="rv.blended">
+        <field name="other_id" ref="parent_1"/>
+        <field name="state">zz</field>
+    </record>
+
+    <record id="replaced_later" model="rv.thing">
+        <field name="parent_id" ref="other_1"/>
+        <field name="state">zz</field>
+    </record>
+
+    <record id="replaced_by_rows" model="rv.thing">
+        <field name="other_id" ref="parent_1"/>
+        <field name="line_ids" eval="[(4, ref('other_1'))]"/>
+    </record>
+</odoo>

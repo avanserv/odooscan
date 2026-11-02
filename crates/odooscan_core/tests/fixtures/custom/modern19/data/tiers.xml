@@ -1,0 +1,5 @@
+<odoo>
+    <record id="tier_partner" model="res.partner">
+        <field name="tier">bronze</field>
+    </record>
+</odoo>

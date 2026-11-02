@@ -109,6 +109,9 @@ pub struct FieldFact {
     pub domain: Vec<Spanned<String>>,
     /// Attributes given by keyword, or by position under the name the field type gives it.
     pub options: Vec<(String, Spanned<OptionValue>)>,
+    /// The label of each value of literal `selection` and `selection_add` lists, none where only a
+    /// run tells it.
+    pub labels: Vec<Option<String>>,
     /// The call unpacks `*args` or `**kwargs`, so it may set any attribute it does not name.
     pub splat: bool,
 }
@@ -356,6 +359,8 @@ pub struct XmlDef {
     pub id: String,
     pub model: Option<String>,
     pub pos: Pos,
+    /// A `<template>` or `<asset>`, whose model is another one in a `theme_` module.
+    pub themed: bool,
     /// The id is given to an existing record, which a `<record>` with that id may then update.
     pub assigned: bool,
 }
@@ -435,6 +440,33 @@ pub struct ViewFact {
 pub struct RecordFact {
     pub model: Spanned<String>,
     pub fields: Vec<Spanned<String>>,
+}
+
+/// What one `<field>` or CSV cell writes, as far as its text tells without a run.
+#[derive(Debug)]
+pub enum WrittenValue {
+    /// XML ids of records of the field's comodel.
+    Ids(Vec<Spanned<String>>),
+    Text(Spanned<String>),
+    Opaque,
+}
+
+#[derive(Debug)]
+pub struct FieldWrite {
+    pub name: String,
+    pub value: WrittenValue,
+}
+
+/// One write of a data file to a record: a `<record>` or a CSV row.
+#[derive(Debug)]
+pub struct RecordWrite {
+    pub id: Option<String>,
+    pub model: String,
+    /// The value each field ends on: the last `<field>` of a name replaces those before.
+    pub fields: Vec<FieldWrite>,
+    /// The model and the field whose `<field>` encloses the record.
+    pub nested_in: Option<(String, String)>,
+    pub csv: bool,
 }
 
 /// A row that grants access: a row of `ir.access` with no group restricts instead.
@@ -544,6 +576,7 @@ pub struct DataFacts {
     /// The `key` of each view or page, a name `t-call` finds apart from the XML id.
     pub view_keys: Vec<String>,
     pub records: Vec<RecordFact>,
+    pub writes: Vec<RecordWrite>,
     /// Domains and `group_by` fields of window actions, on their `res_model`.
     pub action_domains: Vec<DomainFact>,
     pub actions: Vec<ActionFact>,

@@ -1513,6 +1513,12 @@
       "count": 1
     },
     {
+      "path": "addons/mrp_subcontracting/data/mrp_subcontracting_demo.xml",
+      "code": "OD321",
+      "message": "'product.product_delivery_02' is a record of product.product, but mrp.bom.product_tmpl_id takes product.template",
+      "count": 1
+    },
+    {
       "path": "addons/mrp_subcontracting/security/ir.model.access.csv",
       "code": "OD402",
       "message": "base.group_portal gets write, create or unlink on mrp.model_mrp_consumption_warning; public and portal access should be read-only and go through controllers",
@@ -2110,6 +2116,12 @@
       "path": "addons/stock_account/static/src/stock_account_forecasted/forecasted_header.js",
       "code": "OD605",
       "message": "no indexed bundle defines template 'stock_account.ForecastedHeader'",
+      "count": 1
+    },
+    {
+      "path": "addons/stock_fleet/data/stock_fleet_demo.xml",
+      "code": "OD321",
+      "message": "'base.user_admin' is a record of res.users, but fleet.vehicle.driver_id takes res.partner",
       "count": 1
     },
     {

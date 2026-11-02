@@ -1,0 +1,10 @@
+<odoo>
+    <record id="not_loaded" model="rv.thing">
+        <field name="parent_id" ref="other_1"/>
+        <field name="state">zz</field>
+    </record>
+
+    <record id="replaced_unloaded" model="rv.thing">
+        <field name="other_id" ref="other_1"/>
+    </record>
+</odoo>
