@@ -17,4 +17,15 @@
             </form>
         </field>
     </record>
+
+    <record id="view_partner_tree_flagged" model="ir.ui.view">
+        <field name="model">res.partner</field>
+        <field name="inherit_id" ref="view_partner_tree"/>
+        <field name="arch" type="xml">
+            <field name="name" position="attributes">
+                <attribute name="readonly"> </attribute>
+                <attribute name="invisible" add="true" separator=" or "/>
+            </field>
+        </field>
+    </record>
 </odoo>

@@ -39,6 +39,15 @@ const CONTEXT: &[&str] = &[
 
 const REFUSED: &str = "Odoo does not read this construct, such as a comprehension, a set or a lambda";
 
+/// Whether Odoo takes `value` without parsing it. It compares the value as written, so blanks around
+/// one of these make it an expression. Empty attributes are no expression.
+pub fn constant(value: &str) -> bool {
+    value.is_empty()
+        || ["0", "1", "true", "false"]
+            .iter()
+            .any(|c| value.eq_ignore_ascii_case(c))
+}
+
 /// The fields an expression reads: `parent.x` whole, and otherwise the name a path starts from. An
 /// expression Odoo refuses, for its syntax or a construct its walk leaves out, is the error.
 pub fn names(text: &str) -> Result<Vec<String>, String> {
@@ -120,6 +129,16 @@ mod tests {
 
     fn read(text: &str) -> Vec<String> {
         names(text).unwrap_or_else(|e| panic!("{text}: {e}"))
+    }
+
+    #[test]
+    fn a_constant_is_the_value_as_written_in_any_case() {
+        for value in ["", "0", "1", "true", "false", "TRUE", "True", "fAlSe"] {
+            assert!(constant(value), "{value:?}");
+        }
+        for value in [" ", " true", "true ", "\n    true\n", "\n0\n", "None", "2", "not true"] {
+            assert!(!constant(value), "{value:?}");
+        }
     }
 
     #[test]

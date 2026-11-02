@@ -1,14 +1,15 @@
 use std::sync::LazyLock;
 
-use regex::Regex;
+use regex::{Captures, Regex};
 use roxmltree::{Document, Node, ParsingOptions};
 
 use crate::domain;
 use crate::facts::{
-    AccessRow, ActionFact, ActionValue, ArchButton, ArchDomain, ArchElement, ArchField, ArchModifier, ArchSubview,
-    DataFacts, DomainFact, FieldWrite, FunctionCall, Lines, Pos, RawDiag, RecordFact, RecordWrite, ReportFact,
-    RuleFact, ServerFact, Spanned, ViewFact, WrittenValue, XmlDef, XmlRef,
+    AccessRow, ActionFact, ActionValue, ArchButton, ArchDomain, ArchElement, ArchEmptied, ArchField, ArchModifier,
+    ArchSubview, ArchValued, DataFacts, DomainFact, FieldWrite, FunctionCall, Lines, Pos, RawDiag, RecordFact,
+    RecordWrite, ReportFact, RuleFact, ServerFact, Spanned, ViewFact, WrittenValue, XmlDef, XmlRef,
 };
+use crate::modifier;
 use crate::record_eval;
 use crate::server_code;
 
@@ -737,12 +738,16 @@ impl Walker<'_> {
             let read = |attr| Some((attr, attr_value(node, attr, self.lines)?));
             MODIFIERS.into_iter().filter_map(read).collect()
         };
-        let parsed = found.into_iter().filter(|(_, value)| !constant_modifier(&value.value));
+        let joins = joined_element(node);
+        let parsed = found
+            .into_iter()
+            .filter(|(_, value)| joins.is_some() || !modifier::constant(&value.value));
         view.modifiers.extend(parsed.map(|(attr, value)| ArchModifier {
             path: path.to_vec(),
             subviews: self.around.clone(),
             attr,
             value,
+            joins: joins.clone(),
         }));
     }
 
@@ -1054,6 +1059,39 @@ fn attr_value(node: Node, name: &str, lines: &Lines) -> Option<Spanned<String>> 
     })
 }
 
+fn filled(node: Node, attr: &str) -> bool {
+    node.attribute(attr).is_some_and(|v| !v.is_empty())
+}
+
+/// The modifier the `<attribute>` spec `node` may leave empty: a `remove` may take its whole value,
+/// and without `add` or `remove` the text replaces it.
+fn emptied_modifier(node: Node) -> Option<ArchEmptied> {
+    let cleared = !filled(node, "add") && node.text().unwrap_or_default().is_empty();
+    let attr = MODIFIERS.into_iter().find(|a| node.attribute("name") == Some(a))?;
+    (filled(node, "remove") || cleared).then(|| ArchEmptied {
+        attr,
+        target: spec_target(node),
+    })
+}
+
+/// The element whose value an `add` of the `<attribute>` spec `node` joins. Only that value tells
+/// whether the `add` stands alone, and a `remove` may empty it first.
+fn joined_element(node: Node) -> Option<ArchElement> {
+    if !node.has_tag_name("attribute") || !filled(node, "add") || filled(node, "remove") {
+        return None;
+    }
+    spec_target(node)
+}
+
+/// The element the spec around the `<attribute>` `node` names.
+fn spec_target(node: Node) -> Option<ArchElement> {
+    let spec = node.parent_element()?;
+    match spec.tag_name().name() {
+        "xpath" => xpath_target(spec.attribute("expr")?),
+        _ => named_elements(spec).next(),
+    }
+}
+
 /// The expression an `<attribute>` spec gives a modifier: its text, or an `add`, which Odoo joins to
 /// the value it finds by `and` or `or`, so it reads alone. Any other separator splits the value at
 /// places only that value tells.
@@ -1063,17 +1101,9 @@ fn spec_modifier(node: Node, lines: &Lines) -> Option<(&'static str, Spanned<Str
     let value = match node.has_attribute("add") {
         true if joined => attr_value(node, "add", lines)?,
         true => return None,
-        false => spec_text(node, lines)?,
+        false => spec_raw(node, lines)?,
     };
     Some((attr, value))
-}
-
-/// Empty attributes are no expression, and Odoo takes these before it parses, in any case.
-fn constant_modifier(value: &str) -> bool {
-    value.is_empty()
-        || ["0", "1", "true", "false"]
-            .iter()
-            .any(|c| value.eq_ignore_ascii_case(c))
 }
 
 fn identifier(name: &str) -> bool {
@@ -1107,24 +1137,43 @@ fn arch_domain(pos: Pos, path: Vec<String>, fields: impl Iterator<Item = String>
 /// can locate. A spec on another tag than field matches every attribute it carries, so checking one
 /// that names the element is a necessary condition.
 fn arch_element(node: Node, pos: Pos, view: &mut ViewFact) {
-    let tag = node.tag_name().name();
-    let named = LOCATING_ATTRS
-        .iter()
-        .filter_map(|&attr| node.attribute(attr).map(|v| (attr, v)))
-        .map(|(attr, v)| ArchElement {
-            tag: tag.to_owned(),
-            attr: attr.to_owned(),
-            value: v.to_owned(),
-        });
-    match tag {
+    match node.tag_name().name() {
         "xpath" => view
             .locators
             .extend(xpath_locators(node.attribute("expr").unwrap_or_default(), pos)),
         // An attribute spec can rename the element it locates; any other attribute it sets is no element.
-        "attribute" => view.elements.extend(renamed(node)),
-        _ if locates(node) => view.locators.extend(named.take(1).map(|value| Spanned { value, pos })),
-        _ => view.elements.extend(named),
+        "attribute" => {
+            view.elements.extend(renamed(node));
+            view.emptied.extend(emptied_modifier(node));
+        }
+        _ if locates(node) => view
+            .locators
+            .extend(named_elements(node).take(1).map(|value| Spanned { value, pos })),
+        _ => added_element(node, view),
     }
+}
+
+/// `node` as each attribute that names it locates it, in the order of `LOCATING_ATTRS`.
+fn named_elements(node: Node) -> impl Iterator<Item = ArchElement> {
+    LOCATING_ATTRS.into_iter().filter_map(move |attr| {
+        Some(ArchElement {
+            tag: node.tag_name().name().to_owned(),
+            attr: attr.to_owned(),
+            value: node.attribute(attr)?.to_owned(),
+        })
+    })
+}
+
+fn added_element(node: Node, view: &mut ViewFact) {
+    let elements: Vec<ArchElement> = named_elements(node).collect();
+    if elements.is_empty() {
+        return;
+    }
+    view.elements.extend(elements.iter().cloned());
+    view.valued.push(ArchValued {
+        elements,
+        attrs: MODIFIERS.into_iter().filter(|attr| filled(node, attr)).collect(),
+    });
 }
 
 /// The element an `<attribute>` spec gives a new value of an attribute that locates it.
@@ -1192,13 +1241,22 @@ pub fn t_call(node: Node, lines: &Lines) -> Option<Spanned<String>> {
     literal_target(&target.value).then_some(target)
 }
 
-/// The text of a spec, trimmed, at its first character.
-fn spec_text(node: Node, lines: &Lines) -> Option<Spanned<String>> {
+/// The text of a spec as Odoo sets it, blanks included, at its first non-blank character.
+fn spec_raw(node: Node, lines: &Lines) -> Option<Spanned<String>> {
     let text = node.first_child().filter(Node::is_text)?;
     let raw = text.text()?;
     Some(Spanned {
-        value: raw.trim().to_owned(),
+        value: raw.to_owned(),
         pos: lines.pos(text.range().start + (raw.len() - raw.trim_start().len())),
+    })
+}
+
+/// The text of a spec, trimmed, at its first character.
+fn spec_text(node: Node, lines: &Lines) -> Option<Spanned<String>> {
+    let Spanned { value, pos } = spec_raw(node, lines)?;
+    Some(Spanned {
+        value: value.trim().to_owned(),
+        pos,
     })
 }
 
@@ -1241,23 +1299,40 @@ pub fn spec_tag<'a>(spec: Node<'a, '_>) -> Option<&'a str> {
     }
 }
 
-/// The named steps of an xpath, each of which must match some element. A union or an `or` would
-/// make a step optional, so such expressions are not checked.
+/// Whether a union or an `or` makes a step of an xpath optional.
+fn optional_steps(expr: &str) -> bool {
+    expr.contains('|') || expr.contains(" or ")
+}
+
+fn step_element(step: &Captures) -> ArchElement {
+    ArchElement {
+        tag: step[1].to_owned(),
+        attr: step[2].to_owned(),
+        value: step[3].to_owned(),
+    }
+}
+
+/// The named steps of an xpath, each of which must match some element, so an expression with
+/// optional steps is not checked.
 fn xpath_locators(expr: &str, pos: Pos) -> Vec<Spanned<ArchElement>> {
-    if expr.contains('|') || expr.contains(" or ") {
+    if optional_steps(expr) {
         return vec![];
     }
-    XPATH_NAMED_STEP
-        .captures_iter(expr)
-        .map(|c| Spanned {
-            value: ArchElement {
-                tag: c[1].to_owned(),
-                attr: c[2].to_owned(),
-                value: c[3].to_owned(),
-            },
-            pos,
-        })
-        .collect()
+    let located = |c: Captures| Spanned {
+        value: step_element(&c),
+        pos,
+    };
+    XPATH_NAMED_STEP.captures_iter(expr).map(located).collect()
+}
+
+/// The element an xpath lands on, when its last step names it. Anything after that step, such as
+/// `/..` or a further predicate, lands elsewhere or on only some of the named elements.
+fn xpath_target(expr: &str) -> Option<ArchElement> {
+    if optional_steps(expr) {
+        return None;
+    }
+    let step = XPATH_NAMED_STEP.captures_iter(expr).last()?;
+    (step.get(0)?.end() == expr.len()).then(|| step_element(&step))
 }
 
 fn subview(path: &[String], tag: &str) -> ArchSubview {
@@ -1798,6 +1873,15 @@ mod tests {
     }
 
     #[test]
+    fn a_spec_text_keeps_the_blanks_that_make_it_no_constant() {
+        let spec = |text: &str| values(&format!(r#"<attribute name="readonly">{text}</attribute>"#));
+        assert_eq!(spec(" "), [" "]);
+        assert_eq!(spec("\n  true\n"), ["\n  true\n"]);
+        assert_eq!(spec("true"), [""; 0]);
+        assert_eq!(spec(""), [""; 0]);
+    }
+
+    #[test]
     fn an_attribute_of_a_spec_locates_and_is_no_modifier() {
         assert_eq!(values(r#"<field name="a" invisible="b" position="after"/>"#), [""; 0]);
         assert_eq!(values(r#"<xpath expr="//a" invisible="b" position="after"/>"#), [""; 0]);
@@ -1811,7 +1895,7 @@ mod tests {
             "<field name=\"a\" position=\"attributes\"><attribute name=\"invisible\">\n  b\n</attribute></field>";
         assert_eq!(
             modifiers(spec),
-            [(vec!["~a".to_owned()], "invisible", "b".to_owned(), 3, 3)]
+            [(vec!["~a".to_owned()], "invisible", "\n  b\n".to_owned(), 3, 3)]
         );
         assert_eq!(values(r#"<attribute name="string">b</attribute>"#), [""; 0]);
     }
@@ -1835,6 +1919,130 @@ mod tests {
             values(r#"<attribute name="invisible" separator="or">b</attribute>"#),
             ["b"]
         );
+    }
+
+    #[test]
+    fn an_add_joins_the_element_its_spec_locates() {
+        let joined = |spec: &str| {
+            let joins = arch_view(spec).modifiers.swap_remove(0).joins;
+            joins.map(|e| (e.tag, e.attr, e.value))
+        };
+        let add = r#"<attribute name="invisible" add="true" separator="or"/>"#;
+        let target = |tag: &str, attr: &str, value: &str| Some((tag.to_owned(), attr.to_owned(), value.to_owned()));
+        let spec = format!(r#"<field name="a" position="attributes">{add}</field>"#);
+        assert_eq!(joined(&spec), target("field", "name", "a"));
+        let first = format!(r#"<div id="a" name="b" position="attributes">{add}</div>"#);
+        assert_eq!(joined(&first), target("div", "name", "b"));
+        for (expr, found) in [
+            ("//field[@name='a']", target("field", "name", "a")),
+            ("//group/div[@id='a']", target("div", "id", "a")),
+            ("//field[@name='a']/field[@name='b']", target("field", "name", "b")),
+        ] {
+            let spec = format!(r#"<xpath expr="{expr}" position="attributes">{add}</xpath>"#);
+            assert_eq!(joined(&spec), found, "{expr}");
+        }
+    }
+
+    #[test]
+    fn an_xpath_that_ends_on_no_named_step_joins_nothing() {
+        for expr in [
+            "//field[@name='a']/..",
+            "//field[@name='a'][1]",
+            "//group[field[@name='a']]",
+            "//field[@name='a'] | //field[@name='b']",
+            "//field[@name='a' or @name='b']",
+            "//form",
+        ] {
+            let add = r#"<attribute name="invisible" add="b" separator="or"/>"#;
+            let spec = format!(r#"<xpath expr="{expr}" position="attributes">{add}</xpath>"#);
+            assert_eq!(arch_view(&spec).modifiers[0].joins, None, "{expr}");
+        }
+    }
+
+    #[test]
+    fn a_constant_add_is_kept_only_when_it_joins_an_element() {
+        let spec = |attrs: &str| {
+            let attribute = format!(r#"<attribute name="invisible" {attrs} separator="or"/>"#);
+            arch_view(&format!(r#"<field name="a" position="attributes">{attribute}</field>"#)).modifiers
+        };
+        assert_eq!(spec(r#"add="true""#)[0].value.value, "true");
+        assert!(spec(r#"add="true" remove="""#)[0].joins.is_some());
+        assert!(spec(r#"add="true" remove="b""#).is_empty());
+        assert!(spec(r#"add="""#).is_empty());
+        assert_eq!(spec(r#"add="b" remove="c""#)[0].joins, None);
+    }
+
+    #[test]
+    fn a_spec_that_may_empty_a_modifier_records_it() {
+        let emptied = |attribute: &str| {
+            let spec = extension(&format!(r#"<field name="a" position="attributes">{attribute}</field>"#));
+            spec.emptied.iter().map(|e| e.attr).collect::<Vec<_>>()
+        };
+        for attribute in [
+            r#"<attribute name="readonly"/>"#,
+            r#"<attribute name="readonly"></attribute>"#,
+            r#"<attribute name="readonly" add="" remove=""/>"#,
+            r#"<attribute name="readonly" remove="b" separator="or"/>"#,
+            r#"<attribute name="readonly" add="c" remove="b" separator="or"/>"#,
+        ] {
+            assert_eq!(emptied(attribute), ["readonly"], "{attribute}");
+        }
+        for attribute in [
+            r#"<attribute name="readonly"> </attribute>"#,
+            r#"<attribute name="readonly">b</attribute>"#,
+            r#"<attribute name="readonly" add="b" separator="or"/>"#,
+            r#"<attribute name="string"/>"#,
+        ] {
+            assert_eq!(emptied(attribute), [""; 0], "{attribute}");
+        }
+    }
+
+    #[test]
+    fn a_spec_that_empties_a_modifier_records_the_element_it_names() {
+        let target = |spec: &str| {
+            let emptied = extension(spec).emptied.swap_remove(0);
+            emptied.target.map(|e| (e.tag, e.attr, e.value))
+        };
+        let named = |tag: &str, attr: &str, value: &str| Some((tag.to_owned(), attr.to_owned(), value.to_owned()));
+        let clear = r#"<attribute name="readonly"/>"#;
+        let field = format!(r#"<field name="a" position="attributes">{clear}</field>"#);
+        assert_eq!(target(&field), named("field", "name", "a"));
+        let xpath = format!(r#"<xpath expr="//div[@id='a']" position="attributes">{clear}</xpath>"#);
+        assert_eq!(target(&xpath), named("div", "id", "a"));
+        let parent = format!(r#"<xpath expr="//field[@name='a']/.." position="attributes">{clear}</xpath>"#);
+        assert_eq!(target(&parent), None);
+        let form = format!(r#"<form position="attributes">{clear}</form>"#);
+        assert_eq!(target(&form), None);
+    }
+
+    #[test]
+    fn records_each_named_element_with_the_modifiers_it_holds() {
+        let arch =
+            r#"<form><field name="a" readonly="b" invisible="" required="0"/><div id="c" name="d"/><group/></form>"#;
+        let read = |v: ArchValued| {
+            let names = v.elements.into_iter().map(|e| (e.attr, e.value)).collect();
+            (names, v.attrs)
+        };
+        let valued: Vec<_> = arch_view(arch).valued.into_iter().map(read).collect();
+        let held = |names: &[(&str, &str)], attrs: &[&'static str]| {
+            let names: Vec<_> = names.iter().map(|&(a, v)| (a.to_owned(), v.to_owned())).collect();
+            (names, attrs.to_vec())
+        };
+        assert_eq!(
+            valued,
+            [
+                held(&[("name", "a")], &["readonly", "required"]),
+                held(&[("name", "d"), ("id", "c")], &[]),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_spec_adds_no_valued_element_but_its_content_does() {
+        let spec = r#"<field name="a" position="after" readonly="b"><field name="c" readonly="d"/></field>"#;
+        let added = extension(spec).valued;
+        assert_eq!(added.len(), 1);
+        assert_eq!(added[0].elements[0].value, "c");
     }
 
     fn arch_view(arch: &str) -> ViewFact {

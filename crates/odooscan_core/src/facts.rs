@@ -419,6 +419,25 @@ pub struct ArchModifier {
     pub subviews: Vec<ArchSubview>,
     pub attr: &'static str,
     pub value: Spanned<String>,
+    /// The element an `add` joins this value to, unless the spec locates none or a `remove` may
+    /// empty what it joins.
+    pub joins: Option<ArchElement>,
+}
+
+/// An element an arch adds, by each name that locates it, with the modifiers it gives a non-empty
+/// value.
+#[derive(Debug)]
+pub struct ArchValued {
+    pub elements: Vec<ArchElement>,
+    pub attrs: Vec<&'static str>,
+}
+
+/// A modifier an `<attribute>` spec may leave empty, on the element the spec names. A spec that names
+/// none may reach any element.
+#[derive(Debug)]
+pub struct ArchEmptied {
+    pub attr: &'static str,
+    pub target: Option<ArchElement>,
 }
 
 /// A subview at its arch position: opened inline, on a `<groupby>` or inside a field a spec locates,
@@ -441,6 +460,10 @@ pub struct ViewFact {
     pub has_arch: bool,
     /// Elements the arch adds, which views extending it can locate.
     pub elements: Vec<ArchElement>,
+    /// The elements the arch's own tags add, with their modifiers.
+    pub valued: Vec<ArchValued>,
+    /// What the arch's `<attribute>` specs may leave empty.
+    pub emptied: Vec<ArchEmptied>,
     /// Elements the arch's specs must find in the parent views.
     pub locators: Vec<Spanned<ArchElement>>,
     pub domains: Vec<ArchDomain>,

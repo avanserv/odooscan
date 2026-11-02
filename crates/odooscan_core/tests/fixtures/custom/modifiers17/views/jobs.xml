@@ -369,4 +369,26 @@
             </xpath>
         </field>
     </record>
+
+    <record id="job_flagged" model="ir.ui.view">
+        <field name="name">modifier.job.flagged</field>
+        <field name="model">modifier.job</field>
+        <field name="arch" type="xml">
+            <form>
+                <field name="state"/>
+                <field name="name" readonly="state"/>
+            </form>
+        </field>
+    </record>
+
+    <record id="job_flagged_added" model="ir.ui.view">
+        <field name="name">modifier.job.flagged.added</field>
+        <field name="model">modifier.job</field>
+        <field name="inherit_id" ref="job_flagged"/>
+        <field name="arch" type="xml">
+            <field name="name" position="attributes">
+                <attribute name="readonly" add="true" separator=" or "/>
+            </field>
+        </field>
+    </record>
 </odoo>
