@@ -1907,8 +1907,8 @@ impl<'m> Ctx<'_, 'm> {
         }
     }
 
-    /// Whether the scan sees every class that could add to `model`. A model that is not visible is
-    /// OD201's or OD202's.
+    /// Whether the scan sees every class that could add to `model`. A caller stays silent on a
+    /// model that is not visible: only the places that call `model_ref` raise OD201 or OD202.
     fn sees_whole_model(&self, model: &str) -> bool {
         self.sees_model(model) && !self.index.hidden_parents(model, self.scope)
     }
