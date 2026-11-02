@@ -28,4 +28,13 @@
         <field name="report_name">report_tag11.absent_record</field>
         <field name="print_report_name">name = 3</field>
     </record>
+
+    <report id="tag_async_name" string="tag_async_name" model="res.partner" name="report_tag11.sheet" print_report_name="async + '.pdf'"/>
+
+    <record id="record_async_name" model="ir.actions.report">
+        <field name="name">record_async_name</field>
+        <field name="model">res.partner</field>
+        <field name="report_name">report_tag11.sheet</field>
+        <field name="print_report_name">async + '.pdf'</field>
+    </record>
 </odoo>

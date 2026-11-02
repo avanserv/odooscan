@@ -1,16 +1,24 @@
 //! The Python of data records: the `code` of server actions and crons, read as Odoo compiles it when
 //! it loads a record, and the expressions `safe_eval` compiles when something reads them.
 
+use std::borrow::Cow;
 use std::mem::replace;
 
+use ruff_python_ast::token::{Token, TokenKind};
 use ruff_python_ast::visitor::{self, Visitor};
 use ruff_python_ast::{self as ast, ExceptHandler, Expr, ExprContext, Pattern, Stmt};
-use ruff_python_parser::{parse_expression, parse_module};
+use ruff_python_parser::{Mode, parse_expression, parse_module, parse_unchecked};
 use ruff_text_size::{Ranged, TextRange};
 use rustc_hash::FxHashSet;
 
+use crate::series::Series;
+
 /// The names Odoo sets from the record's `model_id` before it runs the code, in every series.
 const FROM_MODEL_ID: [&str; 3] = ["model", "records", "record"];
+
+/// The first series whose floor is Python 3.7, which reserves `async` and `await`: `setup.py:58` on
+/// 15.0 asks for `>=3.7` where `setup.py:59` on saas~14.5 asks for `>=3.6`.
+const ASYNC_RESERVED: Series = Series { major: 15, minor: 0 };
 
 /// What `read` finds in code, at byte offsets into it.
 #[derive(Debug, Default, PartialEq, Eq)]
@@ -21,12 +29,12 @@ pub struct ServerCode {
     pub calls: Vec<(String, usize)>,
 }
 
-pub fn read(code: &str) -> ServerCode {
+pub fn read(code: &str, series: Option<Series>) -> ServerCode {
     let refused = |message, at: TextRange| ServerCode {
         error: Some((message, at.start().to_usize())),
         calls: vec![],
     };
-    let parsed = match parse_module(code) {
+    let parsed = match parse_module(&names_async(code, series)) {
         Ok(parsed) => parsed,
         Err(e) => return refused(e.error.to_string(), e.location),
     };
@@ -39,13 +47,23 @@ pub fn read(code: &str) -> ServerCode {
     let trusted = walk.calls.into_iter().filter(|c| !bound.contains(c.receiver));
     ServerCode {
         error: None,
-        calls: trusted.map(|c| (c.method.to_owned(), c.at)).collect(),
+        calls: trusted
+            .map(|c| (spelled(code, c.method), c.method.start().to_usize()))
+            .collect(),
     }
 }
 
+/// `method` as Odoo looks it up: the parser's name, which is normalized as Python normalizes it, but
+/// the word in `code` where `names_async` renamed it, which no finding may quote.
+fn spelled(code: &str, method: &ast::Identifier) -> String {
+    let word = &code[method.range()];
+    let renamed = matches!(word, "async" | "await");
+    if renamed { word } else { method.as_str() }.to_owned()
+}
+
 /// Why `compile()` in `eval` mode refuses `text`, which it takes stripped, and where.
-pub fn expression_error(text: &str) -> Option<(String, usize)> {
-    let parsed = match parse_expression(text) {
+pub fn expression_error(text: &str, series: Option<Series>) -> Option<(String, usize)> {
+    let parsed = match parse_expression(&names_async(text, series)) {
         Ok(parsed) => parsed,
         Err(e) => return Some((e.error.to_string(), e.location.start().to_usize())),
     };
@@ -55,10 +73,67 @@ pub fn expression_error(text: &str) -> Option<(String, usize)> {
         .map(|(message, at)| (message.to_owned(), at.start().to_usize()))
 }
 
+/// `code` as a module of `series` reads it. Ruff's lexer reserves `async` and `await` at any target,
+/// so where they are names their tokens are renamed before the parse that counts, in uppercase to
+/// keep every offset, which `spelled` reads the word back by. An unknown series takes the names
+/// reading, so a finding never rests on a Python the module may not run on.
+fn names_async(code: &str, series: Option<Series>) -> Cow<'_, str> {
+    let reserved = series.is_some_and(|series| series >= ASYNC_RESERVED);
+    if reserved || !(code.contains("async") || code.contains("await")) {
+        return Cow::Borrowed(code);
+    }
+    let parsed = parse_unchecked(code, Mode::Module.into());
+    let tokens = parsed.tokens();
+    let mut named = code.to_owned();
+    let mut scope = AsyncScope::default();
+    for (i, token) in tokens.iter().enumerate() {
+        let inside = scope.step(token.kind(), tokens.get(i + 1).map(Token::kind));
+        if !inside && matches!(token.kind(), TokenKind::Async | TokenKind::Await) {
+            named[token.range()].make_ascii_uppercase();
+        }
+    }
+    Cow::Owned(named)
+}
+
+/// Where Python before 3.7 reserves both words: from `async def` through its block, which a nested
+/// `async def` does not extend.
+#[derive(Default)]
+struct AsyncScope {
+    indent: usize,
+    /// The indent of the open `async def`.
+    open: Option<usize>,
+    /// Whether the open `async def` has passed a logical newline: its signature sits at its indent
+    /// without ending it.
+    past_signature: bool,
+}
+
+impl AsyncScope {
+    /// Moves past a token of `kind`, and says whether both words are reserved at it.
+    fn step(&mut self, kind: TokenKind, next: Option<TokenKind>) -> bool {
+        match kind {
+            TokenKind::Indent => self.indent += 1,
+            TokenKind::Dedent => self.indent = self.indent.saturating_sub(1),
+            TokenKind::Newline => self.past_signature = true,
+            TokenKind::NonLogicalNewline | TokenKind::Comment => {}
+            _ => self.code_token(kind, next),
+        }
+        self.open.is_some()
+    }
+
+    fn code_token(&mut self, kind: TokenKind, next: Option<TokenKind>) {
+        if self.past_signature && self.open.is_some_and(|indent| self.indent <= indent) {
+            self.open = None;
+        }
+        if self.open.is_none() && kind == TokenKind::Async && next == Some(TokenKind::Def) {
+            self.open = Some(self.indent);
+            self.past_signature = false;
+        }
+    }
+}
+
 struct Call<'a> {
     receiver: &'a str,
-    method: &'a str,
-    at: usize,
+    method: &'a ast::Identifier,
 }
 
 #[derive(Clone, Copy, Default)]
@@ -196,8 +271,7 @@ impl<'a> Walk<'a> {
         if self.guarded == 0 && FROM_MODEL_ID.contains(&receiver.id.as_str()) {
             self.calls.push(Call {
                 receiver: receiver.id.as_str(),
-                method: attribute.attr.as_str(),
-                at: attribute.attr.start().to_usize(),
+                method: &attribute.attr,
             });
         }
     }
@@ -276,21 +350,26 @@ impl<'a> Visitor<'a> for Walk<'a> {
 mod tests {
     use super::*;
 
+    const RESERVED: Option<Series> = Some(ASYNC_RESERVED);
+    const NAMES: Option<Series> = Some(Series { major: 14, minor: 5 });
+    /// What a name followed by a token that cannot continue it gives, unlike a word still reserved.
+    const STRAY_TOKEN: &str = "Simple statements must be separated by newlines or semicolons";
+
     fn methods(code: &str) -> Vec<String> {
-        let read = read(code);
+        let read = read(code, RESERVED);
         assert_eq!(read.error, None, "{code}");
         read.calls.into_iter().map(|(method, _)| method).collect()
     }
 
     fn error(code: &str) -> (String, usize) {
-        read(code).error.unwrap_or_else(|| panic!("{code}"))
+        read(code, RESERVED).error.unwrap_or_else(|| panic!("{code}"))
     }
 
     #[test]
     fn reads_the_calls_of_each_trusted_name_at_the_method() {
         let code = "model.a()\nrecords.b(1)\nif record:\n    record.c(x=2)\n";
         assert_eq!(
-            read(code).calls,
+            read(code, RESERVED).calls,
             [("a".to_owned(), 6), ("b".to_owned(), 18), ("c".to_owned(), 45)]
         );
     }
@@ -390,8 +469,8 @@ mod tests {
     #[test]
     fn refuses_what_the_parser_refuses() {
         assert_eq!(error("model.a(").1, 8);
-        assert!(read("a\n    b").error.is_some());
-        assert!(read("print 'a'").error.is_some());
+        assert!(read("a\n    b", RESERVED).error.is_some());
+        assert!(read("print 'a'", RESERVED).error.is_some());
     }
 
     #[test]
@@ -440,17 +519,17 @@ mod tests {
             "def f():\n    for a in b:\n        break\n    return a",
             "action = {'type': 'ir.actions.act_window'}",
         ] {
-            assert_eq!(read(code), ServerCode::default(), "{code}");
+            assert_eq!(read(code, RESERVED), ServerCode::default(), "{code}");
         }
     }
 
     #[test]
     fn an_expression_takes_no_statement_and_ends_with_its_line() {
         for text in ["a\n+ b", "a\nb", "x = 1", "import a", "return", "a;", "", "a +"] {
-            assert!(expression_error(text).is_some(), "{text}");
+            assert!(expression_error(text, RESERVED).is_some(), "{text}");
         }
-        assert_eq!(expression_error("a\n+ b").map(|(_, at)| at), Some(2));
-        assert_eq!(expression_error("x = 1").map(|(_, at)| at), Some(2));
+        assert_eq!(expression_error("a\n+ b", RESERVED).map(|(_, at)| at), Some(2));
+        assert_eq!(expression_error("x = 1", RESERVED).map(|(_, at)| at), Some(2));
     }
 
     #[test]
@@ -460,7 +539,11 @@ mod tests {
             ("a + (yield from b)", "'yield from' outside function", 5),
             ("f(await a)", "'await' outside function", 2),
         ] {
-            assert_eq!(expression_error(text), Some((message.to_owned(), at)), "{text}");
+            assert_eq!(
+                expression_error(text, RESERVED),
+                Some((message.to_owned(), at)),
+                "{text}"
+            );
         }
     }
 
@@ -478,13 +561,118 @@ mod tests {
             "# a comment\na",
             "a # a comment",
         ] {
-            assert_eq!(expression_error(text), None, "{text}");
+            assert_eq!(expression_error(text, RESERVED), None, "{text}");
         }
     }
 
     #[test]
+    fn both_words_are_names_below_the_reserving_series() {
+        for code in [
+            "async = 1",
+            "await = 1",
+            "f(async=True)",
+            "a.async",
+            "f'{async}'",
+            "async def f():\n    await a\nasync = 1",
+            "async def f(): await a\nasync = 1",
+            "async def f(\n    a,\n):\n    await a\nawait = 1",
+            "class A:\n    async def f(self):\n        await a\n    await = 1",
+            "async def f():\n    async def g():\n        await a\n    await b\nasync = 1",
+            "async def f():\n    await a\n# a comment\n    await b\nasync = 1",
+            "'async'",
+            "# await",
+            "é = async",
+        ] {
+            for series in [NAMES, None] {
+                assert_eq!(read(code, series).error, None, "{code}");
+            }
+        }
+    }
+
+    #[test]
+    fn both_words_stay_keywords_in_an_async_def_below_the_reserving_series() {
+        for code in [
+            "async def f():\n    async = 1",
+            "async def f(): async = 1",
+            "async def f(a=async):\n    pass",
+        ] {
+            let message = read(code, NAMES).error.map(|(message, _)| message);
+            assert!(message.is_some_and(|m| m != STRAY_TOKEN), "{code}");
+        }
+    }
+
+    #[test]
+    fn a_name_takes_no_operand_below_the_reserving_series() {
+        for code in ["await a", "async a", "async def f():\n    await a\nawait b\nawait c"] {
+            let message = read(code, NAMES).error.map(|(message, _)| message);
+            assert_eq!(message.as_deref(), Some(STRAY_TOKEN), "{code}");
+        }
+    }
+
+    #[test]
+    fn a_call_quotes_the_word_the_code_holds() {
+        let code = "model.async()\nrecords.await()";
+        for series in [NAMES, None] {
+            let expected = [("async".to_owned(), 6), ("await".to_owned(), 22)];
+            assert_eq!(read(code, series).calls, expected);
+        }
+    }
+
+    #[test]
+    fn a_call_keeps_any_other_name_as_the_parser_reads_it() {
+        assert_eq!(read("model.ASYNC()", NAMES).calls, [("ASYNC".to_owned(), 6)]);
+        assert_eq!(read("model.\u{FF41}()", NAMES).calls, [("a".to_owned(), 6)]);
+    }
+
+    #[test]
+    fn a_refused_code_quotes_no_renamed_word() {
+        for code in [
+            "async async",
+            "await await",
+            "async.",
+            "f(async",
+            "def async(",
+            "def f(async, async",
+            "import async.",
+            "return async",
+            "class async",
+            "async: int = (",
+        ] {
+            let (message, _) = read(code, NAMES).error.unwrap_or_else(|| panic!("{code}"));
+            assert!(
+                !message.contains("ASYNC") && !message.contains("AWAIT"),
+                "{code}: {message}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_name_keeps_the_offsets_of_what_follows() {
+        assert_eq!(read("async = model.a()", NAMES).calls, [("a".to_owned(), 14)]);
+        assert_eq!(read("async = (", NAMES).error.map(|(_, at)| at), Some(9));
+    }
+
+    #[test]
+    fn both_words_are_reserved_from_the_reserving_series() {
+        for code in ["async = 1", "await = 1", "a.async"] {
+            assert!(read(code, RESERVED).error.is_some(), "{code}");
+            assert!(read(code, Series::parse("19.0")).error.is_some(), "{code}");
+        }
+    }
+
+    #[test]
+    fn an_expression_reads_both_words_by_series() {
+        for text in ["async + '.pdf'", "f(await=1)", "a.async"] {
+            assert_eq!(expression_error(text, NAMES), None, "{text}");
+            assert_eq!(expression_error(text, None), None, "{text}");
+            assert!(expression_error(text, RESERVED).is_some(), "{text}");
+        }
+        assert!(expression_error("await a", NAMES).is_some());
+    }
+
+    #[test]
     fn a_refused_code_makes_no_calls() {
-        assert!(read("model.a()\nreturn").calls.is_empty());
-        assert!(read("model.a()\n(").calls.is_empty());
+        assert!(read("model.a()\nreturn", RESERVED).calls.is_empty());
+        assert!(read("model.a()\n(", RESERVED).calls.is_empty());
     }
 }

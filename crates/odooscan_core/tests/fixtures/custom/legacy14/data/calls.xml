@@ -13,4 +13,10 @@
         <field name="model_id" ref="base.model_res_partner"/>
         <field name="code">model._get_xml_id()</field>
     </record>
+
+    <record id="cron_async_name" model="ir.cron">
+        <field name="name">cron_async_name</field>
+        <field name="model_id" ref="base.model_res_partner"/>
+        <field name="code">async = 1</field>
+    </record>
 </odoo>

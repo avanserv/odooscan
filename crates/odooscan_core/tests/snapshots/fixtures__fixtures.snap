@@ -286,6 +286,9 @@ custom/legacy12/views/views.xml:12:9: OD302 'web_corkboard.corkboard' is defined
 custom/legacy12/views/views.xml:21:9: OD302 'web_slate.slate' is defined by module web_slate; add it to depends
 custom/legacy13/data/calls.xml:4:41: OD314 res.partner has no method '_get_xml_id'
 custom/legacy13/data/calls.xml:15:34: OD320 res.partner has no method '_get_xml_id'
+custom/legacy13/data/calls.xml:29:7: OD320 res.partner has no method '_get_xml_id'
+custom/legacy13/data/calls.xml:36:34: OD320 res.partner has no method 'async'
+custom/legacy13/data/calls.xml:42:34: OD320 res.partner has no method 'await'
 custom/legacy13/models/ledger.py:18:41: OD220 'stamped_on' has the label 'Create Date' of field 'create_date' of legacy.ledger, so Odoo logs a warning and users cannot tell them apart; give it another string
 custom/legacy13/models/res_partner.py:7:72: OD213 'holder_id' is required, so Odoo refuses ondelete='set null'; use 'restrict' or 'cascade'
 custom/legacy13/models/res_partner.py:9:18: OD214 'origin_ids' and 'market_ids' are Many2many fields of res.partner to the same comodel without relation, so Odoo gives both the same table; set relation on one
@@ -669,6 +672,7 @@ custom/report_actions/data/file_names.xml:53:55: OD319 Odoo refuses this express
 custom/report_actions/data/file_names.xml:61:46: OD319 Odoo refuses this expression when it prints the report: Unexpected token at the end of an expression
 custom/report_actions/data/file_names.xml:68:79: OD319 Odoo refuses this expression when it prints the report: Unexpected token at the end of an expression
 custom/report_actions/data/file_names.xml:76:46: OD319 Odoo refuses this expression when it prints the report: Unexpected token at the end of an expression
+custom/report_actions/data/file_names.xml:83:41: OD319 Odoo refuses this expression when it prints the report: Expected an identifier, but found a keyword `async` that cannot be used here
 custom/report_actions/data/first_writes.xml:17:35: OD311 no indexed module defines template 'report_actions.absent_kept'
 custom/report_actions/data/first_writes.xml:29:35: OD311 no indexed module defines template 'report_actions.absent_type_earlier'
 custom/report_actions/data/first_writes.xml:58:46: OD319 Odoo refuses this expression when it prints the report: Unexpected token at the end of an expression
@@ -799,6 +803,7 @@ custom/server_code/data/syntax.xml:90:6: OD319 Odoo refuses this code when it lo
 custom/server_code/data/syntax.xml:99:1: OD319 Odoo refuses this code when it loads the record: Unexpected indentation
 custom/server_code/data/syntax.xml:114:28: OD319 Odoo refuses this code when it loads the record: Expected a statement
 custom/server_code/data/syntax.xml:124:36: OD319 Odoo refuses this code when it loads the record: Expected a statement
+custom/server_code/data/syntax.xml:132:34: OD319 Odoo refuses this code when it loads the record: Expected `def`, `with` or `for` to follow `async`, found `=`
 custom/server_code/data/updates.xml:2:5: OD323 XML id 'code_replaced' is already defined in data/first_writes.xml, and this definition writes the fields it names over it; remove the copy when the two say the same thing, or rename one when both are meant to exist
 custom/server_code/data/updates.xml:3:34: OD320 server.job has no method '_nope_code_replaces'
 custom/server_code/data/updates.xml:6:5: OD323 XML id 'code_cleared' is already defined in data/first_writes.xml, and this definition writes the fields it names over it; remove the copy when the two say the same thing, or rename one when both are meant to exist

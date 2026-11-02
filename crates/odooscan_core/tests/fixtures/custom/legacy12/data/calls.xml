@@ -6,4 +6,10 @@
         <field name="model_id" ref="base.model_res_company"/>
         <field name="code">model.signal_workflow("go")</field>
     </record>
+
+    <record id="cron_async_name" model="ir.cron">
+        <field name="name">cron_async_name</field>
+        <field name="model_id" ref="base.model_res_company"/>
+        <field name="code">async = 1</field>
+    </record>
 </odoo>
