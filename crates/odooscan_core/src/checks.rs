@@ -60,7 +60,7 @@ const CALENDAR_STOPS: &[&str] = &[
 ];
 
 /// 19.0 refuses to generate a calendar without a stop (`odoo/addons/base/models/ir_ui_view.py:2898`),
-/// saas-19.1 does not (`:2909`).
+/// saas~19.1 does not (`:2909`).
 const CALENDAR_STOP_OPTIONAL: Series = Series { major: 19, minor: 1 };
 
 /// The first series that validates a record rule's domain when it writes one
@@ -68,7 +68,7 @@ const CALENDAR_STOP_OPTIONAL: Series = Series { major: 19, minor: 1 };
 /// rule (`:149`), so only the last write can fail.
 const RULE_DOMAIN_VALIDATED: Series = Series { major: 15, minor: 0 };
 
-/// The first series whose access check reads the rows of a transient model (`6d8688bb124d`; saas-13.1
+/// The first series whose access check reads the rows of a transient model (`6d8688bb124d`; saas~13.1
 /// lets every user through, `odoo/addons/base/models/ir_model.py:1500`).
 const TRANSIENT_ACCESS: Series = Series { major: 13, minor: 2 };
 
@@ -326,7 +326,7 @@ const MEMBER_SERIES: &[(&str, &[&str])] = &[
 ];
 
 /// The names Odoo's cache module binds at run time, by the range of series that has them, read on
-/// every branch from 10.0 to saas~19.4, so no row reaches before 10.0. Before 19.0 Odoo evaluates
+/// every series from 10.0 to saas~19.4, so no row reaches before 10.0. Before 19.0 Odoo evaluates
 /// an `ormcache` key with the globals of that module (18.0 `odoo/tools/cache.py:90,148`), so a key
 /// may read them; from 19.0 it gives the key only `method` (19.0 `odoo/tools/cache.py:136-138`).
 const CACHE_KEY_GLOBALS: &[(&str, &[&str])] = &[
@@ -2341,18 +2341,18 @@ const BASE_MAGIC: Series = Series { major: 18, minor: 1 };
 const REFUSED_DELEGATION: Series = Series { major: 18, minor: 3 };
 
 /// The first series that builds no company domain for a `check_company` field of a model without
-/// a company field, logging that it cannot (`18.0`, `odoo/fields.py:3177`; `saas-17.4` builds it for
+/// a company field, logging that it cannot (`18.0`, `odoo/fields.py:3177`; `saas~17.4` builds it for
 /// every model, `odoo/fields.py:3030`).
 const COMPANY_FIELD_DOMAIN: Series = Series { major: 18, minor: 0 };
 
 /// The first series whose name search reads `_rec_names_search` (`saas~15.3`, `odoo/models.py:1924`;
-/// `saas-15.2` knows `_rec_name` alone, `odoo/models.py:1932`).
+/// `saas~15.2` knows `_rec_name` alone, `odoo/models.py:1932`).
 const REC_NAMES_SEARCH: Series = Series { major: 15, minor: 3 };
 
 /// The first series that moves the acceptance of `tracking` to `mail.track.mixin`, so an abstract
-/// model loses it (`saas~19.3`, `addons/mail/models/mail_track_mixin.py:34`; `saas-19.2` still
+/// model loses it (`saas~19.3`, `addons/mail/models/mail_track_mixin.py:34`; `saas~19.2` still
 /// accepts it, `addons/mail/models/models.py:28`). No lower bound applies: `mail` accepts it from
-/// `saas~13.4`, before OD219 starts, in `addons/mail/models/ir_model.py:11` until `saas-14.3`.
+/// `saas~13.4`, before OD219 starts, in `addons/mail/models/ir_model.py:11` until `saas~14.3`.
 const MIXIN_TRACKING: Series = Series { major: 19, minor: 3 };
 
 /// An `_inherits` entry of a class: its module, the class, the parent model and the field.
