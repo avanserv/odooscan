@@ -3,4 +3,20 @@
         <field name="other_id" ref="record_values.parent_1"/>
         <field name="state">zz</field>
     </record>
+    <record id="task_empty" model="project.task"/>
+    <record id="task_shown" model="project.task">
+        <field name="display_name">Shown</field>
+    </record>
+    <record id="task_named" model="project.task">
+        <field name="name">Named</field>
+    </record>
+    <record id="ghost_named" model="ghost.enterprise">
+        <field name="name">Named</field>
+    </record>
+    <record id="partner_nicknamed" model="res.partner">
+        <field name="nickname">Nick</field>
+    </record>
+    <record id="partner_followed" model="res.partner">
+        <field name="message_ids" eval="[]"/>
+    </record>
 </odoo>

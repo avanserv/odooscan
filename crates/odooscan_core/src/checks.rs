@@ -2167,6 +2167,10 @@ impl<'m> Ctx<'_, 'm> {
     }
 
     fn record(&self, out: &mut Out<'m>, path: &'m Path, record: &RecordFact) {
+        // A dependency outside the index may load the model or add the field.
+        if self.partial {
+            return;
+        }
         if !matches!(
             self.index.model_status(&record.model.value, self.scope, None),
             Status::Visible

@@ -6,4 +6,14 @@
     </record>
 
     <record id="task_empty" model="project.task"/>
+
+    <record id="ghost_kickoff" model="ghost.nowhere">
+        <field name="name">Kickoff</field>
+    </record>
+
+    <record id="partner_kickoff" model="res.partner">
+        <field name="name">Kickoff</field>
+        <field name="name@fr">Lancement</field>
+        <field name="nickname">Kick</field>
+    </record>
 </odoo>
