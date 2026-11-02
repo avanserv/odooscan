@@ -83,6 +83,26 @@ fn default_series_reads_a_seriesless_auto_install_list() {
 }
 
 #[test]
+fn a_seriesless_auto_install_reads_as_the_module_checked() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+    let reported = |default_series, reader: &str| {
+        scan(&ScanOptions {
+            paths: vec![root.join("custom")],
+            addons_paths: vec![root.join("core")],
+            default_series,
+        })
+        .diagnostics
+        .iter()
+        .filter(|d| d.path.ends_with(format!("auto_scope_reader_{reader}/thing.py")))
+        .any(|d| d.code == "OD210" && d.message.contains("'country_any_stamp'"))
+    };
+    assert!(!reported(Series::parse("17.0"), "any"));
+    assert!(reported(Series::parse("17.0"), "new"));
+    assert!(!reported(Series::parse("18.0"), "old"));
+    assert!(reported(Series::parse("18.0"), "any"));
+}
+
+#[test]
 fn unassigned_compute_waits_for_a_known_series() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
     let reported = |default_series| {

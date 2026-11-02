@@ -986,7 +986,7 @@ const LISTED_TRIGGERS: Series = Series { major: 12, minor: 4 };
 const COUNTRY_GATE: Series = Series { major: 17, minor: 1 };
 
 /// `base`, and what Odoo always installs with it. `default_series` stands in for a manifest version
-/// without a series, as it does for the checks.
+/// without a series, as no checked module is at hand to lend its own.
 /// The manifest `countries` key is ignored on purpose, because Odoo creates a database without reading it.
 fn always_installed(modules: &[Module], by_name: &FxHashMap<&str, usize>, default_series: Option<Series>) -> Vec<bool> {
     let seeds = modules.iter().map(|m| m.name == "base").collect();
@@ -1000,7 +1000,7 @@ fn install_closure(
     modules: &[Module],
     by_name: &FxHashMap<&str, usize>,
     seeds: Vec<bool>,
-    default_series: Option<Series>,
+    series: Option<Series>,
     joins: impl Fn(&Module) -> bool,
 ) -> Vec<bool> {
     let mut installed = seeds;
@@ -1008,7 +1008,7 @@ fn install_closure(
         let holds = |name: &str| by_name.get(name).is_some_and(|&di| installed[di]);
         let ready: Vec<usize> = (0..modules.len())
             .filter(|&mi| !installed[mi] && joins(&modules[mi]))
-            .filter(|&mi| triggers(&modules[mi], default_series).is_some_and(|t| t.into_iter().all(holds)))
+            .filter(|&mi| triggers(&modules[mi], series).is_some_and(|t| t.into_iter().all(holds)))
             .collect();
         let mut grew = false;
         for mi in ready {
@@ -1029,12 +1029,12 @@ fn install_closure(
 /// names the triggers, and one naming a module outside `depends` fails the manifest. Before `saas~12.4`,
 /// database creation fails on a list, and `update_list` keeps only whether the value is truthy, so `must_install`
 /// waits on every depend for a non-empty list, like `True`, and `[]` is off.
-fn triggers(module: &Module, default_series: Option<Series>) -> Option<Vec<&str>> {
+fn triggers(module: &Module, series: Option<Series>) -> Option<Vec<&str>> {
     let depends: Vec<&str> = module.manifest.depends.iter().map(|d| d.value.as_str()).collect();
     match &module.manifest.auto_install {
         AutoInstall::Off => None,
         AutoInstall::Depends => Some(depends),
-        AutoInstall::Listed(names) if module.series.or(default_series).is_none_or(|s| s >= LISTED_TRIGGERS) => names
+        AutoInstall::Listed(names) if module.series.or(series).is_none_or(|s| s >= LISTED_TRIGGERS) => names
             .iter()
             .map(String::as_str)
             .map(|n| depends.contains(&n).then_some(n))
@@ -1390,7 +1390,6 @@ pub struct Index<'m> {
     js_loaded: Loaded,
     templates_loaded: Loaded,
     always_installed: Vec<bool>,
-    default_series: Option<Series>,
     /// Each module's place in `load_order`.
     load_rank: Vec<usize>,
     patched: Patched<'m>,
@@ -1455,7 +1454,6 @@ impl<'m> Index<'m> {
             js_loaded,
             templates_loaded,
             always_installed: always_installed(modules, &by_name, default_series),
-            default_series,
             load_rank: load_rank(modules, &by_name),
             by_name,
             patched: FxHashMap::default(),
@@ -1808,8 +1806,8 @@ impl<'m> Index<'m> {
     /// What `scope` of `module` grows to on the database that installs it: each module its install
     /// auto-installs, as `triggers` reads them, repeated until nothing is added. A module with
     /// `countries` stays out where the key counts, as whether it installs depends on the companies.
-    pub fn install_scope(&self, module: usize) -> Scope {
-        let series = self.default_series;
+    /// `series` is that of `module`, and a manifest version without one takes it: both install on one Odoo.
+    pub fn install_scope(&self, module: usize, series: Option<Series>) -> Scope {
         let gated = |m: &Module| m.manifest.countries && m.series.or(series).is_none_or(|s| s >= COUNTRY_GATE);
         let seeds = self.scope(module).visible;
         let visible = install_closure(self.modules, &self.by_name, seeds, series, |m| !gated(m));

@@ -222,7 +222,7 @@ pub fn check_module<'m>(index: &Index<'m>, mi: usize, series: Option<Series>) ->
     if index.has_base {
         let scope = index.scope(mi);
         let setup = index.setup_scope(mi);
-        let installs = index.install_scope(mi);
+        let installs = index.install_scope(mi, series);
         let loaded = index.loaded_scope(mi, &scope, &installs);
         let built = BuiltModels::of(module);
         let ctx = Ctx {

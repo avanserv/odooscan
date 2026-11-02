@@ -13,9 +13,9 @@ class AutoScopeThing(models.Model):
         self.search([("next_stamp", "=", "a")])
         self.search([("drag_stamp", "=", "a")])
         self.search([("country_old_stamp", "=", "a")])
+        self.search([("country_any_stamp", "=", "a")])
 
     def _out_of_reach(self):
         self.search([("far_stamp", "=", "a")])
         self.search([("country_stamp", "=", "a")])
-        self.search([("country_any_stamp", "=", "a")])
         self.search([("both_next_id.no_past_both", "=", "a")])
