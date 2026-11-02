@@ -1529,8 +1529,9 @@ impl<'m> Index<'m> {
         self.definer_status(self.templates.definers(name), scope)
     }
 
-    /// Whether a view answers to `name` in scope. Odoo matches a `t-call` against the whole `key`
-    /// and XML id and never adds the calling module, so an undotted name only finds a key.
+    /// Whether a view answers to `name` in scope, by the whole `key` or XML id without adding the
+    /// calling module, so an undotted name can only find a key. That counts on every series, though
+    /// through saas~18.3 Odoo refuses an undotted name, and from 10.0 a website lookup is exempt.
     pub fn qweb_status(&self, name: &str, scope: &Scope) -> Status<'m> {
         let keys = self.view_keys.get(name).map(Vec::as_slice).unwrap_or_default();
         self.definer_status(self.views.definers(name).chain(keys.iter().copied()), scope)

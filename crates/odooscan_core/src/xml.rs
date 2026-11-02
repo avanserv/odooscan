@@ -508,7 +508,9 @@ impl Walker<'_> {
         refused_expression(raw, self.series, |at| code_pos(text, raw, at, self.lines))
     }
 
-    /// Odoo tests each attribute of the tag for truth, so an empty one writes nothing.
+    /// Odoo asserts `name`, `string` and `model`, so an empty `name` aborts the load and no write
+    /// follows. It tests `report_type` and `print_report_name` for truth, so an empty one writes
+    /// nothing.
     fn report_tag(&mut self, node: Node) {
         let set = |name: &str| attr_value(node, name, self.lines).filter(|a| !a.value.is_empty());
         let file_name = set("print_report_name");
@@ -3024,9 +3026,13 @@ mod tests {
     }
 
     #[test]
-    fn an_empty_attribute_of_a_report_tag_writes_nothing() {
-        let fact = report_tag(r#"name="" report_type="" print_report_name="""#);
-        assert!(matches!(fact.template, ActionValue::Unset));
+    fn an_empty_name_of_a_report_tag_gives_no_target() {
+        assert!(matches!(report_tag(r#"name="""#).template, ActionValue::Unset));
+    }
+
+    #[test]
+    fn an_empty_optional_attribute_of_a_report_tag_writes_nothing() {
+        let fact = report_tag(r#"report_type="" print_report_name="""#);
         assert_eq!(fact.qweb, None);
         assert!(!fact.writes_file_name);
         assert!(report_tag(r#"print_report_name="  ""#).refused.is_some());
