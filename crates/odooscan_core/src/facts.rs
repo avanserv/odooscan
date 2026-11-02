@@ -152,6 +152,10 @@ pub struct ClassFact {
     /// `_inherits` is not a dict, or has an entry that is not two string literals, so which fields
     /// it names is unknown.
     pub inherits_unknown: bool,
+    /// A Many2one may delegate to a parent `inherits` lacks: its comodel or its `delegate` is not a
+    /// literal. Apart from `inherits_unknown`, which says the `_inherits` entries are unknown, as
+    /// such a field still has no entry there.
+    pub delegate_unknown: bool,
     pub fields: Vec<FieldFact>,
     /// Methods the class defines, in its body or under an `if`, `try` or `with` block, the names it
     /// binds to a value that may be a method, as Python finds those as it finds a method, and,

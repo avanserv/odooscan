@@ -1,0 +1,29 @@
+<odoo>
+    <record id="view_scheduled_activity" model="ir.ui.view">
+        <field name="name">window.scheduled.activity</field>
+        <field name="model">window.scheduled</field>
+        <field name="arch" type="xml">
+            <activity string="Scheduled">
+                <templates>
+                    <div t-name="activity-box">
+                        <field name="name"/>
+                    </div>
+                </templates>
+            </activity>
+        </field>
+    </record>
+
+    <record id="view_boxed_activity" model="ir.ui.view">
+        <field name="name">window.boxed.activity</field>
+        <field name="model">window.boxed</field>
+        <field name="arch" type="xml">
+            <activity string="Boxed">
+                <templates>
+                    <div t-name="activity-box">
+                        <field name="name"/>
+                    </div>
+                </templates>
+            </activity>
+        </field>
+    </record>
+</odoo>

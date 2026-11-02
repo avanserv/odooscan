@@ -18,4 +18,10 @@
             </form>
         </field>
     </record>
+
+    <record id="action_stamp_activity" model="ir.actions.act_window">
+        <field name="name">action_stamp_activity</field>
+        <field name="res_model">legacy.stamp</field>
+        <field name="view_mode">tree,activity</field>
+    </record>
 </odoo>

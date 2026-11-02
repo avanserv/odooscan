@@ -1,0 +1,14 @@
+id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
+access_window_mailed,window.mailed,model_window_mailed,base.group_user,1,1,1,1
+access_window_noted,window.noted,model_window_noted,base.group_user,1,1,1,1
+access_window_boxed,window.boxed,model_window_boxed,base.group_user,1,1,1,1
+access_window_delegated,window.delegated,model_window_delegated,base.group_user,1,1,1,1
+access_window_delegated_bare,window.delegated.bare,model_window_delegated_bare,base.group_user,1,1,1,1
+access_window_unread_value,window.unread.value,model_window_unread_value,base.group_user,1,1,1,1
+access_window_unread_key,window.unread.key,model_window_unread_key,base.group_user,1,1,1,1
+access_window_unread_comodel,window.unread.comodel,model_window_unread_comodel,base.group_user,1,1,1,1
+access_window_unread_flag,window.unread.flag,model_window_unread_flag,base.group_user,1,1,1,1
+access_window_unread_options,window.unread.options,model_window_unread_options,base.group_user,1,1,1,1
+access_window_unread_absent,window.unread.absent,model_window_unread_absent,base.group_user,1,1,1,1
+access_window_unread_part,window.unread.part,model_window_unread_part,base.group_user,1,1,1,1
+access_window_unread_whole,window.unread.whole,model_window_unread_whole,base.group_user,1,1,1,1

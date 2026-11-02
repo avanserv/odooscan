@@ -1,0 +1,13 @@
+<odoo>
+    <record id="action_plain" model="ir.actions.act_window">
+        <field name="name">action_plain</field>
+        <field name="res_model">saas124.plain</field>
+        <field name="view_mode">tree,activity</field>
+    </record>
+
+    <record id="action_tracked" model="ir.actions.act_window">
+        <field name="name">action_tracked</field>
+        <field name="res_model">saas124.tracked</field>
+        <field name="view_mode">tree,activity</field>
+    </record>
+</odoo>

@@ -1,0 +1,3 @@
+id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
+access_saas123_plain,saas123.plain,model_saas123_plain,base.group_user,1,1,1,1
+access_saas123_tracked,saas123.tracked,model_saas123_tracked,base.group_user,1,1,1,1
