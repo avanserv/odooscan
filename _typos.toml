@@ -2,3 +2,7 @@
 # that an unknown-field rule fires. The oracle baselines quote Odoo identifiers.
 [files]
 extend-exclude = ["crates/*/tests/fixtures/custom/", "tests/oracle/"]
+
+# The spelling of a BaseModel method of Odoo 17.0.
+[default.extend-identifiers]
+_read_group_get_annoted_groupby = "_read_group_get_annoted_groupby"

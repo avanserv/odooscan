@@ -5,8 +5,8 @@ use roxmltree::{Document, Node, ParsingOptions};
 
 use crate::domain;
 use crate::facts::{
-    AccessRow, ArchDomain, ArchElement, ArchField, DataFacts, DomainFact, Lines, Pos, RawDiag, RecordFact, Spanned,
-    ViewFact, XmlDef, XmlRef,
+    AccessRow, ArchButton, ArchDomain, ArchElement, ArchField, DataFacts, DomainFact, FunctionCall, Lines, Pos,
+    RawDiag, RecordFact, Spanned, ViewFact, XmlDef, XmlRef,
 };
 
 /// A `False` second argument makes `ref()` return nothing for an unknown id instead of failing.
@@ -166,6 +166,15 @@ impl Walker<'_> {
         }
     }
 
+    fn function_call(&mut self, node: Node) {
+        if let (Some(model), Some(method)) = (node.attribute("model"), attr_value(node, "name", self.lines)) {
+            self.facts.functions.push(FunctionCall {
+                model: model.to_owned(),
+                method,
+            });
+        }
+    }
+
     fn unsafe_qweb(&mut self, node: Node) {
         for n in node.descendants().filter(|n| n.has_attribute("t-raw")) {
             let pos = self.pos(n);
@@ -199,6 +208,7 @@ impl Walker<'_> {
                 "function" => {
                     self.update_xmlids(child);
                     self.eval_refs(child);
+                    self.function_call(child);
                 }
                 _ => {}
             }
@@ -363,6 +373,7 @@ impl Walker<'_> {
         let tag = node.tag_name().name();
         arch_element(node, pos, view);
         view.calls.extend(t_call(node, self.lines));
+        self.arch_button(node, path, view);
         self.arch_attrs(node, pos);
         self.groups(node);
         self.arch_tag(node, tag, pos);
@@ -389,6 +400,24 @@ impl Walker<'_> {
             self.arch(child, path, view);
         }
         path.truncate(depth);
+    }
+
+    /// A button only calls a method of the model when it has no `special`, which Odoo reads first,
+    /// and a `position` makes it a spec, whose `name` locates a button of the parent view.
+    fn arch_button(&self, node: Node, path: &[String], view: &mut ViewFact) {
+        if !node.has_tag_name("button")
+            || node.attribute("type") != Some("object")
+            || node.has_attribute("special")
+            || node.has_attribute("position")
+        {
+            return;
+        }
+        if let Some(method) = attr_value(node, "name", self.lines).filter(|m| identifier(&m.value)) {
+            view.buttons.push(ArchButton {
+                path: path.to_vec(),
+                method,
+            });
+        }
     }
 
     fn arch_attrs(&mut self, node: Node, pos: Pos) {
@@ -454,6 +483,19 @@ impl Walker<'_> {
             }
         }
     }
+}
+
+fn attr_value(node: Node, name: &str, lines: &Lines) -> Option<Spanned<String>> {
+    let attr = node.attribute_node(name)?;
+    Some(Spanned {
+        value: attr.value().to_owned(),
+        pos: lines.pos(attr.range_value().start),
+    })
+}
+
+fn identifier(name: &str) -> bool {
+    let start = name.chars().next().is_some_and(|c| c.is_alphabetic() || c == '_');
+    start && name.chars().all(|c| c.is_alphanumeric() || c == '_')
 }
 
 fn read_domain(text: &str) -> Vec<String> {
@@ -620,6 +662,69 @@ mod tests {
     fn a_template_root_calls_too() {
         let facts = analyze(r#"<odoo><template id="x" t-call="a.b"/></odoo>"#);
         assert_eq!(facts.views[0].calls[0].value, "a.b");
+    }
+
+    fn buttons(arch: &str) -> Vec<(Vec<String>, String, u32, u32)> {
+        let facts = analyze(&format!(
+            "<odoo><record id=\"x\" model=\"ir.ui.view\">\n<field name=\"arch\" type=\"xml\">{arch}</field></record></odoo>"
+        ));
+        let view = &facts.views[0];
+        let read = |b: &ArchButton| {
+            (
+                b.path.clone(),
+                b.method.value.clone(),
+                b.method.pos.line,
+                b.method.pos.col,
+            )
+        };
+        view.buttons.iter().map(read).collect()
+    }
+
+    #[test]
+    fn reads_an_object_button_at_its_name_with_its_arch_position() {
+        let nested = r#"<form><field name="line_ids"><list><button type="object" name="a"/></list></field></form>"#;
+        assert_eq!(buttons(nested), [(vec!["line_ids".to_owned()], "a".to_owned(), 2, 94)]);
+        let grouped = r#"<list><groupby name="b"><button type="object" name="c"/></groupby></list>"#;
+        assert_eq!(buttons(grouped)[0].0, ["b"]);
+        let inserted = r#"<xpath expr="//header" position="inside"><button type="object" name="d"/></xpath>"#;
+        assert_eq!(buttons(inserted)[0].1, "d");
+    }
+
+    #[test]
+    fn skips_buttons_that_call_no_literal_method() {
+        for button in [
+            r#"<button name="a"/>"#,
+            r#"<button type="action" name="a"/>"#,
+            r#"<button type="object" name="a" special="cancel"/>"#,
+            r#"<button type="object" name="a" position="after"/>"#,
+            r#"<button type="object" t-att-name="a"/>"#,
+            r#"<button type="object" name="%(a)d"/>"#,
+            r#"<button type="object" name="{{ a }}"/>"#,
+            r#"<button type="object" name=""/>"#,
+            r#"<a type="object" name="a"/>"#,
+        ] {
+            assert_eq!(buttons(&format!("<form>{button}</form>")), [], "{button}");
+        }
+    }
+
+    #[test]
+    fn reads_a_function_at_its_name() {
+        let facts = analyze(
+            "<odoo><data>\n<function model=\"m\" name=\"a\"/>\n<function name=\"b\"/>\n<function model=\"m\"/>\n</data></odoo>",
+        );
+        let found: Vec<_> = facts
+            .functions
+            .iter()
+            .map(|f| {
+                (
+                    f.model.as_str(),
+                    f.method.value.as_str(),
+                    f.method.pos.line,
+                    f.method.pos.col,
+                )
+            })
+            .collect();
+        assert_eq!(found, [("m", "a", 2, 27)]);
     }
 
     #[test]

@@ -1,0 +1,14 @@
+<odoo>
+    <record id="visit_form" model="ir.ui.view">
+        <field name="name">button.visit.form</field>
+        <field name="model">button.visit</field>
+        <field name="arch" type="xml">
+            <form>
+                <button type="object" name="action_from_enterprise"/>
+                <button type="object" name="_from_enterprise"/>
+            </form>
+        </field>
+    </record>
+
+    <function model="button.visit" name="action_from_enterprise"/>
+</odoo>

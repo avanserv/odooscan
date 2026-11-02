@@ -1,0 +1,4 @@
+id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
+access_button_order,button.order,model_button_order,base.group_user,1,1,1,1
+access_button_line,button.line,model_button_line,base.group_user,1,1,1,1
+access_button_ticket,button.ticket,model_button_ticket,base.group_user,1,1,1,1

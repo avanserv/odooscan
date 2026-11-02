@@ -157,6 +157,9 @@ rules! {
     "OD309" "unknown-record-field" Correctness Error None, true, "A data record sets a field its model does not have.";
     "OD310" "unmatched-view-locator" Correctness Error None, true, "An inherited view locates an element its parent views do not have.";
     "OD311" "unknown-qweb-template" Correctness Error None, true, "A QWeb view calls a template no module in scope defines.";
+    "OD312" "unknown-button-method" Correctness Error None, true, "A button calls a method its model does not have.";
+    "OD313" "private-button-method" Correctness Error None, true, "A button calls a private method, which Odoo refuses.";
+    "OD314" "unknown-function-method" Correctness Error None, true, "A <function> of a data file calls a method its model does not have.";
     "OD401" "model-without-access" Security Warning None, true, "A new model has no ir.model.access rule.";
     "OD402" "public-write-access" Security Warning None, false, "Public or portal users get write, create or unlink access.";
     "OD501" "manifest-data-missing" Correctness Error None, false, "A file listed in the manifest does not exist.";

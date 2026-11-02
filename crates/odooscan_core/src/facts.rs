@@ -150,9 +150,12 @@ pub struct ClassFact {
     /// it names is unknown.
     pub inherits_unknown: bool,
     pub fields: Vec<FieldFact>,
-    /// Methods the class defines, and `_check_company_domain`, `_table_query` and `_table_sql`
+    /// Methods the class defines, the names it binds to a name, an attribute or a lambda, as Python
+    /// finds those as it finds a method, and `_check_company_domain`, `_table_query` and `_table_sql`
     /// when it assigns them anything but a field.
     pub methods: Vec<String>,
+    /// Methods of the class decorated with `@api.private`.
+    pub private_methods: Vec<String>,
     /// The undotted names given to `@api.onchange` and `@api.constrains`.
     pub paths: Vec<Spanned<String>>,
     /// The field paths each method decorated with `@api.depends` names, by method.
@@ -386,6 +389,14 @@ pub struct ArchElement {
     pub value: String,
 }
 
+/// A `<button type="object">` in a view arch, which calls `method` on the model of the arch position
+/// `path` (the x2many fields whose subviews enclose it, as in `ArchField`).
+#[derive(Debug)]
+pub struct ArchButton {
+    pub path: Vec<String>,
+    pub method: Spanned<String>,
+}
+
 #[derive(Debug, Default)]
 pub struct ViewFact {
     pub id: Option<String>,
@@ -399,6 +410,7 @@ pub struct ViewFact {
     /// Elements the arch's specs (`position` elements and xpaths) must find in the parent views.
     pub locators: Vec<Spanned<ArchElement>>,
     pub domains: Vec<ArchDomain>,
+    pub buttons: Vec<ArchButton>,
     /// Literal targets of `t-call`, in the arch or set by an `<attribute>` spec.
     pub calls: Vec<Spanned<String>>,
     /// The view's type, as its `type` field or the root of its arch says. A root that Odoo does not
@@ -419,6 +431,13 @@ pub struct AccessRow {
     pub by_name: bool,
 }
 
+/// A `<function>` of a data file, which Odoo calls when it loads the file.
+#[derive(Debug)]
+pub struct FunctionCall {
+    pub model: String,
+    pub method: Spanned<String>,
+}
+
 /// Facts from an XML or CSV data file.
 #[derive(Debug, Default)]
 pub struct DataFacts {
@@ -433,6 +452,7 @@ pub struct DataFacts {
     /// Domains and `group_by` fields of window actions, on their `res_model`.
     pub action_domains: Vec<DomainFact>,
     pub access: Vec<AccessRow>,
+    pub functions: Vec<FunctionCall>,
     pub diags: Vec<RawDiag>,
 }
 
