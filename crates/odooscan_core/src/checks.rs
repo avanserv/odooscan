@@ -241,6 +241,16 @@ fn reads_model_access(series: Option<Series>) -> bool {
     series.is_none_or(|s| s < IR_ACCESS)
 }
 
+/// OD401's message for `model`. An `ir.access` row without a group only restricts, so the message
+/// asks for a group where the series reads `ir.access`.
+fn no_access_message(model: &str, series: Option<Series>) -> String {
+    if reads_model_access(series) {
+        format!("model '{model}' has no ir.model.access rule, so only the superuser can use it")
+    } else {
+        format!("model '{model}' has no ir.access rule with a group, so only the superuser can use it")
+    }
+}
+
 /// Whether a model's `name` holds a callable object in `series`, so calling it needs no method: an
 /// `Environment` on every series, and a `Registry` before `REGISTRY_UNCALLABLE`, which an unknown
 /// series may be. Only code running on records needs this: no series lets a button call them, and
@@ -1213,15 +1223,7 @@ impl<'m> Ctx<'_, 'm> {
         self.redefinition(out, path, class);
         self.super_calls(out, path, class);
         if self.lacks_access(class) {
-            out.push(
-                path,
-                "OD401",
-                class.pos,
-                format!(
-                    "model '{}' has no ir.model.access rule, so only the superuser can use it",
-                    class.model
-                ),
-            );
+            out.push(path, "OD401", class.pos, no_access_message(&class.model, self.series));
         }
     }
 
@@ -4836,7 +4838,7 @@ mod tests {
 
     use super::{
         MagicEra, applies, cache_global, callable_attr, csv_label, derived_label, has_last_update, magic_era,
-        reads_model_access, shadowed_member, tuple_checked, tuple_listed,
+        no_access_message, reads_model_access, shadowed_member, tuple_checked, tuple_listed,
     };
     use crate::facts::DefinitionSource;
     use crate::series::Series;
@@ -4847,6 +4849,19 @@ mod tests {
         assert!(reads_model_access(None));
         assert!(reads("18.0") && reads("saas~19.3"));
         assert!(!reads("saas~19.4") && !reads("20.0"));
+    }
+
+    #[test]
+    fn the_no_access_message_follows_the_series() {
+        let message = |series: Option<&str>| no_access_message("x.y", series.and_then(Series::parse));
+        let model_access = "model 'x.y' has no ir.model.access rule, so only the superuser can use it";
+        let ir_access = "model 'x.y' has no ir.access rule with a group, so only the superuser can use it";
+        for series in [Some("9.0"), Some("10.0"), Some("saas~19.3"), None] {
+            assert_eq!(message(series), model_access, "{series:?}");
+        }
+        for series in [Some("saas~19.4"), Some("20.0")] {
+            assert_eq!(message(series), ir_access, "{series:?}");
+        }
     }
 
     #[test]
