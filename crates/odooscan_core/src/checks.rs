@@ -138,6 +138,12 @@ const IR_ACCESS: Series = Series { major: 19, minor: 4 };
 /// The first series without `ir.property` (`de302c2d3630`, in no saas-17 branch).
 const IR_PROPERTY_GONE: Series = Series { major: 18, minor: 0 };
 
+/// The first series whose loader skips a `name@fr` of a record or a CSV column, which the load of a
+/// language's terms reads as a translation (`b7f05277026a`; `odoo/tools/convert.py:396,704` on
+/// saas~18.2).
+/// saas~18.1 sends the name on to `create`, or the import refuses it.
+const DATA_TRANSLATIONS: Series = Series { major: 18, minor: 2 };
+
 /// The first series with `ir.actions.report`. Through 10.0 the model is `ir.actions.report.xml`, and
 /// a `render_html` replaces the template (`addons/report/models/report.py:138` on 10.0).
 const REPORT_MODEL: Series = Series { major: 11, minor: 0 };
@@ -2971,8 +2977,7 @@ impl<'m> Ctx<'_, 'm> {
             .iter()
             .filter(|f| !popped_value(record, &f.value, self.series))
         {
-            // `name@fr` sets the French translation of name.
-            let fname = field.value.split('@').next().unwrap_or_default();
+            let fname = field_name(&field.value, self.series);
             match self.index.field(&record.model.value, fname, self.scope) {
                 Ok(_) => {}
                 Err(None) => out.push(
@@ -3002,6 +3007,15 @@ impl<'m> Ctx<'_, 'm> {
 /// with a language stays apart: nothing pops `value@fr`.
 fn popped_value(record: &RecordFact, name: &str, series: Option<Series>) -> bool {
     !record.csv && record.model.value == "ir.property" && name == "value" && series.is_none_or(|s| s < IR_PROPERTY_GONE)
+}
+
+/// The field a data file's `name` sets. `name@fr` is `name` where the loader leaves it to the load of
+/// a language's terms, and an unknown series may be one of those, so reporting it there could be false.
+fn field_name(name: &str, series: Option<Series>) -> &str {
+    match name.split_once('@') {
+        Some((field, _)) if series.is_none_or(|s| s >= DATA_TRANSLATIONS) => field,
+        _ => name,
+    }
 }
 
 /// The x2many fields of an arch position, without the locators a spec leaves in it.
@@ -5103,12 +5117,22 @@ mod tests {
     use rustc_hash::FxHashSet;
 
     use super::{
-        MagicEra, applies, cache_global, callable_attr, csv_label, derived_label, fetches_own_view, has_last_update,
-        magic_era, no_access_message, reads_model_access, shadowed_member, stores_parent_path, tuple_checked,
-        tuple_listed, warns_on_labels,
+        MagicEra, applies, cache_global, callable_attr, csv_label, derived_label, fetches_own_view, field_name,
+        has_last_update, magic_era, no_access_message, reads_model_access, shadowed_member, stores_parent_path,
+        tuple_checked, tuple_listed, warns_on_labels,
     };
     use crate::facts::DefinitionSource;
     use crate::series::Series;
+
+    #[test]
+    fn language_suffix_is_cut_from_saas_18_2_and_on_an_unknown_series() {
+        let name = |series: &str| field_name("name@fr", Series::parse(series));
+        assert_eq!(field_name("name@fr", None), "name");
+        assert_eq!(name("saas~18.1"), "name@fr");
+        assert_eq!(name("saas~18.2"), "name");
+        assert_eq!(name("19.0"), "name");
+        assert_eq!(field_name("name", None), "name");
+    }
 
     #[test]
     fn model_access_rows_load_below_saas_19_4() {

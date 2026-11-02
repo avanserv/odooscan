@@ -100,15 +100,18 @@ custom/bad_sale/views/views.xml:15:17: OD302 'mail.mail_menu' is defined by modu
 custom/bad_sale/views/views.xml:15:17: OD308 'action_late' is defined in views/late.xml, which loads after this reference
 custom/bad_sale/views/views.xml:22:9: OD301 module base defines no XML id 'base.view_partner_form'
 custom/bad_sale/views/views.xml:26:17: OD304 'vat': res.partner has no field 'vat'
+custom/bad_sale/views/views.xml:33:9: OD309 res.partner has no field 'name@fr'
 custom/bad_sale/views/views.xml:34:9: OD309 res.partner has no field 'email'
 custom/bad_sale/views/views.xml:36:5: OD303 XML id 'partner_demo' is already defined earlier in this file
 custom/bad_sale/views/views.xml:49:9: OD307 t-raw renders unescaped HTML; use t-out and wrap trusted HTML in Markup
 custom/bad_sale/views/views.xml:53:9: OD306 view_mode 'tree' is renamed 'list'
 custom/base_only/data/ghost.nowhere.csv:1:1: OD201 no indexed module defines model 'ghost.nowhere'
 custom/base_only/data/project.project.csv:1:1: OD202 model 'project.project' comes from module project; add it to depends
+custom/base_only/data/res.partner-extra.csv:1:1: OD309 res.partner has no field 'name@fr'
 custom/base_only/data/tasks.xml:2:5: OD202 model 'project.task' comes from module project; add it to depends
 custom/base_only/data/tasks.xml:8:5: OD202 model 'project.task' comes from module project; add it to depends
 custom/base_only/data/tasks.xml:10:5: OD201 no indexed module defines model 'ghost.nowhere'
+custom/base_only/data/tasks.xml:16:9: OD309 res.partner has no field 'name@fr'
 custom/base_only/data/tasks.xml:17:9: OD309 res.partner has no field 'nickname'
 custom/base_only/models/res_partner.py:17:16: OD202 model 'registry.invoice' comes from module registry_fields; add it to depends
 custom/base_only/models/web_palette.py:4:7: OD209 module web already defines model 'web.palette', and this class replaces it; extend it with _inherit = 'web.palette'
@@ -451,6 +454,8 @@ custom/legacy16/models/res_partner.py:23:41: OD220 'touched_on' has the label 'L
 custom/legacy16/models/res_partner.py:31:40: OD220 'turned_on' has the label 'Last Modified on' of field '__last_update' of legacy.turnstile, so Odoo logs a warning and users cannot tell them apart; give it another string
 custom/legacy16/models/res_partner.py:37:21: OD120 'time' in an ormcache key is not a parameter of _quarter_hour_rates(), so every call raises NameError; key on a parameter or on self
 custom/legacy16/models/res_partner.py:49:68: OD222 'home_country_id' has check_company=True, but res.country has no company_id field to check; remove check_company
+custom/legacy17/data/res.partner-translated.csv:1:1: OD309 res.partner has no field 'name@fr'
+custom/legacy17/data/translated.xml:5:9: OD309 res.partner has no field 'name@fr'
 custom/legacy17/models/res_partner.py:7:68: OD222 'home_country_id' has check_company=True, but res.country has no company_id field to check; remove check_company
 custom/legacy17/models/res_partner.py:13:68: OD222 'home_country_id' has check_company=True, but res.country has no company_id field to check; remove check_company
 custom/legacy17/partner_tagline_views.xml:1:1: OD502 'partner_tagline_views.xml' is listed under update_xml, which Odoo ignores in this series; move it to data
@@ -467,9 +472,11 @@ custom/legacy9/data/calls.xml:51:30: OD319 Odoo refuses this code when the actio
 custom/legacy9/data/calls.xml:77:9: OD309 ir.cron has no field 'no_such_field'
 custom/legacy9/data/ir.property.csv:1:1: OD309 ir.property has no field 'value'
 custom/legacy9/data/properties.xml:10:9: OD309 ir.property has no field 'ghost'
-custom/legacy9/data/properties.xml:14:9: OD309 ir.property has no field 'value'
+custom/legacy9/data/properties.xml:14:9: OD309 ir.property has no field 'value@fr'
+custom/legacy9/data/res.partner-translated.csv:1:1: OD309 res.partner has no field 'name@fr'
 custom/legacy9/data/rewrites.xml:2:5: OD323 XML id 'rewritten_code' is already defined in data/calls.xml, and this definition overwrites the fields both name; remove the copy when the two say the same thing, or rename one when both are meant to exist
 custom/legacy9/data/rewrites.xml:6:5: OD323 XML id 'rewritten_state' is already defined in data/calls.xml, and this definition overwrites the fields both name; remove the copy when the two say the same thing, or rename one when both are meant to exist
+custom/legacy9/data/translated.xml:5:9: OD309 res.partner has no field 'name@fr'
 custom/legacy9/models/columns.py:31:33: OD203 'holder_id.ghost': legacy9.columns has no field 'ghost'
 custom/legacy9/models/res_company.py:14:40: OD211 no parent class of res.company defines '_auto_finish', so this super() call fails
 custom/legacy9/static/src/base_calls.js:7:45: OD604 model 'res.partner' has no method 'load_views'
@@ -670,6 +677,7 @@ custom/record_required/data/creates.xml:7:5: OD324 rr.thing.name is required and
 custom/record_required/data/creates.xml:8:5: OD324 rr.thing.name is required and has no default, so creating this record fails if the column is NOT NULL; give the field a value
 custom/record_required/data/creates.xml:9:5: OD324 rr.thing.name is required and has no default, so creating this record fails if the column is NOT NULL; give the field a value
 custom/record_required/data/creates.xml:10:5: OD324 rr.thing.name is required and has no default, so creating this record fails if the column is NOT NULL; give the field a value
+custom/record_required/data/creates.xml:11:9: OD309 rr.thing has no field 'name@fr'
 custom/record_required/data/creates.xml:13:5: OD324 rr.line.label is required and has no default, so creating this record fails if the column is NOT NULL; give the field a value
 custom/record_required/data/creates.xml:19:13: OD324 rr.line.label is required and has no default, so creating this record fails if the column is NOT NULL; give the field a value
 custom/record_required/data/creates.xml:22:5: OD324 rr.mixed.mixed is required and has no default, so creating this record fails if the column is NOT NULL; give the field a value
@@ -794,6 +802,7 @@ custom/record_values/data/selections.xml:21:29: OD322 rv.thing.added has no valu
 custom/record_values/data/selections.xml:25:37: OD321 'base.main_company' is a record of res.company, but rv.thing.agent_id takes res.partner
 custom/record_values/data/selections.xml:26:29: OD322 rv.thing.grade has no value 'zz'
 custom/record_values/data/silent.xml:22:9: OD302 'ghost_addon.line_1' belongs to module ghost_addon, which is neither in depends nor on the addons path
+custom/record_values/data/silent.xml:43:9: OD309 rv.thing has no field 'state@fr'
 custom/record_values/data/targets.xml:11:5: OD201 no indexed module defines model 'rv.nowhere'
 custom/record_values/data/unloaded.xml:1:1: OD502 'data/unloaded.xml' is not in the manifest's data or demo, so Odoo never loads it
 custom/record_values/demo/rewrites.xml:8:38: OD321 'record_values.other_1' is a record of rv.other, but rv.thing.parent_id takes rv.parent
@@ -927,7 +936,10 @@ custom/saas144/models/res_partner.py:17:18: OD221 'child_ids.total' makes 'total
 custom/saas152/models/res_partner.py:8:5: OD117 @api.model on create() makes Odoo call it once per record; decorate it with @api.model_create_multi and take a list of dicts
 custom/saas153/models/res_partner.py:6:34: OD203 'nickname': res.partner has no field 'nickname'
 custom/saas153/models/res_partner.py:8:5: OD117 @api.model on create() makes Odoo call it once per record; decorate it with @api.model_create_multi and take a list of dicts
+custom/saas181/data/res.partner-translated.csv:1:1: OD309 res.partner has no field 'name@fr'
+custom/saas181/data/translated.xml:5:9: OD309 res.partner has no field 'name@fr'
 custom/saas181/models/res_partner.py:7:5: OD117 @api.model on create() makes Odoo call it once per record; decorate it with @api.model_create_multi and take a list of dicts
+custom/saas182/data/translated.xml:6:9: OD309 res.partner has no field 'ghost'
 custom/saas182/models/badge.py:8:58: OD228 'country_id' has delegate=True and no ondelete, so Odoo fails with AttributeError when it sets up the registry; give it ondelete="cascade"
 custom/saas182/models/res_partner.py:7:5: OD118 @api.model on create() passes a list of dicts, so reading vals as one dict fails; decorate it with @api.model_create_multi and loop over the list
 custom/saas183/models/ticket.py:7:33: OD218 _inherits delegates to 'partner_id', which must be required with ondelete 'cascade' or 'restrict'; give it ondelete="cascade"

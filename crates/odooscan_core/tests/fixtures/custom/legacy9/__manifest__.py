@@ -8,6 +8,8 @@
         "data/rewrites.xml",
         "data/properties.xml",
         "data/ir.property.csv",
+        "data/translated.xml",
+        "data/res.partner-translated.csv",
         "views/buttons.xml",
         "views/columns.xml",
         "views/aliases.xml",
