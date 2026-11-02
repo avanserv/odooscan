@@ -1006,9 +1006,15 @@ impl<'m> Ctx<'_, 'm> {
                 }
                 self.domains(out, path, &file.facts.domains);
             }
-            // env['x'] for a model outside depends is usually guarded by `if 'x' in self.env`, and
-            // a dotless name is as likely a key of some other mapping called env.
-            for model in file.facts.env_models.iter().filter(|m| m.value.contains('.')) {
+            // env['x'] for a model outside depends is usually guarded by `if 'x' in self.env`, a
+            // dotless name is as likely a key of some other mapping called env, and a name that
+            // fits what the module builds may exist once its code has run.
+            for model in file
+                .facts
+                .env_models
+                .iter()
+                .filter(|m| m.value.contains('.') && !self.built.fit(&m.value))
+            {
                 if matches!(self.index.model_status(&model.value, self.scope, None), Status::Missing) {
                     out.push(
                         path,

@@ -26,6 +26,9 @@ class UnbuiltHolder(models.Model):
 
     large_id = fields.Many2one("bad.generated.large")
 
+    def _proxy_records(self):
+        return self.env["unbuilt.proxy"].search([])
+
     class NestedHelper:
         _name = MODEL_NAME
 

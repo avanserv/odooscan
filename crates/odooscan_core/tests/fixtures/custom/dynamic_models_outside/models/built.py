@@ -12,3 +12,6 @@ class OutsideHolder(models.Model):
     _name = "outside.holder"
 
     large_id = fields.Many2one("bad.generated.large")
+
+    def _test_records(self):
+        return self.env["outside.test.model"].search([])

@@ -22,3 +22,10 @@ class BadGeneratedHuge(models.Model):
 
 class Side(models.Model):
     _inherit = ["side.order"]
+
+
+class UnknownLater(models.Model):
+    _inherit = ["res.partner"]
+
+    def _later_records(self):
+        return self.env["unknown.later"].search([])
