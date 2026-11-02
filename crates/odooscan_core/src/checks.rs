@@ -1075,7 +1075,7 @@ impl<'m> Ctx<'_, 'm> {
         else {
             return;
         };
-        let message = match self.index.rpc_method(model, &method.value, self.scope) {
+        let message = match self.index.rpc_method(model, &method.value, self.scope, self.series) {
             Status::Visible => return,
             Status::Hidden(m) => format!(
                 "method '{}' of {model} comes from module {m}, which is not in depends",
