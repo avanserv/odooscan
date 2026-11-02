@@ -1803,11 +1803,12 @@ impl<'m> Ctx<'_, 'm> {
         Some(format!("{model} has no primary {kind} view, and nothing generates one"))
     }
 
-    /// What Odoo misses to generate a calendar for `model`. A field only a module outside `depends`
-    /// adds counts, as that module may be installed. A `_date_name` that is no literal may name any.
+    /// What Odoo misses to generate a calendar for `model`. A field or a `_date_name` only a module
+    /// outside `depends` gives counts, as that module may be installed. A `_date_name` that is no
+    /// literal may name any.
     fn calendar_gap(&self, model: &str) -> Option<String> {
         let mut starts = CALENDAR_STARTS.to_vec();
-        for (_, class) in self.index.merged_classes(model, self.scope) {
+        for (_, class) in self.index.chain_classes(model) {
             match class.attr("_date_name").map(|a| &a.value) {
                 Some(OptionValue::Str(name)) => starts.push(name),
                 Some(_) => return None,

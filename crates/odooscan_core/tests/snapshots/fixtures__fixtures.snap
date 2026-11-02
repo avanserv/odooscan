@@ -883,6 +883,8 @@ custom/window_actions/views/actions.xml:158:33: OD318 window.ghosted has no prim
 custom/window_actions/views/actions.xml:164:33: OD318 window.nameless has no primary map view, and nothing generates one
 custom/window_actions/views/actions.xml:170:33: OD318 window.plain has no field activity_ids, which the activity view searches; inherit mail.activity.mixin
 custom/window_actions/views/actions.xml:182:33: OD318 window.tracked has no primary activity view, and nothing generates one
+custom/window_actions/views/actions.xml:200:33: OD318 window.unplanned has no primary calendar view, and no date field to generate one from
+custom/window_actions/views/actions.xml:206:33: OD318 window.lent has no primary calendar view, and no date field to generate one from
 custom/window_actions/views/unlisted.xml:1:1: OD502 'views/unlisted.xml' is not in the manifest's data or demo, so Odoo never loads it
 custom/window_activity/models/delegated.py:67:33: OD201 no indexed module defines model 'window.absent'
 custom/window_activity/models/delegated.py:73:17: OD201 no indexed module defines model 'window.absent'

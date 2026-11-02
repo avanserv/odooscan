@@ -21,3 +21,8 @@ access_window_ghosted,window.ghosted,model_window_ghosted,base.group_user,1,1,1,
 access_window_nameless,window.nameless,model_window_nameless,base.group_user,1,1,1,1
 access_window_scheduled,window.scheduled,model_window_scheduled,base.group_user,1,1,1,1
 access_window_tracked,window.tracked,model_window_tracked,base.group_user,1,1,1,1
+access_window_postponed,window.postponed,model_window_postponed,base.group_user,1,1,1,1
+access_window_guessed,window.guessed,model_window_guessed,base.group_user,1,1,1,1
+access_window_unplanned,window.unplanned,model_window_unplanned,base.group_user,1,1,1,1
+access_window_lender,window.lender,model_window_lender,base.group_user,1,1,1,1
+access_window_lent,window.lent,model_window_lent,base.group_user,1,1,1,1

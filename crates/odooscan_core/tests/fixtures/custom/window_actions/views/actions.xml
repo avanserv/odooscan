@@ -181,4 +181,28 @@
         <field name="res_model">window.tracked</field>
         <field name="view_mode">list,activity</field>
     </record>
+
+    <record id="action_outside_date_name" model="ir.actions.act_window">
+        <field name="name">action_outside_date_name</field>
+        <field name="res_model">window.postponed</field>
+        <field name="view_mode">calendar</field>
+    </record>
+
+    <record id="action_outside_computed_date_name" model="ir.actions.act_window">
+        <field name="name">action_outside_computed_date_name</field>
+        <field name="res_model">window.guessed</field>
+        <field name="view_mode">calendar</field>
+    </record>
+
+    <record id="action_outside_date_name_alone" model="ir.actions.act_window">
+        <field name="name">action_outside_date_name_alone</field>
+        <field name="res_model">window.unplanned</field>
+        <field name="view_mode">calendar</field>
+    </record>
+
+    <record id="action_delegated_date_name" model="ir.actions.act_window">
+        <field name="name">action_delegated_date_name</field>
+        <field name="res_model">window.lent</field>
+        <field name="view_mode">calendar</field>
+    </record>
 </odoo>
