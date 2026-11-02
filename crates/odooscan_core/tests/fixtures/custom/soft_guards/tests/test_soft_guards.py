@@ -151,3 +151,50 @@ class TestSoftGuards(TransactionCase):
     def test_missing_id_under_a_guard(self):
         if "soft.thing" in self.env:
             self.assertTrue(self.env.ref("base.no_such_guarded_id"))
+
+    def test_ref_after_ensure_installed(self):
+        self.ensure_installed("soft_guards_side")
+        self.assertTrue(self.env.ref("soft_guards_side.after_the_helper"))
+
+    def test_ref_of_another_module_after_ensure_installed(self):
+        self.ensure_installed("sale")
+        self.assertTrue(self.env.ref("soft_guards_side.after_another_helper"))
+
+    def test_lookups_after_ensure_installed(self):
+        self.ensure_installed("soft_guards_side")
+        self.assertFalse(self.env["soft.absent"].search([]))
+        self.assertTrue(self.env["soft.thing"].search([("code", "=", "helper")]))
+
+    @classmethod
+    def _ref_from_the_class(cls):
+        cls.ensure_installed("soft_guards_side")
+        return cls.env.ref("soft_guards_side.after_the_class_helper")
+
+    def test_missing_id_after_ensure_installed(self):
+        self.ensure_installed("soft_guards_side")
+        self.assertTrue(self.env.ref("base.no_such_id_after_ensure_installed"))
+
+    def test_ref_without_ensure_installed(self):
+        self.assertTrue(self.env.ref("soft_guards_side.no_helper"))
+
+    def test_ref_before_ensure_installed(self):
+        self.env.ref("soft_guards_side.before_the_helper")
+        self.ensure_installed("soft_guards_side")
+
+    def test_ref_after_ensure_installed_of_a_variable(self):
+        module = "soft_guards_side"
+        self.ensure_installed(module)
+        self.assertTrue(self.env.ref("soft_guards_side.after_a_variable"))
+
+    def test_ref_after_a_conditional_ensure_installed(self):
+        if self.env.user.active:
+            self.ensure_installed("soft_guards_side")
+        self.assertTrue(self.env.ref("soft_guards_side.after_a_branch"))
+
+    def test_ref_after_ensure_installed_on_another_object(self):
+        self.helper.ensure_installed("soft_guards_side")
+        self.assertTrue(self.env.ref("soft_guards_side.after_another_object"))
+
+    def test_lookups_without_ensure_installed(self):
+        self.assertFalse(self.env["soft.absent"].search([]))
+        self.assertTrue(self.env["soft.thing"].search([("code", "=", "no helper")]))

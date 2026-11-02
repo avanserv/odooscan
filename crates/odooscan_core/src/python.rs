@@ -584,6 +584,21 @@ fn skips(body: &[Stmt]) -> bool {
     matches!(&*last.value, Expr::Call(c) if tail_name(&c.func) == Some("skipTest"))
 }
 
+/// `self.ensure_installed('m')`, a test helper that raises `SkipTest` unless the module is
+/// installed. It returns nothing to test, so the call itself is the guard. As with `env.get`, a
+/// variable says nothing of a literal use further on.
+fn ensures_installed(expr: &Expr) -> bool {
+    let Expr::Call(call) = expr else {
+        return false;
+    };
+    let Expr::Attribute(a) = &*call.func else {
+        return false;
+    };
+    a.attr.as_str() == "ensure_installed"
+        && is_self(&a.value)
+        && matches!(&*call.arguments.args, [module] if str_lit(module).is_some())
+}
+
 fn is_registry(expr: &Expr) -> bool {
     matches!(tail_name(expr), Some("env" | "_fields" | "pool" | "registry"))
 }
@@ -2616,12 +2631,13 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
     }
 
     /// Whether the statements after `stmt` in its block run only once a guard has passed: an `if`
-    /// that leaves or skips unless the thing is there, or a `try` that looks up what the rest needs
-    /// and skips from every handler.
+    /// that leaves or skips unless the thing is there, a `try` that looks up what the rest needs
+    /// and skips from every handler, or a call that skips unless a module is installed.
     fn guards_rest(&self, stmt: &Stmt) -> bool {
         match stmt {
             Stmt::If(i) => (exits(&i.body) || skips(&i.body)) && self.holders.proves(&i.test, false),
             Stmt::Try(t) => try_guards(t),
+            Stmt::Expr(e) => ensures_installed(&e.value),
             _ => false,
         }
     }
@@ -3392,6 +3408,9 @@ mod tests {
             "if y or 'x.y' not in self.env:\n    return\nself.env['x.y']",
             "if not (y and 'x.y' in self.env):\n    return\nself.env['x.y']",
             "if 'x.y' not in self.env and 'f' not in self._fields:\n    return\nself.env['x.y']",
+            "self.ensure_installed('m')\nself.env['x.y']",
+            "cls.ensure_installed('m')\ncls.env['x.y']",
+            "if a:\n    self.ensure_installed('m')\n    self.env['x.y']",
         ] {
             assert!(!looks_up(silent), "{silent}");
         }
@@ -3408,6 +3427,14 @@ mod tests {
             "if 'x.y' not in self.env:\n    self.other('m')\nself.env['x.y']",
             "self.env['x.y']\nif 'x.y' not in self.env:\n    self.skipTest('m')",
             "if a:\n    if 'x.y' not in self.env:\n        self.skipTest('m')\nself.env['x.y']",
+            "ensure_installed('m')\nself.env['x.y']",
+            "self.helper.ensure_installed('m')\nself.env['x.y']",
+            "case.ensure_installed('m')\nself.env['x.y']",
+            "try:\n    self.ensure_installed('m')\nexcept E:\n    pass\nself.env['x.y']",
+            "self.ensure_installed(name)\nself.env['x.y']",
+            "self.ensure_installed()\nself.env['x.y']",
+            "self.env['x.y']\nself.ensure_installed('m')",
+            "if a:\n    self.ensure_installed('m')\nself.env['x.y']",
         ] {
             assert!(looks_up(reported), "{reported}");
         }
