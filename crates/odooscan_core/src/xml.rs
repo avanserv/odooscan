@@ -155,12 +155,14 @@ impl Walker<'_> {
     fn def(&mut self, node: Node, model: Option<&str>) {
         if let Some(id) = defined_id(node) {
             let pos = self.pos(node);
+            let tag = node.tag_name().name();
             self.facts.defs.push(XmlDef {
                 id: id.to_owned(),
                 model: model.map(str::to_owned),
                 pos,
-                themed: matches!(node.tag_name().name(), "template" | "asset"),
+                themed: matches!(tag, "template" | "asset"),
                 assigned: false,
+                no_create: matches!(tag, "record" | "template") && no_create(node),
             });
         }
     }
@@ -210,6 +212,7 @@ impl Walker<'_> {
                     pos,
                     themed: false,
                     assigned: true,
+                    no_create: false,
                 });
             }
         }
@@ -3160,5 +3163,19 @@ mod tests {
         let defs = |element: &str| analyze(&format!("<odoo>{element}</odoo>")).defs;
         assert!(defs(r#"<menuitem t-name="a"/>"#).is_empty());
         assert!(defs(r#"<record t-name="a" model="ir.ui.view"/>"#).is_empty());
+    }
+
+    #[test]
+    fn only_a_record_and_a_template_read_forcecreate() {
+        let no_create = |tag: &str| {
+            let text = format!(r#"<odoo><{tag} id="a" model="m" forcecreate="False"/></odoo>"#);
+            analyze(&text).defs[0].no_create
+        };
+        for tag in ["record", "template"] {
+            assert!(no_create(tag), "{tag}");
+        }
+        for tag in ["menuitem", "act_window", "report", "asset"] {
+            assert!(!no_create(tag), "{tag}");
+        }
     }
 }

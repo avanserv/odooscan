@@ -88,4 +88,30 @@
     <template t-name="name_in_one_file">
         <div>two</div>
     </template>
+    <template id="template_declared" forcecreate="False">
+        <div>second</div>
+    </template>
+    <template t-name="template_declared_by_name" forcecreate="0">
+        <div>second</div>
+    </template>
+    <template id="record_then_declared_template" forcecreate="False">
+        <div>second</div>
+    </template>
+    <template id="template_forced" forcecreate="True">
+        <div>second</div>
+    </template>
+    <template id="template_blank_forcecreate" forcecreate="">
+        <div>second</div>
+    </template>
+    <template id="declared_then_plain">
+        <div>second</div>
+    </template>
+    <menuitem id="menu_declared" name="Second" forcecreate="False"/>
+    <asset id="asset_declared" name="Second" forcecreate="False">
+        <bundle>web.assets_backend</bundle>
+        <path>record_required/static/src/second.js</path>
+    </asset>
+    <template id="note_then_declared_template" forcecreate="False">
+        <div>second</div>
+    </template>
 </odoo>

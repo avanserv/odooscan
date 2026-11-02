@@ -375,6 +375,8 @@ pub struct XmlDef {
     pub themed: bool,
     /// The id is given to an existing record, which a `<record>` with that id may then update.
     pub assigned: bool,
+    /// A `<record>` or `<template>` whose `forcecreate` is false. No other tag reads the attribute.
+    pub no_create: bool,
 }
 
 #[derive(Debug)]

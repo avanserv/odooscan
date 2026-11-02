@@ -87,4 +87,30 @@
             <span/>
         </xpath>
     </template>
+    <template id="template_declared">
+        <div>first</div>
+    </template>
+    <template id="template_declared_by_name">
+        <div>first</div>
+    </template>
+    <record id="record_then_declared_template" model="ir.ui.view">
+        <field name="name">First</field>
+    </record>
+    <template id="template_forced">
+        <div>first</div>
+    </template>
+    <template id="template_blank_forcecreate">
+        <div>first</div>
+    </template>
+    <template id="declared_then_plain" forcecreate="False">
+        <div>first</div>
+    </template>
+    <menuitem id="menu_declared" name="First"/>
+    <asset id="asset_declared" name="First">
+        <bundle>web.assets_backend</bundle>
+        <path>record_required/static/src/first.js</path>
+    </asset>
+    <record id="note_then_declared_template" model="rr.note">
+        <field name="name">First</field>
+    </record>
 </odoo>
