@@ -1,0 +1,3 @@
+id,name,model_id:id,group_id:id,perm_read,perm_write
+access_desk_hook,hook loaded,model_access_desk,,1,1
+access_desk_hook_portal,hook loaded portal,model_access_desk,base.group_portal,1,1

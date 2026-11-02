@@ -180,13 +180,6 @@ fn access_row(facts: &mut DataFacts, row: &csv::StringRecord, columns: &[(&str, 
     };
     let target = row.get(i).unwrap_or_default().to_owned();
     let group = cell(row, columns, "group_id");
-    if write_like && PUBLIC_GROUPS.contains(&group) {
-        facts.diags.push(RawDiag::new(
-            "OD402",
-            pos,
-            format!("{group} gets write, create or unlink on {target}; public and portal access should be read-only and go through controllers"),
-        ));
-    }
     let no_group = group.is_empty() && database_id(row, columns, "group_id").unwrap_or_default().is_empty();
     if model == "ir.access" && no_group {
         return;
@@ -194,9 +187,11 @@ fn access_row(facts: &mut DataFacts, row: &csv::StringRecord, columns: &[(&str, 
     facts.access.push(AccessRow {
         id: row_id(row, columns),
         model: target,
-        by_name: model == "ir.access" && !columns[i].1,
+        by_name: !columns[i].1,
         pos,
         global_write: no_group && write_like,
+        public_write: (write_like && PUBLIC_GROUPS.contains(&group)).then(|| group.to_owned()),
+        model_access: model == "ir.model.access",
     });
 }
 
@@ -317,14 +312,18 @@ mod tests {
         for on in ["1", "True", "YES"] {
             assert!(global(&format!("a,m,,1,{on}")), "active {on:?}");
         }
-        assert!(access(HEADER, "a,m,base.group_portal,1,0").diags.is_empty());
-        assert_eq!(access(HEADER, "a,m,base.group_portal,1,1").diags[0].code, "OD402");
+        let public = |row: &str| access(HEADER, row).access[0].public_write.clone();
+        assert_eq!(public("a,m,base.group_portal,1,0"), None);
+        assert_eq!(
+            public("a,m,base.group_portal,1,1").as_deref(),
+            Some("base.group_portal")
+        );
         let on_access = |active: &str| {
             let text = format!("id,model_id,group_id/id,operation,active\na,x.y,base.group_portal,cu,{active}\n");
-            analyze(&text, "ir.access").diags.len()
+            analyze(&text, "ir.access").access[0].public_write.clone()
         };
-        assert_eq!(on_access("0"), 0);
-        assert_eq!(on_access("1"), 1);
+        assert_eq!(on_access("0"), None);
+        assert_eq!(on_access("1").as_deref(), Some("base.group_portal"));
     }
 
     #[test]
@@ -337,7 +336,7 @@ mod tests {
     #[test]
     fn perm_words_reach_public_rows_too() {
         let facts = access(PERMS, "a,m,base.group_portal,1,True,0,0");
-        assert_eq!(facts.diags[0].code, "OD402");
+        assert_eq!(facts.access[0].public_write.as_deref(), Some("base.group_portal"));
     }
 
     #[test]
@@ -351,6 +350,13 @@ mod tests {
         assert!(facts.access[0].by_name);
         assert!(!facts.access[0].global_write);
         assert!(facts.diags.is_empty());
+    }
+
+    #[test]
+    fn a_plain_model_column_names_the_model_of_an_access_row() {
+        let text = "id,model_id,group_id:id,perm_read,perm_write\na,x.y,base.group_portal,1,1\n";
+        assert!(analyze(text, "ir.model.access").access[0].by_name);
+        assert!(!access(PERMS, "a,m,,1,1,0,0").access[0].by_name);
     }
 
     fn rules(text: &str, model: &str) -> Vec<RuleFact> {

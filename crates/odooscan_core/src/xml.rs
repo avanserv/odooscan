@@ -617,6 +617,8 @@ impl Walker<'_> {
                 by_name: false,
                 pos,
                 global_write: false,
+                public_write: None,
+                model_access: model == "ir.model.access",
             });
         }
     }

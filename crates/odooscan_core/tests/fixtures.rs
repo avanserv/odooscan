@@ -181,6 +181,39 @@ fn a_row_with_no_group_needs_no_base() {
 }
 
 #[test]
+fn a_file_a_hook_loads_reports_its_rows() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/custom/access_rows");
+    let report = scan(&ScanOptions {
+        paths: vec![root.clone()],
+        addons_paths: vec![],
+        default_series: None,
+    });
+    let lines = |file: &str| -> Vec<u32> {
+        let od402 = report.diagnostics.iter().filter(|d| d.code == "OD402");
+        od402.filter(|d| d.path == root.join(file)).map(|d| d.line).collect()
+    };
+    assert_eq!(lines("security/ir.model.access-hook.csv"), [2, 3]);
+    assert!(lines("tests/ir.model.access.csv").is_empty());
+}
+
+#[test]
+fn a_public_row_needs_no_base() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+    let report = scan(&ScanOptions {
+        paths: vec![root.join("custom/saas131")],
+        addons_paths: vec![],
+        default_series: None,
+    });
+    let lines: Vec<u32> = report
+        .diagnostics
+        .iter()
+        .filter(|d| d.code == "OD402")
+        .map(|d| d.line)
+        .collect();
+    assert_eq!(lines, [3, 5]);
+}
+
+#[test]
 fn refused_server_code_needs_no_base() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
     let report = scan(&ScanOptions {

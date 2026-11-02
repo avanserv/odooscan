@@ -695,7 +695,7 @@ fn class_ids<'m>(
 }
 
 /// The data files Odoo loads for `module`: those its manifest lists and those it loads itself.
-fn loaded_data(module: &Module, series: Option<Series>) -> impl Iterator<Item = &SourceFile<DataFacts>> {
+pub(crate) fn loaded_data(module: &Module, series: Option<Series>) -> impl Iterator<Item = &SourceFile<DataFacts>> {
     let mentions = module.code_mentions();
     let loaded =
         move |f: &&SourceFile<DataFacts>| f.rank.is_some() || code_loaded(&f.rel, &mentions, &module.manifest, series);

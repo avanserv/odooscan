@@ -6,14 +6,14 @@ use std::rc::Rc;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::facts::{
-    ActionFact, ActionValue, ActionViewId, Annotation, ArchElement, ArchModifier, ArchSubview, ClassFact, DataFacts,
-    DefinitionSource, DomainFact, FieldFact, FieldWrite, FunctionCall, JsFacts, JsName, ModelKind, OptionValue,
-    OrmCall, Pos, RawDiag, RecordFact, RecordWrite, ReportFact, RuleFact, ServerFact, Spanned, SqlColumn, SqlView,
-    ViewFact, WrittenValue, XmlRef,
+    AccessRow, ActionFact, ActionValue, ActionViewId, Annotation, ArchElement, ArchModifier, ArchSubview, ClassFact,
+    DataFacts, DefinitionSource, DomainFact, FieldFact, FieldWrite, FunctionCall, JsFacts, JsName, ModelKind,
+    OptionValue, OrmCall, Pos, RawDiag, RecordFact, RecordWrite, ReportFact, RuleFact, ServerFact, Spanned, SqlColumn,
+    SqlView, ViewFact, WrittenValue, XmlRef,
 };
 use crate::index::{
     BASE_MODEL_METHODS, Export, FieldDef, FieldInfo, Index, JsSpec, PathError, Placed, RELATIONAL_TYPES, Scope, Status,
-    ViewTree, base_private_method, full_id, js_module_path, located,
+    ViewTree, base_private_method, full_id, js_module_path, loaded_data, located,
 };
 use crate::project::{Module, SourceFile, code_loaded};
 use crate::rules::rule;
@@ -91,6 +91,12 @@ const RULE_DOMAIN_VALIDATED: Series = Series { major: 15, minor: 0 };
 /// lets every user through, `odoo/addons/base/models/ir_model.py:1500`).
 const TRANSIENT_ACCESS: Series = Series { major: 13, minor: 2 };
 
+/// The first series without `ir.model.access`: `odoo/addons/base/__manifest__.py:81` loads
+/// `ir.access.csv` where saas~19.3 loads `ir.model.access.csv` (`:78`). The loader calls `env[model]`
+/// on the model of the file name (`odoo/tools/convert.py:776` on saas~19.4), so loading an
+/// `ir.model.access` row fails.
+const IR_ACCESS: Series = Series { major: 19, minor: 4 };
+
 /// The first series with `ir.actions.report`. Through 10.0 the model is `ir.actions.report.xml`, and
 /// a `render_html` replaces the template (`addons/report/models/report.py:138` on 10.0).
 const REPORT_MODEL: Series = Series { major: 11, minor: 0 };
@@ -142,7 +148,7 @@ pub fn check_module<'m>(index: &Index<'m>, mi: usize, series: Option<Series>) ->
     legacy_hook_rollbacks(module, series, &mut out);
     cache_key_names(module, series, &mut out);
     import_patches(index, module, &mut out);
-    global_writes(index, mi, series, &mut out);
+    public_writes(index, mi, series, &mut out);
     refused_server_code(module, &mut out);
     refused_file_names(index, mi, series, &mut out);
     for (_, file) in es_modules(index, mi, series) {
@@ -198,24 +204,52 @@ fn ignores_access(kind: Option<ModelKind>, series: Option<Series>) -> bool {
     kind == Some(ModelKind::Transient) && series.is_some_and(|s| s < TRANSIENT_ACCESS)
 }
 
-/// OD402 on the rows that write for every user. Rows without a group are `ir.model.access`'s, so they
-/// name their model by XML id. A row of an id written twice may hold another value in the database.
-fn global_writes<'m>(index: &Index<'m>, mi: usize, series: Option<Series>, out: &mut Out<'m>) {
+/// Whether a module of `series` can load a row of `ir.model.access`: an unknown series may.
+fn reads_model_access(series: Option<Series>) -> bool {
+    series.is_none_or(|s| s < IR_ACCESS)
+}
+
+/// What OD402 says of a row, if it writes for public or portal users.
+fn public_write_message(row: &AccessRow) -> Option<String> {
+    if let Some(group) = &row.public_write {
+        return Some(format!(
+            "{group} gets write, create or unlink on {}; public and portal access should be read-only and go through controllers",
+            row.model
+        ));
+    }
+    row.global_write.then(|| {
+        format!(
+            "no group limits this row, so every user, public and portal included, gets write, create or unlink on {}; name a group",
+            row.model
+        )
+    })
+}
+
+/// OD402 on the rows that write for public or portal users, in the files Odoo loads. A row with no
+/// group of an id written twice may hold another value in the database. A plain `model_id` cell may
+/// also hold the model's description, which finds no kind, so that row reports.
+fn public_writes<'m>(index: &Index<'m>, mi: usize, series: Option<Series>, out: &mut Out<'m>) {
     let module = &index.modules[mi];
     let scope = index.scope(mi);
     let rewritten = |id: &String| {
         let defs = index.xmlids.get(&full_id(&module.name, id));
         defs.is_some_and(|d| d.len() > 1)
     };
-    for file in module.data.iter().filter(|f| f.rank.is_some()) {
-        for row in file.facts.access.iter().filter(|r| r.global_write) {
-            let model = index.model_of_xmlid(&full_id(&module.name, &row.model));
-            let kind = model.and_then(|m| index.kind(m, &scope));
-            if !row.id.as_ref().is_some_and(rewritten) && !ignores_access(kind, series) {
-                let message = format!(
-                    "no group limits this row, so every user, public and portal included, gets write, create or unlink on {}; name a group",
-                    row.model
-                );
+    let kind = |row: &AccessRow| {
+        let id = full_id(&module.name, &row.model);
+        let model = if row.by_name {
+            Some(row.model.as_str())
+        } else {
+            index.model_of_xmlid(&id)
+        };
+        model.and_then(|m| index.kind(m, &scope))
+    };
+    let replaced = !reads_model_access(series);
+    for file in loaded_data(module, series) {
+        let rows = file.facts.access.iter().filter(|r| !(replaced && r.model_access));
+        let rows = rows.filter(|r| !(r.global_write && r.id.as_ref().is_some_and(rewritten)));
+        for row in rows.filter(|r| !ignores_access(kind(r), series)) {
+            if let Some(message) = public_write_message(row) {
                 out.push(&file.path, "OD402", row.pos, message);
             }
         }
@@ -4505,9 +4539,19 @@ fn has_certain_column(field: &Field) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{MagicEra, applies, cache_global, derived_label, has_last_update, magic_era, shadowed_member};
+    use super::{
+        MagicEra, applies, cache_global, derived_label, has_last_update, magic_era, reads_model_access, shadowed_member,
+    };
     use crate::facts::DefinitionSource;
     use crate::series::Series;
+
+    #[test]
+    fn model_access_rows_load_below_saas_19_4() {
+        let reads = |series: &str| reads_model_access(Series::parse(series));
+        assert!(reads_model_access(None));
+        assert!(reads("18.0") && reads("saas~19.3"));
+        assert!(!reads("saas~19.4") && !reads("20.0"));
+    }
 
     #[test]
     fn applies_sql_constraints_before_19_and_table_objects_from_19() {

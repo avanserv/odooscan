@@ -1,0 +1,3 @@
+id,name,model_id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
+access_legacy_slip_named,legacy.slip named,legacy.slip,base.group_portal,1,1,0,0
+access_legacy_slip_all,legacy.slip for all,legacy.slip,,1,1,0,0
