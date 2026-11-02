@@ -131,4 +131,10 @@ a = 1 &lt; 2
         <field name="model_id" ref="model_server_job"/>
         <field name="code">async = 1</field>
     </record>
+
+    <record id="syntax_decoded_newline" model="ir.cron">
+        <field name="name">syntax_decoded_newline</field>
+        <field name="model_id" ref="model_server_job"/>
+        <field name="code">a = 1&#10;b = (</field>
+    </record>
 </odoo>
