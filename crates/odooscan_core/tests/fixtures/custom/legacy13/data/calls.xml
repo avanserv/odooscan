@@ -1,0 +1,17 @@
+<odoo>
+    <function model="res.partner" name="_get_xml_ids"/>
+    <function model="res.partner" name="resolve_o2m_commands_to_record_dicts"/>
+    <function model="res.partner" name="_get_xml_id"/>
+
+    <record id="cron_aliases" model="ir.cron">
+        <field name="name">cron_aliases</field>
+        <field name="model_id" ref="base.model_res_partner"/>
+        <field name="code">model._get_xml_ids(); model.resolve_o2m_commands_to_record_dicts("child_ids", [])</field>
+    </record>
+
+    <record id="cron_misspelled" model="ir.cron">
+        <field name="name">cron_misspelled</field>
+        <field name="model_id" ref="base.model_res_partner"/>
+        <field name="code">model._get_xml_id()</field>
+    </record>
+</odoo>
