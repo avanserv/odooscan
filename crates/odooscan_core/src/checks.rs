@@ -1863,12 +1863,20 @@ impl<'m> Ctx<'_, 'm> {
         }
     }
 
+    /// The type at the root of the view's inheritance. None when the view has neither a parent nor
+    /// an id, or the type of the root is not known.
+    fn root_kind(&self, view: &ViewFact) -> Option<&'m str> {
+        let start = view.inherit.as_deref().or(view.id.as_deref())?;
+        self.index.view_kind(full_id(&self.module.name, start))
+    }
+
     /// The type of the tree a view belongs to, unless it is QWeb, whose attributes are plain HTML. A
     /// root the index cannot read may be QWeb.
     fn arch_kind<'a>(&'a self, view: &'a ViewFact) -> Option<&'a str> {
-        let kind = match view.inherit.as_deref() {
-            Some(parent) => self.index.view_kind(full_id(&self.module.name, parent)),
-            None => view.kind.as_deref(),
+        let kind = if view.inherit.is_some() {
+            self.root_kind(view)
+        } else {
+            view.kind.as_deref()
         };
         kind.filter(|k| *k != QWEB)
     }
@@ -2110,9 +2118,7 @@ impl<'m> Ctx<'_, 'm> {
     /// Whether the view renders on the server. The tree's root decides, since a kanban arch runs
     /// `t-call` in the client whatever the type of a view extending it.
     fn qweb_view(&self, view: &ViewFact) -> bool {
-        let start = view.inherit.as_deref().or(view.id.as_deref());
-        let root = start.and_then(|id| self.index.view_kind(full_id(&self.module.name, id)));
-        root.or(view.kind.as_deref()) == Some(QWEB)
+        self.root_kind(view).or(view.kind.as_deref()) == Some(QWEB)
     }
 
     fn qweb_calls(&self, out: &mut Out<'m>, path: &'m Path, view: &ViewFact) {
