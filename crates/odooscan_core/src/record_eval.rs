@@ -29,7 +29,86 @@ pub fn written(eval: &Spanned<String>) -> WrittenValue {
 /// Whether an `eval` is a literal that tests false, which writes no value to a many2one. A name or a
 /// call only a run can tell is not one.
 pub fn is_false(eval: &str) -> bool {
-    parse_expression(eval.trim()).is_ok_and(|p| Truthiness::from_expr(p.expr(), |_| false).into_bool() == Some(false))
+    parse_expression(eval.trim()).is_ok_and(|p| falsy(p.expr()))
+}
+
+fn falsy(expr: &Expr) -> bool {
+    Truthiness::from_expr(expr, |_| false).into_bool() == Some(false)
+}
+
+/// The rows of an `eval` of `view_ids` that carry a view: one item each, none when its type does not
+/// read. A row without a view names none, so Odoo still looks a view up for its type. An item
+/// that may hide a view counts as such a row.
+pub fn view_rows(eval: &str) -> Vec<Option<String>> {
+    let Ok(parsed) = parse_expression(eval.trim()) else {
+        return vec![None];
+    };
+    match parsed.expr() {
+        expr if falsy(expr) => vec![],
+        Expr::List(list) => list.elts.iter().filter_map(view_row).collect(),
+        _ => vec![None],
+    }
+}
+
+/// What one command gives `view_rows`, nothing when it adds no row with a view.
+fn view_row(item: &Expr) -> Option<Option<String>> {
+    match item {
+        Expr::Tuple(t) => tuple_view_row(&t.elts),
+        Expr::Call(c) => call_view_row(c),
+        _ => Some(None),
+    }
+}
+
+fn tuple_view_row(elts: &[Expr]) -> Option<Option<String>> {
+    match (command_code(elts), elts.get(2)) {
+        (Some(0), Some(values)) => created_view_row(values),
+        (Some(5), _) => None,
+        (Some(6), Some(ids)) if falsy(ids) => None,
+        _ => Some(None),
+    }
+}
+
+fn call_view_row(call: &ast::ExprCall) -> Option<Option<String>> {
+    match (command_name(call), call.arguments.args.first()) {
+        (Some("create"), Some(values)) => created_view_row(values),
+        (Some("clear"), _) => None,
+        (Some("set"), Some(ids)) if falsy(ids) => None,
+        _ => Some(None),
+    }
+}
+
+fn created_view_row(values: &Expr) -> Option<Option<String>> {
+    let Some(values) = row_values(values) else {
+        return Some(None);
+    };
+    // A key given twice keeps its last value, as in Python.
+    let value = |name: &str| values.iter().rev().find(|(key, _)| *key == name).map(|(_, v)| *v);
+    value("view_id").filter(|view| !falsy(view))?;
+    Some(value("view_mode").and_then(string))
+}
+
+/// The pairs of a dict literal or a keyword `dict()`, none when a key only a run tells may be any.
+fn row_values(values: &Expr) -> Option<Vec<(&str, &Expr)>> {
+    match values {
+        Expr::Dict(dict) => dict.items.iter().map(dict_pair).collect(),
+        Expr::Call(call) if is_keyword_dict(call) => call.arguments.keywords.iter().map(keyword_pair).collect(),
+        _ => None,
+    }
+}
+
+fn dict_pair(item: &ast::DictItem) -> Option<(&str, &Expr)> {
+    let Some(Expr::StringLiteral(key)) = &item.key else {
+        return None;
+    };
+    Some((key.value.to_str(), &item.value))
+}
+
+fn is_keyword_dict(call: &ast::ExprCall) -> bool {
+    call.arguments.args.is_empty() && matches!(&*call.func, Expr::Name(n) if n.id.as_str() == "dict")
+}
+
+fn keyword_pair(keyword: &ast::Keyword) -> Option<(&str, &Expr)> {
+    Some((keyword.arg.as_ref()?.as_str(), &keyword.value))
 }
 
 /// Whether an `eval` is a list of x2many commands that all keep the other rows of the field.
@@ -62,11 +141,14 @@ pub fn strings(eval: &str) -> Vec<Option<String>> {
     let (Expr::Tuple(ast::ExprTuple { elts, .. }) | Expr::List(ast::ExprList { elts, .. })) = parsed.expr() else {
         return vec![];
     };
-    let text = |item: &Expr| match item {
+    elts.iter().map(string).collect()
+}
+
+fn string(item: &Expr) -> Option<String> {
+    match item {
         Expr::StringLiteral(s) => Some(s.value.to_str().to_owned()),
         _ => None,
-    };
-    elts.iter().map(text).collect()
+    }
 }
 
 /// The id of a `ref()` call: its second argument only says what a missing id gives.
@@ -281,6 +363,73 @@ mod tests {
         ] {
             assert_eq!(read(eval), None, "{eval}");
         }
+    }
+
+    #[test]
+    fn counts_a_view_row_only_with_a_view() {
+        let mode = |m: &str| Some(m.to_owned());
+        for eval in [
+            "",
+            "ref(",
+            "ref('a')",
+            "((5, 0, 0),)",
+            "[7]",
+            "[(4, ref('a'))]",
+            "[(6, 0, [ref('a')])]",
+            "[(6, 0)]",
+            "[(0, 0)]",
+            "[(0, 0, vals)]",
+            "[(0, 0, dict(vals))]",
+            "[(0, 0, other(view_id=1))]",
+            "[(0, 0, {**extra})]",
+            "[(0, 0, {'view_mode': 'gantt', **extra})]",
+            "[(0, 0, {key: 1})]",
+            "[(0, 0, dict(view_mode='gantt', **extra))]",
+            "[(0, 0, {'view_id': ref('a')})]",
+            "[(0, 0, {'view_id': ref('a'), 'view_mode': mode})]",
+            "[Command.link(ref('a'))]",
+            "[Command.set([ref('a')])]",
+            "[Command.set()]",
+            "[Command.create()]",
+            "[Command.create(vals)]",
+            "[Other.create({})]",
+        ] {
+            assert_eq!(view_rows(eval), [None], "{eval}");
+        }
+        for eval in [
+            "False",
+            " None ",
+            "[]",
+            "[(5, 0, 0)]",
+            "[(5,)]",
+            "[(6, 0, [])]",
+            "[(6, 0, False)]",
+            "[Command.clear()]",
+            "[Command.set([])]",
+            "[(0, 0, {})]",
+            "[(0, 0, {'view_mode': 'gantt'})]",
+            "[(0, 0, {'view_mode': 'gantt', 'view_id': False})]",
+            "[(0, 0, {'view_id': ref('a'), 'view_id': False})]",
+            "[(0, 0, dict(view_mode='gantt', view_id=None))]",
+            "[Command.create({'view_mode': 'gantt'})]",
+            "[Command.create(dict(view_mode='map'))]",
+        ] {
+            assert!(view_rows(eval).is_empty(), "{eval}");
+        }
+        for eval in [
+            "[(0, 0, {'view_mode': 'gantt', 'view_id': ref('a')})]",
+            "[(0, 0, {'view_id': ref('a'), 'view_mode': 'gantt'})]",
+            "[(5, 0, 0), (0, 0, dict(view_id=7, view_mode='gantt'))]",
+            "[Command.clear(), Command.create({'view_mode': 'gantt', 'view_id': x})]",
+            "[(0, 0, {'view_mode': 'map'}), (0, 0, {'view_mode': 'gantt', 'view_id': 7})]",
+            "[Command.create(dict(view_mode='gantt', view_id=7))]",
+        ] {
+            assert_eq!(view_rows(eval), [mode("gantt")], "{eval}");
+        }
+        assert_eq!(
+            view_rows("[(0, 0, {'view_mode': 'gantt', 'view_id': 1}), (4, ref('a'))]"),
+            [mode("gantt"), None]
+        );
     }
 
     #[test]

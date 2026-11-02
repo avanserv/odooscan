@@ -27,9 +27,6 @@ static UPDATE_XMLID: LazyLock<Regex> =
 static CONTEXT_DEFAULT: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\bdefault_(\w+)").unwrap());
 /// The key of a context that makes Odoo take a view for a type by its id.
 static CONTEXT_VIEW_REF: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(\w+)_view_ref\b").unwrap());
-/// The type of a row an `eval` writes to `view_ids`, as a dict literal or `dict()` gives it.
-static VIEW_ROW_MODE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r#"\bview_mode['"]?\s*[:=]\s*['"](\w+)['"]"#).unwrap());
 /// A field step followed by more steps, as in `//field[@name='line_ids']//field[...]`, reaches into
 /// the subview of line_ids.
 static XPATH_CONTAINER: LazyLock<Regex> =
@@ -416,18 +413,18 @@ impl Walker<'_> {
             model: written("res_model"),
             view_mode: written("view_mode"),
             view_of_any_kind: field("view_id").is_some_and(holds_record),
-            view_kinds: vec![],
+            ..ActionFact::default()
         };
         if let Some(f) = field("context") {
             action.view_kinds = context_view_kinds(f.attribute("eval").or_else(|| f.text()));
         }
         if let Some(eval) = field("view_ids").and_then(|f| f.attribute("eval")) {
-            let rows: Vec<String> = VIEW_ROW_MODE.captures_iter(eval).map(|c| c[1].to_owned()).collect();
-            action.view_of_any_kind |= rows.is_empty();
-            action.view_kinds.extend(rows);
+            let rows = record_eval::view_rows(eval);
+            action.view_of_any_kind |= rows.contains(&None);
+            action.view_kinds.extend(rows.into_iter().flatten());
         }
         for row in field("view_ids").iter().flat_map(|f| f.children()).filter(is_view_row) {
-            name_row_view(&mut action, row);
+            name_row_view(&mut action.nested_view_kinds, &mut action.nested_view_of_any_kind, row);
         }
         self.facts.actions.push(action);
     }
@@ -534,6 +531,7 @@ impl Walker<'_> {
             view_mode: written("view_mode"),
             view_kinds: context_view_kinds(node.attribute("context")),
             view_of_any_kind: node.attribute("view_id").is_some_and(|id| !id.is_empty()),
+            ..ActionFact::default()
         };
         self.facts.actions.push(action);
     }
@@ -554,7 +552,7 @@ impl Walker<'_> {
             id: Some(action.value.clone()),
             ..ActionFact::default()
         };
-        name_row_view(&mut row, node);
+        name_row_view(&mut row.view_kinds, &mut row.view_of_any_kind, node);
         if row.view_of_any_kind || !row.view_kinds.is_empty() {
             self.facts.actions.push(row);
         }
@@ -1047,16 +1045,16 @@ fn is_view_row(node: &Node) -> bool {
     node.has_tag_name("record") && node.attribute("model") == Some("ir.actions.act_window.view")
 }
 
-/// Adds what a row of `view_ids` names to `action`. A row without a view only orders the type, so
-/// Odoo still looks a view up for it.
-fn name_row_view(action: &mut ActionFact, row: Node) {
+/// Adds what a row of `view_ids` names. A row without a view names none, so Odoo still
+/// looks a view up for it.
+fn name_row_view(kinds: &mut Vec<String>, of_any_kind: &mut bool, row: Node) {
     if !field_of(row, "view_id").is_some_and(holds_record) {
         return;
     }
     let kind = field_of(row, "view_mode").and_then(|f| f.text()).map(str::trim);
     match kind.filter(|k| !k.is_empty()) {
-        Some(kind) => action.view_kinds.push(kind.to_owned()),
-        None => action.view_of_any_kind = true,
+        Some(kind) => kinds.push(kind.to_owned()),
+        None => *of_any_kind = true,
     }
 }
 
@@ -2270,12 +2268,17 @@ mod tests {
             named(
                 r#"<field name="view_ids" eval="[(5, 0, 0), (0, 0, {'view_mode': 'gantt', 'view_id': ref('v')}), Command.create(dict(view_mode='map'))]"/>"#
             ),
-            kinds(&["gantt", "map"])
+            kinds(&["gantt"])
+        );
+        assert_eq!(
+            named(r#"<field name="view_ids" eval="[(0, 0, {'view_mode': 'gantt'}), (4, ref('row'))]"/>"#),
+            (vec![], true)
         );
         assert_eq!(
             named(r#"<field name="view_ids" eval="[(6, 0, [ref('row')])]"/>"#),
             (vec![], true)
         );
+        assert_eq!(named(r#"<field name="view_ids" eval="[(5, 0, 0)]"/>"#), none);
         assert_eq!(named(r#"<field name="view_ids"/>"#), none);
     }
 
@@ -2367,25 +2370,31 @@ mod tests {
         let actions = nested(r#"<field name="view_mode">gantt</field><field name="view_id" ref="v"/>"#);
         assert_eq!(actions.len(), 1);
         assert_eq!(actions[0].id.as_deref(), Some("a"));
-        assert_eq!(actions[0].view_kinds, ["gantt"]);
-        assert!(!actions[0].view_of_any_kind);
+        assert_eq!(actions[0].nested_view_kinds, ["gantt"]);
+        assert!(!actions[0].nested_view_of_any_kind);
+        assert!(actions[0].view_kinds.is_empty());
+        assert!(actions[0].names_view("gantt", true));
+        assert!(!actions[0].names_view("gantt", false));
 
         let searched = nested(r#"<field name="view_mode">gantt</field><field name="view_id" search="[]"/>"#);
-        assert_eq!(searched[0].view_kinds, ["gantt"]);
+        assert_eq!(searched[0].nested_view_kinds, ["gantt"]);
 
         let hidden = nested(r#"<field name="view_mode" eval="'gantt'"/><field name="view_id" ref="v"/>"#);
-        assert!(hidden[0].view_of_any_kind);
+        assert!(hidden[0].nested_view_of_any_kind);
+        assert!(!hidden[0].view_of_any_kind);
+        assert!(hidden[0].names_view("gantt", true));
+        assert!(!hidden[0].names_view("gantt", false));
 
         let no_view = nested(r#"<field name="view_mode">gantt</field>"#);
-        assert!(no_view[0].view_kinds.is_empty());
-        assert!(!no_view[0].view_of_any_kind);
+        assert!(no_view[0].nested_view_kinds.is_empty());
+        assert!(!no_view[0].nested_view_of_any_kind);
 
         let elsewhere = nested(
             r#"<field name="view_mode">gantt</field><field name="view_id" ref="v"/><field name="act_window_id" ref="b"/>"#,
         );
         assert_eq!(elsewhere.len(), 1);
         assert_eq!(elsewhere[0].id.as_deref(), Some("a"));
-        assert_eq!(elsewhere[0].view_kinds, ["gantt"]);
+        assert_eq!(elsewhere[0].nested_view_kinds, ["gantt"]);
     }
 
     fn rule_of(fields: &str) -> RuleFact {

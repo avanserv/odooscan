@@ -572,11 +572,19 @@ pub struct ActionFact {
     pub view_kinds: Vec<String>,
     /// It names a view without saying the type: a `view_id`, or `view_ids` that an `eval` hides.
     pub view_of_any_kind: bool,
+    /// As `view_kinds`, from a record nested in `view_ids`, which not every series loads.
+    pub nested_view_kinds: Vec<String>,
+    /// As `view_of_any_kind`, from a record nested in `view_ids`.
+    pub nested_view_of_any_kind: bool,
 }
 
 impl ActionFact {
-    pub fn names_view(&self, kind: &str) -> bool {
-        self.view_of_any_kind || self.view_kinds.iter().any(|k| k == kind)
+    /// Whether it names a view of `kind`, counting the records nested in `view_ids` when `nested`.
+    pub fn names_view(&self, kind: &str, nested: bool) -> bool {
+        let of_kind = |kinds: &[String]| kinds.iter().any(|k| k == kind);
+        self.view_of_any_kind
+            || of_kind(&self.view_kinds)
+            || (nested && (self.nested_view_of_any_kind || of_kind(&self.nested_view_kinds)))
     }
 }
 
