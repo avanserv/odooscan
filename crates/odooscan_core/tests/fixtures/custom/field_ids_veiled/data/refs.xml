@@ -1,0 +1,10 @@
+<odoo>
+    <record id="veiled_delegate" model="field.ids.old">
+        <field name="code">a</field>
+        <field name="field_id" ref="field_bay_table_height"/>
+    </record>
+    <record id="veiled_delegate_later" model="field.ids.old">
+        <field name="code">b</field>
+        <field name="field_id" ref="field_bay_table_depth"/>
+    </record>
+</odoo>

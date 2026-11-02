@@ -1,0 +1,11 @@
+<odoo>
+    <record id="field_rack_table_shelf" model="ir.model.fields">
+        <field name="name">shelf</field>
+    </record>
+    <record id="field_rack_table_custom" model="ir.model.fields">
+        <field name="name">x_custom</field>
+    </record>
+    <record id="field_res_partner_shelf" model="ir.model.fields">
+        <field name="name">shelf</field>
+    </record>
+</odoo>

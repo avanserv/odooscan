@@ -210,7 +210,7 @@ pub fn check_module<'m>(index: &Index<'m>, mi: usize, series: Option<Series>) ->
     unloaded_files(module, series, &mut out);
     ids_repeated_in_a_file(module, series, &mut out);
     ids_repeated_across_files(module, series, &mut out);
-    same_module_xmlids(index, module, series, &mut out);
+    same_module_xmlids(index, mi, series, &mut out);
     shadowed_members(module, series, &mut out);
     legacy_hook_rollbacks(module, series, &mut out);
     cache_key_names(module, series, &mut out);
@@ -732,7 +732,10 @@ fn unloaded(rel: &str, ignored: Option<&str>, series: Option<Series>) -> String 
     format!("'{rel}' is not in the manifest's {keys}, so Odoo never loads it")
 }
 
-fn same_module_xmlids<'m>(index: &Index<'m>, module: &'m Module, series: Option<Series>, out: &mut Out<'m>) {
+fn same_module_xmlids<'m>(index: &Index<'m>, mi: usize, series: Option<Series>, out: &mut Out<'m>) {
+    let module = &index.modules[mi];
+    let scope = index.scope(mi);
+    let partial = index.partial_scope(&scope);
     // base_data.sql creates base's bootstrap records before any data file loads.
     let bootstrapped = module.name == "base";
     let first_def = first_defs(module);
@@ -743,7 +746,7 @@ fn same_module_xmlids<'m>(index: &Index<'m>, module: &'m Module, series: Option<
             if let Some(&(def_rank, def_line)) = first_def.get(&id)
                 && (def_rank, def_line) > (rank, r.pos.line)
                 && !bootstrapped
-                && !registry_id(index, module, series, &id)
+                && !registry_id(index, module, series, &scope, partial, &id)
             {
                 let place = load_place(module, series, def_rank, rank);
                 out.push(
@@ -930,12 +933,15 @@ fn types_differ(a: &str, b: &str) -> bool {
 }
 
 /// The registry creates the `ir.model` and `ir.model.fields` ids of a module's models before any of
-/// its data files load, so a record with such an id only updates it.
-fn registry_id(index: &Index, module: &Module, series: Option<Series>, id: &str) -> bool {
+/// its data files load, so a record with such an id only updates it. On a `partial` `scope` the id
+/// may be spelled from a table outside the index.
+fn registry_id(index: &Index, module: &Module, series: Option<Series>, scope: &Scope, partial: bool, id: &str) -> bool {
     let local = id.split_once('.').map_or(id, |(_, l)| l);
     module.python.iter().flat_map(|f| &f.facts.classes).any(|c| {
         let mut prefixes = index.field_prefixes(&c.model, series).into_iter();
-        local == format!("model_{}", c.model.replace('.', "_")) || prefixes.any(|p| local.starts_with(&p))
+        local == format!("model_{}", c.model.replace('.', "_"))
+            || prefixes.any(|p| local.starts_with(&p))
+            || (partial && index.unseen_table_id(c, local, series, scope))
     })
 }
 
@@ -1745,7 +1751,7 @@ impl<'m> Ctx<'_, 'm> {
         self.module.name != "base"
             && at.is_some_and(|at| loaded.ids.get(&full) == Some(&at) && loaded.first_call.is_none_or(|c| at < c))
             && first.is_some_and(|w| std::ptr::eq(w.fact, write))
-            && !registry_id(self.index, self.module, self.series, &full)
+            && !registry_id(self.index, self.module, self.series, self.scope, self.partial, &full)
             && !self.index.derived.contains(&full)
     }
 
@@ -2416,27 +2422,20 @@ impl<'m> Ctx<'_, 'm> {
         }
     }
 
-    /// Whether a class of `class`'s model, or a parent or delegate of it, is out of the scan's sight,
-    /// so the model may hold fields the index does not list.
-    fn unread_fields(&self, class: &ClassFact) -> bool {
-        class.unread
-            || self.index.unread_class(&class.model, self.scope)
-            || self.index.hidden_field_parents(&class.model, self.scope)
-            || self.index.unread_delegate(&class.model, self.scope)
-    }
-
     /// Whether `local` may name a field of an unread class of `owner`, a module in scope, or one that
     /// a class of `owner` gets from a parent the scan cannot read: the id may exist, but the scan has
-    /// no field to build it from.
+    /// no field to build it from. On a partial scope it may also be spelled from a table outside the
+    /// index, so that the scan has no prefix to match it with.
     fn unread_field_id(&self, owner: &str, local: &str) -> bool {
         let Some(&mi) = self.index.by_name.get(owner).filter(|&&mi| self.scope.sees(mi)) else {
             return false;
         };
-        let classes = self.index.modules[mi].python.iter().flat_map(|f| &f.facts.classes);
-        classes.filter(|c| self.unread_fields(c)).any(|c| {
-            let series = self.series.or(self.index.modules[mi].series);
+        let mut classes = self.index.modules[mi].python.iter().flat_map(|f| &f.facts.classes);
+        let series = self.series.or(self.index.modules[mi].series);
+        classes.any(|c| {
             let mut prefixes = self.index.field_prefixes(&c.model, series).into_iter();
-            prefixes.any(|p| local.starts_with(&p))
+            (self.index.unread_fields(c, self.scope) && prefixes.any(|p| local.starts_with(&p)))
+                || (self.partial && self.index.unseen_table_id(c, local, series, self.scope))
         })
     }
 

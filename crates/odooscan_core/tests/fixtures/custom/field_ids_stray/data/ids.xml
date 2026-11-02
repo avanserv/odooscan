@@ -1,0 +1,6 @@
+<odoo>
+    <record id="field_rack_table_shelf" model="ir.model.fields">
+        <field name="name">shelf</field>
+    </record>
+    <record id="field_rack_table_bay" model="field.ids.old"/>
+</odoo>

@@ -1,0 +1,10 @@
+<odoo>
+    <record id="stray_declared" model="field.ids.old">
+        <field name="code">a</field>
+        <field name="field_id" ref="field_rack_table_stock"/>
+    </record>
+    <record id="stray_declared_later" model="field.ids.old">
+        <field name="code">b</field>
+        <field name="field_id" ref="field_rack_table_shelf"/>
+    </record>
+</odoo>
