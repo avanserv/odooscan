@@ -708,6 +708,7 @@ fn module_ids(module: &Module, base: usize, xmlids: &mut XmlIds) {
             module: base,
             model: Some("ir.module.module"),
             spelling: None,
+            holder: None,
         });
     let Some(category) = &module.manifest.category else {
         return;
@@ -722,6 +723,7 @@ fn module_ids(module: &Module, base: usize, xmlids: &mut XmlIds) {
                 module: base,
                 model: Some("ir.module.category"),
                 spelling: None,
+                holder: None,
             });
     }
 }
@@ -744,6 +746,7 @@ fn class_ids<'m>(
             module: mi,
             model: Some("ir.model"),
             spelling: None,
+            holder: None,
         });
     }
 }
@@ -784,6 +787,97 @@ fn field_ids<'m>(modules: &'m [Module], models: &Models<'m>, xmlids: &mut XmlIds
                         module: mi,
                         model: Some("ir.model.fields"),
                         spelling: Some(*spelling),
+                        holder: None,
+                    });
+                }
+            }
+        }
+    }
+}
+
+/// Every class of `model` and of the models it inherits from, `base` included. `delegated` adds the
+/// models it reaches through `_inherits`, whose fields it has but does not merge.
+fn model_chain<'m>(
+    models: &Models<'m>,
+    model: &str,
+    scope: Option<&Scope>,
+    delegated: bool,
+) -> Vec<(usize, &'m ClassFact)> {
+    let mut out = vec![];
+    let mut seen = FxHashSet::default();
+    let mut stack = vec![model, "base"];
+    while let Some(m) = stack.pop() {
+        if !seen.insert(m) {
+            continue;
+        }
+        for &(mi, class) in models.get(m).map(Vec::as_slice).unwrap_or_default() {
+            if scope.is_some_and(|s| !s.sees(mi)) {
+                continue;
+            }
+            out.push((mi, class));
+            stack.extend(class.inherit.iter().map(|i| i.value.as_str()).filter(|i| *i != m));
+            if delegated {
+                stack.extend(class.inherits.iter().map(|(parent, _)| parent.as_str()));
+            }
+        }
+    }
+    out
+}
+
+/// The fields `class` of module `mi` gets from its parents, each with a module that may hold its id.
+/// Odoo tests a module against the model's original one, so a later class of the module that
+/// introduces the model takes its place, and against the modules that declare the field, so every
+/// series writes an id under a declarer that takes the parent itself. saas~11.5 leaves out a
+/// delegated field of a parent an extension adds, as its `_modules` stay on the delegated model.
+fn inherited_fields<'m>(
+    mi: usize,
+    class: &'m ClassFact,
+    models: &Models<'m>,
+) -> Vec<(usize, &'m str, Option<FieldHolder>)> {
+    let classes = &models[class.model.as_str()];
+    let introduces = classes.iter().any(|(m, c)| *m == mi && c.new_model);
+    let own = if introduces {
+        FieldHolder::Introducer
+    } else {
+        FieldHolder::Extender
+    };
+    let parents = class.inherit.iter().map(|i| i.value.as_str());
+    let merged: Vec<_> = parents
+        .filter(|p| *p != class.model)
+        .flat_map(|p| model_chain(models, p, None, false))
+        .collect();
+    let mut out = vec![];
+    for &(declarer, parent) in &merged {
+        for field in &parent.fields {
+            out.push((mi, field.name.as_str(), (declarer != mi).then_some(own)));
+            if declarer != mi {
+                out.push((declarer, field.name.as_str(), Some(FieldHolder::Mixin)));
+            }
+        }
+    }
+    let own_delegates = class.inherits.iter().filter(|_| introduces);
+    let delegates = own_delegates.chain(merged.iter().flat_map(|(_, parent)| &parent.inherits));
+    for (declarer, target) in delegates.flat_map(|(target, _)| model_chain(models, target, None, true)) {
+        let holder = (!introduces && declarer != mi).then_some(FieldHolder::Delegator);
+        out.extend(target.fields.iter().map(|f| (mi, f.name.as_str(), holder)));
+    }
+    out
+}
+
+/// The ids of the fields a class gets from its parents, spelled for the inheriting model. Odoo
+/// reflects them for that model, while `field_ids` only knows the class that declares each.
+fn inherited_field_ids<'m>(modules: &'m [Module], models: &Models<'m>, xmlids: &mut XmlIds<'m>) {
+    for (mi, module) in modules.iter().enumerate() {
+        for class in module.python.iter().flat_map(|f| &f.facts.classes) {
+            let prefixes = spelled_prefixes(&class.model, &models[class.model.as_str()]);
+            for (holder_module, field, holder) in inherited_fields(mi, class, models) {
+                for (spelling, prefix) in &prefixes {
+                    let id = format!("{}.{prefix}{field}", modules[holder_module].name);
+                    xmlids.entry(id).or_default().push(XmlIdDef {
+                        module: holder_module,
+                        model: Some("ir.model.fields"),
+                        spelling: Some(*spelling),
+                        holder,
                     });
                 }
             }
@@ -845,6 +939,7 @@ fn data_ids<'m>(
                 module: owner,
                 model,
                 spelling: None,
+                holder: None,
             });
         }
     }
@@ -1237,12 +1332,48 @@ pub struct XmlIdDef<'m> {
     /// How the id spells its field when the registry creates it. Such an id exists in some series
     /// only, where a record of a data file exists in all of them.
     spelling: Option<FieldSpelling>,
+    /// Why the module holds the id of an inherited field, which only some series write there. None
+    /// for an id every series writes there.
+    holder: Option<FieldHolder>,
 }
 
 impl XmlIdDef<'_> {
     fn exists_in(&self, series: Option<Series>) -> bool {
-        self.spelling
-            .is_none_or(|own| series.is_none_or(|s| FieldSpelling::of(s) == own))
+        let spelled = self
+            .spelling
+            .is_none_or(|own| series.is_none_or(|s| FieldSpelling::of(s) == own));
+        spelled && self.holder.is_none_or(|h| series.is_none_or(|s| h.holds_in(s)))
+    }
+}
+
+/// Why a module may hold the id of a field that a model gets from an `_inherit` parent.
+#[derive(Clone, Copy)]
+enum FieldHolder {
+    /// It introduces the model.
+    Introducer,
+    /// It declares the field on the parent.
+    Mixin,
+    /// It adds the parent to a model it extends.
+    Extender,
+    /// It adds to a model it extends a parent that delegates the field.
+    Delegator,
+}
+
+impl FieldHolder {
+    /// 9.0 takes the module that creates the row. 10.0 to saas~11.2 prefer the module of the class
+    /// that declares the field, which a delegated field lacks. saas~11.3 and 11.4 take the one that
+    /// creates the row or declares the field. From saas~11.5 it is the model's original module or one
+    /// that declares the field, joined from saas~13.4 by each module that adds the parent. A declarer
+    /// that does not take the parent is taken to load before the model, so to write nothing for it.
+    fn holds_in(self, series: Series) -> bool {
+        let by_declarer = series::matches(">=10.0,<11.3", series);
+        let by_original = series::matches(">=11.5,<13.4", series);
+        match self {
+            Self::Introducer => !by_declarer,
+            Self::Mixin => by_declarer,
+            Self::Extender => !by_declarer && !by_original,
+            Self::Delegator => !by_original,
+        }
     }
 }
 
@@ -1420,6 +1551,7 @@ impl<'m> Index<'m> {
             data_ids(mi, module, &by_name, &mut xmlids, &mut views, &mut view_keys, series);
         }
         field_ids(modules, &models, &mut xmlids);
+        inherited_field_ids(modules, &models, &mut xmlids);
         let mut derived = FxHashSet::default();
         for (id, mi, parent) in derived_ids(modules, &models, default_series) {
             derived.insert(id.clone());
@@ -1427,6 +1559,7 @@ impl<'m> Index<'m> {
                 module: mi,
                 model: Some(parent),
                 spelling: None,
+                holder: None,
             });
         }
         let models_with_access = access_models(modules, &model_by_xmlid, default_series);
@@ -1997,28 +2130,9 @@ impl<'m> Index<'m> {
             .reduce(|first, mi| if self.reaches(first, mi) { mi } else { first })
     }
 
-    /// Every class of `model` and of the models it inherits from, `base` included. `delegated`
-    /// adds the models it reaches through `_inherits`, whose fields it has but does not merge.
+    /// Every class of `model` and of the models it inherits from: see `model_chain`.
     fn chain(&self, model: &str, scope: Option<&Scope>, delegated: bool) -> Vec<(usize, &'m ClassFact)> {
-        let mut out = vec![];
-        let mut seen = FxHashSet::default();
-        let mut stack = vec![model, "base"];
-        while let Some(m) = stack.pop() {
-            if !seen.insert(m) {
-                continue;
-            }
-            for &(mi, class) in self.models.get(m).map(Vec::as_slice).unwrap_or_default() {
-                if scope.is_some_and(|s| !s.sees(mi)) {
-                    continue;
-                }
-                out.push((mi, class));
-                stack.extend(class.inherit.iter().map(|i| i.value.as_str()).filter(|i| *i != m));
-                if delegated {
-                    stack.extend(class.inherits.iter().map(|(parent, _)| parent.as_str()));
-                }
-            }
-        }
-        out
+        model_chain(&self.models, model, scope, delegated)
     }
 
     pub fn field_defs(&self, model: &str, field: &str, scope: Option<&Scope>) -> Vec<FieldDef<'m>> {
@@ -2700,8 +2814,8 @@ fn method_flows(modules: &[Module]) -> MethodFlows<'_> {
 mod tests {
     use super::{
         BASE_MODEL_DUNDERS, BASE_MODEL_EXTRA, BASE_MODEL_METHODS, BASE_PRIVATE_METHODS, BASE_RPC_METHODS,
-        FIELD_CLASSES, FieldSpelling, OLD_BASE_METHODS, PlacedWrite, XmlIdDef, base_private_method, base_rpc_method,
-        class_file, field_id_prefixes, fold_writes, last_text, old_base_method,
+        FIELD_CLASSES, FieldHolder, FieldSpelling, OLD_BASE_METHODS, PlacedWrite, XmlIdDef, base_private_method,
+        base_rpc_method, class_file, field_id_prefixes, fold_writes, last_text, old_base_method,
     };
     use crate::python;
     use crate::series::Series;
@@ -2745,6 +2859,7 @@ mod tests {
             module: 0,
             model: None,
             spelling,
+            holder: None,
         };
         let (old, new) = (Series::parse("saas~11.1"), Series::parse("saas~11.2"));
         assert!(def(Some(FieldSpelling::ByTable)).exists_in(old));
@@ -2753,6 +2868,38 @@ mod tests {
         assert!(!def(Some(FieldSpelling::ByName)).exists_in(old));
         assert!(def(Some(FieldSpelling::ByName)).exists_in(None));
         assert!(def(None).exists_in(old));
+    }
+
+    #[test]
+    fn an_inherited_field_id_holds_by_series() {
+        let holds = |holder: FieldHolder, series| holder.holds_in(Series::parse(series).unwrap());
+        // Series, then whether the introducer, the mixin module, an extender and a delegator hold it.
+        let bands = [
+            ("9.0", true, false, true, true),
+            ("10.0", false, true, false, true),
+            ("saas~11.2", false, true, false, true),
+            ("saas~11.3", true, false, true, true),
+            ("saas~11.4", true, false, true, true),
+            ("saas~11.5", true, false, false, false),
+            ("saas~13.3", true, false, false, false),
+            ("saas~13.4", true, false, true, true),
+            ("20.0", true, false, true, true),
+        ];
+        for (series, introducer, mixin, extender, delegator) in bands {
+            assert_eq!(holds(FieldHolder::Introducer, series), introducer, "{series}");
+            assert_eq!(holds(FieldHolder::Mixin, series), mixin, "{series}");
+            assert_eq!(holds(FieldHolder::Extender, series), extender, "{series}");
+            assert_eq!(holds(FieldHolder::Delegator, series), delegator, "{series}");
+        }
+        let def = |holder| XmlIdDef {
+            module: 0,
+            model: None,
+            spelling: None,
+            holder,
+        };
+        assert!(def(Some(FieldHolder::Mixin)).exists_in(None));
+        assert!(!def(Some(FieldHolder::Mixin)).exists_in(Series::parse("13.0")));
+        assert!(def(None).exists_in(Series::parse("13.0")));
     }
 
     #[test]

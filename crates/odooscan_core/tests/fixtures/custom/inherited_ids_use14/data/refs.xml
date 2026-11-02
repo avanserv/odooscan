@@ -1,0 +1,38 @@
+<odoo>
+    <record id="introducer" model="inherited.b14.tagged">
+        <field name="field_id" ref="field_inherited_b14_tagged__tag"/>
+    </record>
+    <record id="introducer_chained" model="inherited.b14.tagged">
+        <field name="field_id" ref="field_inherited_b14_tagged__deep"/>
+    </record>
+    <record id="mixin_module" model="inherited.b14.tagged">
+        <field name="field_id" ref="inherited_ids_mix14.field_inherited_b14_tagged__tag"/>
+    </record>
+    <record id="mixin_module_chained" model="inherited.b14.tagged">
+        <field name="field_id" ref="inherited_ids_mix14.field_inherited_b14_tagged__deep"/>
+    </record>
+    <record id="unrelated_model" model="inherited.b14.tagged">
+        <field name="field_id" ref="field_inherited_b14_plain__tag"/>
+    </record>
+    <record id="delegated" model="inherited.b14.tagged">
+        <field name="field_id" ref="field_inherited_b14_child__title"/>
+    </record>
+    <record id="extender" model="inherited.b14.tagged">
+        <field name="field_id" ref="field_inherited_b14_host__tag"/>
+    </record>
+    <record id="mixin_module_extended" model="inherited.b14.tagged">
+        <field name="field_id" ref="inherited_ids_mix14.field_inherited_b14_host__tag"/>
+    </record>
+    <record id="delegated_mixin" model="inherited.b14.tagged">
+        <field name="field_id" ref="field_inherited_b14_forwarded__title"/>
+    </record>
+    <record id="delegated_mixin_module" model="inherited.b14.tagged">
+        <field name="field_id" ref="inherited_ids_mix14.field_inherited_b14_forwarded__title"/>
+    </record>
+    <record id="delegated_extender" model="inherited.b14.tagged">
+        <field name="field_id" ref="field_inherited_b14_host__title"/>
+    </record>
+    <record id="later_class" model="inherited.b14.tagged">
+        <field name="field_id" ref="field_inherited_b14_late__tag"/>
+    </record>
+</odoo>

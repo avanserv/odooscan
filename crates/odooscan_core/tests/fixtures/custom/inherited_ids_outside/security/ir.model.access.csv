@@ -1,0 +1,5 @@
+id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
+access_inherited_outside_hosted,inherited.outside.hosted,model_inherited_outside_hosted,,1,0,0,0
+access_inherited_outside_plain,inherited.outside.plain,model_inherited_outside_plain,,1,0,0,0
+access_inherited_outside_based,inherited.outside.based,model_inherited_outside_based,,1,0,0,0
+access_inherited_outside_hazed,inherited.outside.hazed,model_inherited_outside_hazed,,1,0,0,0
