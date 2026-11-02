@@ -437,11 +437,16 @@ pub struct RecordFact {
     pub fields: Vec<Spanned<String>>,
 }
 
+/// A row that grants access: a row of `ir.access` with no group restricts instead.
 #[derive(Debug)]
 pub struct AccessRow {
+    pub id: Option<String>,
     /// An `ir.model` XML id, or a model name when `by_name` (the `ir.access` CSV format).
     pub model: String,
     pub by_name: bool,
+    pub pos: Pos,
+    /// A CSV row with no group gives every user a permission other than read.
+    pub global_write: bool,
 }
 
 /// A `<function>` of a data file, which Odoo calls when it loads the file.
@@ -451,8 +456,8 @@ pub struct FunctionCall {
     pub method: Spanned<String>,
 }
 
-/// What one element writes to a field of a window action. A write that is no literal still replaces
-/// what an earlier one gave, so it differs from no write at all.
+/// What one element writes to a field of a window action or a record rule. A write that is no
+/// literal still replaces what an earlier one gave, so it differs from no write at all.
 #[derive(Debug, Default)]
 pub enum ActionValue {
     #[default]
@@ -480,6 +485,20 @@ impl ActionFact {
     }
 }
 
+/// One write to an `ir.rule`, or to an `ir.access` with a domain, by a `<record>` or a CSV row.
+#[derive(Debug)]
+pub struct RuleFact {
+    pub id: Option<String>,
+    /// What it gives `model_id`: an `ir.model` XML id, or a model name when `by_name`.
+    pub model: ActionValue,
+    pub by_name: bool,
+    pub domain: ActionValue,
+    /// The field paths `domain` names, which a domain only a run can read leaves empty.
+    pub fields: Vec<Spanned<String>>,
+    /// What it gives `active`, where a value only a run tells counts as false.
+    pub active: Option<bool>,
+}
+
 /// Facts from an XML or CSV data file.
 #[derive(Debug, Default)]
 pub struct DataFacts {
@@ -495,6 +514,7 @@ pub struct DataFacts {
     pub action_domains: Vec<DomainFact>,
     pub actions: Vec<ActionFact>,
     pub access: Vec<AccessRow>,
+    pub rules: Vec<RuleFact>,
     pub functions: Vec<FunctionCall>,
     pub diags: Vec<RawDiag>,
 }

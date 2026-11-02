@@ -1,0 +1,46 @@
+<odoo>
+    <record id="rule_domain_text" model="ir.rule">
+        <field name="model_id" ref="model_rule_ticket"/>
+        <field name="domain_force">
+            [('user_id.no_login', '=', user.id), (1, '=', 1)]
+        </field>
+    </record>
+    <record id="rule_domain_eval" model="ir.rule">
+        <field name="model_id" ref="model_rule_ticket"/>
+        <field name="domain_force" eval="[('no_domain_eval', '=', 1)]"/>
+    </record>
+
+    <record id="rule_domain_ref" model="ir.rule">
+        <field name="model_id" ref="model_rule_ticket"/>
+        <field name="domain_force" ref="rule_domain_text">[('no_ref', '=', 1)]</field>
+    </record>
+    <record id="rule_domain_search" model="ir.rule">
+        <field name="model_id" ref="model_rule_ticket"/>
+        <field name="domain_force" search="[]" model="ir.rule">[('no_search', '=', 1)]</field>
+    </record>
+    <record id="rule_domain_file" model="ir.rule">
+        <field name="model_id" ref="model_rule_ticket"/>
+        <field name="domain_force" file="record_rules/security/domain.txt">[('no_file', '=', 1)]</field>
+    </record>
+    <record id="rule_domain_type" model="ir.rule">
+        <field name="model_id" ref="model_rule_ticket"/>
+        <field name="domain_force" type="char">[('no_type', '=', 1)]</field>
+    </record>
+    <record id="rule_domain_placeholder" model="ir.rule">
+        <field name="model_id" ref="model_rule_ticket"/>
+        <field name="domain_force">[('no_placeholder', '=', %(rule_domain_text)d)]</field>
+    </record>
+    <record id="rule_domain_conditional" model="ir.rule">
+        <field name="model_id" ref="model_rule_ticket"/>
+        <field name="domain_force">[('no_conditional', '=', 1)] if user else []</field>
+    </record>
+    <record id="rule_domain_call" model="ir.rule">
+        <field name="model_id" ref="model_rule_ticket"/>
+        <field name="domain_force">build([('no_call', '=', 1)])</field>
+    </record>
+    <record id="rule_domain_term" model="ir.rule">
+        <field name="model_id" ref="model_rule_ticket"/>
+        <field name="domain_force">[('no_term', '=', 1), (user.name, '=', 1)]</field>
+    </record>
+    <function model="ir.rule" name="write" eval="[ref('rule_domain_text')], {'domain_force': '[]'}"/>
+</odoo>

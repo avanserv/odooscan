@@ -1,0 +1,2 @@
+id,name,model_id:id,group_id/.id,perm_read,perm_write
+access_desk_database_id,by database id,model_access_desk,3,1,1

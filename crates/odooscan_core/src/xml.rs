@@ -6,13 +6,16 @@ use roxmltree::{Document, Node, ParsingOptions};
 use crate::domain;
 use crate::facts::{
     AccessRow, ActionFact, ActionValue, ArchButton, ArchDomain, ArchElement, ArchField, ArchModifier, DataFacts,
-    DomainFact, FunctionCall, Lines, Pos, RawDiag, RecordFact, Spanned, ViewFact, XmlDef, XmlRef,
+    DomainFact, FunctionCall, Lines, Pos, RawDiag, RecordFact, RuleFact, Spanned, ViewFact, XmlDef, XmlRef,
 };
 
 /// A `False` second argument makes `ref()` return nothing for an unknown id instead of failing.
 static EVAL_REF: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r#"\bref\(\s*['"]([\w.]+)['"]\s*(,\s*(?:raise_if_not_found\s*=\s*)?False\b)?"#).unwrap()
 });
+/// An `eval` that is one `ref()`, and so gives the record of that id.
+static WHOLE_EVAL_REF: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"^\s*ref\(\s*['"]([\w.]+)['"]\s*\)\s*$"#).unwrap());
 /// The ids `ir.model.data._update_xmlids` gives to records that Python expressions select.
 static UPDATE_XMLID: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r#"['"]xml_id['"]\s*:\s*['"]([\w.]+)['"]"#).unwrap());
@@ -40,6 +43,9 @@ static XPATH_NAMED_STEP: LazyLock<Regex> =
 /// Attributes by which a spec names the element it locates.
 const LOCATING_ATTRS: [&str; 2] = ["name", "id"];
 static ACTION_REF: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"%\(([\w.]+)\)d").unwrap());
+
+/// Attributes that make the value of a `<field>` something other than its `eval` or its text.
+const INDIRECT_VALUE: [&str; 4] = ["ref", "search", "file", "type"];
 
 /// Tags under which a `<field>` opens a subview on the field's comodel.
 const SUBVIEWS: &[&str] = &["list", "tree", "form", "kanban", "graph", "pivot", "calendar", "search"];
@@ -298,6 +304,9 @@ impl Walker<'_> {
         if model == "ir.actions.act_window.view" {
             self.action_view(node);
         }
+        if let Some(domain) = rule_domain_field(model) {
+            self.rule(node, domain);
+        }
         self.facts.records.push(record);
     }
 
@@ -328,6 +337,24 @@ impl Walker<'_> {
             name_row_view(&mut action, row);
         }
         self.facts.actions.push(action);
+    }
+
+    /// Odoo sets the inverse field of a record nested in a one2many, whatever the record says.
+    fn rule(&mut self, node: Node, domain_field: &str) {
+        let (model, by_name) = match field_of(node, "model_id") {
+            _ if node.parent_element().is_some_and(|p| p.has_tag_name("field")) => (ActionValue::Opaque, false),
+            Some(field) => rule_model(field, self.lines),
+            None => (ActionValue::Unset, false),
+        };
+        let domain = field_of(node, domain_field).map_or(ActionValue::Unset, |f| rule_domain(f, self.lines));
+        self.facts.rules.push(RuleFact {
+            id: node.attribute("id").map(str::to_owned),
+            model,
+            by_name,
+            fields: domain::written_fields(&domain),
+            domain,
+            active: field_of(node, "active").map(rule_active),
+        });
     }
 
     /// The tag Odoo reads through 16.0. It writes `view_mode` even without the attribute, as Odoo
@@ -395,11 +422,8 @@ impl Walker<'_> {
         // Odoo reads an empty ref as no value.
         if let Some(id) = field.attribute("ref").filter(|r| !r.is_empty()) {
             self.reference(id, field);
-            if name == "model_id" && matches!(model, "ir.model.access" | "ir.access") {
-                self.facts.access.push(AccessRow {
-                    model: id.to_owned(),
-                    by_name: false,
-                });
+            if name == "model_id" {
+                self.access_row(field, model, id);
             }
         }
         self.eval_refs(field);
@@ -414,6 +438,19 @@ impl Walker<'_> {
             self.facts
                 .diags
                 .push(RawDiag::new("OD306", pos, "view_mode 'tree' is renamed 'list'"));
+        }
+    }
+
+    fn access_row(&mut self, model_id: Node, model: &str, id: &str) {
+        if model == "ir.model.access" || model == "ir.access" && names_group(model_id) {
+            let pos = self.pos(model_id);
+            self.facts.access.push(AccessRow {
+                id: None,
+                model: id.to_owned(),
+                by_name: false,
+                pos,
+                global_write: false,
+            });
         }
     }
 
@@ -594,8 +631,78 @@ fn field_of<'a, 'i>(node: Node<'a, 'i>, name: &str) -> Option<Node<'a, 'i>> {
         .find(|c| c.has_tag_name("field") && c.attribute("name") == Some(name))
 }
 
+/// The field holding the domain of a model of record rules.
+pub fn rule_domain_field(model: &str) -> Option<&'static str> {
+    match model {
+        "ir.rule" => Some("domain_force"),
+        "ir.access" => Some("domain"),
+        _ => None,
+    }
+}
+
+/// Whether the `ir.access` record of a `model_id` field gives `group_id` a value. Without one the
+/// record restricts every user rather than granting.
+fn names_group(model_id: Node) -> bool {
+    let group = model_id
+        .parent_element()
+        .and_then(|record| field_of(record, "group_id"));
+    group.is_some_and(|f| {
+        let blank = |attr: &str| f.attribute(attr).is_none_or(str::is_empty);
+        !blank("ref") || !blank("eval") || !blank("search") || f.text().is_some_and(|t| !t.trim().is_empty())
+    })
+}
+
+/// What a `model_id` field writes, as Odoo reads it: a `search`, a `ref`, then an `eval`. With
+/// `true` the value is a model name, else an XML id.
+fn rule_model(field: Node, lines: &Lines) -> (ActionValue, bool) {
+    let opaque = (ActionValue::Opaque, false);
+    if field.has_attribute("use") || field.attribute("model").is_some_and(|m| m != "ir.model") {
+        return opaque;
+    }
+    if let Some(search) = attr_value(field, "search", lines).filter(|s| !s.value.is_empty()) {
+        return domain::searched_model(&search.value).map_or(opaque, |value| {
+            let pos = search.pos;
+            (ActionValue::Literal(Spanned { value, pos }), true)
+        });
+    }
+    if let Some(id) = attr_value(field, "ref", lines).filter(|r| !r.value.is_empty()) {
+        return (ActionValue::Literal(id), false);
+    }
+    let Some(eval) = attr_value(field, "eval", lines) else {
+        return opaque;
+    };
+    let id = WHOLE_EVAL_REF.captures(&eval.value).map(|c| c[1].to_owned());
+    id.map_or(opaque, |value| {
+        let pos = eval.pos;
+        (ActionValue::Literal(Spanned { value, pos }), false)
+    })
+}
+
+/// Only an `eval` or the text tells a domain without a run.
+fn rule_domain(field: Node, lines: &Lines) -> ActionValue {
+    if INDIRECT_VALUE.iter().any(|a| field.has_attribute(*a)) {
+        return ActionValue::Opaque;
+    }
+    literal(attr_value(field, "eval", lines).or_else(|| spec_text(field, lines)))
+}
+
+/// An `eval` that is no constant counts as false. Odoo tests the text of a boolean untrimmed, so
+/// anything but these three spellings, an empty field too, is true.
+fn rule_active(field: Node) -> bool {
+    if INDIRECT_VALUE.iter().any(|a| field.has_attribute(*a)) {
+        return false;
+    }
+    match field.attribute("eval") {
+        Some(eval) => matches!(eval.trim(), "True" | "1"),
+        None => {
+            let text = field.text().unwrap_or_default().to_lowercase();
+            !matches!(text.as_str(), "0" | "false" | "off")
+        }
+    }
+}
+
 /// The value of a field of an action that is present: a blank one holds no literal.
-fn literal(text: Option<Spanned<String>>) -> ActionValue {
+pub fn literal(text: Option<Spanned<String>>) -> ActionValue {
     text.filter(|t| !t.value.trim().is_empty())
         .map_or(ActionValue::Opaque, ActionValue::Literal)
 }
@@ -1165,6 +1272,138 @@ mod tests {
         assert_eq!(elsewhere.len(), 1);
         assert_eq!(elsewhere[0].id.as_deref(), Some("a"));
         assert_eq!(elsewhere[0].view_kinds, ["gantt"]);
+    }
+
+    fn rule_of(fields: &str) -> RuleFact {
+        let record = format!(r#"<odoo><record id="r" model="ir.rule">{fields}</record></odoo>"#);
+        analyze(&record).rules.remove(0)
+    }
+
+    fn model_of(field: &str) -> (Option<String>, bool) {
+        let rule = rule_of(field);
+        let value = match rule.model {
+            ActionValue::Literal(m) => Some(m.value),
+            ActionValue::Opaque => None,
+            ActionValue::Unset => panic!("{field}"),
+        };
+        (value, rule.by_name)
+    }
+
+    #[test]
+    fn reads_the_forms_of_a_rule_model() {
+        let id = |id: &str| (Some(id.to_owned()), false);
+        assert_eq!(model_of(r#"<field name="model_id" ref="model_a"/>"#), id("model_a"));
+        assert_eq!(model_of(r#"<field name="model_id" ref="m.model_a"/>"#), id("m.model_a"));
+        assert_eq!(
+            model_of(r#"<field name="model_id" eval="ref('m.model_a')"/>"#),
+            id("m.model_a")
+        );
+        assert_eq!(
+            model_of(r#"<field name="model_id" search="[('model', '=', 'a.b')]"/>"#),
+            (Some("a.b".to_owned()), true)
+        );
+        assert_eq!(
+            model_of(r#"<field name="model_id" model="ir.model" search="[('model', '=', 'a.b')]"/>"#),
+            (Some("a.b".to_owned()), true)
+        );
+    }
+
+    #[test]
+    fn a_rule_model_only_a_run_tells_is_no_literal() {
+        for field in [
+            r#"<field name="model_id" eval="ref('a') or ref('b')"/>"#,
+            r#"<field name="model_id" eval="False"/>"#,
+            r#"<field name="model_id" search="[('name', '=', 'a')]"/>"#,
+            r#"<field name="model_id" search="[('model', '=', 'a')]" use="model"/>"#,
+            r#"<field name="model_id" search="[('model', '=', 'a')]" model="ir.ui.view"/>"#,
+            r#"<field name="model_id" ref=""/>"#,
+            r#"<field name="model_id"/>"#,
+            r#"<field name="model_id">3</field>"#,
+        ] {
+            assert_eq!(model_of(field), (None, false), "{field}");
+        }
+    }
+
+    #[test]
+    fn a_nested_rule_takes_the_model_of_its_parent() {
+        let text = r#"<odoo><record id="m" model="ir.model"><field name="rule_ids">
+            <record id="r" model="ir.rule"><field name="model_id" ref="model_a"/></record>
+        </field></record></odoo>"#;
+        assert!(matches!(analyze(text).rules[0].model, ActionValue::Opaque));
+    }
+
+    #[test]
+    fn reads_the_domain_of_a_rule() {
+        let rule = rule_of("<field name=\"domain_force\">\n  [('a', '=', 1)]\n</field>");
+        assert_eq!(rule.fields[0].value, "a");
+        assert_eq!(rule.fields[0].pos.line, 2);
+        let rule = rule_of(r#"<field name="domain_force" eval="[('b', '=', 1)]"/>"#);
+        assert_eq!(rule.fields[0].value, "b");
+        let access = analyze(
+            r#"<odoo><record id="r" model="ir.access"><field name="domain">[('c', '=', 1)]</field></record></odoo>"#,
+        );
+        assert_eq!(access.rules[0].fields[0].value, "c");
+    }
+
+    #[test]
+    fn a_rule_domain_only_a_run_tells_replaces_without_naming_fields() {
+        for field in [
+            r#"<field name="domain_force" ref="a"/>"#,
+            r#"<field name="domain_force" search="[]"/>"#,
+            r#"<field name="domain_force" file="a.txt"/>"#,
+            r#"<field name="domain_force" type="xml"><a/></field>"#,
+            r#"<field name="domain_force" type="char">[('a', '=', 1)]</field>"#,
+            r#"<field name="domain_force"><function model="m" name="n"/></field>"#,
+            r#"<field name="domain_force"/>"#,
+        ] {
+            let rule = rule_of(field);
+            assert!(matches!(rule.domain, ActionValue::Opaque), "{field}");
+            assert!(rule.fields.is_empty(), "{field}");
+        }
+        let unset = rule_of(r#"<field name="name">a</field>"#);
+        assert!(matches!(unset.domain, ActionValue::Unset));
+    }
+
+    #[test]
+    fn reads_active_as_the_loader_does() {
+        let active = |field: &str| rule_of(field).active;
+        assert_eq!(active(r#"<field name="name">a</field>"#), None);
+        for field in [
+            r#"<field name="active" eval="True"/>"#,
+            r#"<field name="active" eval="1"/>"#,
+            r#"<field name="active">True</field>"#,
+            r#"<field name="active">yes</field>"#,
+            r#"<field name="active"> False </field>"#,
+            r#"<field name="active"/>"#,
+        ] {
+            assert_eq!(active(field), Some(true), "{field}");
+        }
+        for field in [
+            r#"<field name="active" eval="False"/>"#,
+            r#"<field name="active" eval="0"/>"#,
+            r#"<field name="active" eval="not x"/>"#,
+            r#"<field name="active">False</field>"#,
+            r#"<field name="active">0</field>"#,
+            r#"<field name="active">OFF</field>"#,
+            r#"<field name="active" ref="a"/>"#,
+        ] {
+            assert_eq!(active(field), Some(false), "{field}");
+        }
+    }
+
+    #[test]
+    fn an_access_record_grants_with_a_group_only() {
+        let access = |model: &str, group: &str| {
+            let record = format!(
+                r#"<odoo><record id="a" model="{model}"><field name="model_id" ref="model_a"/>{group}</record></odoo>"#
+            );
+            analyze(&record).access.len()
+        };
+        assert_eq!(access("ir.model.access", ""), 1);
+        assert_eq!(access("ir.access", ""), 0);
+        assert_eq!(access("ir.access", r#"<field name="group_id" ref=""/>"#), 0);
+        assert_eq!(access("ir.access", r#"<field name="group_id" ref="g"/>"#), 1);
+        assert_eq!(access("ir.access", r#"<field name="group_id" eval="ref('g')"/>"#), 1);
     }
 
     #[test]

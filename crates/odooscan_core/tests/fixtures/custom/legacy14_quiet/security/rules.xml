@@ -1,0 +1,8 @@
+<odoo>
+    <record id="legacy14.rule_ledger_replaced_later" model="ir.rule">
+        <field name="domain_force">[('name', '=', 'b')]</field>
+    </record>
+    <record id="legacy14.rule_ledger_deactivated_later" model="ir.rule">
+        <field name="active" eval="False"/>
+    </record>
+</odoo>

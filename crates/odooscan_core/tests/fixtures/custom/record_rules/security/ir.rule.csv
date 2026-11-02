@@ -1,0 +1,9 @@
+id,name,model_id:id,domain_force,active
+rule_csv_colon,By colon,model_rule_ticket,"[('no_csv_colon', '=', 1)]",1
+rule_csv_good,Known fields,model_rule_ticket,"['|', ('name', '=', 'a'), ('user_id.login', '=', user.login)]",1
+rule_csv_true,Spelled true,model_rule_ticket,"[('no_csv_true', '=', 1)]",True
+rule_csv_off,Switched off,model_rule_ticket,"[('no_csv_off', '=', 1)]",0
+rule_csv_empty,No active value,model_rule_ticket,"[('no_csv_empty', '=', 1)]",
+rule_csv_blank_model,No model,,"[('no_blank_model', '=', 1)]",1
+rule_csv_clause,Unreadable,model_rule_ticket,"[('no_clause', '=', 1)] + extra",1
+rule_csv_word,Unknown word,model_rule_ticket,"[('no_csv_word', '=', 1)]",maybe

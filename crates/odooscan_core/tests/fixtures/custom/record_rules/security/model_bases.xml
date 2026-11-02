@@ -1,0 +1,35 @@
+<odoo>
+    <record id="rule_model_other_eval" model="ir.rule">
+        <field name="model_id" ref="model_rule_ticket"/>
+    </record>
+    <record id="rule_model_other_field" model="ir.rule">
+        <field name="model_id" ref="model_rule_ticket"/>
+    </record>
+    <record id="rule_model_other_operator" model="ir.rule">
+        <field name="model_id" ref="model_rule_ticket"/>
+    </record>
+    <record id="rule_model_two_terms" model="ir.rule">
+        <field name="model_id" ref="model_rule_ticket"/>
+    </record>
+    <record id="rule_model_use" model="ir.rule">
+        <field name="model_id" ref="model_rule_ticket"/>
+    </record>
+    <record id="rule_model_comodel" model="ir.rule">
+        <field name="model_id" ref="model_rule_ticket"/>
+    </record>
+    <record id="rule_model_empty" model="ir.rule">
+        <field name="model_id" ref="model_rule_ticket"/>
+    </record>
+    <record id="rule_model_data_id" model="ir.rule">
+        <field name="model_id" ref="model_rule_ticket"/>
+    </record>
+    <record id="rule_csv_blank_model" model="ir.rule">
+        <field name="model_id" ref="model_rule_ticket"/>
+    </record>
+    <record id="rule_csv_plain" model="ir.rule">
+        <field name="model_id" ref="model_rule_ticket"/>
+    </record>
+    <record id="rule_csv_database" model="ir.rule">
+        <field name="model_id" ref="model_rule_ticket"/>
+    </record>
+</odoo>

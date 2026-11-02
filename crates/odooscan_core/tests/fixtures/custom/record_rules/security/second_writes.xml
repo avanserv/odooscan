@@ -1,0 +1,18 @@
+<odoo>
+    <record id="rule_replaced" model="ir.rule">
+        <field name="domain_force">[('name', '=', 'a')]</field>
+    </record>
+    <record id="rule_switched_off" model="ir.rule">
+        <field name="active" eval="False"/>
+    </record>
+    <record id="rule_opaque_update" model="ir.rule">
+        <field name="model_id" eval="ref('model_rule_ticket') or False"/>
+        <field name="domain_force">[('no_opaque_update', '=', 1)]</field>
+    </record>
+    <record id="rule_held_off" model="ir.rule">
+        <field name="domain_force">[('no_held_off', '=', 1)]</field>
+    </record>
+    <record id="rule_supplied" model="ir.rule">
+        <field name="model_id" ref="model_rule_ticket"/>
+    </record>
+</odoo>

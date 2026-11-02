@@ -96,6 +96,7 @@ class IrModelAccess(models.Model):
     _name = "ir.model.access"
 
     name = fields.Char()
+    active = fields.Boolean()
     model_id = fields.Many2one("ir.model")
     group_id = fields.Many2one("res.groups")
     perm_read = fields.Boolean()
@@ -104,10 +105,32 @@ class IrModelAccess(models.Model):
     perm_unlink = fields.Boolean()
 
 
+class IrRule(models.Model):
+    _name = "ir.rule"
+
+    name = fields.Char()
+    active = fields.Boolean()
+    model_id = fields.Many2one("ir.model")
+    groups = fields.Many2many("res.groups")
+    domain_force = fields.Text()
+
+
+class IrAccess(models.Model):
+    _name = "ir.access"
+
+    name = fields.Char()
+    active = fields.Boolean()
+    model_id = fields.Many2one("ir.model")
+    group_id = fields.Many2one("res.groups")
+    operation = fields.Char()
+    domain = fields.Char()
+
+
 class IrModel(models.Model):
     _name = "ir.model"
 
     model = fields.Char()
+    rule_ids = fields.One2many("ir.rule", "model_id")
 
 
 class IrHttp(models.AbstractModel):

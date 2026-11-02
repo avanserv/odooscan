@@ -2,6 +2,12 @@
 source: crates/odooscan_core/tests/fixtures.rs
 expression: "lines.join(\"\\n\")"
 ---
+custom/access_rows/security/ir.model.access-inactive.csv:6:1: OD402 no group limits this row, so every user, public and portal included, gets write, create or unlink on model_access_desk; name a group
+custom/access_rows/security/ir.model.access-inactive.csv:7:1: OD402 base.group_portal gets write, create or unlink on model_access_desk; public and portal access should be read-only and go through controllers
+custom/access_rows/security/ir.model.access-nogroup.csv:2:1: OD402 no group limits this row, so every user, public and portal included, gets write, create or unlink on model_access_desk; name a group
+custom/access_rows/security/ir.model.access.csv:2:1: OD402 no group limits this row, so every user, public and portal included, gets write, create or unlink on model_access_desk; name a group
+custom/access_rows/security/ir.model.access.csv:3:1: OD402 no group limits this row, so every user, public and portal included, gets write, create or unlink on model_access_desk; name a group
+custom/access_rows/security/ir.model.access.csv:4:1: OD402 no group limits this row, so every user, public and portal included, gets write, create or unlink on model_access_desk; name a group
 custom/bad_sale/__manifest__.py:5:25: OD503 module 'not_installed' is not on the addons path
 custom/bad_sale/__manifest__.py:11:9: OD501 'data/missing.xml' does not exist
 custom/bad_sale/controllers/flows.py:14:9: OD701 route parameter 'term' reaches the query of cr.execute() through 'where', 'query'; pass it as a query parameter or build the query with odoo.tools.SQL
@@ -201,12 +207,14 @@ custom/legacy12/models/badge.py:7:33: OD218 _inherits delegates to 'partner_id',
 custom/legacy12/models/badge.py:10:58: OD218 'country_id' has delegate=True, so it must be required with ondelete 'cascade' or 'restrict'; give it ondelete="cascade"
 custom/legacy12/models/ledger.py:17:40: OD220 'opened_on' has the label 'Created on' of field 'create_date' of legacy.ledger, so Odoo logs a warning and users cannot tell them apart; give it another string
 custom/legacy12/models/res_partner.py:22:41: OD220 'stamped_on' has the label 'Create Date' of field 'create_date' of res.partner, so Odoo logs a warning and users cannot tell them apart; give it another string
+custom/legacy12/security/rules.xml:4:36: OD210 'no_legacy_field': legacy.ledger has no field 'no_legacy_field'
 custom/legacy12/views/views.xml:12:9: OD302 'web_corkboard.corkboard' is defined by module web_corkboard; add it to depends
 custom/legacy12/views/views.xml:21:9: OD302 'web_slate.slate' is defined by module web_slate; add it to depends
 custom/legacy13/models/ledger.py:18:41: OD220 'stamped_on' has the label 'Create Date' of field 'create_date' of legacy.ledger, so Odoo logs a warning and users cannot tell them apart; give it another string
 custom/legacy13/models/res_partner.py:7:72: OD213 'holder_id' is required, so Odoo refuses ondelete='set null'; use 'restrict' or 'cascade'
 custom/legacy13/models/res_partner.py:9:18: OD214 'origin_ids' and 'market_ids' are Many2many fields of res.partner to the same comodel without relation, so Odoo gives both the same table; set relation on one
 custom/legacy13/models/res_partner.py:12:68: OD222 'home_country_id' has check_company=True, but res.country has no company_id field to check; remove check_company
+custom/legacy13/security/rules.xml:4:36: OD210 'no_legacy_field': legacy.ledger has no field 'no_legacy_field'
 custom/legacy13/views/views.xml:16:45: OD312 legacy.stamp has no method 'action_stmap'
 custom/legacy13/views/views.xml:17:45: OD313 method '_stamp' of legacy.stamp is private, so Odoo refuses to call it from a button
 custom/legacy14/models/badge.py:7:33: OD218 _inherits delegates to 'partner_id', which must be required with ondelete 'cascade' or 'restrict'; give it ondelete="cascade"
@@ -223,6 +231,8 @@ custom/legacy14/models/res_partner.py:11:34: OD219 'stage' sets tracking, but re
 custom/legacy14/models/res_partner.py:22:9: OD223 _compute_initials() can leave 'initials' unassigned on a record, so reading it raises ValueError; assign it on every path through the loop, False when there is no value
 custom/legacy14/models/res_partner.py:33:41: OD220 'stamped_on' has the label 'Create Date' of field 'create_date' of res.partner, so Odoo logs a warning and users cannot tell them apart; give it another string
 custom/legacy14/models/res_partner.py:35:41: OD220 'touched_on' has the label 'Last Modified on' of field '__last_update' of res.partner, so Odoo logs a warning and users cannot tell them apart; give it another string
+custom/legacy14/security/rules.xml:4:36: OD210 'no_legacy_field': legacy.ledger has no field 'no_legacy_field'
+custom/legacy14/security/rules.xml:24:36: OD210 'no_supplied': legacy.ledger has no field 'no_supplied'
 custom/legacy14/views/ledger_archive.xml:1:1: OD502 'views/ledger_archive.xml' is not in the manifest's init_xml, update_xml, data, demo_xml or demo, so Odoo never loads it
 custom/legacy14/views/ledger_reports.xml:19:71: OD201 no indexed module defines model 'legacy.ledgr'
 custom/legacy14/views/ledger_updates.xml:4:33: OD318 legacy.ledger has no gantt view, and nothing generates one
@@ -232,6 +242,7 @@ custom/legacy15/models/card.py:7:33: OD218 _inherits delegates to 'partner_id', 
 custom/legacy15/models/card.py:10:58: OD218 'country_id' has delegate=True, so it must be required with ondelete 'cascade' or 'restrict'; give it ondelete="cascade"
 custom/legacy15/models/res_partner.py:9:22: OD212 Monetary field 'parent_balance' has no currency: res.partner has no currency_id, and the field names no currency_field
 custom/legacy15/models/res_partner.py:13:18: OD221 'child_ids.total' makes 'total' depend on itself on other records, so Odoo logs a warning; declare 'total' with recursive=True
+custom/legacy15/security/rules.xml:4:36: OD210 'no_replaced': res.partner has no field 'no_replaced'
 custom/legacy16/models/gauge.py:7:5: OD226 _auto = False leaves legacy.gauge without a table, and nothing creates the view legacy_gauge; create it in init(), or drop _auto = False
 custom/legacy16/models/res_partner.py:6:34: OD203 'nickname': res.partner has no field 'nickname'
 custom/legacy16/models/res_partner.py:12:5: OD117 @api.model on create() makes Odoo call it once per record; decorate it with @api.model_create_multi and take a list of dicts
@@ -290,6 +301,8 @@ custom/modern19/models/partner.py:49:73: OD213 'partner_id' is required, so Odoo
 custom/modern19/models/partner.py:63:30: OD220 'ref' has the label 'ID' of field 'id' of modern.seal, so Odoo logs a warning and users cannot tell them apart; give it another string
 custom/modern19/models/partner.py:69:21: OD120 'time' in an ormcache key is not a parameter of _quarter_hour_rates(), so every call raises NameError; key on a parameter or on self
 custom/modern19/models/views.py:15:5: OD226 _auto = False leaves modern.gauge without a table, and nothing creates the view modern_gauge; create it in init(), or drop _auto = False
+custom/modern20/models/lamp.py:14:7: OD401 model 'modern.booth' has no ir.model.access rule, so only the superuser can use it
+custom/modern20/models/lamp.py:21:7: OD401 model 'modern.kiosk' has no ir.model.access rule, so only the superuser can use it
 custom/modern20/models/meter.py:7:5: OD226 _auto = False leaves modern.meter without a table, and nothing creates the view modern_meter; create it in init(), or drop _auto = False
 custom/modern20/models/res_partner.py:10:96: OD203 'x_parent_model': res.partner has no field 'x_parent_model'
 custom/modern20/models/res_partner.py:17:33: OD219 'note' sets tracking, but modern.note does not inherit mail.thread, so Odoo ignores it and logs a warning; inherit mail.thread or remove tracking
@@ -303,6 +316,9 @@ custom/modern20/models/res_partner.py:111:7: OD401 model 'modern.lamp.shade' has
 custom/modern20/models/res_partner.py:117:39: OD224 l.x_shade: modern_lamp has no such column, since modern.lamp has no field x_shade; name the column of a stored field of modern.lamp
 custom/modern20/models/tariff.py:13:45: OD212 Monetary field 'amount' takes its currency from 'x_tariff_currency_id', which modern.tariff does not have
 custom/modern20/models/tariff.py:16:39: OD224 t.code: modern_tariff has no such column, since modern.tariff has no field code; name the column of a stored field of modern.tariff
+custom/modern20/security/access.xml:6:30: OD210 'no_xml_domain': modern.lamp has no field 'no_xml_domain'
+custom/modern20/security/ir.access-inactive.csv:3:1: OD402 base.group_portal gets write, create or unlink on modern.lamp; public and portal access should be read-only and go through controllers
+custom/modern20/security/ir.access.csv:2:1: OD210 'no_csv_name': modern.lamp has no field 'no_csv_name'
 custom/modifiers17/views/jobs.xml:7:47: OD317 invisible reads field 'state', which the view does not show
 custom/modifiers173/views/tasks.xml:8:47: OD316 invisible names 'active_id': modifier.task has no field 'active_id'
 custom/orm_overrides/models/caches.py:7:21: OD120 'lang' in an ormcache key is not a parameter of _greeting_for(), so every call raises NameError; key on a parameter or on self
@@ -338,6 +354,26 @@ custom/qweb_calls/views/pages.xml:33:28: OD311 no indexed module defines templat
 custom/qweb_calls/views/pages.xml:43:28: OD311 no indexed module defines template 'web.layot_appended'
 custom/qweb_partial/__manifest__.py:4:24: OD503 module 'ghost_enterprise' is not on the addons path
 custom/qweb_partial/views/partial.xml:5:20: OD311 no indexed module defines template 'web.layot'
+custom/record_rules/security/active_forms.xml:4:36: OD210 'no_active_eval': rule.ticket has no field 'no_active_eval'
+custom/record_rules/security/active_forms.xml:9:36: OD210 'no_active_one': rule.ticket has no field 'no_active_one'
+custom/record_rules/security/active_forms.xml:14:36: OD210 'no_active_text': rule.ticket has no field 'no_active_text'
+custom/record_rules/security/domain_forms.xml:5:13: OD210 'user_id.no_login': res.users has no field 'no_login'
+custom/record_rules/security/domain_forms.xml:10:42: OD210 'no_domain_eval': rule.ticket has no field 'no_domain_eval'
+custom/record_rules/security/ir.rule-slash.csv:2:1: OD210 'no_csv_slash': rule.ticket has no field 'no_csv_slash'
+custom/record_rules/security/ir.rule-slash.csv:3:1: OD210 'no_row_id': rule.ticket has no field 'no_row_id'
+custom/record_rules/security/ir.rule.csv:2:1: OD210 'no_csv_colon': rule.ticket has no field 'no_csv_colon'
+custom/record_rules/security/ir.rule.csv:4:1: OD210 'no_csv_true': rule.ticket has no field 'no_csv_true'
+custom/record_rules/security/model_forms.xml:4:36: OD210 'no_model_ref': rule.ticket has no field 'no_model_ref'
+custom/record_rules/security/model_forms.xml:8:36: OD210 'no_model_dotted': rule.ticket has no field 'no_model_dotted'
+custom/record_rules/security/model_forms.xml:12:36: OD210 'no_model_eval': rule.ticket has no field 'no_model_eval'
+custom/record_rules/security/model_forms.xml:16:36: OD210 'no_model_search': rule.ticket has no field 'no_model_search'
+custom/record_rules/security/updates.xml:8:36: OD210 'no_replaced': rule.ticket has no field 'no_replaced'
+custom/record_rules/security/updates.xml:12:36: OD210 'no_switched_off_later': rule.ticket has no field 'no_switched_off_later'
+custom/record_update/security/updates.xml:3:36: OD210 'no_updated': rule.ticket has no field 'no_updated'
+custom/record_update/security/updates.xml:6:36: OD210 'no_replaced_by_update': rule.ticket has no field 'no_replaced_by_update'
+custom/record_update/security/updates.xml:9:36: OD210 'no_scoped': rule.ticket has no field 'no_scoped'
+custom/record_update/security/updates.xml:13:36: OD210 'no_note': rule.note has no field 'no_note'
+custom/record_update/security/updates.xml:17:36: OD210 'no_moved': rule.note has no field 'no_moved'
 custom/registry_fields/models/links.py:7:71: OD213 'owner_id' is required, so Odoo refuses ondelete='set null'; use 'restrict' or 'cascade'
 custom/registry_fields/models/links.py:11:19: OD214 'follower_ids' and 'watcher_ids' are Many2many fields of registry.invoice to the same comodel without relation, so Odoo gives both the same table; set relation on one
 custom/registry_fields/models/links.py:14:33: OD215 relation table 'registry_invoice_partners_notified_about_each_payment_reminder_rel' of 'notified_ids' is 66 characters long, and PostgreSQL allows 63; name a shorter one with relation=
@@ -358,6 +394,9 @@ custom/registry_fields/models/shipment.py:24:17: OD205 'reference' is a Char fie
 custom/registry_fields/models/shipment.py:26:19: OD205 'carrier_ids' is a Many2many field elsewhere and is redefined here as Many2one
 custom/saas125/models/res_partner.py:7:68: OD222 'home_country_id' has check_company=True, but res.country has no company_id field to check; remove check_company
 custom/saas131/models/badge.py:8:53: OD218 'model_id' has delegate=True, so it must be required with ondelete 'cascade' or 'restrict'; give it ondelete="cascade"
+custom/saas131/security/ir.model.access.csv:3:1: OD402 no group limits this row, so every user, public and portal included, gets write, create or unlink on model_saas_register; name a group
+custom/saas132/models/wizards.py:4:7: OD401 model 'saas.later.pass.wizard' has no ir.model.access rule, so only the superuser can use it
+custom/saas132/security/ir.model.access.csv:2:1: OD402 no group limits this row, so every user, public and portal included, gets write, create or unlink on model_saas_later_note_wizard; name a group
 custom/saas133/models/res_partner.py:10:9: OD223 _compute_monogram() can leave 'monogram' unassigned on a record, so reading it raises ValueError; assign it on every path through the loop, False when there is no value
 custom/saas143/models/badge.py:9:60: OD218 'currency_id' has delegate=True, so it must be required with ondelete 'cascade' or 'restrict'; give it required=True
 custom/saas143/models/badge.py:14:54: OD218 'view_id' has delegate=True, so it must be required with ondelete 'cascade' or 'restrict'; give it required=True

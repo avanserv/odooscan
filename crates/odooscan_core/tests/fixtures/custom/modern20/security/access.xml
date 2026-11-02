@@ -1,0 +1,19 @@
+<odoo>
+    <record id="access_modern_lamp_xml" model="ir.access">
+        <field name="name">lamp by record</field>
+        <field name="model_id" ref="model_modern_lamp"/>
+        <field name="group_id" ref="base.group_user"/>
+        <field name="domain">[('no_xml_domain', '=', 1)]</field>
+    </record>
+    <record id="access_modern_kiosk" model="ir.access">
+        <field name="name">kiosk restriction</field>
+        <field name="model_id" ref="model_modern_kiosk"/>
+        <field name="domain">[('name', '=', 'a')]</field>
+    </record>
+    <record id="access_modern_kiosk_off" model="ir.access">
+        <field name="name">switched off</field>
+        <field name="model_id" ref="model_modern_kiosk"/>
+        <field name="domain">[('no_inactive_domain', '=', 1)]</field>
+        <field name="active">False</field>
+    </record>
+</odoo>

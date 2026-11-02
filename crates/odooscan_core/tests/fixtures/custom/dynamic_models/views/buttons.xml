@@ -16,4 +16,9 @@
         <field name="res_model">res.partner</field>
         <field name="view_mode">gantt</field>
     </record>
+
+    <record id="rule_generated" model="ir.rule">
+        <field name="model_id" ref="model_bad_generated_user"/>
+        <field name="domain_force">[('no_dynamic', '=', 1)]</field>
+    </record>
 </odoo>

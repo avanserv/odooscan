@@ -1,0 +1,2 @@
+id,name,model_id:id,perm_read,perm_write
+access_desk_no_column,no column,model_access_desk,1,1

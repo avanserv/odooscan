@@ -1,0 +1,2 @@
+id,name,model_id:id,group_id:id,perm_read,perm_write
+access_desk_rewritten,written twice,model_access_desk,base.group_user,1,1

@@ -1,0 +1,3 @@
+id,name,model_id/id,domain_force
+rule_csv_slash,By slash,model_rule_ticket,"[('no_csv_slash', '=', 1)]"
+,No id,model_rule_ticket,"[('no_row_id', '=', 1)]"

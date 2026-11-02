@@ -1,0 +1,5 @@
+<odoo>
+    <record id="rule_partner_replaced" model="ir.rule">
+        <field name="domain_force">[('name', '=', 'a')]</field>
+    </record>
+</odoo>
