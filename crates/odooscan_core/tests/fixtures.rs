@@ -123,6 +123,7 @@ fn company_check_severity_follows_the_module_series() {
         ("legacy13", Severity::Warning),
         ("legacy16", Severity::Warning),
         ("legacy17", Severity::Error),
+        ("saas125", Severity::Warning),
     ];
     assert_eq!(found, expected.map(|(m, s)| (m.to_owned(), s)));
 }

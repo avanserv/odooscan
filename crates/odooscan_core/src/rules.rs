@@ -101,8 +101,12 @@ rules! {
     "OD114" "depends-on-id" Correctness Error None, false, "@api.depends names the field id, which Odoo refuses.";
     "OD115" "dotted-onchange-constrains" Correctness Warning None, false, "@api.onchange or @api.constrains names a dotted path, which Odoo ignores.";
     "OD116" "field-shadows-model-member" Correctness Error None, false, "A field is named like a method or an attribute every model has.";
-    "OD117" "create-not-batched" Deprecation Warning Some(">=16.0,<19.0"), false, "create() is decorated with @api.model, so Odoo calls it once per record.";
-    "OD118" "create-reads-dict" Correctness Error Some(">=19.0"), false, "create() under @api.model reads its argument as one dict, but receives a list of them.";
+    // saas-15.2 warns (`odoo/api.py:404`), saas-15.1 does not (`odoo/api.py:397`); saas-18.2 batches such a create
+    // (`odoo/orm/decorators.py:286`), saas-18.1 does not (`odoo/orm/decorators.py:266`).
+    "OD117" "create-not-batched" Deprecation Warning Some(">=saas~15.2,<saas~18.2"), false, "create() is decorated with @api.model, so Odoo calls it once per record.";
+    // saas-18.2 hands such a create a list (`odoo/orm/decorators.py:286`), saas-18.1 one dict at a time
+    // (`odoo/orm/decorators.py:266`).
+    "OD118" "create-reads-dict" Correctness Error Some(">=saas~18.2"), false, "create() under @api.model reads its argument as one dict, but receives a list of them.";
     "OD119" "override-drops-result" Correctness Error None, false, "A create(), write() or copy() override calls super() but returns nothing.";
     "OD120" "ormcache-unknown-name" Correctness Error None, false, "An ormcache key names something that is not a parameter of the method.";
     "OD121" "cursor-rollback" Correctness Warning None, false, "Business code rolls back the cursor, discarding the caller's work with its own.";
@@ -127,10 +131,15 @@ rules! {
     "OD216" "selection-add-without-ondelete" Correctness Error Some(">=14.0"), true, "selection_add leaves a value of a required Selection with ondelete 'set null'.";
     "OD217" "parent-store-without-path" Correctness Error None, true, "A model sets _parent_store without an indexed parent_path field.";
     "OD218" "delegation-field-not-required" Correctness Warning None, true, "A field that delegates to a parent model is not required with ondelete cascade or restrict.";
+    // 14.0 validates the merged attributes and warns (`odoo/fields.py:381`, 231bdca3f26d). saas-13.5 validates
+    // `self.args` (`odoo/fields.py:360`), which a registry field built by `field.new()` lacks (`odoo/models.py:2750`),
+    // so it logs nothing.
     "OD219" "tracking-without-mail-thread" Correctness Warning Some(">=14.0"), true, "A field sets tracking on a model that does not inherit mail.thread, which Odoo ignores.";
     "OD220" "duplicate-field-label" Correctness Warning None, true, "Two fields of a model have the same label.";
-    "OD221" "self-dependency-not-recursive" Correctness Warning Some(">=15.0"), true, "A computed field depends on itself through other records without recursive=True.";
-    "OD222" "check-company-without-company" Correctness Warning Some(">=13.0"), true, "A field sets check_company to a comodel without company_id.";
+    // saas-14.4 warns (`odoo/fields.py:713`), saas-14.3 sets `recursive` without a word (`odoo/fields.py:645`).
+    "OD221" "self-dependency-not-recursive" Correctness Warning Some(">=saas~14.4"), true, "A computed field depends on itself through other records without recursive=True.";
+    // saas-12.5 introduces `check_company` (`odoo/fields.py:2217`), saas-12.4 has no such attribute.
+    "OD222" "check-company-without-company" Correctness Warning Some(">=saas~12.5"), true, "A field sets check_company to a comodel without company_id.";
     "OD223" "compute-leaves-field-unassigned" Correctness Error Some(">=saas~13.3"), true, "A compute method leaves a non-stored readonly field unassigned on some records.";
     "OD224" "sql-unknown-column" Correctness Error None, true, "A literal SQL query names a column its model's table does not have.";
     "OD225" "sql-view-missing-column" Correctness Error None, true, "The SQL view of a model selects no column for one of its stored fields.";
@@ -252,6 +261,26 @@ mod tests {
         assert!(od228.applies_to(Series::parse("saas~14.4")));
         assert!(od228.applies_to(Series::parse("18.0")));
         assert!(od228.applies_to(Series::parse("saas~18.2")));
+    }
+
+    #[test]
+    fn series_gates_follow_source() {
+        let gates: [(&str, &[&str], &[&str]); 5] = [
+            ("OD117", &["saas~15.1", "saas~18.2"], &["saas~15.2", "saas~18.1"]),
+            ("OD118", &["saas~18.1"], &["saas~18.2"]),
+            ("OD219", &["saas~13.5"], &["14.0"]),
+            ("OD221", &["saas~14.3"], &["saas~14.4"]),
+            ("OD222", &["saas~12.4"], &["saas~12.5"]),
+        ];
+        for (code, silent, reported) in gates {
+            let r = rule(code);
+            for series in silent {
+                assert!(!r.applies_to(Series::parse(series)), "{code} runs on {series}");
+            }
+            for series in reported {
+                assert!(r.applies_to(Series::parse(series)), "{code} skips {series}");
+            }
+        }
     }
 
     #[test]
