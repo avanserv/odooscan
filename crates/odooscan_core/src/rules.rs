@@ -40,11 +40,12 @@ pub const SUPERSEDED: &[(&str, &str)] = &[("OD101", "OD701")];
 
 /// Severities that replace a rule's own from some series on, as (code, series range, severity).
 /// From saas~19.4, `odoo/addons/base/__manifest__.py:81` loads `ir.access.csv` where saas~19.3
-/// loads `ir.model.access.csv` (`:78`), and `ir.access` rows only grant access, so a model meant
-/// for the superuser alone has none. From saas~18.3, Odoo refuses a model whose `_inherits` field
-/// is not required with ondelete 'cascade' or 'restrict' instead of fixing it. From saas~16.4, a
-/// `check_company` field gets the domain its comodel's `_check_company_domain` gives, which by
-/// default names a `company_id` the comodel may lack.
+/// loads `ir.model.access.csv` (`:78`). An `ir.access` row grants only through its group, and one
+/// with no group restricts every user (`odoo/addons/base/models/ir_access.py:350` on saas~19.4),
+/// so a model meant for the superuser alone has no row that grants. From saas~18.3, Odoo refuses a
+/// model whose `_inherits` field is not required with ondelete 'cascade' or 'restrict' instead of
+/// fixing it. From saas~16.4, a `check_company` field gets the domain its comodel's
+/// `_check_company_domain` gives, which by default names a `company_id` the comodel may lack.
 const SEVERITY_BY_SERIES: &[(&str, &str, Severity)] = &[
     ("OD401", ">=saas~19.4", Severity::Info),
     ("OD218", ">=saas~18.3", Severity::Error),
