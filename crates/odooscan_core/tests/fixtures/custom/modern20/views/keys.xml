@@ -1,0 +1,9 @@
+<odoo>
+    <template id="keyed" key="plain_key">
+        <div/>
+    </template>
+
+    <template id="plain_key_caller">
+        <t t-call="plain_key"/>
+    </template>
+</odoo>

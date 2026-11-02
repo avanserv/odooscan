@@ -22,4 +22,10 @@
         <field name="model">res.partner</field>
         <field name="report_name">web.layot_report</field>
     </record>
+
+    <template id="enterprise_page" inherit_id="ghost_enterprise.page">
+        <xpath expr="//div" position="inside">
+            <t t-call="web.layot_inside_enterprise"/>
+        </xpath>
+    </template>
 </odoo>

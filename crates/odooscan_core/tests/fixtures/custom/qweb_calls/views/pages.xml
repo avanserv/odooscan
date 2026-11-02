@@ -237,4 +237,33 @@
             <span/>
         </t>
     </template>
+
+    <!-- With no id there is no tree to ask, so each view's own kind decides. -->
+    <record model="ir.ui.view">
+        <field name="name">no.id.qweb</field>
+        <field name="type">qweb</field>
+        <field name="arch" type="xml">
+            <t t-name="no_id_qweb">
+                <t t-call="web.layot_no_id"/>
+            </t>
+        </field>
+    </record>
+
+    <record model="ir.ui.view">
+        <field name="name">no.id.kanban</field>
+        <field name="model">res.partner</field>
+        <field name="arch" type="xml">
+            <kanban>
+                <templates>
+                    <t t-name="card">
+                        <t t-call="kanban_no_id"/>
+                    </t>
+                </templates>
+            </kanban>
+        </field>
+    </record>
+
+    <template id="hidden_key">
+        <t t-call="qweb_outside.alias"/>
+    </template>
 </odoo>
