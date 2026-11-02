@@ -12,7 +12,7 @@ use crate::facts::{
     ViewFact, WrittenValue, XmlRef,
 };
 use crate::index::{
-    BASE_MODEL_METHODS, Export, FieldDef, FieldInfo, Index, JsSpec, RELATIONAL_TYPES, Scope, Status, ViewTree,
+    BASE_MODEL_METHODS, Export, FieldDef, FieldInfo, Index, JsSpec, Placed, RELATIONAL_TYPES, Scope, Status, ViewTree,
     base_private_method, full_id, js_module_path, located,
 };
 use crate::project::{Module, SourceFile, code_loaded};
@@ -246,14 +246,18 @@ fn report_state<'m>(
     series: Option<Series>,
     report: &'m ReportFact,
 ) -> Vec<&'m ReportFact> {
-    let own = [(mi, report)];
+    let own = [Placed {
+        module: mi,
+        demo: false,
+        fact: report,
+    }];
     let id = report.id.as_ref().map(|id| full_id(&index.modules[mi].name, id));
     let writes = id.and_then(|id| index.report_writes.get(&id));
     let writes = writes.map_or(&own[..], Vec::as_slice);
     let read = writes
         .iter()
-        .filter(|(m, r)| scope.sees(*m) && reads_report(series, r.tag));
-    read.map(|(_, r)| *r).collect()
+        .filter(|w| scope.reads(w) && reads_report(series, w.fact.tag));
+    read.map(|w| w.fact).collect()
 }
 
 /// OD319 on the `print_report_name` of what the manifest loads. Print compiles only the value the
@@ -262,10 +266,12 @@ fn report_state<'m>(
 fn refused_file_names<'m>(index: &Index<'m>, mi: usize, series: Option<Series>, out: &mut Out<'m>) {
     let module = &index.modules[mi];
     let scope = index.scope(mi);
+    let demo_scope = scope.in_demo();
     for file in module.data.iter().filter(|f| f.rank.is_some()) {
+        let scope = if file.demo { &demo_scope } else { &scope };
         for report in &file.facts.reports {
             let Some(refused) = &report.refused else { continue };
-            let state = report_state(index, mi, &scope, series, report);
+            let state = report_state(index, mi, scope, series, report);
             let holder = state.iter().rev().find(|r| r.writes_file_name);
             if holder.is_some_and(|r| std::ptr::eq(*r, report)) {
                 let message = format!(
@@ -1289,8 +1295,8 @@ impl<'m> Ctx<'_, 'm> {
     }
 
     /// Whether `write` of a loaded `file` reaches `create`: it has no id, or Odoo finds no record under
-    /// its id. Anything before it may have made that record: a definition, a module that writes the
-    /// id, the registry, a parent record, `base_data.sql`, or a `<function>` of the module. An id of
+    /// its id. Anything before it may have made that record: a definition, a write the scope reads,
+    /// the registry, a parent record, `base_data.sql`, or a `<function>` of the module. An id of
     /// another module is none of `first_defs`.
     fn creates(&self, write: &RecordWrite, file: &SourceFile<DataFacts>, loaded: &Loaded) -> bool {
         if write.no_create || write.fields.iter().any(database_id) {
@@ -1300,10 +1306,10 @@ impl<'m> Ctx<'_, 'm> {
         let full = full_id(&self.module.name, id);
         let at = file.rank.map(|rank| (rank, write.pos.line));
         let writes = self.index.value_writes.get(&full).map_or(&[][..], Vec::as_slice);
-        let first = writes.iter().find(|(mi, _)| self.scope.sees(*mi));
+        let first = writes.iter().find(|w| self.scope.reads(w));
         self.module.name != "base"
             && at.is_some_and(|at| loaded.ids.get(&full) == Some(&at) && loaded.first_call.is_none_or(|c| at < c))
-            && first.is_some_and(|(_, w)| std::ptr::eq(*w, write))
+            && first.is_some_and(|w| std::ptr::eq(w.fact, write))
             && !registry_id(self.module, &full)
             && !self.index.derived.contains(&full)
     }
@@ -1479,16 +1485,17 @@ impl<'m> Ctx<'_, 'm> {
         }
     }
 
-    /// Whether `write` makes the last write of `name` its scope sees: what a module depending on this
-    /// one replaces later does not mend a database without that module.
+    /// Whether `write` makes the last write of `name` its scope reads: what a module depending on this
+    /// one replaces later does not mend a database without that module, nor a demo write one without
+    /// demo data.
     fn holds(&self, write: &'m RecordWrite, name: &str) -> bool {
         let id = write.id.as_ref().map(|id| full_id(&self.module.name, id));
         let Some(writes) = id.and_then(|id| self.index.value_writes.get(&id)) else {
             return true;
         };
         let writes_it = |w: &RecordWrite| w.fields.iter().any(|f| f.name == name);
-        let last = writes.iter().rev().find(|(mi, w)| self.scope.sees(*mi) && writes_it(w));
-        last.is_none_or(|(_, w)| std::ptr::eq(*w, write))
+        let last = writes.iter().rev().find(|w| self.scope.reads(w) && writes_it(w.fact));
+        last.is_none_or(|w| std::ptr::eq(w.fact, write))
     }
 
     /// Whether the record enclosing `write` overrides or drops `name`. Odoo gives a record nested in
@@ -1605,13 +1612,13 @@ impl<'m> Ctx<'_, 'm> {
             return;
         }
         let writes = self.rule_state(rule);
-        let holder = |(_, r): &&(usize, &'m RuleFact)| !matches!(r.domain, ActionValue::Unset);
+        let holder = |w: &&Placed<&'m RuleFact>| !matches!(w.fact.domain, ActionValue::Unset);
         let holds = writes
             .iter()
             .rev()
             .find(holder)
-            .is_some_and(|(_, r)| std::ptr::eq(*r, rule));
-        let active = writes.iter().rev().find_map(|(_, r)| r.active);
+            .is_some_and(|w| std::ptr::eq(w.fact, rule));
+        let active = writes.iter().rev().find_map(|w| w.fact.active);
         let Some(model) = self.rule_model(&writes).filter(|_| holds && active != Some(false)) else {
             return;
         };
@@ -1622,33 +1629,40 @@ impl<'m> Ctx<'_, 'm> {
         }
     }
 
+    /// `fact` as the only write of its record, in a file of this module. The reader is the file that
+    /// holds it, so `demo` false loads it in either scope.
+    fn own<F>(&self, fact: F) -> Placed<F> {
+        Placed {
+            module: self.index.by_name[self.module.name.as_str()],
+            demo: false,
+            fact,
+        }
+    }
+
     /// The writes that decide what Odoo checks. From 15.0, and in an unknown series, it validates each
-    /// write as it loads, on what the modules in scope gave so far. Before, the query reads what the
-    /// whole load left.
-    fn rule_state(&self, rule: &'m RuleFact) -> Vec<(usize, &'m RuleFact)> {
+    /// write as it loads, on what the modules in scope gave so far that the reader's file is sure of,
+    /// so no demo write for a data file. Before, the query reads what the whole load left, without
+    /// the demo writes a data file cannot count on.
+    fn rule_state(&self, rule: &'m RuleFact) -> Vec<Placed<&'m RuleFact>> {
         let id = rule.id.as_ref().map(|id| full_id(&self.module.name, id));
         let Some(writes) = id.and_then(|id| self.index.rule_writes.get(&id)) else {
-            return vec![(self.index.by_name[self.module.name.as_str()], rule)];
+            return vec![self.own(rule)];
         };
         if self.series.is_some_and(|s| s < RULE_DOMAIN_VALIDATED) {
-            return writes.clone();
+            return writes.iter().filter(|w| self.scope.loads(w)).copied().collect();
         }
-        let upto = writes.iter().position(|(_, r)| std::ptr::eq(*r, rule));
+        let upto = writes.iter().position(|w| std::ptr::eq(w.fact, rule));
         let upto = upto.map_or(writes.len(), |at| at + 1);
-        writes[..upto]
-            .iter()
-            .filter(|(mi, _)| self.scope.sees(*mi))
-            .copied()
-            .collect()
+        writes[..upto].iter().filter(|w| self.scope.reads(w)).copied().collect()
     }
 
     /// The model of the last `model_id` of `writes`, whose XML id the module that wrote it resolves.
-    fn rule_model(&self, writes: &[(usize, &'m RuleFact)]) -> Option<&'m str> {
-        let (mi, rule) = writes
+    fn rule_model(&self, writes: &[Placed<&'m RuleFact>]) -> Option<&'m str> {
+        let write = writes
             .iter()
             .rev()
-            .find(|(_, r)| !matches!(r.model, ActionValue::Unset))?;
-        self.written_model(*mi, &rule.model, rule.by_name)
+            .find(|w| !matches!(w.fact.model, ActionValue::Unset))?;
+        self.written_model(write.module, &write.fact.model, write.fact.by_name)
     }
 
     /// The model a `model_id` written by the module `mi` names.
@@ -1670,18 +1684,18 @@ impl<'m> Ctx<'_, 'm> {
         if server.calls.is_empty() {
             return;
         }
-        let own = [(self.index.by_name[self.module.name.as_str()], server)];
+        let own = [self.own(server)];
         let id = server.id.as_ref().map(|id| full_id(&self.module.name, id));
         let writes = id.and_then(|id| self.index.server_writes.get(&id));
         let writes = writes.map_or(&own[..], Vec::as_slice);
-        let last = || writes.iter().rev().filter(|(mi, _)| self.scope.sees(*mi));
+        let last = || writes.iter().rev().filter(|w| self.scope.reads(w));
         let holds = last()
-            .find(|(_, s)| s.writes_code)
-            .is_some_and(|(_, s)| std::ptr::eq(*s, server));
-        let runs = last().find_map(|(_, s)| s.state).unwrap_or(server.cron);
+            .find(|w| w.fact.writes_code)
+            .is_some_and(|w| std::ptr::eq(w.fact, server));
+        let runs = last().find_map(|w| w.fact.state).unwrap_or(server.cron);
         let model = last()
-            .find(|(_, s)| !matches!(s.model, ActionValue::Unset))
-            .and_then(|(mi, s)| self.written_model(*mi, &s.model, s.by_name));
+            .find(|w| !matches!(w.fact.model, ActionValue::Unset))
+            .and_then(|w| self.written_model(w.module, &w.fact.model, w.fact.by_name));
         let Some(model) = model.filter(|_| holds && runs) else {
             return;
         };
@@ -1723,15 +1737,15 @@ impl<'m> Ctx<'_, 'm> {
     /// Only `scope` loads ahead of this module: what a module depending on it replaces later does not
     /// mend a database without that module. A model that stays unknown is out of the scan or an `eval`.
     fn action_view_mode(&self, out: &mut Out<'m>, path: &'m Path, action: &'m ActionFact, mode: &Spanned<String>) {
-        let own = [(self.index.by_name[self.module.name.as_str()], action)];
+        let own = [self.own(action)];
         let id = action.id.as_ref().map(|id| full_id(&self.module.name, id));
         let writes = id.and_then(|id| self.index.action_writes.get(&id));
         let writes = writes.map_or(&own[..], Vec::as_slice);
         let last = |value: fn(&'m ActionFact) -> &'m ActionValue| {
-            let loaded = writes.iter().filter(|(mi, _)| self.scope.sees(*mi));
+            let loaded = writes.iter().filter(|w| self.scope.reads(w));
             loaded
                 .rev()
-                .map(|(_, a)| value(a))
+                .map(|w| value(w.fact))
                 .find(|v| !matches!(v, ActionValue::Unset))
         };
         if !last(|a| &a.view_mode).is_some_and(|v| std::ptr::eq(v, &action.view_mode)) {
@@ -1744,19 +1758,20 @@ impl<'m> Ctx<'_, 'm> {
         }
     }
 
-    /// A view an action names counts from any indexed module, as one in `view_types` does.
+    /// A view an action names counts from any indexed module, as one in `view_types` does, as long as
+    /// the scope loads that write.
     fn view_mode(
         &self,
         out: &mut Out<'m>,
         path: &'m Path,
         model: &str,
         mode: &Spanned<String>,
-        writes: &[(usize, &ActionFact)],
+        writes: &[Placed<&ActionFact>],
     ) {
         let mut seen = FxHashSet::default();
         let kinds = mode.value.split(',').map(str::trim).filter(|k| !k.is_empty());
         for kind in kinds.filter(|k| seen.insert(*k)) {
-            let named = writes.iter().any(|(_, a)| a.names_view(kind));
+            let named = writes.iter().any(|w| self.scope.loads(w) && w.fact.names_view(kind));
             let gap = self.activity_gap(model, kind);
             if let Some(message) = gap.or_else(|| self.view_gap(model, kind).filter(|_| !named)) {
                 out.push(path, "OD318", mode.pos, message);

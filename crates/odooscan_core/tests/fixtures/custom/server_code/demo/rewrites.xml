@@ -1,0 +1,17 @@
+<odoo>
+    <record id="demo_fixes_code" model="ir.cron">
+        <field name="code">model._run_daily()</field>
+    </record>
+
+    <record id="demo_changes_state" model="ir.actions.server">
+        <field name="state">object_write</field>
+    </record>
+
+    <record id="demo_changes_model" model="ir.cron">
+        <field name="model_id" ref="model_server_note"/>
+    </record>
+
+    <record id="demo_breaks_code" model="ir.cron">
+        <field name="code">model._nope_demo_breaks()</field>
+    </record>
+</odoo>

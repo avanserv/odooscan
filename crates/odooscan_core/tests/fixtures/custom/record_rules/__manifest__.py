@@ -14,5 +14,7 @@
         "security/active_forms.xml",
         "security/updates.xml",
         "security/second_writes.xml",
+        "security/demo_writes.xml",
     ],
+    "demo": ["demo/rewrites.xml"],
 }

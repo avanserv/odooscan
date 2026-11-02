@@ -10,5 +10,7 @@
         "data/silent.xml",
         "data/replaced.xml",
         "data/rv.thing.csv",
+        "data/demo_writes.xml",
     ],
+    "demo": ["demo/rewrites.xml"],
 }

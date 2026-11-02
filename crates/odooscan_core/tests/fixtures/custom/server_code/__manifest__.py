@@ -10,5 +10,7 @@
         "data/silent.xml",
         "data/first_writes.xml",
         "data/updates.xml",
+        "data/demo_writes.xml",
     ],
+    "demo": ["demo/rewrites.xml"],
 }

@@ -1,0 +1,21 @@
+<odoo>
+    <record id="action_demo_mode" model="ir.actions.act_window">
+        <field name="view_mode">list</field>
+    </record>
+
+    <record id="action_demo_model" model="ir.actions.act_window">
+        <field name="res_model">window.shown</field>
+    </record>
+
+    <record id="action_demo_view" model="ir.actions.act_window">
+        <field name="view_id" ref="window_actions.view_shown_gantt"/>
+    </record>
+
+    <record id="action_demo_gantt" model="ir.actions.act_window">
+        <field name="view_mode">gantt</field>
+    </record>
+
+    <record id="action_demo_gantt_named" model="ir.actions.act_window">
+        <field name="view_mode">gantt</field>
+    </record>
+</odoo>

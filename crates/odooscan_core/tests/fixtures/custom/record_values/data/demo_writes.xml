@@ -1,0 +1,11 @@
+<odoo>
+    <record id="demo_fixes_values" model="rv.thing">
+        <field name="parent_id" ref="other_1"/>
+        <field name="state">c</field>
+    </record>
+
+    <record id="demo_breaks_values" model="rv.thing">
+        <field name="parent_id" ref="parent_1"/>
+        <field name="state">a</field>
+    </record>
+</odoo>
