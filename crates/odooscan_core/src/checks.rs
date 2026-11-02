@@ -1059,7 +1059,7 @@ impl<'m> Ctx<'_, 'm> {
         let Some(method) = call
             .method
             .as_ref()
-            .filter(|m| !self.dynamic && !m.value.starts_with('_'))
+            .filter(|m| !m.value.starts_with('_') && self.sees_methods(model))
         else {
             return;
         };
@@ -2364,8 +2364,7 @@ impl<'m> Ctx<'_, 'm> {
         !self.lost && self.sees_classes(model)
     }
 
-    /// Whether the scan reaches every class of `model`. That is all a question on a method needs,
-    /// since no data file adds one.
+    /// Whether the scan reaches every class of `model`, short of the parents a class hides from it.
     fn sees_classes(&self, model: &str) -> bool {
         !self.partial
             && !self.dynamic
@@ -2373,10 +2372,15 @@ impl<'m> Ctx<'_, 'm> {
             && !self.index.unindexed_parent(model, self.scope)
     }
 
-    /// Why `model` lacks the method a data file calls, when the scan sees every class that could
-    /// define it: a delegate's hidden parent cannot, since `_inherits` passes on fields only.
+    /// Whether the scan sees every class that could define a method of `model`: no data file adds
+    /// one, and a delegate's hidden parent cannot, since `_inherits` passes on fields only.
+    fn sees_methods(&self, model: &str) -> bool {
+        self.sees_classes(model) && !self.index.merged_hidden_parents(model, self.scope)
+    }
+
+    /// Why `model` lacks the method a data file calls, when the scan can tell.
     fn method_gap(&self, model: &str, method: &str) -> Option<String> {
-        if !self.sees_classes(model) || self.index.merged_hidden_parents(model, self.scope) {
+        if !self.sees_methods(model) {
             return None;
         }
         match self.index.data_method(model, method, self.scope, self.series) {

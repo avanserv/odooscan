@@ -124,6 +124,8 @@ custom/button_calls/views/buttons.xml:111:9: OD301 module button_calls defines n
 custom/button_calls/views/calls.xml:5:42: OD314 button.order has no method '_run_misspelled'
 custom/button_calls/views/calls.xml:6:41: OD314 method 'action_follow' of res.partner comes from module mail, which is not in depends
 custom/button_delegate/models/contacts.py:18:36: OD204 res.users has no method '_compute_nicknmae'
+custom/button_delegate/static/src/contacts.js:3:43: OD604 model 'res.users' has no method 'action_contact'
+custom/button_delegate/static/src/contacts.js:4:43: OD604 model 'res.users' has no method 'action_contcat'
 custom/button_delegate/views/delegate.xml:7:45: OD312 res.users has no method 'action_contcat'
 custom/button_delegate/views/delegate.xml:12:39: OD314 res.users has no method '_run_misspelled'
 custom/button_delegate/views/delegate.xml:13:39: OD314 res.users has no method 'action_contact'
