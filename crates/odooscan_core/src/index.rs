@@ -7,7 +7,7 @@ use crate::facts::{
 };
 use crate::manifest::AutoInstall;
 use crate::project::{Module, SourceFile, code_loaded};
-use crate::series::Series;
+use crate::series::{self, Series};
 
 /// Fields every model has without declaring them.
 const MAGIC_FIELDS: &[&str] = &[
@@ -335,6 +335,73 @@ const BASE_MODEL_EXTRA: &[&str] = &[
     "view_header_get",
     "view_init",
 ];
+
+/// Series that decorate `BaseModel` with `@api.private`: a February 2025 backport reached 16.0 and
+/// 17.0, while saas~16.1 to 16.4 and saas~17.1 to 17.3 keep the older regex and accept the names of
+/// `BASE_PRIVATE_METHODS`.
+const API_PRIVATE: &str = ">=16.0,!=16.1,!=16.2,!=16.3,!=16.4,!=17.1,!=17.2,!=17.3";
+
+/// Series that refuse a button on `init`: 9.0 refuses only a leading `_`.
+const INIT_REFUSED: &str = ">=10.0";
+
+/// The `@api.private` methods of `BaseModel`, by the range of series that decorates them, `init`
+/// aside, which `INIT_REFUSED` covers. Names only, read off each branch head: when adding a series,
+/// reread the decorators of `BaseModel` and add what changed.
+const BASE_PRIVATE_METHODS: &[(&str, &[&str])] = &[
+    (
+        ">=16.0",
+        &[
+            "concat",
+            "ensure_one",
+            "filtered",
+            "filtered_domain",
+            "flush_model",
+            "flush_recordset",
+            "invalidate_model",
+            "invalidate_recordset",
+            "mapped",
+            "new",
+            "sorted",
+            "union",
+            "with_company",
+            "with_context",
+            "with_env",
+            "with_prefetch",
+            "with_user",
+        ],
+    ),
+    (">=17.0", &["grouped"]),
+    (">=18.0", &["sudo"]),
+    (
+        ">=18.2",
+        &[
+            "browse",
+            "check_access",
+            "exists",
+            "fetch",
+            "modified",
+            "search_fetch",
+            "update",
+        ],
+    ),
+    (">=18.3", &["lock_for_update"]),
+    (">=19.0", &["try_lock_for_update"]),
+];
+
+/// Whether Odoo refuses a button on `name` because `BaseModel` makes it private in `series`,
+/// whatever a module overrides: the refusal walks the MRO. A module of unknown series gets only
+/// `init`, which nearly every series refuses.
+pub(crate) fn base_private_method(name: &str, series: Option<Series>) -> bool {
+    if name == "init" {
+        return series.is_none_or(|s| series::matches(INIT_REFUSED, s));
+    }
+    series.is_some_and(|s| {
+        series::matches(API_PRIVATE, s)
+            && BASE_PRIVATE_METHODS
+                .iter()
+                .any(|(spec, names)| names.contains(&name) && series::matches(spec, s))
+    })
+}
 pub fn full_id(module: &str, id: &str) -> String {
     if id.contains('.') {
         id.to_owned()
@@ -1889,7 +1956,8 @@ fn method_flows(modules: &[Module]) -> MethodFlows<'_> {
 
 #[cfg(test)]
 mod tests {
-    use super::class_file;
+    use super::{BASE_MODEL_EXTRA, BASE_MODEL_METHODS, BASE_PRIVATE_METHODS, base_private_method, class_file};
+    use crate::series::Series;
 
     #[test]
     fn maps_a_class_path_to_its_files() {
@@ -1904,5 +1972,58 @@ mod tests {
         );
         assert_eq!(class_file("odoo.addons.base.LabelWizard"), None);
         assert_eq!(class_file("odoo.models.BaseModel"), None);
+    }
+
+    fn private(name: &str, series: &str) -> bool {
+        base_private_method(name, Series::parse(series))
+    }
+
+    #[test]
+    fn every_private_method_starts_private_at_its_row() {
+        let rows = [
+            ("concat", "15.0", "16.0"),
+            ("grouped", "16.4", "17.0"),
+            ("sudo", "17.4", "18.0"),
+            ("browse", "18.1", "18.2"),
+            ("lock_for_update", "18.2", "18.3"),
+            ("try_lock_for_update", "18.4", "19.0"),
+        ];
+        for (name, before, first) in rows {
+            assert!(!private(name, before), "{name} on {before}");
+            assert!(private(name, first), "{name} on {first}");
+        }
+        assert!(private("try_lock_for_update", "20.0"));
+    }
+
+    #[test]
+    fn saas_series_without_the_decorator_report_only_init() {
+        for series in ["16.1", "16.2", "16.3", "16.4", "17.1", "17.2", "17.3"] {
+            assert!(!private("ensure_one", series), "{series}");
+            assert!(private("init", series), "{series}");
+        }
+        assert!(private("ensure_one", "17.4"));
+    }
+
+    #[test]
+    fn init_is_refused_from_10() {
+        assert!(!private("init", "9.0"));
+        assert!(private("init", "10.0"));
+    }
+
+    #[test]
+    fn unknown_series_reports_only_init() {
+        assert!(base_private_method("init", None));
+        assert!(!base_private_method("ensure_one", None));
+    }
+
+    #[test]
+    fn private_methods_are_known_to_data_method() {
+        let names = BASE_PRIVATE_METHODS.iter().flat_map(|(_, names)| *names);
+        for name in names {
+            assert!(
+                BASE_MODEL_METHODS.contains(name) || BASE_MODEL_EXTRA.contains(name),
+                "{name} would raise OD312 on an earlier series"
+            );
+        }
     }
 }
