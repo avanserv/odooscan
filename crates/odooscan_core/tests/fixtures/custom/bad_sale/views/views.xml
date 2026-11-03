@@ -98,4 +98,9 @@
             </xpath>
         </field>
     </record>
+
+    <record id="action_orders_list_row" model="ir.actions.act_window.view">
+        <field name="act_window_id" ref="action_orders"/>
+        <field name="view_mode">tree</field>
+    </record>
 </odoo>
