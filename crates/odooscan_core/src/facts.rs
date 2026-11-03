@@ -175,6 +175,8 @@ pub struct ClassFact {
     /// in its body, `_check_company_domain`, `_table_query` and `_table_sql` when it assigns them
     /// anything but a field.
     pub methods: Vec<String>,
+    /// The `def`s of the class body, outside `if`, `try` and `with` blocks, in order.
+    pub defs: Vec<MethodDef>,
     /// Methods of the class decorated with `@api.private`.
     pub private_methods: Vec<String>,
     /// The undotted names given to `@api.onchange` and `@api.constrains`.
@@ -255,6 +257,7 @@ impl ClassFact {
             delegate_unknown: false,
             fields: vec![],
             methods: vec![],
+            defs: vec![],
             private_methods: vec![],
             paths: vec![],
             depends: vec![],
@@ -292,6 +295,139 @@ impl ClassFact {
     /// better than one.
     pub fn hidden_parents(&self) -> bool {
         !self.plain_bases.is_empty() || self.inherit_unknown
+    }
+
+    /// The signature `name` has on the class, when every binding of it is a `def` of the body. The
+    /// last one wins, as Python binds each in turn; any other binding may hold any callable.
+    pub fn signature(&self, name: &str) -> Option<&Signature> {
+        let mut defs = self.defs.iter().filter(|d| d.name.value == name);
+        let bindings = self.methods.iter().filter(|m| *m == name).count();
+        if bindings == 0 || defs.clone().count() != bindings {
+            return None;
+        }
+        defs.next_back()?.signature.as_ref()
+    }
+}
+
+/// A `def` of a class body.
+#[derive(Debug)]
+pub struct MethodDef {
+    pub name: Spanned<String>,
+    /// Each decorator dotted as written, a call by what it calls: `api.depends` for `@api.depends("x")`.
+    pub decorators: Vec<String>,
+    /// None when a decorator may change the arguments the method takes: any but those of `api`,
+    /// `staticmethod`, `classmethod`, `override`, `ormcache` and `ormcache_context`.
+    pub signature: Option<Signature>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Param {
+    pub name: String,
+    /// The default as the source spells it.
+    pub default: Option<String>,
+}
+
+/// The parameters of a `def`, as a call through an instance fills them.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Signature {
+    /// The parameter the instance or the class fills, none for a `staticmethod` or a `def` that takes
+    /// nothing by position, whose `*args` then takes it.
+    pub bound: Option<String>,
+    /// The parameters a call can fill by position, after `bound`.
+    pub positional: Vec<Param>,
+    /// How many of `positional`, from the first, a call cannot fill by name.
+    pub positional_only: usize,
+    pub var_positional: Option<String>,
+    pub keyword_only: Vec<Param>,
+    pub var_keyword: Option<String>,
+}
+
+/// Why an override refuses a call its parent takes, by the parameter that makes it fail.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Refusal<'s> {
+    /// A positional the parent requires, which the override has no place for by position.
+    Lost(&'s Param),
+    /// A parameter the override requires, which no call of the parent's form passes.
+    Required(&'s Param),
+    /// A keyword-only parameter of the parent, which the override cannot take by name.
+    Keyword(&'s Param),
+}
+
+impl Signature {
+    /// Why a call that the parent takes, and that passes every parameter the parent requires,
+    /// fails on this override. Dropped optional parameters, defaults made required and renamed
+    /// positionals are left out: core overrides do all three where no caller passes them.
+    pub fn refuses<'s>(&'s self, parent: &'s Signature) -> Option<Refusal<'s>> {
+        self.lost(parent)
+            .or_else(|| self.required(parent))
+            .or_else(|| self.keyword(parent))
+    }
+
+    fn lost<'s>(&self, parent: &'s Signature) -> Option<Refusal<'s>> {
+        if self.var_positional.is_some() {
+            return None;
+        }
+        let mut past = parent.positional.iter().skip(self.positional.len());
+        past.find(|p| p.default.is_none()).map(Refusal::Lost)
+    }
+
+    /// A parent's `*args` says its callers may pass more by position, and its `**kwargs` by name.
+    /// A positional the parent takes by name alone comes in by name; a call that omits it is one
+    /// for a default made required.
+    fn required<'s>(&'s self, parent: &Signature) -> Option<Refusal<'s>> {
+        let named = |p: &Param| parent.keyword_only.iter().any(|k| k.name == p.name);
+        let past = self.positional.iter().enumerate().skip(parent.positional.len());
+        let positional = past
+            .filter(|_| parent.var_positional.is_none())
+            .find(|(i, p)| p.default.is_none() && !(*i >= self.positional_only && named(p)))
+            .map(|(_, p)| p);
+        let keyword = || {
+            let unknown = |p: &&Param| p.default.is_none() && !parent.takes_name(&p.name);
+            self.keyword_only
+                .iter()
+                .filter(|_| parent.var_keyword.is_none())
+                .find(unknown)
+        };
+        positional.or_else(keyword).map(Refusal::Required)
+    }
+
+    /// A renamed keyword-only parameter shows as one the override adds, next to the one it lacks.
+    fn keyword<'s>(&self, parent: &'s Signature) -> Option<Refusal<'s>> {
+        if self.var_keyword.is_some() {
+            return None;
+        }
+        let adds = self.keyword_only.iter().any(|p| !parent.takes_name(&p.name));
+        let lacked = |p: &&Param| (p.default.is_none() || adds) && !self.takes_name(&p.name);
+        parent.keyword_only.iter().find(lacked).map(Refusal::Keyword)
+    }
+
+    /// Whether a call can pass `name` by keyword to a parameter of its own, `**` aside.
+    fn takes_name(&self, name: &str) -> bool {
+        let by_position = self.positional.iter().skip(self.positional_only);
+        by_position.chain(&self.keyword_only).any(|p| p.name == name)
+    }
+
+    /// The `def` line of `method` without the annotations, such as `_prepare(self, order, line=None)`.
+    pub fn spelled(&self, method: &str) -> String {
+        // A default may span lines, which a one-line message cannot hold.
+        let param = |p: &Param| match &p.default {
+            Some(d) => format!("{}={}", p.name, d.split_whitespace().collect::<Vec<_>>().join(" ")),
+            None => p.name.clone(),
+        };
+        let mut parts: Vec<String> = self.bound.iter().cloned().collect();
+        parts.extend(self.positional[..self.positional_only].iter().map(param));
+        if self.positional_only > 0 {
+            parts.push("/".to_owned());
+        }
+        parts.extend(self.positional[self.positional_only..].iter().map(param));
+        match &self.var_positional {
+            Some(name) => parts.push(format!("*{name}")),
+            None if !self.keyword_only.is_empty() => parts.push("*".to_owned()),
+            None => {}
+        }
+        parts.extend(self.keyword_only.iter().map(param));
+        parts.extend(self.var_keyword.iter().map(|name| format!("**{name}")));
+        format!("{method}({})", parts.join(", "))
     }
 }
 
@@ -890,4 +1026,106 @@ pub struct OwlTemplate {
 #[derive(Debug, Default)]
 pub struct TemplateFacts {
     pub templates: Vec<OwlTemplate>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sig(def: &str) -> Signature {
+        let src = format!(
+            "from odoo import models\n\n\nclass X(models.Model):\n    _inherit = 'x'\n\n    {def}:\n        pass\n"
+        );
+        let mut facts = crate::python::analyze(&src, None);
+        facts.classes.remove(0).defs.remove(0).signature.unwrap()
+    }
+
+    /// The refusal of `child` against `parent`, as its kind and the parameter's name.
+    fn refusal(child: &str, parent: &str) -> Option<(&'static str, String)> {
+        let (child, parent) = (sig(child), sig(parent));
+        child.refuses(&parent).map(|r| match r {
+            Refusal::Lost(p) => ("lost", p.name.clone()),
+            Refusal::Required(p) => ("required", p.name.clone()),
+            Refusal::Keyword(p) => ("keyword", p.name.clone()),
+        })
+    }
+
+    fn lost(p: &str) -> Option<(&'static str, String)> {
+        Some(("lost", p.to_owned()))
+    }
+
+    fn required(p: &str) -> Option<(&'static str, String)> {
+        Some(("required", p.to_owned()))
+    }
+
+    fn keyword(p: &str) -> Option<(&'static str, String)> {
+        Some(("keyword", p.to_owned()))
+    }
+
+    #[test]
+    fn a_required_positional_the_override_has_no_place_for_is_lost() {
+        assert_eq!(refusal("def f(self, a)", "def f(self, a, b)"), lost("b"));
+        assert_eq!(refusal("def f(self, a, *, b)", "def f(self, a, b)"), lost("b"));
+        assert_eq!(refusal("def f(self, a, **kw)", "def f(self, a, b)"), lost("b"));
+        assert_eq!(refusal("def f(self, a, *args)", "def f(self, a, b)"), None);
+        assert_eq!(refusal("def f(self, a)", "def f(self, a, b=None)"), None);
+    }
+
+    #[test]
+    fn a_parameter_the_override_requires_and_the_parent_lacks_is_required() {
+        assert_eq!(refusal("def f(self, a, b)", "def f(self, a)"), required("b"));
+        assert_eq!(refusal("def f(self, *, b)", "def f(self)"), required("b"));
+        assert_eq!(refusal("def f(self, a, b)", "def f(self, a, **kw)"), required("b"));
+        assert_eq!(refusal("def f(self, a, b)", "def f(self, a, *args)"), None);
+        assert_eq!(refusal("def f(self, *, b)", "def f(self, **kw)"), None);
+        assert_eq!(refusal("def f(self, a, b=None)", "def f(self, a)"), None);
+        // A positional the parent requires by name still comes in by name, unless only by position.
+        assert_eq!(refusal("def f(self, a, b)", "def f(self, a, *, b)"), None);
+        assert_eq!(refusal("def f(self, a, b, /)", "def f(self, a, *, b)"), required("b"));
+        assert_eq!(refusal("def f(self, a, b)", "def f(self, a, *, b=None)"), None);
+        // A default made required is left out.
+        assert_eq!(refusal("def f(self, a, b)", "def f(self, a, b=None)"), None);
+        assert_eq!(refusal("def f(self, *, b)", "def f(self, *, b=None)"), None);
+    }
+
+    #[test]
+    fn a_keyword_the_override_cannot_take_by_name_is_refused_when_required_or_renamed() {
+        assert_eq!(refusal("def f(self)", "def f(self, *, k)"), keyword("k"));
+        assert_eq!(
+            refusal("def f(self, *, s=None)", "def f(self, *, k=None)"),
+            keyword("k")
+        );
+        assert_eq!(refusal("def f(self, k=None, /)", "def f(self, *, k)"), keyword("k"));
+        assert_eq!(refusal("def f(self, k)", "def f(self, *, k)"), None);
+        assert_eq!(refusal("def f(self)", "def f(self, *, k=None)"), None);
+        assert_eq!(refusal("def f(self, **kw)", "def f(self, *, k)"), None);
+    }
+
+    #[test]
+    fn positional_only_parameters_count_by_position() {
+        assert_eq!(refusal("def f(self, a, /)", "def f(self, a, b, /)"), lost("b"));
+        assert_eq!(refusal("def f(self, x, y, /)", "def f(self, a, b)"), None);
+    }
+
+    #[test]
+    fn varargs_on_either_side_accept_everything() {
+        assert_eq!(refusal("def f(self, *args, **kwargs)", "def f(self, a, *, k)"), None);
+        assert_eq!(
+            refusal("def f(self, a, *, k=None)", "def f(self, *args, **kwargs)"),
+            None
+        );
+        assert_eq!(refusal("def f(self, a)", "def f(self, *args, **kwargs)"), None);
+    }
+
+    #[test]
+    fn a_default_spelled_over_lines_fits_on_one() {
+        let parent = sig("def f(self, a, b=(\n        1,\n        2,\n    ))");
+        assert_eq!(parent.spelled("f"), "f(self, a, b=( 1, 2, ))");
+    }
+
+    #[test]
+    fn a_staticmethod_compares_without_the_bound_parameter() {
+        assert_eq!(refusal("@staticmethod\n    def f(a, b)", "def f(self, a, b)"), None);
+        assert_eq!(refusal("@staticmethod\n    def f(a)", "def f(self, a, b)"), lost("b"));
+    }
 }

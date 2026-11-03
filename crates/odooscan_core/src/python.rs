@@ -8,8 +8,8 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::api_table::{self, Kind};
 use crate::facts::{
-    ClassFact, DefinitionSource, DomainFact, FieldClass, FieldFact, GuardedRef, ModelKind, OptionValue, Pos, PyFacts,
-    RawDiag, Receiver, Spanned, SqlColumn, SqlView, Subject, UNREAD_TYPE, XmlRef,
+    ClassFact, DefinitionSource, DomainFact, FieldClass, FieldFact, GuardedRef, MethodDef, ModelKind, OptionValue,
+    Param, Pos, PyFacts, RawDiag, Receiver, Signature, Spanned, SqlColumn, SqlView, Subject, UNREAD_TYPE, XmlRef,
 };
 use crate::series::Series;
 use crate::sql::{
@@ -1243,6 +1243,16 @@ fn is_api(expr: &Expr, name: &str) -> bool {
     matches!(expr, Expr::Attribute(a) if a.attr.as_str() == name && tail_name(&a.value) == Some("api"))
 }
 
+/// Whether a decorator, dotted, hands the method's calls on as they come. Odoo's own keep the
+/// arity on 18.0: `api.model` (`odoo/api.py:421`), `api.returns` (`:393`) and `ormcache`
+/// (`odoo/tools/cache.py:64`).
+fn keeps_arity(decorator: &str) -> bool {
+    let (head, last) = decorator.rsplit_once('.').unwrap_or(("", decorator));
+    head.rsplit('.').next() == Some("api")
+        || matches!(last, "ormcache" | "ormcache_context" | "override")
+        || matches!(decorator, "staticmethod" | "classmethod")
+}
+
 /// What an ORM method returns to its callers, for the OD119 message.
 fn orm_result(method: &str) -> &'static str {
     match method {
@@ -1915,6 +1925,7 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
     /// views it creates.
     fn method_fact(&mut self, func: &ast::StmtFunctionDef, fact: &mut ClassFact) {
         method_name(func, fact);
+        fact.defs.push(self.method_def(func));
         if func.name.as_str() == "init" {
             fact.views = self.init_views(func);
         }
@@ -1939,6 +1950,47 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
                     pos: self.loc.pos(at),
                 }),
         );
+    }
+
+    fn method_def(&self, func: &ast::StmtFunctionDef) -> MethodDef {
+        let decorators = func.decorator_list.iter().map(|d| match &d.expression {
+            Expr::Call(call) => module_state::dotted(&call.func),
+            e => module_state::dotted(e),
+        });
+        let mut def = MethodDef {
+            name: Spanned {
+                value: func.name.to_string(),
+                pos: self.loc.at(&func.name),
+            },
+            decorators: decorators.collect(),
+            signature: None,
+        };
+        if def.decorators.iter().all(|d| keeps_arity(d)) {
+            let unbound = def.decorators.iter().any(|d| d == "staticmethod");
+            def.signature = Some(self.signature(&func.parameters, unbound));
+        }
+        def
+    }
+
+    fn signature(&self, params: &ast::Parameters, unbound: bool) -> Signature {
+        let param = |p: &ast::ParameterWithDefault| Param {
+            name: p.parameter.name.to_string(),
+            default: p.default.as_ref().map(|d| self.loc.src[d.range()].to_owned()),
+        };
+        let mut positional: Vec<Param> = params.posonlyargs.iter().chain(&params.args).map(param).collect();
+        let mut positional_only = params.posonlyargs.len();
+        let bound = (!unbound && !positional.is_empty()).then(|| {
+            positional_only = positional_only.saturating_sub(1);
+            positional.remove(0).name
+        });
+        Signature {
+            bound,
+            positional,
+            positional_only,
+            var_positional: params.vararg.as_ref().map(|p| p.name.to_string()),
+            keyword_only: params.kwonlyargs.iter().map(param).collect(),
+            var_keyword: params.kwarg.as_ref().map(|p| p.name.to_string()),
+        }
     }
 
     fn class_attrs(&mut self, targets: &[Expr], value: &Expr, fact: &mut ClassFact, naming: &mut Naming) {
@@ -4844,6 +4896,77 @@ mod tests {
         let class = &facts.classes[0];
         assert_eq!(class.private_methods, ["a"]);
         assert_eq!(class.methods, ["a", "b", "c", "d", "e"]);
+    }
+
+    fn class_defs(body: &str) -> ClassFact {
+        let src = format!("from odoo import api, models\n\n\nclass X(models.Model):\n    _inherit = 'x'\n{body}");
+        analyze(&src, None).classes.remove(0)
+    }
+
+    #[test]
+    fn reads_each_parameter_kind_of_a_def() {
+        let class = class_defs(
+            "    def f(self, a, /, b, c=1 + 2, *rest, d, e=None, **more):\n        pass\n\n    \
+             def g(self, *, k):\n        pass\n",
+        );
+        let f = class.signature("f").unwrap();
+        assert_eq!(f.bound.as_deref(), Some("self"));
+        let names: Vec<_> = f.positional.iter().map(|p| p.name.as_str()).collect();
+        assert_eq!(names, ["a", "b", "c"]);
+        assert_eq!(f.positional_only, 1);
+        assert_eq!(f.positional[2].default.as_deref(), Some("1 + 2"));
+        assert_eq!(f.var_positional.as_deref(), Some("rest"));
+        assert_eq!(f.keyword_only.len(), 2);
+        assert_eq!(f.var_keyword.as_deref(), Some("more"));
+        assert_eq!(f.spelled("f"), "f(self, a, /, b, c=1 + 2, *rest, d, e=None, **more)");
+        assert_eq!(class.signature("g").unwrap().spelled("g"), "g(self, *, k)");
+    }
+
+    #[test]
+    fn a_staticmethod_binds_nothing_and_a_classmethod_its_class() {
+        let class = class_defs(
+            "    @staticmethod\n    def f(a):\n        pass\n\n    \
+             @classmethod\n    def g(cls, a):\n        pass\n\n    \
+             def h(*args):\n        pass\n",
+        );
+        let f = class.signature("f").unwrap();
+        assert_eq!((f.bound.as_deref(), f.positional.len()), (None, 1));
+        assert_eq!(class.signature("g").unwrap().bound.as_deref(), Some("cls"));
+        let h = class.signature("h").unwrap();
+        assert_eq!((h.bound.as_deref(), h.var_positional.as_deref()), (None, Some("args")));
+    }
+
+    #[test]
+    fn only_decorators_that_keep_the_arity_keep_the_signature() {
+        let class = class_defs(
+            "    @api.model\n    @api.returns('self')\n    def a(self):\n        pass\n\n    \
+             @tools.ormcache('self.env.uid')\n    @ormcache_context('x')\n    def b(self):\n        pass\n\n    \
+             @typing.override\n    def c(self):\n        pass\n\n    \
+             @logged\n    def d(self):\n        pass\n\n    \
+             @property\n    def e(self):\n        pass\n\n    \
+             @functools.wraps(other)\n    def f(self):\n        pass\n",
+        );
+        assert_eq!(class.defs[0].decorators, ["api.model", "api.returns"]);
+        assert_eq!(class.defs[1].decorators, ["tools.ormcache", "ormcache_context"]);
+        let kept: Vec<_> = ["a", "b", "c", "d", "e", "f"]
+            .into_iter()
+            .filter(|name| class.signature(name).is_some())
+            .collect();
+        assert_eq!(kept, ["a", "b", "c"]);
+    }
+
+    #[test]
+    fn a_name_bound_otherwise_than_by_a_def_of_the_body_has_no_signature() {
+        let class = class_defs(
+            "    def a(self):\n        pass\n\n    a = helpers.run\n\n    \
+             def b(self):\n        pass\n\n    if X:\n        def b(self, c):\n            pass\n\n    \
+             def c(self):\n        pass\n\n    def c(self, d):\n        pass\n",
+        );
+        assert!(class.signature("a").is_none());
+        assert!(class.signature("b").is_none());
+        assert_eq!(class.signature("c").unwrap().positional.len(), 1);
+        assert!(class.signature("missing").is_none());
+        assert_eq!(class.defs.len(), 4);
     }
 
     #[test]

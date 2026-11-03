@@ -4,7 +4,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use crate::facts::{
     ActionFact, Annotation, ArchElement, ArchEmptied, ArchSubview, ArchValued, ClassFact, DataFacts, FieldFact,
     FlowSummary, Heritage, JsClass, ModelKind, OptionValue, PyFacts, Receiver, RecordWrite, ReportFact, RuleFact,
-    ServerFact, UNREAD_TYPE, ViewFact, WrittenValue,
+    ServerFact, Signature, UNREAD_TYPE, ViewFact, WrittenValue,
 };
 use crate::manifest::AutoInstall;
 use crate::project::{Module, SourceFile, code_loaded};
@@ -2172,10 +2172,17 @@ impl<'m> Index<'m> {
     where
         'm: 'c,
     {
-        classes
-            .filter(|(_, c)| c.new_model)
-            .map(|(mi, _)| *mi)
-            .reduce(|first, mi| if self.reaches(first, mi) { mi } else { first })
+        let introducers = classes.filter(|(_, c)| c.new_model).map(|(mi, _)| (*mi, ()));
+        self.first_loaded(introducers).map(|(mi, _)| mi)
+    }
+
+    /// The entry, by module, that loads first. Independent modules keep index order, since Odoo's
+    /// tie order between them is unknown, and so do the entries of one module.
+    pub fn first_loaded<T>(&self, entries: impl IntoIterator<Item = (usize, T)>) -> Option<(usize, T)> {
+        let loads_after = |first: usize, next: usize| first != next && self.reaches(first, next);
+        entries
+            .into_iter()
+            .reduce(|first, next| if loads_after(first.0, next.0) { next } else { first })
     }
 
     /// Every class of `model` and of the models it inherits from: see `model_chain`.
@@ -2222,7 +2229,40 @@ impl<'m> Index<'m> {
     /// Whether a class in scope of `model`, or of a model it inherits or delegates to, may get fields
     /// from a parent the scan cannot read.
     pub fn hidden_field_parents(&self, model: &str, scope: &Scope) -> bool {
-        self.unread_bases(model, scope, |c| &c.field_bases)
+        self.unread_bases(model, scope, true, |c| &c.field_bases)
+    }
+
+    /// Whether a class in scope of `model`, or of a model it inherits, may get methods from a parent
+    /// the scan cannot read. A model reached through `_inherits` gives fields, not methods.
+    pub fn hidden_method_parents(&self, model: &str, scope: &Scope) -> bool {
+        self.unread_bases(model, scope, false, |c| &c.plain_bases)
+    }
+
+    /// The signature of each definition of `method`, among `merged` (`merged_classes` of the model of
+    /// `class`, of module `mi`), that `class` overrides: those of other modules, short of one that
+    /// depends on `mi`, and of classes above `class` in its file. The order of the files of `mi` is
+    /// that of the imports, which is not indexed, so its other files count neither way. None when one
+    /// of them has no signature to compare.
+    pub fn method_parents(
+        &self,
+        mi: usize,
+        class: &ClassFact,
+        merged: &[(usize, &'m ClassFact)],
+        method: &str,
+    ) -> Option<Vec<(usize, &'m Signature)>> {
+        let above = self.classes_above(mi, class);
+        let overridden = |m: usize, c: &ClassFact| {
+            if m == mi {
+                above.iter().any(|a| std::ptr::eq(a, c))
+            } else {
+                !self.reaches(m, mi)
+            }
+        };
+        merged
+            .iter()
+            .filter(|&&(m, c)| c.methods.iter().any(|n| n == method) && overridden(m, c))
+            .map(|&(m, c)| c.signature(method).map(|s| (m, s)))
+            .collect()
     }
 
     /// Whether a class of the chain of `model` has a non-literal `_inherit` element or one of the
@@ -2230,8 +2270,14 @@ impl<'m> Index<'m> {
     /// in its file that is another class of the chain counts as read: mixins subclass each other
     /// along their `_inherit`, and Odoo merges that class's fields either way. Every chain holds
     /// `base`, so its classes prove nothing.
-    fn unread_bases(&self, model: &str, scope: &Scope, bases: impl Fn(&ClassFact) -> &[String]) -> bool {
-        let chain = self.chain(model, Some(scope), true);
+    fn unread_bases(
+        &self,
+        model: &str,
+        scope: &Scope,
+        delegated: bool,
+        bases: impl Fn(&ClassFact) -> &[String],
+    ) -> bool {
+        let chain = self.chain(model, Some(scope), delegated);
         let read = |mi: usize, class: &ClassFact, base: &str| {
             self.class_above(mi, class, base).is_some_and(|above| {
                 above.model != "base" && chain.iter().any(|(_, other)| std::ptr::eq(*other, above))
@@ -2245,10 +2291,17 @@ impl<'m> Index<'m> {
     /// The class `name` holds where `class` is defined, when its own file defines it above. The
     /// index keeps no imports, so a class of that name elsewhere may be another class.
     fn class_above(&self, mi: usize, class: &ClassFact, name: &str) -> Option<&'m ClassFact> {
-        let mut files = self.modules[mi].python.iter().map(|f| &f.facts.classes);
-        let classes = files.find(|classes| classes.iter().any(|c| std::ptr::eq(c, class)))?;
-        let above = classes.iter().take_while(|c| !std::ptr::eq(*c, class));
-        above.filter(|c| c.class_name == name).last()
+        let above = self.classes_above(mi, class).iter();
+        above.rev().find(|c| c.class_name == name)
+    }
+
+    /// The classes above `class` in its file of module `mi`.
+    fn classes_above(&self, mi: usize, class: &ClassFact) -> &'m [ClassFact] {
+        let mut files = self.modules[mi].python.iter().map(|f| f.facts.classes.as_slice());
+        let at = |classes: &'m [ClassFact]| classes.iter().position(|c| std::ptr::eq(c, class));
+        files
+            .find_map(|classes| at(classes).map(|at| &classes[..at]))
+            .unwrap_or_default()
     }
 
     /// Whether a class merged into `model` has a parent the scan cannot see. A parent reached through
@@ -2283,7 +2336,7 @@ impl<'m> Index<'m> {
     /// What `holds_fields` asks, and no plain base the scan does not read, which may hold methods
     /// whatever its fields.
     pub fn holds_model(&self, module: usize, model: &str, scope: &Scope) -> bool {
-        self.holds_fields(module, model, scope) && !self.unread_bases(model, scope, |c| &c.plain_bases)
+        self.holds_fields(module, model, scope) && !self.unread_bases(model, scope, true, |c| &c.plain_bases)
     }
 
     /// Whether `module` introduces `model` and holds all its fields: every class in scope of `model`
