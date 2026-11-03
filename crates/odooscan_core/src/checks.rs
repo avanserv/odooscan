@@ -1745,10 +1745,6 @@ impl<'m> Ctx<'_, 'm> {
         let merged = self.index.merged_classes(&class.model, self.scope);
         for def in &class.defs {
             let name = def.name.value.as_str();
-            // Python mangles `__name` with the class's name, so it overrides nothing elsewhere.
-            if name.starts_with("__") && !name.ends_with("__") {
-                continue;
-            }
             if let Some((mi, parent, refusal)) = self.override_refusal(class, &merged, def) {
                 let message = refusal_message(name, &self.index.modules[mi].name, parent, &refusal);
                 out.push(path, "OD229", def.name.pos, message);
@@ -1757,8 +1753,8 @@ impl<'m> Ctx<'_, 'm> {
     }
 
     /// What `def` refuses of every definition it overrides, with the module and the signature of the
-    /// one that loads first. Only the last binding of a name in the class is the method, and only
-    /// when every binding of it is a `def`.
+    /// one that loads first, ties kept in the chain order of `merged`. Only the last binding of a
+    /// name in the class is the method, and only when every binding of it is a `def`.
     fn override_refusal<'c>(
         &self,
         class: &'c ClassFact,

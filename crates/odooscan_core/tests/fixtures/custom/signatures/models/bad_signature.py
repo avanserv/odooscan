@@ -7,6 +7,7 @@ def logged(method):
 
 class BadSignature(models.Model):
     _name = "bad.signature"
+    _inherit = ["ordered.signature.mixin"]
     _description = "Bad signature"
 
     name = fields.Char()
@@ -60,6 +61,9 @@ class BadSignature(models.Model):
 
     def __seal(self, order, line):
         return order, line
+
+    def __vouch(self, order):
+        return order
 
     def _keyed(self, order, *, line=None):
         return order, line
