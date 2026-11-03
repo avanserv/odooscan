@@ -105,6 +105,8 @@ cannot tell which model it names.
 | [OD226](OD226.md) | `sql-view-not-created` | A model sets _auto = False, and nothing creates its SQL view. |
 | [OD227](OD227.md) | `sql-definition-unknown-column` | An SQL constraint or index names a column its model's table does not have. |
 | [OD228](OD228.md) | `delegate-without-ondelete` | A delegate=True Many2one has no ondelete, so Odoo fails when it sets up the registry. |
+| [OD229](OD229.md) | `override-signature-mismatch` | An override refuses a call that the method it overrides takes. |
+| [OD230](OD230.md) | `orphan-hook-method` | A compute, inverse, search or onchange method of a model extension is named nowhere, so Odoo never runs it. |
 
 ## OD3: XML ids, views and data
 

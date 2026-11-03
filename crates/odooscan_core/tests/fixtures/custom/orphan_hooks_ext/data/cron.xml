@@ -1,0 +1,8 @@
+<odoo>
+    <record id="cron_orphan_hook" model="ir.cron">
+        <field name="name">Orphan hook cron</field>
+        <field name="model_id" ref="orphan_hooks.model_orphan_hook"/>
+        <field name="state">code</field>
+        <field name="code">model._compute_hook_cron()</field>
+    </record>
+</odoo>

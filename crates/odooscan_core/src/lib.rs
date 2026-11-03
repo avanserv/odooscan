@@ -9,6 +9,7 @@ mod flows;
 mod index;
 mod js;
 mod manifest;
+mod mentions;
 mod method_body;
 mod modifier;
 mod module_state;

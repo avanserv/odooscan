@@ -9,13 +9,14 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use crate::facts::{
     AccessRow, ActionFact, ActionValue, ActionViewId, Annotation, ArchElement, ArchModifier, ArchSubview, ClassFact,
     DataFacts, DefinitionSource, DomainFact, FieldFact, FieldWrite, FunctionCall, GuardedRef, JsFacts, JsName,
-    ModelKind, OptionValue, OrmCall, Pos, RawDiag, RecordFact, RecordWrite, ReportFact, RuleFact, ServerFact, Spanned,
-    SqlColumn, SqlView, Subject, UNREAD_TYPE, ViewFact, WrittenValue, XmlDef, XmlRef,
+    MethodDef, ModelKind, OptionValue, OrmCall, Pos, RawDiag, RecordFact, RecordWrite, Refusal, ReportFact, RuleFact,
+    ServerFact, Signature, Spanned, SqlColumn, SqlView, Subject, UNREAD_TYPE, ViewFact, WrittenValue, XmlDef, XmlRef,
 };
 use crate::index::{
     BASE_MODEL_METHODS, Export, FieldDef, FieldInfo, Index, JsSpec, PathError, Placed, RELATIONAL_TYPES, Scope, Status,
     ViewTree, asset_glob_set, base_private_method, full_id, js_module_path, loaded_data, located,
 };
+use crate::mentions::HOOK_PREFIXES;
 use crate::project::{Module, SourceFile, code_loaded};
 use crate::rules::rule;
 use crate::series::{self, Series};
@@ -24,6 +25,17 @@ use crate::{flows, manifest, modifier, module_state};
 
 /// Directories of upgrade scripts, which name XML ids of past versions.
 const UPGRADE_DIRS: &[&str] = &["migrations", "upgrades"];
+
+/// The decorators that leave a hook method to run only by its name. `api.onchange` runs it by the
+/// fields it lists, and any other may register it elsewhere.
+const NAMED_HOOK_DECORATORS: &[&str] = &[
+    "api.depends",
+    "api.depends_context",
+    "api.model",
+    "api.multi",
+    "api.one",
+    "api.returns",
+];
 
 /// Types a One2many's inverse may have: an Integer holds the id of a `res_model`/`res_id` pair, and
 /// an unread type cannot be judged.
@@ -284,6 +296,42 @@ pub fn check_module<'m>(index: &Index<'m>, mi: usize, series: Option<Series>) ->
         ctx.templates(&mut out, mi);
     }
     out.diags
+}
+
+/// OD229's message: what the override of `method` refuses of the parent definition of `module`.
+fn refusal_message(method: &str, module: &str, parent: &Signature, refusal: &Refusal) -> String {
+    let parent = format!("{} in module {module}", parent.spelled(method));
+    match refusal {
+        Refusal::Lost(p) => format!(
+            "this override takes no '{}' by position, which {parent} requires, so a call that passes it fails",
+            p.name
+        ),
+        Refusal::Required(p) => format!(
+            "this override requires '{}', which {parent} does not take, so a call made for the parent fails",
+            p.name
+        ),
+        Refusal::Keyword(p) => format!(
+            "this override takes no keyword '{}', which {parent} takes, so a call that passes it fails",
+            p.name
+        ),
+    }
+}
+
+/// OD230: whether Odoo could run `name` as the hook its prefix says, by what it passes after the
+/// records. A field's search method gets the operator and the value (18.0 `odoo/fields.py:1504`), a
+/// compute, an inverse and an `@api.onchange` method nothing (`:1500`, 20.0
+/// `odoo/orm/models.py:4453`), and a view's `on_change` attribute whatever it spells (10.0
+/// `odoo/models.py:5460`). A `def` no such call fits is a helper that only shares the prefix.
+fn runs_as_hook(name: &str, signature: Option<&Signature>) -> bool {
+    let Some(prefix) = HOOK_PREFIXES.iter().find(|p| name.starts_with(**p)) else {
+        return false;
+    };
+    let count = match *prefix {
+        "onchange_" => return true,
+        "_search_" => 2,
+        _ => 0,
+    };
+    signature.is_some_and(|s| s.takes_positional(count))
 }
 
 /// Whether Odoo ignores the access rows of a model of this kind.
@@ -1559,6 +1607,8 @@ impl<'m> Ctx<'_, 'm> {
         }
         self.redefinition(out, path, class);
         self.super_calls(out, path, class);
+        self.override_signatures(out, path, class);
+        self.orphan_hooks(out, path, class);
         if self.lacks_access(class) {
             out.push(path, "OD401", class.pos, no_access_message(&class.model, self.series));
         }
@@ -1609,13 +1659,12 @@ impl<'m> Ctx<'_, 'm> {
         }
     }
 
-    /// Parents the index cannot see: a plain Python base of this class, an `_inherit` element that
-    /// is not a literal in any class of the model or of a model it inherits, a class in scope in a
-    /// file that does not parse, a module that is not indexed, a model nobody indexes, and for a
-    /// mixin, every model that inherits it.
-    fn super_calls(&self, out: &mut Out<'m>, path: &'m Path, class: &ClassFact) {
-        if class.super_calls.is_empty()
-            || !class.plain_bases.is_empty()
+    /// Whether a parent of `class` may be out of the index's sight: a plain Python base of this class,
+    /// an `_inherit` element that is not a literal in any class of the model or of a model it
+    /// inherits, a class in scope in a file that does not parse, a module that is not indexed, a
+    /// model nobody indexes, and for a mixin, every model that inherits it.
+    fn hides_parents(&self, class: &ClassFact) -> bool {
+        !class.plain_bases.is_empty()
             || self.partial
             || class.kind == ModelKind::Abstract
             || !self.index.has_model(&class.model)
@@ -1624,7 +1673,11 @@ impl<'m> Ctx<'_, 'm> {
                 .chain_read_from(&class.model, self.scope)
                 .iter()
                 .any(|(_, c)| c.inherit_unknown)
-        {
+    }
+
+    /// A `super()` call that no parent class answers, where `hides_parents` leaves every parent seen.
+    fn super_calls(&self, out: &mut Out<'m>, path: &'m Path, class: &ClassFact) {
+        if class.super_calls.is_empty() || self.hides_parents(class) {
             return;
         }
         for call in &class.super_calls {
@@ -1643,6 +1696,88 @@ impl<'m> Ctx<'_, 'm> {
                 );
             }
         }
+    }
+
+    /// An override, in a class that extends its model in place, that refuses a call each definition it
+    /// overrides takes. A new model's override may serve its own callers alone. A class that does
+    /// not parse is read with an unknown `_inherit`, so `hides_parents` covers it.
+    fn override_signatures(&self, out: &mut Out<'m>, path: &'m Path, class: &ClassFact) {
+        if class.new_model
+            || class.defs.is_empty()
+            || self.hides_parents(class)
+            || self.index.hidden_method_parents(&class.model, self.scope)
+        {
+            return;
+        }
+        let merged = self.index.merged_classes(&class.model, self.scope);
+        for def in &class.defs {
+            let name = def.name.value.as_str();
+            // Python mangles `__name` with the class's name, so it overrides nothing elsewhere.
+            if name.starts_with("__") && !name.ends_with("__") {
+                continue;
+            }
+            if let Some((mi, parent, refusal)) = self.override_refusal(class, &merged, def) {
+                let message = refusal_message(name, &self.index.modules[mi].name, parent, &refusal);
+                out.push(path, "OD229", def.name.pos, message);
+            }
+        }
+    }
+
+    /// What `def` refuses of every definition it overrides, with the module and the signature of the
+    /// one that loads first. Only the last binding of a name in the class is the method, and only
+    /// when every binding of it is a `def`.
+    fn override_refusal<'c>(
+        &self,
+        class: &'c ClassFact,
+        merged: &[(usize, &'m ClassFact)],
+        def: &'c MethodDef,
+    ) -> Option<(usize, &'m Signature, Refusal<'c>)>
+    where
+        'm: 'c,
+    {
+        let own = def.signature.as_ref()?;
+        let signature = class.signature(&def.name.value).filter(|s| std::ptr::eq(*s, own))?;
+        let parents = self.index.method_parents(self.mi, class, merged, &def.name.value)?;
+        let refusals = parents
+            .into_iter()
+            .map(|(mi, parent)| Some((mi, (parent, signature.refuses(parent)?))))
+            .collect::<Option<Vec<_>>>()?;
+        let (mi, (parent, refusal)) = self.index.first_loaded(refusals)?;
+        Some((mi, parent, refusal))
+    }
+
+    /// A hook method, in a class that extends its model in place, that Odoo never runs: the usual
+    /// trace of a parent hook renamed upstream. A new model's hooks are its own to leave unused.
+    fn orphan_hooks(&self, out: &mut Out<'m>, path: &'m Path, class: &ClassFact) {
+        if class.new_model
+            || class.defs.is_empty()
+            || self.hides_parents(class)
+            || self.index.hidden_method_parents(&class.model, self.scope)
+            || self.index.lost_mentions(self.mi)
+        {
+            return;
+        }
+        for def in class.defs.iter().filter(|d| self.orphan_hook(class, d)) {
+            let message = format!(
+                "no parent class of {} defines '{}' and no file names it, so Odoo never runs it",
+                class.model, def.name.value
+            );
+            out.push(path, "OD230", def.name.pos, message);
+        }
+    }
+
+    /// Whether `def` is a hook method that only its name could run, bound by nothing else in the
+    /// class, which no parent class defines and no file names, as far as the scan can read them.
+    fn orphan_hook(&self, class: &ClassFact, def: &MethodDef) -> bool {
+        let name = def.name.value.as_str();
+        runs_as_hook(name, def.signature.as_ref())
+            && def
+                .decorators
+                .iter()
+                .all(|d| NAMED_HOOK_DECORATORS.contains(&d.as_str()))
+            && class.methods.iter().filter(|m| *m == name).count() == 1
+            && !self.index.has_parent_method(&class.model, name, class, self.series)
+            && !self.index.names_hook(name)
     }
 
     /// Whether `first` comes before `then` in the same file of this module. The order of the files

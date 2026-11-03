@@ -1975,6 +1975,12 @@
       "count": 5
     },
     {
+      "path": "addons/pos_self_order/models/pos_config.py",
+      "code": "OD230",
+      "message": "no parent class of pos.config defines '_compute_self_order' and no file names it, so Odoo never runs it",
+      "count": 1
+    },
+    {
       "path": "addons/pos_self_order_bancontact_pay/controllers/kiosk.py",
       "code": "OD111",
       "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
@@ -2140,6 +2146,12 @@
       "path": "addons/sale/wizard/account_accrued_orders_wizard_views.xml",
       "code": "OD320",
       "message": "sale.order.line has no method 'action_open_accrual_wizard'",
+      "count": 1
+    },
+    {
+      "path": "addons/sale/wizard/res_config_settings.py",
+      "code": "OD230",
+      "message": "no parent class of res.config.settings defines '_onchange_group_discount_per_so_line' and no file names it, so Odoo never runs it",
       "count": 1
     },
     {

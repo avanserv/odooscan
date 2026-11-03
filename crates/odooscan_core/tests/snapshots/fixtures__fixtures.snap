@@ -140,6 +140,7 @@ custom/button_calls/views/calls.xml:5:42: OD314 button.order has no method '_run
 custom/button_calls/views/calls.xml:6:41: OD314 method 'action_follow' of res.partner comes from module mail, which is not in depends
 custom/button_calls/views/calls.xml:9:42: OD314 button.order has no method 'pool'
 custom/button_delegate/models/contacts.py:18:36: OD204 res.users has no method '_compute_nicknmae'
+custom/button_delegate/models/contacts.py:20:9: OD230 no parent class of res.users defines '_compute_nickname' and no file names it, so Odoo never runs it
 custom/button_delegate/static/src/contacts.js:3:43: OD604 model 'res.users' has no method 'action_contact'
 custom/button_delegate/static/src/contacts.js:4:43: OD604 model 'res.users' has no method 'action_contcat'
 custom/button_delegate/views/delegate.xml:7:45: OD312 res.users has no method 'action_contcat'
@@ -680,6 +681,14 @@ custom/orm_overrides/models/computes.py:395:9: OD223 _compute_named_child() can 
 custom/orm_overrides/models/overrides.py:7:9: OD119 write() calls super() but returns nothing, so callers get None instead of True; return what super().write() returns
 custom/orm_overrides/models/overrides.py:14:9: OD119 copy() calls super() but returns nothing, so callers get None instead of the new records; return what super().copy() returns
 custom/orm_overrides/models/overrides.py:24:5: OD117 @api.model on create() makes Odoo call it once per record; decorate it with @api.model_create_multi and take a list of dicts
+custom/orphan_hooks_ext/models/orphan_hook.py:11:9: OD230 no parent class of orphan.hook defines '_onchange_hook_partner' and no file names it, so Odoo never runs it
+custom/orphan_hooks_ext/models/orphan_hook.py:15:9: OD230 no parent class of orphan.hook defines '_compute_hook_stale' and no file names it, so Odoo never runs it
+custom/orphan_hooks_ext/models/orphan_hook.py:19:9: OD230 no parent class of orphan.hook defines '_inverse_hook_stale' and no file names it, so Odoo never runs it
+custom/orphan_hooks_ext/models/orphan_hook.py:22:9: OD230 no parent class of orphan.hook defines '_search_hook_stale' and no file names it, so Odoo never runs it
+custom/orphan_hooks_ext/models/orphan_hook.py:25:9: OD230 no parent class of orphan.hook defines 'onchange_hook_customer' and no file names it, so Odoo never runs it
+custom/orphan_hooks_ext/models/orphan_hook.py:28:9: OD230 no parent class of orphan.hook defines '_search_hook_spread' and no file names it, so Odoo never runs it
+custom/orphan_hooks_ext/models/orphan_hook.py:31:9: OD230 no parent class of orphan.hook defines 'onchange_hook_legacy' and no file names it, so Odoo never runs it
+custom/orphan_hooks_ext/models/orphan_hook.py:79:24: OD211 no parent class of orphan.hook defines '_compute_hook_super', so this super() call fails
 custom/partial_sites/__manifest__.py:5:25: OD503 module 'ghost_enterprise' is not on the addons path
 custom/partial_sites/models/sites.py:24:22: OD301 module base defines no XML id 'base.no_such_id'
 custom/partial_sites/models/sites.py:25:22: OD302 'mail.no_such_id' belongs to module mail; add it to depends
@@ -993,6 +1002,7 @@ custom/report_tag161/data/updates.xml:2:5: OD323 XML id 'tag_replaces' is alread
 custom/saas124/views/actions.xml:5:33: OD318 saas124.plain has no field activity_ids, which the activity view searches; inherit mail.activity.mixin
 custom/saas124/views/actions.xml:11:33: OD318 saas124.tracked has no primary activity view, and nothing generates one
 custom/saas125/models/res_partner.py:7:68: OD222 'home_country_id' has check_company=True, but res.country has no company_id field to check; remove check_company
+custom/saas125/models/signature.py:14:9: OD229 this override takes no 'line' by position, which _x_sign(self, order, line) in module saas125 requires, so a call that passes it fails
 custom/saas125/models/upgrade.py:7:33: OD126 oldname= no longer works from saas~12.5; use an upgrade script that renames the column
 custom/saas125/models/upgrade.py:11:21: OD125 sudo(user) is deprecated from saas~12.5; use with_user(user)
 custom/saas125/models/upgrade.py:11:39: OD125 sudo(user) is deprecated from saas~12.5; use with_user(user)
@@ -1145,6 +1155,12 @@ custom/server_code/data/updates.xml:26:5: OD323 XML id 'model_replaced' is alrea
 custom/server_code/data/updates.xml:30:5: OD323 XML id 'model_hidden' is already defined in data/first_writes.xml, and this definition overwrites the fields both name; remove the copy when the two say the same thing, or rename one when both are meant to exist
 custom/server_code/demo/rewrites.xml:15:34: OD320 server.job has no method '_nope_demo_breaks'
 custom/server_code_extension/data/updates.xml:7:34: OD320 server.job has no method '_nope_extension'
+custom/signatures_ext/models/bad_signature.py:11:9: OD229 this override takes no 'line' by position, which _prepare(self, order, line) in module signatures requires, so a call that passes it fails
+custom/signatures_ext/models/bad_signature.py:14:9: OD229 this override requires 'extra', which _stamp(self, order) in module signatures does not take, so a call made for the parent fails
+custom/signatures_ext/models/bad_signature.py:17:9: OD229 this override requires 'style', which _render(self, *, mode=None) in module signatures does not take, so a call made for the parent fails
+custom/signatures_ext/models/bad_signature.py:20:9: OD229 this override requires 'flag', which _mark(self) in module signatures does not take, so a call made for the parent fails
+custom/signatures_ext/models/bad_signature.py:58:9: OD229 this override takes no keyword 'mode', which _label(self, *, mode=None) in module signatures takes, so a call that passes it fails
+custom/signatures_ext/models/bad_signature.py:80:9: OD229 this override takes no 'line' by position, which _twice(self, order, line) in module signatures requires, so a call that passes it fails
 custom/soft_guards/models/soft_partner.py:9:48: OD210 'code': field 'code' of soft.thing comes from module soft_guards_side, which is not in depends
 custom/soft_guards/models/soft_partner.py:46:52: OD210 'code': field 'code' of soft.thing comes from module soft_guards_side, which is not in depends
 custom/soft_guards/models/soft_partner.py:50:52: OD210 'code': field 'code' of soft.thing comes from module soft_guards_side, which is not in depends

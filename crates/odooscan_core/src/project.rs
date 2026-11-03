@@ -7,6 +7,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::facts::{DataFacts, JsFacts, PyFacts, TemplateFacts};
 use crate::manifest::{self, Manifest, normalize};
+use crate::mentions::Mentions;
 use crate::series::Series;
 use crate::suppress::Suppressions;
 use crate::{csvdata, decode, js, owl, python, sql, xml};
@@ -29,6 +30,8 @@ pub struct SourceFile<T> {
     pub demo: bool,
     pub facts: T,
     pub suppressions: Suppressions,
+    /// The hook names its text mentions, comments included.
+    pub mentions: Mentions,
 }
 
 impl SourceFile<()> {
@@ -40,6 +43,7 @@ impl SourceFile<()> {
             demo: self.demo,
             facts,
             suppressions: self.suppressions,
+            mentions: self.mentions,
         }
     }
 }
@@ -60,6 +64,9 @@ pub struct Module {
     pub templates: Vec<SourceFile<TemplateFacts>>,
     /// The views the SQL files the manifest loads in the module's series create.
     pub sql_views: Vec<String>,
+    /// A file whose text may name a method could not be read: Python, XML or CSV that does not
+    /// decode, or a script or template under `static/src` that is not UTF-8.
+    pub lost_text: bool,
 }
 
 impl Module {
@@ -289,6 +296,7 @@ fn read_module(name: String, dir: PathBuf, checked: bool) -> Option<Module> {
         js: vec![],
         templates: vec![],
         sql_views: vec![],
+        lost_text: false,
     })
 }
 
@@ -315,12 +323,19 @@ struct ModuleContext<'a> {
 type ParsedFile = Result<SourceFile<PyFacts>, SourceFile<DataFacts>>;
 
 impl ModuleContext<'_> {
-    /// Reads `path`, none when it cannot be read or is Python that does not decode. A data file that
-    /// does not decode stays, since what it may define matters to the rules.
-    fn file(&self, path: PathBuf) -> Option<ParsedFile> {
-        let bytes = std::fs::read(&path).ok()?;
+    /// Reads `path`, none when it cannot be read or is Python that does not decode, and whether its
+    /// text is lost. A data file that does not decode stays, since what it may define matters to
+    /// the rules; one that decodes but does not parse keeps its text.
+    fn file(&self, path: PathBuf) -> (Option<ParsedFile>, bool) {
+        let Ok(bytes) = std::fs::read(&path) else {
+            return (None, true);
+        };
         let text = decoded(&path, &bytes, self.series);
         let text = text.as_deref();
+        (self.parsed(path, text), text.is_none())
+    }
+
+    fn parsed(&self, path: PathBuf, text: Option<&str>) -> Option<ParsedFile> {
         if path.extension().is_some_and(|e| e == "py") {
             let facts = python::analyze(text?, self.series);
             return Some(Ok(self.source(path, text)?.with(facts)));
@@ -341,6 +356,7 @@ impl ModuleContext<'_> {
             rel,
             rank,
             suppressions: suppressions.unwrap_or_default(),
+            mentions: text.map(Mentions::scan).unwrap_or_default(),
         })
     }
 
@@ -385,18 +401,23 @@ fn parse_module_files(module: &mut Module, default_series: Option<Series>) {
         checked,
     };
     let files = module_files(&module.dir);
-    let parsed: Vec<_> = files.into_par_iter().filter_map(|path| context.file(path)).collect();
-    for file in parsed {
+    let parsed: Vec<_> = files.into_par_iter().map(|path| context.file(path)).collect();
+    for (file, lost) in parsed {
+        module.lost_text |= lost;
         match file {
-            Ok(py) => module.python.push(py),
-            Err(data) => module.data.push(data),
+            Some(Ok(py)) => module.python.push(py),
+            Some(Err(data)) => module.data.push(data),
+            None => {}
         }
     }
     module
         .data
         .sort_by_key(|f| (f.rank.unwrap_or(usize::MAX), f.rel.clone()));
-    module.js = parse_static_files(&module.dir, "js", checked, js::analyze);
-    module.templates = parse_static_files(&module.dir, "xml", checked, owl::analyze);
+    let (js, lost_js) = parse_static_files(&module.dir, "js", checked, js::analyze);
+    module.js = js;
+    let (templates, lost_templates) = parse_static_files(&module.dir, "xml", checked, owl::analyze);
+    module.templates = templates;
+    module.lost_text |= lost_js || lost_templates;
     module.sql_views = sql_views(module, series);
 }
 
@@ -409,13 +430,16 @@ fn sql_views(module: &Module, series: Option<Series>) -> Vec<String> {
     texts.flat_map(|text| sql::file_views(&text)).collect()
 }
 
+/// The files of `extension` under `static/src`, and whether one of them could not be read.
 fn parse_static_files<T: Send>(
     dir: &Path,
     extension: &str,
     checked: bool,
     analyze: fn(&str) -> T,
-) -> Vec<SourceFile<T>> {
-    let mut files: Vec<_> = static_files(dir, extension)
+) -> (Vec<SourceFile<T>>, bool) {
+    let paths = static_files(dir, extension);
+    let count = paths.len();
+    let mut files: Vec<_> = paths
         .into_par_iter()
         .filter_map(|path| {
             // Odoo decodes assets as UTF-8 whatever they declare (18.0 `odoo/addons/base/models/assetsbundle.py:776`).
@@ -430,12 +454,14 @@ fn parse_static_files<T: Send>(
                     Suppressions::default()
                 },
                 facts: analyze(&text),
+                mentions: Mentions::scan(&text),
                 path,
             })
         })
         .collect();
     files.sort_by(|a, b| a.rel.cmp(&b.rel));
-    files
+    let lost = files.len() < count;
+    (files, lost)
 }
 
 #[cfg(test)]
@@ -473,6 +499,19 @@ mod tests {
         let mentions = FxHashSet::default();
         assert!(!code_loaded("views/a.xml", &mentions, &m, Series::parse("17.0")));
         assert!(code_loaded("views/a.xml", &mentions, &m, Series::parse("14.0")));
+    }
+
+    #[test]
+    fn only_a_file_that_does_not_decode_loses_its_text() {
+        let lost = |name: &str| {
+            let dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/fixtures/custom")
+                .join(name);
+            let modules = load(&[dir], &[], None).modules;
+            modules.iter().find(|m| m.name == name).unwrap().lost_text
+        };
+        assert!(!lost("encoded_broken"));
+        assert!(lost("orphan_hooks_lost"));
     }
 
     #[test]
