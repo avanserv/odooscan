@@ -1707,10 +1707,18 @@ impl<'a> BoundNames<'a> {
     }
 }
 
-/// Where each class that can give a subclass no field ends, by name. Only a class at the top of the
-/// file counts, and only until something rebinds its name: a fallback beside an import names a
-/// class the file cannot tell.
-fn fieldless_classes(body: &[Stmt]) -> FxHashMap<&str, TextSize> {
+/// A class of the file that can give a subclass no field.
+struct Fieldless<'a> {
+    end: TextSize,
+    /// The names its body binds with a `def` or an assignment, but those starting with `__`: Python
+    /// mangles a private one with this class's name, and a dunder is the object protocol's.
+    binds: Vec<&'a str>,
+}
+
+/// Each class that can give a subclass no field, by name. Only a class at the top of the file
+/// counts, and only until something rebinds its name: a fallback beside an import names a class
+/// the file cannot tell.
+fn fieldless_classes(body: &[Stmt]) -> FxHashMap<&str, Fieldless<'_>> {
     let mut classes = FxHashMap::default();
     for stmt in body {
         let mut bound = BoundNames::default();
@@ -1721,10 +1729,35 @@ fn fieldless_classes(body: &[Stmt]) -> FxHashMap<&str, TextSize> {
         if let Stmt::ClassDef(class) = stmt
             && holds_no_field(class)
         {
-            classes.insert(class.name.as_str(), class.end());
+            let binds = class_binds(class)
+                .into_iter()
+                .filter(|n| !n.starts_with("__"))
+                .collect();
+            classes.insert(
+                class.name.as_str(),
+                Fieldless {
+                    end: class.end(),
+                    binds,
+                },
+            );
         }
     }
     classes
+}
+
+/// The names the body of `class` binds with a `def` or an assignment.
+fn class_binds(class: &ast::StmtClassDef) -> Vec<&str> {
+    let mut bound = BoundNames::default();
+    for stmt in &class.body {
+        match stmt {
+            Stmt::FunctionDef(func) => bound.0.push(func.name.as_str()),
+            _ => assigned(stmt)
+                .into_iter()
+                .flat_map(|(targets, _)| targets)
+                .for_each(|t| bound.visit_expr(t)),
+        }
+    }
+    bound.0
 }
 
 /// Whether a class can give a subclass no field: no base but `object` to get one from, nothing that
@@ -1774,7 +1807,7 @@ struct PyVisitor<'a, 'ast> {
     /// Model classes of the file by Python class name.
     kinds: FxHashMap<String, ModelKind>,
     /// What `fieldless_classes` reads of the file.
-    fieldless: FxHashMap<&'ast str, TextSize>,
+    fieldless: FxHashMap<&'ast str, Fieldless<'ast>>,
     /// What each guard that code runs behind proves, outermost first.
     guarded: Vec<Proven>,
     /// The holders of a guard in reach: the outermost enclosing function's, the innermost class's.
@@ -1874,12 +1907,12 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
             .filter(|b| tail_name(b).and_then(orm_kind).is_none())
             .map(|b| b.as_name_expr().map_or("", |n| n.id.as_str()).to_owned())
             .collect();
-        let above = |base: &str| self.fieldless.get(base).is_some_and(|end| *end <= class.start());
-        let field_bases = plain_bases.iter().filter(|base| !above(base)).cloned().collect();
+        let (opaque_bases, base_methods) = self.read_bases(class, &plain_bases);
         let mut fact = ClassFact {
             kind: kind.unwrap_or(ModelKind::Model),
             plain_bases,
-            field_bases,
+            opaque_bases,
+            base_methods,
             ..ClassFact::new(self.loc.at(&class.name), class.name.to_string())
         };
         for stmt in &class.body {
@@ -1893,6 +1926,20 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
         }
         fact.unassigned_computes = self.unassigned_computes(class, &fact);
         self.named_model(fact, naming, may_reach_orm(class))
+    }
+
+    /// The `plain_bases` of `class` the scan does not read, and the names those it reads bind: the
+    /// classes its file defines above it that can hold no field.
+    fn read_bases(&self, class: &ast::StmtClassDef, plain_bases: &[String]) -> (Vec<String>, Vec<String>) {
+        let mut opaque = vec![];
+        let mut binds = vec![];
+        for base in plain_bases {
+            match self.fieldless.get(base.as_str()).filter(|f| f.end <= class.start()) {
+                Some(fieldless) => binds.extend(fieldless.binds.iter().map(|n| (*n).to_owned())),
+                None => opaque.push(base.clone()),
+            }
+        }
+        (opaque, binds)
     }
 
     /// `fact` with the model what a class says about it gives, when that gives one.
@@ -4322,22 +4369,26 @@ mod tests {
     }
 
     #[test]
-    fn keeps_a_class_of_the_file_that_holds_no_field_from_the_field_bases() {
+    fn keeps_a_class_of_the_file_that_holds_no_field_from_the_opaque_bases() {
         let class = "class X(models.Model, Layout):\n    _name = 'x'\n";
-        for layout in [
-            "class Layout:\n    pass\n",
-            "class Layout(object):\n    \"\"\"Doc.\"\"\"\n    __slots__ = ()\n    kind: str\n    def a(self):\n        pass\n",
-            "class Layout:\n    ...\n",
-            "class Layout:\n    pass\nclass Layout:\n    size = 1\n",
+        for (layout, methods) in [
+            ("class Layout:\n    pass\n", &[][..]),
+            (
+                "class Layout(object):\n    \"\"\"Doc.\"\"\"\n    __slots__ = ()\n    kind: str\n    def a(self):\n        pass\n",
+                &["a"],
+            ),
+            ("class Layout:\n    ...\n", &[]),
+            ("class Layout:\n    pass\nclass Layout:\n    size = 1\n", &["size"]),
         ] {
             let facts = analyze(&format!("{layout}{class}"), None);
             assert_eq!(facts.classes[0].plain_bases, ["Layout"], "{layout}");
-            assert!(facts.classes[0].field_bases.is_empty(), "{layout}");
+            assert!(facts.classes[0].opaque_bases.is_empty(), "{layout}");
+            assert_eq!(facts.classes[0].base_methods, methods, "{layout}");
         }
     }
 
     #[test]
-    fn keeps_a_plain_base_that_may_hold_a_field_in_the_field_bases() {
+    fn keeps_a_plain_base_that_may_hold_a_field_in_the_opaque_bases() {
         let class = "class X(models.Model, Layout):\n    _name = 'x'\n";
         for layout in [
             "",
@@ -4357,17 +4408,19 @@ mod tests {
             "class Layout:\n    pass\nclass Layout:\n    name = fields.Char()\n",
         ] {
             let facts = analyze(&format!("{layout}{class}"), None);
-            assert_eq!(facts.classes.last().unwrap().field_bases, ["Layout"], "{layout}");
+            let class = facts.classes.last().unwrap();
+            assert_eq!(class.opaque_bases, ["Layout"], "{layout}");
+            assert!(class.base_methods.is_empty(), "{layout}");
         }
     }
 
     #[test]
-    fn reads_a_class_of_the_file_below_the_class_as_a_field_base() {
+    fn reads_a_class_of_the_file_below_the_class_as_an_opaque_base() {
         let facts = analyze(
             "class X(models.Model, Layout):\n    _name = 'x'\nclass Layout:\n    pass\n",
             None,
         );
-        assert_eq!(facts.classes[0].field_bases, ["Layout"]);
+        assert_eq!(facts.classes[0].opaque_bases, ["Layout"]);
     }
 
     #[test]

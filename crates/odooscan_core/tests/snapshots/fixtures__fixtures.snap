@@ -685,6 +685,7 @@ custom/orm_overrides/models/computes.py:395:9: OD223 _compute_named_child() can 
 custom/orm_overrides/models/overrides.py:7:9: OD119 write() calls super() but returns nothing, so callers get None instead of True; return what super().write() returns
 custom/orm_overrides/models/overrides.py:14:9: OD119 copy() calls super() but returns nothing, so callers get None instead of the new records; return what super().copy() returns
 custom/orm_overrides/models/overrides.py:24:5: OD117 @api.model on create() makes Odoo call it once per record; decorate it with @api.model_create_multi and take a list of dicts
+custom/orphan_hooks_ext/models/mixed_hook.py:8:9: OD230 no parent class of mixed.hook defines '_onchange_hook_mixed' and no file names it, so Odoo never runs it
 custom/orphan_hooks_ext/models/orphan_hook.py:11:9: OD230 no parent class of orphan.hook defines '_onchange_hook_partner' and no file names it, so Odoo never runs it
 custom/orphan_hooks_ext/models/orphan_hook.py:15:9: OD230 no parent class of orphan.hook defines '_compute_hook_stale' and no file names it, so Odoo never runs it
 custom/orphan_hooks_ext/models/orphan_hook.py:19:9: OD230 no parent class of orphan.hook defines '_inverse_hook_stale' and no file names it, so Odoo never runs it
@@ -1166,6 +1167,7 @@ custom/signatures_ext/models/bad_signature.py:64:9: OD229 this override takes no
 custom/signatures_ext/models/bad_signature.py:67:9: OD229 this override requires 'line', which __vouch(self, order) in module signatures does not take, so a call made for the parent fails
 custom/signatures_ext/models/bad_signature.py:86:9: OD229 this override takes no 'line' by position, which _twice(self, order, line) in module signatures requires, so a call that passes it fails
 custom/signatures_ext/models/bad_signature.py:92:9: OD229 this override takes no 'line' by position, which _ordered(self, order, line) in module signatures requires, so a call that passes it fails
+custom/signatures_ext/models/mixed_signature.py:8:9: OD229 this override takes no 'line' by position, which _prepare(self, order, line) in module signatures requires, so a call that passes it fails
 custom/signatures_side/models/bad_signature.py:14:9: OD229 this override takes no 'order' by position, which __vouch(self, order) in module signatures requires, so a call that passes it fails
 custom/soft_guards/models/soft_partner.py:9:48: OD210 'code': field 'code' of soft.thing comes from module soft_guards_side, which is not in depends
 custom/soft_guards/models/soft_partner.py:46:52: OD210 'code': field 'code' of soft.thing comes from module soft_guards_side, which is not in depends

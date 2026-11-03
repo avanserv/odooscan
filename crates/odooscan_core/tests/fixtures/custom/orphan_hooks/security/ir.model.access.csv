@@ -1,2 +1,4 @@
 id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
 access_orphan_hook,orphan.hook,model_orphan_hook,base.group_user,1,1,1,1
+access_mixed_hook,mixed.hook,model_mixed_hook,base.group_user,1,1,1,1
+access_hidden_hook,hidden.hook,model_hidden_hook,base.group_user,1,1,1,1
