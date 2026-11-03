@@ -13,8 +13,14 @@ class ResPartnerUpgrade(models.Model):
     def _x_as_admin(self):
         return self.sudo(self.env["res.users"].browse(2)) | self.sudo(self.env["res.users"].browse(2).id)
 
-    def _x_as_caller(self, is_superuser, as_superuser):
-        return self.sudo(self.env.su) | self.sudo(is_superuser) | self.sudo(self.x_user_can_edit) | self.sudo(as_superuser)
+    def _x_as_caller(self, is_superuser, as_superuser, is_user):
+        return (
+            self.sudo(self.env.su)
+            | self.sudo(is_superuser)
+            | self.sudo(self.x_user_can_edit)
+            | self.sudo(as_superuser)
+            | self.sudo(is_user)
+        )
 
     def _x_as_root(self):
         return self.sudo(SUPERUSER_ID)

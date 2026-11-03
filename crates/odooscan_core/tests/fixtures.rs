@@ -240,7 +240,15 @@ fn asset_declarations_are_reported_from_their_series() {
 
 #[test]
 fn python_api_stages_keep_their_severity() {
-    let deprecated = ["legacy14", "legacy154", "modern19", "saas125", "saas181", "saas182"];
+    let deprecated = [
+        "legacy14",
+        "legacy154",
+        "modern19",
+        "saas125",
+        "saas132",
+        "saas181",
+        "saas182",
+    ];
     assert_eq!(
         severities("OD125"),
         deprecated.map(|m| (m.to_owned(), Severity::Warning))
