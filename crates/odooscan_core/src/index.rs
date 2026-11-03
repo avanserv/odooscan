@@ -1,4 +1,4 @@
-use globset::{GlobBuilder, GlobSetBuilder};
+use globset::{GlobBuilder, GlobSet, GlobSetBuilder};
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::facts::{
@@ -1279,21 +1279,24 @@ fn record_writes<'m, T>(
     writes
 }
 
+/// Asset globs as Odoo expands them: `*` stops at a slash. An invalid glob matches nothing.
+pub(crate) fn asset_glob_set<'g>(globs: impl IntoIterator<Item = &'g String>) -> GlobSet {
+    let mut builder = GlobSetBuilder::new();
+    for glob in globs {
+        if let Ok(g) = GlobBuilder::new(glob).literal_separator(true).build() {
+            builder.add(g);
+        }
+    }
+    builder.build().unwrap_or_else(|_| GlobSet::empty())
+}
+
 /// Files of a kind, as (module, index among the module's files of that kind).
 type Loaded = FxHashSet<(usize, usize)>;
 
 /// The scripts and the template files some bundle of an indexed manifest adds, as (module, file).
 /// Odoo expands the globs against the addons directories, so a module may add another module's files.
 fn loaded_static(modules: &[Module]) -> (Loaded, Loaded) {
-    let mut builder = GlobSetBuilder::new();
-    for glob in modules.iter().flat_map(|m| &m.manifest.assets) {
-        if let Ok(g) = GlobBuilder::new(glob).literal_separator(true).build() {
-            builder.add(g);
-        }
-    }
-    let Ok(set) = builder.build() else {
-        return Default::default();
-    };
+    let set = asset_glob_set(modules.iter().flat_map(|m| &m.manifest.assets));
     let loaded = |files: fn(&Module) -> Vec<&str>| {
         let mut loaded = FxHashSet::default();
         for (mi, module) in modules.iter().enumerate() {

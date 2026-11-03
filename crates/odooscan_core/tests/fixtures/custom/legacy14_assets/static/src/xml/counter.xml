@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<templates xml:space="preserve">
+    <t t-name="legacy14_assets.Counter">
+        <span class="o_counter" t-esc="widget.value"/>
+    </t>
+</templates>

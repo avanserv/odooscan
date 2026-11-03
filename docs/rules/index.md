@@ -137,6 +137,7 @@ XML ids, views and data records, within a file and across the dependency graph.
 | [OD325](OD325.md) | `t-esc-removed` | The server no longer renders t-esc in a QWeb view; use t-out. |
 | [OD326](OD326.md) | `kanban-box-renamed-card` | The kanban-box template of a kanban view is renamed card. |
 | [OD327](OD327.md) | `chatter-div-replaced` | A form's div with class oe_chatter no longer shows the chatter; use `<chatter/>`. |
+| [OD328](OD328.md) | `bundle-template-removed` | A data file inherits or references an asset bundle, which is no longer a template. |
 
 ## OD4: access
 
@@ -157,6 +158,8 @@ The manifest and the dependency graph: listed files, unlisted files and dependen
 | [OD502](OD502.md) | `data-file-not-loaded` | A data file is listed under no manifest key Odoo reads, so Odoo never loads it. |
 | [OD503](OD503.md) | `unknown-dependency` | A module in depends is not on the addons path. |
 | [OD504](OD504.md) | `circular-dependency` | A module in depends depends back on this module. |
+| [OD505](OD505.md) | `qweb-key-ignored` | The manifest lists templates under qweb, which Odoo ignores. |
+| [OD506](OD506.md) | `assets-qweb-unloaded` | The manifest adds files to web.assets_qweb, which Odoo no longer loads. |
 
 ## OD6: JavaScript and Owl
 

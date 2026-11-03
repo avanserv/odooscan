@@ -1,0 +1,17 @@
+<odoo>
+    <template id="assets_backend" inherit_id="web.assets_backend">
+        <xpath expr="." position="inside">
+            <script type="text/javascript" src="/saas143/static/src/js/badge.js"/>
+        </xpath>
+    </template>
+
+    <record id="assets_common" model="ir.ui.view">
+        <field name="name">saas143 common assets</field>
+        <field name="inherit_id" ref="web.assets_common"/>
+        <field name="arch" type="xml">
+            <xpath expr="." position="inside">
+                <link rel="stylesheet" href="/saas143/static/src/css/badge.css"/>
+            </xpath>
+        </field>
+    </record>
+</odoo>

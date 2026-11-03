@@ -1,7 +1,7 @@
 use ruff_python_ast::{Expr, Stmt};
 use ruff_python_parser::parse_module;
 
-use crate::facts::Spanned;
+use crate::facts::{Pos, Spanned};
 use crate::python::{Locator, str_lit};
 use crate::series::Series;
 
@@ -62,6 +62,14 @@ impl AutoInstall {
     }
 }
 
+/// A bundle of the manifest's `assets`, at its key.
+#[derive(Debug)]
+pub struct Bundle {
+    pub name: Spanned<String>,
+    /// What `asset_globs` reads from its list.
+    pub globs: Vec<String>,
+}
+
 /// The manifest keys odooscan reads, evaluated as literals; the file is never executed.
 #[derive(Debug, Default)]
 pub struct Manifest {
@@ -79,6 +87,10 @@ pub struct Manifest {
     pub countries: bool,
     /// Globs the `assets` bundles add, relative to the addons directory.
     pub assets: Vec<String>,
+    /// Each bundle `assets` gives a non-empty list.
+    pub bundles: Vec<Bundle>,
+    /// The entries of the `qweb` key, normalized, at the key, when its list names a file.
+    pub qweb: Option<Spanned<Vec<String>>>,
     /// Entries of the list keys Odoo loads nothing from, such as `other_files`, normalized.
     pub unread: Vec<String>,
 }
@@ -137,34 +149,72 @@ impl Manifest {
             .chain(plain.iter().map(String::as_str))
     }
 
-    fn set(&mut self, loc: &Locator, key: &str, value: &Expr) {
+    fn set(&mut self, loc: &Locator, key: &str, at: Pos, value: &Expr) {
         match key {
-            "version" => self.version = str_lit(value).map(str::to_owned),
-            "depends" => self.depends = list(loc, value),
-            "data" => self.data = list(loc, value),
-            "init_xml" | "update_xml" | "demo_xml" => self.set_legacy(key, names(loc, value)),
-            "demo" => self.demo = list(loc, value),
-            "category" => self.category = str_lit(value).map(str::to_owned),
-            "installable" => self.installable = !matches!(value, Expr::BooleanLiteral(b) if !b.value),
-            "assets" => self.assets = asset_globs(value),
+            "version" | "category" | "installable" => self.set_scalar(key, value),
+            "depends" | "data" | "demo" | "init_xml" | "update_xml" | "demo_xml" => self.set_files(loc, key, value),
+            "assets" => self.set_assets(loc, value),
+            "qweb" => self.set_qweb(loc, at, value),
             "auto_install" | "countries" => self.set_install(loc, key, value),
             _ => self.unread.extend(names(loc, value).iter().map(|f| normalize(f))),
         }
+    }
+
+    fn set_scalar(&mut self, key: &str, value: &Expr) {
+        match key {
+            "version" => self.version = str_lit(value).map(str::to_owned),
+            "category" => self.category = str_lit(value).map(str::to_owned),
+            "installable" => self.installable = !matches!(value, Expr::BooleanLiteral(b) if !b.value),
+            _ => {}
+        }
+    }
+
+    fn set_files(&mut self, loc: &Locator, key: &str, value: &Expr) {
+        match key {
+            "depends" => self.depends = list(loc, value),
+            "data" => self.data = list(loc, value),
+            "demo" => self.demo = list(loc, value),
+            "init_xml" => self.init_xml = names(loc, value),
+            "update_xml" => self.update_xml = names(loc, value),
+            "demo_xml" => self.demo_xml = names(loc, value),
+            _ => {}
+        }
+    }
+
+    fn set_assets(&mut self, loc: &Locator, value: &Expr) {
+        let Expr::Dict(bundles) = value else {
+            return;
+        };
+        for item in &bundles.items {
+            let Expr::List(list) = &item.value else {
+                continue;
+            };
+            let globs = asset_globs(&list.elts);
+            self.assets.extend(globs.iter().cloned());
+            let Some(key) = item.key.as_ref().filter(|_| !list.elts.is_empty()) else {
+                continue;
+            };
+            if let Some(name) = str_lit(key) {
+                let name = Spanned {
+                    value: name.to_owned(),
+                    pos: loc.at(key),
+                };
+                self.bundles.push(Bundle { name, globs });
+            }
+        }
+    }
+
+    fn set_qweb(&mut self, loc: &Locator, at: Pos, value: &Expr) {
+        let files: Vec<String> = names(loc, value).iter().map(|f| normalize(f)).collect();
+        // Odoo loads no data from `qweb`, so like any such key it exempts its files from OD502.
+        self.unread.extend(files.iter().cloned());
+        self.qweb = (!files.is_empty()).then_some(Spanned { value: files, pos: at });
     }
 
     fn set_install(&mut self, loc: &Locator, key: &str, value: &Expr) {
         match key {
             "auto_install" => self.auto_install = AutoInstall::read(value),
             "countries" => self.countries = !list(loc, value).is_empty(),
-            _ => {}
-        }
-    }
-
-    fn set_legacy(&mut self, key: &str, files: Vec<String>) {
-        match key {
-            "init_xml" => self.init_xml = files,
-            "update_xml" => self.update_xml = files,
-            "demo_xml" => self.demo_xml = files,
             _ => {}
         }
     }
@@ -182,10 +232,10 @@ pub fn parse(src: &str) -> Option<Manifest> {
         ..Manifest::default()
     };
     for item in &dict.items {
-        let Some(key) = item.key.as_ref().and_then(str_lit) else {
+        let Some((key, at)) = item.key.as_ref().and_then(|k| Some((str_lit(k)?, loc.at(k)))) else {
             continue;
         };
-        m.set(&loc, key, &item.value);
+        m.set(&loc, key, at, &item.value);
     }
     Some(m)
 }
@@ -217,17 +267,11 @@ fn list(loc: &Locator, e: &Expr) -> Vec<Spanned<String>> {
         .collect()
 }
 
-/// The globs of every bundle, whether a plain entry or the last item of an `(op, ..., glob)` one.
+/// The globs of a bundle's list, whether a plain entry or the last item of an `(op, ..., glob)` one.
 /// `include` names a bundle and `remove` takes files out, so neither adds anything.
-fn asset_globs(e: &Expr) -> Vec<String> {
-    let Expr::Dict(bundles) = e else {
-        return vec![];
-    };
-    let entries = bundles.items.iter().flat_map(|item| match &item.value {
-        Expr::List(l) => &l.elts[..],
-        _ => &[],
-    });
+fn asset_globs(entries: &[Expr]) -> Vec<String> {
     entries
+        .iter()
         .filter_map(|entry| match entry {
             Expr::Tuple(t) => {
                 let op = t.elts.first().and_then(str_lit)?;
@@ -257,6 +301,36 @@ mod tests {
         )
         .unwrap();
         assert_eq!(m.assets, ["x/static/src/**/*", "x/static/src/b.js"]);
+    }
+
+    #[test]
+    fn reads_the_bundles_and_the_qweb_key() {
+        let m = parse(
+            r#"{"qweb": ["static/src/xml/a.xml"],
+                "assets": {"web.assets_qweb": ["x/static/src/xml/*.xml"], "web.assets_tests": []}}"#,
+        )
+        .unwrap();
+        let qweb = m.qweb.unwrap();
+        assert_eq!(
+            (qweb.value, qweb.pos),
+            (vec!["static/src/xml/a.xml".to_owned()], Pos { line: 1, col: 2 })
+        );
+        let bundles: Vec<_> = m
+            .bundles
+            .iter()
+            .map(|b| (b.name.value.as_str(), b.name.pos, &b.globs[..]))
+            .collect();
+        assert_eq!(
+            bundles,
+            [(
+                "web.assets_qweb",
+                Pos { line: 2, col: 28 },
+                &["x/static/src/xml/*.xml".to_owned()][..]
+            )]
+        );
+        assert_eq!(m.unread, ["static/src/xml/a.xml"]);
+        assert!(parse(r#"{"qweb": []}"#).unwrap().qweb.is_none());
+        assert!(parse("{}").unwrap().qweb.is_none());
     }
 
     #[test]

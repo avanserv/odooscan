@@ -1,0 +1,13 @@
+<odoo>
+    <template id="assets_frontend" inherit_id="web.assets_frontend">
+        <xpath expr="." position="inside">
+            <script type="text/javascript" src="/legacy16/static/src/js/widget.js"/>
+        </xpath>
+    </template>
+
+    <template id="layout" inherit_id="web.layout">
+        <xpath expr="//div[@id='shell']" position="inside">
+            <div class="o_legacy_banner"/>
+        </xpath>
+    </template>
+</odoo>
