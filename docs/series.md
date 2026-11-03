@@ -35,7 +35,8 @@ OD322, OD503 and OD601-OD606 count as missing upstream: each reports a model, fi
 XML id, template, view element, selection value or module that the code names and nothing it
 depends on defines, or an override or hook that no longer fits its parent. Every other finding
 counts as other. With `--format text` the summary follows the
-findings, and `--statistics` prints it alone; with any other format it goes to stderr.
+findings, and `--statistics` prints it alone; with any other format it goes to stderr. `--fix`
+applies the rewrites of the target's findings, as [Fixing findings](fixing.md) describes.
 
 When no addons path entry is an Odoo checkout and no `base` module is found on the addons path or
 among the checked paths, `oscn` fetches the target's core with `git`, which must be on `PATH`. It

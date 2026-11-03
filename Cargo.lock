@@ -688,6 +688,7 @@ dependencies = [
  "odooscan_core",
  "serde",
  "serde_json",
+ "similar",
  "toml",
 ]
 

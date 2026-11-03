@@ -14,6 +14,7 @@ nav = [
     { "Series" = "series.md" },
     { "Adopting on an existing codebase" = "baseline.md" },
     { "Suppressing a finding" = "suppressing.md" },
+    { "Fixing findings" = "fixing.md" },
     { "Rules" = "rules/index.md" },
 ]
 

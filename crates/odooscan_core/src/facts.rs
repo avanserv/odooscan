@@ -2,6 +2,8 @@
 
 use std::path::PathBuf;
 
+use crate::fix::Fix;
+
 /// The type of a field the scan cannot tell: an `ir.model.fields` record gives no `ttype` it can
 /// read, or a field class's name stands for two types.
 pub(crate) const UNREAD_TYPE: &str = "Unread";
@@ -33,6 +35,7 @@ pub struct RawDiag {
     pub message: String,
     /// The path a data flow takes from its source to the finding.
     pub flow: Vec<Step>,
+    pub fix: Option<Fix>,
 }
 
 impl RawDiag {
@@ -42,6 +45,7 @@ impl RawDiag {
             pos,
             message: message.into(),
             flow: vec![],
+            fix: None,
         }
     }
 

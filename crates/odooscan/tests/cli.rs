@@ -44,6 +44,10 @@ fn file_url(path: &Path) -> String {
     }
 }
 
+fn fixtures() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../odooscan_core/tests/fixtures")
+}
+
 fn assert_rejects(out: &Output, entry: &str) {
     assert_eq!(out.status.code(), Some(2));
     let stderr = String::from_utf8_lossy(&out.stderr);
@@ -95,9 +99,8 @@ fn check_expands_a_tilde_from_the_file() {
 /// The OD203 findings of a scan of `cycles/<module>`. A stack overflow aborts the process and would
 /// take a test binary with it, so the scan is spawned: a signal gives no exit code.
 fn cycle_paths(module: &str) -> Vec<String> {
-    let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("../odooscan_core/tests/fixtures");
     let target = format!("cycles/{module}");
-    let out = check_in(&fixtures, &[&target, "--addons-path", "core"])
+    let out = check_in(&fixtures(), &[&target, "--addons-path", "core"])
         .output()
         .unwrap();
     assert_eq!(out.status.code(), Some(1), "{}", String::from_utf8_lossy(&out.stderr));
@@ -185,10 +188,9 @@ fn explain_suggests_rules_sharing_a_prefix() {
 
 /// `oscn check target/port17` against the fixture core, as of 18.0.
 fn port(args: &[&str]) -> Output {
-    let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("../odooscan_core/tests/fixtures");
     let mut all = vec!["target/port17", "--addons-path", "core", "--target-series", "18.0"];
     all.extend(args);
-    check_in(&fixtures, &all).output().unwrap()
+    check_in(&fixtures(), &all).output().unwrap()
 }
 
 const PORT_SUMMARY: &str = "Findings by kind, checked as 18.0:
@@ -296,8 +298,7 @@ fn odoo_remote(dir: &Path, branch: &str, version_info: &str) -> PathBuf {
     let remote = dir.join("odoo.git");
     fs::create_dir_all(&remote).unwrap();
     git(&remote, &["init", "-q", "-b", branch]);
-    let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("../odooscan_core/tests/fixtures");
-    copy_dir(&fixtures.join("core"), &remote.join("odoo/addons"));
+    copy_dir(&fixtures().join("core"), &remote.join("odoo/addons"));
     // The sparse patterns leave tests out.
     fs::create_dir_all(remote.join("odoo/addons/base/tests")).unwrap();
     fs::write(remote.join("odoo/addons/base/tests/__init__.py"), "").unwrap();
@@ -313,8 +314,7 @@ fn odoo_remote(dir: &Path, branch: &str, version_info: &str) -> PathBuf {
 
 /// `oscn check target/port17 --target-series <target>` with no core given, fetching from `remote`.
 fn port_fetched(remote: &Path, cache: &Path, target: &str) -> Command {
-    let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("../odooscan_core/tests/fixtures");
-    let mut command = check_in(&fixtures, &["target/port17", "--target-series", target]);
+    let mut command = check_in(&fixtures(), &["target/port17", "--target-series", target]);
     command
         .env("ODOOSCAN_ODOO_REMOTE", file_url(remote))
         .env("ODOOSCAN_CACHE_DIR", cache);
@@ -494,8 +494,7 @@ fn a_cache_inside_a_repository_ignores_its_configuration() {
 
 #[test]
 fn a_remote_starting_with_a_dash_is_an_error() {
-    let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("../odooscan_core/tests/fixtures");
-    let mut command = check_in(&fixtures, &["target/port17", "--target-series", "18.0"]);
+    let mut command = check_in(&fixtures(), &["target/port17", "--target-series", "18.0"]);
     command.env("ODOOSCAN_ODOO_REMOTE", "--upload-pack=touch x");
     let (code, _, stderr) = run(command);
     assert_eq!(code, Some(2), "{stderr}");
@@ -531,4 +530,256 @@ fn a_fetch_runs_none_of_the_users_hooks() {
     let (code, stdout, stderr) = run(command);
     assert_summary(code, &stdout, &stderr);
     assert!(!ran.exists(), "{stderr}");
+}
+
+/// The findings `--fix` rewrites in the fixture, by message.
+const FIXED: &[&str] = &[
+    "@api.multi no longer exists",
+    "group_operator is renamed",
+    "self._cr is deprecated",
+    "self._uid is deprecated",
+    "self._context is deprecated",
+    "sudo(user)",
+    "track_visibility=",
+];
+
+#[test]
+fn a_diff_writes_nothing_and_a_second_fix_changes_nothing() {
+    let dir = scratch("fix_fixtures");
+    copy_dir(&fixtures().join("custom"), &dir.join("custom"));
+    copy_dir(&fixtures().join("core"), &dir.join("core"));
+    let checked = ["custom", "--addons-path", "core"];
+    let before = contents(&dir);
+    let (code, diff, stderr) = run(check_in(&dir, &[&checked[..], &["--diff"]].concat()));
+    assert_eq!(code, Some(1), "{stderr}");
+    assert!(contents(&dir) == before, "--diff wrote");
+    insta::assert_snapshot!(diff);
+
+    let (code, _, stderr) = run(check_in(&dir, &[&checked[..], &["--fix"]].concat()));
+    assert_eq!(code, Some(1), "{stderr}");
+    assert!(stderr.contains("fixed 14 diagnostics in 7 files"), "{stderr}");
+    let fixed = contents(&dir);
+    let (_, _, stderr) = run(check_in(&dir, &[&checked[..], &["--fix"]].concat()));
+    assert!(stderr.contains("fixed 0 diagnostics in 0 files"), "{stderr}");
+    assert!(contents(&dir) == fixed, "the second --fix wrote");
+
+    let (_, stdout, _) = run(check_in(&dir, &checked));
+    let left: Vec<&str> = stdout.lines().filter(|l| FIXED.iter().any(|m| l.contains(m))).collect();
+    assert!(left.is_empty(), "{left:?}");
+}
+
+/// A module of `series` named `name` under `dir/mods`, holding `files` under `models/`.
+fn module(dir: &Path, name: &str, series: &str, files: &[(&str, &[u8])]) -> PathBuf {
+    let root = dir.join("mods").join(name);
+    fs::create_dir_all(root.join("models")).unwrap();
+    let manifest = format!("{{\"name\": \"{name}\", \"version\": \"{series}.1.0.0\", \"depends\": [\"base\"]}}\n");
+    fs::write(root.join("__manifest__.py"), manifest).unwrap();
+    for (file, bytes) in files {
+        fs::write(root.join("models").join(file), bytes).unwrap();
+    }
+    root.join("models")
+}
+
+const AVERAGED: &str = "from odoo import fields, models\n\n\nclass X(models.Model):\n    _inherit = 'res.partner'\n\n    x = fields.Float(group_operator='avg')\n";
+
+#[test]
+fn a_fix_keeps_the_bom_and_the_crlf_line_ends() {
+    let dir = scratch("fix_bytes");
+    let src = "\u{feff}from odoo import api, fields, models\r\n\r\n\r\nclass X(models.Model):\r\n    _inherit = 'res.partner'\r\n\r\n    x = fields.Float(group_operator='avg')\r\n\r\n    @api.multi\r\n    def f(self):\r\n        return self\r\n";
+    let models = module(&dir, "bytes", "18.0", &[("x.py", src.as_bytes())]);
+    let (code, _, stderr) = run(check_in(&dir, &["mods", "--fix"]));
+    assert_eq!(code, Some(0), "{stderr}");
+    let expected = "\u{feff}from odoo import api, fields, models\r\n\r\n\r\nclass X(models.Model):\r\n    _inherit = 'res.partner'\r\n\r\n    x = fields.Float(aggregator='avg')\r\n\r\n    def f(self):\r\n        return self\r\n";
+    assert_eq!(
+        String::from_utf8(fs::read(models.join("x.py")).unwrap()).unwrap(),
+        expected
+    );
+}
+
+#[test]
+fn baselined_and_suppressed_findings_stay_unfixed() {
+    let dir = scratch("fix_hidden");
+    let models = module(&dir, "hidden", "18.0", &[("baselined.py", AVERAGED.as_bytes())]);
+    let (code, _, stderr) = run(check_in(&dir, &["mods", "--write-baseline"]));
+    assert_eq!(code, Some(0), "{stderr}");
+    let suppressed = AVERAGED.replace("'avg')", "'avg')  # odooscan: ignore[OD108]");
+    fs::write(models.join("suppressed.py"), &suppressed).unwrap();
+    fs::write(models.join("reported.py"), AVERAGED).unwrap();
+    let baseline = "--baseline=odooscan-baseline.json";
+    let (code, _, stderr) = run(check_in(&dir, &["mods", baseline, "--fix"]));
+    assert_eq!(code, Some(0), "{stderr}");
+    let read = |file: &str| fs::read_to_string(models.join(file)).unwrap();
+    assert_eq!(read("baselined.py"), AVERAGED);
+    assert_eq!(read("suppressed.py"), suppressed);
+    assert_eq!(read("reported.py"), AVERAGED.replace("group_operator", "aggregator"));
+    assert_eq!(stderr.matches("the baseline hid").count(), 1, "{stderr}");
+    // Nothing is left to write, so the findings come from the one scan.
+    let (code, _, stderr) = run(check_in(&dir, &["mods", baseline, "--fix"]));
+    assert_eq!(code, Some(0), "{stderr}");
+    assert_eq!(stderr.matches("the baseline hid").count(), 1, "{stderr}");
+}
+
+#[test]
+fn a_finding_of_the_target_series_only_is_fixed_under_it() {
+    let dir = scratch("fix_target");
+    let models = module(&dir, "port", "17.0", &[("x.py", AVERAGED.as_bytes())]);
+    let core = fixtures().join("core");
+    let core = core.to_str().unwrap();
+    let (code, _, stderr) = run(check_in(&dir, &["mods", "--addons-path", core, "--fix"]));
+    assert_eq!(
+        (code, fs::read_to_string(models.join("x.py")).unwrap()),
+        (Some(0), AVERAGED.to_owned()),
+        "{stderr}"
+    );
+    let (code, _, stderr) = run(check_in(
+        &dir,
+        &["mods", "--addons-path", core, "--target-series", "18.0", "--fix"],
+    ));
+    assert_eq!(code, Some(0), "{stderr}");
+    assert_eq!(
+        fs::read_to_string(models.join("x.py")).unwrap(),
+        AVERAGED.replace("group_operator", "aggregator")
+    );
+}
+
+#[test]
+fn fix_and_diff_refuse_the_flags_they_cannot_honour() {
+    let dir = scratch("fix_conflicts");
+    module(&dir, "conflicts", "18.0", &[("x.py", AVERAGED.as_bytes())]);
+    for flags in [
+        &["--fix", "--diff"][..],
+        &["--diff", "--format", "json"],
+        &["--diff", "--statistics"],
+        &["--fix", "--write-baseline"],
+        &["--diff", "--write-baseline"],
+    ] {
+        let (code, _, stderr) = run(check_in(&dir, &[&["mods"][..], flags].concat()));
+        assert_eq!(code, Some(2), "{flags:?}");
+        assert!(stderr.contains("cannot be used with"), "{flags:?}: {stderr}");
+    }
+    assert_eq!(
+        fs::read_to_string(dir.join("mods/conflicts/models/x.py")).unwrap(),
+        AVERAGED
+    );
+    assert!(!dir.join("odooscan-baseline.json").exists());
+}
+
+/// Dropping `@api.multi` moves the lines below it, and `with_user` the columns after it.
+const MOVED: &str = "from odoo import api, models\n\n\nclass X(models.Model):\n    _inherit = 'res.partner'\n\n    @api.multi\n    def f(self, q, user):\n        self._cr.execute('SELECT %s' % q)\n        return self.sudo(user).flush()\n";
+
+#[test]
+fn a_fix_reports_the_findings_left_where_they_now_are() {
+    let dir = scratch("fix_positions");
+    module(&dir, "moved", "19.0", &[("x.py", MOVED.as_bytes())]);
+    let (code, fixed, stderr) = run(check_in(&dir, &["mods", "--fix"]));
+    assert_eq!(code, Some(1), "{stderr}");
+    assert!(fixed.contains("x.py:9:37: OD126 flush()"), "{fixed}");
+    let (_, checked, _) = run(check_in(&dir, &["mods"]));
+    assert_eq!(fixed, checked);
+}
+
+/// The names in `dir` but those of `kept`, to show that a fix left nothing beside the file.
+fn left_beside(dir: &Path, kept: &[&str]) -> Vec<String> {
+    let mut names: Vec<String> = fs::read_dir(dir)
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .filter(|n| !kept.contains(&n.as_str()))
+        .collect();
+    names.sort();
+    names
+}
+
+#[cfg(unix)]
+#[test]
+fn a_failed_write_exits_2_and_leaves_the_file_whole() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = scratch("fix_unwritable");
+    let models = module(&dir, "unwritable", "18.0", &[("x.py", AVERAGED.as_bytes())]);
+    // The file can be written, but nothing can be created beside it.
+    fs::set_permissions(&models, fs::Permissions::from_mode(0o555)).unwrap();
+    let (code, stdout, stderr) = run(check_in(&dir, &["mods", "--fix"]));
+    fs::set_permissions(&models, fs::Permissions::from_mode(0o755)).unwrap();
+    assert_eq!((code, stdout.as_str()), (Some(2), ""), "{stderr}");
+    assert!(stderr.contains("error: ") && stderr.contains("x.py: "), "{stderr}");
+    assert_eq!(fs::read_to_string(models.join("x.py")).unwrap(), AVERAGED);
+    assert_eq!(left_beside(&models, &["x.py"]), Vec::<String>::new());
+}
+
+#[cfg(unix)]
+#[test]
+fn a_fix_keeps_the_mode_and_leaves_nothing_beside_the_file() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = scratch("fix_mode");
+    let models = module(&dir, "mode", "18.0", &[("x.py", AVERAGED.as_bytes())]);
+    fs::set_permissions(models.join("x.py"), fs::Permissions::from_mode(0o640)).unwrap();
+    let (code, _, stderr) = run(check_in(&dir, &["mods", "--fix"]));
+    assert_eq!(code, Some(0), "{stderr}");
+    let fixed = models.join("x.py");
+    assert_eq!(
+        fs::read_to_string(&fixed).unwrap(),
+        AVERAGED.replace("group_operator", "aggregator")
+    );
+    assert_eq!(fs::metadata(&fixed).unwrap().permissions().mode() & 0o777, 0o640);
+    assert_eq!(left_beside(&models, &["x.py"]), Vec::<String>::new());
+}
+
+#[cfg(unix)]
+#[test]
+fn a_link_planted_where_the_rewrite_goes_is_not_written_through() {
+    let dir = scratch("fix_planted");
+    let models = module(&dir, "planted", "18.0", &[("x.py", AVERAGED.as_bytes())]);
+    let target = dir.join("bashrc");
+    fs::write(&target, "export A=1\n").unwrap();
+    let planted = models.join(".x.py.oscn-fix");
+    std::os::unix::fs::symlink(&target, &planted).unwrap();
+    let (code, _, stderr) = run(check_in(&dir, &["mods", "--fix"]));
+    assert_eq!(code, Some(0), "{stderr}");
+    assert_eq!(fs::read_link(&planted).unwrap(), target);
+    assert_eq!(fs::read_to_string(&target).unwrap(), "export A=1\n");
+    let fixed = models.join("x.py");
+    assert!(fs::symlink_metadata(&fixed).unwrap().is_file());
+    assert_eq!(
+        fs::read_to_string(&fixed).unwrap(),
+        AVERAGED.replace("group_operator", "aggregator")
+    );
+    assert_eq!(left_beside(&models, &["x.py", ".x.py.oscn-fix"]), Vec::<String>::new());
+}
+
+#[test]
+fn a_read_only_file_is_left_alone_with_a_notice() {
+    let dir = scratch("fix_read_only");
+    let models = module(&dir, "read_only", "18.0", &[("x.py", AVERAGED.as_bytes())]);
+    let file = models.join("x.py");
+    let writable = fs::metadata(&file).unwrap().permissions();
+    let mut read_only = writable.clone();
+    read_only.set_readonly(true);
+    fs::set_permissions(&file, read_only).unwrap();
+    let (code, _, stderr) = run(check_in(&dir, &["mods", "--fix"]));
+    // Windows refuses to remove a read-only file, so the next run's scratch could not.
+    fs::set_permissions(&file, writable).unwrap();
+    assert_eq!(code, Some(1), "{stderr}");
+    assert!(stderr.contains("x.py is not writable; not fixed"), "{stderr}");
+    assert_eq!(fs::read_to_string(&file).unwrap(), AVERAGED);
+    assert_eq!(left_beside(&models, &["x.py"]), Vec::<String>::new());
+}
+
+#[cfg(unix)]
+#[test]
+fn a_file_with_other_hard_links_is_left_alone_with_a_notice() {
+    let dir = scratch("fix_hard_link");
+    let models = module(&dir, "hard_link", "18.0", &[("x.py", AVERAGED.as_bytes())]);
+    fs::hard_link(models.join("x.py"), dir.join("other.py")).unwrap();
+    let (code, _, stderr) = run(check_in(&dir, &["mods", "--fix"]));
+    assert_eq!(code, Some(1), "{stderr}");
+    assert!(stderr.contains("x.py has other hard links; not fixed"), "{stderr}");
+    assert_eq!(fs::read_to_string(models.join("x.py")).unwrap(), AVERAGED);
+}
+
+#[test]
+fn a_diff_of_nothing_reported_exits_0() {
+    let dir = scratch("fix_clean");
+    let clean = AVERAGED.replace("group_operator", "aggregator");
+    module(&dir, "clean", "18.0", &[("x.py", clean.as_bytes())]);
+    let (code, stdout, stderr) = run(check_in(&dir, &["mods", "--diff"]));
+    assert_eq!((code, stdout.as_str()), (Some(0), ""), "{stderr}");
 }

@@ -1,6 +1,7 @@
 mod baseline;
 mod config;
 mod fetch;
+mod fixes;
 mod output;
 
 use std::io::{IsTerminal, Write};
@@ -11,7 +12,7 @@ use std::time::Instant;
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use odooscan_core::rules::RULES;
 use odooscan_core::series::Series;
-use odooscan_core::{Diagnostic, ScanOptions, scan};
+use odooscan_core::{Diagnostic, Report, ScanOptions, scan};
 
 use crate::baseline::Baseline;
 use crate::config::{Config, Exclude};
@@ -76,6 +77,12 @@ struct CheckArgs {
     /// Print a count per rule instead of each diagnostic.
     #[arg(long)]
     statistics: bool,
+    /// Rewrite the reported findings that have a mechanical fix, then report the rest.
+    #[arg(long, conflicts_with_all = ["diff", "write_baseline"])]
+    fix: bool,
+    /// Print the rewrites of --fix as a unified diff instead of the findings, and write nothing.
+    #[arg(long, conflicts_with_all = ["format", "statistics", "write_baseline"])]
+    diff: bool,
 }
 
 #[derive(Clone, Copy, ValueEnum)]
@@ -226,21 +233,30 @@ fn check(args: &CheckArgs) -> ExitCode {
         }
     };
     let report = scan(&settings.scan);
-    let mut diags: Vec<&Diagnostic> = report.diagnostics.iter().filter(|d| settings.reports(d)).collect();
     for notice in &report.notices {
         eprintln!("notice: {notice}");
     }
     if let (Some(path), true) = (&settings.baseline, args.write_baseline) {
+        let diags: Vec<&Diagnostic> = report.diagnostics.iter().filter(|d| settings.reports(d)).collect();
         return write_baseline(path, &diags);
     }
-    if let Some(path) = &settings.baseline
-        && let Err(e) = apply_baseline(path, &mut diags)
-    {
-        eprintln!("error: {e}");
-        return ExitCode::from(2);
+    let diags = match reported(&settings, &report, true) {
+        Ok(diags) => diags,
+        Err(exit) => return exit,
+    };
+    if args.diff {
+        return fixes::diff(&diags, &|p| relative(&cwd, p));
     }
-    print(args, &diags, &cwd);
-    print_summary(args, &diags);
+    if args.fix {
+        return fix(args, &settings, &report, &diags, &cwd, started);
+    }
+    finish(args, &report, &diags, &cwd, started)
+}
+
+/// Prints `diags` and the summary line of the check of `report`, and exits by whether any is left.
+fn finish(args: &CheckArgs, report: &Report, diags: &[&Diagnostic], cwd: &Path, started: Instant) -> ExitCode {
+    print(args, diags, cwd);
+    print_summary(args, diags);
     eprintln!(
         "{} diagnostics in {} modules ({} indexed, {} files) in {:.2?}",
         diags.len(),
@@ -256,16 +272,44 @@ fn check(args: &CheckArgs) -> ExitCode {
     }
 }
 
+/// The findings of `report` that the settings select and the baseline does not hold. `notify`
+/// prints what the baseline hid, which a scan after `--fix` would repeat.
+fn reported<'r>(settings: &Settings, report: &'r Report, notify: bool) -> Result<Vec<&'r Diagnostic>, ExitCode> {
+    let mut diags: Vec<&Diagnostic> = report.diagnostics.iter().filter(|d| settings.reports(d)).collect();
+    if let Some(path) = &settings.baseline
+        && let Err(e) = apply_baseline(path, &mut diags, notify)
+    {
+        eprintln!("error: {e}");
+        return Err(ExitCode::from(2));
+    }
+    Ok(diags)
+}
+
+/// Writes the fixes of `diags`, the findings of `report`, then reports the findings left. After a
+/// write, those are what a fresh scan finds, since the findings left in a rewritten file moved.
+fn fix(
+    args: &CheckArgs,
+    settings: &Settings,
+    report: &Report,
+    diags: &[&Diagnostic],
+    cwd: &Path,
+    started: Instant,
+) -> ExitCode {
+    match fixes::write(diags, &|p| relative(cwd, p)) {
+        Err(exit) => exit,
+        Ok(false) => finish(args, report, diags, cwd, started),
+        Ok(true) => {
+            let fresh = scan(&settings.scan);
+            match reported(settings, &fresh, false) {
+                Ok(left) => finish(args, &fresh, &left, cwd, started),
+                Err(exit) => exit,
+            }
+        }
+    }
+}
+
 fn print(args: &CheckArgs, diags: &[&Diagnostic], cwd: &Path) {
-    // Scanning `.` yields `./a/b.py`, which GitLab and GitHub do not match to the file `a/b.py`.
-    let rel = |p: &Path| {
-        let p = p.strip_prefix(cwd).unwrap_or(p);
-        p.components()
-            .filter(|c| *c != Component::CurDir)
-            .collect::<PathBuf>()
-            .display()
-            .to_string()
-    };
+    let rel = |p: &Path| relative(cwd, p);
     let mut stdout = std::io::stdout().lock();
     match args.format {
         // The upgrade summary carries the same counts.
@@ -283,6 +327,17 @@ fn print(args: &CheckArgs, diags: &[&Diagnostic], cwd: &Path) {
             let _ = serde_json::to_writer_pretty(&mut stdout, &output::gitlab(diags, &rel));
         }
     }
+}
+
+/// `p` relative to `cwd`, without `.` components. Scanning `.` yields `./a/b.py`, which GitLab and
+/// GitHub do not match to the file `a/b.py`.
+fn relative(cwd: &Path, p: &Path) -> String {
+    let p = p.strip_prefix(cwd).unwrap_or(p);
+    p.components()
+        .filter(|c| *c != Component::CurDir)
+        .collect::<PathBuf>()
+        .display()
+        .to_string()
 }
 
 /// With a target series, the upgrade summary: after the findings as text, otherwise on stderr so
@@ -316,14 +371,14 @@ fn write_baseline(path: &Path, diags: &[&Diagnostic]) -> ExitCode {
     }
 }
 
-fn apply_baseline(path: &Path, diags: &mut Vec<&Diagnostic>) -> Result<(), String> {
+fn apply_baseline(path: &Path, diags: &mut Vec<&Diagnostic>, notify: bool) -> Result<(), String> {
     let mut baseline = Baseline::read(path)?;
     let hidden = baseline.hide(diags);
-    if hidden > 0 {
+    if notify && hidden > 0 {
         eprintln!("notice: the baseline hid {hidden} findings");
     }
     let stale = baseline.stale();
-    if stale > 0 {
+    if notify && stale > 0 {
         eprintln!("notice: {stale} findings in the baseline are fixed; run with --write-baseline to drop them");
     }
     Ok(())
