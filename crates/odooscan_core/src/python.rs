@@ -1803,6 +1803,9 @@ struct PyVisitor<'a, 'ast> {
     odoo_names: Vec<&'ast str>,
     /// The names the file's imports from `ORM_PACKAGES` bind at import, each with its dotted path.
     orm_names: Vec<(&'ast str, String)>,
+    /// Where the method name starts in each `super()` call of the overridden method made by an
+    /// override `api_table` reports. That finding covers the call of the method's name.
+    covered_supers: FxHashSet<TextSize>,
 }
 
 impl<'a, 'ast> PyVisitor<'a, 'ast> {
@@ -1834,6 +1837,7 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
                 .iter()
                 .flat_map(|package| module_state::imported_names(&top, package))
                 .collect(),
+            covered_supers: FxHashSet::default(),
         }
     }
 
@@ -1974,7 +1978,7 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
         }
         let mut calls = SuperCalls::default();
         calls.visit_body(&func.body);
-        self.method_checks(func, fact);
+        self.method_checks(func, fact, &calls.calls);
         self.override_checks(func, &calls.calls);
         if calls.calls.iter().any(|(name, ..)| *name == func.name.as_str()) {
             fact.extended.push(func.name.to_string());
@@ -2381,7 +2385,7 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
         }
     }
 
-    fn method_checks(&mut self, func: &ast::StmtFunctionDef, fact: &mut ClassFact) {
+    fn method_checks(&mut self, func: &ast::StmtFunctionDef, fact: &mut ClassFact, supers: &[(&str, TextSize, bool)]) {
         self.decorator_checks(func, fact);
         let name = func.name.as_str();
         if name == "fields_view_get" {
@@ -2398,7 +2402,7 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
                 "name_get() is no longer called; override _compute_display_name() instead",
             );
         }
-        self.api_definitions(func);
+        self.api_definitions(func, supers);
         if SUPER_REQUIRED.contains(&name) && !body_contains(&func.body, None) {
             self.diag(
                 "OD105",
@@ -2411,14 +2415,17 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
     }
 
     /// The method definitions `api_table` has a row for: an override of its name, or an onchange
-    /// returning its key in a literal dict.
-    fn api_definitions(&mut self, func: &ast::StmtFunctionDef) {
+    /// returning its key in a literal dict. A reported override covers its `super()` calls of the
+    /// method it overrides, which would report the same form again.
+    fn api_definitions(&mut self, func: &ast::StmtFunctionDef, supers: &[(&str, TextSize, bool)]) {
         let name = func.name.as_str();
         let overridden = api_table::ROWS
             .iter()
             .find(|row| matches!(row.kind, Kind::Override(m) if m == name));
         if let Some((code, message)) = overridden.and_then(|row| api_table::stage(row, self.series)) {
             self.diag(code, &func.name, message);
+            let same = supers.iter().filter(|(called, ..)| *called == name);
+            self.covered_supers.extend(same.map(|(_, at, _)| *at));
         }
         let onchange = |d: &ast::Decorator| matches!(&d.expression, Expr::Call(c) if is_api(&c.func, "onchange"));
         if func.decorator_list.iter().any(onchange)
@@ -2664,7 +2671,8 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
         self.created_views(call);
     }
 
-    /// The calls `api_table` has a row for, but those of a method the class defines itself.
+    /// The calls `api_table` has a row for, but those of a method the class defines itself, and
+    /// the method name of a `super()` call a reported override covers.
     fn api_calls(&mut self, call: &ast::ExprCall) {
         let Expr::Attribute(a) = &*call.func else { return };
         if a.attr.as_str() == "sudo" && call.arguments.args.first().is_some_and(names_user) {
@@ -2676,17 +2684,41 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
             return;
         }
         for row in api_table::ROWS {
-            if let Some(range) = self.api_call_range(row.kind, call, a) {
-                let found = if passes_false(row, call) {
-                    api_table::stage_if_false(row, self.series)
-                } else {
-                    api_table::stage(row, self.series)
-                };
-                if let Some((code, message)) = found {
-                    self.diag(code, &range, message);
-                }
+            if self.covered_super(row.kind, a) {
+                continue;
+            }
+            if let Some(range) = self.api_call_range(row.kind, call, a)
+                && let Some((code, message)) = self.row_stage(row, call, a)
+            {
+                self.diag(code, &range, message);
             }
         }
+    }
+
+    /// The stage of a call matching the row, with the advice for the argument it passes.
+    fn row_stage(
+        &self,
+        row: &api_table::Row,
+        call: &ast::ExprCall,
+        a: &ast::ExprAttribute,
+    ) -> Option<(&'static str, String)> {
+        if passes_false(row, call) {
+            api_table::stage_if_false(row, self.series)
+        } else if row.if_negative.is_some() && self.writes_negative(row.kind, call, a) {
+            api_table::stage_if_negative(row, self.series)
+        } else {
+            api_table::stage(row, self.series)
+        }
+    }
+
+    /// Whether the call writes a literal negative number as the field of a written-field row.
+    fn writes_negative(&self, kind: Kind, call: &ast::ExprCall, a: &ast::ExprAttribute) -> bool {
+        let Kind::WrittenField(model, field) = kind else {
+            return false;
+        };
+        self.written_field(call, &a.value, model, field).is_some_and(|item| {
+            matches!(&item.value, Expr::UnaryOp(u) if u.op == UnaryOp::USub && u.operand.is_number_literal_expr())
+        })
     }
 
     /// The range to report when the call matches the row's form: the method name, the first
@@ -2707,14 +2739,23 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
     fn passed_key_range(&self, kind: Kind, call: &ast::ExprCall, a: &ast::ExprAttribute) -> Option<TextRange> {
         match (kind, a.attr.as_str()) {
             (Kind::ContextKey(key), "with_context") => context_key(call, key),
-            (Kind::WrittenField(model, field), "create" | "write") => self.written_field(call, &a.value, model, field),
+            (Kind::WrittenField(model, field), "create" | "write") => {
+                let item = self.written_field(call, &a.value, model, field)?;
+                item.key.as_ref().map(Ranged::range)
+            }
             _ => None,
         }
     }
 
-    /// The key that names `field` in the literal values a `create()` or `write()` on `model`
+    /// The item that names `field` in the literal values a `create()` or `write()` on `model`
     /// writes: a dict, or the first dict of a list or tuple that names it.
-    fn written_field(&self, call: &ast::ExprCall, receiver: &Expr, model: &str, field: &str) -> Option<TextRange> {
+    fn written_field<'c>(
+        &self,
+        call: &'c ast::ExprCall,
+        receiver: &Expr,
+        model: &str,
+        field: &str,
+    ) -> Option<&'c ast::DictItem> {
         if self.receiver_model(receiver).as_deref() != Some(model) {
             return None;
         }
@@ -2722,7 +2763,13 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
         let mut dicts = domain::items(values)
             .map_or(std::slice::from_ref(values), |items| items)
             .iter();
-        dicts.find_map(|d| method_body::dict_key(d, field)).map(Ranged::range)
+        dicts.find_map(|d| method_body::dict_item(d, field))
+    }
+
+    /// Whether the row is the call of the method a reported override overrides, at a `super()` call
+    /// of that override. The keywords such a call passes stay reported, as they fail on their own.
+    fn covered_super(&self, kind: Kind, a: &ast::ExprAttribute) -> bool {
+        matches!(kind, Kind::Method(m) if m == a.attr.as_str()) && self.covered_supers.contains(&a.attr.start())
     }
 
     /// Whether `expr` is `self` in a method of a model class, mixins included, or a model the code
@@ -5394,9 +5441,9 @@ mod tests {
                    self.user_has_groups('base.group_user')\n        self.env['y'].refresh()\n        self.flush()\n\n\
                    class Y(models.Model):\n    _inherit = 'y'\n\n    def refresh(self):\n        \
                    return super().refresh()\n\n    def f(self):\n        self.refresh()\n";
-        let facts = analyze(src, Series::parse("16.0"));
+        let facts = analyze(src, Series::parse("saas~17.2"));
         let found: Vec<_> = facts.diags.iter().map(|d| (d.code, d.pos.line)).collect();
-        assert_eq!(found, [("OD125", 16), ("OD125", 17), ("OD125", 26)]);
+        assert_eq!(found, [("OD126", 16), ("OD126", 17), ("OD126", 26)]);
     }
 
     #[test]
@@ -5459,6 +5506,18 @@ mod tests {
     }
 
     #[test]
+    fn a_numbercall_without_limit_is_advised_away() {
+        let message = |value: &str| {
+            let src = format!("def f(env, n):\n    return env['ir.cron'].create([{{'numbercall': {value}}}])\n");
+            analyze(&src, Series::parse("saas~17.3")).diags[0].message.clone()
+        };
+        assert!(message("-1").ends_with("; remove it, as a cron repeats until deactivated"));
+        for value in ["1", "0", "n", "-n"] {
+            assert!(message(value).ends_with("; use active=False or _trigger()"), "{value}");
+        }
+    }
+
+    #[test]
     fn an_onchange_returning_a_domain_warns_then_fails() {
         let src = |decorator: &str| {
             format!(
@@ -5494,6 +5553,40 @@ mod tests {
         );
         let plain = "class Helper:\n    def _name_search(self, name):\n        return []\n";
         assert_eq!(codes(plain, Series::parse("18.0")), [""; 0]);
+    }
+
+    #[test]
+    fn an_override_of_read_group_is_reported_once_for_its_super_call() {
+        let src = |method: &str, sup: &str| {
+            format!(
+                "class X(models.Model):\n    _inherit = 'x'\n\n    def {method}(self, domain, fields, groupby):\n        \
+                 return {sup}.read_group(domain, fields, groupby)\n"
+            )
+        };
+        for series in ["saas~18.2", "saas~19.2"] {
+            for sup in ["super()", "super(X, self)"] {
+                let found: Vec<_> = analyze(&src("read_group", sup), Series::parse(series))
+                    .diags
+                    .iter()
+                    .map(|d| (d.pos.line, d.message.starts_with("overriding")))
+                    .collect();
+                assert_eq!(found, [(4, true)], "{sup} on {series}");
+            }
+            let other = analyze(&src("_x_totals", "super()"), Series::parse(series));
+            assert_eq!(
+                other.diags.iter().map(|d| d.pos.line).collect::<Vec<_>>(),
+                [5],
+                "{series}"
+            );
+        }
+        let keyword = "class X(models.Model):\n    _inherit = 'x'\n\n    def read_group(self, domain, groupby, lazy=True):\n        \
+                       return super().read_group(domain, groupby=groupby, lazy=lazy)\n";
+        let found: Vec<_> = analyze(keyword, Series::parse("20.0"))
+            .diags
+            .iter()
+            .map(|d| (d.code, d.pos.line, d.message.starts_with("read_group(fields=")))
+            .collect();
+        assert_eq!(found, [("OD126", 4, false), ("OD126", 5, true)]);
     }
 
     #[test]

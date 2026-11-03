@@ -18,8 +18,8 @@ pub(crate) enum Kind {
     SudoUser,
     /// A keyword of `with_context()`, or a key of the literal dict it is given.
     ContextKey(&'static str),
-    /// A key of the literal dict, or of each literal dict of a list, that `create()` or `write()`
-    /// writes on the model, with the field.
+    /// A key of the literal dict, or of the first literal dict of a list naming the field, that
+    /// `create()` or `write()` writes on the model, with the field.
     WrittenField(&'static str, &'static str),
     /// A key of a literal dict an `@api.onchange` method returns.
     OnchangeKey(&'static str),
@@ -51,6 +51,8 @@ pub(crate) struct Row {
     instead_before: Option<(Series, &'static str)>,
     /// The argument whose `False` changes what the call does, and the advice for such a call.
     pub if_false: Option<IfFalse>,
+    /// The advice for a written field given a negative number.
+    pub if_negative: Option<&'static str>,
 }
 
 /// An argument of a call, by keyword or position, and the advice for a call passing `False` there.
@@ -80,6 +82,7 @@ const fn row(
         instead,
         instead_before: None,
         if_false: None,
+        if_negative: None,
     }
 }
 
@@ -183,16 +186,20 @@ pub(crate) static ROWS: &[Row] = &[
         at(17, 2),
         "use self.env.user.has_groups()",
     ),
-    // saas~17.2 ir.cron has both fields (`odoo/addons/base/models/ir_cron.py:67`), and from
-    // saas~17.3 create() and write() raise on a field the model lacks (`odoo/models.py:4437`,
-    // `:4683`), while _trigger() schedules a run (`ir_cron.py:636`).
-    row(
-        Kind::WrittenField("ir.cron", "numbercall"),
-        "writing numbercall on ir.cron",
-        None,
-        at(17, 3),
-        "use active=False or _trigger()",
-    ),
+    // saas~17.2 ir.cron has both fields (`odoo/addons/base/models/ir_cron.py:67`), a negative
+    // numbercall meaning no limit, and from saas~17.3 create() and write() raise on a field the
+    // model lacks (`odoo/models.py:4437`, `:4683`), while _trigger() schedules a run
+    // (`ir_cron.py:636`) and a run reschedules the cron with no count (`ir_cron.py:508`).
+    Row {
+        if_negative: Some("remove it, as a cron repeats until deactivated"),
+        ..row(
+            Kind::WrittenField("ir.cron", "numbercall"),
+            "writing numbercall on ir.cron",
+            None,
+            at(17, 3),
+            "use active=False or _trigger()",
+        )
+    },
     row(
         Kind::WrittenField("ir.cron", "doall"),
         "writing doall on ir.cron",
@@ -317,6 +324,11 @@ pub(crate) fn stage(row: &Row, series: Option<Series>) -> Option<(&'static str, 
 /// `stage` for a call that passes `False` where `row.if_false` reads it.
 pub(crate) fn stage_if_false(row: &Row, series: Option<Series>) -> Option<(&'static str, String)> {
     staged(row, series, row.if_false.as_ref().map(|f| f.instead))
+}
+
+/// `stage` for a written field given a negative number, where `row.if_negative` has advice.
+pub(crate) fn stage_if_negative(row: &Row, series: Option<Series>) -> Option<(&'static str, String)> {
+    staged(row, series, row.if_negative)
 }
 
 fn staged(row: &Row, series: Option<Series>, advice: Option<&'static str>) -> Option<(&'static str, String)> {
@@ -489,6 +501,11 @@ mod tests {
             message,
             "check_access_rule() is deprecated from 18.0; use check_access()"
         );
+        let (_, message) = stage(row_of(Kind::WrittenField("ir.cron", "doall")), Series::parse("18.0")).unwrap();
+        assert_eq!(
+            message,
+            "writing doall on ir.cron no longer works from saas~17.3; remove it"
+        );
     }
 
     #[test]
@@ -527,10 +544,17 @@ mod tests {
             message,
             "check_access_rule() is deprecated from 18.0; use check_access()"
         );
-        let (_, message) = stage(row_of(Kind::WrittenField("ir.cron", "doall")), Series::parse("18.0")).unwrap();
+        let numbercall = row_of(Kind::WrittenField("ir.cron", "numbercall"));
+        let (_, message) = stage_if_negative(numbercall, Series::parse("saas~17.3")).unwrap();
         assert_eq!(
             message,
-            "writing doall on ir.cron no longer works from saas~17.3; remove it"
+            "writing numbercall on ir.cron no longer works from saas~17.3; remove it, as a cron repeats until deactivated"
         );
+        let (_, message) = stage(numbercall, Series::parse("saas~17.3")).unwrap();
+        assert_eq!(
+            message,
+            "writing numbercall on ir.cron no longer works from saas~17.3; use active=False or _trigger()"
+        );
+        assert_eq!(stage_if_negative(numbercall, Series::parse("saas~17.2")), None);
     }
 }
