@@ -7,9 +7,9 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::facts::{
     AccessRow, ActionFact, ActionValue, ActionViewId, Annotation, ArchElement, ArchModifier, ArchSubview, ClassFact,
-    DataFacts, DefinitionSource, DomainFact, FieldFact, FieldWrite, FunctionCall, JsFacts, JsName, ModelKind,
-    OptionValue, OrmCall, Pos, RawDiag, RecordFact, RecordWrite, ReportFact, RuleFact, ServerFact, Spanned, SqlColumn,
-    SqlView, UNREAD_TYPE, ViewFact, WrittenValue, XmlDef, XmlRef,
+    DataFacts, DefinitionSource, DomainFact, FieldFact, FieldWrite, FunctionCall, GuardedRef, JsFacts, JsName,
+    ModelKind, OptionValue, OrmCall, Pos, RawDiag, RecordFact, RecordWrite, ReportFact, RuleFact, ServerFact, Spanned,
+    SqlColumn, SqlView, Subject, UNREAD_TYPE, ViewFact, WrittenValue, XmlDef, XmlRef,
 };
 use crate::index::{
     BASE_MODEL_METHODS, Export, FieldDef, FieldInfo, Index, JsSpec, PathError, Placed, RELATIONAL_TYPES, Scope, Status,
@@ -1187,7 +1187,10 @@ impl<'m> Ctx<'_, 'm> {
                 for r in &file.facts.xml_refs {
                     self.py_ref(out, path, r, true);
                 }
-                for r in file.facts.guarded_refs.iter().chain(&file.facts.group_refs) {
+                for r in &file.facts.guarded_refs {
+                    self.guarded_ref(out, path, r);
+                }
+                for r in &file.facts.group_refs {
                     self.py_ref(out, path, r, false);
                 }
                 self.domains(out, path, &file.facts.domains);
@@ -2487,6 +2490,48 @@ impl<'m> Ctx<'_, 'm> {
                 format!("module {owner} defines no XML id '{}'", r.id),
             );
         }
+    }
+
+    /// A reference behind runtime tests to a module outside scope reports as an unguarded one would,
+    /// unless what the tests prove installed brings that module in. A test that names nothing the
+    /// scan reads, or what it does not index, may prove the module of any id.
+    fn guarded_ref(&self, out: &mut Out<'m>, path: &'m Path, r: &GuardedRef) {
+        let owner = r.xml_ref.id.split_once('.').unwrap_or_default().0;
+        let Some(&mi) = self.index.by_name.get(owner).filter(|&&mi| !self.scope.sees(mi)) else {
+            return self.py_ref(out, path, &r.xml_ref, false);
+        };
+        let Some(guard) = r.proven.as_deref().and_then(|proven| self.guard_scope(proven)) else {
+            return;
+        };
+        if !guard.sees(mi) {
+            let partial = self.index.partial_scope(&guard);
+            Ctx {
+                scope: &guard,
+                partial,
+                ..*self
+            }
+            .py_ref(out, path, &r.xml_ref, true);
+        }
+    }
+
+    /// The scope of the module once each of `proven` is installed, none when one is not indexed.
+    /// A model stands for every module that introduces it.
+    fn guard_scope(&self, proven: &[Subject]) -> Option<Scope> {
+        let mut named = vec![];
+        for subject in proven {
+            match subject {
+                Subject::Module(name) => named.push(*self.index.by_name.get(name.as_str())?),
+                Subject::Model(model) => {
+                    let introducers = self.index.classes(model).iter().filter(|(_, c)| c.new_model);
+                    let before = named.len();
+                    named.extend(introducers.map(|(mi, _)| *mi));
+                    if named.len() == before {
+                        return None;
+                    }
+                }
+            }
+        }
+        Some(self.index.guard_scope(self.mi, named, self.series))
     }
 
     fn view(&self, out: &mut Out<'m>, path: &'m Path, view: &ViewFact, trees: &mut FxHashMap<String, ViewTree<'m>>) {

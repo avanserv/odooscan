@@ -7,8 +7,8 @@ use ruff_text_size::{Ranged, TextRange, TextSize};
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::facts::{
-    ClassFact, DefinitionSource, DomainFact, FieldClass, FieldFact, ModelKind, OptionValue, Pos, PyFacts, RawDiag,
-    Receiver, Spanned, SqlColumn, SqlView, UNREAD_TYPE, XmlRef,
+    ClassFact, DefinitionSource, DomainFact, FieldClass, FieldFact, GuardedRef, ModelKind, OptionValue, Pos, PyFacts,
+    RawDiag, Receiver, Spanned, SqlColumn, SqlView, Subject, UNREAD_TYPE, XmlRef,
 };
 use crate::series::Series;
 use crate::sql::{
@@ -395,6 +395,53 @@ enum Held {
     Installed,
 }
 
+/// What a passed guard shows installed: the modules and models its test names, or `None` when it
+/// names nothing the scan reads, so that it may prove the module of any id.
+type Proven = Option<Vec<Subject>>;
+
+/// What two guards that both passed prove.
+fn join(a: Proven, b: Proven) -> Proven {
+    let (mut a, b) = (a?, b?);
+    a.extend(b);
+    Some(a)
+}
+
+/// The model a registry is tested for under `key`: a field's `_fields` and a model's own fields
+/// name none.
+fn registry_subject(registry: &Expr, key: &Expr) -> Proven {
+    let model = str_lit(key).filter(|_| is_registry(registry) && tail_name(registry) != Some("_fields"))?;
+    Some(vec![Subject::Model(model.to_owned())])
+}
+
+/// The model `env.get('x')` asks for. `hasattr` names none.
+fn presence_subject(call: &ast::ExprCall) -> Proven {
+    let Expr::Attribute(a) = &*call.func else { return None };
+    registry_subject(&a.value, call.arguments.args.first()?)
+}
+
+/// The modules a search of `ir.module.module` asks for by name.
+fn searched_modules(call: &ast::ExprCall) -> Proven {
+    let domain = keyword(call, "domain").or_else(|| call.arguments.args.first())?;
+    let names = domain::values(domain, "name")?;
+    Some(names.into_iter().map(|m| Subject::Module(m.to_owned())).collect())
+}
+
+/// The modules a chain on `ir.module.module` such as `.sudo()._get('m')` picks.
+fn named_modules(expr: &Expr) -> Proven {
+    match expr {
+        Expr::Attribute(a) => named_modules(&a.value),
+        Expr::Call(c) => {
+            let Expr::Attribute(a) = &*c.func else { return None };
+            match a.attr.as_str() {
+                "_get" => Some(vec![Subject::Module(str_lit(c.arguments.args.first()?)?.to_owned())]),
+                "search" | "search_count" => searched_modules(c),
+                _ => named_modules(&a.value),
+            }
+        }
+        _ => None,
+    }
+}
+
 impl<'a> GuardHolders<'a> {
     fn attrs_of(class: &'a ast::StmtClassDef) -> FxHashMap<&'a str, Held> {
         let mut holders = Self::default();
@@ -405,50 +452,69 @@ impl<'a> GuardHolders<'a> {
         holders.attrs
     }
 
-    /// Whether `test` having the value `truth` shows the thing there.
-    fn proves(&self, test: &Expr, truth: bool) -> bool {
+    /// What `test` having the value `truth` shows there, if it shows the thing there at all.
+    fn cover(&self, test: &Expr, truth: bool) -> Option<Proven> {
         match test {
-            Expr::UnaryOp(u) if u.op == UnaryOp::Not => self.proves(&u.operand, !truth),
-            Expr::Named(n) => self.proves(&n.value, truth),
-            Expr::BoolOp(b) => self.chain_proves(b, truth),
-            Expr::Compare(c) => self.compare_sense(c) == Some(truth),
-            Expr::Call(c) if is_presence_call(c) || self.searches_installed(c) => truth,
-            _ => self.held(test) == Some(Held::Proof(truth)),
+            Expr::UnaryOp(u) if u.op == UnaryOp::Not => self.cover(&u.operand, !truth),
+            Expr::Named(n) => self.cover(&n.value, truth),
+            Expr::BoolOp(b) => self.chain_cover(b, truth),
+            Expr::Compare(c) => self
+                .compare_sense(c)
+                .and_then(|(sense, proven)| (sense == truth).then_some(proven)),
+            Expr::Call(c) => self.call_cover(c).filter(|_| truth),
+            _ => (self.held(test) == Some(Held::Proof(truth))).then_some(None),
         }
     }
 
-    /// An `and` that holds and an `or` that fails fix every operand, so one proof is enough.
-    fn chain_proves(&self, chain: &ast::ExprBoolOp, truth: bool) -> bool {
-        let mut proofs = chain.values.iter().map(|v| self.proves(v, truth));
+    /// An `and` that holds and an `or` that fails fix every operand, so one proof is enough, and
+    /// each operand that proves adds what it names.
+    fn chain_cover(&self, chain: &ast::ExprBoolOp, truth: bool) -> Option<Proven> {
+        let covers = chain.values.iter().map(|v| self.cover(v, truth));
         if (chain.op == BoolOp::And) == truth {
-            proofs.any(|proof| proof)
+            covers.flatten().reduce(join)
         } else {
-            proofs.all(|proof| proof)
+            covers.collect::<Option<Vec<_>>>()?.into_iter().reduce(join)
         }
     }
 
-    /// The truth value of a value that proves the thing there, if it proves it at all.
-    fn sense(&self, value: &Expr) -> Option<bool> {
-        [true, false].into_iter().find(|&truth| self.proves(value, truth))
+    fn call_cover(&self, call: &ast::ExprCall) -> Option<Proven> {
+        if is_presence_call(call) {
+            Some(presence_subject(call))
+        } else {
+            self.searches_installed(call).then(|| searched_modules(call))
+        }
     }
 
-    fn compare_sense(&self, c: &ast::ExprCompare) -> Option<bool> {
+    /// The truth value of a value that proves the thing there, with what it proves, if it proves
+    /// it at all.
+    fn sense(&self, value: &Expr) -> Option<(bool, Proven)> {
+        [true, false]
+            .into_iter()
+            .find_map(|truth| self.cover(value, truth).map(|proven| (truth, proven)))
+    }
+
+    fn compare_sense(&self, c: &ast::ExprCompare) -> Option<(bool, Proven)> {
         let ([op], [left, right]) = (&*c.ops, &*c.operands) else {
             return None;
         };
-        let sense = match op {
+        let (sense, proven) = match op {
             CmpOp::In | CmpOp::NotIn => self.member_sense(left, right),
             CmpOp::Eq | CmpOp::NotEq => self.state_sense(left, &[str_lit(right)?]),
             CmpOp::Is | CmpOp::IsNot if right.is_none_literal_expr() => self.sense(left),
             _ => None,
         }?;
-        Some(sense == matches!(op, CmpOp::In | CmpOp::Eq | CmpOp::IsNot))
+        Some((sense == matches!(op, CmpOp::In | CmpOp::Eq | CmpOp::IsNot), proven))
     }
 
     /// The truth value of `left in right` that shows the thing there.
-    fn member_sense(&self, left: &Expr, right: &Expr) -> Option<bool> {
-        if str_lit(left).is_some() && (is_name_set(right) || self.reads_installed(right)) {
-            return Some(true);
+    fn member_sense(&self, left: &Expr, right: &Expr) -> Option<(bool, Proven)> {
+        if let Some(name) = str_lit(left) {
+            if self.reads_installed(right) {
+                return Some((true, Some(vec![Subject::Module(name.to_owned())])));
+            }
+            if is_name_set(right) {
+                return Some((true, registry_subject(right, left)));
+            }
         }
         self.state_sense(left, &str_items(right)?)
     }
@@ -456,16 +522,17 @@ impl<'a> GuardHolders<'a> {
     /// The truth value of `left in states` that shows a module there, for `left` the state of one.
     /// A set that leaves `uninstalled` out says nothing when it fails, as the module may be on its
     /// way in, but one that holds it leaves only states of a module that is there, or nearly.
-    fn state_sense(&self, left: &Expr, states: &[&str]) -> Option<bool> {
+    fn state_sense(&self, left: &Expr, states: &[&str]) -> Option<(bool, Proven)> {
         let Expr::Attribute(a) = left else { return None };
         if a.attr.as_str() != "state" || !self.reads_modules(&a.value) {
             return None;
         }
+        let proven = named_modules(&a.value);
         if states.contains(&"uninstalled") {
-            return Some(false);
+            return Some((false, proven));
         }
         let loaded = |state: &&str| matches!(*state, "installed" | "to upgrade" | "to remove");
-        (states.contains(&"installed") && states.iter().all(loaded)).then_some(true)
+        (states.contains(&"installed") && states.iter().all(loaded)).then_some((true, proven))
     }
 
     fn held(&self, expr: &Expr) -> Option<Held> {
@@ -481,7 +548,7 @@ impl<'a> GuardHolders<'a> {
         if self.reads_installed(value) {
             return Some(Held::Installed);
         }
-        let proof = self.sense(value).map(Held::Proof);
+        let proof = self.sense(value).map(|(truth, _)| Held::Proof(truth));
         proof.or_else(|| self.reads_modules(value).then_some(Held::Modules))
     }
 
@@ -584,19 +651,20 @@ fn skips(body: &[Stmt]) -> bool {
     matches!(&*last.value, Expr::Call(c) if tail_name(&c.func) == Some("skipTest"))
 }
 
-/// `self.ensure_installed('m')`, a test helper that raises `SkipTest` unless the module is
-/// installed. It returns nothing to test, so the call itself is the guard. As with `env.get`, a
-/// variable says nothing of a literal use further on.
-fn ensures_installed(expr: &Expr) -> bool {
+/// The module of `self.ensure_installed('m')`, a test helper that raises `SkipTest` unless the
+/// module is installed. It returns nothing to test, so the call itself is the guard. As with
+/// `env.get`, a variable says nothing of a literal use further on.
+fn ensures_installed(expr: &Expr) -> Option<&str> {
     let Expr::Call(call) = expr else {
-        return false;
+        return None;
     };
     let Expr::Attribute(a) = &*call.func else {
-        return false;
+        return None;
     };
-    a.attr.as_str() == "ensure_installed"
-        && is_self(&a.value)
-        && matches!(&*call.arguments.args, [module] if str_lit(module).is_some())
+    match &*call.arguments.args {
+        [module] if a.attr.as_str() == "ensure_installed" && is_self(&a.value) => str_lit(module),
+        _ => None,
+    }
 }
 
 fn is_registry(expr: &Expr) -> bool {
@@ -648,27 +716,72 @@ fn hasattr_guard(call: &ast::ExprCall) -> bool {
     !on_super && tail_name(target) != Some("request") && str_lit(name).is_some_and(|n| !n.starts_with('_'))
 }
 
-/// Finds an `env.ref` or an `env[...]`, each of which raises when what it names is missing.
+/// Finds each `env.ref` and `env[...]`, each of which raises when what it names is missing, with
+/// the module of the id or the model, none when the scan cannot read it. When `settled`, it keeps
+/// to the lookups that run whenever the code around them does.
 #[derive(Default)]
 struct LookupFinder {
-    record: bool,
-    model: bool,
+    settled: bool,
+    records: Vec<Option<Subject>>,
+    models: Vec<Option<Subject>>,
 }
 
 impl<'a> Visitor<'a> for LookupFinder {
+    /// A `with` is passed over too, as its context manager may swallow the error.
+    fn visit_stmt(&mut self, stmt: &'a Stmt) {
+        let branches = matches!(
+            stmt,
+            Stmt::If(_)
+                | Stmt::For(_)
+                | Stmt::While(_)
+                | Stmt::Try(_)
+                | Stmt::With(_)
+                | Stmt::Match(_)
+                | Stmt::FunctionDef(_)
+                | Stmt::ClassDef(_)
+        );
+        if !(self.settled && branches) {
+            visitor::walk_stmt(self, stmt);
+        }
+    }
+
     fn visit_expr(&mut self, expr: &'a Expr) {
+        self.lookup(expr);
         match expr {
-            Expr::Call(c) => {
-                self.record |= matches!(
-                    &*c.func,
-                    Expr::Attribute(a) if a.attr.as_str() == "ref" && tail_name(&a.value) == Some("env")
-                );
+            _ if !self.settled => visitor::walk_expr(self, expr),
+            Expr::BoolOp(b) => self.visit_expr(&b.values[0]),
+            Expr::If(e) => self.visit_expr(&e.test),
+            Expr::Lambda(_) | Expr::ListComp(_) | Expr::SetComp(_) | Expr::DictComp(_) | Expr::Generator(_) => {}
+            _ => visitor::walk_expr(self, expr),
+        }
+    }
+}
+
+impl LookupFinder {
+    fn lookup(&mut self, expr: &Expr) {
+        match expr {
+            Expr::Call(c) if is_env_ref(c) && raises_if_not_found(c) => {
+                let id = c.arguments.args.first().and_then(str_lit);
+                let module = id.and_then(|id| id.split_once('.')).map(|(m, _)| m);
+                self.records.push(module.map(|m| Subject::Module(m.to_owned())));
             }
-            Expr::Subscript(sub) => self.model |= tail_name(&sub.value) == Some("env"),
+            Expr::Subscript(sub) if tail_name(&sub.value) == Some("env") => {
+                self.models
+                    .push(env_literal(expr).map(|m| Subject::Model(m.to_owned())));
+            }
             _ => {}
         }
-        visitor::walk_expr(self, expr);
     }
+}
+
+fn is_env_ref(call: &ast::ExprCall) -> bool {
+    matches!(&*call.func, Expr::Attribute(a) if a.attr.as_str() == "ref" && tail_name(&a.value) == Some("env"))
+}
+
+/// `env.ref()` raises on an unknown id unless told not to, and then the caller handles it.
+fn raises_if_not_found(call: &ast::ExprCall) -> bool {
+    let raise = keyword(call, "raise_if_not_found").or_else(|| call.arguments.args.get(1));
+    raise.is_none_or(|e| matches!(e, Expr::BooleanLiteral(b) if b.value))
 }
 
 /// Whether a handler catches `error`: by name, as a bare `except`, or through a base of every error.
@@ -682,16 +795,42 @@ fn catches(handler: &ast::ExceptHandlerExceptHandler, error: &str) -> bool {
     }
 }
 
-/// A `try` that looks something up, catches what the lookup raises and skips from every handler, so
-/// a run that gets past it found what it looked up: `env.ref` raises `ValueError` and `env[...]`
-/// raises `KeyError`.
-fn try_guards(t: &ast::StmtTry) -> bool {
-    let mut lookup = LookupFinder::default();
+/// What a `try` proves when it looks something up, catches what the lookup raises and skips from
+/// every handler, so a run that gets past it found what it looked up: `env.ref` raises
+/// `ValueError` and `env[...]` raises `KeyError`. Its body runs behind every lookup it catches, as
+/// each one skips when it fails, but what runs after it has passed only those that always run.
+fn try_guards(t: &ast::StmtTry) -> Option<(Proven, Proven)> {
+    let within = caught_lookups(t, false);
+    let skipping = t
+        .handlers
+        .iter()
+        .all(|ast::ExceptHandler::ExceptHandler(h)| skips(&h.body));
+    (!within.is_empty() && skipping).then(|| {
+        let after = caught_lookups(t, true);
+        (within.into_iter().collect(), after.into_iter().collect())
+    })
+}
+
+/// The lookups in the body of `t` that raise what one of its handlers catches.
+fn caught_lookups(t: &ast::StmtTry, settled: bool) -> Vec<Option<Subject>> {
+    let mut lookup = LookupFinder {
+        settled,
+        ..LookupFinder::default()
+    };
     lookup.visit_body(&t.body);
-    let handlers = || t.handlers.iter().map(|ast::ExceptHandler::ExceptHandler(h)| h);
-    let caught = |error| handlers().any(|h| catches(h, error));
-    ((lookup.record && caught("ValueError")) || (lookup.model && caught("KeyError")))
-        && handlers().all(|h| skips(&h.body))
+    let caught = |error| {
+        t.handlers
+            .iter()
+            .any(|ast::ExceptHandler::ExceptHandler(h)| catches(h, error))
+    };
+    let mut found = vec![];
+    if caught("ValueError") {
+        found.extend(lookup.records);
+    }
+    if caught("KeyError") {
+        found.extend(lookup.models);
+    }
+    found
 }
 
 /// The methods called as `super().name(...)` or `super(Class, self).name(...)`, each with whether
@@ -1504,8 +1643,8 @@ struct PyVisitor<'a, 'ast> {
     kinds: FxHashMap<String, ModelKind>,
     /// What `fieldless_classes` reads of the file.
     fieldless: FxHashMap<&'ast str, TextSize>,
-    /// Depth of code that runs only once a guard has passed.
-    guarded: u32,
+    /// What each guard that code runs behind proves, outermost first.
+    guarded: Vec<Proven>,
     /// The holders of a guard in reach: the outermost enclosing function's, the innermost class's.
     holders: GuardHolders<'ast>,
     /// The model of each enclosing class, None for a mixin or a class that is no model.
@@ -1542,7 +1681,7 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
             facts: PyFacts::default(),
             kinds: FxHashMap::default(),
             fieldless: fieldless_classes(body),
-            guarded: 0,
+            guarded: vec![],
             holders: GuardHolders::default(),
             class_models: vec![],
             class_facts: vec![],
@@ -2042,7 +2181,7 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
 
     fn domain_call(&mut self, call: &ast::ExprCall) {
         let Expr::Attribute(a) = &*call.func else { return };
-        if !DOMAIN_METHODS.contains(&a.attr.as_str()) || self.guarded > 0 {
+        if !DOMAIN_METHODS.contains(&a.attr.as_str()) || !self.guarded.is_empty() {
             return;
         }
         let Some(model) = self.receiver_model(&a.value) else {
@@ -2424,7 +2563,7 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
     fn id_refs(&mut self, call: &ast::ExprCall, expr: &Expr) {
         let first = call.arguments.args.first().and_then(Expr::as_string_literal_expr);
         match &*call.func {
-            Expr::Attribute(a) if a.attr.as_str() == "ref" && tail_name(&a.value) == Some("env") => self.env_ref(call),
+            _ if is_env_ref(call) => self.env_ref(call),
             Expr::Attribute(a) if a.attr.as_str() == "has_group" => first.into_iter().for_each(|s| self.group_refs(s)),
             _ if field_call(expr, self.known).is_some() => {
                 if let Some(groups) = keyword(call, "groups").and_then(Expr::as_string_literal_expr) {
@@ -2435,23 +2574,19 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
         }
     }
 
-    /// `env.ref()` raises on an unknown id unless told not to, and then the caller handles it.
     fn env_ref(&mut self, call: &ast::ExprCall) {
-        let raise = keyword(call, "raise_if_not_found").or_else(|| call.arguments.args.get(1));
-        if raise.is_none_or(|e| matches!(e, Expr::BooleanLiteral(b) if b.value))
+        if raises_if_not_found(call)
             && let Some(id) = call.arguments.args.first().and_then(Expr::as_string_literal_expr)
             && id.value.to_str().contains('.')
         {
-            let pos = self.loc.at(id);
-            let refs = if self.guarded > 0 {
-                &mut self.facts.guarded_refs
-            } else {
-                &mut self.facts.xml_refs
-            };
-            refs.push(XmlRef {
+            let xml_ref = XmlRef {
                 id: id.value.to_str().to_owned(),
-                pos,
-            });
+                pos: self.loc.at(id),
+            };
+            match self.guarded.iter().cloned().reduce(join) {
+                Some(proven) => self.facts.guarded_refs.push(GuardedRef { xml_ref, proven }),
+                None => self.facts.xml_refs.push(xml_ref),
+            }
         }
     }
 
@@ -2561,7 +2696,7 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
 
     fn env_model(&mut self, sub: &ast::ExprSubscript) {
         if tail_name(&sub.value) == Some("env")
-            && self.guarded == 0
+            && self.guarded.is_empty()
             && let Some(s) = sub.slice.as_string_literal_expr()
         {
             let spanned = self.spanned(s);
@@ -2572,28 +2707,27 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
     /// Visits `test`, then what runs when it holds and what runs when it does not.
     fn branches(&mut self, test: &'ast Expr, then: impl FnOnce(&mut Self), otherwise: impl FnOnce(&mut Self)) {
         self.visit_expr(test);
-        let (opened, closed) = (self.holders.proves(test, true), self.holders.proves(test, false));
+        let (opened, closed) = (self.holders.cover(test, true), self.holders.cover(test, false));
         self.guarded_by(opened, then);
         self.guarded_by(closed, otherwise);
     }
 
-    fn guarded_by(&mut self, guard: bool, visit: impl FnOnce(&mut Self)) {
-        self.guarded += u32::from(guard);
+    fn guarded_by(&mut self, guard: Option<Proven>, visit: impl FnOnce(&mut Self)) {
+        let depth = self.guarded.len();
+        self.guarded.extend(guard);
         visit(self);
-        self.guarded -= u32::from(guard);
+        self.guarded.truncate(depth);
     }
 
     /// Operands of an `and` after a guard run only once it passed.
     fn and_chain(&mut self, values: &'ast [Expr]) {
-        let mut depth = 0;
+        let depth = self.guarded.len();
         for value in values {
             self.visit_expr(value);
-            if depth == 0 && self.holders.proves(value, true) {
-                depth = 1;
-                self.guarded += 1;
-            }
+            let guard = self.holders.cover(value, true);
+            self.guarded.extend(guard);
         }
-        self.guarded -= depth;
+        self.guarded.truncate(depth);
     }
 
     fn private_attr(&mut self, a: &ast::ExprAttribute, expr: &Expr) {
@@ -2637,24 +2771,25 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
         }
     }
 
-    /// Whether the statements after `stmt` in its block run only once a guard has passed: an `if`
-    /// that leaves or skips unless the thing is there, a `try` that looks up what the rest needs
-    /// and skips from every handler, or a call that skips unless a module is installed.
-    fn guards_rest(&self, stmt: &Stmt) -> bool {
+    /// What the statements after `stmt` in its block run behind, if they run only once a guard has
+    /// passed: an `if` that leaves or skips unless the thing is there, a `try` that looks up what
+    /// the rest needs and skips from every handler, or a call that skips unless a module is
+    /// installed.
+    fn guards_rest(&self, stmt: &Stmt) -> Option<Proven> {
         match stmt {
-            Stmt::If(i) => (exits(&i.body) || skips(&i.body)) && self.holders.proves(&i.test, false),
-            Stmt::Try(t) => try_guards(t),
-            Stmt::Expr(e) => ensures_installed(&e.value),
-            _ => false,
+            Stmt::If(i) if exits(&i.body) || skips(&i.body) => self.holders.cover(&i.test, false),
+            Stmt::Try(t) => try_guards(t).map(|(_, after)| after),
+            Stmt::Expr(e) => ensures_installed(&e.value).map(|m| Some(vec![Subject::Module(m.to_owned())])),
+            _ => None,
         }
     }
 
     /// The handlers run once the lookup has failed, and `finally` runs either way.
     fn visit_try(&mut self, t: &'ast ast::StmtTry) {
-        let guards = try_guards(t);
-        self.guarded_by(guards, |v| v.visit_body(&t.body));
+        let (within, after) = try_guards(t).unzip();
+        self.guarded_by(within, |v| v.visit_body(&t.body));
         t.handlers.iter().for_each(|h| self.visit_except_handler(h));
-        self.guarded_by(guards, |v| v.visit_body(&t.orelse));
+        self.guarded_by(after, |v| v.visit_body(&t.orelse));
         self.visit_body(&t.finalbody);
     }
 }
@@ -2662,16 +2797,13 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
 impl<'ast> Visitor<'ast> for PyVisitor<'_, 'ast> {
     /// Statements after `if 'x' not in self.env: return` run only once the thing is there.
     fn visit_body(&mut self, body: &'ast [Stmt]) {
-        let mut depth = 0;
+        let depth = self.guarded.len();
         for stmt in body {
-            let guards = depth == 0 && self.guards_rest(stmt);
+            let guard = self.guards_rest(stmt);
             self.visit_stmt(stmt);
-            if guards {
-                depth = 1;
-                self.guarded += 1;
-            }
+            self.guarded.extend(guard);
         }
-        self.guarded -= depth;
+        self.guarded.truncate(depth);
     }
 
     fn visit_stmt(&mut self, stmt: &'ast Stmt) {
@@ -3475,6 +3607,8 @@ mod tests {
             "try:\n    self.env.ref('m.r')\nexcept KeyError:\n    self.skipTest('m')\nself.env['x.y']",
             "try:\n    self.env.ref('m.r')\nexcept ValueError:\n    self.env['x.y']\n    self.skipTest('m')",
             "try:\n    self.env.ref('m.r')\nexcept ValueError:\n    self.skipTest('m')\nfinally:\n    self.env['x.y']",
+            "try:\n    self.env.ref('m.r', raise_if_not_found=False)\nexcept ValueError:\n    self.skipTest('m')\n\
+             self.env['x.y']",
         ] {
             assert!(looks_up(reported), "{reported}");
         }
@@ -3493,7 +3627,110 @@ mod tests {
             None,
         );
         assert_eq!(ids(&facts.xml_refs), ["a.before", "a.caught"]);
-        assert_eq!(ids(&facts.guarded_refs), ["a.opened", "a.tried", "a.after"]);
+        let guarded: Vec<_> = facts.guarded_refs.into_iter().map(|g| g.xml_ref).collect();
+        assert_eq!(ids(&guarded), ["a.opened", "a.tried", "a.after"]);
+    }
+
+    #[test]
+    fn a_guard_names_what_it_proves() {
+        let proven = |guard: &str| {
+            let indent = if guard.ends_with(':') { "    " } else { "" };
+            let lines: String = format!("{guard}\n{indent}self.env.ref('z.r')")
+                .lines()
+                .map(|line| format!("        {line}\n"))
+                .collect();
+            let src = format!("class T(models.Model):\n    _name = 't'\n    def m(self):\n{lines}");
+            let mut facts = analyze(&src, None);
+            assert!(facts.xml_refs.is_empty(), "{guard}");
+            let names = |s: &Subject| match s {
+                Subject::Module(m) => format!("module {m}"),
+                Subject::Model(m) => format!("model {m}"),
+            };
+            let proven = facts.guarded_refs.pop().unwrap().proven;
+            proven.map(|p| p.iter().map(names).collect::<Vec<_>>().join(", "))
+        };
+        let module_state = "self.env['ir.module.module']";
+        for (guard, names) in [
+            ("self.ensure_installed('m')", "module m"),
+            ("cls.ensure_installed('m')", "module m"),
+            (
+                &format!("if {module_state}._get('m').state != 'installed':\n    return"),
+                "module m",
+            ),
+            (
+                &format!("if {module_state}.sudo()._get('m').state == 'installed':"),
+                "module m",
+            ),
+            (
+                &format!("if {module_state}.search([('name', '=', 'm')]).state == 'uninstalled':\n    return"),
+                "module m",
+            ),
+            (
+                &format!("if {module_state}.search_count([('name', 'in', ['m', 'n']), ('state', '=', 'installed')]):"),
+                "module m, module n",
+            ),
+            (
+                &format!("if 'm' not in {module_state}._installed():\n    self.skipTest('m')"),
+                "module m",
+            ),
+            (
+                "try:\n    self.env.ref('m.r')\nexcept ValueError:\n    self.skipTest('m')",
+                "module m",
+            ),
+            ("if 'x.y' in self.env:", "model x.y"),
+            ("if 'x.y' not in self.env.registry:\n    return", "model x.y"),
+            ("if 'x.y' in self.pool:", "model x.y"),
+            ("if self.env.get('x.y'):", "model x.y"),
+            ("if (m := self.env.get('x.y')) is not None:", "model x.y"),
+            (
+                "try:\n    self.env['x.y']\nexcept KeyError:\n    self.skipTest('m')",
+                "model x.y",
+            ),
+            (
+                "try:\n    self.env.ref('n.r', raise_if_not_found=False)\n    self.env.ref('m.r')\n\
+                 except ValueError:\n    self.skipTest('m')",
+                "module m",
+            ),
+            (
+                "try:\n    if y:\n        self.env.ref('n.r')\n    self.env.ref('m.r') or self.env.ref('n.s')\n\
+                 except ValueError:\n    self.skipTest('m')",
+                "module m",
+            ),
+            (
+                "try:\n    try:\n        self.env.ref('n.r')\n    except ValueError:\n        pass\n\
+                 \x20   self.env['x.y']\nexcept (KeyError, ValueError):\n    self.skipTest('m')",
+                "model x.y",
+            ),
+            (
+                "try:\n    with y:\n        self.env.ref('n.r')\n    [self.env.ref(r) for r in y]\n\
+                 except ValueError:\n    self.skipTest('m')",
+                "",
+            ),
+            (
+                "self.ensure_installed('m')\nif y and 'x.y' in self.env:",
+                "module m, model x.y",
+            ),
+            (
+                "if 'x.y' in self.env and 'm' in self.env['ir.module.module']._installed():",
+                "model x.y, module m",
+            ),
+        ] {
+            assert_eq!(proven(guard).as_deref(), Some(names), "{guard}");
+        }
+        for guard in [
+            "if hasattr(self, 'f'):",
+            "if 'f' in self._fields:",
+            "if 'f' in self.env['a.b']:",
+            "a = 'x.y' in self.env\nif a:",
+            "a = self.env['ir.module.module']._get('m')\nif a.state != 'installed':\n    return",
+            &format!("if {module_state}.search([('state', '=', 'installed')]):"),
+            &format!("if {module_state}._get(name).state == 'installed':"),
+            "try:\n    self.env.ref(RECORD)\nexcept ValueError:\n    self.skipTest('m')",
+            "try:\n    self.env[name]\nexcept KeyError:\n    self.skipTest('m')",
+            "self.ensure_installed('m')\nif hasattr(self, 'f'):",
+        ] {
+            assert_eq!(proven(guard), None, "{guard}");
+        }
     }
 
     #[test]

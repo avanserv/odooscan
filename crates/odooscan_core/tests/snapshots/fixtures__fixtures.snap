@@ -1127,6 +1127,15 @@ custom/soft_guards/tests/test_soft_guards.py:192:38: OD302 'soft_guards_side.aft
 custom/soft_guards/tests/test_soft_guards.py:196:38: OD302 'soft_guards_side.after_another_object' belongs to module soft_guards_side; add it to depends
 custom/soft_guards/tests/test_soft_guards.py:199:35: OD206 no indexed module defines model 'soft.absent'
 custom/soft_guards/tests/test_soft_guards.py:200:57: OD210 'code': field 'code' of soft.thing comes from module soft_guards_side, which is not in depends
+custom/soft_guards/tests/test_soft_guards.py:204:38: OD302 'soft_guards_side.after_an_unrelated_helper' belongs to module soft_guards_side; add it to depends
+custom/soft_guards/tests/test_soft_guards.py:209:38: OD302 'soft_guards_side.after_an_unrelated_model' belongs to module soft_guards_side; add it to depends
+custom/soft_guards/tests/test_soft_guards.py:214:38: OD302 'soft_guards_side.after_an_unrelated_state' belongs to module soft_guards_side; add it to depends
+custom/soft_guards/tests/test_soft_guards.py:255:38: OD302 'soft_guards_side.after_a_lookup_that_does_not_raise' belongs to module soft_guards_side; add it to depends
+custom/soft_guards/tests/test_soft_guards.py:264:38: OD302 'soft_guards_side.after_a_lookup_under_a_branch' belongs to module soft_guards_side; add it to depends
+custom/soft_guards_both/tests/test_soft_guards_both.py:6:38: OD302 'soft_guards_heir.heir_thing' belongs to module soft_guards_heir; add it to depends
+custom/soft_guards_both/tests/test_soft_guards_both.py:10:38: OD302 'soft_guards_heir.heir_thing' belongs to module soft_guards_heir; add it to depends
+custom/soft_guards_both/tests/test_soft_guards_both.py:15:38: OD302 'soft_guards_heir.heir_thing' belongs to module soft_guards_heir; add it to depends
+custom/soft_guards_open/__manifest__.py:4:25: OD503 module 'ghost_enterprise' is not on the addons path
 custom/sql_base_entries/models/buoys.py:35:54: OD224 f.x_base_depot_id: buoy_float has no such column, since buoy.float has no field x_base_depot_id; name the column of a stored field of buoy.float
 custom/sql_columns/models/constraints.py:7:35: OD227 depot: parcel_box has no such column, since parcel.box has no field depot; use depot_id
 custom/sql_columns/models/constraints.py:8:36: OD227 total_weight: parcel_box has no such column, since parcel.box.total_weight is not stored; set store=True on the field, or drop it from the definition

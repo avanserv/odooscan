@@ -414,7 +414,7 @@ pub struct PyFacts {
     /// XML ids named by `env.ref()` outside code that runs once a runtime test has passed.
     pub xml_refs: Vec<XmlRef>,
     /// XML ids named by `env.ref()` in such code, which may come from modules that are not installed.
-    pub guarded_refs: Vec<XmlRef>,
+    pub guarded_refs: Vec<GuardedRef>,
     /// Groups named by `has_group()` and the `groups` of fields, which may come from modules
     /// that are not installed.
     pub group_refs: Vec<XmlRef>,
@@ -465,6 +465,23 @@ pub struct XmlDef {
 pub struct XmlRef {
     pub id: String,
     pub pos: Pos,
+}
+
+/// What a runtime test shows installed once it has passed.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Subject {
+    Module(String),
+    /// A model, there once a module that introduces it is installed.
+    Model(String),
+}
+
+/// An `env.ref()` behind the runtime tests in reach of it.
+#[derive(Debug)]
+pub struct GuardedRef {
+    pub xml_ref: XmlRef,
+    /// What every one of those tests names, or `None` when one names nothing the scan reads, so
+    /// that it may prove the module of any id.
+    pub proven: Option<Vec<Subject>>,
 }
 
 /// A `<field>` in a view arch. `path` holds the x2many fields whose subviews enclose it.
