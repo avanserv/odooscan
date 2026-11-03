@@ -167,3 +167,81 @@ fn explain_suggests_rules_sharing_a_prefix() {
     let stderr = String::from_utf8(out.stderr).unwrap();
     assert!(stderr.contains("OD210") && stderr.contains("OD211"), "{stderr}");
 }
+
+/// `oscn check target/port17` against the fixture core, as of 18.0.
+fn port(args: &[&str]) -> Output {
+    let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("../odooscan_core/tests/fixtures");
+    let mut all = vec!["target/port17", "--addons-path", "core", "--target-series", "18.0"];
+    all.extend(args);
+    check_in(&fixtures, &all).output().unwrap()
+}
+
+const PORT_SUMMARY: &str = "Findings by kind, checked as 18.0:
+     1  removed API
+     1  deprecated API
+     1  missing upstream
+     1  other
+";
+
+#[test]
+fn a_target_series_summarizes_the_upgrade_after_the_findings() {
+    let out = port(&[]);
+    assert_eq!(out.status.code(), Some(1));
+    let stdout = String::from_utf8(out.stdout).unwrap();
+    let (findings, summary) = stdout.split_once("Findings by kind").unwrap();
+    assert!(
+        findings.contains(": OD126 ") && findings.contains(": OD108 "),
+        "{stdout}"
+    );
+    assert!(
+        format!("Findings by kind{summary}").starts_with(PORT_SUMMARY),
+        "{stdout}"
+    );
+    assert!(summary.contains("     1  OD126  python-api-removed\n"), "{stdout}");
+}
+
+#[test]
+fn statistics_with_a_target_series_print_only_the_summary() {
+    let out = port(&["--statistics"]);
+    let stdout = String::from_utf8(out.stdout).unwrap();
+    assert!(stdout.starts_with(PORT_SUMMARY), "{stdout}");
+    assert_eq!(stdout.matches("OD126").count(), 1, "{stdout}");
+}
+
+#[test]
+fn a_target_series_summary_goes_to_stderr_beside_json() {
+    let out = port(&["--format", "json"]);
+    let findings: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(findings.as_array().map(Vec::len), Some(4));
+    assert!(String::from_utf8(out.stderr).unwrap().contains(PORT_SUMMARY));
+}
+
+#[test]
+fn a_target_series_conflicts_with_a_default_series() {
+    let out = port(&["--odoo-version", "17.0"]);
+    assert_eq!(out.status.code(), Some(2));
+    let stderr = String::from_utf8(out.stderr).unwrap();
+    assert!(
+        stderr.contains("cannot be used with") && stderr.contains("--odoo-version"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn a_checkout_of_another_series_gets_a_notice() {
+    let dir = scratch("target_checkout");
+    fs::create_dir_all(dir.join("odoo/odoo/addons/base")).unwrap();
+    fs::write(
+        dir.join("odoo/odoo/release.py"),
+        "version_info = (17, 0, 0, FINAL, 0, '')\n",
+    )
+    .unwrap();
+    let out = check_in(&dir, &["--addons-path", "odoo", "--target-series", "18.0"])
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8(out.stderr).unwrap();
+    assert!(
+        stderr.contains("notice: odoo: the Odoo checkout is 17.0, not the target series 18.0"),
+        "{stderr}"
+    );
+}

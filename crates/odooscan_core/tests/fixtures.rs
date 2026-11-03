@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use odooscan_core::rules::Severity;
+use odooscan_core::rules::{Kind, Severity, rule};
 use odooscan_core::series::Series;
 use odooscan_core::{ScanOptions, scan};
 
@@ -11,6 +11,7 @@ fn fixtures() {
         paths: vec![root.join("custom")],
         addons_paths: vec![root.join("core")],
         default_series: None,
+        target_series: None,
     });
     let lines: Vec<String> = report
         .diagnostics
@@ -36,6 +37,7 @@ fn base_creates_none_of_its_ids() {
         paths: vec![root.join("bootstrap")],
         addons_paths: vec![],
         default_series: None,
+        target_series: None,
     });
     let lines: Vec<u32> = report
         .diagnostics
@@ -54,6 +56,7 @@ fn series_notice_only_without_default() {
             paths: vec![root.join("core")],
             addons_paths: vec![],
             default_series,
+            target_series: None,
         })
         .notices
         .into_iter()
@@ -72,6 +75,7 @@ fn python_2_files_of_checked_modules_get_a_notice() {
             paths,
             addons_paths,
             default_series: None,
+            target_series: None,
         })
         .notices
         .into_iter()
@@ -102,6 +106,7 @@ fn default_series_reads_a_seriesless_auto_install_list() {
             paths: vec![root.join("custom")],
             addons_paths: vec![root.join("core")],
             default_series,
+            target_series: None,
         })
         .diagnostics
         .iter()
@@ -119,6 +124,7 @@ fn a_seriesless_auto_install_reads_as_the_module_checked() {
             paths: vec![root.join("custom")],
             addons_paths: vec![root.join("core")],
             default_series,
+            target_series: None,
         })
         .diagnostics
         .iter()
@@ -139,6 +145,7 @@ fn unassigned_compute_waits_for_a_known_series() {
             paths: vec![root.join("custom")],
             addons_paths: vec![root.join("core")],
             default_series,
+            target_series: None,
         })
         .diagnostics
         .iter()
@@ -156,6 +163,7 @@ fn delegate_without_ondelete_waits_for_a_known_series() {
             paths: vec![root.join("custom")],
             addons_paths: vec![root.join("core")],
             default_series,
+            target_series: None,
         })
         .diagnostics
         .iter()
@@ -173,6 +181,7 @@ fn severities(code: &str) -> Vec<(String, Severity)> {
         paths: vec![root.join("custom")],
         addons_paths: vec![root.join("core")],
         default_series: None,
+        target_series: None,
     });
     let mut found: Vec<(String, Severity)> = report
         .diagnostics
@@ -288,6 +297,7 @@ fn a_row_with_no_group_needs_no_base() {
         paths: vec![root.join("custom/access_rows")],
         addons_paths: vec![],
         default_series: None,
+        target_series: None,
     });
     let lines: Vec<u32> = report
         .diagnostics
@@ -305,6 +315,7 @@ fn a_file_a_hook_loads_reports_its_rows() {
         paths: vec![root.clone()],
         addons_paths: vec![],
         default_series: None,
+        target_series: None,
     });
     let lines = |file: &str| -> Vec<u32> {
         let od402 = report.diagnostics.iter().filter(|d| d.code == "OD402");
@@ -322,6 +333,7 @@ fn a_calendar_the_client_registers_still_needs_a_date_field() {
         paths: vec![root.join("custom/legacy9")],
         addons_paths: vec![root.join("core")],
         default_series: None,
+        target_series: None,
     });
     let reported = |message: &str| {
         let od318 = report.diagnostics.iter().filter(|d| d.code == "OD318");
@@ -341,6 +353,7 @@ fn a_public_row_needs_no_base() {
         paths: vec![root.join("custom/saas131")],
         addons_paths: vec![],
         default_series: None,
+        target_series: None,
     });
     let lines: Vec<u32> = report
         .diagnostics
@@ -359,6 +372,7 @@ fn refused_server_code_needs_no_base() {
             paths: vec![root.join(module)],
             addons_paths: vec![],
             default_series: None,
+            target_series: None,
         });
         report.diagnostics.iter().filter(|d| d.code == "OD319").count()
     };
@@ -374,6 +388,7 @@ fn a_refused_file_name_needs_no_base() {
         paths: vec![root.join("custom/report_actions")],
         addons_paths: vec![],
         default_series: None,
+        target_series: None,
     });
     let in_file = |code: &str, name: &str| {
         let matching = report.diagnostics.iter().filter(|d| d.code == code);
@@ -392,6 +407,7 @@ fn a_report_tag_waits_for_a_known_series() {
             paths: vec![root.join("custom")],
             addons_paths: vec![root.join("core")],
             default_series,
+            target_series: None,
         });
         let found = report.diagnostics.iter();
         found
@@ -412,6 +428,7 @@ fn hierarchy_and_label_rules_wait_for_their_series_but_not_for_an_unknown_one() 
             paths: vec![root.join("custom")],
             addons_paths: vec![root.join("core")],
             default_series,
+            target_series: None,
         });
         let found = report.diagnostics.into_iter();
         found
@@ -437,6 +454,7 @@ fn import_patches_without_base_take_the_advice_of_the_path() {
         paths: vec![root.join("custom")],
         addons_paths: vec![],
         default_series: None,
+        target_series: None,
     });
     let advice: Vec<(u32, bool)> = report
         .diagnostics
@@ -450,4 +468,70 @@ fn import_patches_without_base_take_the_advice_of_the_path() {
         advice,
         [(8, true), (9, true), (12, true), (13, false), (17, false), (18, false)]
     );
+}
+
+#[test]
+fn a_target_series_checks_a_module_as_of_that_series() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+    let findings = |target_series| {
+        let report = scan(&ScanOptions {
+            paths: vec![root.join("target/port17")],
+            addons_paths: vec![root.join("core")],
+            default_series: None,
+            target_series,
+        });
+        let found = report.diagnostics.iter();
+        found
+            .map(|d| (d.line, d.code, rule(d.code).kind(d.severity)))
+            .collect::<Vec<_>>()
+    };
+    let ported = [
+        (7, "OD108", Kind::Deprecated),
+        (10, "OD126", Kind::Removed),
+        (13, "OD103", Kind::Other),
+        (17, "OD201", Kind::Upstream),
+    ];
+    assert_eq!(findings(Series::parse("18.0")), ported);
+    assert_eq!(
+        findings(None),
+        [(13, "OD103", Kind::Other), (17, "OD201", Kind::Upstream)]
+    );
+}
+
+#[test]
+fn an_indexed_module_keeps_its_own_series_under_a_target() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+    // web_corkboard names 12.3, where its list-form auto_install waits on project too.
+    let report = scan(&ScanOptions {
+        paths: vec![root.join("custom/legacy12")],
+        addons_paths: vec![root.join("core")],
+        default_series: None,
+        target_series: Series::parse("18.0"),
+    });
+    let found = report.diagnostics.iter();
+    assert!(
+        found
+            .filter(|d| d.code == "OD302")
+            .any(|d| d.message.contains("'web_corkboard.corkboard'"))
+    );
+}
+
+#[test]
+fn a_seriesless_indexed_module_takes_the_target() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+    // As 12.0 web_sticker's list-form auto_install waits on web_glue too, so base_only must depend on it.
+    let reported = |target_series| {
+        let report = scan(&ScanOptions {
+            paths: vec![root.join("custom/base_only")],
+            addons_paths: vec![root.join("core")],
+            default_series: None,
+            target_series,
+        });
+        let found = report.diagnostics.iter();
+        found
+            .filter(|d| d.code == "OD302")
+            .any(|d| d.message.contains("'web_sticker.sticker'"))
+    };
+    assert!(!reported(Series::parse("18.0")));
+    assert!(reported(Series::parse("12.0")));
 }

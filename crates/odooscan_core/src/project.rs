@@ -135,10 +135,43 @@ fn modules_under(path: &Path) -> Vec<PathBuf> {
     modules
 }
 
+/// Whether `path` is an Odoo source checkout rather than an addons directory.
+fn is_checkout(path: &Path) -> bool {
+    path.join("odoo/addons/base").is_dir()
+}
+
+/// The series a checkout's `release.py` names in `version_info`, such as `(18, 0, ...)` or
+/// `('saas~18', 1, ...)`.
+fn checkout_series(release: &Path) -> Option<Series> {
+    let text = std::fs::read_to_string(release).ok()?;
+    let line = text.lines().find(|l| l.trim_start().starts_with("version_info"))?;
+    let (_, tuple) = line.split_once('(')?;
+    let mut items = tuple.split(',').map(|i| i.trim().trim_matches(['\'', '"']));
+    Series::parse(&format!("{}.{}", items.next()?, items.next()?))
+}
+
+/// One notice per checkout on the addons path whose series is not the target, since its core is
+/// what the checked modules are held to. Only an entry that is a whole checkout counts: its
+/// `odoo/addons` alone does not hold `release.py`, and the scan reads nothing outside its paths.
+fn checkout_notices(addons_paths: &[PathBuf], target: Series) -> Vec<String> {
+    let mut seen = FxHashSet::default();
+    let differing = addons_paths.iter().filter(|p| is_checkout(p)).filter_map(|p| {
+        let release = p.join("odoo/release.py");
+        let series = checkout_series(&release).filter(|s| *s != target)?;
+        seen.insert(release.canonicalize().unwrap_or(release)).then(|| {
+            format!(
+                "{}: the Odoo checkout is {series}, not the target series {target}",
+                p.display()
+            )
+        })
+    });
+    differing.collect()
+}
+
 /// Modules directly inside an addons directory, as Odoo reads `--addons-path`. An Odoo source
 /// checkout stands for its two addons directories.
 fn modules_in_addons_path(path: &Path) -> Vec<PathBuf> {
-    if path.join("odoo/addons/base").is_dir() {
+    if is_checkout(path) {
         return [path.join("odoo/addons"), path.join("addons")]
             .iter()
             .flat_map(|p| modules_in_addons_path(p))
@@ -193,11 +226,17 @@ pub struct Discovery {
     pub notices: Vec<String>,
 }
 
-pub fn load(paths: &[PathBuf], addons_paths: &[PathBuf], default_series: Option<Series>) -> Discovery {
-    let mut notices = vec![];
+/// Reads the modules, `target` standing for the series of each checked one.
+pub fn load(
+    paths: &[PathBuf],
+    addons_paths: &[PathBuf],
+    default_series: Option<Series>,
+    target: Option<Series>,
+) -> Discovery {
+    let mut notices = target.map_or_else(Vec::new, |t| checkout_notices(addons_paths, t));
     let mut modules: Vec<Module> = candidates(paths, addons_paths)
         .into_par_iter()
-        .filter_map(|(name, dir, checked)| read_module(name, dir, checked))
+        .filter_map(|(name, dir, checked)| read_module(name, dir, checked, target))
         .collect();
     for m in modules.iter().filter(|_| default_series.is_none()) {
         if m.checked && m.series.is_none() {
@@ -281,11 +320,12 @@ fn candidates(paths: &[PathBuf], addons_paths: &[PathBuf]) -> Vec<(String, PathB
     chosen
 }
 
-fn read_module(name: String, dir: PathBuf, checked: bool) -> Option<Module> {
+/// A checked module takes `target` for its series, an indexed one keeps its manifest's.
+fn read_module(name: String, dir: PathBuf, checked: bool, target: Option<Series>) -> Option<Module> {
     let manifest_path = manifest_in(&dir)?;
     let manifest = manifest::parse(&std::fs::read_to_string(&manifest_path).ok()?)?;
     manifest.installable.then(|| Module {
-        series: manifest.series(),
+        series: target.filter(|_| checked).or(manifest.series()),
         name,
         dir,
         manifest_path,
@@ -507,11 +547,48 @@ mod tests {
             let dir = Path::new(env!("CARGO_MANIFEST_DIR"))
                 .join("tests/fixtures/custom")
                 .join(name);
-            let modules = load(&[dir], &[], None).modules;
+            let modules = load(&[dir], &[], None, None).modules;
             modules.iter().find(|m| m.name == name).unwrap().lost_text
         };
         assert!(!lost("encoded_broken"));
         assert!(lost("orphan_hooks_lost"));
+    }
+
+    fn checkout(name: &str, release: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("odooscan-checkout-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("odoo/addons/base")).unwrap();
+        std::fs::create_dir_all(dir.join("addons/web")).unwrap();
+        std::fs::write(dir.join("odoo/release.py"), release).unwrap();
+        dir
+    }
+
+    #[test]
+    fn a_checkout_names_its_series_in_version_info() {
+        let stable = checkout(
+            "stable",
+            "RELEASE_LEVELS = [ALPHA]\nversion_info = (18, 0, 0, FINAL, 0, '')\n",
+        );
+        let saas = checkout("saas", "version_info = ('saas~18', 1, 0, ALPHA, 1, '')\n");
+        let release = |dir: &Path| checkout_series(&dir.join("odoo/release.py"));
+        assert_eq!(release(&stable), Series::parse("18.0"));
+        assert_eq!(release(&saas), Series::parse("saas~18.1"));
+        let entries = [
+            stable.clone(),
+            saas.clone(),
+            saas.join("."),
+            saas.join("odoo/addons"),
+            saas.join("addons"),
+        ];
+        let notices = checkout_notices(&entries, Series::parse("18.0").unwrap());
+        let differing = format!(
+            "{}: the Odoo checkout is 18.1, not the target series 18.0",
+            saas.display()
+        );
+        assert_eq!(notices, [differing]);
+        for dir in [stable, saas] {
+            let _ = std::fs::remove_dir_all(dir);
+        }
     }
 
     #[test]

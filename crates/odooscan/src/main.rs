@@ -2,7 +2,7 @@ mod baseline;
 mod config;
 mod output;
 
-use std::io::IsTerminal;
+use std::io::{IsTerminal, Write};
 use std::path::{Component, Path, PathBuf};
 use std::process::ExitCode;
 use std::time::Instant;
@@ -47,6 +47,10 @@ struct CheckArgs {
     /// Series for modules whose manifest version does not name one, e.g. 18.0.
     #[arg(long, value_parser = parse_series)]
     odoo_version: Option<Series>,
+    /// Check the given modules as of this series, whatever their manifests name, and summarize the
+    /// upgrade; modules on the addons path keep their own series.
+    #[arg(long, value_parser = parse_series, conflicts_with = "odoo_version")]
+    target_series: Option<Series>,
     #[arg(long, value_enum, default_value_t = Format::Text)]
     format: Format,
     /// Only report these codes or code prefixes, e.g. OD1,OD304.
@@ -113,6 +117,7 @@ impl Settings {
                 paths: args.paths.clone(),
                 addons_paths: addons_paths(&or(&args.addons_path, file.addons_path))?,
                 default_series: odoo_version,
+                target_series: args.target_series,
             },
             select: or(&args.select, file.select),
             ignore: or(&args.ignore, file.ignore),
@@ -219,6 +224,7 @@ fn check(args: &CheckArgs) -> ExitCode {
         return ExitCode::from(2);
     }
     print(args, &diags, &cwd);
+    print_summary(args, &diags);
     eprintln!(
         "{} diagnostics in {} modules ({} indexed, {} files) in {:.2?}",
         diags.len(),
@@ -246,6 +252,8 @@ fn print(args: &CheckArgs, diags: &[&Diagnostic], cwd: &Path) {
     };
     let mut stdout = std::io::stdout().lock();
     match args.format {
+        // The upgrade summary carries the same counts.
+        Format::Text if args.statistics && args.target_series.is_some() => {}
         Format::Text if args.statistics => output::print_statistics(&mut stdout, diags),
         Format::Text => output::print_text(&mut stdout, diags, &rel, std::io::stdout().is_terminal()),
         Format::Json => {
@@ -258,6 +266,24 @@ fn print(args: &CheckArgs, diags: &[&Diagnostic], cwd: &Path) {
         Format::Gitlab => {
             let _ = serde_json::to_writer_pretty(&mut stdout, &output::gitlab(diags, &rel));
         }
+    }
+}
+
+/// With a target series, the upgrade summary: after the findings as text, otherwise on stderr so
+/// that stdout stays the one document the format promises.
+fn print_summary(args: &CheckArgs, diags: &[&Diagnostic]) {
+    let Some(target) = args.target_series else {
+        return;
+    };
+    match args.format {
+        Format::Text => {
+            let mut stdout = std::io::stdout().lock();
+            if !args.statistics && !diags.is_empty() {
+                let _ = writeln!(stdout);
+            }
+            output::print_summary(&mut stdout, diags, target);
+        }
+        _ => output::print_summary(&mut std::io::stderr().lock(), diags, target),
     }
 }
 
