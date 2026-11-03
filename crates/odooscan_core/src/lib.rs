@@ -1,3 +1,4 @@
+mod api_table;
 mod async_names;
 mod checks;
 mod csvdata;
