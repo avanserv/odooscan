@@ -140,6 +140,19 @@ fn is_checkout(path: &Path) -> bool {
     path.join("odoo/addons/base").is_dir()
 }
 
+/// Whether the scan is given an Odoo core: an addons entry that is a checkout, a `base` module in
+/// an addons entry that is not a checkout, or a `base` module among the paths. The paths, which
+/// may be deep trees, are walked only when no addons entry gives a core.
+pub fn has_core(paths: &[PathBuf], addons_paths: &[PathBuf]) -> bool {
+    let is_base = |dir: &PathBuf| dir.canonicalize().is_ok_and(|d| d.file_name() == Some("base".as_ref()));
+    addons_paths.iter().any(|p| is_checkout(p))
+        || addons_paths
+            .iter()
+            .flat_map(|p| modules_in_addons_path(p))
+            .chain(paths.iter().flat_map(|p| modules_under(p)))
+            .any(|dir| is_base(&dir))
+}
+
 /// The series a checkout's `release.py` names in `version_info`, such as `(18, 0, ...)` or
 /// `('saas~18', 1, ...)`.
 fn checkout_series(release: &Path) -> Option<Series> {
@@ -589,6 +602,20 @@ mod tests {
         for dir in [stable, saas] {
             let _ = std::fs::remove_dir_all(dir);
         }
+    }
+
+    #[test]
+    fn a_core_is_a_base_module_or_a_checkout() {
+        let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+        let module = fixtures.join("target/port17");
+        assert!(has_core(std::slice::from_ref(&module), &[fixtures.join("core")]));
+        assert!(has_core(&[fixtures.join("core/base")], &[]));
+        // Without a manifest, base is no module, yet the directory makes the entry a checkout.
+        let bare = checkout("bare", "");
+        assert!(has_core(std::slice::from_ref(&module), std::slice::from_ref(&bare)));
+        assert!(!has_core(std::slice::from_ref(&module), &[bare.join("addons")]));
+        assert!(!has_core(&[module], &[fixtures.join("target")]));
+        let _ = std::fs::remove_dir_all(bare);
     }
 
     #[test]

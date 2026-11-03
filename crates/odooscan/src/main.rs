@@ -1,5 +1,6 @@
 mod baseline;
 mod config;
+mod fetch;
 mod output;
 
 use std::io::{IsTerminal, Write};
@@ -48,7 +49,8 @@ struct CheckArgs {
     #[arg(long, value_parser = parse_series)]
     odoo_version: Option<Series>,
     /// Check the given modules as of this series, whatever their manifests name, and summarize the
-    /// upgrade; modules on the addons path keep their own series.
+    /// upgrade; modules on the addons path keep their own series. Without an Odoo core on the
+    /// addons path, git fetches the series' core into the user cache.
     #[arg(long, value_parser = parse_series, conflicts_with = "odoo_version")]
     target_series: Option<Series>,
     #[arg(long, value_enum, default_value_t = Format::Text)]
@@ -112,13 +114,15 @@ impl Settings {
             None if args.write_baseline => Some(dir.join(baseline::DEFAULT_FILE)),
             b => b,
         };
+        let mut scan = ScanOptions {
+            paths: args.paths.clone(),
+            addons_paths: addons_paths(&or(&args.addons_path, file.addons_path))?,
+            default_series: odoo_version,
+            target_series: args.target_series,
+        };
+        target_core(&mut scan)?;
         Ok(Self {
-            scan: ScanOptions {
-                paths: args.paths.clone(),
-                addons_paths: addons_paths(&or(&args.addons_path, file.addons_path))?,
-                default_series: odoo_version,
-                target_series: args.target_series,
-            },
+            scan,
             select: or(&args.select, file.select),
             ignore: or(&args.ignore, file.ignore),
             exclude,
@@ -130,6 +134,18 @@ impl Settings {
         let matches = |list: &[String]| list.iter().any(|p| d.code.starts_with(p.as_str()));
         (self.select.is_empty() || matches(&self.select)) && !matches(&self.ignore) && !self.exclude.matches(&d.path)
     }
+}
+
+/// With a target series and no core given, the target's core from odoo/odoo, indexed last so that
+/// every given module shadows the core module of its name.
+fn target_core(scan: &mut ScanOptions) -> Result<(), String> {
+    let Some(target) = scan.target_series else {
+        return Ok(());
+    };
+    if !odooscan_core::has_core(scan) {
+        scan.addons_paths.push(fetch::core(target)?);
+    }
+    Ok(())
 }
 
 fn or<T: Clone>(flag: &[T], file: Vec<T>) -> Vec<T> {

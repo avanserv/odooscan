@@ -29,9 +29,12 @@ Other options:
 - `--exclude migrations/,tests/` hides findings in files matching gitignore-style patterns.
 - `--statistics` prints counts per rule.
 - `--target-series 19.0` checks the modules given to `check` as of that series and summarizes the
-  upgrade, as [Series](series.md) describes.
+  upgrade, as [Series](series.md) describes. Unless an addons path entry is an Odoo checkout or a
+  `base` module is on the addons path or among the checked paths, it fetches the series' core from
+  odoo/odoo with git.
 
-The exit status is 1 when anything is reported, and 2 when the settings are invalid.
+The exit status is 1 when anything is reported, and 2 when the settings are invalid or the core of
+`--target-series` can be neither fetched nor found in the cache.
 
 `oscn explain OD203`, or `oscn explain unresolved-field-path`, prints a rule's page: what it
 reports, why Odoo fails on it, and an example of the fix. [Rules](rules/index.md) lists every one.
