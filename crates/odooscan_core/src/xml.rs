@@ -311,6 +311,9 @@ impl Walker<'_> {
         for n in node.descendants().skip(1).filter(Node::is_element) {
             let pos = self.pos(n);
             arch_element(n, pos, &mut view);
+            if n.has_attribute("t-esc") && !locates(n) {
+                view.escapes.push(pos);
+            }
         }
         self.facts.views.push(view);
     }
@@ -690,6 +693,7 @@ impl Walker<'_> {
         self.arch_attrs(node, pos);
         self.groups(node);
         self.arch_tag(node, tag, pos);
+        Self::arch_markup(node, tag, pos, view);
         if tag == "field"
             && let Some(name) = node.attribute("name").filter(|n| !n.contains('.'))
         {
@@ -813,6 +817,29 @@ impl Walker<'_> {
         }
     }
 
+    /// OD326 and OD327 on markup the web client stops reading, and the `t-esc` that OD325 checks once
+    /// it knows which tree the view belongs to. A spec locates the parent's markup rather than adding
+    /// its own.
+    fn arch_markup(node: Node, tag: &str, pos: Pos, view: &mut ViewFact) {
+        if locates(node) {
+            return;
+        }
+        if node.has_attribute("t-esc") {
+            view.escapes.push(pos);
+        }
+        if node.attribute("t-name") == Some("kanban-box") && !beside_card(node) {
+            view.dropped
+                .push(RawDiag::new("OD326", pos, "the kanban-box template is renamed card"));
+        }
+        if tag == "div" && has_class(node, "oe_chatter") {
+            view.dropped.push(RawDiag::new(
+                "OD327",
+                pos,
+                "a div with class oe_chatter renders as a plain div, without the chatter; write <chatter/>",
+            ));
+        }
+    }
+
     fn arch_field(&mut self, node: Node, name: &str, pos: Pos, path: &mut Vec<String>, view: &mut ViewFact) {
         if node.has_attribute("position") {
             // A locator matches the first such field anywhere in the parent arch, subviews included.
@@ -841,6 +868,22 @@ impl Walker<'_> {
             }
         }
     }
+}
+
+/// Whether the kanban a template is in, or failing one the arch, also defines `card`, which the
+/// client then draws instead, so `kanban-box` is never read. A spec on `card` finds it in the parent.
+fn beside_card(template: Node) -> bool {
+    let arch = |a: &Node| a.has_tag_name("field") && matches!(a.attribute("name"), Some("arch" | "arch_db"));
+    let scope = template
+        .ancestors()
+        .find(|a| a.has_tag_name("kanban"))
+        .or_else(|| template.ancestors().find(arch));
+    scope.is_some_and(|s| s.descendants().any(|d| d.attribute("t-name") == Some("card")))
+}
+
+fn has_class(node: Node, class: &str) -> bool {
+    node.attribute("class")
+        .is_some_and(|c| c.split_whitespace().any(|token| token == class))
 }
 
 fn field_of<'a, 'i>(node: Node<'a, 'i>, name: &str) -> Option<Node<'a, 'i>> {
@@ -3210,5 +3253,95 @@ mod tests {
         for tag in ["menuitem", "act_window", "report", "asset"] {
             assert!(!no_create(tag), "{tag}");
         }
+    }
+
+    /// The codes of the markup a view record's arch drops, with `fields` before the arch and `arch`
+    /// in it.
+    fn arch_codes(fields: &str, arch: &str) -> Vec<&'static str> {
+        let record = format!(
+            r#"<record id="v" model="ir.ui.view">{fields}<field name="arch" type="xml">{arch}</field></record>"#
+        );
+        view(&record).dropped.into_iter().map(|d| d.code).collect()
+    }
+
+    #[test]
+    fn reports_a_chatter_div_by_its_class_tokens() {
+        assert_eq!(arch_codes("", r#"<form><div class="oe_chatter"/></form>"#), ["OD327"]);
+        assert_eq!(
+            arch_codes("", "<form><div class=\"o_x\toe_chatter \"/></form>"),
+            ["OD327"]
+        );
+        for markup in [
+            r#"<div class="oe_chatter_box"/>"#,
+            r#"<div class="o_oe_chatter"/>"#,
+            r#"<span class="oe_chatter"/>"#,
+            "<chatter/>",
+        ] {
+            assert_eq!(arch_codes("", &format!("<form>{markup}</form>")), [""; 0], "{markup}");
+        }
+    }
+
+    #[test]
+    fn reports_a_kanban_box_template_without_a_card() {
+        let kanban = |names: &str| {
+            let templates: String = names
+                .split(' ')
+                .map(|n| format!(r#"<t t-name="{n}"><div/></t>"#))
+                .collect();
+            format!("<kanban><templates>{templates}</templates></kanban>")
+        };
+        assert_eq!(arch_codes("", &kanban("kanban-box")), ["OD326"]);
+        assert_eq!(arch_codes("", &kanban("card")), [""; 0]);
+        assert_eq!(arch_codes("", &kanban("kanban-box card")), [""; 0]);
+        let form = format!(
+            r#"<form>{}<field name="line_ids">{}</field></form>"#,
+            kanban("card"),
+            kanban("kanban-box")
+        );
+        assert_eq!(arch_codes("", &form), ["OD326"]);
+    }
+
+    #[test]
+    fn a_spec_on_card_keeps_an_added_kanban_box_silent() {
+        let parent = r#"<field name="inherit_id" ref="p"/>"#;
+        let box_only = r#"<xpath expr="//templates" position="inside"><t t-name="kanban-box"/></xpath>"#;
+        assert_eq!(arch_codes(parent, box_only), ["OD326"]);
+        let beside = format!(r#"<data>{box_only}<t t-name="card" position="inside"><span/></t></data>"#);
+        assert_eq!(arch_codes(parent, &beside), [""; 0]);
+    }
+
+    #[test]
+    fn a_spec_reports_no_markup() {
+        let parent = r#"<field name="inherit_id" ref="p"/>"#;
+        let spec = r#"<div class="oe_chatter" position="replace"><chatter/></div>"#;
+        assert_eq!(arch_codes(parent, spec), [""; 0]);
+        let xpath = r#"<xpath expr="//div[hasclass('oe_chatter')]" position="replace"><chatter/></xpath>"#;
+        assert_eq!(arch_codes(parent, xpath), [""; 0]);
+        let added = r#"<xpath expr="//sheet" position="after"><div class="oe_chatter"/></xpath>"#;
+        assert_eq!(arch_codes(parent, added), ["OD327"]);
+    }
+
+    fn escape_lines(view: &ViewFact) -> Vec<u32> {
+        view.escapes.iter().map(|p| p.line).collect()
+    }
+
+    #[test]
+    fn records_the_escapes_an_arch_adds() {
+        let template = view("<template id=\"t\">\n<div>\n<span t-esc=\"a\"/>\n<t t-out=\"b\"/></div></template>");
+        assert_eq!(escape_lines(&template), [3]);
+        let record = view(
+            "<record id=\"v\" model=\"ir.ui.view\"><field name=\"arch\" type=\"xml\"><div>\n<span t-esc=\"a\"/></div></field></record>",
+        );
+        assert_eq!(escape_lines(&record), [2]);
+    }
+
+    #[test]
+    fn a_spec_locates_an_escape_and_its_content_adds_one() {
+        let spec = extension("<span t-esc=\"a\" position=\"replace\">\n<span t-esc=\"b\"/></span>");
+        assert_eq!(escape_lines(&spec), [2]);
+        let record = view(
+            "<record id=\"v\" model=\"ir.ui.view\"><field name=\"inherit_id\" ref=\"p\"/><field name=\"arch\" type=\"xml\"><data><span t-esc=\"a\" position=\"replace\"/><xpath expr=\"//p\" position=\"after\">\n<em t-esc=\"b\"/></xpath></data></field></record>",
+        );
+        assert_eq!(escape_lines(&record), [2]);
     }
 }

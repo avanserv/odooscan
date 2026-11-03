@@ -715,6 +715,12 @@
       "count": 1
     },
     {
+      "path": "addons/l10n_id_efaktur_coretax/views/efaktur_document.xml",
+      "code": "OD327",
+      "message": "a div with class oe_chatter renders as a plain div, without the chatter; write <chatter/>",
+      "count": 1
+    },
+    {
       "path": "addons/l10n_in_edi_ewaybill/models/account_edi_format.py",
       "code": "OD211",
       "message": "no parent class of account.edi.format defines '_cancel_invoice_edi', so this super() call fails",

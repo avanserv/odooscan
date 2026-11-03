@@ -65,4 +65,37 @@
             </form>
         </field>
     </record>
+
+    <record id="view_order_kanban" model="ir.ui.view">
+        <field name="model">bad.order</field>
+        <field name="arch" type="xml">
+            <kanban>
+                <templates>
+                    <t t-name="kanban-box">
+                        <div><field name="name"/></div>
+                    </t>
+                </templates>
+            </kanban>
+        </field>
+    </record>
+
+    <record id="view_order_form_chatter" model="ir.ui.view">
+        <field name="model">bad.order</field>
+        <field name="arch" type="xml">
+            <form>
+                <field name="name"/>
+                <div class="oe_chatter"/>
+            </form>
+        </field>
+    </record>
+
+    <record id="view_order_form_chatter_ported" model="ir.ui.view">
+        <field name="model">bad.order</field>
+        <field name="inherit_id" ref="view_order_form_chatter"/>
+        <field name="arch" type="xml">
+            <xpath expr="//div[hasclass('oe_chatter')]" position="replace">
+                <chatter/>
+            </xpath>
+        </field>
+    </record>
 </odoo>

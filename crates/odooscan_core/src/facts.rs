@@ -581,6 +581,11 @@ pub struct ViewFact {
     pub subviews: Vec<ArchSubview>,
     /// Literal targets of `t-call`, in the arch or set by an `<attribute>` spec.
     pub calls: Vec<Spanned<String>>,
+    /// Where the elements the arch adds carry `t-esc`, which a spec only locates.
+    pub escapes: Vec<Pos>,
+    /// Markup the arch adds that the web client stops reading, reported only when the tree turns
+    /// out not to be QWeb, which the server renders as it is.
+    pub dropped: Vec<RawDiag>,
     /// The view's type, as its `type` field or the root of its arch says. A root that Odoo does not
     /// take as a type, such as an inherited view's `<xpath>`, says nothing.
     pub kind: Option<String>,

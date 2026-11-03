@@ -8,6 +8,7 @@
         "data/calls.xml",
         "data/translated.xml",
         "data/res.partner-translated.csv",
+        "views/cards.xml",
     ],
     "init_xml": ["data/modern_digest_view.sql", "data/tier_pages.xml"],
     "update_xml": ["data/modern_gauge_view.sql"],

@@ -7,6 +7,7 @@
         "data/properties.xml",
         "data/translated.xml",
         "data/res.partner-translated.csv",
+        "views/partner_cards.xml",
     ],
     "init_xml": ["views/partner_nickname_views.xml"],
     "update_xml": [
