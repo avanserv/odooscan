@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="partner_children" model="ir.ui.view">
+        <field name="model">res.partner</field>
+        <field name="arch" type="xml">
+            <form>
+                <field name="child_ids">
+                    <tree>
+                        <field name="name"/>
+                    </tree>
+                </field>
+            </form>
+        </field>
+    </record>
+
+    <record id="partner_children_country" model="ir.ui.view">
+        <field name="model">res.partner</field>
+        <field name="inherit_id" ref="partner_children"/>
+        <field name="arch" type="xml">
+            <xpath expr="//field[@name='child_ids']/tree" position="inside">
+                <field name="country_id"/>
+            </xpath>
+        </field>
+    </record>
+</odoo>

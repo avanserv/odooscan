@@ -729,8 +729,17 @@ pub struct ViewFact {
     pub subviews: Vec<ArchSubview>,
     /// Literal targets of `t-call`, in the arch or set by an `<attribute>` spec.
     pub calls: Vec<Spanned<String>>,
-    /// Where the elements the arch adds carry `t-esc`, which a spec only locates.
-    pub escapes: Vec<Pos>,
+    /// OD325 on each element the arch adds with `t-esc`, which a spec only locates, reported only
+    /// when the tree turns out to be QWeb.
+    pub escapes: Vec<RawDiag>,
+    /// A spec carries `t-esc`, or an xpath names it, so renaming the parent's would lose its target.
+    pub escape_specs: bool,
+    /// OD306 on each `<tree>` of the arch, reported whatever the tree, whose fix the tree may forbid.
+    pub renamed: Vec<RawDiag>,
+    /// An xpath names `tree`, so renaming a `<tree>` of the tree would lose its target.
+    pub tree_paths: bool,
+    /// A spec is a `<tree>`, which finds the parent's `<tree>` by its tag.
+    pub tree_specs: bool,
     /// Markup the arch adds that the web client stops reading, reported only when the tree turns
     /// out not to be QWeb, which the server renders as it is.
     pub dropped: Vec<RawDiag>,
@@ -941,6 +950,18 @@ pub struct DataFacts {
     pub diags: Vec<RawDiag>,
     /// The file does not decode or parse, so these facts say nothing of what it holds.
     pub unreadable: bool,
+}
+
+impl DataFacts {
+    /// Drops every fix, for a file whose text is not its bytes: an offset into the decoded text,
+    /// as in Latin-1 above 127, would land elsewhere in the file.
+    pub fn drop_fixes(&mut self) {
+        let views = self.views.iter_mut();
+        let held = views.flat_map(|v| v.escapes.iter_mut().chain(&mut v.renamed).chain(&mut v.dropped));
+        for diag in self.diags.iter_mut().chain(held) {
+            diag.fix = None;
+        }
+    }
 }
 
 /// What the leading comment of a JS file says about it.

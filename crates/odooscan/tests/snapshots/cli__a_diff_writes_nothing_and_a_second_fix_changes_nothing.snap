@@ -21,6 +21,47 @@ expression: diff
      def name_get(self):
          return []
  
+--- a/custom/bad_sale/views/views.xml
++++ b/custom/bad_sale/views/views.xml
+@@ -3,7 +3,7 @@
+     <record id="view_order_tree" model="ir.ui.view">
+         <field name="model">bad.order</field>
+         <field name="arch" type="xml">
+-            <tree>
++            <list>
+                 <field name="name" attrs="{'invisible': [('total', '=', 0)]}"/>
+                 <field name="nmae"/>
+                 <field name="line_ids">
+@@ -13,7 +13,7 @@
+                     </list>
+                 </field>
+                 <button name="%(action_late)d" type="action" groups="base.group_user,mail.mail_menu"/>
+-            </tree>
++            </list>
+         </field>
+     </record>
+ 
+@@ -50,7 +50,7 @@
+     </template>
+ 
+     <record id="action_orders" model="ir.actions.act_window">
+-        <field name="view_mode">tree,form</field>
++        <field name="view_mode">list,form</field>
+     </record>
+ 
+     <record id="view_order_form_lines" model="ir.ui.view">
+@@ -58,9 +58,9 @@
+         <field name="arch" type="xml">
+             <form>
+                 <field name="line_ids">
+-                    <tree>
++                    <list>
+                         <field name="amount"/>
+-                    </tree>
++                    </list>
+                 </field>
+             </form>
+         </field>
 --- a/custom/legacy14/models/upgrade.py
 +++ b/custom/legacy14/models/upgrade.py
 @@ -4,7 +4,7 @@
@@ -62,6 +103,16 @@ expression: diff
      def _x_reset_lang(self):
 -        return self.with_context(lang=self._context.get("lang"), reset_by=self._uid)
 +        return self.with_context(lang=self.env.context.get("lang"), reset_by=self.env.uid)
+--- a/custom/modern20/views/pages.xml
++++ b/custom/modern20/views/pages.xml
+@@ -35,6 +35,6 @@
+     </record>
+ 
+     <template id="lamp_badge">
+-        <b class="lamp_badge" t-esc="lamp.code"/>
++        <b class="lamp_badge" t-out="lamp.code"/>
+     </template>
+ </odoo>
 --- a/custom/saas125/models/upgrade.py
 +++ b/custom/saas125/models/upgrade.py
 @@ -8,10 +8,10 @@

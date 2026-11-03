@@ -33,4 +33,8 @@
             </kanban>
         </field>
     </record>
+
+    <template id="lamp_badge">
+        <b class="lamp_badge" t-esc="lamp.code"/>
+    </template>
 </odoo>
