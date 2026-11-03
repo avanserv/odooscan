@@ -16,7 +16,7 @@ use crate::sql::{
     self_cursor, source_offset,
 };
 use crate::taint::{self, Params};
-use crate::{async_names, domain, method_body, module_state};
+use crate::{async_names, domain, method_body, module_state, python2};
 
 const FIELD_TYPES: &[&str] = &[
     "Boolean",
@@ -1236,7 +1236,7 @@ fn is_target([name, equal]: &[Token; 2]) -> bool {
 }
 
 /// Whether the token after one of `kind` starts a statement.
-fn opens_statement(kind: TokenKind) -> bool {
+pub(crate) fn opens_statement(kind: TokenKind) -> bool {
     matches!(
         kind,
         TokenKind::Indent | TokenKind::Dedent | TokenKind::Newline | TokenKind::Semi
@@ -1280,9 +1280,16 @@ pub fn analyze_with(src: &str, series: Option<Series>, known: &FieldClasses) -> 
     let module = match async_names::parse(src, series) {
         Ok(module) => module,
         Err(e) => {
-            let diag = RawDiag::new("OD000", loc.pos(e.location.start()), e.error.to_string());
             let mut visitor = PyVisitor::new(&loc, series, known, &[]);
-            visitor.facts.diags.push(diag);
+            let error = if python2::runs_on(series) {
+                python2::remaining_error(src, series)
+            } else {
+                Some((loc.pos(e.location.start()), e.error.to_string()))
+            };
+            match error {
+                Some((pos, message)) => visitor.facts.diags.push(RawDiag::new("OD000", pos, message)),
+                None => visitor.facts.python2 = Some(loc.pos(e.location.start())),
+            }
             return unread_facts(src, visitor);
         }
     };
@@ -3872,10 +3879,11 @@ mod tests {
         assert!(facts.classes[0].inherit_unknown && !facts.dynamic_models);
     }
 
-    /// The facts of a file that stops at a Python 2 `print`.
+    /// The facts of a file that ends in a Python 2 `print`: unread, with OD000 when `body` is not
+    /// Python 2 either.
     fn unparsed(body: &str) -> PyFacts {
         let facts = analyze(&format!("{body}\nprint 'x'\n"), Series::parse("10.0"));
-        assert_eq!(facts.diags.len(), 1);
+        assert_eq!(facts.diags.len() + usize::from(facts.python2.is_some()), 1);
         facts
     }
 
@@ -4630,6 +4638,51 @@ mod tests {
             assert_eq!(codes(src, None), [""; 0], "{src}");
             assert_eq!(codes(src, Series::parse("15.0")), ["OD000"], "{src}");
         }
+    }
+
+    #[test]
+    fn python_2_forms_give_a_notice_below_11_0_and_od000_elsewhere() {
+        for src in [
+            "print 'x'\n",
+            "exec 'x'\n",
+            "raise ValueError, 'x'\n",
+            "x = a <> b\n",
+            "x = 0755\n",
+            "x = 10L\n",
+            "x = ur'a'\n",
+            "x = `a`\n",
+            "def f(self, (a, b)):\n    pass\n",
+            "def f(True=1):\n    pass\n",
+            "if a:\n\tx = 1\n        y = 2\n",
+        ] {
+            let facts = analyze(src, Series::parse("10.0"));
+            assert!(facts.python2.is_some() && facts.diags.is_empty(), "{src}");
+            assert_eq!(codes(src, Series::parse("15.0")), ["OD000"], "{src}");
+            assert_eq!(codes(src, None), ["OD000"], "{src}");
+        }
+    }
+
+    #[test]
+    fn a_file_python_2_refuses_too_keeps_od000_below_11_0() {
+        for src in [
+            "None = 1\n",
+            "x = 089\n",
+            "x = 1e5L\n",
+            "x = (\n",
+            "from __future__ import print_function\nprint \"x\"\n",
+        ] {
+            let facts = analyze(src, Series::parse("10.0"));
+            assert_eq!(
+                facts.diags.iter().map(|d| d.code).collect::<Vec<_>>(),
+                ["OD000"],
+                "{src}"
+            );
+            assert!(facts.python2.is_none(), "{src}");
+        }
+        let facts = analyze("print \"x\"\nx = (", Series::parse("9.0"));
+        assert_eq!(facts.diags[0].pos.line, 2);
+        let facts = analyze("if a:\n\t  x = 089\n", Series::parse("9.0"));
+        assert_eq!((facts.diags[0].pos.line, facts.diags[0].pos.col), (2, 8));
     }
 
     #[test]

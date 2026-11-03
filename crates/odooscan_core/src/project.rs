@@ -209,7 +209,29 @@ pub fn load(paths: &[PathBuf], addons_paths: &[PathBuf], default_series: Option<
             .par_iter_mut()
             .for_each(|module| read_field_calls(module, default_series, &known));
     }
+    notices.extend(python2_notices(&modules, default_series));
     Discovery { modules, notices }
+}
+
+/// One notice per file of a checked module that only parses as the Python 2 its series runs, by
+/// path. Such a file gets no finding, so this says it went unchecked.
+fn python2_notices(modules: &[Module], default_series: Option<Series>) -> Vec<String> {
+    let mut notices: Vec<String> = modules
+        .iter()
+        .filter(|m| m.checked)
+        .flat_map(|m| {
+            let series = m.series.or(default_series);
+            m.python.iter().filter_map(move |f| {
+                let pos = f.facts.python2?;
+                Some(format!(
+                    "{}/{}:{}:{}: Python 2 syntax, which {} runs; this file is not checked",
+                    m.name, f.rel, pos.line, pos.col, series?
+                ))
+            })
+        })
+        .collect();
+    notices.sort();
+    notices
 }
 
 /// Reads again the files whose class attributes call a field class of the scan. A class may live

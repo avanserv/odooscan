@@ -336,8 +336,6 @@ custom/field_ids_away12/models/rack.py:11:22: OD301 module field_ids_away12 defi
 custom/field_ids_bare/data/refs.xml:6:9: OD301 module field_ids_old defines no XML id 'field_ids_old.field_field_ids_old__name'
 custom/field_ids_bare/data/refs.xml:21:9: OD301 module field_ids_broken defines no XML id 'field_ids_broken.field_field_ids_broken__name'
 custom/field_ids_blind/__manifest__.py:4:42: OD503 module 'ghost_racks' is not on the addons path
-custom/field_ids_blind/models/crate.py:8:11: OD000 Simple statements must be separated by newlines or semicolons
-custom/field_ids_broken/models/bin.py:11:15: OD000 Simple statements must be separated by newlines or semicolons
 custom/field_ids_later/data/refs.xml:6:9: OD301 module field_ids_old defines no XML id 'field_ids_old.field_field_ids_stock_name'
 custom/field_ids_new/data/refs.xml:9:9: OD301 module field_ids_new defines no XML id 'field_ids_new.field_field_ids_shelf_name'
 custom/field_ids_new/data/refs.xml:12:9: OD301 module base defines no XML id 'base.field_res_partner_name'
@@ -421,6 +419,7 @@ custom/inherited_ids_use9/data/refs.xml:30:9: OD301 module inherited_ids_mix9 de
 custom/legacy10/data/calls.xml:5:34: OD320 res.partner has no method '_nope_default_code'
 custom/legacy10/data/calls.xml:12:30: OD319 Odoo refuses this code when it loads the record: Expected an expression
 custom/legacy10/models/columns.py:27:32: OD203 'holder_id.code': legacy10.columns has no field 'code'
+custom/legacy10/models/py2_broken.py:3:20: OD000 Invalid decimal integer literal
 custom/legacy10/views/actions.xml:5:33: OD318 legacy10.columns.user has no primary legacy10_board view, and nothing generates one
 custom/legacy11/data/calls.xml:3:41: OD314 res.partner has no method 'delete_workflow'
 custom/legacy11/models/res_company.py:14:24: OD211 no parent class of res.company defines '_table_exist', so this super() call fails
@@ -484,6 +483,7 @@ custom/legacy14/views/ledger_views.xml:9:17: OD308 'action_ledger_report' is def
 custom/legacy15/models/async_names.py:1:7: OD000 Expected `)`, found `async`
 custom/legacy15/models/card.py:7:33: OD218 _inherits delegates to 'partner_id', which must be required with ondelete 'cascade' or 'restrict'; give it ondelete="cascade"
 custom/legacy15/models/card.py:10:58: OD218 'country_id' has delegate=True, so it must be required with ondelete 'cascade' or 'restrict'; give it ondelete="cascade"
+custom/legacy15/models/py2_print.py:2:11: OD000 Simple statements must be separated by newlines or semicolons
 custom/legacy15/models/res_partner.py:9:22: OD212 Monetary field 'parent_balance' has no currency: res.partner has no currency_id, and the field names no currency_field
 custom/legacy15/models/res_partner.py:13:18: OD221 'child_ids.total' makes 'total' depend on itself on other records, so Odoo logs a warning; declare 'total' with recursive=True
 custom/legacy15/models/res_partner.py:49:24: OD211 no parent class of res.partner defines '_name_gone', so this super() call fails
@@ -1199,11 +1199,8 @@ custom/unlisted_data/models/rooms.py:24:7: OD401 model 'unlisted.room.xml' has n
 custom/unlisted_data/models/rooms.py:29:7: OD401 model 'unlisted.room.legacy' has no ir.model.access rule, so only the superuser can use it
 custom/unlisted_data/security/ir.model.access-legacy.csv:1:1: OD502 'security/ir.model.access-legacy.csv' is listed under update_xml, which Odoo ignores in this series; move it to data
 custom/unlisted_data/security/ir.model.access-unlisted.csv:1:1: OD502 'security/ir.model.access-unlisted.csv' is not in the manifest's data or demo, so Odoo never loads it
-custom/unparsed_accent/models/thread.py:17:15: OD000 Simple statements must be separated by newlines or semicolons
 custom/unparsed_accent/views/accent.xml:4:9: OD201 no indexed module defines model 'unparsed.unknown'
 custom/unparsed_base/models/ledger.py:14:5: OD226 _auto = False leaves unparsed.report without a table, and nothing creates the view unparsed_report; create it in init(), or drop _auto = False
-custom/unparsed_built/models/built.py:10:15: OD000 Simple statements must be separated by newlines or semicolons
-custom/unparsed_code/models/ledger.py:25:15: OD000 Simple statements must be separated by newlines or semicolons
 custom/unparsed_code/views/ledger.xml:17:13: OD310 no <field name="missing_anchor"> in view unparsed_code.view_ledger_form or the views that extend it
 custom/unparsed_code/views/ledger.xml:44:20: OD311 no indexed module defines template 'unparsed_code.no_such_page'
 custom/unparsed_code/views/ledger.xml:53:9: OD309 res.partner has no field 'ledger_note'

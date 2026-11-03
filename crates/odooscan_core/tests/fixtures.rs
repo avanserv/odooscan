@@ -65,6 +65,35 @@ fn series_notice_only_without_default() {
 }
 
 #[test]
+fn python_2_files_of_checked_modules_get_a_notice() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+    let notices = |paths: Vec<PathBuf>, addons_paths: Vec<PathBuf>| {
+        scan(&ScanOptions {
+            paths,
+            addons_paths,
+            default_series: None,
+        })
+        .notices
+        .into_iter()
+        .filter(|n| n.contains("Python 2 syntax"))
+        .collect::<Vec<_>>()
+    };
+    let checked = notices(vec![root.join("custom")], vec![root.join("core")]);
+    for file in [
+        "legacy10/models/py2_forms.py:6:1: Python 2 syntax, which 10.0 runs",
+        "legacy9/models/py2_tabs.py:7:1: Python 2 syntax, which 9.0 runs",
+        "unparsed_code/models/ledger.py:25:15: Python 2 syntax, which 10.0 runs",
+    ] {
+        assert!(checked.iter().any(|n| n.starts_with(file)), "{file}: {checked:#?}");
+    }
+    for module in ["legacy15/", "inherited_ids_outside/", "legacy10/models/py2_broken.py"] {
+        assert!(!checked.iter().any(|n| n.starts_with(module)), "{module}: {checked:#?}");
+    }
+    assert!(checked.is_sorted());
+    assert_eq!(notices(vec![], vec![root.join("custom")]), [""; 0]);
+}
+
+#[test]
 fn default_series_reads_a_seriesless_auto_install_list() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
     // Before saas~12.4 the list waits on every depend, and web_sticker also depends on web_glue.

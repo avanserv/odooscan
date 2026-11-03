@@ -434,6 +434,9 @@ pub struct PyFacts {
     /// with something other than `self._table` whole in a model class, so it may create any view.
     pub creates_any_view: bool,
     pub diags: Vec<RawDiag>,
+    /// Where the file stops parsing as Python 3, in a module of a series on Python 2 where it parses
+    /// once its Python 2 forms are read: such a file gets a notice instead of OD000.
+    pub python2: Option<Pos>,
     /// OD121 on the rollbacks of `ir.http._handle_exception()`, Odoo's hook for a failed request
     /// only before 16.0, which the series of the module decides.
     pub legacy_hook_rollbacks: Vec<RawDiag>,
