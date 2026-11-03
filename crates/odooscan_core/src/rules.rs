@@ -153,7 +153,9 @@ rules! {
     "OD303" "duplicate-xmlid" Correctness Warning None, false, "The same XML id is defined twice in one file, with another model or overwriting a field.";
     "OD304" "unknown-view-field" Correctness Error None, true, "A view references a field its model does not have.";
     "OD305" "attrs-states-removed" Deprecation Error Some(">=17.0"), false, "attrs and states are removed; use invisible, readonly and required expressions.";
-    "OD306" "tree-renamed-list" Deprecation Warning Some(">=18.0"), false, "The tree view type is renamed list.";
+    // 18.0 refuses a root `<tree>` (`odoo/addons/base/models/ir_ui_view.py:507`) and validates an x2many
+    // `<tree>` as part of its parent (`:1615`); saas~17.4 still has `('tree', 'Tree')`.
+    "OD306" "tree-renamed-list" Deprecation Error Some(">=18.0"), false, "The tree view type is renamed list.";
     "OD307" "t-raw-unsafe" Security Warning Some(">=15.0"), false, "t-raw is deprecated and renders unescaped HTML; use t-out with Markup.";
     "OD308" "xmlid-used-before-definition" Correctness Error None, false, "An XML id is referenced before the file that defines it is loaded.";
     "OD309" "unknown-record-field" Correctness Error None, true, "A data record sets a field its model does not have.";
@@ -271,6 +273,16 @@ mod tests {
         assert_eq!(od222.severity_for(Series::parse("18.0")), Severity::Error);
         assert_eq!(od222.severity_for(Series::parse("20.0")), Severity::Error);
         assert_eq!(od222.severity_for(None), Severity::Warning);
+    }
+
+    #[test]
+    fn tree_rule_is_an_error_where_it_runs() {
+        let od306 = rule("OD306");
+        assert!(!od306.applies_to(Series::parse("saas~17.4")));
+        for series in ["18.0", "20.0"] {
+            assert!(od306.applies_to(Series::parse(series)), "OD306 skips {series}");
+            assert_eq!(od306.severity_for(Series::parse(series)), Severity::Error);
+        }
     }
 
     #[test]
