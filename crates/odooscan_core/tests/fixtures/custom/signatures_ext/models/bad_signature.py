@@ -64,11 +64,17 @@ class BadSignature(models.Model):
     def __seal(self, order):
         return order
 
+    def __vouch(self, order, line):
+        return order, line
+
     def _keyed(self, order, line):
         return super()._keyed(order, line=line)
 
     def _split(self, order):
         return order
+
+    def _ordered(self, order, line):
+        return super()._ordered(order, line)
 
 
 class BadSignatureAgain(models.Model):
@@ -79,6 +85,12 @@ class BadSignatureAgain(models.Model):
 
     def _twice(self, order):
         return super()._twice(order, False)
+
+    def __vouch(self, order, line, extra):
+        return order, line, extra
+
+    def _ordered(self, order):
+        return super()._ordered(order, False)
 
 
 class BadSignatureCopy(models.Model):

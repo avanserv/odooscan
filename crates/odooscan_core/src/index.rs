@@ -2172,8 +2172,8 @@ impl<'m> Index<'m> {
         }
     }
 
-    /// The module of the class that introduces the model with `_name`, the first in load order.
-    /// Independent introducers keep index order, since Odoo's tie order between them is unknown.
+    /// The module of the class that introduces the model with `_name`, the first in load order
+    /// (ties: see `first_loaded`).
     fn introducer<'c>(&self, classes: impl Iterator<Item = &'c (usize, &'m ClassFact)>) -> Option<usize>
     where
         'm: 'c,
@@ -2182,8 +2182,9 @@ impl<'m> Index<'m> {
         self.first_loaded(introducers).map(|(mi, _)| mi)
     }
 
-    /// The entry, by module, that loads first. Independent modules keep index order, since Odoo's
-    /// tie order between them is unknown, and so do the entries of one module.
+    /// The entry, by module, that loads first. Entries of independent modules, or of one module,
+    /// keep the order of `entries` (for OD229, the chain order of `merged_classes`), since Odoo's
+    /// tie order between independent modules is unknown.
     pub fn first_loaded<T>(&self, entries: impl IntoIterator<Item = (usize, T)>) -> Option<(usize, T)> {
         let loads_after = |first: usize, next: usize| first != next && self.reaches(first, next);
         entries
@@ -2246,9 +2247,9 @@ impl<'m> Index<'m> {
 
     /// The signature of each definition of `method`, among `merged` (`merged_classes` of the model of
     /// `class`, of module `mi`), that `class` overrides: those of other modules, short of one that
-    /// depends on `mi`, and of classes above `class` in its file. The order of the files of `mi` is
-    /// that of the imports, which is not indexed, so its other files count neither way. None when one
-    /// of them has no signature to compare.
+    /// depends on `mi`, and of classes above `class` in its file, whose name mangles `method` alike.
+    /// The order of the files of `mi` is that of the imports, which is not indexed, so its other files
+    /// count neither way. None when one of them has no signature to compare.
     pub fn method_parents(
         &self,
         mi: usize,
@@ -2267,6 +2268,7 @@ impl<'m> Index<'m> {
         merged
             .iter()
             .filter(|&&(m, c)| c.methods.iter().any(|n| n == method) && overridden(m, c))
+            .filter(|(_, c)| mangles_alike(method, &class.class_name, &c.class_name))
             .map(|&(m, c)| c.signature(method).map(|s| (m, s)))
             .collect()
     }
@@ -2976,6 +2978,13 @@ fn method_flows(modules: &[Module]) -> MethodFlows<'_> {
     flows
 }
 
+/// Whether `method` gets the same name in classes `a` and `b`. Python renames a `__name` method
+/// to `_<class>__name`, with the class's leading underscores stripped, and leaves it as is in a class
+/// whose name is all underscores, so an extension of the same class name overrides it.
+fn mangles_alike(method: &str, a: &str, b: &str) -> bool {
+    !method.starts_with("__") || method.ends_with("__") || a.trim_start_matches('_') == b.trim_start_matches('_')
+}
+
 /// What `Index::names_hook` reads: the union of the mentions of every file of `modules`.
 fn hook_mentions(modules: &[Module]) -> (FxHashSet<&str>, Vec<&str>) {
     let files = modules.iter().flat_map(|m| {
@@ -3003,8 +3012,8 @@ mod tests {
     use super::{
         BASE_MODEL_DUNDERS, BASE_MODEL_EXTRA, BASE_MODEL_METHODS, BASE_PRIVATE_METHODS, BASE_RPC_METHODS,
         FIELD_CLASSES, FieldHolder, FieldSpelling, Index, Module, OLD_BASE_METHODS, PlacedWrite, Scope, XmlIdDef,
-        base_private_method, base_rpc_method, class_file, field_id_prefixes, fold_writes, last_text, old_base_method,
-        unseen_table_id,
+        base_private_method, base_rpc_method, class_file, field_id_prefixes, fold_writes, last_text, mangles_alike,
+        old_base_method, unseen_table_id,
     };
     use crate::manifest;
     use crate::mentions::Mentions;
@@ -3012,6 +3021,16 @@ mod tests {
     use crate::python;
     use crate::series::Series;
     use crate::xml;
+
+    #[test]
+    fn a_private_name_mangles_alike_only_in_classes_of_one_name() {
+        assert!(mangles_alike("__seal", "_Foo", "Foo"));
+        assert!(!mangles_alike("__seal", "Foo", "Bar"));
+        assert!(mangles_alike("__init__", "Foo", "Bar"));
+        assert!(mangles_alike("_seal", "Foo", "Bar"));
+        assert!(mangles_alike("__seal", "__", "_"));
+        assert!(!mangles_alike("__seal", "__", "Foo"));
+    }
 
     #[test]
     fn every_field_class_is_its_ttype_in_camel_case() {
