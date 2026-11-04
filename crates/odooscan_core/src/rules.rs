@@ -147,7 +147,7 @@ rules! {
     "OD108" "group-operator-renamed" Deprecation Warning Some(">=18.0"), false, "Field attribute group_operator is renamed aggregator.";
     "OD109" "private-env-shortcut" Deprecation Warning Some(">=19.0"), false, "self._cr, self._uid and self._context are deprecated; use self.env.";
     "OD110" "sql-constraints-unsupported" Deprecation Error Some(">=19.0"), false, "_sql_constraints is ignored; declare models.Constraint attributes.";
-    "OD111" "public-route-sudo" Security Info None, false, "A public or auth='none' route escalates with sudo().";
+    "OD111" "public-route-sudo" Security Info None, false, "A public or auth='none' route runs as superuser.";
     "OD112" "csrf-disabled" Security Info None, false, "An HTTP route disables CSRF protection.";
     "OD113" "fields-view-get-removed" Deprecation Error Some(">=16.0"), false, "fields_view_get() is removed; override _get_view() or get_views().";
     "OD114" "depends-on-id" Correctness Error None, false, "@api.depends names the field id, which Odoo refuses.";
@@ -172,6 +172,8 @@ rules! {
     "OD127" "get-route-writes" Security Warning None, false, "An HTTP route that accepts GET writes records, which Odoo checks no CSRF token for.";
     "OD128" "cors-any-origin" Security Info None, false, "A route sets cors='*', so a script on any site can read its responses.";
     "OD129" "auth-none-user" Security Warning None, false, "An auth='none' route reads the user or writes records, but runs with no user.";
+    "OD130" "session-user-switch" Security Info None, false, "Code switches the user a request or a session runs as.";
+    "OD131" "secret-compared-with-eq" Security Warning None, false, "A token, secret or signature is compared with == rather than consteq().";
     "OD201" "unknown-model" Correctness Error None, true, "The model is not defined by any indexed module.";
     "OD202" "model-not-in-depends" Correctness Error None, true, "The model comes from a module missing from depends.";
     "OD203" "unresolved-field-path" Correctness Error None, true, "A field path does not resolve on its model.";

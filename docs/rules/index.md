@@ -48,7 +48,7 @@ Python code checked on its own: security, deprecated APIs and ORM mistakes visib
 | [OD108](OD108.md) | `group-operator-renamed` | Field attribute group_operator is renamed aggregator. |
 | [OD109](OD109.md) | `private-env-shortcut` | self._cr, self._uid and self._context are deprecated; use self.env. |
 | [OD110](OD110.md) | `sql-constraints-unsupported` | _sql_constraints is ignored; declare models.Constraint attributes. |
-| [OD111](OD111.md) | `public-route-sudo` | A public or auth='none' route escalates with sudo(). |
+| [OD111](OD111.md) | `public-route-sudo` | A public or auth='none' route runs as superuser. |
 | [OD112](OD112.md) | `csrf-disabled` | An HTTP route disables CSRF protection. |
 | [OD113](OD113.md) | `fields-view-get-removed` | fields_view_get() is removed; override _get_view() or get_views(). |
 | [OD114](OD114.md) | `depends-on-id` | @api.depends names the field id, which Odoo refuses. |
@@ -67,6 +67,8 @@ Python code checked on its own: security, deprecated APIs and ORM mistakes visib
 | [OD127](OD127.md) | `get-route-writes` | An HTTP route that accepts GET writes records, which Odoo checks no CSRF token for. |
 | [OD128](OD128.md) | `cors-any-origin` | A route sets cors='*', so a script on any site can read its responses. |
 | [OD129](OD129.md) | `auth-none-user` | An auth='none' route reads the user or writes records, but runs with no user. |
+| [OD130](OD130.md) | `session-user-switch` | Code switches the user a request or a session runs as. |
+| [OD131](OD131.md) | `secret-compared-with-eq` | A token, secret or signature is compared with == rather than consteq(). |
 
 ## OD2: models and fields
 
