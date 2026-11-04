@@ -7,6 +7,10 @@ extend-exclude = ["crates/*/tests/fixtures/custom/", "tests/oracle/"]
 [default.extend-identifiers]
 _read_group_get_annoted_groupby = "_read_group_get_annoted_groupby"
 
+# The content fields of ir.attachment are `datas` and `db_datas`.
+[default.extend-words]
+datas = "datas"
+
 # Release Please links each changelog entry to its commit, and a short hash such as ba446ab reads
 # as a word.
 [default]

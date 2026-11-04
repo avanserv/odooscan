@@ -26,6 +26,14 @@ custom/auto_scope_reader_new/thing.py:8:23: OD210 'country_any_stamp': field 'co
 custom/auto_scope_reader_ten/thing.py:9:23: OD210 'list_any_stamp': field 'list_any_stamp' of auto.scope.thing comes from module auto_scope_list_any, which is not in depends
 custom/auto_scope_v131/data.xml:7:17: OD210 'next_stamp': field 'next_stamp' of auto.scope.thing comes from module auto_scope_next, which is not in depends
 custom/bad_sale/__manifest__.py:11:9: OD501 'data/missing.xml' does not exist
+custom/bad_sale/controllers/attachments.py:10:9: OD717 route parameter 'upload' reaches the content of sudo().create(), which public=True lets anyone download; keep it private and share it with generate_access_token()
+custom/bad_sale/controllers/attachments.py:16:16: OD717 route parameter 'upload' reaches the content of sudo().create() through 'vals', which public=True lets anyone download; keep it private and share it with generate_access_token()
+custom/bad_sale/controllers/attachments.py:23:9: OD717 route parameter 'upload' reaches the content of sudo().create() through 'vals', which public=True lets anyone download; keep it private and share it with generate_access_token()
+custom/bad_sale/controllers/attachments.py:28:9: OD717 route parameter 'upload' reaches the content of sudo().create() through 'vals', which public=True lets anyone download; keep it private and share it with generate_access_token()
+custom/bad_sale/controllers/attachments.py:32:9: OD717 route parameter 'first' reaches the content of sudo().create(), which public=True lets anyone download; keep it private and share it with generate_access_token()
+custom/bad_sale/controllers/attachments.py:41:9: OD704 route parameter 'post' reaches sudo().create(), so the user picks the fields it sets as superuser; copy only the fields the user may set
+custom/bad_sale/controllers/attachments.py:41:9: OD717 route parameter 'post' reaches the content of sudo().create(), which public=True lets anyone download; keep it private and share it with generate_access_token()
+custom/bad_sale/controllers/attachments.py:45:9: OD717 route parameter 'data' reaches the content of sudo().create(), which public=True lets anyone download; keep it private and share it with generate_access_token()
 custom/bad_sale/controllers/callers.py:18:9: OD701 route parameter 'term' reaches the query of cr.execute() through 'self.term'; pass it as a query parameter or build the query with odoo.tools.SQL
 custom/bad_sale/controllers/callers.py:23:16: OD703 route parameter 'note' reaches Markup() through '_note_html()', '_note_paragraph()' unescaped; escape it, or pass it as an argument of Markup's % or format()
 custom/bad_sale/controllers/configured.py:11:9: OD701 route parameter 'term' reaches the query of lib.run_query(); pass it as a query parameter or build the query with odoo.tools.SQL
@@ -758,6 +766,8 @@ custom/partial_sites/views/sites.xml:75:20: OD311 template 'partial_sites.lent_b
 custom/partial_sites/views/sites.xml:87:35: OD311 template 'partial_sites_dependent.block' comes from module partial_sites_dependent, which is not in depends
 custom/project_fork/data/projects.xml:7:9: OD309 field 'allow_timesheets' of project.project comes from module hr_timesheet, which is not in depends
 custom/project_fork/models/task.py:4:7: OD209 module project already defines model 'project.task', and this class replaces it; extend it with _inherit = 'project.task'
+custom/public193/controllers/main.py:12:9: OD717 route parameter 'upload' reaches the content of sudo().create(), which public=True lets anyone download; keep it private and share it with generate_access_token()
+custom/public193/controllers/main.py:16:16: OD717 route parameter 'upload' reaches the content of sudo()._upload_file(), which public=True lets anyone download; keep it private and share it with generate_access_token()
 custom/qweb_calls/data/pages.xml:1:1: OD502 'data/pages.xml' is not in the manifest's data or demo, so Odoo never loads it
 custom/qweb_calls/static/src/panel.xml:6:20: OD605 no indexed bundle defines template 'qweb_calls.Absent'
 custom/qweb_calls/static/src/panel.xml:7:20: OD605 template 'qweb_outside.Panel' comes from module qweb_outside, which is not in depends
