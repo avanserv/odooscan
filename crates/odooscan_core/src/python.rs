@@ -17,7 +17,7 @@ use crate::sql::{
     self, Created, CursorUse, QueryVars, Write, is_self, odoo_cursor, query_head, query_source, query_text,
     self_cursor, source_offset,
 };
-use crate::taint::{self, Params};
+use crate::taint::{self, Params, TaintTable};
 use crate::{async_names, domain, method_body, module_state, python2};
 
 const FIELD_TYPES: &[&str] = &[
@@ -1541,17 +1541,19 @@ fn unread_facts(src: &str, visitor: PyVisitor<'_, '_>) -> PyFacts {
 }
 
 /// The facts of a Python file of a module of `series`, which names a class without `_name`.
+#[cfg(test)]
 pub fn analyze(src: &str, series: Option<Series>) -> PyFacts {
-    analyze_with(src, series, &FieldClasses::default())
+    analyze_with(src, series, &FieldClasses::default(), &TaintTable::default())
 }
 
-/// As `analyze`, reading a call of a class of `known` as a field.
-pub fn analyze_with(src: &str, series: Option<Series>, known: &FieldClasses) -> PyFacts {
+/// As `analyze`, reading a call of a class of `known` as a field and following data by the rows
+/// of `taint` too.
+pub fn analyze_with(src: &str, series: Option<Series>, known: &FieldClasses, taint: &TaintTable) -> PyFacts {
     let loc = Locator::new(src);
     let module = match async_names::parse(src, series) {
         Ok(module) => module,
         Err(e) => {
-            let mut visitor = PyVisitor::new(&loc, series, known, &[]);
+            let mut visitor = PyVisitor::new(&loc, series, known, taint, &[]);
             let error = if python2::runs_on(series) {
                 python2::remaining_error(src, series)
             } else {
@@ -1565,7 +1567,7 @@ pub fn analyze_with(src: &str, series: Option<Series>, known: &FieldClasses) -> 
         }
     };
     let body = &module.body;
-    let mut v = PyVisitor::new(&loc, series, known, body);
+    let mut v = PyVisitor::new(&loc, series, known, taint, body);
     v.visit_body(body);
     let (patches, diags) = module_state::check(body, &loc);
     v.facts.import_patches = patches;
@@ -1803,6 +1805,7 @@ struct PyVisitor<'a, 'ast> {
     loc: &'a Locator<'a>,
     series: Option<Series>,
     known: &'a FieldClasses,
+    taint: &'a TaintTable,
     facts: PyFacts,
     /// Model classes of the file by Python class name.
     kinds: FxHashMap<String, ModelKind>,
@@ -1842,12 +1845,19 @@ struct PyVisitor<'a, 'ast> {
 }
 
 impl<'a, 'ast> PyVisitor<'a, 'ast> {
-    fn new(loc: &'a Locator<'a>, series: Option<Series>, known: &'a FieldClasses, body: &'ast [Stmt]) -> Self {
+    fn new(
+        loc: &'a Locator<'a>,
+        series: Option<Series>,
+        known: &'a FieldClasses,
+        taint: &'a TaintTable,
+        body: &'ast [Stmt],
+    ) -> Self {
         let top = module_state::top_level(body);
         Self {
             loc,
             series,
             known,
+            taint,
             facts: PyFacts::default(),
             kinds: FxHashMap::default(),
             fieldless: fieldless_classes(body),
@@ -2647,7 +2657,7 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
             Params::None
         };
         let owner = self.owners.last().cloned().flatten();
-        let (diags, summary) = taint::function(func, params, owner, self.loc);
+        let (diags, summary) = taint::function(func, params, owner, self.loc, self.taint);
         self.facts.diags.extend(diags);
         self.facts.flows.extend(summary);
     }
@@ -3588,7 +3598,7 @@ mod tests {
         let known = FieldClasses::from_iter([pair("Mark", UNREAD_TYPE)]);
         let src = "class X(models.Model):\n    _name = 'x'\n    a = Mark('p.q')\n    b = Mark(string='B')\n    \
                    c = Mark('p.q', delegate=True)\n    d = Mark()\n";
-        let facts = analyze_with(src, None, &known);
+        let facts = analyze_with(src, None, &known, &TaintTable::default());
         let class = &facts.classes[0];
         let [a, b, c, d] = class.fields.as_slice() else {
             panic!("{:?}", class.fields);
@@ -3660,7 +3670,7 @@ mod tests {
         assert_eq!(unknown.attr_calls, ["Vector", "Link", "Other"]);
         assert!(unknown.classes[0].fields.is_empty());
         let known = FieldClasses::from_iter([pair("Vector", "Vector"), pair("Link", "Many2one")]);
-        let facts = analyze_with(src, None, &known);
+        let facts = analyze_with(src, None, &known, &TaintTable::default());
         let class = &facts.classes[0];
         let declared: Vec<_> = class
             .fields
@@ -3690,7 +3700,7 @@ mod tests {
         let src = "class X(models.Model):\n    _name = 'x'\n    a = Link('p.q', delegate=True)\n    \
                    b = Link('r.s', delegate=flag)\n    c = Tag(groups='base.group_user', default=fields.Date.today())\n    \
                    _table_query = Tag()\n";
-        let facts = analyze_with(src, None, &known);
+        let facts = analyze_with(src, None, &known, &TaintTable::default());
         let class = &facts.classes[0];
         assert_eq!(class.inherits, [("p.q".to_owned(), "a".to_owned())]);
         assert!(class.delegate_unknown);

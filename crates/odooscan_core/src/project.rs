@@ -10,6 +10,7 @@ use crate::manifest::{self, Manifest, normalize};
 use crate::mentions::Mentions;
 use crate::series::Series;
 use crate::suppress::Suppressions;
+use crate::taint::TaintTable;
 use crate::{csvdata, decode, js, owl, python, sql, xml};
 
 const MANIFESTS: &[&str] = &["__manifest__.py", "__openerp__.py"];
@@ -245,6 +246,7 @@ pub fn load(
     addons_paths: &[PathBuf],
     default_series: Option<Series>,
     target: Option<Series>,
+    taint: &TaintTable,
 ) -> Discovery {
     let mut notices = target.map_or_else(Vec::new, |t| checkout_notices(addons_paths, t));
     let mut modules: Vec<Module> = candidates(paths, addons_paths)
@@ -261,12 +263,12 @@ pub fn load(
     }
     modules
         .par_iter_mut()
-        .for_each(|module| parse_module_files(module, default_series));
+        .for_each(|module| parse_module_files(module, default_series, taint));
     let known = python::field_classes(modules.iter().flat_map(|m| &m.python).map(|f| &f.facts));
     if !known.is_empty() {
         modules
             .par_iter_mut()
-            .for_each(|module| read_field_calls(module, default_series, &known));
+            .for_each(|module| read_field_calls(module, default_series, &known, taint));
     }
     notices.extend(python2_notices(&modules, default_series));
     Discovery { modules, notices }
@@ -295,7 +297,12 @@ fn python2_notices(modules: &[Module], default_series: Option<Series>) -> Vec<St
 
 /// Reads again the files whose class attributes call a field class of the scan. A class may live
 /// in any module, so the first pass takes such a call for a method.
-fn read_field_calls(module: &mut Module, default_series: Option<Series>, known: &python::FieldClasses) {
+fn read_field_calls(
+    module: &mut Module,
+    default_series: Option<Series>,
+    known: &python::FieldClasses,
+    taint: &TaintTable,
+) {
     let series = module.series.or(default_series);
     module
         .python
@@ -303,7 +310,7 @@ fn read_field_calls(module: &mut Module, default_series: Option<Series>, known: 
         .filter(|file| file.facts.attr_calls.iter().any(|name| known.contains_key(name)))
         .for_each(|file| {
             if let Ok(text) = std::fs::read_to_string(&file.path) {
-                file.facts = python::analyze_with(&text, series, known);
+                file.facts = python::analyze_with(&text, series, known, taint);
             }
         });
 }
@@ -370,6 +377,7 @@ struct ModuleContext<'a> {
     data_entries: usize,
     series: Option<Series>,
     checked: bool,
+    taint: &'a TaintTable,
 }
 
 /// A Python file on the left, a data file on the right.
@@ -390,7 +398,7 @@ impl ModuleContext<'_> {
 
     fn parsed(&self, path: PathBuf, text: Option<&str>, bytes: &[u8]) -> Option<ParsedFile> {
         if path.extension().is_some_and(|e| e == "py") {
-            let facts = python::analyze(text?, self.series);
+            let facts = python::analyze_with(text?, self.series, &python::FieldClasses::default(), self.taint);
             return Some(Ok(self.source(path, text)?.with(facts)));
         }
         let facts = self.data_facts(&path, text, bytes);
@@ -447,7 +455,7 @@ fn decoded<'b>(path: &Path, bytes: &'b [u8], series: Option<Series>) -> Option<C
     }
 }
 
-fn parse_module_files(module: &mut Module, default_series: Option<Series>) {
+fn parse_module_files(module: &mut Module, default_series: Option<Series>, taint: &TaintTable) {
     let series = module.series.or(default_series);
     let checked = module.checked;
     let context = ModuleContext {
@@ -456,6 +464,7 @@ fn parse_module_files(module: &mut Module, default_series: Option<Series>) {
         data_entries: module.manifest.data_entries(series),
         series,
         checked,
+        taint,
     };
     let files = module_files(&module.dir);
     let parsed: Vec<_> = files.into_par_iter().map(|path| context.file(path)).collect();
@@ -564,7 +573,7 @@ mod tests {
             let dir = Path::new(env!("CARGO_MANIFEST_DIR"))
                 .join("tests/fixtures/custom")
                 .join(name);
-            let modules = load(&[dir], &[], None, None).modules;
+            let modules = load(&[dir], &[], None, None, &TaintTable::default()).modules;
             modules.iter().find(|m| m.name == name).unwrap().lost_text
         };
         assert!(!lost("encoded_broken"));

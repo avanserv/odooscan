@@ -36,7 +36,9 @@ use crate::facts::RawDiag;
 use crate::fix::Fix;
 use crate::rules::{SUPERSEDED, Severity, rule};
 use crate::series::Series;
+pub use crate::taint::TaintTable;
 
+#[derive(Default)]
 pub struct ScanOptions {
     /// Modules to report on: module directories, or directories searched for modules.
     pub paths: Vec<PathBuf>,
@@ -47,6 +49,8 @@ pub struct ScanOptions {
     /// Series every checked module is checked as, whatever its manifest version names, and the
     /// default for the rest.
     pub target_series: Option<Series>,
+    /// Sources, sinks and sanitizers the OD7 rules follow besides their own.
+    pub taint: TaintTable,
 }
 
 #[derive(Debug, Serialize)]
@@ -130,7 +134,13 @@ pub fn has_core(opts: &ScanOptions) -> bool {
 
 pub fn scan(opts: &ScanOptions) -> Report {
     let default_series = opts.target_series.or(opts.default_series);
-    let discovery = project::load(&opts.paths, &opts.addons_paths, default_series, opts.target_series);
+    let discovery = project::load(
+        &opts.paths,
+        &opts.addons_paths,
+        default_series,
+        opts.target_series,
+        &opts.taint,
+    );
     let mut notices = discovery.notices;
     let modules = discovery.modules;
     let index = index::Index::build(&modules, default_series);

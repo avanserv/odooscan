@@ -207,6 +207,9 @@ The flow ends at a sanitizer: `int()`, `float()`, `bool()`, `len()`, `SQL.identi
 `if x not in allowed: raise`; and at an intersection with values the code chose, such as
 `set(vals) & allowed`.
 
+A project adds its own sources, sinks and sanitizers in the
+[`[taint]` table of its configuration](../configuration.md#taint-table).
+
 | Code | Name | Reports |
 | --- | --- | --- |
 | [OD701](OD701.md) | `sql-injection-flow` | Data a user controls reaches the text of an SQL query. |
