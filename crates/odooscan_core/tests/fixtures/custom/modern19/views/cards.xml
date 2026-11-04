@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="partner_kanban_cards" model="ir.ui.view">
+        <field name="model">res.partner</field>
+        <field name="arch" type="xml">
+            <kanban>
+                <templates>
+                    <t t-name="kanban-box">
+                        <div><field name="name"/></div>
+                    </t>
+                </templates>
+            </kanban>
+        </field>
+    </record>
+
+    <template id="partner_badge">
+        <div class="badge">
+            <span t-esc="partner.name"/>
+            <p t-raw="partner.motto"/>
+        </div>
+    </template>
+
+    <record id="partner_badge_followed" model="ir.ui.view">
+        <field name="inherit_id" ref="partner_badge"/>
+        <field name="arch" type="xml">
+            <xpath expr="//div" position="inside">
+                <div class="oe_chatter"/>
+            </xpath>
+        </field>
+    </record>
+
+    <record id="partner_sheet_page" model="ir.ui.view">
+        <field name="arch" type="xml">
+            <div>
+                <div class="oe_chatter"/>
+            </div>
+        </field>
+        <field name="type">qweb</field>
+    </record>
+
+    <record id="partner_kanban_both" model="ir.ui.view">
+        <field name="model">res.partner</field>
+        <field name="arch" type="xml">
+            <kanban>
+                <templates>
+                    <t t-name="kanban-box">
+                        <div><field name="name"/></div>
+                    </t>
+                    <t t-name="card">
+                        <field name="name"/>
+                    </t>
+                </templates>
+            </kanban>
+        </field>
+    </record>
+</odoo>

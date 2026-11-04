@@ -46,8 +46,13 @@ pub const SUPERSEDED: &[(&str, &str)] = &[("OD101", "OD701")];
 /// model whose `_inherits` field is not required with ondelete 'cascade' or 'restrict' instead of
 /// fixing it. From saas~16.4, a `check_company` field gets the domain its comodel's
 /// `_check_company_domain` gives, which by default names a `company_id` the comodel may lack.
+/// saas~19.1 drops `t-raw` from QWeb's directives (`odoo/addons/base/models/ir_qweb.py:1681`), so
+/// the server logs it as unknown and renders nothing for it. From saas~18.1 a kanban arch without a
+/// `card` template fails in the browser (`addons/web/static/src/views/kanban/kanban_arch_parser.js:136`).
 const SEVERITY_BY_SERIES: &[(&str, &str, Severity)] = &[
     ("OD401", ">=saas~19.4", Severity::Info),
+    ("OD307", ">=saas~19.1", Severity::Error),
+    ("OD326", ">=saas~18.1", Severity::Error),
     ("OD218", ">=saas~18.3", Severity::Error),
     ("OD222", ">=saas~16.4", Severity::Error),
 ];
@@ -177,6 +182,15 @@ rules! {
     "OD322" "unknown-selection-value" Correctness Error None, true, "A data record gives a Selection field a value it does not list.";
     "OD323" "duplicate-xmlid-across-files" Correctness Warning None, false, "A data file defines an XML id another file of the module already defines, with another model, or overwriting the fields both name.";
     "OD324" "missing-required-field" Correctness Warning None, true, "A data record is created without a required field that has no default.";
+    // saas~19.1 drops `t-esc` from QWeb's directives (`odoo/addons/base/models/ir_qweb.py:1681`); 19.0 still
+    // renders it as `t-out` (`:2487`).
+    "OD325" "t-esc-removed" Deprecation Error Some(">=saas~19.1"), false, "The server no longer renders t-esc in a QWeb view; use t-out.";
+    // 18.0 falls back to `kanban-box` with a warning (`addons/web/static/src/views/kanban/kanban_arch_parser.js:150`),
+    // saas~18.1 throws without a `card` (`:136`).
+    "OD326" "kanban-box-renamed-card" Deprecation Warning Some(">=18.0"), false, "The kanban-box template of a kanban view is renamed card.";
+    // saas~17.1 compiles `div.oe_chatter` into the chatter (`addons/mail/static/src/chatter/web/form_compiler.js:74`),
+    // saas~17.2 only `chatter` (`:42`).
+    "OD327" "chatter-div-replaced" Deprecation Warning Some(">=saas~17.2"), false, "A form's div with class oe_chatter no longer shows the chatter; use <chatter/>.";
     "OD401" "model-without-access" Security Warning None, true, "A new model has no ir.model.access rule, or from saas~19.4 no ir.access rule with a group.";
     "OD402" "public-write-access" Security Warning None, false, "An access row gives public or portal users write, create or unlink, through their group or no group.";
     "OD501" "manifest-data-missing" Correctness Error None, false, "A file listed in the manifest does not exist.";
@@ -286,6 +300,24 @@ mod tests {
     }
 
     #[test]
+    fn raw_severity_is_an_error_from_saas_19_1() {
+        let od307 = rule("OD307");
+        assert_eq!(od307.severity_for(Series::parse("15.0")), Severity::Warning);
+        assert_eq!(od307.severity_for(Series::parse("19.0")), Severity::Warning);
+        assert_eq!(od307.severity_for(Series::parse("saas~19.1")), Severity::Error);
+        assert_eq!(od307.severity_for(Series::parse("20.0")), Severity::Error);
+        assert_eq!(od307.severity_for(None), Severity::Warning);
+    }
+
+    #[test]
+    fn kanban_box_rule_is_an_error_from_saas_18_1() {
+        let od326 = rule("OD326");
+        assert_eq!(od326.severity_for(Series::parse("18.0")), Severity::Warning);
+        assert_eq!(od326.severity_for(Series::parse("saas~18.1")), Severity::Error);
+        assert_eq!(od326.severity_for(Series::parse("20.0")), Severity::Error);
+    }
+
+    #[test]
     fn delegate_crash_rule_runs_from_saas_14_4_before_saas_18_3() {
         let od228 = rule("OD228");
         assert!(!od228.applies_to(Series::parse("saas~14.3")));
@@ -298,7 +330,7 @@ mod tests {
 
     #[test]
     fn series_gates_follow_source() {
-        let gates: [(&str, &[&str], &[&str]); 8] = [
+        let gates: [(&str, &[&str], &[&str]); 11] = [
             ("OD117", &["saas~15.1", "saas~18.2"], &["saas~15.2", "saas~18.1"]),
             ("OD118", &["saas~18.1"], &["saas~18.2"]),
             ("OD219", &["saas~13.5"], &["14.0"]),
@@ -307,6 +339,9 @@ mod tests {
             ("OD315", &["saas~16.4"], &["17.0", "20.0"]),
             ("OD316", &["saas~16.4"], &["17.0", "20.0"]),
             ("OD317", &["saas~16.4", "saas~17.3"], &["17.0", "saas~17.2"]),
+            ("OD325", &["19.0"], &["saas~19.1", "20.0"]),
+            ("OD326", &["saas~17.4"], &["18.0", "20.0"]),
+            ("OD327", &["saas~17.1"], &["saas~17.2", "20.0"]),
         ];
         for (code, silent, reported) in gates {
             let r = rule(code);

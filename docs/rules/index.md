@@ -134,6 +134,9 @@ XML ids, views and data records, within a file and across the dependency graph.
 | [OD322](OD322.md) | `unknown-selection-value` | A data record gives a Selection field a value it does not list. |
 | [OD323](OD323.md) | `duplicate-xmlid-across-files` | A data file defines an XML id another file of the module already defines, with another model, or overwriting the fields both name. |
 | [OD324](OD324.md) | `missing-required-field` | A data record is created without a required field that has no default. |
+| [OD325](OD325.md) | `t-esc-removed` | The server no longer renders t-esc in a QWeb view; use t-out. |
+| [OD326](OD326.md) | `kanban-box-renamed-card` | The kanban-box template of a kanban view is renamed card. |
+| [OD327](OD327.md) | `chatter-div-replaced` | A form's div with class oe_chatter no longer shows the chatter; use `<chatter/>`. |
 
 ## OD4: access
 

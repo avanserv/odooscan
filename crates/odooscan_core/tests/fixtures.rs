@@ -205,6 +205,27 @@ fn tree_severity_is_an_error() {
 }
 
 #[test]
+fn raw_severity_is_an_error_from_saas_19_1() {
+    let expected = [
+        ("bad_sale", Severity::Warning),
+        ("modern19", Severity::Warning),
+        ("modern20", Severity::Error),
+    ];
+    assert_eq!(severities("OD307"), expected.map(|(m, s)| (m.to_owned(), s)));
+}
+
+#[test]
+fn kanban_box_severity_follows_the_module_series() {
+    let expected = [("bad_sale", Severity::Warning), ("modern19", Severity::Error)];
+    assert_eq!(severities("OD326"), expected.map(|(m, s)| (m.to_owned(), s)));
+}
+
+#[test]
+fn chatter_div_is_reported_from_saas_17_2() {
+    assert_eq!(severities("OD327"), [("bad_sale".to_owned(), Severity::Warning)]);
+}
+
+#[test]
 fn access_severity_follows_the_module_series() {
     let expected = [
         ("bad_sale", Severity::Warning),

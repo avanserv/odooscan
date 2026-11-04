@@ -218,6 +218,8 @@ pub fn check_module<'m>(index: &Index<'m>, mi: usize, series: Option<Series>) ->
     public_writes(index, mi, series, &mut out);
     refused_server_code(index, mi, series, &mut out);
     refused_file_names(index, mi, series, &mut out);
+    removed_escapes(index, mi, &mut out);
+    dropped_markup(index, mi, &mut out);
     for (_, file) in es_modules(index, mi, series) {
         if let Some(e) = &file.facts.syntax_error {
             out.push(&file.path, "OD000", e.pos, e.value.clone());
@@ -481,6 +483,50 @@ fn refused_file_names<'m>(index: &Index<'m>, mi: usize, series: Option<Series>, 
             }
         }
     }
+}
+
+/// OD325 on the `t-esc` of a view the server renders, which needs no index: a view whose tree is out
+/// of reach falls back to its own type. The web client still reads `t-esc` in the archs it compiles,
+/// such as a kanban's.
+fn removed_escapes<'m>(index: &Index<'m>, mi: usize, out: &mut Out<'m>) {
+    let module = &index.modules[mi];
+    for file in module.data.iter().filter(|f| f.rank.is_some()) {
+        for view in file.facts.views.iter().filter(|v| qweb_view(index, module, v)) {
+            for pos in &view.escapes {
+                out.push(
+                    &file.path,
+                    "OD325",
+                    *pos,
+                    "the server no longer knows t-esc and renders nothing for it; write t-out",
+                );
+            }
+        }
+    }
+}
+
+/// OD326 and OD327 on the markup the web client stops reading, unless the view's tree is QWeb, as a
+/// record inheriting a `<template>` is: the server renders its markup as it is.
+fn dropped_markup<'m>(index: &Index<'m>, mi: usize, out: &mut Out<'m>) {
+    let module = &index.modules[mi];
+    for file in &module.data {
+        for view in file.facts.views.iter().filter(|v| !qweb_view(index, module, v)) {
+            out.diags
+                .extend(view.dropped.iter().map(|d| (file.path.as_path(), d.clone())));
+        }
+    }
+}
+
+/// The type at the root of the view's inheritance. None when the view has neither a parent nor an
+/// id, or the type of the root is not known.
+fn root_kind<'m>(index: &Index<'m>, module: &Module, view: &ViewFact) -> Option<&'m str> {
+    let start = view.inherit.as_deref().or(view.id.as_deref())?;
+    index.view_kind(full_id(&module.name, start))
+}
+
+/// Whether the view renders on the server. The tree's root decides, since a kanban arch runs
+/// `t-call` in the client whatever the type of a view extending it.
+fn qweb_view(index: &Index, module: &Module, view: &ViewFact) -> bool {
+    root_kind(index, module, view).or(view.kind.as_deref()) == Some(QWEB)
 }
 
 /// The module's scripts that a bundle loads as ES modules: annotated, or from 17.0 on, any script
@@ -2605,18 +2651,11 @@ impl<'m> Ctx<'_, 'm> {
         }
     }
 
-    /// The type at the root of the view's inheritance. None when the view has neither a parent nor
-    /// an id, or the type of the root is not known.
-    fn root_kind(&self, view: &ViewFact) -> Option<&'m str> {
-        let start = view.inherit.as_deref().or(view.id.as_deref())?;
-        self.index.view_kind(full_id(&self.module.name, start))
-    }
-
     /// The type of the tree a view belongs to, unless it is QWeb, whose attributes are plain HTML. A
     /// root the index cannot read may be QWeb.
     fn arch_kind<'a>(&'a self, view: &'a ViewFact) -> Option<&'a str> {
         let kind = if view.inherit.is_some() {
-            self.root_kind(view)
+            root_kind(self.index, self.module, view)
         } else {
             view.kind.as_deref()
         };
@@ -2958,14 +2997,8 @@ impl<'m> Ctx<'_, 'm> {
             .then(|| format!("{} reads field '{}', which the view does not show", n.attr, n.field))
     }
 
-    /// Whether the view renders on the server. The tree's root decides, since a kanban arch runs
-    /// `t-call` in the client whatever the type of a view extending it.
-    fn qweb_view(&self, view: &ViewFact) -> bool {
-        self.root_kind(view).or(view.kind.as_deref()) == Some(QWEB)
-    }
-
     fn qweb_calls(&self, out: &mut Out<'m>, path: &'m Path, view: &ViewFact) {
-        if !self.qweb_view(view) {
+        if !qweb_view(self.index, self.module, view) {
             return;
         }
         for call in &view.calls {

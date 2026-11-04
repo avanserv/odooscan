@@ -106,6 +106,8 @@ custom/bad_sale/views/views.xml:36:5: OD303 XML id 'partner_demo' is already def
 custom/bad_sale/views/views.xml:49:9: OD307 t-raw renders unescaped HTML; use t-out and wrap trusted HTML in Markup
 custom/bad_sale/views/views.xml:53:9: OD306 view_mode 'tree' is renamed 'list'
 custom/bad_sale/views/views.xml:61:21: OD306 the <tree> view is renamed <list>
+custom/bad_sale/views/views.xml:74:21: OD326 the kanban-box template is renamed card
+custom/bad_sale/views/views.xml:87:17: OD327 a div with class oe_chatter renders as a plain div, without the chatter; write <chatter/>
 custom/base_only/data/ghost.nowhere.csv:1:1: OD201 no indexed module defines model 'ghost.nowhere'
 custom/base_only/data/project.project.csv:1:1: OD202 model 'project.project' comes from module project; add it to depends
 custom/base_only/data/res.partner-extra.csv:1:1: OD309 res.partner has no field 'name@fr'
@@ -588,6 +590,8 @@ custom/modern19/models/partner.py:69:21: OD120 'time' in an ormcache key is not 
 custom/modern19/models/views.py:15:5: OD226 _auto = False leaves modern.gauge without a table, and nothing creates the view modern_gauge; create it in init(), or drop _auto = False
 custom/modern19/static/src/base_calls.js:4:45: OD604 model 'res.partner' has no method 'is_transient'
 custom/modern19/static/src/base_calls.js:5:45: OD604 model 'res.partner' has no method 'ids'
+custom/modern19/views/cards.xml:8:21: OD326 the kanban-box template is renamed card
+custom/modern19/views/cards.xml:19:13: OD307 t-raw renders unescaped HTML; use t-out and wrap trusted HTML in Markup
 custom/modern20/data/calls.xml:7:7: OD320 res.partner has no method 'pool'
 custom/modern20/models/lamp.py:14:7: OD401 model 'modern.booth' has no ir.access rule with a group, so only the superuser can use it
 custom/modern20/models/lamp.py:21:7: OD401 model 'modern.kiosk' has no ir.access rule with a group, so only the superuser can use it
@@ -609,6 +613,9 @@ custom/modern20/security/ir.access-inactive.csv:3:1: OD402 base.group_portal get
 custom/modern20/security/ir.access.csv:2:1: OD210 'no_csv_name': modern.lamp has no field 'no_csv_name'
 custom/modern20/static/src/base_calls.js:5:45: OD604 model 'res.partner' has no method 'get_formview_action'
 custom/modern20/static/src/base_calls.js:6:45: OD604 model 'res.partner' has no method 'ids'
+custom/modern20/views/pages.xml:5:13: OD325 the server no longer knows t-esc and renders nothing for it; write t-out
+custom/modern20/views/pages.xml:6:13: OD307 t-raw renders unescaped HTML; use t-out and wrap trusted HTML in Markup
+custom/modern20/views/pages.xml:18:21: OD325 the server no longer knows t-esc and renders nothing for it; write t-out
 custom/modifiers17/views/jobs.xml:7:47: OD317 invisible reads field 'state', which the view does not show
 custom/modifiers17/views/jobs.xml:54:47: OD317 invisible reads field 'note', which the view does not show
 custom/modifiers17/views/jobs.xml:76:51: OD317 invisible reads field 'phase', which the view does not show

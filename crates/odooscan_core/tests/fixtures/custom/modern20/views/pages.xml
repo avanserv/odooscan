@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <template id="lamp_page">
+        <div class="lamp">
+            <span t-esc="lamp.name"/>
+            <p t-raw="lamp.note"/>
+        </div>
+    </template>
+
+    <record id="lamp_page_ported" model="ir.ui.view">
+        <field name="inherit_id" ref="lamp_page"/>
+        <field name="arch" type="xml">
+            <data>
+                <span t-esc="lamp.name" position="replace">
+                    <span t-out="lamp.name"/>
+                </span>
+                <xpath expr="//p" position="after">
+                    <em t-esc="lamp.code"/>
+                </xpath>
+            </data>
+        </field>
+    </record>
+
+    <record id="partner_kanban_cards" model="ir.ui.view">
+        <field name="model">res.partner</field>
+        <field name="arch" type="xml">
+            <kanban>
+                <templates>
+                    <t t-name="card">
+                        <span t-esc="record.name.value"/>
+                    </t>
+                </templates>
+            </kanban>
+        </field>
+    </record>
+</odoo>
