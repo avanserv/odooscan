@@ -41,10 +41,15 @@ pub(crate) fn returned_key<'b>(body: &'b [Stmt], key: &str) -> Option<&'b Expr> 
 
 /// The key of the literal dict that is the string `key`.
 pub(crate) fn dict_key<'e>(expr: &'e Expr, key: &str) -> Option<&'e Expr> {
+    dict_item(expr, key)?.key.as_ref()
+}
+
+/// The item of the literal dict whose key is the string `key`.
+pub(crate) fn dict_item<'e>(expr: &'e Expr, key: &str) -> Option<&'e ast::DictItem> {
     let Expr::Dict(d) = expr else { return None };
     d.items
         .iter()
-        .find_map(|item| item.key.as_ref().filter(|k| is_str(k, key)))
+        .find(|item| item.key.as_ref().is_some_and(|k| is_str(k, key)))
 }
 
 /// What the `return` statements of the method itself, not of a function it nests, give.

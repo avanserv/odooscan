@@ -1050,7 +1050,7 @@ custom/saas181/models/upgrade.py:11:14: OD125 check_access_rights() is deprecate
 custom/saas181/models/upgrade.py:12:14: OD125 check_access_rule() is deprecated from 18.0; use check_access()
 custom/saas181/models/upgrade.py:14:21: OD126 user_has_groups() no longer works from saas~17.2; use self.env.user.has_groups()
 custom/saas181/models/upgrade.py:17:9: OD126 overriding _name_search() no longer works from 18.0; override _search_display_name()
-custom/saas181/models/upgrade.py:25:68: OD126 writing numbercall on ir.cron no longer works from saas~17.3; use active=False or _trigger()
+custom/saas181/models/upgrade.py:25:68: OD126 writing numbercall on ir.cron no longer works from saas~17.3; remove it, as a cron repeats until deactivated
 custom/saas181/models/upgrade.py:25:86: OD126 writing doall on ir.cron no longer works from saas~17.3; remove it
 custom/saas181/models/upgrade.py:40:37: OD125 type='json' is deprecated from saas~18.1; use type='jsonrpc'
 custom/saas182/data/translated.xml:6:9: OD309 res.partner has no field 'ghost'
@@ -1058,7 +1058,6 @@ custom/saas182/models/badge.py:8:58: OD228 'country_id' has delegate=True and no
 custom/saas182/models/res_partner.py:7:5: OD118 @api.model on create() passes a list of dicts, so reading vals as one dict fails; decorate it with @api.model_create_multi and loop over the list
 custom/saas182/models/upgrade.py:8:40: OD125 read_group() is deprecated from saas~18.2; use _read_group()
 custom/saas182/models/upgrade.py:11:9: OD125 overriding read_group() is deprecated from saas~18.2; override _read_group() or formatted_read_group()
-custom/saas182/models/upgrade.py:12:24: OD125 read_group() is deprecated from saas~18.2; use _read_group()
 custom/saas183/models/ticket.py:7:33: OD218 _inherits delegates to 'partner_id', which must be required with ondelete 'cascade' or 'restrict'; give it ondelete="cascade"
 custom/saas183/models/ticket.py:9:73: OD213 'partner_id' is required, so Odoo refuses ondelete='set null'; use 'restrict' or 'cascade'
 custom/saas183/models/ticket.py:10:88: OD213 'country_id' is required, so Odoo refuses ondelete='set null'; use 'restrict' or 'cascade'
@@ -1067,7 +1066,6 @@ custom/saas192/models/upgrade.py:14:14: OD126 check_access_rights() no longer wo
 custom/saas192/models/upgrade.py:15:14: OD126 check_access_rule() no longer works from saas~19.1; use check_access()
 custom/saas192/models/upgrade.py:16:33: OD126 read_group() no longer works from saas~19.1; use _read_group()
 custom/saas192/models/upgrade.py:20:9: OD126 overriding read_group() no longer works from saas~19.1; override _read_group() or formatted_read_group()
-custom/saas192/models/upgrade.py:21:24: OD126 read_group() no longer works from saas~19.1; use _read_group()
 custom/saas193/models/ledger.py:4:7: OD401 model 'saas.before.ledger' has no ir.model.access rule, so only the superuser can use it
 custom/saas193/models/memo.py:8:34: OD219 'stage' sets tracking, but saas.memo does not inherit mail.thread, so Odoo ignores it and logs a warning; inherit mail.thread or remove tracking
 custom/saas193/security/ir.model.access.csv:2:1: OD402 no group limits this row, so every user, public and portal included, gets write, create or unlink on model_saas_before_desk; name a group
