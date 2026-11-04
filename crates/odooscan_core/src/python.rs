@@ -6,6 +6,7 @@ use ruff_source_file::LineIndex;
 use ruff_text_size::{Ranged, TextRange, TextSize};
 use rustc_hash::{FxHashMap, FxHashSet};
 
+use crate::api_table::{self, Kind};
 use crate::facts::{
     ClassFact, DefinitionSource, DomainFact, FieldClass, FieldFact, GuardedRef, ModelKind, OptionValue, Pos, PyFacts,
     RawDiag, Receiver, Spanned, SqlColumn, SqlView, Subject, UNREAD_TYPE, XmlRef,
@@ -110,11 +111,67 @@ pub(crate) fn tail_name(expr: &Expr) -> Option<&str> {
 }
 
 fn keyword<'a>(call: &'a ast::ExprCall, name: &str) -> Option<&'a Expr> {
+    keyword_arg(call, name).map(|k| &k.value)
+}
+
+fn keyword_arg<'a>(call: &'a ast::ExprCall, name: &str) -> Option<&'a ast::Keyword> {
     call.arguments
         .keywords
         .iter()
         .find(|k| k.arg.as_ref().is_some_and(|a| a.as_str() == name))
-        .map(|k| &k.value)
+}
+
+/// Whether the argument of `sudo()` is a user rather than the flag: an id, a record a call looks
+/// up, or a name whose last word is a user, such as `user`, `self.env.uid`, `admin_user.id`,
+/// `env.ref("base.user_admin").id` or `SUPERUSER_ID`. A flag such as `is_superuser`,
+/// `use_superuser` or `self.user_can_edit` names something else.
+fn names_user(arg: &Expr) -> bool {
+    let (named, id) = match arg {
+        Expr::NumberLiteral(n) => return matches!(n.value, ast::Number::Int(_)),
+        Expr::Call(c) => return matches!(tail_name(&c.func), Some("ref" | "browse")),
+        Expr::Attribute(a) if a.attr.as_str() == "id" => match &*a.value {
+            Expr::Call(_) => return names_user(&a.value),
+            value => (value, true),
+        },
+        _ => (arg, false),
+    };
+    tail_name(named).is_some_and(|name| {
+        let name = name.to_ascii_lowercase();
+        let mut words: Vec<&str> = name.split('_').filter(|w| !w.is_empty()).collect();
+        let id = id || words.last() == Some(&"id");
+        if words.last() == Some(&"id") {
+            words.pop();
+        }
+        let flag = matches!(words.first(), Some(&("is" | "has" | "can")));
+        // Flags name the superuser mode too, so only its id is a user.
+        !flag
+            && matches!(
+                (words.last(), id),
+                (Some(&("user" | "uid")), _) | (Some(&"superuser"), true)
+            )
+    })
+}
+
+/// The packages an import statement imports, `odoo.osv` for `from odoo import osv` too.
+fn imported_modules(stmt: &Stmt) -> Vec<String> {
+    match stmt {
+        Stmt::Import(i) => i.names.iter().map(|a| a.name.to_string()).collect(),
+        Stmt::ImportFrom(ast::StmtImportFrom {
+            module: Some(module),
+            names,
+            level: 0,
+            ..
+        }) => std::iter::once(module.to_string())
+            .chain(names.iter().map(|a| format!("{module}.{}", a.name)))
+            .collect(),
+        _ => vec![],
+    }
+}
+
+fn under_package(module: &str, package: &str) -> bool {
+    module
+        .strip_prefix(package)
+        .is_some_and(|rest| rest.is_empty() || rest.starts_with('.'))
 }
 
 pub(crate) fn is_cursor(expr: &Expr) -> bool {
@@ -1665,6 +1722,8 @@ struct PyVisitor<'a, 'ast> {
     /// Whether the code is in the `init()` or `_auto_init()` of a class, which creates the view of
     /// the model the class is or is mixed into, and which Odoo runs ahead of the module's data.
     in_view_maker: bool,
+    /// How many enclosing `try` bodies have a handler that catches a failed import.
+    import_shims: usize,
     /// The names the file's imports from `odoo` bind at import.
     odoo_names: Vec<&'ast str>,
     /// The names the file's imports from `ORM_PACKAGES` bind at import, each with its dotted path.
@@ -1691,6 +1750,7 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
             self_cursors: vec![],
             cursor_uses: vec![],
             in_view_maker: false,
+            import_shims: 0,
             odoo_names: module_state::odoo_names(&top)
                 .into_iter()
                 .map(|(local, _)| local)
@@ -2109,13 +2169,13 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
                 "this default is computed once at import; pass the function itself, e.g. default=fields.Date.today",
             );
         }
-        if let Some(k) = call
-            .arguments
-            .keywords
-            .iter()
-            .find(|k| k.arg.as_ref().is_some_and(|a| a.as_str() == "group_operator"))
-        {
+        if let Some(k) = keyword_arg(call, "group_operator") {
             self.diag("OD108", k, "group_operator is renamed aggregator");
+        }
+        for option in ["oldname", "track_visibility"] {
+            if let Some(k) = keyword_arg(call, option) {
+                self.api_use(Kind::FieldOption(option), k);
+            }
         }
         let options = self.options(ftype, call);
         Some(FieldFact {
@@ -2391,31 +2451,36 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
 
     fn route_checks(&mut self, func: &ast::StmtFunctionDef) {
         for decorator in &func.decorator_list {
-            let Expr::Call(call) = &decorator.expression else {
-                continue;
-            };
-            if tail_name(&call.func) != Some("route") {
-                continue;
-            }
-            let auth = keyword(call, "auth").and_then(str_lit).unwrap_or("user");
-            let kind = keyword(call, "type").and_then(str_lit).unwrap_or("http");
-            if matches!(auth, "public" | "none") && body_contains(&func.body, Some("sudo")) {
-                self.diag("OD111", &func.name, format!("route with auth='{auth}' calls sudo(); check that every record it reads or writes is filtered by an access check"));
-            }
-            if kind == "http"
-                && let Some(k) = call
-                    .arguments
-                    .keywords
-                    .iter()
-                    .find(|k| k.arg.as_ref().is_some_and(|a| a.as_str() == "csrf"))
-                && matches!(&k.value, Expr::BooleanLiteral(b) if !b.value)
+            if let Expr::Call(call) = &decorator.expression
+                && tail_name(&call.func) == Some("route")
             {
-                self.diag(
-                    "OD112",
-                    k,
-                    "csrf=False lets other sites submit this form on the user's behalf",
-                );
+                self.route_check(func, call);
             }
+        }
+    }
+
+    fn route_check(&mut self, func: &ast::StmtFunctionDef, call: &ast::ExprCall) {
+        let auth = keyword(call, "auth").and_then(str_lit).unwrap_or("user");
+        if matches!(auth, "public" | "none") && body_contains(&func.body, Some("sudo")) {
+            self.diag("OD111", &func.name, format!("route with auth='{auth}' calls sudo(); check that every record it reads or writes is filtered by an access check"));
+        }
+        let kind = keyword_arg(call, "type").map(|k| (k, str_lit(&k.value).unwrap_or("http")));
+        match kind {
+            Some((k, "json")) => self.api_use(Kind::RouteType("json"), k),
+            None | Some((_, "http")) => self.route_csrf(call),
+            _ => {}
+        }
+    }
+
+    fn route_csrf(&mut self, call: &ast::ExprCall) {
+        if let Some(k) = keyword_arg(call, "csrf")
+            && matches!(&k.value, Expr::BooleanLiteral(b) if !b.value)
+        {
+            self.diag(
+                "OD112",
+                k,
+                "csrf=False lets other sites submit this form on the user's behalf",
+            );
         }
     }
 
@@ -2442,11 +2507,80 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
             }
             _ => {}
         }
+        self.api_calls(call);
         self.domain_call(call);
         self.id_refs(call, expr);
         self.sql_columns(call);
         self.added_columns(call);
         self.created_views(call);
+    }
+
+    /// The calls `api_table` has a row for.
+    fn api_calls(&mut self, call: &ast::ExprCall) {
+        let Expr::Attribute(a) = &*call.func else { return };
+        if a.attr.as_str() == "sudo" && call.arguments.args.first().is_some_and(names_user) {
+            self.api_use(Kind::SudoUser, &a.attr);
+        }
+        for row in api_table::ROWS {
+            if let Some(range) = self.api_call_range(row.kind, call, a) {
+                self.api_use(row.kind, &range);
+            }
+        }
+    }
+
+    /// The range to report when the call matches the row's form: the method name, or the first
+    /// keyword the row lists.
+    fn api_call_range(&self, kind: Kind, call: &ast::ExprCall, a: &ast::ExprAttribute) -> Option<TextRange> {
+        let method = a.attr.as_str();
+        match kind {
+            Kind::Method(m) if m == method => Some(a.attr.range()),
+            Kind::RecordsetMethod(m) if m == method && self.on_recordset(&a.value, m) => Some(a.attr.range()),
+            Kind::Keywords(m, names) if m == method => {
+                names.iter().find_map(|name| keyword_arg(call, name)).map(Ranged::range)
+            }
+            _ => None,
+        }
+    }
+
+    /// Whether `expr` is `self` in a method of a model class, mixins included, that does not define
+    /// `method` itself, or a model the code names.
+    fn on_recordset(&self, expr: &Expr, method: &str) -> bool {
+        if matches!(expr, Expr::Name(n) if n.id.as_str() == "self")
+            && let Some(&Some(class)) = self.class_facts.last()
+        {
+            return !self.facts.classes[class].methods.iter().any(|m| m == method);
+        }
+        self.receiver_model(expr).is_some()
+    }
+
+    fn api_use(&mut self, kind: Kind, node: &impl Ranged) {
+        if let Some((code, message)) = api_table::stage(api_table::row_of(kind), self.series) {
+            self.diag(code, node, message);
+        }
+    }
+
+    /// One finding per import statement, for the first row it imports the package of and whose
+    /// stage the series has reached. Behind a `try` that catches the `ImportError`, the import of a
+    /// removed package is a fallback, while one that still loads warns all the same.
+    fn api_imports(&mut self, stmt: &Stmt) {
+        let modules = imported_modules(stmt);
+        let found = api_table::ROWS.iter().find_map(|row| match row.kind {
+            Kind::Import(package) if modules.iter().any(|m| under_package(m, package)) => {
+                api_table::stage(row, self.series)
+            }
+            _ => None,
+        });
+        if let Some((code, message)) = found
+            && !(code == "OD126" && self.import_shims > 0)
+        {
+            self.diag(code, stmt, message);
+        }
+    }
+
+    fn request_attr(&mut self, a: &ast::ExprAttribute, expr: &Expr) {
+        if a.attr.as_str() == "jsonrequest" && tail_name(&a.value) == Some("request") {
+            self.api_use(Kind::RequestAttr("jsonrequest"), expr);
+        }
     }
 
     /// The names of the views a `CREATE VIEW` creates, where `SQL()` spells it out or an
@@ -2787,7 +2921,13 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
     /// The handlers run once the lookup has failed, and `finally` runs either way.
     fn visit_try(&mut self, t: &'ast ast::StmtTry) {
         let (within, after) = try_guards(t).unzip();
+        let shim = t
+            .handlers
+            .iter()
+            .any(|ast::ExceptHandler::ExceptHandler(h)| catches(h, "ImportError") || catches(h, "ModuleNotFoundError"));
+        self.import_shims += usize::from(shim);
         self.guarded_by(within, |v| v.visit_body(&t.body));
+        self.import_shims -= usize::from(shim);
         t.handlers.iter().for_each(|h| self.visit_except_handler(h));
         self.guarded_by(after, |v| v.visit_body(&t.orelse));
         self.visit_body(&t.finalbody);
@@ -2844,6 +2984,7 @@ impl<'ast> Visitor<'ast> for PyVisitor<'_, 'ast> {
             }
             Stmt::Try(t) => return self.visit_try(t),
             Stmt::For(f) => self.holders.unbind(&f.target),
+            Stmt::Import(_) | Stmt::ImportFrom(_) => self.api_imports(stmt),
             _ => {}
         }
         visitor::walk_stmt(self, stmt);
@@ -2859,7 +3000,10 @@ impl<'ast> Visitor<'ast> for PyVisitor<'_, 'ast> {
                 return self.branches(&i.test, |v| v.visit_expr(&i.body), |v| v.visit_expr(&i.orelse));
             }
             Expr::Subscript(sub) => self.env_model(sub),
-            Expr::Attribute(a) => self.private_attr(a, expr),
+            Expr::Attribute(a) => {
+                self.private_attr(a, expr);
+                self.request_attr(a, expr);
+            }
             _ => {}
         }
         visitor::walk_expr(self, expr);
@@ -4936,5 +5080,62 @@ mod tests {
         let fields: Vec<_> = class.fields.iter().map(|f| f.name.as_str()).collect();
         assert_eq!(fields, ["async", "ASYNC"]);
         assert_eq!(class.methods, ["await", "AWAIT"]);
+    }
+
+    #[test]
+    fn sudo_is_given_a_user_only_by_an_id_a_record_or_a_user_name() {
+        let src = |arg: &str| {
+            format!("class X(models.Model):\n    _inherit = 'x'\n\n    def f(self):\n        return self.sudo({arg})\n")
+        };
+        let users = [
+            "user",
+            "2",
+            "SUPERUSER_ID",
+            "superuser.id",
+            "self.env.ref('base.user_admin')",
+            "self.env.ref('base.user_admin').id",
+            "users.browse(2).id",
+        ];
+        for arg in users {
+            assert_eq!(codes(&src(arg), Series::parse("16.0")), ["OD126"], "{arg}");
+        }
+        let flags = [
+            "as_superuser",
+            "force_superuser",
+            "self.use_superuser",
+            "is_superuser",
+            "self.env.su",
+        ];
+        for arg in flags {
+            assert_eq!(codes(&src(arg), Series::parse("16.0")), [""; 0], "{arg}");
+        }
+    }
+
+    #[test]
+    fn a_recordset_method_the_class_defines_is_its_own() {
+        let src = "class X(models.Model):\n    _inherit = 'x'\n\n    def refresh(self):\n        return True\n\n    \
+                   def f(self):\n        self.refresh()\n        self.env['x'].refresh()\n        self.flush()\n";
+        let facts = analyze(src, Series::parse("16.0"));
+        let found: Vec<_> = facts.diags.iter().map(|d| (d.code, d.pos.line)).collect();
+        assert_eq!(found, [("OD125", 9), ("OD125", 10)]);
+    }
+
+    #[test]
+    fn an_import_a_try_falls_back_from_is_no_error() {
+        let src = |caught: &str| {
+            format!("try:\n    from odoo.osv import expression\nexcept {caught}:\n    expression = None\n")
+        };
+        for caught in [
+            "ImportError",
+            "ModuleNotFoundError",
+            "(ImportError, KeyError)",
+            "Exception",
+        ] {
+            assert_eq!(codes(&src(caught), Series::parse("saas~19.1")), [""; 0], "{caught}");
+            assert_eq!(codes(&src(caught), Series::parse("19.0")), ["OD125"], "{caught}");
+        }
+        assert_eq!(codes(&src("ValueError"), Series::parse("saas~19.1")), ["OD126"]);
+        let fallback = "try:\n    import lxml\nexcept ImportError:\n    from odoo.osv import expression\n";
+        assert_eq!(codes(fallback, Series::parse("saas~19.1")), ["OD126"]);
     }
 }

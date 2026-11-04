@@ -192,6 +192,7 @@ custom/cursor_state/models/sql_writes.py:27:9: OD122 UPDATE on res_partner bypas
 custom/cursor_state/models/sql_writes.py:30:9: OD122 UPDATE on res_partner bypasses the ORM, so records this transaction already read keep stale values; call flush_model() before the query and invalidate_model() after it (flush() and invalidate_cache() before 16.0)
 custom/cursor_state/models/sql_writes.py:34:9: OD122 UPDATE on res_partner bypasses the ORM, so records this transaction already read keep stale values; call flush_model() before the query and invalidate_model() after it (flush() and invalidate_cache() before 16.0)
 custom/cursor_state/models/sql_writes.py:38:13: OD122 UPDATE on res_partner bypasses the ORM, so records this transaction already read keep stale values; call flush_model() before the query and invalidate_model() after it (flush() and invalidate_cache() before 16.0)
+custom/cursor_state/models/sql_writes.py:56:14: OD126 invalidate_cache() no longer works from saas~16.2; use invalidate_model(), invalidate_recordset() or self.env.invalidate_all()
 custom/cursor_state/models/sql_writes.py:82:9: OD122 UPDATE on res_partner bypasses the ORM, so records this transaction already read keep stale values; call flush_model() before the query and invalidate_model() after it (flush() and invalidate_cache() before 16.0)
 custom/cursor_state/models/sql_writes.py:86:9: OD122 UPDATE on res_partner bypasses the ORM, so records this transaction already read keep stale values; call flush_model() before the query and invalidate_model() after it (flush() and invalidate_cache() before 16.0)
 custom/cursor_state/models/sql_writes.py:116:13: OD122 UPDATE on res_partner bypasses the ORM, so records this transaction already read keep stale values; call flush_model() before the query and invalidate_model() after it (flush() and invalidate_cache() before 16.0)
@@ -472,6 +473,7 @@ custom/legacy14/models/res_partner.py:11:34: OD219 'stage' sets tracking, but re
 custom/legacy14/models/res_partner.py:22:9: OD223 _compute_initials() can leave 'initials' unassigned on a record, so reading it raises ValueError; assign it on every path through the loop, False when there is no value
 custom/legacy14/models/res_partner.py:33:41: OD220 'stamped_on' has the label 'Create Date' of field 'create_date' of res.partner, so Odoo logs a warning and users cannot tell them apart; give it another string
 custom/legacy14/models/res_partner.py:35:41: OD220 'touched_on' has the label 'Last Modified on' of field '__last_update' of res.partner, so Odoo logs a warning and users cannot tell them apart; give it another string
+custom/legacy14/models/upgrade.py:7:49: OD125 track_visibility= is deprecated from saas~13.4; use tracking=
 custom/legacy14/security/rules.xml:4:36: OD210 'no_legacy_field': legacy.ledger has no field 'no_legacy_field'
 custom/legacy14/security/rules.xml:24:36: OD210 'no_supplied': legacy.ledger has no field 'no_supplied'
 custom/legacy14/security/second_writes.xml:2:5: OD323 XML id 'rule_ledger_replaced' is already defined in security/rules.xml, and this definition overwrites the fields both name; remove the copy when the two say the same thing, or rename one when both are meant to exist
@@ -497,6 +499,12 @@ custom/legacy15/static/src/base_calls.js:9:45: OD604 model 'res.partner' has no 
 custom/legacy15/static/src/base_calls.js:10:45: OD604 model 'res.partner' has no method 'get_property_definition'
 custom/legacy154/data/calls.xml:4:41: OD314 res.partner has no method '_neutralized'
 custom/legacy154/models/res_company.py:14:24: OD211 no parent class of res.company defines '_neutralized', so this super() call fails
+custom/legacy154/models/upgrade.py:9:14: OD126 sudo(user) no longer works from saas~15.3; use with_user(user)
+custom/legacy154/models/upgrade.py:9:25: OD125 flush() is deprecated from saas~15.4; use flush_model(), flush_recordset() or self.env.flush_all()
+custom/legacy154/models/upgrade.py:10:33: OD125 recompute() is deprecated from saas~15.4; use flush_model(), flush_recordset() or self.env.flush_all()
+custom/legacy154/models/upgrade.py:11:14: OD125 invalidate_cache() is deprecated from saas~15.4; use invalidate_model(), invalidate_recordset() or self.env.invalidate_all()
+custom/legacy154/models/upgrade.py:12:14: OD125 refresh() is deprecated from saas~15.2; use invalidate_recordset()
+custom/legacy154/models/upgrade.py:19:16: OD126 request.jsonrequest no longer works from saas~15.3; use request.get_json_data()
 custom/legacy16/__manifest__.py:7:5: OD505 Odoo ignores the qweb key, so the templates it lists that no bundle loads are missing; list them under web.assets_backend in assets
 custom/legacy16/__manifest__.py:10:9: OD506 Odoo no longer loads web.assets_qweb, so the templates it lists that no other bundle loads are missing; list them under web.assets_backend
 custom/legacy16/models/gauge.py:7:5: OD226 _auto = False leaves legacy.gauge without a table, and nothing creates the view legacy_gauge; create it in init(), or drop _auto = False
@@ -512,6 +520,10 @@ custom/legacy17/data/res.partner-translated.csv:1:1: OD309 res.partner has no fi
 custom/legacy17/data/translated.xml:5:9: OD309 res.partner has no field 'name@fr'
 custom/legacy17/models/res_partner.py:7:68: OD222 'home_country_id' has check_company=True, but res.country has no company_id field to check; remove check_company
 custom/legacy17/models/res_partner.py:13:68: OD222 'home_country_id' has check_company=True, but res.country has no company_id field to check; remove check_company
+custom/legacy17/models/upgrade.py:8:14: OD126 flush() no longer works from saas~16.2; use flush_model(), flush_recordset() or self.env.flush_all()
+custom/legacy17/models/upgrade.py:9:33: OD126 recompute() no longer works from saas~16.2; use flush_model(), flush_recordset() or self.env.flush_all()
+custom/legacy17/models/upgrade.py:10:14: OD126 invalidate_cache() no longer works from saas~16.2; use invalidate_model(), invalidate_recordset() or self.env.invalidate_all()
+custom/legacy17/models/upgrade.py:11:14: OD126 refresh() no longer works from saas~16.2; use invalidate_recordset()
 custom/legacy17/partner_tagline_views.xml:1:1: OD502 'partner_tagline_views.xml' is listed under update_xml, which Odoo ignores in this series; move it to data
 custom/legacy17/views/partner_motto_views.xml:1:1: OD502 'views/partner_motto_views.xml' is listed under update_xml, which Odoo ignores in this series; move it to data
 custom/legacy17/views/partner_nickname_views.xml:1:1: OD502 'views/partner_nickname_views.xml' is listed under init_xml, which Odoo ignores in this series; move it to data
@@ -590,6 +602,7 @@ custom/modern19/models/partner.py:47:33: OD218 _inherits delegates to 'partner_i
 custom/modern19/models/partner.py:49:73: OD213 'partner_id' is required, so Odoo refuses ondelete='set null'; use 'restrict' or 'cascade'
 custom/modern19/models/partner.py:63:30: OD220 'ref' has the label 'ID' of field 'id' of modern.seal, so Odoo logs a warning and users cannot tell them apart; give it another string
 custom/modern19/models/partner.py:69:21: OD120 'time' in an ormcache key is not a parameter of _quarter_hour_rates(), so every call raises NameError; key on a parameter or on self
+custom/modern19/models/upgrade.py:2:1: OD125 importing odoo.osv is deprecated from 19.0; use odoo.fields.Domain
 custom/modern19/models/views.py:15:5: OD226 _auto = False leaves modern.gauge without a table, and nothing creates the view modern_gauge; create it in init(), or drop _auto = False
 custom/modern19/static/src/base_calls.js:4:45: OD604 model 'res.partner' has no method 'is_transient'
 custom/modern19/static/src/base_calls.js:5:45: OD604 model 'res.partner' has no method 'ids'
@@ -611,6 +624,7 @@ custom/modern20/models/res_partner.py:111:7: OD401 model 'modern.lamp.shade' has
 custom/modern20/models/res_partner.py:117:39: OD224 l.x_shade: modern_lamp has no such column, since modern.lamp has no field x_shade; name the column of a stored field of modern.lamp
 custom/modern20/models/tariff.py:13:45: OD212 Monetary field 'amount' takes its currency from 'x_tariff_currency_id', which modern.tariff does not have
 custom/modern20/models/tariff.py:16:39: OD224 t.code: modern_tariff has no such column, since modern.tariff has no field code; name the column of a stored field of modern.tariff
+custom/modern20/models/upgrade.py:10:40: OD126 read_group(fields=, orderby=, lazy=) no longer works from 20.0; use read_group(domain, groupby, aggregates, order=)
 custom/modern20/security/access.xml:6:30: OD210 'no_xml_domain': modern.lamp has no field 'no_xml_domain'
 custom/modern20/security/ir.access-inactive.csv:3:1: OD402 base.group_portal gets write, create or unlink on modern.lamp; public and portal access should be read-only and go through controllers
 custom/modern20/security/ir.access.csv:2:1: OD210 'no_csv_name': modern.lamp has no field 'no_csv_name'
@@ -977,7 +991,15 @@ custom/report_tag161/data/updates.xml:2:5: OD323 XML id 'tag_replaces' is alread
 custom/saas124/views/actions.xml:5:33: OD318 saas124.plain has no field activity_ids, which the activity view searches; inherit mail.activity.mixin
 custom/saas124/views/actions.xml:11:33: OD318 saas124.tracked has no primary activity view, and nothing generates one
 custom/saas125/models/res_partner.py:7:68: OD222 'home_country_id' has check_company=True, but res.country has no company_id field to check; remove check_company
+custom/saas125/models/upgrade.py:7:33: OD126 oldname= no longer works from saas~12.5; use an upgrade script that renames the column
+custom/saas125/models/upgrade.py:11:21: OD125 sudo(user) is deprecated from saas~12.5; use with_user(user)
+custom/saas125/models/upgrade.py:11:39: OD125 sudo(user) is deprecated from saas~12.5; use with_user(user)
+custom/saas125/models/upgrade.py:11:60: OD125 sudo(user) is deprecated from saas~12.5; use with_user(user)
+custom/saas125/models/upgrade.py:14:21: OD125 sudo(user) is deprecated from saas~12.5; use with_user(user)
+custom/saas125/models/upgrade.py:14:66: OD125 sudo(user) is deprecated from saas~12.5; use with_user(user)
+custom/saas125/models/upgrade.py:20:21: OD125 sudo(user) is deprecated from saas~12.5; use with_user(user)
 custom/saas131/models/badge.py:8:53: OD218 'model_id' has delegate=True, so it must be required with ondelete 'cascade' or 'restrict'; give it ondelete="cascade"
+custom/saas131/models/upgrade.py:8:41: OD126 message_post(subtype=) no longer works from saas~13.1; use subtype_xmlid=
 custom/saas131/security/ir.model.access.csv:3:1: OD402 no group limits this row, so every user, public and portal included, gets write, create or unlink on model_saas_register; name a group
 custom/saas131/security/ir.model.access.csv:5:1: OD402 base.group_portal gets write, create or unlink on model_saas_register; public and portal access should be read-only and go through controllers
 custom/saas132/models/wizards.py:4:7: OD401 model 'saas.later.pass.wizard' has no ir.model.access rule, so only the superuser can use it
@@ -1003,12 +1025,22 @@ custom/saas153/models/res_partner.py:8:5: OD117 @api.model on create() makes Odo
 custom/saas181/data/res.partner-translated.csv:1:1: OD309 res.partner has no field 'name@fr'
 custom/saas181/data/translated.xml:5:9: OD309 res.partner has no field 'name@fr'
 custom/saas181/models/res_partner.py:7:5: OD117 @api.model on create() makes Odoo call it once per record; decorate it with @api.model_create_multi and take a list of dicts
+custom/saas181/models/upgrade.py:7:49: OD126 track_visibility= no longer works from saas~18.1; use tracking=
+custom/saas181/models/upgrade.py:10:14: OD125 check_access_rights() is deprecated from 18.0; use check_access()
+custom/saas181/models/upgrade.py:11:14: OD125 check_access_rule() is deprecated from 18.0; use check_access()
+custom/saas181/models/upgrade.py:13:21: OD126 user_has_groups() no longer works from saas~17.2; use self.env.user.has_groups()
+custom/saas181/models/upgrade.py:17:37: OD125 type='json' is deprecated from saas~18.1; use type='jsonrpc'
 custom/saas182/data/translated.xml:6:9: OD309 res.partner has no field 'ghost'
 custom/saas182/models/badge.py:8:58: OD228 'country_id' has delegate=True and no ondelete, so Odoo fails with AttributeError when it sets up the registry; give it ondelete="cascade"
 custom/saas182/models/res_partner.py:7:5: OD118 @api.model on create() passes a list of dicts, so reading vals as one dict fails; decorate it with @api.model_create_multi and loop over the list
+custom/saas182/models/upgrade.py:8:40: OD125 read_group() is deprecated from saas~18.2; use _read_group()
 custom/saas183/models/ticket.py:7:33: OD218 _inherits delegates to 'partner_id', which must be required with ondelete 'cascade' or 'restrict'; give it ondelete="cascade"
 custom/saas183/models/ticket.py:9:73: OD213 'partner_id' is required, so Odoo refuses ondelete='set null'; use 'restrict' or 'cascade'
 custom/saas183/models/ticket.py:10:88: OD213 'country_id' is required, so Odoo refuses ondelete='set null'; use 'restrict' or 'cascade'
+custom/saas192/models/upgrade.py:2:1: OD126 importing odoo.osv no longer works from saas~19.1; use odoo.fields.Domain
+custom/saas192/models/upgrade.py:14:14: OD126 check_access_rights() no longer works from saas~19.1; use check_access()
+custom/saas192/models/upgrade.py:15:14: OD126 check_access_rule() no longer works from saas~19.1; use check_access()
+custom/saas192/models/upgrade.py:16:33: OD126 read_group() no longer works from saas~19.1; use _read_group()
 custom/saas193/models/ledger.py:4:7: OD401 model 'saas.before.ledger' has no ir.model.access rule, so only the superuser can use it
 custom/saas193/models/memo.py:8:34: OD219 'stage' sets tracking, but saas.memo does not inherit mail.thread, so Odoo ignores it and logs a warning; inherit mail.thread or remove tracking
 custom/saas193/security/ir.model.access.csv:2:1: OD402 no group limits this row, so every user, public and portal included, gets write, create or unlink on model_saas_before_desk; name a group

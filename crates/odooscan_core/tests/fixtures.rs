@@ -239,6 +239,26 @@ fn asset_declarations_are_reported_from_their_series() {
 }
 
 #[test]
+fn python_api_stages_keep_their_severity() {
+    let deprecated = ["legacy14", "legacy154", "modern19", "saas125", "saas181", "saas182"];
+    assert_eq!(
+        severities("OD125"),
+        deprecated.map(|m| (m.to_owned(), Severity::Warning))
+    );
+    let removed = [
+        "cursor_state",
+        "legacy154",
+        "legacy17",
+        "modern20",
+        "saas125",
+        "saas131",
+        "saas181",
+        "saas192",
+    ];
+    assert_eq!(severities("OD126"), removed.map(|m| (m.to_owned(), Severity::Error)));
+}
+
+#[test]
 fn access_severity_follows_the_module_series() {
     let expected = [
         ("bad_sale", Severity::Warning),

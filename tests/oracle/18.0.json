@@ -451,6 +451,12 @@
       "count": 1
     },
     {
+      "path": "addons/html_editor/controllers/main.py",
+      "code": "OD125",
+      "message": "check_access_rights() is deprecated from 18.0; use check_access()",
+      "count": 1
+    },
+    {
       "path": "addons/html_editor/static/src/main/table/table_plugin.js",
       "code": "OD601",
       "message": "'@html_editor/utils/dom_info' does not export 'isTableCell'",
@@ -712,6 +718,12 @@
       "path": "addons/l10n_hu_edi/wizard/l10n_hu_edi_cancellation.py",
       "code": "OD103",
       "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_id_efaktur_coretax/controllers/download_efaktur.py",
+      "code": "OD125",
+      "message": "check_access_rights() is deprecated from 18.0; use check_access()",
       "count": 1
     },
     {
