@@ -22,4 +22,32 @@
             </xpath>
         </field>
     </record>
+
+    <record id="partner_parents" model="ir.ui.view">
+        <field name="model">res.partner</field>
+        <field name="arch" type="xml">
+            <tree>
+                <field name="name"/>
+            </tree>
+        </field>
+    </record>
+
+    <record id="partner_parents_country" model="ir.ui.view">
+        <field name="model">res.partner</field>
+        <field name="inherit_id" ref="partner_parents"/>
+        <field name="arch" type="xml">
+            <xpath expr="/*[local-name()='tree']" position="inside">
+                <field name="country_id"/>
+            </xpath>
+        </field>
+    </record>
+
+    <record id="partner_rows" model="ir.ui.view">
+        <field name="model">res.partner</field>
+        <field name="arch" type="xml">
+            <tree>
+                <field name="name"/>
+            </tree>
+        </field>
+    </record>
 </odoo>

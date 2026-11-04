@@ -43,6 +43,11 @@ static XPATH_LAST_SUBVIEW: LazyLock<Regex> =
 static XPATH_AMBIGUOUS: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(^|/)(list|tree|kanban|column)\b").unwrap());
 /// An xpath that names `tree` as a tag, in a step or an axis, rather than in an attribute or a string.
 static XPATH_TREE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"(^|[^\w.@'"-])tree($|[^\w.'"-])"#).unwrap());
+/// A call to `name()` or `local-name()`. Beside the string `tree`, it may test an element's name in
+/// any form, as `contains(local-name(), 'tree')` or `name(.) != 'tree'`, so the pair guards.
+static XPATH_NAME_CALL: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\b(local-)?name\s*\(").unwrap());
+/// The quoted string `tree`, in either quote.
+static XPATH_TREE_STRING: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"'tree'|"tree""#).unwrap());
 
 /// Path segment for an arch position whose model cannot be told without the parent view.
 pub const UNKNOWN_CONTEXT: &str = "?";
@@ -54,6 +59,9 @@ static XPATH_NAMED_STEP: LazyLock<Regex> =
 /// Attributes by which a spec names the element it locates.
 const LOCATING_ATTRS: [&str; 3] = ["name", "id", "t-call"];
 static ACTION_REF: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"%\(([\w.]+)\)d").unwrap());
+
+/// Output attributes an `<attribute>` spec may set, over which a renamed `t-out` would win.
+const OUT_BESIDE_ESCAPE: [&str; 3] = ["t-esc", "t-field", "t-raw"];
 
 /// Attributes that make the value of a `<field>` something other than its `eval` or its text.
 const INDIRECT_VALUE: [&str; 4] = ["ref", "search", "file", "type"];
@@ -1313,15 +1321,23 @@ fn renamed(node: Node) -> Option<ArchElement> {
 }
 
 /// Notes a spec that finds the parent's element by a name OD306 or OD325 rewrites, which keeps the
-/// tree from being fixed.
+/// tree from being fixed, and a `<tree>` the arch adds, which a `<tree>` spec may find. An
+/// `<attribute>` setting `t-esc`, `t-field` or `t-raw` puts it beside the parent's renamed `t-out`,
+/// which 20.0 `_compile_directive_out` reads first (`ir_qweb.py:2476-2480`), so the child's value
+/// would be lost.
 fn old_names(node: Node, view: &mut ViewFact) {
     if node.has_tag_name("xpath") {
         let expr = node.attribute("expr").unwrap_or_default();
-        view.tree_paths |= XPATH_TREE.is_match(expr);
+        view.tree_paths |=
+            XPATH_TREE.is_match(expr) || (XPATH_NAME_CALL.is_match(expr) && XPATH_TREE_STRING.is_match(expr));
         view.escape_specs |= expr.contains("t-esc");
+    } else if node.has_tag_name("attribute") {
+        view.escape_specs |= node.attribute("name").is_some_and(|n| OUT_BESIDE_ESCAPE.contains(&n));
     } else if locates(node) {
         view.tree_specs |= node.has_tag_name("tree");
         view.escape_specs |= node.has_attribute("t-esc");
+    } else {
+        view.tree_elements |= node.has_tag_name("tree");
     }
 }
 
@@ -3528,6 +3544,7 @@ mod tests {
             "{entity}{}",
             arch_record(r#"<form><field name="l">&t;</field></form>"#)
         ));
+        unfixed(r#"<odoo><template id="t"><span xmlns:x="urn:x" x:t-esc="a"/></template></odoo>"#);
         let entity = r#"<!DOCTYPE odoo [<!ENTITY s "<span t-esc='a'/>">]>"#;
         unfixed(&format!(
             "{entity}<odoo><template id=\"t\"><div>&s;</div></template></odoo>"
@@ -3548,11 +3565,21 @@ mod tests {
             "tr&#101;e,form",
             "<![CDATA[tree,form]]>",
             "tree,form<!-- kanban -->",
+            // The empty section leaves no node of its own, so only the end tag's place tells.
+            "tree,form<![CDATA[]]>",
         ] {
             unfixed(&window_action(view_mode));
         }
-        let evaluated = window_action("tree,form").replace(r#"name="view_mode""#, r#"name="view_mode" eval="'list'""#);
-        unfixed(&evaluated);
+        for indirect in [
+            r#"eval="'list'""#,
+            r#"ref="a""#,
+            r#"search="[]""#,
+            r#"file="a""#,
+            r#"type="char""#,
+        ] {
+            let field = format!(r#"name="view_mode" {indirect}"#);
+            unfixed(&window_action("tree,form").replace(r#"name="view_mode""#, &field));
+        }
     }
 
     #[test]
@@ -3571,32 +3598,48 @@ mod tests {
     }
 
     #[test]
-    fn notes_the_specs_that_find_an_old_name() {
+    fn notes_the_specs_that_find_an_old_name_and_the_trees_added() {
         let noted = |arch: &str| {
             let v = extension(arch);
-            (v.tree_paths, v.tree_specs, v.escape_specs)
+            (v.tree_paths, v.tree_specs, v.escape_specs, v.tree_elements)
         };
-        assert_eq!(
-            noted(r#"<xpath expr="//field[@name='a']/tree" position="inside"/>"#),
-            (true, false, false)
-        );
-        assert_eq!(
-            noted(r#"<xpath expr="//tree[1]" position="inside"/>"#),
-            (true, false, false)
-        );
-        assert_eq!(
-            noted(r#"<xpath expr="//field[@name='tree']" position="inside"/>"#),
-            (false, false, false)
-        );
-        assert_eq!(noted(r#"<tree position="attributes"/>"#), (false, true, false));
+        let paths = (true, false, false, false);
+        let specs = (false, true, false, false);
+        let escapes = (false, false, true, false);
+        let none = (false, false, false, false);
+        for expr in [
+            "//field[@name='a']/tree",
+            "//tree[1]",
+            "//*[local-name()='tree']",
+            r#"//field[@name='a']/*[name() = "tree"]"#,
+            "//*[contains(local-name(),'tree')]",
+            "//*['tree'=name()]",
+            "//*[name(.)='tree']",
+            "//*[name ()='tree']",
+            "//field/*[name()!='tree']",
+        ] {
+            let xpath = format!(r#"<xpath expr="{}" position="inside"/>"#, expr.replace('"', "&quot;"));
+            assert_eq!(noted(&xpath), paths, "{expr}");
+        }
+        for expr in ["//field[@name='tree']", "//*[name()='field']"] {
+            let xpath = format!(r#"<xpath expr="{expr}" position="inside"/>"#);
+            assert_eq!(noted(&xpath), none, "{expr}");
+        }
+        assert_eq!(noted(r#"<tree position="attributes"/>"#), specs);
         assert_eq!(
             noted(r#"<xpath expr="//span[@t-esc='a']" position="replace"/>"#),
-            (false, false, true)
+            escapes
         );
-        assert_eq!(noted(r#"<span t-esc="a" position="replace"/>"#), (false, false, true));
+        assert_eq!(noted(r#"<span t-esc="a" position="replace"/>"#), escapes);
+        let set = |name: &str| format!(r#"<span position="attributes"><attribute name="{name}">b</attribute></span>"#);
+        for name in ["t-esc", "t-field", "t-raw"] {
+            assert_eq!(noted(&set(name)), escapes, "{name}");
+        }
+        assert_eq!(noted(&set("t-out")), none);
         assert_eq!(
             noted(r#"<xpath expr="//p" position="after"><tree/><span t-esc="a"/></xpath>"#),
-            (false, false, false)
+            (false, false, false, true)
         );
+        assert_eq!(noted(r#"<xpath expr="//p" position="after"><list/></xpath>"#), none);
     }
 }

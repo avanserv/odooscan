@@ -621,7 +621,10 @@ const FIXED: &[&str] = &[
 const GUARDED: &[&str] = &[
     "custom/modern20/views/pages.xml:5:13: OD325",
     "custom/modern20/views/pages.xml:18:21: OD325",
+    "custom/modern20/views/pages.xml:42:9: OD325",
     "custom/tree_paths/views/partner.xml:8:21: OD306",
+    "custom/tree_paths/views/partner.xml:29:13: OD306",
+    "custom/tree_paths/views/partner.xml:48:13: OD306",
 ];
 
 #[test]
@@ -1003,4 +1006,126 @@ fn a_tree_whose_inheritance_an_unchecked_module_shares_stays_unfixed() {
     assert!(stderr.contains("fixed 0 diagnostics in 0 files"), "{stderr}");
     assert_eq!(fs::read_to_string(own.join("list.xml")).unwrap(), list);
     assert_eq!(fs::read_to_string(own.join("spec.xml")).unwrap(), spec);
+}
+
+/// A `<tree>` spec on `own.list`.
+fn tree_spec() -> String {
+    partner_view(
+        "spec",
+        Some("own.list"),
+        "<tree position=\"inside\"><field name=\"email\"/></tree>",
+    )
+}
+
+/// A list view whose root is `root`, and `spec` on it, both in module `own` of 18.0.
+fn tree_and_spec(dir: &Path, root: &str, spec: &[u8]) -> (PathBuf, String) {
+    let list = partner_view("list", None, &format!("<{root}><field name=\"name\"/></{root}>"));
+    let own = module(dir, "own", "18.0", &[("list.xml", list.as_bytes()), ("spec.xml", spec)]);
+    load(&own, &["list.xml", "spec.xml"]);
+    (own, list)
+}
+
+/// `--fix` in a fresh `tree_and_spec` changes neither file, `case` naming the run. With `baselined`,
+/// `args` go to the `--write-baseline` run and `--fix` runs with `--baseline` only; without, `args`
+/// go to `--fix`.
+fn assert_tree_and_spec_unfixed(case: &str, spec: &[u8], args: &[&str], baselined: bool) {
+    let dir = scratch(&format!("fix_tree_spec_{case}"));
+    let (own, list) = tree_and_spec(&dir, "tree", spec);
+    let mut fixed = vec!["mods", "--fix"];
+    if baselined {
+        let (code, _, stderr) = run(check_in(&dir, &[&["mods", "--write-baseline"], args].concat()));
+        assert_eq!(code, Some(0), "{case}: {stderr}");
+        fixed.push("--baseline=odooscan-baseline.json");
+    } else {
+        fixed.extend(args);
+    }
+    let (code, _, stderr) = run(check_in(&dir, &fixed));
+    assert_eq!(code, Some(1), "{case}: {stderr}");
+    assert!(stderr.contains("fixed 0 diagnostics in 0 files"), "{case}: {stderr}");
+    assert_eq!(fs::read_to_string(own.join("list.xml")).unwrap(), list, "{case}");
+    assert_eq!(fs::read(own.join("spec.xml")).unwrap(), spec, "{case}");
+}
+
+#[test]
+fn a_tree_and_its_spec_stay_unfixed_when_either_one_is_left_out() {
+    let spec = tree_spec();
+    for (case, file) in [
+        ("list", "mods/own/models/list.xml"),
+        ("spec", "mods/own/models/spec.xml"),
+    ] {
+        let excluded = ["--exclude", file];
+        assert_tree_and_spec_unfixed(&format!("baselined_{case}"), spec.as_bytes(), &excluded, true);
+        assert_tree_and_spec_unfixed(&format!("excluded_{case}"), spec.as_bytes(), &excluded, false);
+    }
+    let suppressed = spec.replace("</odoo>", "</odoo><!-- odooscan: ignore[OD306] -->");
+    assert_tree_and_spec_unfixed("suppressed", suppressed.as_bytes(), &[], false);
+    // A Latin-1 byte keeps the decoded text from being the file's bytes, so its fixes are dropped.
+    let latin1 = format!("<?xml version=\"1.0\" encoding=\"ISO-8859-1\"?>\n{spec}<!-- R\u{e9}sum\u{e9} -->\n");
+    let latin1: Vec<u8> = latin1.chars().map(|c| u8::try_from(u32::from(c)).unwrap()).collect();
+    assert_tree_and_spec_unfixed("undecodable", &latin1, &[], false);
+}
+
+#[test]
+fn a_tree_spec_over_a_list_is_fixed() {
+    let dir = scratch("fix_tree_spec_list");
+    let spec = tree_spec();
+    let (own, list) = tree_and_spec(&dir, "list", spec.as_bytes());
+    let (code, _, stderr) = run(check_in(&dir, &["mods", "--fix"]));
+    assert_eq!(code, Some(0), "{stderr}");
+    assert_eq!(fs::read_to_string(own.join("list.xml")).unwrap(), list);
+    assert_eq!(
+        fs::read_to_string(own.join("spec.xml")).unwrap(),
+        spec.replace("tree", "list")
+    );
+}
+
+/// Whether a line of `stdout` reports `code` at `place`, a path and line.
+fn reports(stdout: &str, place: &str, code: &str) -> bool {
+    stdout.lines().any(|l| l.contains(place) && l.contains(code))
+}
+
+#[test]
+fn a_fix_keeps_what_a_child_view_finds_or_sets_by_the_old_name() {
+    let dir = scratch("fix_old_names");
+    let parent =
+        |id: &str| format!("<odoo><template id=\"{id}\"><span class=\"{id}\" t-esc=\"a\"/></template></odoo>\n");
+    let child = |id: &str, parent: &str, attr: &str| {
+        format!(
+            "<odoo><template id=\"{id}\" inherit_id=\"{parent}\"><xpath expr=\"//span[hasclass('{parent}')]\" position=\"attributes\"><attribute name=\"{attr}\">b</attribute></xpath></template></odoo>\n"
+        )
+    };
+    let views = [
+        ("label.xml", parent("label")),
+        ("coded.xml", child("coded", "label", "t-esc")),
+        ("badge.xml", parent("badge")),
+        ("fielded.xml", child("fielded", "badge", "t-field")),
+    ];
+    let files: Vec<(&str, &[u8])> = views.iter().map(|(f, v)| (*f, v.as_bytes())).collect();
+    let pages = module(&dir, "pages", "20.0", &files);
+    load(&pages, &views.each_ref().map(|(f, _)| *f));
+    let list = partner_view("list", None, "<tree><field name=\"name\"/></tree>");
+    let named = partner_view(
+        "named",
+        Some("list"),
+        "<xpath expr=\"/*[local-name()='tree']\" position=\"inside\"><field name=\"email\"/></xpath>",
+    );
+    let rows = module(
+        &dir,
+        "rows",
+        "18.0",
+        &[("list.xml", list.as_bytes()), ("named.xml", named.as_bytes())],
+    );
+    load(&rows, &["list.xml", "named.xml"]);
+    let (code, stdout, stderr) = run(check_in(&dir, &["mods", "--fix"]));
+    assert_eq!(code, Some(1), "{stderr}");
+    assert!(stderr.contains("fixed 0 diagnostics in 0 files"), "{stderr}");
+    for place in ["pages/models/label.xml:1:", "pages/models/badge.xml:1:"] {
+        assert!(reports(&stdout, place, "OD325"), "{place}: {stdout}");
+    }
+    assert!(reports(&stdout, "rows/models/list.xml:1:", "OD306"), "{stdout}");
+    let read = |models: &Path, file: &str| fs::read_to_string(models.join(file)).unwrap();
+    for (file, view) in &views {
+        assert_eq!(&read(&pages, file), view, "{file}");
+    }
+    assert_eq!((read(&rows, "list.xml"), read(&rows, "named.xml")), (list, named));
 }

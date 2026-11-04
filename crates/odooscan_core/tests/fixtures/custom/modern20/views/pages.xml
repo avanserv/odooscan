@@ -37,4 +37,14 @@
     <template id="lamp_badge">
         <b class="lamp_badge" t-esc="lamp.code"/>
     </template>
+
+    <template id="lamp_label">
+        <span class="lamp_label" t-esc="lamp.name"/>
+    </template>
+
+    <template id="lamp_label_coded" inherit_id="lamp_label">
+        <xpath expr="//span[hasclass('lamp_label')]" position="attributes">
+            <attribute name="t-esc">lamp.code</attribute>
+        </xpath>
+    </template>
 </odoo>
