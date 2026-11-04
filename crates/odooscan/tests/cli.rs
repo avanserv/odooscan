@@ -532,6 +532,77 @@ fn a_fetch_runs_none_of_the_users_hooks() {
     assert!(!ran.exists(), "{stderr}");
 }
 
+/// An executable script at `path` that runs `body`.
+#[cfg(unix)]
+fn script(path: &Path, body: &str) {
+    use std::os::unix::fs::PermissionsExt;
+    fs::create_dir_all(path.parent().unwrap()).unwrap();
+    fs::write(path, format!("#!/bin/sh\n{body}\n")).unwrap();
+    fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
+}
+
+/// Git runs an fsmonitor hook on every index refresh, which `core.hooksPath` does not cover.
+#[cfg(unix)]
+#[test]
+fn a_fetch_runs_no_fsmonitor_hook() {
+    let dir = scratch("target_fetch_fsmonitor");
+    let remote = odoo_remote(&dir, "18.0", RELEASE_18);
+    let ran = dir.join("ran");
+    let hook = dir.join("fsmonitor");
+    script(&hook, &format!("touch '{}'\nexit 1", ran.display()));
+    let config = dir.join("gitconfig");
+    fs::write(&config, format!("[core]\n\tfsmonitor = {}\n", hook.display())).unwrap();
+    let mut command = port_fetched(&remote, &dir.join("cache"), "18.0");
+    command
+        .env("GIT_CONFIG_GLOBAL", &config)
+        .env("GIT_CONFIG_NOSYSTEM", "1");
+    let (code, stdout, stderr) = run(command);
+    assert_summary(code, &stdout, &stderr);
+    assert!(!ran.exists(), "{stderr}");
+}
+
+/// The arguments the `ssh` first on `PATH` and the configured ssh command get for an ssh remote,
+/// both fakes that record them and fail, so that nothing leaves the machine.
+#[cfg(unix)]
+fn ssh_arguments(name: &str, configured: bool) -> (Option<String>, Option<String>) {
+    let dir = scratch(name);
+    let (fake, chosen) = (dir.join("fake"), dir.join("chosen"));
+    let record = |to: &Path| format!("printf '%s\\n' \"$*\" >> '{}'\nexit 255", to.display());
+    script(&dir.join("bin/ssh"), &record(&fake));
+    script(&dir.join("record-ssh"), &record(&chosen));
+    let config = dir.join("gitconfig");
+    let text = format!("[core]\n\tsshCommand = {}\n", dir.join("record-ssh").display());
+    fs::write(&config, if configured { text } else { String::new() }).unwrap();
+    let path = std::env::var_os("PATH").unwrap_or_default();
+    let path = std::env::join_paths([dir.join("bin")].into_iter().chain(std::env::split_paths(&path))).unwrap();
+    let mut command = port_fetched(&dir.join("unused"), &dir.join("cache"), "18.0");
+    command
+        .env("ODOOSCAN_ODOO_REMOTE", "ssh://git@odooscan.invalid/odoo.git")
+        .env("GIT_CONFIG_GLOBAL", &config)
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("PATH", path);
+    for var in ["GIT_SSH", "GIT_SSH_COMMAND", "GIT_SSH_VARIANT"] {
+        command.env_remove(var);
+    }
+    let (code, _, stderr) = run(command);
+    assert_eq!(code, Some(2), "{stderr}");
+    (fs::read_to_string(fake).ok(), fs::read_to_string(chosen).ok())
+}
+
+/// A configured ssh command is the user's choice, which the batch options must not replace.
+#[cfg(unix)]
+#[test]
+fn an_ssh_command_the_user_configured_runs_as_given() {
+    let (fake, chosen) = ssh_arguments("target_fetch_ssh_chosen", true);
+    assert_eq!(fake, None);
+    let chosen = chosen.expect("the configured ssh command runs");
+    assert!(!chosen.contains("BatchMode"), "{chosen}");
+    let (fake, chosen) = ssh_arguments("target_fetch_ssh_default", false);
+    assert_eq!(chosen, None);
+    let fake = fake.expect("the ssh on PATH runs");
+    assert!(fake.contains("BatchMode=yes"), "{fake}");
+}
+
 /// The findings `--fix` rewrites in the fixture, by message, but those of `GUARDED`.
 const FIXED: &[&str] = &[
     "@api.multi no longer exists",

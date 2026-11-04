@@ -50,8 +50,9 @@ struct CheckArgs {
     #[arg(long, value_parser = parse_series)]
     odoo_version: Option<Series>,
     /// Check the given modules as of this series, whatever their manifests name, and summarize the
-    /// upgrade; modules on the addons path keep their own series. Without an Odoo core on the
-    /// addons path, git fetches the series' core into the user cache.
+    /// upgrade; modules on the addons path keep their own series. Unless an addons path entry is an
+    /// Odoo checkout or a base module is on the addons path or among the checked paths, git fetches
+    /// the series' core into the user cache.
     #[arg(long, value_parser = parse_series, conflicts_with = "odoo_version")]
     target_series: Option<Series>,
     #[arg(long, value_enum, default_value_t = Format::Text)]
