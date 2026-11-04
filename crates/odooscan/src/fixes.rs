@@ -67,8 +67,11 @@ fn rewrite<'d>(path: &'d Path, found: Vec<&'d Diagnostic>, rel: &dyn Fn(&Path) -
 /// anything is reported, as a check does, so that a diff that leaves findings fails.
 pub fn diff(diags: &[&Diagnostic], rel: &dyn Fn(&Path) -> String) -> ExitCode {
     let rewrites = rewrites(diags, rel);
+    let fixable: usize = rewrites.iter().map(|r| r.fixed.len()).sum();
+    let files = rewrites.len();
+    let (shown, failed) = foreseen(rewrites, rel);
     let mut stdout = io::stdout().lock();
-    for r in &rewrites {
+    for r in &shown {
         let name = rel(r.path);
         let (before, after) = (String::from_utf8_lossy(&r.before), String::from_utf8_lossy(&r.after));
         let text = similar::TextDiff::from_lines(&before, &after)
@@ -77,21 +80,44 @@ pub fn diff(diags: &[&Diagnostic], rel: &dyn Fn(&Path) -> String) -> ExitCode {
             .to_string();
         let _ = stdout.write_all(text.as_bytes());
     }
-    let fixable: usize = rewrites.iter().map(|r| r.fixed.len()).sum();
+    let left = match files - shown.len() {
+        0 => String::new(),
+        n => format!(", {n} left out"),
+    };
     eprintln!(
-        "{fixable} of {} diagnostics have a fix, in {} files",
-        diags.len(),
-        rewrites.len()
+        "{fixable} of {} diagnostics have a fix, in {files} files{left}",
+        diags.len()
     );
-    if diags.is_empty() {
+    if failed {
+        ExitCode::from(2)
+    } else if diags.is_empty() {
         ExitCode::SUCCESS
     } else {
         ExitCode::FAILURE
     }
 }
 
-/// Writes each file the fixes of `diags` rewrite once, and returns whether any was, which moves the
-/// findings left in it. A failed write stops the check with status 2 once every file was tried.
+/// The rewrites that `--fix` would write, as far as the metadata of their files tells without
+/// opening them for write, which could wake a file watcher, and whether one failed as `--fix`
+/// would. The others get the notice or the error that `write` gives.
+fn foreseen<'d>(rewrites: Vec<Rewrite<'d>>, rel: &dyn Fn(&Path) -> String) -> (Vec<Rewrite<'d>>, bool) {
+    let (mut shown, mut failed) = (Vec::new(), false);
+    for r in rewrites {
+        match target(r.path).map(|(_, original)| kept_unopened(&original)) {
+            Ok(None) => shown.push(r),
+            Ok(Some(why)) => eprintln!("notice: {} {why}; not fixed", rel(r.path)),
+            Err(e) => {
+                eprintln!("error: {}: {e}", rel(r.path));
+                failed = true;
+            }
+        }
+    }
+    (shown, failed)
+}
+
+/// Writes each file that the fixes of `diags` rewrite, once with every fix of its findings. Returns
+/// whether a file was written, since the findings left in it then moved, or status 2 when a write
+/// failed, once every file was tried.
 pub fn write(diags: &[&Diagnostic], rel: &dyn Fn(&Path) -> String) -> Result<bool, ExitCode> {
     let mut failed = false;
     let (mut files, mut fixed) = (0, 0);
@@ -113,31 +139,54 @@ pub fn write(diags: &[&Diagnostic], rel: &dyn Fn(&Path) -> String) -> Result<boo
 }
 
 /// Writes `bytes` to a new file beside the one `path` names, then renames it over that one, so that
-/// a full disk or an interrupt leaves the original whole. The file keeps its mode, and a link its
-/// target. Returns why the file was left alone, when it was.
+/// a full disk or an interrupt leaves the original whole. The file keeps its mode and its group,
+/// and a link its target. Returns why the file was left alone, when it was.
 fn replace(path: &Path, bytes: &[u8]) -> io::Result<Option<&'static str>> {
-    let path = path.canonicalize()?;
-    let original = std::fs::metadata(&path)?;
+    let (path, original) = target(path)?;
     if let Some(why) = kept(&path, &original) {
         return Ok(Some(why));
     }
     let (temp, file) = create_beside(&path)?;
-    let done = fill(file, &original, bytes).and_then(|why| match why {
-        None => std::fs::rename(&temp, &path).map(|()| None),
+    put(&path, &temp, file, &original, bytes)
+}
+
+/// The file a link at `path` ends at, which the rewrite replaces, and its metadata.
+fn target(path: &Path) -> io::Result<(PathBuf, Metadata)> {
+    let path = path.canonicalize()?;
+    let original = std::fs::metadata(&path)?;
+    Ok((path, original))
+}
+
+/// Fills `file`, the new file `temp` names, and renames it over `path`. Removes it when it is left
+/// unused, by a skip or a failure.
+fn put(path: &Path, temp: &Path, file: File, original: &Metadata, bytes: &[u8]) -> io::Result<Option<&'static str>> {
+    let done = fill(file, original, bytes).and_then(|why| match why {
+        None => std::fs::rename(temp, path).map(|()| None),
         why => Ok(why),
     });
     if !matches!(done, Ok(None)) {
-        let _ = std::fs::remove_file(&temp);
+        let _ = std::fs::remove_file(temp);
     }
     done
 }
 
-/// Why renaming a rewrite over the file at `path` would change more than its text, if it would: it
-/// would bypass the mode of a file its user cannot write, and split one from its other hard links.
-/// Since a read-only file is never rewritten, the temporary file never is either, so that Windows
-/// lets the cleanup remove it.
+/// Why `--fix` leaves the file at `path` alone before writing anything: replacing a file that the
+/// user running the check cannot write would bypass its mode, and replacing one with other hard links would split it from
+/// them. Skipping a read-only file also spares the cleanup a read-only temporary file, which
+/// Windows refuses to remove.
 fn kept(path: &Path, original: &Metadata) -> Option<&'static str> {
     if OpenOptions::new().write(true).open(path).is_err() {
+        return Some("is not writable");
+    }
+    linked(original)
+}
+
+/// What `kept` says, from the mode and the link count of `original` alone. Neither tells who runs
+/// the check nor what else refuses the write, so the diff still shows, for example, a file that
+/// others may write but not the user, or that an ACL or a read-only mount protects, and leaves out
+/// a read-only file even for root, which `--fix` run as root writes.
+fn kept_unopened(original: &Metadata) -> Option<&'static str> {
+    if original.permissions().readonly() {
         return Some("is not writable");
     }
     linked(original)
@@ -175,20 +224,31 @@ fn create_beside(path: &Path) -> io::Result<(PathBuf, File)> {
     Err(io::Error::from(io::ErrorKind::AlreadyExists))
 }
 
-/// The file `temp` names, created empty, or `None` when a file or a link is there already.
+/// The file `temp` names, created empty, or `None` when a file or a link is there already. On Unix
+/// only its user may open it until `fill` gives it the group and the mode of the original: a file
+/// made under the umask could be opened by that group, or anyone, who would keep the descriptor.
 fn create_new(temp: &Path) -> io::Result<Option<File>> {
-    match OpenOptions::new().write(true).create_new(true).open(temp) {
+    let mut options = OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
+    match options.open(temp) {
         Ok(file) => Ok(Some(file)),
         Err(e) if e.kind() == io::ErrorKind::AlreadyExists => Ok(None),
         Err(e) => Err(e),
     }
 }
 
-/// Writes `bytes` to the new file, with the mode of `original` set first so that the text is never
-/// readable beyond what the original allows. Returns why the rewrite must not replace the original,
-/// when it must not. The file is closed on return, which Windows needs before the rename.
+/// Writes `bytes` to the new file, which only its user may open, with the group and the mode of
+/// `original` set first so that the text is never readable beyond what the original allows. Returns why the rewrite must not replace
+/// the original, when it must not. The file is closed on return, which Windows needs before the
+/// rename. The mode comes after the group, since a change of group clears the set-id bits.
 fn fill(mut file: File, original: &Metadata, bytes: &[u8]) -> io::Result<Option<&'static str>> {
-    if let Some(why) = owned_apart(original, &file.metadata()?) {
+    let made = file.metadata()?;
+    if let Some(why) = owned_apart(original, &made) {
+        return Ok(Some(why));
+    }
+    if let Some(why) = regroup(&file, &made, original)? {
         return Ok(Some(why));
     }
     file.set_permissions(original.permissions())?;
@@ -207,6 +267,27 @@ fn owned_apart(original: &Metadata, temp: &Metadata) -> Option<&'static str> {
 #[cfg(not(unix))]
 fn owned_apart(_: &Metadata, _: &Metadata) -> Option<&'static str> {
     None
+}
+
+/// Gives `file` the group of `original`, since a new file takes the user's primary group, or the
+/// directory's under setgid or on BSD and macOS. The user may give it only a group they are in, so
+/// a file of another group is left alone rather than handed over.
+#[cfg(unix)]
+fn regroup(file: &File, made: &Metadata, original: &Metadata) -> io::Result<Option<&'static str>> {
+    use std::os::unix::fs::MetadataExt;
+    if made.gid() == original.gid() {
+        return Ok(None);
+    }
+    match std::os::unix::fs::fchown(file, None, Some(original.gid())) {
+        Ok(()) => Ok(None),
+        Err(e) if e.kind() == io::ErrorKind::PermissionDenied => Ok(Some("belongs to a group its owner is not in")),
+        Err(e) => Err(e),
+    }
+}
+
+#[cfg(not(unix))]
+fn regroup(_: &File, _: &Metadata, _: &Metadata) -> io::Result<Option<&'static str>> {
+    Ok(None)
 }
 
 #[cfg(test)]
@@ -267,14 +348,83 @@ mod tests {
             std::fs::read_link(&link).unwrap(),
             std::fs::read_to_string(&target).unwrap(),
         );
-        let mut names: Vec<_> = std::fs::read_dir(&dir)
+        let names = names(&dir);
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!((replaced, read), (None, (target, "b = 2\n".to_owned())));
+        assert_eq!(names, ["link.py", "target.py"]);
+    }
+
+    /// The names in `dir`, sorted.
+    #[cfg(unix)]
+    fn names(dir: &Path) -> Vec<OsString> {
+        let mut names: Vec<_> = std::fs::read_dir(dir)
             .unwrap()
             .map(|e| e.unwrap().file_name())
             .collect();
         names.sort();
+        names
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_failed_rename_leaves_no_temporary_file() {
+        let dir = scratch("rename");
+        let path = dir.join("x.py");
+        std::fs::create_dir(&path).unwrap();
+        let original = std::fs::metadata(&path).unwrap();
+        let (temp, file) = create_beside(&path).unwrap();
+        let put = put(&path, &temp, file, &original, b"a = 1\n");
+        let left = names(&dir);
         let _ = std::fs::remove_dir_all(&dir);
-        assert_eq!((replaced, read), (None, (target, "b = 2\n".to_owned())));
-        assert_eq!(names, ["link.py", "target.py"]);
+        assert!(put.is_err(), "{put:?}");
+        assert_eq!(left, ["x.py"]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_file_of_another_user_is_left_alone() {
+        use std::os::unix::fs::MetadataExt;
+        let root = std::fs::metadata("/").unwrap();
+        let dir = scratch("owner");
+        let path = dir.join("x.py");
+        std::fs::write(&path, "a = 1\n").unwrap();
+        let (temp, file) = create_beside(&path).unwrap();
+        if file.metadata().unwrap().uid() == root.uid() {
+            let _ = std::fs::remove_dir_all(&dir);
+            eprintln!("skipped: the test runs as the owner of /, so no other user owns it");
+            return;
+        }
+        let put = put(&path, &temp, file, &root, b"b = 2\n");
+        let (text, left) = (std::fs::read_to_string(&path).unwrap(), names(&dir));
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(put.unwrap(), Some("belongs to another user"));
+        assert_eq!((text.as_str(), left), ("a = 1\n", vec![OsString::from("x.py")]));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_temporary_file_is_created_for_its_user_alone() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = scratch("private");
+        let made = create_new(&dir.join("temp")).unwrap().unwrap();
+        let mode = made.metadata().unwrap().permissions().mode();
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(mode & 0o077, 0, "{mode:o}");
+    }
+
+    #[test]
+    fn a_diff_reports_a_file_it_cannot_resolve_as_a_failure() {
+        let dir = scratch("unresolved");
+        let gone = dir.join("gone.py");
+        let rewrite = Rewrite {
+            path: &gone,
+            before: vec![],
+            after: vec![],
+            fixed: vec![],
+        };
+        let (shown, failed) = foreseen(vec![rewrite], &|p| p.display().to_string());
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!((shown.len(), failed), (0, true));
     }
 
     #[cfg(unix)]

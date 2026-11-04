@@ -6,8 +6,12 @@ writes nothing.
 
 ```sh
 oscn check path/to/module --addons-path ~/repos/odoo/odoo --diff > fixes.patch
-patch -p1 < fixes.patch    # writes what --fix writes
+patch -p1 < fixes.patch    # writes what --fix writes, with two exceptions
 ```
+
+`patch` also writes a file that `--fix` finds it must leave alone only when it tries the write, as
+one of another user, and under root it misses a read-only file, which `--diff` leaves out and
+`--fix` writes. [What is fixed](#what-is-fixed) lists the skips.
 
 The diff names each file as the check reports it, relative to the current directory, so `patch
 -p1` applies it from that directory when every path checked is under it. A file outside it gets a
@@ -48,18 +52,29 @@ fixed, and neither is an XML file whose text is not its bytes, as one in Latin-1
 above 127: an ASCII file that declares Latin-1 is fixed.
 
 Each file is written once, with every fix of its findings. The bytes around a fix stay as they
-are, so the formatting, a byte order mark and CRLF line ends survive. A file that changed between
-the check reading it and the fix is left alone with a notice, and so is a read-only file, one with
-other hard links or one of another user, since putting the rewrite in its place would change more
-than its text. When two fixes would touch the same text, the first is applied and the other
+are, so the formatting, a byte order mark and CRLF line ends survive, and so do the mode and the
+group of the file. When two fixes would touch the same text, the first is applied and the other
 finding stays reported. A second `--fix` changes nothing the first one fixed.
+
+A file is left alone with a notice when its text changed between the check reading it and the
+fix, or when putting the rewrite in its place would change more than its text: when the user cannot
+write it, when it has other hard links, when it belongs to another user, or when it belongs to a
+group its owner is not in. The last three are checked on Unix only.
+
+`--diff` gives the same notice and leaves the file out of the diff when its text changed, which
+both find by comparing it with what the check read, and when its mode lets no one write it or it
+has other hard links, which its metadata tells without opening it for write. Other skips and
+failures show only on a real write, so `--diff` still prints the rewrite of, for example, a file of
+another user or of a group its owner is not in, one that its mode lets others write but not the
+user running it, one that an ACL or a read-only mount protects, or one in a directory where no file
+can be created. Under root, it leaves out a read-only file that `--fix` writes.
 
 ## Exit status and flags
 
 With `--fix`, the exit status is 1 when findings are left, those of a file left alone included, 0
 when none are, and 2 when a write fails; the other files are still written. With `--diff` it is 1
 when anything is reported, whether it has a fix or not, so a CI job running `--diff` fails until
-the code is clean.
+the code is clean, and 2, as with `--fix`, when the metadata of a file to rewrite cannot be read.
 
 `--fix` and `--diff` cannot be combined, and neither can be combined with `--write-baseline`.
 `--diff` prints only the diff, so it also refuses `--format` and `--statistics`; `--fix` reports

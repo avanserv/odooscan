@@ -866,26 +866,35 @@ fn a_fix_keeps_the_mode_and_leaves_nothing_beside_the_file() {
     assert_eq!(left_beside(&models, &["x.py"]), Vec::<String>::new());
 }
 
+/// A group of the user running the tests other than their primary one, if they are in one.
+#[cfg(unix)]
+fn other_group() -> Option<u32> {
+    let id = |flag: &str| String::from_utf8(Command::new("id").arg(flag).output().unwrap().stdout).unwrap();
+    let primary = id("-g");
+    let other = id("-G").split_whitespace().find(|g| *g != primary.trim())?.to_owned();
+    other.parse().ok()
+}
+
 #[cfg(unix)]
 #[test]
-fn a_link_planted_where_the_rewrite_goes_is_not_written_through() {
-    let dir = scratch("fix_planted");
-    let models = module(&dir, "planted", "18.0", &[("x.py", AVERAGED.as_bytes())]);
-    let target = dir.join("bashrc");
-    fs::write(&target, "export A=1\n").unwrap();
-    let planted = models.join(".x.py.oscn-fix");
-    std::os::unix::fs::symlink(&target, &planted).unwrap();
+fn a_fix_keeps_the_group_of_the_file() {
+    use std::os::unix::fs::MetadataExt;
+    let Some(gid) = other_group() else {
+        eprintln!("skipped: the user running the tests is in no group but their primary one");
+        return;
+    };
+    let dir = scratch("fix_group");
+    let models = module(&dir, "group", "18.0", &[("x.py", AVERAGED.as_bytes())]);
+    let file = models.join("x.py");
+    std::os::unix::fs::chown(&file, None, Some(gid)).unwrap();
     let (code, _, stderr) = run(check_in(&dir, &["mods", "--fix"]));
     assert_eq!(code, Some(0), "{stderr}");
-    assert_eq!(fs::read_link(&planted).unwrap(), target);
-    assert_eq!(fs::read_to_string(&target).unwrap(), "export A=1\n");
-    let fixed = models.join("x.py");
-    assert!(fs::symlink_metadata(&fixed).unwrap().is_file());
+    assert_eq!(fs::metadata(&file).unwrap().gid(), gid);
     assert_eq!(
-        fs::read_to_string(&fixed).unwrap(),
+        fs::read_to_string(&file).unwrap(),
         AVERAGED.replace("group_operator", "aggregator")
     );
-    assert_eq!(left_beside(&models, &["x.py", ".x.py.oscn-fix"]), Vec::<String>::new());
+    assert_eq!(left_beside(&models, &["x.py"]), Vec::<String>::new());
 }
 
 #[test]
@@ -898,10 +907,12 @@ fn a_read_only_file_is_left_alone_with_a_notice() {
     read_only.set_readonly(true);
     fs::set_permissions(&file, read_only).unwrap();
     let (code, _, stderr) = run(check_in(&dir, &["mods", "--fix"]));
+    let diffed = run(check_in(&dir, &["mods", "--diff"]));
     // Windows refuses to remove a read-only file, so the next run's scratch could not.
     fs::set_permissions(&file, writable).unwrap();
     assert_eq!(code, Some(1), "{stderr}");
     assert!(stderr.contains("x.py is not writable; not fixed"), "{stderr}");
+    assert_skipped_by_diff(diffed, "x.py is not writable; not fixed");
     assert_eq!(fs::read_to_string(&file).unwrap(), AVERAGED);
     assert_eq!(left_beside(&models, &["x.py"]), Vec::<String>::new());
 }
@@ -916,6 +927,20 @@ fn a_file_with_other_hard_links_is_left_alone_with_a_notice() {
     assert_eq!(code, Some(1), "{stderr}");
     assert!(stderr.contains("x.py has other hard links; not fixed"), "{stderr}");
     assert_eq!(fs::read_to_string(models.join("x.py")).unwrap(), AVERAGED);
+    assert_skipped_by_diff(
+        run(check_in(&dir, &["mods", "--diff"])),
+        "x.py has other hard links; not fixed",
+    );
+}
+
+/// `--diff` left out the one file it checked, with the `notice` that `--fix` gives.
+fn assert_skipped_by_diff((code, stdout, stderr): (Option<i32>, String, String), notice: &str) {
+    assert_eq!((code, stdout.as_str()), (Some(1), ""), "{stderr}");
+    assert!(stderr.contains(notice), "{stderr}");
+    assert!(
+        stderr.contains("1 of 1 diagnostics have a fix, in 1 files, 1 left out"),
+        "{stderr}"
+    );
 }
 
 #[test]
