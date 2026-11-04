@@ -108,6 +108,7 @@ custom/bad_sale/views/views.xml:53:9: OD306 view_mode 'tree' is renamed 'list'
 custom/bad_sale/views/views.xml:61:21: OD306 the <tree> view is renamed <list>
 custom/bad_sale/views/views.xml:74:21: OD326 the kanban-box template is renamed card
 custom/bad_sale/views/views.xml:87:17: OD327 a div with class oe_chatter renders as a plain div, without the chatter; write <chatter/>
+custom/bad_sale/views/views.xml:104:9: OD306 view_mode 'tree' is renamed 'list'
 custom/base_only/data/ghost.nowhere.csv:1:1: OD201 no indexed module defines model 'ghost.nowhere'
 custom/base_only/data/project.project.csv:1:1: OD202 model 'project.project' comes from module project; add it to depends
 custom/base_only/data/res.partner-extra.csv:1:1: OD309 res.partner has no field 'name@fr'

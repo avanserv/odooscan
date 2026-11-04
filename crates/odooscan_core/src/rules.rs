@@ -213,8 +213,9 @@ rules! {
     "OD303" "duplicate-xmlid" Correctness Warning None, false, "The same XML id is defined twice in one file, with another model or overwriting a field.";
     "OD304" "unknown-view-field" Correctness Error None, true, "A view references a field its model does not have.";
     "OD305" "attrs-states-removed" Deprecation Error Some(">=17.0"), false, "attrs and states are removed; use invisible, readonly and required expressions.";
-    // 18.0 refuses a root `<tree>` (`odoo/addons/base/models/ir_ui_view.py:507`) and validates an x2many
-    // `<tree>` as part of its parent (`:1615`); saas~17.4 still has `('tree', 'Tree')`.
+    // 18.0 refuses a root `<tree>` (`odoo/addons/base/models/ir_ui_view.py:507`); saas~17.4 still has
+    // `('tree', 'Tree')`. An x2many `<tree>` is not taken as a subview (`:1615`), so Odoo refuses a
+    // field the parent lacks (`:1625`) or appends the comodel's default list (`:1324`).
     "OD306" "tree-renamed-list" Deprecation Error Some(">=18.0"), false, "The tree view type is renamed list.";
     "OD307" "t-raw-unsafe" Security Warning Some(">=15.0"), false, "t-raw is deprecated and renders unescaped HTML; use t-out with Markup.";
     "OD308" "xmlid-used-before-definition" Correctness Error None, false, "An XML id is referenced before the file that defines it is loaded.";
@@ -356,9 +357,7 @@ mod tests {
     #[test]
     fn tree_rule_is_an_error_where_it_runs() {
         let od306 = rule("OD306");
-        assert!(!od306.applies_to(Series::parse("saas~17.4")));
         for series in ["18.0", "20.0"] {
-            assert!(od306.applies_to(Series::parse(series)), "OD306 skips {series}");
             assert_eq!(od306.severity_for(Series::parse(series)), Severity::Error);
         }
     }
@@ -402,7 +401,7 @@ mod tests {
 
     #[test]
     fn series_gates_follow_source() {
-        let gates: [(&str, &[&str], &[&str]); 17] = [
+        let gates: [(&str, &[&str], &[&str]); 18] = [
             ("OD117", &["saas~15.1", "saas~18.2"], &["saas~15.2", "saas~18.1"]),
             ("OD118", &["saas~18.1"], &["saas~18.2"]),
             ("OD125", &["saas~12.4"], &["saas~12.5", "20.0"]),
@@ -411,6 +410,7 @@ mod tests {
             ("OD221", &["saas~14.3"], &["saas~14.4"]),
             ("OD222", &["saas~12.4"], &["saas~12.5"]),
             ("OD229", &["saas~12.4"], &["saas~12.5", "20.0"]),
+            ("OD306", &["saas~17.4"], &["18.0", "20.0"]),
             ("OD315", &["saas~16.4"], &["17.0", "20.0"]),
             ("OD316", &["saas~16.4"], &["17.0", "20.0"]),
             ("OD317", &["saas~16.4", "saas~17.3"], &["17.0", "saas~17.2"]),
