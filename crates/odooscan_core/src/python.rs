@@ -152,6 +152,33 @@ fn names_user(arg: &Expr) -> bool {
     })
 }
 
+/// `self`, through methods that keep the model, such as `self.sudo()`.
+fn self_model(expr: &Expr) -> bool {
+    match expr {
+        Expr::Name(n) => n.id.as_str() == "self",
+        Expr::Call(c) => {
+            matches!(&*c.func, Expr::Attribute(a) if SAME_MODEL.contains(&a.attr.as_str()) && self_model(&a.value))
+        }
+        _ => false,
+    }
+}
+
+/// The keyword of `with_context()` that is `key`, or the key of the literal dict it is given.
+fn context_key(call: &ast::ExprCall, key: &str) -> Option<TextRange> {
+    let keyed = keyword_arg(call, key).map(Ranged::range);
+    let first = call.arguments.args.first();
+    keyed.or_else(|| method_body::dict_key(first?, key).map(Ranged::range))
+}
+
+/// Whether the call passes a literal `False` as the argument `row.if_false` names.
+fn passes_false(row: &api_table::Row, call: &ast::ExprCall) -> bool {
+    row.if_false.as_ref().is_some_and(|arg| {
+        keyword(call, arg.keyword)
+            .or_else(|| call.arguments.args.get(arg.position))
+            .is_some_and(|value| matches!(value, Expr::BooleanLiteral(b) if !b.value))
+    })
+}
+
 /// The packages an import statement imports, `odoo.osv` for `from odoo import osv` too.
 fn imported_modules(stmt: &Stmt) -> Vec<String> {
     match stmt {
@@ -2273,6 +2300,7 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
                 "name_get() is no longer called; override _compute_display_name() instead",
             );
         }
+        self.api_definitions(func);
         if SUPER_REQUIRED.contains(&name) && !body_contains(&func.body, None) {
             self.diag(
                 "OD105",
@@ -2281,6 +2309,24 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
                     "{name}() override never calls super(), so other modules' overrides and the ORM itself are skipped"
                 ),
             );
+        }
+    }
+
+    /// The method definitions `api_table` has a row for: an override of its name, or an onchange
+    /// returning its key in a literal dict.
+    fn api_definitions(&mut self, func: &ast::StmtFunctionDef) {
+        let name = func.name.as_str();
+        let overridden = api_table::ROWS
+            .iter()
+            .find(|row| matches!(row.kind, Kind::Override(m) if m == name));
+        if let Some((code, message)) = overridden.and_then(|row| api_table::stage(row, self.series)) {
+            self.diag(code, &func.name, message);
+        }
+        let onchange = |d: &ast::Decorator| matches!(&d.expression, Expr::Call(c) if is_api(&c.func, "onchange"));
+        if func.decorator_list.iter().any(onchange)
+            && let Some(key) = method_body::returned_key(&func.body, "domain")
+        {
+            self.api_use(Kind::OnchangeKey("domain"), key);
         }
     }
 
@@ -2515,42 +2561,83 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
         self.created_views(call);
     }
 
-    /// The calls `api_table` has a row for.
+    /// The calls `api_table` has a row for, but those of a method the class defines itself.
     fn api_calls(&mut self, call: &ast::ExprCall) {
         let Expr::Attribute(a) = &*call.func else { return };
         if a.attr.as_str() == "sudo" && call.arguments.args.first().is_some_and(names_user) {
             self.api_use(Kind::SudoUser, &a.attr);
         }
+        if self.own_method(&a.value, a.attr.as_str()) {
+            return;
+        }
         for row in api_table::ROWS {
             if let Some(range) = self.api_call_range(row.kind, call, a) {
-                self.api_use(row.kind, &range);
+                let found = if passes_false(row, call) {
+                    api_table::stage_if_false(row, self.series)
+                } else {
+                    api_table::stage(row, self.series)
+                };
+                if let Some((code, message)) = found {
+                    self.diag(code, &range, message);
+                }
             }
         }
     }
 
-    /// The range to report when the call matches the row's form: the method name, or the first
-    /// keyword the row lists.
+    /// The range to report when the call matches the row's form: the method name, the first
+    /// keyword the row lists, or the key of the value it passes.
     fn api_call_range(&self, kind: Kind, call: &ast::ExprCall, a: &ast::ExprAttribute) -> Option<TextRange> {
         let method = a.attr.as_str();
         match kind {
             Kind::Method(m) if m == method => Some(a.attr.range()),
-            Kind::RecordsetMethod(m) if m == method && self.on_recordset(&a.value, m) => Some(a.attr.range()),
+            Kind::RecordsetMethod(m) if m == method && self.on_recordset(&a.value) => Some(a.attr.range()),
             Kind::Keywords(m, names) if m == method => {
                 names.iter().find_map(|name| keyword_arg(call, name)).map(Ranged::range)
             }
+            _ => self.passed_key_range(kind, call, a),
+        }
+    }
+
+    /// The range of the keyword or the dict key that the call passes for a row of a passed key.
+    fn passed_key_range(&self, kind: Kind, call: &ast::ExprCall, a: &ast::ExprAttribute) -> Option<TextRange> {
+        match (kind, a.attr.as_str()) {
+            (Kind::ContextKey(key), "with_context") => context_key(call, key),
+            (Kind::WrittenField(model, field), "create" | "write") => self.written_field(call, &a.value, model, field),
             _ => None,
         }
     }
 
-    /// Whether `expr` is `self` in a method of a model class, mixins included, that does not define
-    /// `method` itself, or a model the code names.
-    fn on_recordset(&self, expr: &Expr, method: &str) -> bool {
-        if matches!(expr, Expr::Name(n) if n.id.as_str() == "self")
-            && let Some(&Some(class)) = self.class_facts.last()
-        {
-            return !self.facts.classes[class].methods.iter().any(|m| m == method);
+    /// The key that names `field` in the literal values a `create()` or `write()` on `model`
+    /// writes: a dict, or the first dict of a list or tuple that names it.
+    fn written_field(&self, call: &ast::ExprCall, receiver: &Expr, model: &str, field: &str) -> Option<TextRange> {
+        if self.receiver_model(receiver).as_deref() != Some(model) {
+            return None;
         }
-        self.receiver_model(expr).is_some()
+        let values = call.arguments.args.first()?;
+        let mut dicts = domain::items(values)
+            .map_or(std::slice::from_ref(values), |items| items)
+            .iter();
+        dicts.find_map(|d| method_body::dict_key(d, field)).map(Ranged::range)
+    }
+
+    /// Whether `expr` is `self` in a method of a model class, mixins included, or a model the code
+    /// names.
+    fn on_recordset(&self, expr: &Expr) -> bool {
+        (self_model(expr) && matches!(self.class_facts.last(), Some(Some(_)))) || self.receiver_model(expr).is_some()
+    }
+
+    /// Whether the call of `method` on `expr` runs the enclosing model class's own definition:
+    /// `expr` is `self`, or the class's model, and the class defines `method` without calling the
+    /// definition it overrides through `super()`, which may be the one Odoo removed.
+    fn own_method(&self, expr: &Expr, method: &str) -> bool {
+        let Some(&Some(class)) = self.class_facts.last() else {
+            return false;
+        };
+        let class = &self.facts.classes[class];
+        let named = |names: &[String]| names.iter().any(|m| m == method);
+        named(&class.methods)
+            && !named(&class.extended)
+            && (self_model(expr) || self.receiver_model(expr).is_some_and(|model| model == class.model))
     }
 
     fn api_use(&mut self, kind: Kind, node: &impl Ranged) {
@@ -2559,9 +2646,9 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
         }
     }
 
-    /// One finding per import statement, for the first row it imports the package of and whose
-    /// stage the series has reached. Behind a `try` that catches the `ImportError`, the import of a
-    /// removed package is a fallback, while one that still loads warns all the same.
+    /// One finding per import statement, for the first row whose package the statement imports and
+    /// whose stage the series has reached. Behind a `try` that catches the `ImportError`, the import
+    /// of a removed package is a fallback, while one that still loads warns all the same.
     fn api_imports(&mut self, stmt: &Stmt) {
         let modules = imported_modules(stmt);
         let found = api_table::ROWS.iter().find_map(|row| match row.kind {
@@ -5100,6 +5187,8 @@ mod tests {
             assert_eq!(codes(&src(arg), Series::parse("16.0")), ["OD126"], "{arg}");
         }
         let flags = [
+            "is_user",
+            "has_uid",
             "as_superuser",
             "force_superuser",
             "self.use_superuser",
@@ -5112,12 +5201,114 @@ mod tests {
     }
 
     #[test]
-    fn a_recordset_method_the_class_defines_is_its_own() {
+    fn a_method_the_class_defines_is_its_own_unless_it_extends_the_removed_one() {
         let src = "class X(models.Model):\n    _inherit = 'x'\n\n    def refresh(self):\n        return True\n\n    \
-                   def f(self):\n        self.refresh()\n        self.env['x'].refresh()\n        self.flush()\n";
+                   def user_has_groups(self, groups):\n        return self.env.user.has_groups(groups)\n\n    \
+                   def f(self):\n        self.refresh()\n        self.sudo().refresh()\n        \
+                   self.with_context(a=1).refresh()\n        self.env['x'].refresh()\n        \
+                   self.user_has_groups('base.group_user')\n        self.env['y'].refresh()\n        self.flush()\n\n\
+                   class Y(models.Model):\n    _inherit = 'y'\n\n    def refresh(self):\n        \
+                   return super().refresh()\n\n    def f(self):\n        self.refresh()\n";
         let facts = analyze(src, Series::parse("16.0"));
         let found: Vec<_> = facts.diags.iter().map(|d| (d.code, d.pos.line)).collect();
-        assert_eq!(found, [("OD125", 9), ("OD125", 10)]);
+        assert_eq!(found, [("OD125", 16), ("OD125", 17), ("OD125", 26)]);
+    }
+
+    #[test]
+    fn check_access_rights_without_raising_advises_has_access() {
+        let src = |args: &str| format!("def f(records):\n    records.check_access_rights({args})\n");
+        let message = |args: &str| analyze(&src(args), Series::parse("18.0")).diags[0].message.clone();
+        for args in ["'read', raise_exception=False", "'read', False"] {
+            assert!(message(args).ends_with("; use has_access()"), "{args}");
+        }
+        for args in ["'read'", "'read', raise_exception=True", "'read', True"] {
+            assert!(message(args).ends_with("; use check_access()"), "{args}");
+        }
+    }
+
+    #[test]
+    fn force_company_counts_as_a_keyword_or_a_literal_key_of_with_context() {
+        let src = |line: &str| format!("def f(records, company):\n    return {line}\n");
+        let keyed = [
+            "records.with_context(force_company=company.id)",
+            "records.with_context({'force_company': company.id})",
+        ];
+        for line in keyed {
+            assert_eq!(codes(&src(line), Series::parse("saas~13.1")), ["OD126"], "{line}");
+            assert_eq!(codes(&src(line), Series::parse("13.0")), [""; 0], "{line}");
+        }
+        let unkeyed = [
+            "records.env.context.get('force_company')",
+            "records.with_context(company_id=company.id)",
+            "records.with_company(company)",
+        ];
+        for line in unkeyed {
+            assert_eq!(codes(&src(line), Series::parse("saas~13.1")), [""; 0], "{line}");
+        }
+    }
+
+    #[test]
+    fn cron_fields_count_in_the_values_create_and_write_give_ir_cron() {
+        let src = |line: &str| format!("def f(env, cron):\n    return {line}\n");
+        let written = [
+            "env['ir.cron'].create({'name': 'x', 'numbercall': -1})",
+            "env['ir.cron'].sudo().create([{'name': 'x'}, {'name': 'y', 'doall': True}])",
+            "env['ir.cron'].with_context(a=1).write({'numbercall': 1})",
+        ];
+        for line in written {
+            assert_eq!(codes(&src(line), Series::parse("saas~17.3")), ["OD126"], "{line}");
+            assert_eq!(codes(&src(line), Series::parse("saas~17.2")), [""; 0], "{line}");
+        }
+        let unwritten = [
+            "env['res.partner'].create({'numbercall': 1})",
+            "cron.write({'doall': True})",
+            "env['ir.cron'].create({'name': 'x', 'active': False})",
+            "end_previous(doall=True)",
+        ];
+        for line in unwritten {
+            assert_eq!(codes(&src(line), Series::parse("saas~17.3")), [""; 0], "{line}");
+        }
+        let own = "class X(models.Model):\n    _inherit = 'ir.cron'\n\n    def f(self):\n        \
+                   return self.write({'doall': False})\n";
+        assert_eq!(codes(own, Series::parse("18.0")), ["OD126"]);
+    }
+
+    #[test]
+    fn an_onchange_returning_a_domain_warns_then_fails() {
+        let src = |decorator: &str| {
+            format!(
+                "class X(models.Model):\n    _inherit = 'x'\n\n    {decorator}\n    def f(self):\n        \
+                 if self.a:\n            return {{'warning': {{}}, 'domain': {{'b': []}}}}\n        return {{}}\n"
+            )
+        };
+        let onchange = src("@api.onchange('a')");
+        assert_eq!(codes(&onchange, Series::parse("saas~13.1")), [""; 0]);
+        assert_eq!(codes(&onchange, Series::parse("saas~13.2")), ["OD125"]);
+        assert_eq!(codes(&onchange, Series::parse("saas~16.3")), ["OD126"]);
+        assert_eq!(codes(&src("@api.depends('a')"), Series::parse("17.0")), [""; 0]);
+    }
+
+    #[test]
+    fn overrides_count_in_model_classes() {
+        let src = |base: &str, method: &str| {
+            format!(
+                "class X({base}):\n    _inherit = 'x'\n\n    def {method}(self, *args, **kwargs):\n        return []\n"
+            )
+        };
+        assert_eq!(
+            codes(&src("models.Model", "_name_search"), Series::parse("saas~17.4")),
+            [""; 0]
+        );
+        assert_eq!(
+            codes(&src("models.Model", "_name_search"), Series::parse("18.0")),
+            ["OD126"]
+        );
+        assert_eq!(
+            codes(&src("models.Model", "read_group"), Series::parse("20.0")),
+            ["OD126"]
+        );
+        let plain = "class Helper:\n    def _name_search(self, name):\n        return []\n";
+        assert_eq!(codes(plain, Series::parse("18.0")), [""; 0]);
     }
 
     #[test]

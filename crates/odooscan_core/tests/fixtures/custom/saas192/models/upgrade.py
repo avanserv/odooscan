@@ -1,4 +1,4 @@
-from odoo import models
+from odoo import api, models
 from odoo.osv import expression, query
 
 try:
@@ -15,3 +15,7 @@ class ResPartnerUpgrade(models.Model):
         self.check_access_rule("read")
         self.env["res.partner"].read_group([], fields=["name"], groupby=["country_id"])
         return expression, query, normalize_domain
+
+    @api.model
+    def read_group(self, domain, fields, groupby, offset=0, limit=None, orderby=False, lazy=True):
+        return super().read_group(domain, fields, groupby, offset=offset, limit=limit, orderby=orderby, lazy=lazy)

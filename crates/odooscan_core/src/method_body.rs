@@ -31,21 +31,39 @@ fn arguments(call: &ast::ExprCall) -> impl Iterator<Item = &Expr> {
 
 /// Whether a `return` of the method itself, not of a function it nests, gives a value.
 pub(crate) fn returns_value(body: &[Stmt]) -> bool {
+    returned(body).iter().any(|v| !v.is_none_literal_expr())
+}
+
+/// The key `key` of a literal dict that a `return` of the method itself gives.
+pub(crate) fn returned_key<'b>(body: &'b [Stmt], key: &str) -> Option<&'b Expr> {
+    returned(body).into_iter().find_map(|value| dict_key(value, key))
+}
+
+/// The key of the literal dict that is the string `key`.
+pub(crate) fn dict_key<'e>(expr: &'e Expr, key: &str) -> Option<&'e Expr> {
+    let Expr::Dict(d) = expr else { return None };
+    d.items
+        .iter()
+        .find_map(|item| item.key.as_ref().filter(|k| is_str(k, key)))
+}
+
+/// What the `return` statements of the method itself, not of a function it nests, give.
+fn returned(body: &[Stmt]) -> Vec<&Expr> {
     let mut finder = ReturnFinder::default();
     finder.visit_body(body);
-    finder.found
+    finder.values
 }
 
 #[derive(Default)]
-struct ReturnFinder {
-    found: bool,
+struct ReturnFinder<'a> {
+    values: Vec<&'a Expr>,
 }
 
-impl<'a> Visitor<'a> for ReturnFinder {
+impl<'a> Visitor<'a> for ReturnFinder<'a> {
     fn visit_stmt(&mut self, stmt: &'a Stmt) {
         match stmt {
             Stmt::FunctionDef(_) | Stmt::ClassDef(_) => {}
-            Stmt::Return(r) => self.found |= r.value.as_deref().is_some_and(|v| !v.is_none_literal_expr()),
+            Stmt::Return(r) => self.values.extend(r.value.as_deref()),
             _ => visitor::walk_stmt(self, stmt),
         }
     }
@@ -967,6 +985,21 @@ mod tests {
 
     fn indent(body: &str) -> String {
         body.lines().map(|l| format!("    {l}\n")).collect()
+    }
+
+    #[test]
+    fn a_returned_key_is_one_of_a_literal_dict_the_method_itself_returns() {
+        let key = |src: &str| with_body(src, |body| returned_key(body, "domain").is_some());
+        assert!(key(
+            "def f(self):\n    if self.a:\n        return {'domain': {}}\n    return {}\n"
+        ));
+        assert!(!key(
+            "def f(self):\n    return {'warning': {}, 'value': {'domain': 1}}\n"
+        ));
+        assert!(!key("def f(self):\n    res = {'domain': {}}\n    return res\n"));
+        assert!(!key(
+            "def f(self):\n    def g():\n        return {'domain': {}}\n    return g\n"
+        ));
     }
 
     #[test]

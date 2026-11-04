@@ -727,6 +727,12 @@
       "count": 1
     },
     {
+      "path": "addons/l10n_id_efaktur_coretax/models/product_code.py",
+      "code": "OD126",
+      "message": "overriding _name_search() no longer works from 18.0; override _search_display_name()",
+      "count": 1
+    },
+    {
       "path": "addons/l10n_id_efaktur_coretax/views/efaktur_document.xml",
       "code": "OD327",
       "message": "a div with class oe_chatter renders as a plain div, without the chatter; write <chatter/>",
