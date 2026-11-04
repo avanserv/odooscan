@@ -12,6 +12,7 @@ use crate::facts::{
     Param, Pos, PyFacts, RawDiag, Receiver, Signature, Spanned, SqlColumn, SqlView, Subject, UNREAD_TYPE, XmlRef,
 };
 use crate::fix::{self, Edit, Fix};
+use crate::route_body::RouteBody;
 use crate::series::Series;
 use crate::sql::{
     self, Created, CursorUse, QueryVars, Write, is_self, odoo_cursor, query_head, query_source, query_text,
@@ -130,7 +131,7 @@ fn keyword<'a>(call: &'a ast::ExprCall, name: &str) -> Option<&'a Expr> {
     keyword_arg(call, name).map(|k| &k.value)
 }
 
-fn keyword_arg<'a>(call: &'a ast::ExprCall, name: &str) -> Option<&'a ast::Keyword> {
+pub(crate) fn keyword_arg<'a>(call: &'a ast::ExprCall, name: &str) -> Option<&'a ast::Keyword> {
     call.arguments
         .keywords
         .iter()
@@ -1854,6 +1855,23 @@ fn url_converters(url: &str) -> impl Iterator<Item = (&str, &str)> {
     })
 }
 
+/// The `csrf=False` of a route, which turns Odoo's token check off for every method.
+fn csrf_off(call: &ast::ExprCall) -> Option<&ast::Keyword> {
+    keyword_arg(call, "csrf").filter(|k| matches!(&k.value, Expr::BooleanLiteral(b) if !b.value))
+}
+
+/// Whether a route's literal `methods` lets a GET through: werkzeug upper-cases them, and with
+/// none every method passes.
+fn accepts_get(call: &ast::ExprCall) -> bool {
+    let elts = match keyword(call, "methods") {
+        None | Some(Expr::NoneLiteral(_)) => return true,
+        Some(Expr::List(l)) => &l.elts,
+        Some(Expr::Tuple(t)) => &t.elts,
+        Some(_) => return false,
+    };
+    elts.iter().filter_map(str_lit).any(|m| m.eq_ignore_ascii_case("GET"))
+}
+
 struct PyVisitor<'a, 'ast> {
     loc: &'a Locator<'a>,
     series: Option<Series>,
@@ -2718,20 +2736,34 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
     }
 
     fn route_checks(&mut self, func: &ast::StmtFunctionDef) {
+        let records = record_params(func);
+        let mut body = None;
         for decorator in &func.decorator_list {
             if let Expr::Call(call) = &decorator.expression
                 && tail_name(&call.func) == Some("route")
             {
-                self.route_check(func, call);
+                let body = body.get_or_insert_with(|| RouteBody::of(func, &records));
+                self.route_check(func, call, body);
             }
         }
     }
 
-    fn route_check(&mut self, func: &ast::StmtFunctionDef, call: &ast::ExprCall) {
+    fn route_check(&mut self, func: &ast::StmtFunctionDef, call: &ast::ExprCall, body: &RouteBody) {
         let auth = keyword(call, "auth").and_then(str_lit).unwrap_or("user");
+        self.route_sudo(func, auth);
+        self.route_type(call);
+        self.route_get_writes(func, call, body);
+        self.route_cors(call);
+        self.route_no_user(func, auth, body);
+    }
+
+    fn route_sudo(&mut self, func: &ast::StmtFunctionDef, auth: &str) {
         if matches!(auth, "public" | "none") && body_contains(&func.body, Some("sudo")) {
             self.diag("OD111", &func.name, format!("route with auth='{auth}' calls sudo(); check that every record it reads or writes is filtered by an access check"));
         }
+    }
+
+    fn route_type(&mut self, call: &ast::ExprCall) {
         let kind = keyword_arg(call, "type").map(|k| (k, str_lit(&k.value).unwrap_or("http")));
         match kind {
             Some((k, "json")) => self.api_use(Kind::RouteType("json"), k),
@@ -2741,15 +2773,60 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
     }
 
     fn route_csrf(&mut self, call: &ast::ExprCall) {
-        if let Some(k) = keyword_arg(call, "csrf")
-            && matches!(&k.value, Expr::BooleanLiteral(b) if !b.value)
-        {
+        if let Some(k) = csrf_off(call) {
             self.diag(
                 "OD112",
                 k,
                 "csrf=False lets other sites submit this form on the user's behalf",
             );
         }
+    }
+
+    /// A route without a URL is an override, which keeps the routing of the route it overrides
+    /// (18.0 `odoo/http.py:880-891`), so its methods are not known here.
+    fn route_get_writes(&mut self, func: &ast::StmtFunctionDef, call: &ast::ExprCall, body: &RouteBody) {
+        let http = keyword(call, "type").is_none_or(|t| str_lit(t) == Some("http"));
+        let has_url = call.arguments.args.first().or_else(|| keyword(call, "route")).is_some();
+        if !(http && has_url && accepts_get(call)) || csrf_off(call).is_some() || body.checks_token {
+            return;
+        }
+        if let Some(write) = body.unguarded_write {
+            self.diag(
+                "OD127",
+                &func.name,
+                format!("route accepts GET, on which Odoo checks no CSRF token, and calls {write}(); restrict it with methods=['POST'] or check a token"),
+            );
+        }
+    }
+
+    fn route_cors(&mut self, call: &ast::ExprCall) {
+        if let Some(k) = keyword_arg(call, "cors")
+            && str_lit(&k.value) == Some("*")
+        {
+            self.diag(
+                "OD128",
+                k,
+                "cors='*' lets a script on any site call this route and read its response; name the origin that needs it",
+            );
+        }
+    }
+
+    fn route_no_user(&mut self, func: &ast::StmtFunctionDef, auth: &str, body: &RouteBody) {
+        if auth != "none" || body.sets_user {
+            return;
+        }
+        let what = if body.reads_user {
+            "reads request.env.user, which is empty as the route runs with no user".to_owned()
+        } else if let Some(write) = body.write {
+            format!("calls {write}(), but runs with no user, so the write belongs to no one")
+        } else {
+            return;
+        };
+        self.diag(
+            "OD129",
+            &func.name,
+            format!("route with auth='none' {what}; use auth='public' or set the user with request.update_env()"),
+        );
     }
 
     fn file_mention(&mut self, s: &ast::ExprStringLiteral) {
@@ -5466,6 +5543,134 @@ mod tests {
         assert!(other.contains("'partner'"), "{other}");
         let both = route("route='/p/<int:partner>'");
         assert!(both.contains("'partner'") && both.contains("'id'"), "{both}");
+    }
+
+    fn route(decorator: &str, body: &str) -> Vec<&'static str> {
+        let src = format!(
+            "class C(http.Controller):\n    {decorator}\n    def f(self, order, buffer, path):\n        {body}\n"
+        );
+        codes(&src, None)
+    }
+
+    #[test]
+    fn a_route_that_accepts_get_and_writes_records_is_reported() {
+        let local = "lines = request.env['x'].browse(1)\n        lines.unlink()";
+        let nested = "def inner():\n            request.env['x'].create({})\n        inner()";
+        for (decorator, body) in [
+            ("@http.route('/a')", "request.env['x'].browse(1).write({})"),
+            (
+                "@http.route('/a', methods=['GET', 'POST'])",
+                "request.env['x'].create({})",
+            ),
+            (
+                "@http.route('/a', type='http', methods=('get',))",
+                "request.env.user.write({})",
+            ),
+            ("@http.route(route='/a')", local),
+            ("@http.route('/a')", nested),
+            ("@http.route('/a/<model(\"x\"):order>')", "order.write({})"),
+            ("@http.route('/a')", "request.env['x'].with_user(1).create({})"),
+        ] {
+            assert_eq!(route(decorator, body), ["OD127"], "{decorator} {body}");
+        }
+        let post = "if request.httprequest.method == 'POST':\n            request.env['x'].create({})";
+        let token = "request.validate_csrf(kw)\n        request.env['x'].create({})";
+        for (decorator, body) in [
+            ("@http.route('/a', methods=['POST'])", "request.env['x'].create({})"),
+            ("@http.route('/a', methods=METHODS)", "request.env['x'].create({})"),
+            ("@http.route('/a', type='json')", "request.env['x'].create({})"),
+            ("@http.route('/a', type=kind)", "request.env['x'].create({})"),
+            ("@http.route()", "request.env['x'].create({})"),
+            ("@http.route('/a')", post),
+            ("@http.route('/a')", token),
+            (
+                "@http.route('/a')",
+                "buffer.write(b'x')\n        Command.create({})\n        os.unlink(path)",
+            ),
+            ("@http.route('/a')", "order.write({})"),
+        ] {
+            assert_eq!(route(decorator, body), [""; 0], "{decorator} {body}");
+        }
+        let off = route("@http.route('/a', csrf=False)", "request.env['x'].create({})");
+        assert_eq!(off, ["OD112"]);
+    }
+
+    #[test]
+    fn a_route_open_to_any_origin_is_reported_at_its_cors() {
+        let src =
+            "class C(http.Controller):\n    @http.route('/a', type='json', cors='*')\n    def f(self):\n        pass\n";
+        let diags = analyze(src, None).diags;
+        assert_eq!(
+            diags
+                .iter()
+                .map(|d| (d.code, d.pos.line, d.pos.col))
+                .collect::<Vec<_>>(),
+            [("OD128", 2, 36)]
+        );
+        assert_eq!(
+            route("@http.route('/a', cors='https://shop.example.com')", "pass"),
+            [""; 0]
+        );
+        assert_eq!(route("@http.route('/a', cors=ORIGIN)", "pass"), [""; 0]);
+    }
+
+    #[test]
+    fn an_auth_none_route_that_reads_the_user_or_writes_without_setting_one_is_reported() {
+        let none = |body: &str| route("@http.route('/a', auth='none', methods=['POST'])", body);
+        assert_eq!(none("return request.env.user.name"), ["OD129"]);
+        assert_eq!(none("request.env['x'].create({})"), ["OD129"]);
+        assert_eq!(none("return http.request.env.user.name"), ["OD129"]);
+        let check = "request.env['res.users'].authenticate(db, kw, env)\n        return request.env.user.name";
+        assert_eq!(none(check), ["OD129"]);
+        for set in [
+            "request.update_env(user=1)",
+            "request.session.authenticate(request.db, kw)",
+            "request.uid = 1",
+            "http.request.uid = 1",
+            "request.env = request.env(user=uid)",
+            "authenticate(request.session, request.env, kw)",
+        ] {
+            assert_eq!(
+                none(&format!("{set}\n        return request.env.user.name")),
+                [""; 0],
+                "{set}"
+            );
+        }
+        for own in [
+            "env = api.Environment(request.env.cr, SUPERUSER_ID, {})\n        env['x'].create({})",
+            "env = request.env(user=SUPERUSER_ID)\n        env['x'].create({})",
+            "request.env['x'].with_user(SUPERUSER_ID).create({})",
+        ] {
+            assert_eq!(none(own), [""; 0], "{own}");
+        }
+        assert_eq!(none("return request.env.cr.dbname"), [""; 0]);
+        let public = "@http.route('/a', auth='public', methods=['POST'])";
+        assert_eq!(route(public, "return request.env.user.name"), [""; 0]);
+        let src = "class C(http.Controller):\n    @http.route('/a', auth='none', methods=['POST'])\n    def f(self):\n        request.env['x'].create({})\n";
+        assert_eq!(
+            analyze(src, None).diags[0].message,
+            "route with auth='none' calls create(), but runs with no user, so the write belongs to no one; use auth='public' or set the user with request.update_env()"
+        );
+    }
+
+    /// `route_check` raises every route rule, so a change to one must leave the others as they were.
+    #[test]
+    fn the_route_rules_sharing_route_check_keep_their_findings() {
+        let src = "class C(http.Controller):\n    @http.route('/a', auth='public', methods=['POST'])\n    def f(self):\n        return request.env['x'].sudo().search([]).name\n";
+        let diags = analyze(src, None).diags;
+        let od111 = (
+            diags[0].code,
+            diags[0].pos.line,
+            diags[0].pos.col,
+            diags[0].message.as_str(),
+        );
+        let message = "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check";
+        assert_eq!((diags.len(), od111), (1, ("OD111", 3, 9, message)));
+        let csrf = route("@http.route('/a', type=kind, methods=['POST'], csrf=False)", "pass");
+        assert_eq!(csrf, ["OD112"]);
+        let src = "class C(http.Controller):\n    @http.route('/a', type='json')\n    def f(self):\n        pass\n";
+        assert_eq!(codes(src, Series::parse("saas~18.1")), ["OD125"]);
+        assert_eq!(codes(src, Series::parse("18.0")), [""; 0]);
     }
 
     #[test]
