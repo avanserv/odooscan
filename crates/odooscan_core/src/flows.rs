@@ -535,4 +535,22 @@ mod tests {
         assert!(findings(route, &chain(5, "request.params.get('x')")).is_empty());
         assert!(findings(route, &chain(1, "self._m1(v)")).is_empty());
     }
+
+    #[test]
+    fn a_helper_storing_a_route_upload_publicly_is_reported() {
+        let store = "    def _store(self, data):\n        self.env['ir.attachment'].sudo().create({'raw': data, 'public': True})\n";
+        let call = |arg: &str| {
+            findings(
+                &format!("    def r(self, upload):\n        request.env['x.y']._store({arg})\n"),
+                store,
+            )
+        };
+        assert_eq!(
+            call("upload.read()"),
+            [
+                "model.py:5 OD717 route parameter 'upload' reaches the content of sudo().create() through '_store()', which public=True lets anyone download"
+            ]
+        );
+        assert!(call("b'logo'").is_empty());
+    }
 }
