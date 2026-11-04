@@ -6,7 +6,7 @@ use ruff_python_ast::{self as ast, CmpOp, Expr, Operator, Stmt};
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::facts::{
-    ArgSlot, CallSite, FlowEdge, FlowOrigin, FlowSummary, FlowTarget, RawDiag, Receiver, Spanned, Step,
+    ArgSlot, CallSite, FlowEdge, FlowOrigin, FlowSummary, FlowTarget, RawDiag, Receiver, RunsAs, Spanned, Step,
 };
 use crate::python::{Locator, SAME_MODEL, exits, str_lit, tail_name};
 
@@ -455,9 +455,12 @@ impl Flows<'_> {
         self.body(&t.finalbody);
     }
 
-    /// Assigns `t` to a target. A plain name loses what it held; an item or attribute set on a
-    /// local adds the value to it.
+    /// Assigns `t` to a target. A plain name or an attribute of `self` loses what it held; an item
+    /// or attribute set on either adds the value to it.
     fn bind(&mut self, target: &Expr, t: Option<Taint>, value: Option<&Expr>) {
+        if let Some(key) = self_attr(target) {
+            return self.set(key, target, t);
+        }
         match target {
             Expr::Name(n) => {
                 let name = n.id.as_str();
@@ -471,18 +474,7 @@ impl Flows<'_> {
                     Some(r) => self.state.models.insert(name.to_owned(), r),
                     None => self.state.models.remove(name),
                 };
-                match t {
-                    Some(mut t) => {
-                        t.steps.push(Spanned {
-                            value: name.to_owned(),
-                            pos: self.loc.at(target),
-                        });
-                        self.state.vars.insert(name.to_owned(), t);
-                    }
-                    None => {
-                        self.state.vars.remove(name);
-                    }
-                }
+                self.set(name.to_owned(), target, t);
             }
             Expr::Tuple(ast::ExprTuple { elts, .. }) | Expr::List(ast::ExprList { elts, .. }) => {
                 for elt in elts {
@@ -496,12 +488,33 @@ impl Flows<'_> {
         }
     }
 
-    /// Adds a tainted value to the local `base` names, as `vals["x"] = t` or `vals.update(t)` do.
+    fn set(&mut self, key: String, target: &Expr, t: Option<Taint>) {
+        match t {
+            Some(mut t) => {
+                t.steps.push(Spanned {
+                    value: key.clone(),
+                    pos: self.loc.at(target),
+                });
+                self.state.vars.insert(key, t);
+            }
+            None => {
+                self.state.vars.remove(&key);
+            }
+        }
+    }
+
+    /// Adds a tainted value to the local or attribute of `self` that `base` names, as
+    /// `vals["x"] = t` or `vals.update(t)` do. `self` itself stays clean, so that the methods
+    /// called on it are still followed.
     fn add_to(&mut self, base: &Expr, t: Option<Taint>) {
-        let (Expr::Name(n), Some(t)) = (base, t) else {
-            return;
+        let name = match base {
+            Expr::Name(n) if !matches!(n.id.as_str(), "self" | "cls") => n.id.to_string(),
+            _ => match self_attr(base) {
+                Some(key) => key,
+                None => return,
+            },
         };
-        let name = n.id.to_string();
+        let Some(t) = t else { return };
         let mine = self.state.vars.remove(&name);
         if let Some(t) = join(mine, Some(t)) {
             self.state.vars.insert(name, t);
@@ -593,7 +606,13 @@ impl Flows<'_> {
         let receiver = self.receiver(&a.value)?;
         let method = a.attr.to_string();
         let pos = self.loc.at(expr);
-        let site = CallSite { receiver, method, pos };
+        let runs_as = runs_as(&self.path(&a.value));
+        let site = CallSite {
+            receiver,
+            method,
+            pos,
+            runs_as,
+        };
         let c = match self.calls.iter().position(|s| *s == site) {
             Some(c) => c,
             None => {
@@ -628,7 +647,10 @@ impl Flows<'_> {
             Expr::Name(n) => self.state.vars.get(n.id.as_str()).cloned(),
             Expr::Attribute(a) => match self.table.lookup(&self.path(expr)) {
                 Some((pattern, Role::Source(kind))) => self.source(pattern.to_owned(), expr, kind),
-                _ => values(self.expr(&a.value)),
+                _ => match self_attr(expr).and_then(|key| self.state.vars.get(&key)) {
+                    Some(t) => Some(t.clone()),
+                    None => values(self.expr(&a.value)),
+                },
             },
             Expr::Subscript(s) => {
                 self.expr(&s.slice);
@@ -781,11 +803,37 @@ impl Flows<'_> {
                 self.sink(sink, pattern, arg, expr);
                 None
             }
-            None if receiver.is_none() && self.method_target(call) => self.method_call(call, expr, args, keywords),
             None => {
+                self.self_write(call, &args, &keywords);
+                if receiver.is_none() && self.method_target(call) {
+                    return self.method_call(call, expr, args, keywords);
+                }
                 let args = args.into_iter().chain(keywords).fold(None, join);
                 self.result(call, &path, receiver, args)
             }
+        }
+    }
+
+    /// Keeps a parameter whose keys the user may pick that `write()` or `create()` receives on the
+    /// records of a model method, for the callers that call the method under `sudo()`.
+    fn self_write(&mut self, call: &ast::ExprCall, args: &[Option<Taint>], keywords: &[Option<Taint>]) {
+        let Expr::Attribute(a) = &*call.func else { return };
+        if !matches!(self.owner, Some(Receiver::Model(_))) || !matches!(a.attr.as_str(), "write" | "create") {
+            return;
+        }
+        let records = self.path(&a.value);
+        if runs_as(&records) != RunsAs::AsCaller {
+            return;
+        }
+        let Some(mut t) = sink_arg(call, args, keywords) else {
+            return;
+        };
+        if t.kind == Kind::Keys && matches!(t.origin, FlowOrigin::Param(_)) {
+            t.steps.push(Spanned {
+                value: format!("{}.{}()", records.join("."), a.attr),
+                pos: self.loc.at(call),
+            });
+            self.edge(t, FlowTarget::SelfWrite);
         }
     }
 
@@ -865,6 +913,27 @@ impl Flows<'_> {
             label: callee,
         });
         self.diags.push(RawDiag::new(code, pos, message).with_flow(flow));
+    }
+}
+
+/// Whose rights a method called on the records of the dotted path `records` runs with.
+fn runs_as(records: &[String]) -> RunsAs {
+    let last = |name: &str| records.iter().rposition(|p| p == name);
+    let on_self = records.first().is_some_and(|p| p == "self") && records[1..].iter().all(|p| p.ends_with("()"));
+    match (last("sudo()"), last("with_user()")) {
+        (Some(sudo), user) if user.is_none_or(|user| sudo > user) => RunsAs::Superuser,
+        (_, None) if on_self => RunsAs::AsCaller,
+        _ => RunsAs::User,
+    }
+}
+
+/// The key `self.<attr>` keeps a value under, as a local's name does.
+fn self_attr(expr: &Expr) -> Option<String> {
+    match expr {
+        Expr::Attribute(a) if matches!(&*a.value, Expr::Name(n) if n.id.as_str() == "self") => {
+            Some(format!("self.{}", a.attr))
+        }
+        _ => None,
     }
 }
 
@@ -1228,6 +1297,93 @@ mod tests {
         assert!(table.sink("no-such-rule", "lib.run").is_err());
         assert!(table.sink("sql-injection-flow", "lib.run").is_ok());
         assert!(table.sink("od704", "lib.run").is_ok());
+    }
+
+    #[test]
+    fn attributes_of_self_hold_values_like_locals() {
+        let query = |attr: &str| {
+            scan(
+                Params::Route,
+                &format!(
+                    "def f(self, term):\n    self.term = term\n    self.env.cr.execute('SELECT %s' % self.{attr})\n"
+                ),
+            )
+        };
+        assert_eq!(
+            query("term"),
+            ["OD701 route parameter 'term' reaches the query of cr.execute() through 'self.term'"]
+        );
+        assert!(query("other").is_empty());
+        let src =
+            "def f(self, **kw):\n    self.vals = {}\n    self.vals.update(kw)\n    self.sudo().write(self.vals)\n";
+        assert_eq!(
+            scan(Params::Route, src),
+            ["OD704 route parameter 'kw' reaches sudo().write(), so the user picks the fields it sets as superuser"]
+        );
+    }
+
+    #[test]
+    fn a_call_on_self_after_a_store_is_followed() {
+        let route = summary(
+            Params::Route,
+            "def f(self, term):\n    self.term = term\n    self._h(term)\n",
+        );
+        let calls: Vec<_> = route.calls.iter().map(|c| c.method.as_str()).collect();
+        assert_eq!(calls, ["_h"]);
+    }
+
+    /// Whether the first function of `src`, a method of `owner`, writes a parameter on its records.
+    fn self_writes(owner: Receiver, src: &str) -> bool {
+        let parsed = parse_module(src).expect("valid Python");
+        let Some(Stmt::FunctionDef(func)) = parsed.syntax().body.first() else {
+            panic!("no function");
+        };
+        let summary = function(
+            func,
+            Params::None,
+            Some(owner),
+            &Locator::new(src),
+            &TaintTable::default(),
+        )
+        .1;
+        summary.is_some_and(|s| s.edges.iter().any(|e| e.target == FlowTarget::SelfWrite))
+    }
+
+    #[test]
+    fn a_model_method_writing_a_parameter_on_its_records_is_a_self_write() {
+        let model = Receiver::Model("x.y".to_owned());
+        let write =
+            |owner: &Receiver, call: &str| self_writes(owner.clone(), &format!("def _f(self, vals):\n    {call}\n"));
+        assert!(write(&model, "self.write(vals)"));
+        assert!(write(&model, "self.browse(1).create(vals_list=vals)"));
+        assert!(write(&model, "self.with_context(a=1).write(vals)"));
+        assert!(!write(&model, "self.write({'name': vals['name']})"));
+        assert!(!write(&model, "self.partner_id.write(vals)"));
+        assert!(!write(&model, "self.env['y'].create(vals)"));
+        assert!(!write(&model, "self.with_user(1).write(vals)"));
+        assert!(!write(&Receiver::Class("C".to_owned()), "self.write(vals)"));
+    }
+
+    #[test]
+    fn a_call_runs_as_its_receiver_shows() {
+        let route = summary(
+            Params::Route,
+            "def f(self, **kw):\n    M = request.env['x.y'].sudo()\n    M._a(kw)\n    request.env['x.y']._a(kw)\n    request.env['x.y'].sudo()._a(kw)\n    request.env['x.y'].with_user(1).sudo()._a(kw)\n    request.env['x.y'].sudo().with_user(1)._a(kw)\n    self._a(kw)\n    self.with_context(a=1)._a(kw)\n    self.with_user(1)._a(kw)\n",
+        );
+        let runs_as: Vec<RunsAs> = route.calls.iter().map(|c| c.runs_as).collect();
+        assert_eq!(
+            runs_as,
+            [
+                RunsAs::Superuser,
+                RunsAs::User,
+                RunsAs::Superuser,
+                RunsAs::Superuser,
+                RunsAs::User,
+                RunsAs::AsCaller,
+                RunsAs::AsCaller,
+                RunsAs::User,
+            ]
+        );
     }
 
     #[test]

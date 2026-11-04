@@ -460,11 +460,22 @@ pub enum Receiver {
     Class(String),
 }
 
+/// Whose rights a called method runs with, as the receiver of the call shows.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RunsAs {
+    /// Under `sudo()`, after any `with_user()`.
+    Superuser,
+    /// On `self` or the records of calls on it, which keep the caller's environment.
+    AsCaller,
+    User,
+}
+
 #[derive(Debug, PartialEq, Eq)]
 pub struct CallSite {
     pub receiver: Receiver,
     pub method: String,
     pub pos: Pos,
+    pub runs_as: RunsAs,
 }
 
 /// Where a tainted value comes from within a function: a source, a parameter (by position, without
@@ -488,6 +499,9 @@ pub enum FlowTarget {
     Sink(&'static str),
     Arg(usize, ArgSlot),
     Return,
+    /// `write()` or `create()` on the records of a model method, which run as superuser when the
+    /// caller called the method under `sudo()`.
+    SelfWrite,
 }
 
 #[derive(Debug)]
