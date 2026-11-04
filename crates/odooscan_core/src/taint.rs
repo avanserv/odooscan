@@ -28,6 +28,10 @@ enum Sink {
     Redirect,
     Request,
     Path,
+    Command,
+    Deserialize,
+    Entity,
+    Header,
 }
 
 /// The arguments of a call that a sink checks.
@@ -41,14 +45,26 @@ enum Arg {
     Any,
 }
 
-/// A literal a call must pass, by keyword or position, for it to be the sink, as `local=False` for
-/// `request.redirect()`. Before `since` the callee has no such parameter and always acts as if the
-/// literal were passed.
+/// What the argument a guard reads must be for a call to be the sink.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Test {
+    /// A boolean literal, as `local=False` for `request.redirect()`.
+    Is(bool),
+    /// Anything but a value whose last name is listed, as a YAML loader other than a safe one.
+    Unless(&'static [&'static str]),
+    /// An lxml parser that resolves entities: `XMLParser(resolve_entities=True)`, and before the
+    /// series also the default parser or an `XMLParser` built without the keyword, as lxml before
+    /// 5 resolves by default.
+    Resolves(Series),
+}
+
+/// The argument at a keyword or position that tells whether a call is the sink. Before `since`
+/// the callee has no such parameter and always acts as the test asks.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct Guard {
     keyword: &'static str,
     pos: usize,
-    value: bool,
+    test: Test,
     since: Option<Series>,
 }
 
@@ -59,6 +75,9 @@ struct SinkRow {
     guard: Option<Guard>,
     /// The pattern matches the bare name alone, so that `Image.open` is no `open`.
     whole: bool,
+    /// The path names the standard library's module, not the one of that name an import from
+    /// `odoo` binds: 17.0 `odoo.tools.pickle` loads only plain data (`odoo/tools/misc.py:1689`).
+    stdlib: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -83,6 +102,7 @@ const fn sink_at(sink: Sink, arg: Arg) -> Role {
         arg,
         guard: None,
         whole: false,
+        stdlib: false,
     })
 }
 
@@ -92,6 +112,17 @@ const fn guarded(sink: Sink, arg: Arg, guard: Guard) -> Role {
         arg,
         guard: Some(guard),
         whole: false,
+        stdlib: false,
+    })
+}
+
+const fn stdlib(sink: Sink, arg: Arg) -> Role {
+    Role::Sink(SinkRow {
+        sink,
+        arg,
+        guard: None,
+        whole: false,
+        stdlib: true,
     })
 }
 
@@ -105,9 +136,43 @@ const FILE: Arg = Arg::At(0, &["file", "name", "path_or_file", "filepath_or_fp"]
 const REDIRECT_LOCAL: Guard = Guard {
     keyword: "local",
     pos: 2,
-    value: false,
+    test: Test::Is(false),
     since: Some(Series { major: 15, minor: 0 }),
 };
+
+/// The command of a `subprocess` call, which a shell runs only with `shell=True`, the ninth
+/// parameter of `Popen`.
+const COMMAND: Arg = Arg::At(0, &["args"]);
+const SHELL: Guard = Guard {
+    keyword: "shell",
+    pos: 8,
+    test: Test::Is(true),
+    since: None,
+};
+
+const DATA: Arg = Arg::At(0, &["data", "file", "stream"]);
+
+/// A YAML loader that builds only plain values.
+const SAFE_LOADER: Guard = Guard {
+    keyword: "Loader",
+    pos: 1,
+    test: Test::Unless(&["SafeLoader", "CSafeLoader", "BaseLoader", "CBaseLoader"]),
+    since: None,
+};
+
+const XML: Arg = Arg::At(0, &["text", "source", "xml"]);
+
+/// From saas~19.1 Odoo needs Python 3.12 (`odoo/release.py:39`) and so lxml 5.2.1
+/// (`requirements.txt:21`), whose default parser resolves no external entity; 18.0 pins lxml 4
+/// below Python 3.12 (`requirements.txt:38-39`). Odoo's own default parser is set per thread only.
+const RESOLVES: Guard = Guard {
+    keyword: "parser",
+    pos: 1,
+    test: Test::Resolves(Series { major: 19, minor: 1 }),
+    since: None,
+};
+
+const HEADERS: Arg = Arg::At(1, &["headers"]);
 
 /// Where user data enters, where it must not arrive, and what makes it harmless. A pattern matches
 /// a dotted callee or attribute that ends with its last name and holds its other names in order, so
@@ -168,10 +233,40 @@ const TABLE: &[(&str, Role)] = &[
             arg: FILE,
             guard: None,
             whole: true,
+            stdlib: false,
         }),
     ),
     ("send_file", sink_at(Sink::Path, FILE)),
     ("os.path.join", sink_at(Sink::Path, Arg::Any)),
+    ("os.system", sink_at(Sink::Command, Arg::At(0, &["command"]))),
+    ("os.popen", sink_at(Sink::Command, Arg::At(0, &["cmd"]))),
+    ("subprocess.getoutput", sink_at(Sink::Command, Arg::At(0, &["cmd"]))),
+    (
+        "subprocess.getstatusoutput",
+        sink_at(Sink::Command, Arg::At(0, &["cmd"])),
+    ),
+    ("subprocess.run", guarded(Sink::Command, COMMAND, SHELL)),
+    ("subprocess.call", guarded(Sink::Command, COMMAND, SHELL)),
+    ("subprocess.check_call", guarded(Sink::Command, COMMAND, SHELL)),
+    ("subprocess.check_output", guarded(Sink::Command, COMMAND, SHELL)),
+    ("subprocess.Popen", guarded(Sink::Command, COMMAND, SHELL)),
+    ("pickle.loads", stdlib(Sink::Deserialize, DATA)),
+    ("pickle.load", stdlib(Sink::Deserialize, DATA)),
+    ("marshal.loads", sink_at(Sink::Deserialize, DATA)),
+    ("marshal.load", sink_at(Sink::Deserialize, DATA)),
+    ("yaml.load", guarded(Sink::Deserialize, DATA, SAFE_LOADER)),
+    ("yaml.load_all", guarded(Sink::Deserialize, DATA, SAFE_LOADER)),
+    ("yaml.unsafe_load", sink_at(Sink::Deserialize, DATA)),
+    ("yaml.unsafe_load_all", sink_at(Sink::Deserialize, DATA)),
+    ("etree.fromstring", guarded(Sink::Entity, XML, RESOLVES)),
+    ("etree.XML", guarded(Sink::Entity, XML, RESOLVES)),
+    ("etree.parse", guarded(Sink::Entity, XML, RESOLVES)),
+    ("objectify.fromstring", guarded(Sink::Entity, XML, RESOLVES)),
+    ("make_response", sink_at(Sink::Header, HEADERS)),
+    ("make_json_response", sink_at(Sink::Header, HEADERS)),
+    ("Response", sink_at(Sink::Header, Arg::At(2, &["headers"]))),
+    ("headers.add", sink_at(Sink::Header, Arg::Any)),
+    ("headers.set", sink_at(Sink::Header, Arg::Any)),
     ("int", Role::Sanitizer),
     ("float", Role::Sanitizer),
     ("bool", Role::Sanitizer),
@@ -187,6 +282,11 @@ const TABLE: &[(&str, Role)] = &[
     ("urlencode", Role::Sanitizer),
     ("url_encode", Role::Sanitizer),
     ("secure_filename", Role::Sanitizer),
+    // Its file lies under the addons paths, whatever name it is given (18.0
+    // odoo/tools/misc.py:187-260).
+    ("file_open", Role::Sanitizer),
+    // Quotes a file name for the header, so that it ends no parameter (18.0 odoo/http.py:328-331).
+    ("content_disposition", Role::Sanitizer),
     // An attribute's value, or the default, and not its name.
     ("getattr", Role::Keeps(&[0, 2], &[])),
     // The query parameters go URL-encoded into the query of the URL (portal/controllers/portal.py).
@@ -195,6 +295,24 @@ const TABLE: &[(&str, Role)] = &[
     ("basename", Role::Clears("OD707")),
     ("BytesIO", Role::Clears("OD707")),
     ("StringIO", Role::Clears("OD707")),
+    // Each value they quote is one shell word, whatever it holds.
+    ("shlex.quote", Role::Clears("OD708")),
+    ("shlex.join", Role::Clears("OD708")),
+];
+
+/// The rule that reports each sink.
+const SINKS: &[(Sink, &str)] = &[
+    (Sink::Sql, "OD701"),
+    (Sink::Eval, "OD702"),
+    (Sink::Markup, "OD703"),
+    (Sink::SudoWrite, "OD704"),
+    (Sink::Redirect, "OD705"),
+    (Sink::Request, "OD706"),
+    (Sink::Path, "OD707"),
+    (Sink::Command, "OD708"),
+    (Sink::Deserialize, "OD709"),
+    (Sink::Entity, "OD710"),
+    (Sink::Header, "OD711"),
 ];
 
 /// Keywords that carry the argument a sink checks when it is not passed by position.
@@ -225,23 +343,15 @@ impl TaintTable {
         self.add(pattern, Role::Sanitizer)
     }
 
-    /// A sink reported as `rule`, the code or name of one of OD701 to OD707.
+    /// A sink reported as `rule`, the code or name of one of OD701 to OD711.
     pub fn sink(&mut self, rule: &str, pattern: &str) -> Result<(), String> {
-        let kind = match crate::rules::find(rule).map(|r| r.code) {
-            Some("OD701") => Sink::Sql,
-            Some("OD702") => Sink::Eval,
-            Some("OD703") => Sink::Markup,
-            Some("OD704") => Sink::SudoWrite,
-            Some("OD705") => Sink::Redirect,
-            Some("OD706") => Sink::Request,
-            Some("OD707") => Sink::Path,
-            _ => {
-                return Err(format!(
-                    "'{rule}' is not a taint rule: name OD701 to OD707 by code or name"
-                ));
-            }
+        let code = crate::rules::find(rule).map(|r| r.code);
+        let Some((kind, _)) = SINKS.iter().find(|(_, c)| Some(*c) == code) else {
+            return Err(format!(
+                "'{rule}' is not a taint rule: name OD701 to OD711 by code or name"
+            ));
         };
-        self.add(pattern, sink(kind))
+        self.add(pattern, sink(*kind))
     }
 
     fn add(&mut self, pattern: &str, role: Role) -> Result<(), String> {
@@ -296,10 +406,11 @@ fn matches_path(pattern: &str, path: &[String]) -> bool {
 
 /// Which parameters of a function a user sets.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Params {
+pub enum Params<'a> {
     None,
-    /// A controller method behind `@route`: its URL and form parameters.
-    Route,
+    /// A controller method behind `@route`: its URL and form parameters, but for those named here,
+    /// which a converter of the URL fills with records.
+    Route(&'a [&'a str]),
     /// A public model method, which any user with access to the model can call over RPC.
     Rpc,
 }
@@ -468,6 +579,10 @@ struct State {
     sudo: FxHashSet<String>,
     /// Locals bound to a model, as `Orders = env["sale.order"]` does.
     models: FxHashMap<String, Receiver>,
+    /// Locals bound to an lxml `XMLParser()`.
+    parsers: FxHashMap<String, Entities>,
+    /// Locals bound to a dotted name, by its last name, as `Loader = yaml.SafeLoader`.
+    names: FxHashMap<String, String>,
 }
 
 impl State {
@@ -480,17 +595,26 @@ impl State {
         }
         self.sudo.extend(other.sudo);
         self.models.extend(other.models);
+        // A parser that may resolve entities on either path may on the merged one.
+        for (name, e) in other.parsers {
+            let e = self.parsers.get(&name).map_or(e, |mine| e.max(*mine));
+            self.parsers.insert(name, e);
+        }
+        // A name is known only where both paths agree on it.
+        self.names.retain(|name, mine| other.names.get(name) == Some(mine));
     }
 }
 
 /// The flows of one function: findings for those that start in it, and its summary when data
-/// may cross into or out of the methods it calls. `owner` is what `self` is, and `series` that of
-/// the module, an unknown one read as the newest.
+/// may cross into or out of the methods it calls. `owner` is what `self` is, `series` that of the
+/// module, an unknown one read as the newest, and `odoo` the names the file's imports from `odoo`
+/// bind.
 pub fn function(
     func: &ast::StmtFunctionDef,
     params: Params,
     owner: Option<Receiver>,
     series: Option<Series>,
+    odoo: &[&str],
     loc: &Locator,
     table: &TaintTable,
 ) -> (Vec<RawDiag>, Option<FlowSummary>) {
@@ -498,6 +622,7 @@ pub fn function(
         loc,
         table,
         series,
+        odoo,
         state: State::default(),
         locals: FxHashSet::default(),
         owner,
@@ -523,6 +648,7 @@ struct Flows<'a> {
     loc: &'a Locator<'a>,
     table: &'a TaintTable,
     series: Option<Series>,
+    odoo: &'a [&'a str],
     state: State,
     /// Every name the function binds, so that `x.f()` on another name is a module's function.
     locals: FxHashSet<String>,
@@ -549,8 +675,12 @@ impl Flows<'_> {
             }
             let (label, kind, origin) = match source {
                 Params::None => ("parameter", Kind::Keys, FlowOrigin::Param(names.len())),
-                Params::Route if mapping => ("route parameter", Kind::Keys, FlowOrigin::Source),
-                Params::Route => ("route parameter", Kind::Value, FlowOrigin::Source),
+                Params::Route(records) if records.contains(&name) => {
+                    names.push(name.to_owned());
+                    continue;
+                }
+                Params::Route(_) if mapping => ("route parameter", Kind::Keys, FlowOrigin::Source),
+                Params::Route(_) => ("route parameter", Kind::Value, FlowOrigin::Source),
                 Params::Rpc => ("RPC argument", Kind::Keys, FlowOrigin::Rpc(names.len())),
             };
             names.push(name.to_owned());
@@ -737,29 +867,60 @@ impl Flows<'_> {
             return self.set(key, target, t);
         }
         match target {
-            Expr::Name(n) => {
-                let name = n.id.as_str();
-                self.locals.insert(name.to_owned());
-                if value.is_some_and(|v| self.is_sudo(v)) {
-                    self.state.sudo.insert(name.to_owned());
-                } else {
-                    self.state.sudo.remove(name);
-                }
-                match value.and_then(|v| self.receiver(v)) {
-                    Some(r) => self.state.models.insert(name.to_owned(), r),
-                    None => self.state.models.remove(name),
-                };
-                self.set(name.to_owned(), target, t);
-            }
+            Expr::Name(n) => self.bind_name(n.id.as_str(), target, t, value),
             Expr::Tuple(ast::ExprTuple { elts, .. }) | Expr::List(ast::ExprList { elts, .. }) => {
                 for elt in elts {
                     self.bind(elt, values(t.clone()), None);
                 }
             }
             Expr::Starred(s) => self.bind(&s.value, t, None),
+            // `response.headers[name] = t` sets a header, as `headers.set(name, t)` does.
+            Expr::Subscript(ast::ExprSubscript { value: base, slice, .. }) if is_headers(base) => {
+                let label = header_label(str_lit(slice), &self.path(base).join("."));
+                self.sink(Sink::Header, label, t, target);
+            }
             Expr::Subscript(ast::ExprSubscript { value: base, .. })
             | Expr::Attribute(ast::ExprAttribute { value: base, .. }) => self.add_to(base, values(t)),
             _ => {}
+        }
+    }
+
+    /// Binds a local, and what the value tells of it beyond its taint.
+    fn bind_name(&mut self, name: &str, target: &Expr, t: Option<Taint>, value: Option<&Expr>) {
+        self.locals.insert(name.to_owned());
+        if value.is_some_and(|v| self.is_sudo(v)) {
+            self.state.sudo.insert(name.to_owned());
+        } else {
+            self.state.sudo.remove(name);
+        }
+        match value.and_then(|v| self.receiver(v)) {
+            Some(r) => self.state.models.insert(name.to_owned(), r),
+            None => self.state.models.remove(name),
+        };
+        match value.and_then(xml_parser) {
+            Some(e) => self.state.parsers.insert(name.to_owned(), e),
+            None => self.state.parsers.remove(name),
+        };
+        match value.and_then(|v| self.named(v)) {
+            Some(named) => self.state.names.insert(name.to_owned(), named.to_owned()),
+            None => self.state.names.remove(name),
+        };
+        self.set(name.to_owned(), target, t);
+    }
+
+    /// The last name of what `expr` refers to, through a local bound to it and `getattr()` with a
+    /// literal name, so that `Loader = getattr(yaml, "CSafeLoader", yaml.SafeLoader)` is a safe
+    /// loader.
+    fn named<'e>(&'e self, expr: &'e Expr) -> Option<&'e str> {
+        match expr {
+            Expr::Name(n) => Some(
+                self.state
+                    .names
+                    .get(n.id.as_str())
+                    .map_or(n.id.as_str(), String::as_str),
+            ),
+            Expr::Call(c) if tail_name(&c.func) == Some("getattr") => c.arguments.args.get(1).and_then(str_lit),
+            e => tail_name(e),
         }
     }
 
@@ -1121,7 +1282,13 @@ impl Flows<'_> {
         let args: Vec<Option<Taint>> = call.arguments.args.iter().map(|a| self.expr(a)).collect();
         let keywords: Vec<Option<Taint>> = call.arguments.keywords.iter().map(|k| self.expr(&k.value)).collect();
         let path = self.path(&call.func);
-        match self.table.lookup(&path) {
+        // A call whose guard fails is no sink, and returns what any other call would, as
+        // `etree.fromstring(t, HTMLParser())` returns the tree of `t`.
+        let row = self.table.lookup(&path).filter(|(_, role)| match role {
+            Role::Sink(row) => self.is_sink(*row, &path, call),
+            _ => true,
+        });
+        match row {
             Some((pattern, Role::Source(kind))) => self.source(format!("{pattern}()"), expr, kind),
             Some((_, Role::Sanitizer)) => None,
             Some((_, Role::Clears(code))) => {
@@ -1140,26 +1307,60 @@ impl Flows<'_> {
                 values(t)
             }
             Some((pattern, Role::Sink(row))) => {
-                if row.guard.is_none_or(|g| self.met(g, call)) {
-                    let arg = sink_arg(row.arg, code(row.sink), call, &args, &keywords);
-                    self.sink(row.sink, pattern, arg, expr);
+                let arg = sink_arg(row.arg, code(row.sink), call, &args, &keywords);
+                let callee = format!("{pattern}()");
+                let callee = match row.sink {
+                    Sink::Header => header_label(arg_expr(row.arg, call).and_then(header_name), &callee),
+                    _ => callee,
+                };
+                self.sink(row.sink, callee, arg, expr);
+                // A parser, a loader or a command hands back the data in another form, so the
+                // flows that pass through it go on as they would without the row.
+                let passes = matches!(
+                    row.sink,
+                    Sink::Command | Sink::Deserialize | Sink::Entity | Sink::Header
+                );
+                if !passes {
+                    return None;
                 }
-                None
+                self.plain_call(call, expr, &path, receiver, args, keywords)
             }
-            None => {
-                self.self_write(call, &args, &keywords);
-                if receiver.is_none() && self.method_target(call) {
-                    return self.method_call(call, expr, args, keywords);
-                }
-                let start = format_start(call, &args, &keywords);
-                let args = args.into_iter().chain(keywords).fold(None, join);
-                let t = self.result(call, &path, receiver, args);
-                t.map(|t| t.safe(start))
-            }
+            None => self.plain_call(call, expr, &path, receiver, args, keywords),
         }
     }
 
-    /// Whether a call passes the literal the guard asks for, or the module's series predates the
+    /// What a call that no row names returns, keeping a write on `self` or a call of a model's
+    /// method for the summary.
+    fn plain_call(
+        &mut self,
+        call: &ast::ExprCall,
+        expr: &Expr,
+        path: &[String],
+        receiver: Option<Taint>,
+        args: Vec<Option<Taint>>,
+        keywords: Vec<Option<Taint>>,
+    ) -> Option<Taint> {
+        self.self_write(call, &args, &keywords);
+        if receiver.is_none() && self.method_target(call) {
+            return self.method_call(call, expr, args, keywords);
+        }
+        let start = format_start(call, &args, &keywords);
+        let args = args.into_iter().chain(keywords).fold(None, join);
+        let t = self.result(call, path, receiver, args);
+        t.map(|t| t.safe(start))
+    }
+
+    /// Whether a call of `path` that `row` matches is the sink: its guard is met, it calls no
+    /// module an import from `odoo` binds when the row names the standard library's, and it sets
+    /// no header of a session.
+    fn is_sink(&self, row: SinkRow, path: &[String], call: &ast::ExprCall) -> bool {
+        let odoo = row.stdlib && path.first().is_some_and(|p| self.odoo.contains(&p.as_str()));
+        let session = matches!(&*call.func, Expr::Attribute(a) if matches!(&*a.value,
+            Expr::Attribute(h) if h.attr.as_str() == "headers" && is_session(&h.value)));
+        !odoo && !session && row.guard.is_none_or(|g| self.met(g, call))
+    }
+
+    /// Whether the argument a guard reads passes its test, or the module's series predates the
     /// parameter.
     fn met(&self, guard: Guard, call: &ast::ExprCall) -> bool {
         if guard.since.is_some_and(|since| self.series.is_some_and(|s| s < since)) {
@@ -1169,7 +1370,30 @@ impl Flows<'_> {
             Some(k) => Some(&k.value),
             None => call.arguments.args.get(guard.pos),
         };
-        matches!(arg, Some(Expr::BooleanLiteral(b)) if b.value == guard.value)
+        match guard.test {
+            Test::Is(value) => matches!(arg, Some(Expr::BooleanLiteral(b)) if b.value == value),
+            Test::Unless(names) => arg.and_then(|a| self.named(a)).is_none_or(|n| !names.contains(&n)),
+            Test::Resolves(until) => self.resolves(arg, until),
+        }
+    }
+
+    /// Whether the parser passed as `arg`, or the default one without it, resolves entities.
+    fn resolves(&self, arg: Option<&Expr>, until: Series) -> bool {
+        match arg.map_or(Entities::Default, |a| self.entities(a)) {
+            Entities::Resolved => true,
+            Entities::Default => self.series.is_some_and(|s| s < until),
+            Entities::Kept => false,
+        }
+    }
+
+    /// What the parser `expr` names does with entities: `None`, and `XMLParser()` inline or bound
+    /// to a local, count; any other parser resolves none.
+    fn entities(&self, expr: &Expr) -> Entities {
+        match expr {
+            Expr::NoneLiteral(_) => Entities::Default,
+            Expr::Name(n) => self.state.parsers.get(n.id.as_str()).copied().unwrap_or(Entities::Kept),
+            e => xml_parser(e).unwrap_or(Entities::Kept),
+        }
     }
 
     /// Keeps a parameter whose keys the user may pick that `write()` or `create()` receives on the
@@ -1252,7 +1476,7 @@ impl Flows<'_> {
 
     /// Reports a value from a source at a sink, and keeps one from a parameter or a call for the
     /// callers' and callees' flows.
-    fn sink(&mut self, sink: Sink, pattern: &str, t: Option<Taint>, expr: &Expr) {
+    fn sink(&mut self, sink: Sink, callee: String, t: Option<Taint>, expr: &Expr) {
         let code = code(sink);
         let Some(mut t) = t.filter(|t| !t.safe.has(code)) else {
             return;
@@ -1260,7 +1484,6 @@ impl Flows<'_> {
         if sink == Sink::SudoWrite && t.kind != Kind::Keys {
             return;
         }
-        let callee = format!("{pattern}()");
         let pos = self.loc.at(expr);
         if !t.origin.is_user() {
             t.steps.push(Spanned { value: callee, pos });
@@ -1279,6 +1502,32 @@ impl Flows<'_> {
     }
 }
 
+/// What an lxml parser does with entities, from the safest.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+enum Entities {
+    /// Any other value, or another parser such as `HTMLParser()`.
+    Kept,
+    /// The default of the lxml the series runs.
+    Default,
+    /// `resolve_entities=True`.
+    Resolved,
+}
+
+/// What `XMLParser(...)` does with entities, by its `resolve_entities` literal.
+fn xml_parser(expr: &Expr) -> Option<Entities> {
+    let Expr::Call(call) = expr else { return None };
+    if tail_name(&call.func) != Some("XMLParser") {
+        return None;
+    }
+    Some(
+        match call.arguments.find_keyword("resolve_entities").map(|k| &k.value) {
+            None => Entities::Default,
+            Some(Expr::BooleanLiteral(b)) if b.value => Entities::Resolved,
+            Some(_) => Entities::Kept,
+        },
+    )
+}
+
 /// Whose rights a method called on the records of the dotted path `records` runs with.
 fn runs_as(records: &[String]) -> RunsAs {
     let last = |name: &str| records.iter().rposition(|p| p == name);
@@ -1287,6 +1536,71 @@ fn runs_as(records: &[String]) -> RunsAs {
         (Some(sudo), user) if user.is_none_or(|user| sudo > user) => RunsAs::Superuser,
         (_, None) if on_self => RunsAs::AsCaller,
         _ => RunsAs::User,
+    }
+}
+
+/// Whether `expr` is the `headers` of a response. Those of a session, as `requests.Session`
+/// has, go out with the requests it sends.
+fn is_headers(expr: &Expr) -> bool {
+    matches!(expr, Expr::Attribute(a) if a.attr.as_str() == "headers" && !is_session(&a.value))
+}
+
+fn is_session(expr: &Expr) -> bool {
+    let name = match expr {
+        Expr::Call(c) => tail_name(&c.func),
+        e => tail_name(e),
+    };
+    name.is_some_and(|n| n.to_ascii_lowercase().contains("session"))
+}
+
+/// The expression a call passes for `arg`, positional first, as `sink_arg` reads its taint.
+fn arg_expr(arg: Arg, call: &ast::ExprCall) -> Option<&Expr> {
+    let (pos, names) = match arg {
+        Arg::First => (0, SINK_KEYWORDS),
+        Arg::At(pos, names) => (pos, names),
+        Arg::Any => (0, &[][..]),
+    };
+    match call.arguments.args.get(pos) {
+        Some(e) => Some(e),
+        None => names
+            .iter()
+            .find_map(|n| call.arguments.find_keyword(n))
+            .map(|k| &k.value),
+    }
+}
+
+/// The header that `expr` names, or that the one entry of a list of pairs or of a mapping not
+/// written out whole sets, which is the entry the user may set.
+fn header_name(expr: &Expr) -> Option<&str> {
+    fn pair(e: &Expr) -> Option<(&Expr, &Expr)> {
+        match e {
+            Expr::Tuple(t) if t.elts.len() == 2 => Some((&t.elts[0], &t.elts[1])),
+            _ => None,
+        }
+    }
+    let entries: Vec<(&Expr, &Expr)> = match expr {
+        Expr::List(ast::ExprList { elts, .. }) | Expr::Tuple(ast::ExprTuple { elts, .. }) => {
+            elts.iter().filter_map(pair).collect()
+        }
+        Expr::Dict(d) => d
+            .items
+            .iter()
+            .filter_map(|i| Some((i.key.as_ref()?, &i.value)))
+            .collect(),
+        e => return str_lit(e),
+    };
+    let mut set = entries.into_iter().filter(|(_, value)| constant(value).is_none());
+    match (set.next(), set.next()) {
+        (Some((key, _)), None) => str_lit(key),
+        _ => None,
+    }
+}
+
+/// The step a header sink takes in a flow, naming the header when the code does.
+fn header_label(name: Option<&str>, callee: &str) -> String {
+    match name {
+        Some(name) => format!("the {name} header of {callee}"),
+        None => format!("a header of {callee}"),
     }
 }
 
@@ -1452,15 +1766,8 @@ fn step(s: &Spanned<String>) -> Step {
 }
 
 fn code(sink: Sink) -> &'static str {
-    match sink {
-        Sink::Sql => "OD701",
-        Sink::Eval => "OD702",
-        Sink::Markup => "OD703",
-        Sink::SudoWrite => "OD704",
-        Sink::Redirect => "OD705",
-        Sink::Request => "OD706",
-        Sink::Path => "OD707",
-    }
+    let row = SINKS.iter().find(|(s, _)| *s == sink);
+    row.expect("every sink has a row in SINKS").1
 }
 
 /// The message of a flow from `origin` to the call `callee`, naming the locals and methods it
@@ -1477,28 +1784,76 @@ pub(crate) fn message(code: &str, callee: &str, origin: &str, names: &[&str]) ->
     } else {
         format!(" through '{}'", through.join("', '"))
     };
-    match code {
-        "OD701" => format!(
-            "{origin} reaches the query of {callee}{through}; pass it as a query parameter or build the query with odoo.tools.SQL"
-        ),
-        "OD702" => format!("{origin} reaches {callee}{through}, which runs it as code"),
-        "OD703" => format!(
-            "{origin} reaches {callee}{through} unescaped; escape it, or pass it as an argument of Markup's % or format()"
-        ),
-        "OD705" => format!(
-            "{origin} reaches the URL of {callee}{through}, so the user picks the site the browser goes to; start the URL with a path the code picks"
-        ),
-        "OD706" => format!(
-            "{origin} reaches the URL of {callee}{through}, so the user picks the host the server connects to; start the URL with a host the code picks"
-        ),
-        "OD707" => format!(
-            "{origin} reaches the path of {callee}{through}, so the user picks the file the server opens; pass the name through secure_filename() or os.path.basename()"
-        ),
-        _ => format!(
-            "{origin} reaches {callee}{through}, so the user picks the fields it sets as superuser; copy only the fields the user may set"
-        ),
-    }
+    let (lead, tail) = MESSAGES
+        .iter()
+        .find(|(c, ..)| *c == code)
+        .map_or(("", ""), |(_, lead, tail)| (*lead, *tail));
+    let tail = if code == "OD711" && callee.to_ascii_lowercase().contains("content-disposition") {
+        DISPOSITION
+    } else {
+        tail
+    };
+    format!("{origin} reaches {lead}{callee}{through}{tail}")
 }
+
+/// What the message of each rule says before the callee, and after the locals the flow went
+/// through.
+const MESSAGES: &[(&str, &str, &str)] = &[
+    (
+        "OD701",
+        "the query of ",
+        "; pass it as a query parameter or build the query with odoo.tools.SQL",
+    ),
+    ("OD702", "", ", which runs it as code"),
+    (
+        "OD703",
+        "",
+        " unescaped; escape it, or pass it as an argument of Markup's % or format()",
+    ),
+    (
+        "OD704",
+        "",
+        ", so the user picks the fields it sets as superuser; copy only the fields the user may set",
+    ),
+    (
+        "OD705",
+        "the URL of ",
+        ", so the user picks the site the browser goes to; start the URL with a path the code picks",
+    ),
+    (
+        "OD706",
+        "the URL of ",
+        ", so the user picks the host the server connects to; start the URL with a host the code picks",
+    ),
+    (
+        "OD707",
+        "the path of ",
+        ", so the user picks the file the server opens; pass the name through secure_filename() or os.path.basename()",
+    ),
+    (
+        "OD708",
+        "the command of ",
+        ", so the user picks what the shell runs; pass the arguments as a list without shell=True, or quote each with shlex.quote()",
+    ),
+    (
+        "OD709",
+        "",
+        ", which trusts the data it loads, so the user may run code on the server; load it with json.loads() or yaml.safe_load()",
+    ),
+    (
+        "OD710",
+        "",
+        ", whose parser resolves entities, so the user can read the server's files; pass etree.XMLParser(resolve_entities=False)",
+    ),
+    (
+        "OD711",
+        "",
+        ", so the user picks how the browser reads the response; pick the value from those the code allows",
+    ),
+];
+
+const DISPOSITION: &str =
+    ", so the user picks how the browser reads the response; pass the file name through content_disposition()";
 
 #[cfg(test)]
 mod tests {
@@ -1515,15 +1870,21 @@ mod tests {
         scan_in(table, None, params, src)
     }
 
-    /// The findings of the first function in `src`, in a module of `series`.
+    /// The findings of the first function in `src`, in a module of `series`, after the imports
+    /// before it.
     fn scan_in(table: &TaintTable, series: Option<&str>, params: Params, src: &str) -> Vec<String> {
         let series = series.and_then(Series::parse);
         let parsed = parse_module(src).expect("valid Python");
-        let Some(Stmt::FunctionDef(func)) = parsed.syntax().body.first() else {
+        let body = &parsed.syntax().body;
+        let Some(func) = body.iter().find_map(Stmt::as_function_def_stmt) else {
             panic!("no function");
         };
+        let odoo: Vec<&str> = crate::module_state::odoo_names(&crate::module_state::top_level(body))
+            .into_iter()
+            .map(|(local, _)| local)
+            .collect();
         let loc = Locator::new(src);
-        function(func, params, None, series, &loc, table)
+        function(func, params, None, series, &odoo, &loc, table)
             .0
             .into_iter()
             .map(|d| format!("{} {}", d.code, d.message.split(';').next().unwrap_or_default()))
@@ -1534,7 +1895,7 @@ mod tests {
     fn follows_assignments_to_the_sink() {
         let src = "def f(self, term):\n    where = \"name = '%s'\" % term\n    q = 'SELECT 1 WHERE ' + where\n    self.env.cr.execute(q)\n";
         assert_eq!(
-            scan(Params::Route, src),
+            scan(Params::Route(&[]), src),
             ["OD701 route parameter 'term' reaches the query of cr.execute() through 'where', 'q'"]
         );
         assert!(scan(Params::None, src).is_empty());
@@ -1552,6 +1913,7 @@ mod tests {
             Params::None,
             None,
             None,
+            &[],
             &Locator::new(src),
             &TaintTable::default(),
         );
@@ -1562,20 +1924,20 @@ mod tests {
     #[test]
     fn joins_branches_and_skips_those_that_exit() {
         let joined = "def f(self, x):\n    q = 'a'\n    if self:\n        q = x\n    self.env.cr.execute(q)\n";
-        assert_eq!(scan(Params::Route, joined).len(), 1);
+        assert_eq!(scan(Params::Route(&[]), joined).len(), 1);
         let exits =
             "def f(self, x):\n    q = 'a'\n    if self:\n        q = x\n        return\n    self.env.cr.execute(q)\n";
-        assert!(scan(Params::Route, exits).is_empty());
+        assert!(scan(Params::Route(&[]), exits).is_empty());
         let both =
             "def f(self, x):\n    if self:\n        q = x\n    else:\n        q = 'a'\n    self.env.cr.execute(q)\n";
-        assert_eq!(scan(Params::Route, both).len(), 1);
+        assert_eq!(scan(Params::Route(&[]), both).len(), 1);
     }
 
     #[test]
     fn sudo_writes_need_user_chosen_keys() {
         let write = |body: &str| {
             scan(
-                Params::Route,
+                Params::Route(&[]),
                 &format!("def f(self, name, **kw):\n    M = request.env['x'].sudo()\n{body}\n"),
             )
         };
@@ -1626,16 +1988,16 @@ mod tests {
     #[test]
     fn records_and_recordsets_carry_no_taint() {
         let src = "def f(self, model, domain):\n    M = request.env.get(model)\n    q = M.sudo()._search(domain)\n    sql, params = q.select()\n    request.env.cr.execute(f'EXPLAIN {sql}', params)\n";
-        assert!(scan(Params::Route, src).is_empty());
+        assert!(scan(Params::Route(&[]), src).is_empty());
         let module = "def f(self, x):\n    self.env.cr.execute(json.dumps(x))\n";
-        assert_eq!(scan(Params::Route, module).len(), 1);
+        assert_eq!(scan(Params::Route(&[]), module).len(), 1);
     }
 
     #[test]
     fn markup_and_eval_sinks() {
         let src = "def f(self, **post):\n    a = Markup(post.get('a'))\n    b = Markup(f\"<p>{post['b']}</p>\")\n    return safe_eval(post['c'])\n";
         assert_eq!(
-            scan(Params::Route, src),
+            scan(Params::Route(&[]), src),
             [
                 "OD703 route parameter 'post' reaches Markup() unescaped",
                 "OD703 route parameter 'post' reaches Markup() unescaped",
@@ -1650,9 +2012,17 @@ mod tests {
             panic!("no function");
         };
         let owner = Some(Receiver::Model("x.y".to_owned()));
-        function(func, params, owner, None, &Locator::new(src), &TaintTable::default())
-            .1
-            .expect("a summary")
+        function(
+            func,
+            params,
+            owner,
+            None,
+            &[],
+            &Locator::new(src),
+            &TaintTable::default(),
+        )
+        .1
+        .expect("a summary")
     }
 
     #[test]
@@ -1671,7 +2041,7 @@ mod tests {
         );
         assert_eq!(helper.params, ["a", "b"]);
         let route = summary(
-            Params::Route,
+            Params::Route(&[]),
             "def f(self, term):\n    M = request.env['x.y'].sudo()\n    rows = M._h(1, b=term)\n    return Markup(self._g())\n",
         );
         let calls: Vec<_> = route
@@ -1713,7 +2083,7 @@ mod tests {
         table.sink("OD702", "tools.run_code").unwrap();
         let src = "def f(self, code):\n    tools.run_code(code)\n";
         assert_eq!(
-            scan_with(&table, Params::Route, src),
+            scan_with(&table, Params::Route(&[]), src),
             ["OD702 route parameter 'code' reaches tools.run_code(), which runs it as code"]
         );
     }
@@ -1770,7 +2140,7 @@ mod tests {
     fn attributes_of_self_hold_values_like_locals() {
         let query = |attr: &str| {
             scan(
-                Params::Route,
+                Params::Route(&[]),
                 &format!(
                     "def f(self, term):\n    self.term = term\n    self.env.cr.execute('SELECT %s' % self.{attr})\n"
                 ),
@@ -1784,7 +2154,7 @@ mod tests {
         let src =
             "def f(self, **kw):\n    self.vals = {}\n    self.vals.update(kw)\n    self.sudo().write(self.vals)\n";
         assert_eq!(
-            scan(Params::Route, src),
+            scan(Params::Route(&[]), src),
             ["OD704 route parameter 'kw' reaches sudo().write(), so the user picks the fields it sets as superuser"]
         );
     }
@@ -1792,7 +2162,7 @@ mod tests {
     #[test]
     fn a_call_on_self_after_a_store_is_followed() {
         let route = summary(
-            Params::Route,
+            Params::Route(&[]),
             "def f(self, term):\n    self.term = term\n    self._h(term)\n",
         );
         let calls: Vec<_> = route.calls.iter().map(|c| c.method.as_str()).collect();
@@ -1810,6 +2180,7 @@ mod tests {
             Params::None,
             Some(owner),
             None,
+            &[],
             &Locator::new(src),
             &TaintTable::default(),
         )
@@ -1835,7 +2206,7 @@ mod tests {
     #[test]
     fn a_call_runs_as_its_receiver_shows() {
         let route = summary(
-            Params::Route,
+            Params::Route(&[]),
             "def f(self, **kw):\n    M = request.env['x.y'].sudo()\n    M._a(kw)\n    request.env['x.y']._a(kw)\n    request.env['x.y'].sudo()._a(kw)\n    request.env['x.y'].with_user(1).sudo()._a(kw)\n    request.env['x.y'].sudo().with_user(1)._a(kw)\n    self._a(kw)\n    self.with_context(a=1)._a(kw)\n    self.with_user(1)._a(kw)\n",
         );
         let runs_as: Vec<RunsAs> = route.calls.iter().map(|c| c.runs_as).collect();
@@ -1858,7 +2229,7 @@ mod tests {
     /// a value the user does not control.
     fn codes_in(series: Option<&str>, call: &str) -> Vec<String> {
         let src = format!("def f(self, t):\n    base = self.get_base_url()\n    {call}\n");
-        let found = scan_in(&TaintTable::default(), series, Params::Route, &src);
+        let found = scan_in(&TaintTable::default(), series, Params::Route(&[]), &src);
         found.iter().map(|f| f[..5].to_owned()).collect()
     }
 
@@ -1991,7 +2362,7 @@ mod tests {
     fn a_checked_start_keeps_the_host() {
         let redirect = |check: &str| {
             scan(
-                Params::Route,
+                Params::Route(&[]),
                 &format!("def f(self, t):\n{check}\n    return werkzeug.utils.redirect(t)\n"),
             )
         };
@@ -2016,6 +2387,216 @@ mod tests {
         );
         assert_eq!(route.edges.len(), 1);
         assert!(!route.edges[0].safe.has("OD705"));
+    }
+
+    #[test]
+    fn commands_loads_parsers_and_headers_are_sinks() {
+        for (call, code) in [
+            ("os.system(t)", "OD708"),
+            ("os.popen(cmd=t)", "OD708"),
+            ("subprocess.getoutput(t)", "OD708"),
+            ("subprocess.getstatusoutput(t)", "OD708"),
+            ("subprocess.run(t, shell=True)", "OD708"),
+            ("subprocess.call(['sh', t], shell=True)", "OD708"),
+            ("subprocess.check_call(args=t, shell=True)", "OD708"),
+            ("subprocess.check_output(t, shell=True)", "OD708"),
+            (
+                "subprocess.Popen(t, -1, None, None, None, None, None, True, True)",
+                "OD708",
+            ),
+            ("pickle.loads(t)", "OD709"),
+            ("pickle.load(file=t)", "OD709"),
+            ("marshal.loads(t)", "OD709"),
+            ("marshal.load(t)", "OD709"),
+            ("yaml.unsafe_load(t)", "OD709"),
+            ("yaml.unsafe_load_all(t)", "OD709"),
+            (
+                "lxml.etree.fromstring(t, etree.XMLParser(resolve_entities=True))",
+                "OD710",
+            ),
+            ("etree.XML(t, parser=etree.XMLParser(resolve_entities=True))", "OD710"),
+            ("etree.parse(t, etree.XMLParser(resolve_entities=True))", "OD710"),
+            (
+                "objectify.fromstring(t, etree.XMLParser(resolve_entities=True))",
+                "OD710",
+            ),
+            ("request.make_response(base, [('X-Name', t)])", "OD711"),
+            ("request.make_json_response(base, headers={'X-Name': t})", "OD711"),
+            ("Response(base, 200, [('X-Name', t)])", "OD711"),
+            ("Response(base, headers=[('X-Name', t)])", "OD711"),
+            ("base.headers.add('X-Name', t)", "OD711"),
+            ("base.headers.set('X-Name', t)", "OD711"),
+            ("base.headers['X-Name'] = t", "OD711"),
+        ] {
+            assert_eq!(codes(call), [code], "{call}");
+        }
+        for call in [
+            "subprocess.run(t)",
+            "subprocess.run(t, shell=False)",
+            "subprocess.Popen(t, -1, None, None, None, None, None, True, False)",
+            "subprocess.run('ls', shell=True, input=t)",
+            "request.make_response(t)",
+            "request.make_response(base, [('X-Name', base)], t)",
+            "Response(t, 200)",
+            "headers = {}\n    headers['X-Name'] = t",
+            "self.session.headers['Authorization'] = t",
+            "requests.Session().headers['Authorization'] = t",
+            "session.headers.update({'Authorization': t})",
+            "self._session.headers.set('Authorization', t)",
+        ] {
+            assert!(codes(call).is_empty(), "{call}");
+        }
+    }
+
+    #[test]
+    fn a_safe_yaml_loader_builds_plain_values() {
+        for loader in ["yaml.Loader", "yaml.UnsafeLoader", "yaml.FullLoader", "loader"] {
+            assert_eq!(codes(&format!("yaml.load(t, Loader={loader})")), ["OD709"], "{loader}");
+        }
+        assert_eq!(codes("yaml.load(t)"), ["OD709"]);
+        assert_eq!(
+            codes("Loader = yaml.Loader\n    yaml.load(t, Loader=Loader)"),
+            ["OD709"]
+        );
+        let either = "Loader = yaml.SafeLoader\n    if base:\n        Loader = yaml.Loader\n    yaml.load(t, Loader)";
+        assert_eq!(codes(either), ["OD709"]);
+        for bound in [
+            "Loader = getattr(yaml, 'CSafeLoader', yaml.SafeLoader)\n    yaml.load(t, Loader=Loader)",
+            "Loader = yaml.SafeLoader\n    L = Loader\n    yaml.load(t, L)",
+            "yaml.load(t, Loader=getattr(yaml, 'CSafeLoader', yaml.SafeLoader))",
+        ] {
+            assert!(codes(bound).is_empty(), "{bound}");
+        }
+        assert_eq!(codes("yaml.load_all(t, yaml.Loader)"), ["OD709"]);
+        for loader in ["SafeLoader", "CSafeLoader", "BaseLoader", "CBaseLoader"] {
+            assert!(
+                codes(&format!("yaml.load(t, Loader=yaml.{loader})")).is_empty(),
+                "{loader}"
+            );
+            assert!(codes(&format!("yaml.load_all(t, {loader})")).is_empty(), "{loader}");
+        }
+    }
+
+    #[test]
+    fn the_default_parser_resolves_entities_before_saas_19_1() {
+        let parse = |series: Option<&str>, call: &str| codes_in(series, call).len();
+        for call in [
+            "etree.fromstring(t)",
+            "etree.fromstring(t, None)",
+            "etree.fromstring(t, parser=etree.XMLParser(remove_blank_text=True))",
+            "p = etree.XMLParser()\n    etree.fromstring(t, p)",
+        ] {
+            assert_eq!(parse(Some("18.0"), call), 1, "{call}");
+            assert_eq!(parse(Some("saas~19.1"), call), 0, "{call}");
+            assert_eq!(parse(None, call), 0, "{call}");
+        }
+        for call in [
+            "etree.fromstring(t, etree.XMLParser(resolve_entities=True))",
+            "p = etree.XMLParser(resolve_entities=True)\n    etree.fromstring(t, parser=p)",
+        ] {
+            for series in [Some("18.0"), Some("saas~19.1"), None] {
+                assert_eq!(parse(series, call), 1, "{call} on {series:?}");
+            }
+        }
+        for call in [
+            "etree.fromstring(t, etree.XMLParser(resolve_entities=False))",
+            "p = etree.XMLParser(resolve_entities=False)\n    etree.fromstring(t, p)",
+            "etree.fromstring(t, etree.HTMLParser())",
+            "etree.fromstring(t, self.parser)",
+            "etree.parse(tools.file_open(t))",
+        ] {
+            assert_eq!(parse(Some("18.0"), call), 0, "{call}");
+        }
+        let either = "p = etree.XMLParser(resolve_entities=True)\n    if base:\n        p = etree.XMLParser(resolve_entities=False)\n    etree.fromstring(t, p)";
+        assert_eq!(parse(None, either), 1);
+        // A sink too, the tree keeps the taint of the text.
+        assert_eq!(
+            codes_in(
+                Some("18.0"),
+                "root = etree.fromstring(t)\n    self.env.cr.execute('SELECT %s' % root.findtext('q'))\n    Markup(etree.tostring(root))"
+            ),
+            ["OD710", "OD701", "OD703"]
+        );
+        assert_eq!(
+            codes("data = pickle.loads(t)\n    safe_eval(data['x'])"),
+            ["OD709", "OD702"]
+        );
+        // No sink, so the tree keeps the taint of the text, as a module's function's result does.
+        assert_eq!(
+            codes_in(
+                Some("18.0"),
+                "Markup(etree.tostring(etree.fromstring(t, etree.HTMLParser())))"
+            ),
+            ["OD703"]
+        );
+    }
+
+    #[test]
+    fn the_pickle_of_odoo_loads_plain_data() {
+        let load = |imports: &str, call: &str| {
+            let src = format!("{imports}\ndef f(self, t):\n    {call}\n");
+            scan(Params::Route(&[]), &src).len()
+        };
+        assert_eq!(load("import pickle", "pickle.loads(t)"), 1);
+        assert_eq!(load("from odoo.tools import pickle", "pickle.loads(t)"), 0);
+        assert_eq!(load("from odoo.tools.misc import pickle", "pickle.load(t)"), 0);
+        assert_eq!(load("from odoo import tools", "tools.pickle.loads(t)"), 0);
+        assert_eq!(load("from odoo.tools import pickle", "marshal.loads(t)"), 1);
+    }
+
+    #[test]
+    fn quoting_and_file_names_end_these_flows() {
+        for call in [
+            "os.system('lpr ' + shlex.quote(t))",
+            "subprocess.run(shlex.join(['lpr', t]), shell=True)",
+            "request.make_response(base, [('Content-Disposition', content_disposition(t))])",
+            "base.headers['Content-Disposition'] = http.content_disposition(t)",
+        ] {
+            assert!(codes(call).is_empty(), "{call}");
+        }
+        assert_eq!(codes("self.env.cr.execute('SELECT ' + shlex.quote(t))"), ["OD701"]);
+    }
+
+    #[test]
+    fn only_a_file_name_header_asks_for_content_disposition() {
+        let message = |call: &str| {
+            let src = format!("def f(self, t):\n    {call}\n");
+            let parsed = parse_module(&src).expect("valid Python");
+            let Some(Stmt::FunctionDef(func)) = parsed.syntax().body.first() else {
+                panic!("no function");
+            };
+            let loc = Locator::new(&src);
+            let (diags, _) = function(func, Params::Route(&[]), None, None, &[], &loc, &TaintTable::default());
+            diags.into_iter().map(|d| d.message).collect::<Vec<_>>().join("\n")
+        };
+        assert_eq!(
+            message("r.headers['Content-Type'] = t"),
+            "route parameter 't' reaches the Content-Type header of r.headers, so the user picks how the browser reads the response; pick the value from those the code allows"
+        );
+        assert!(message("r.headers.add(base, t)").contains("reaches a header of headers.add(), so"));
+        for call in [
+            "r.headers['content-disposition'] = t",
+            "r.headers.set('Content-Disposition', t)",
+            "request.make_response('', [('Content-Type', 'text/csv'), ('Content-Disposition', 'a; filename=' + t)])",
+            "request.make_response('', headers={'Content-Disposition': f'a; filename={t}'})",
+        ] {
+            assert!(
+                message(call).ends_with("; pass the file name through content_disposition()"),
+                "{call}"
+            );
+        }
+        let both =
+            message("request.make_response('', [('Content-Type', t), ('Content-Disposition', 'a; filename=' + t)])");
+        assert!(both.contains("reaches a header of make_response()"), "{both}");
+    }
+
+    #[test]
+    fn a_route_parameter_a_converter_fills_with_records_is_no_source() {
+        let src = "def f(self, partner, page):\n    os.system(partner.name)\n    os.system(page)\n";
+        assert_eq!(
+            scan(Params::Route(&["partner"]), src),
+            ["OD708 route parameter 'page' reaches the command of os.system(), so the user picks what the shell runs"]
+        );
     }
 
     #[test]

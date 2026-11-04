@@ -188,7 +188,8 @@ The sources are the parameters of a controller method behind `@route`; the param
 model method (no leading `_`, no `@api.private`), which any user with access to the model can call
 over RPC; and the request: `request.params`, `request.get_json_data()`,
 `request.get_http_params()`, and the `args`, `form`, `values`, `files`, `cookies`, `headers`, `data`
-and JSON of `request.httprequest`.
+and JSON of `request.httprequest`. A route parameter that a `model` or `models` converter of its URL
+fills holds records, whose ids alone the user picks, and is no source.
 
 A value stays tainted through assignments, attributes of `self` set in the same method, formatting,
 concatenation, f-strings, string methods, items, attributes, collections, comprehensions and module
@@ -204,11 +205,12 @@ sink when the module holds it, otherwise at the call that leaves the module. A m
 writes on `self`, or on the records of a call on `self`, is a superuser write.
 
 The flow ends at a sanitizer: `int()`, `float()`, `bool()`, `len()`, `SQL.identifier()`,
-`escape()`, `html_escape()`, `html_sanitize()`, `plaintext2html()`, `urlencode()`, `url_encode()`
-and `secure_filename()`; at `assert x in (...)` or `if x not in allowed: raise`; and at an
-intersection with values the code chose, such as `set(vals) & allowed`. Some steps make a value
-harmless for one rule only: `os.path.basename()`, `io.BytesIO()` and `io.StringIO()` for OD707,
-and a start the code picks for OD705 and OD706, as their pages say.
+`escape()`, `html_escape()`, `html_sanitize()`, `plaintext2html()`, `urlencode()`, `url_encode()`,
+`secure_filename()`, `content_disposition()` and `file_open()`; at `assert x in (...)` or
+`if x not in allowed: raise`; and at an intersection with values the code chose, such as
+`set(vals) & allowed`. Some steps make a value harmless for one rule only: `os.path.basename()`,
+`io.BytesIO()` and `io.StringIO()` for OD707, `shlex.quote()` and `shlex.join()` for OD708, and a
+start the code picks for OD705 and OD706, as their pages say.
 
 A project adds its own sources, sinks and sanitizers in the
 [`[taint]` table of its configuration](../configuration.md#taint-table).
@@ -222,3 +224,7 @@ A project adds its own sources, sinks and sanitizers in the
 | [OD705](OD705.md) | `open-redirect-flow` | Data a user controls picks the site a redirect sends the browser to. |
 | [OD706](OD706.md) | `server-request-forgery-flow` | Data a user controls picks the URL the server sends a request to. |
 | [OD707](OD707.md) | `path-traversal-flow` | Data a user controls picks the path of a file the server opens. |
+| [OD708](OD708.md) | `command-injection-flow` | Data a user controls reaches a command the server runs through the shell. |
+| [OD709](OD709.md) | `unsafe-deserialization-flow` | Data a user controls is loaded by pickle, marshal or an unsafe YAML loader. |
+| [OD710](OD710.md) | `xml-entity-flow` | Data a user controls is parsed as XML by a parser that resolves entities. |
+| [OD711](OD711.md) | `header-injection-flow` | Data a user controls reaches the headers of a response. |
