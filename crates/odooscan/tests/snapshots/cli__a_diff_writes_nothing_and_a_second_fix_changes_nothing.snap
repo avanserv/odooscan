@@ -113,14 +113,15 @@ expression: diff
 +        return self.with_context(lang=self.env.context.get("lang"), reset_by=self.env.uid)
 --- a/custom/modern20/views/pages.xml
 +++ b/custom/modern20/views/pages.xml
-@@ -35,6 +35,6 @@
+@@ -35,7 +35,7 @@
      </record>
  
      <template id="lamp_badge">
 -        <b class="lamp_badge" t-esc="lamp.code"/>
 +        <b class="lamp_badge" t-out="lamp.code"/>
      </template>
- </odoo>
+ 
+     <template id="lamp_label">
 --- a/custom/saas125/models/upgrade.py
 +++ b/custom/saas125/models/upgrade.py
 @@ -8,10 +8,10 @@

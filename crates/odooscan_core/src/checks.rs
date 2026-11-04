@@ -559,19 +559,24 @@ fn removed_escapes<'m>(index: &Index<'m>, mi: usize, out: &mut Out<'m>) {
     }
 }
 
-/// OD306 on each `<tree>` of a view. A `<tree>` spec of a checked module is renamed with the element
-/// it finds, so the fix waits only while an xpath of the tree names `tree`, or an unchecked module,
-/// which the fix leaves as it is, holds a `<tree>` spec or element in it.
+/// OD306 on each `<tree>` of a view, unfixed while `tree_guarded` holds.
 fn renamed_lists<'m>(index: &Index<'m>, mi: usize, out: &mut Out<'m>) {
-    let finds_tree =
-        |m: usize, v: &ViewFact| v.tree_paths || !index.modules[m].checked && (v.tree_specs || !v.renamed.is_empty());
     for file in &index.modules[mi].data {
         for view in &file.facts.views {
-            push_guarded(out, &file.path, &view.renamed, || {
-                tree_holds(index, mi, view, finds_tree)
-            });
+            push_guarded(out, &file.path, &view.renamed, || tree_guarded(index, mi, view));
         }
     }
+}
+
+/// Whether a view of the tree of `view` finds a `<tree>` by its name: an xpath naming `tree`, or an
+/// unchecked module, which the fix leaves as it is, holding a `<tree>` spec or element. A `<tree>`
+/// spec of a checked module guards too while the tree adds a `<tree>`, since `--exclude`, the
+/// baseline or a write skip could apply one of the two fixes without the other.
+fn tree_guarded(index: &Index, mi: usize, view: &ViewFact) -> bool {
+    let finds_tree =
+        |m: usize, v: &ViewFact| v.tree_paths || (!index.modules[m].checked && (v.tree_specs || !v.renamed.is_empty()));
+    tree_holds(index, mi, view, finds_tree)
+        || (tree_holds(index, mi, view, |_, v| v.tree_specs) && tree_holds(index, mi, view, |_, v| v.tree_elements))
 }
 
 /// Reports `diags`, without their fixes when `guarded` says the tree forbids them.

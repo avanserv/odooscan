@@ -640,6 +640,7 @@ custom/modern20/views/pages.xml:5:13: OD325 the server no longer knows t-esc and
 custom/modern20/views/pages.xml:6:13: OD307 t-raw renders unescaped HTML; use t-out and wrap trusted HTML in Markup
 custom/modern20/views/pages.xml:18:21: OD325 the server no longer knows t-esc and renders nothing for it; write t-out
 custom/modern20/views/pages.xml:38:9: OD325 the server no longer knows t-esc and renders nothing for it; write t-out
+custom/modern20/views/pages.xml:42:9: OD325 the server no longer knows t-esc and renders nothing for it; write t-out
 custom/modifiers17/views/jobs.xml:7:47: OD317 invisible reads field 'state', which the view does not show
 custom/modifiers17/views/jobs.xml:54:47: OD317 invisible reads field 'note', which the view does not show
 custom/modifiers17/views/jobs.xml:76:51: OD317 invisible reads field 'phase', which the view does not show
@@ -1284,6 +1285,8 @@ custom/supers/models/supers.py:97:21: OD211 no parent class of bad.super defines
 custom/supers/models/supers.py:98:24: OD211 no parent class of bad.super defines '_guard_gone', so this super() call fails
 custom/supers/models/supers.py:108:24: OD211 no parent class of bad.super defines '__getattr__', so this super() call fails
 custom/tree_paths/views/partner.xml:8:21: OD306 the <tree> view is renamed <list>
+custom/tree_paths/views/partner.xml:29:13: OD306 the <tree> view is renamed <list>
+custom/tree_paths/views/partner.xml:48:13: OD306 the <tree> view is renamed <list>
 custom/unlisted_data/data/signs.xml:3:9: OD301 module unlisted_data defines no XML id 'unlisted_data.badge_hidden_unlisted_plate'
 custom/unlisted_data/data/signs.xml:11:5: OD324 unlisted.plate.code is required and has no default, so creating this record fails if the column is NOT NULL; give the field a value
 custom/unlisted_data/extra/access.xml:1:1: OD502 'extra/access.xml' is not in the manifest's data or demo, so Odoo never loads it

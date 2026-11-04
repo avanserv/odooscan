@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="partner_rows_email" model="ir.ui.view">
+        <field name="model">res.partner</field>
+        <field name="inherit_id" ref="tree_paths.partner_rows"/>
+        <field name="arch" type="xml">
+            <tree position="inside">
+                <field name="email"/>
+            </tree>
+        </field>
+    </record>
+</odoo>
