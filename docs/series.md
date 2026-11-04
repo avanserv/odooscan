@@ -29,14 +29,15 @@ the checkout's `odoo/addons` gives none, since the scan reads nothing outside th
 The flag conflicts with `--odoo-version` and has no configuration key.
 
 A summary then counts the findings per kind and per rule. A deprecation rule reporting at error
-severity counts as a removed API, below it as a deprecated API. The index rules OD201-OD204, OD206,
+severity counts as a removed API, below it as a deprecated API. The index rules OD201-OD207,
 OD210-OD212, OD224, OD227, OD229, OD230, OD301, OD302, OD304, OD309-OD312, OD314, OD316, OD320,
-OD322, OD503 and OD601-OD606 count as missing upstream: each reports a model, field, column, method,
-XML id, template, view element, selection value or module that the code names and nothing it
-depends on defines, or an override or hook that no longer fits its parent. Every other finding
-counts as other. With `--format text` the summary follows the
-findings, and `--statistics` prints it alone; with any other format it goes to stderr. `--fix`
-applies the rewrites of the target's findings, as [Fixing findings](fixing.md) describes.
+OD322, OD324, OD503 and OD601-OD606 count as missing upstream: each reports a model, field, column,
+method, XML id, template, view element, selection value or module that the code names and nothing
+it depends on defines, an override or hook that no longer fits its parent, an inherited or related
+field whose type it no longer matches, or a required field a data record leaves unset. Every other
+finding counts as other. With `--format text` the summary follows the findings, and `--statistics`
+prints it alone; with any other format it goes to stderr. `--fix` applies the rewrites of the
+target's findings, as [Fixing findings](fixing.md) describes.
 
 When no addons path entry is an Odoo checkout and no `base` module is found on the addons path or
 among the checked paths, `oscn` fetches the target's core with `git`, which must be on `PATH`. It

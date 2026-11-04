@@ -43,12 +43,13 @@ impl Kind {
 
 /// Index rules whose finding means the modules in scope lack the model, field, column, method, id,
 /// template, element, selection value or module the code names, or no longer take or call a method
-/// it overrides or hooks: on a port, what the target core dropped, renamed or reshaped. A field the
-/// core retyped or made required (OD205, OD207, OD324) counts as other.
+/// it overrides or hooks: on a port, what the target core dropped, renamed or reshaped. An inherited
+/// or related field whose type the module no longer matches, or a required field a data record
+/// leaves unset, counts too.
 const UPSTREAM: &[&str] = &[
-    "OD201", "OD202", "OD203", "OD204", "OD206", "OD210", "OD211", "OD212", "OD224", "OD227", "OD229", "OD230",
-    "OD301", "OD302", "OD304", "OD309", "OD310", "OD311", "OD312", "OD314", "OD316", "OD320", "OD322", "OD503",
-    "OD601", "OD602", "OD603", "OD604", "OD605", "OD606",
+    "OD201", "OD202", "OD203", "OD204", "OD205", "OD206", "OD207", "OD210", "OD211", "OD212", "OD224", "OD227",
+    "OD229", "OD230", "OD301", "OD302", "OD304", "OD309", "OD310", "OD311", "OD312", "OD314", "OD316", "OD320",
+    "OD322", "OD324", "OD503", "OD601", "OD602", "OD603", "OD604", "OD605", "OD606",
 ];
 
 /// Info-level security rules are hotspots: code to review, not a confirmed flaw.
@@ -446,6 +447,21 @@ mod tests {
         assert_eq!(rule("OD230").kind(Severity::Info), Kind::Upstream);
         assert_eq!(rule("OD103").kind(Severity::Warning), Kind::Other);
         assert_eq!(rule("OD101").kind(Severity::Error), Kind::Other);
+    }
+
+    #[test]
+    fn a_core_field_the_module_no_longer_matches_is_missing_upstream() {
+        for code in ["OD205", "OD207", "OD324"] {
+            let r = rule(code);
+            assert_eq!(r.kind(r.severity_for(None)), Kind::Upstream, "{code}");
+            for series in ["18.0", "20.0"] {
+                assert_eq!(
+                    r.kind(r.severity_for(Series::parse(series))),
+                    Kind::Upstream,
+                    "{code} on {series}"
+                );
+            }
+        }
     }
 
     #[test]

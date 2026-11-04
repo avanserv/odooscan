@@ -281,6 +281,7 @@ mod tests {
     fn summary_counts_every_kind_then_every_rule() {
         let mut diags = diags();
         diags[0].code = "OD126";
+        diags[1].code = "OD324";
         let mut out = vec![];
         print_summary(
             &mut out,
@@ -290,14 +291,45 @@ mod tests {
         let expected = "Findings by kind, checked as 18.0:
      1  removed API
      0  deprecated API
-     0  missing upstream
-     2  other
+     1  missing upstream
+     1  other
 
      1  OD126  python-api-removed
-     1  OD111  public-route-sudo
+     1  OD324  missing-required-field
      1  OD701  sql-injection-flow
 ";
         assert_eq!(String::from_utf8(out).unwrap(), expected);
+    }
+
+    #[test]
+    fn summary_kinds_add_up_to_the_total() {
+        let diags: Vec<_> = RULES
+            .iter()
+            .map(|r| Diagnostic {
+                code: r.code,
+                severity: r.severity,
+                path: PathBuf::from("bad_sale/models/sale_order.py"),
+                line: 1,
+                column: 1,
+                message: String::new(),
+                flow: vec![],
+                fix: None,
+            })
+            .collect();
+        let mut out = vec![];
+        print_summary(
+            &mut out,
+            &diags.iter().collect::<Vec<_>>(),
+            Series::parse("18.0").unwrap(),
+        );
+        let out = String::from_utf8(out).unwrap();
+        let kinds: usize = out
+            .lines()
+            .skip(1)
+            .take(Kind::ALL.len())
+            .map(|l| l.split_whitespace().next().unwrap().parse::<usize>().unwrap())
+            .sum();
+        assert_eq!(kinds, RULES.len());
     }
 
     #[test]
