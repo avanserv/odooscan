@@ -1559,6 +1559,9 @@ pub struct Index<'m> {
     method_flows: MethodFlows<'m>,
     /// The models whose table each table name may be, from any module.
     table_models: FxHashMap<String, Vec<&'m str>>,
+    /// The hook names and the prefixes of built ones that any file of any module mentions.
+    hook_names: FxHashSet<&'m str>,
+    hook_prefixes: Vec<&'m str>,
 }
 
 impl<'m> Index<'m> {
@@ -1593,6 +1596,7 @@ impl<'m> Index<'m> {
         }
         let models_with_access = access_models(modules, &model_by_xmlid, default_series);
         let (js_loaded, templates_loaded) = loaded_static(modules);
+        let (hook_names, hook_prefixes) = hook_mentions(modules);
         let mut index = Self {
             modules,
             has_base: base.is_some(),
@@ -1623,6 +1627,8 @@ impl<'m> Index<'m> {
             method_flows: method_flows(modules),
             table_models: table_models(&models),
             models,
+            hook_names,
+            hook_prefixes,
         };
         index.patched = index.patched_classes();
         index.template_bases = index.template_bases();
@@ -2610,6 +2616,19 @@ impl<'m> Index<'m> {
                 .any(|(_, c)| !std::ptr::eq(*c, except) && c.methods.iter().any(|m| m == method))
     }
 
+    /// Whether a file of any module names the hook method `name`, whole or by a prefix it is built
+    /// from. A module outside the scope counts: what it names may run once it is installed.
+    pub fn names_hook(&self, name: &str) -> bool {
+        self.hook_names.contains(name) || self.hook_prefixes.iter().any(|p| name.starts_with(p))
+    }
+
+    /// Whether `module`, a module in its scope or a module with it in its scope has a file whose
+    /// text the scan cannot read, which may name a hook method of `module`.
+    pub fn lost_mentions(&self, module: usize) -> bool {
+        let mut lost = self.modules.iter().enumerate().filter(|(_, m)| m.lost_text);
+        lost.any(|(mi, _)| self.scope(module).sees(mi) || self.scope(mi).sees(module))
+    }
+
     /// Whether a class in scope of `model` or of a model it inherits by `_inherit` defines `method`.
     /// A parent it delegates to does not count, since Odoo looks the method up on the model's
     /// records, which get the parent's fields, not its methods.
@@ -2928,6 +2947,26 @@ fn method_flows(modules: &[Module]) -> MethodFlows<'_> {
     flows
 }
 
+/// What `Index::names_hook` reads: the union of the mentions of every file of `modules`.
+fn hook_mentions(modules: &[Module]) -> (FxHashSet<&str>, Vec<&str>) {
+    let files = modules.iter().flat_map(|m| {
+        let python = m.python.iter().map(|f| &f.mentions);
+        python
+            .chain(m.data.iter().map(|f| &f.mentions))
+            .chain(m.js.iter().map(|f| &f.mentions))
+            .chain(m.templates.iter().map(|f| &f.mentions))
+    });
+    let mut names = FxHashSet::default();
+    let mut prefixes: Vec<&str> = vec![];
+    for mentions in files {
+        names.extend(mentions.names.iter().map(String::as_str));
+        prefixes.extend(mentions.prefixes.iter().map(String::as_str));
+    }
+    prefixes.sort_unstable();
+    prefixes.dedup();
+    (names, prefixes)
+}
+
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
@@ -2939,6 +2978,8 @@ mod tests {
         unseen_table_id,
     };
     use crate::manifest;
+    use crate::mentions::Mentions;
+    use crate::project::SourceFile;
     use crate::python;
     use crate::series::Series;
     use crate::xml;
@@ -3281,6 +3322,7 @@ mod tests {
             js: vec![],
             templates: vec![],
             sql_views: vec![],
+            lost_text: false,
         }
     }
 
@@ -3314,6 +3356,71 @@ mod tests {
         assert_eq!(sees(&index.guard_scope(1, [], series)), ["base", "main"]);
         assert_eq!(sees(&index.guard_scope(1, [3], series)), ["base", "main", "far"]);
         assert_eq!(sees(&index.install_scope(1, series)), ["base", "main", "own"]);
+    }
+
+    #[test]
+    fn a_hook_is_named_by_any_file_of_any_module() {
+        fn file<T: Default>(text: &str) -> SourceFile<T> {
+            SourceFile {
+                path: PathBuf::new(),
+                rel: String::new(),
+                rank: None,
+                demo: false,
+                facts: T::default(),
+                suppressions: Default::default(),
+                mentions: Mentions::scan(text),
+            }
+        }
+        let manifest = "{'version': '18.0.1.0'}";
+        let mut modules = [module("base", manifest), module("web", manifest)];
+        modules[0]
+            .python
+            .push(file("compute='_compute_total'\ndef _compute_tax(self):"));
+        modules[0].checked = false;
+        modules[1]
+            .js
+            .push(file("orm.call(model, '_onchange_partner'); `_inverse_${name}`"));
+        modules[1]
+            .data
+            .push(file("id,code\ncron_total,model._search_total_due()"));
+        modules[1]
+            .templates
+            .push(file(r#"<button t-on-click="() => this.call('onchange_customer')"/>"#));
+        let index = Index::build(&modules, None);
+        let named = [
+            "_compute_total",
+            "_onchange_partner",
+            "_inverse_amount",
+            "_search_total_due",
+            "onchange_customer",
+        ];
+        for name in named {
+            assert!(index.names_hook(name), "{name}");
+        }
+        for name in [
+            "_compute_tax",
+            "_compute_total_tax",
+            "_onchange_partner_id",
+            "_search_total",
+        ] {
+            assert!(!index.names_hook(name), "{name}");
+        }
+    }
+
+    #[test]
+    fn a_lost_text_hides_the_hooks_of_the_modules_it_sees_and_that_see_it() {
+        let manifest = |depends: &str| format!("{{'version': '18.0.1.0', 'depends': [{depends}]}}");
+        let mut modules = [
+            module("base", &manifest("")),
+            module("low", &manifest("'base'")),
+            module("main", &manifest("'low'")),
+            module("heir", &manifest("'main'")),
+            module("side", &manifest("'base'")),
+        ];
+        modules[2].lost_text = true;
+        let index = Index::build(&modules, None);
+        let lost: Vec<_> = (0..modules.len()).filter(|&mi| index.lost_mentions(mi)).collect();
+        assert_eq!(lost, [0, 1, 2, 3]);
     }
 
     #[test]

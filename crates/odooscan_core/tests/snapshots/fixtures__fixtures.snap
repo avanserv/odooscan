@@ -140,6 +140,7 @@ custom/button_calls/views/calls.xml:5:42: OD314 button.order has no method '_run
 custom/button_calls/views/calls.xml:6:41: OD314 method 'action_follow' of res.partner comes from module mail, which is not in depends
 custom/button_calls/views/calls.xml:9:42: OD314 button.order has no method 'pool'
 custom/button_delegate/models/contacts.py:18:36: OD204 res.users has no method '_compute_nicknmae'
+custom/button_delegate/models/contacts.py:20:9: OD230 no parent class of res.users defines '_compute_nickname' and no file names it, so Odoo never runs it
 custom/button_delegate/static/src/contacts.js:3:43: OD604 model 'res.users' has no method 'action_contact'
 custom/button_delegate/static/src/contacts.js:4:43: OD604 model 'res.users' has no method 'action_contcat'
 custom/button_delegate/views/delegate.xml:7:45: OD312 res.users has no method 'action_contcat'
@@ -680,6 +681,14 @@ custom/orm_overrides/models/computes.py:395:9: OD223 _compute_named_child() can 
 custom/orm_overrides/models/overrides.py:7:9: OD119 write() calls super() but returns nothing, so callers get None instead of True; return what super().write() returns
 custom/orm_overrides/models/overrides.py:14:9: OD119 copy() calls super() but returns nothing, so callers get None instead of the new records; return what super().copy() returns
 custom/orm_overrides/models/overrides.py:24:5: OD117 @api.model on create() makes Odoo call it once per record; decorate it with @api.model_create_multi and take a list of dicts
+custom/orphan_hooks_ext/models/orphan_hook.py:11:9: OD230 no parent class of orphan.hook defines '_onchange_hook_partner' and no file names it, so Odoo never runs it
+custom/orphan_hooks_ext/models/orphan_hook.py:15:9: OD230 no parent class of orphan.hook defines '_compute_hook_stale' and no file names it, so Odoo never runs it
+custom/orphan_hooks_ext/models/orphan_hook.py:19:9: OD230 no parent class of orphan.hook defines '_inverse_hook_stale' and no file names it, so Odoo never runs it
+custom/orphan_hooks_ext/models/orphan_hook.py:22:9: OD230 no parent class of orphan.hook defines '_search_hook_stale' and no file names it, so Odoo never runs it
+custom/orphan_hooks_ext/models/orphan_hook.py:25:9: OD230 no parent class of orphan.hook defines 'onchange_hook_customer' and no file names it, so Odoo never runs it
+custom/orphan_hooks_ext/models/orphan_hook.py:28:9: OD230 no parent class of orphan.hook defines '_search_hook_spread' and no file names it, so Odoo never runs it
+custom/orphan_hooks_ext/models/orphan_hook.py:31:9: OD230 no parent class of orphan.hook defines 'onchange_hook_legacy' and no file names it, so Odoo never runs it
+custom/orphan_hooks_ext/models/orphan_hook.py:79:24: OD211 no parent class of orphan.hook defines '_compute_hook_super', so this super() call fails
 custom/partial_sites/__manifest__.py:5:25: OD503 module 'ghost_enterprise' is not on the addons path
 custom/partial_sites/models/sites.py:24:22: OD301 module base defines no XML id 'base.no_such_id'
 custom/partial_sites/models/sites.py:25:22: OD302 'mail.no_such_id' belongs to module mail; add it to depends

@@ -401,6 +401,14 @@ impl Signature {
         parent.keyword_only.iter().find(lacked).map(Refusal::Keyword)
     }
 
+    /// Whether a call through an instance that passes `count` arguments by position, and none by
+    /// name, fills every parameter the `def` requires.
+    pub fn takes_positional(&self, count: usize) -> bool {
+        let room = self.var_positional.is_some() || self.positional.len() >= count;
+        let filled = |p: &Param| p.default.is_some();
+        room && self.positional.iter().skip(count).all(filled) && self.keyword_only.iter().all(filled)
+    }
+
     /// Whether a call can pass `name` by keyword to a parameter of its own, `**` aside.
     fn takes_name(&self, name: &str) -> bool {
         let by_position = self.positional.iter().skip(self.positional_only);
@@ -1099,6 +1107,20 @@ mod tests {
         assert_eq!(refusal("def f(self, k)", "def f(self, *, k)"), None);
         assert_eq!(refusal("def f(self)", "def f(self, *, k=None)"), None);
         assert_eq!(refusal("def f(self, **kw)", "def f(self, *, k)"), None);
+    }
+
+    #[test]
+    fn a_positional_call_fills_what_has_a_place_and_leaves_only_defaults() {
+        let takes = |def: &str, count: usize| sig(def).takes_positional(count);
+        assert!(takes("def f(self)", 0));
+        assert!(takes("def f(self, a=None, *, k=None)", 0));
+        assert!(takes("def f(self, operator, value)", 2));
+        assert!(takes("def f(self, *args)", 2));
+        assert!(takes("def f(self, operator, *args)", 2));
+        assert!(!takes("def f(self, html)", 0));
+        assert!(!takes("def f(self, html)", 2));
+        assert!(!takes("def f(self, *, k)", 0));
+        assert!(!takes("def f(self, a, b, c)", 2));
     }
 
     #[test]

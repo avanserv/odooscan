@@ -161,6 +161,10 @@ rules! {
     // saas~12.4's metaclass wraps every method in `api.guess` (`odoo/api.py:112`, `:666`), which adapts
     // old-style calls; saas~12.5's has no such wrapper (`odoo/api.py:93`-`:108`).
     "OD229" "override-signature-mismatch" Correctness Error Some(">=saas~12.5"), true, "An override refuses a call that the method it overrides takes.";
+    // Odoo runs these by the name a field option gives (18.0 `odoo/fields.py:95`-`:110`), by
+    // `@api.onchange` on the method itself (18.0 `odoo/models.py:944`-`:976`), or through 11.0 by a
+    // view's `on_change` attribute (10.0 `odoo/models.py:5424`, `:5460`).
+    "OD230" "orphan-hook-method" Correctness Info None, true, "A compute, inverse, search or onchange method of a model extension is named nowhere, so Odoo never runs it.";
     "OD301" "unresolved-xmlid" Correctness Error None, true, "The XML id is not defined by its module.";
     "OD302" "xmlid-not-in-depends" Correctness Error None, true, "The XML id comes from a module missing from depends.";
     "OD303" "duplicate-xmlid" Correctness Warning None, false, "The same XML id is defined twice in one file, with another model or overwriting a field.";

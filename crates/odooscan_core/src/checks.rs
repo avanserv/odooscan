@@ -16,6 +16,7 @@ use crate::index::{
     BASE_MODEL_METHODS, Export, FieldDef, FieldInfo, Index, JsSpec, PathError, Placed, RELATIONAL_TYPES, Scope, Status,
     ViewTree, asset_glob_set, base_private_method, full_id, js_module_path, loaded_data, located,
 };
+use crate::mentions::HOOK_PREFIXES;
 use crate::project::{Module, SourceFile, code_loaded};
 use crate::rules::rule;
 use crate::series::{self, Series};
@@ -24,6 +25,17 @@ use crate::{flows, manifest, modifier, module_state};
 
 /// Directories of upgrade scripts, which name XML ids of past versions.
 const UPGRADE_DIRS: &[&str] = &["migrations", "upgrades"];
+
+/// The decorators that leave a hook method to run only by its name. `api.onchange` runs it by the
+/// fields it lists, and any other may register it elsewhere.
+const NAMED_HOOK_DECORATORS: &[&str] = &[
+    "api.depends",
+    "api.depends_context",
+    "api.model",
+    "api.multi",
+    "api.one",
+    "api.returns",
+];
 
 /// Types a One2many's inverse may have: an Integer holds the id of a `res_model`/`res_id` pair, and
 /// an unread type cannot be judged.
@@ -303,6 +315,23 @@ fn refusal_message(method: &str, module: &str, parent: &Signature, refusal: &Ref
             p.name
         ),
     }
+}
+
+/// OD230: whether Odoo could run `name` as the hook its prefix says, by what it passes after the
+/// records. A field's search method gets the operator and the value (18.0 `odoo/fields.py:1504`), a
+/// compute, an inverse and an `@api.onchange` method nothing (`:1500`, 20.0
+/// `odoo/orm/models.py:4453`), and a view's `on_change` attribute whatever it spells (10.0
+/// `odoo/models.py:5460`). A `def` no such call fits is a helper that only shares the prefix.
+fn runs_as_hook(name: &str, signature: Option<&Signature>) -> bool {
+    let Some(prefix) = HOOK_PREFIXES.iter().find(|p| name.starts_with(**p)) else {
+        return false;
+    };
+    let count = match *prefix {
+        "onchange_" => return true,
+        "_search_" => 2,
+        _ => 0,
+    };
+    signature.is_some_and(|s| s.takes_positional(count))
 }
 
 /// Whether Odoo ignores the access rows of a model of this kind.
@@ -1579,6 +1608,7 @@ impl<'m> Ctx<'_, 'm> {
         self.redefinition(out, path, class);
         self.super_calls(out, path, class);
         self.override_signatures(out, path, class);
+        self.orphan_hooks(out, path, class);
         if self.lacks_access(class) {
             out.push(path, "OD401", class.pos, no_access_message(&class.model, self.series));
         }
@@ -1714,6 +1744,40 @@ impl<'m> Ctx<'_, 'm> {
             .collect::<Option<Vec<_>>>()?;
         let (mi, (parent, refusal)) = self.index.first_loaded(refusals)?;
         Some((mi, parent, refusal))
+    }
+
+    /// A hook method, in a class that extends its model in place, that Odoo never runs: the usual
+    /// trace of a parent hook renamed upstream. A new model's hooks are its own to leave unused.
+    fn orphan_hooks(&self, out: &mut Out<'m>, path: &'m Path, class: &ClassFact) {
+        if class.new_model
+            || class.defs.is_empty()
+            || self.hides_parents(class)
+            || self.index.hidden_method_parents(&class.model, self.scope)
+            || self.index.lost_mentions(self.mi)
+        {
+            return;
+        }
+        for def in class.defs.iter().filter(|d| self.orphan_hook(class, d)) {
+            let message = format!(
+                "no parent class of {} defines '{}' and no file names it, so Odoo never runs it",
+                class.model, def.name.value
+            );
+            out.push(path, "OD230", def.name.pos, message);
+        }
+    }
+
+    /// Whether `def` is a hook method that only its name could run, bound by nothing else in the
+    /// class, which no parent class defines and no file names, as far as the scan can read them.
+    fn orphan_hook(&self, class: &ClassFact, def: &MethodDef) -> bool {
+        let name = def.name.value.as_str();
+        runs_as_hook(name, def.signature.as_ref())
+            && def
+                .decorators
+                .iter()
+                .all(|d| NAMED_HOOK_DECORATORS.contains(&d.as_str()))
+            && class.methods.iter().filter(|m| *m == name).count() == 1
+            && !self.index.has_parent_method(&class.model, name, class, self.series)
+            && !self.index.names_hook(name)
     }
 
     /// Whether `first` comes before `then` in the same file of this module. The order of the files
