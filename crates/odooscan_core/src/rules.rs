@@ -169,6 +169,9 @@ rules! {
     // of its stages in `api_table::ROWS`, which a test there asserts.
     "OD125" "python-api-deprecated" Deprecation Warning Some(">=saas~12.5"), false, "The module uses a Python API its series deprecates or ignores.";
     "OD126" "python-api-removed" Deprecation Error Some(">=saas~13.1"), false, "The module uses a Python API its series removed.";
+    "OD127" "get-route-writes" Security Warning None, false, "An HTTP route that accepts GET writes records, which Odoo checks no CSRF token for.";
+    "OD128" "cors-any-origin" Security Info None, false, "A route sets cors='*', so a script on any site can read its responses.";
+    "OD129" "auth-none-user" Security Warning None, false, "An auth='none' route reads the user or writes records, but runs with no user.";
     "OD201" "unknown-model" Correctness Error None, true, "The model is not defined by any indexed module.";
     "OD202" "model-not-in-depends" Correctness Error None, true, "The model comes from a module missing from depends.";
     "OD203" "unresolved-field-path" Correctness Error None, true, "A field path does not resolve on its model.";

@@ -77,6 +77,14 @@ custom/bad_sale/controllers/records.py:15:16: OD716 route parameter 'order_id' r
 custom/bad_sale/controllers/records.py:20:16: OD716 route parameter 'order_id' reaches the id of browse() through 'order', whose records the route returns read as superuser; check them with _document_check_access(), consteq(), check_access() from 18.0 or check_access_rule() before 18.0
 custom/bad_sale/controllers/records.py:27:16: OD716 route parameter 'order_id' reaches the id of browse() through 'order_id', 'values', whose records the route returns read as superuser; check them with _document_check_access(), consteq(), check_access() from 18.0 or check_access_rule() before 18.0
 custom/bad_sale/controllers/records.py:35:16: OD716 route parameter 'order_id' reaches the id of browse() through 'order', whose records the route returns read as superuser; check them with _document_check_access(), consteq(), check_access() from 18.0 or check_access_rule() before 18.0
+custom/bad_sale/controllers/routes.py:10:9: OD127 route accepts GET, on which Odoo checks no CSRF token, and calls write(); restrict it with methods=['POST'] or check a token
+custom/bad_sale/controllers/routes.py:15:9: OD127 route accepts GET, on which Odoo checks no CSRF token, and calls create(); restrict it with methods=['POST'] or check a token
+custom/bad_sale/controllers/routes.py:20:9: OD127 route accepts GET, on which Odoo checks no CSRF token, and calls unlink(); restrict it with methods=['POST'] or check a token
+custom/bad_sale/controllers/routes.py:26:9: OD127 route accepts GET, on which Odoo checks no CSRF token, and calls write(); restrict it with methods=['POST'] or check a token
+custom/bad_sale/controllers/routes.py:30:66: OD128 cors='*' lets a script on any site call this route and read its response; name the origin that needs it
+custom/bad_sale/controllers/routes.py:35:9: OD129 route with auth='none' reads request.env.user, which is empty as the route runs with no user; use auth='public' or set the user with request.update_env()
+custom/bad_sale/controllers/routes.py:39:9: OD129 route with auth='none' calls create(), but runs with no user, so the write belongs to no one; use auth='public' or set the user with request.update_env()
+custom/bad_sale/controllers/routes.py:48:50: OD112 csrf=False lets other sites submit this form on the user's behalf
 custom/bad_sale/data/orphan.xml:1:1: OD502 'data/orphan.xml' is not in the manifest's data or demo, so Odoo never loads it
 custom/bad_sale/models/callers.py:8:9: OD704 route parameter 'post' reaches self.write() through '_apply_values()', so the user picks the fields it sets as superuser; copy only the fields the user may set
 custom/bad_sale/models/domains.py:7:64: OD210 'is_company': res.partner has no field 'is_company'
