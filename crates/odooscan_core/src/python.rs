@@ -11,6 +11,7 @@ use crate::facts::{
     ClassFact, DefinitionSource, DomainFact, FieldClass, FieldFact, GuardedRef, MethodDef, ModelKind, OptionValue,
     Param, Pos, PyFacts, RawDiag, Receiver, Signature, Spanned, SqlColumn, SqlView, Subject, UNREAD_TYPE, XmlRef,
 };
+use crate::fix::{self, Edit, Fix};
 use crate::series::Series;
 use crate::sql::{
     self, Created, CursorUse, QueryVars, Write, is_self, odoo_cursor, query_head, query_source, query_text,
@@ -92,6 +93,21 @@ impl<'a> Locator<'a> {
     pub fn at(&self, node: &impl Ranged) -> Pos {
         self.pos(node.start())
     }
+
+    /// The fix that writes `replacement` over the text of `range`.
+    fn replace(&self, range: TextRange, replacement: &str) -> Fix {
+        Fix::single(Edit {
+            start: range.start().to_usize(),
+            end: range.end().to_usize(),
+            expected: self.src[range].to_owned(),
+            replacement: replacement.to_owned(),
+        })
+    }
+
+    /// The fix that removes `node` with its line, when it is alone there.
+    fn remove_line(&self, node: &impl Ranged) -> Option<Fix> {
+        fix::remove_line(self.src, node.start().to_usize(), node.end().to_usize()).map(Fix::single)
+    }
 }
 
 pub fn str_lit(expr: &Expr) -> Option<&str> {
@@ -119,6 +135,28 @@ fn keyword_arg<'a>(call: &'a ast::ExprCall, name: &str) -> Option<&'a ast::Keywo
         .keywords
         .iter()
         .find(|k| k.arg.as_ref().is_some_and(|a| a.as_str() == name))
+}
+
+/// The range of the name of keyword `k` of `call`, which a rename to `to` replaces, unless the call
+/// already passes `to` or may through `**`, which would pass it twice.
+fn renamed_keyword(call: &ast::ExprCall, k: &ast::Keyword, to: &str) -> Option<TextRange> {
+    let unpacked = call.arguments.keywords.iter().any(|k| k.arg.is_none());
+    (!unpacked && keyword_arg(call, to).is_none())
+        .then(|| k.arg.as_ref().map(Ranged::range))
+        .flatten()
+}
+
+/// Whether `track_visibility=` can become `tracking=True`: 13.0 tracks a field whose `tracking` or
+/// `track_visibility` is truthy (`addons/mail/models/mail_thread.py:549`), which a non-empty string
+/// is, and the call sets neither `tracking=` nor `track_sequence=`, nor may through `**`.
+fn tracked(call: &ast::ExprCall, k: &ast::Keyword) -> bool {
+    let truthy = str_lit(&k.value).is_some_and(|v| !v.is_empty());
+    let unpacked = call.arguments.keywords.iter().any(|k| k.arg.is_none());
+    truthy
+        && !unpacked
+        && ["tracking", "track_sequence"]
+            .iter()
+            .all(|o| keyword_arg(call, o).is_none())
 }
 
 /// Whether the argument of `sudo()` is a user rather than the flag: an id, a record a call looks
@@ -1800,8 +1838,13 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
     }
 
     fn diag(&mut self, code: &'static str, node: &impl Ranged, message: impl Into<String>) {
-        let pos = self.loc.at(node);
-        self.facts.diags.push(RawDiag::new(code, pos, message));
+        self.fixed_diag(code, node, message, None);
+    }
+
+    fn fixed_diag(&mut self, code: &'static str, node: &impl Ranged, message: impl Into<String>, fix: Option<Fix>) {
+        let mut diag = RawDiag::new(code, self.loc.at(node), message);
+        diag.fix = fix;
+        self.facts.diags.push(diag);
     }
 
     fn spanned(&self, s: &ast::ExprStringLiteral) -> Spanned<String> {
@@ -2249,12 +2292,15 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
             );
         }
         if let Some(k) = keyword_arg(call, "group_operator") {
-            self.diag("OD108", k, "group_operator is renamed aggregator");
+            let fix = renamed_keyword(call, k, "aggregator").map(|arg| self.loc.replace(arg, "aggregator"));
+            self.fixed_diag("OD108", k, "group_operator is renamed aggregator", fix);
         }
-        for option in ["oldname", "track_visibility"] {
-            if let Some(k) = keyword_arg(call, option) {
-                self.api_use(Kind::FieldOption(option), k);
-            }
+        if let Some(k) = keyword_arg(call, "oldname") {
+            self.api_use(Kind::FieldOption("oldname"), k);
+        }
+        if let Some(k) = keyword_arg(call, "track_visibility") {
+            let fix = tracked(call, k).then(|| self.loc.replace(k.range(), "tracking=True"));
+            self.fixed_api_use(Kind::FieldOption("track_visibility"), k, fix);
         }
         let options = self.options(ftype, call);
         Some(FieldFact {
@@ -2486,10 +2532,15 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
                 Expr::Attribute(a)
                     if is_api(&decorator.expression, "multi") || is_api(&decorator.expression, "one") =>
                 {
-                    self.diag(
+                    // `@api.one` returned a list of the results, so dropping it changes what callers get.
+                    let fix = (a.attr.as_str() == "multi")
+                        .then(|| self.loc.remove_line(decorator))
+                        .flatten();
+                    self.fixed_diag(
                         "OD107",
                         decorator,
                         format!("@api.{} no longer exists; methods always receive a recordset", a.attr),
+                        fix,
                     );
                 }
                 _ => {}
@@ -2617,7 +2668,9 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
     fn api_calls(&mut self, call: &ast::ExprCall) {
         let Expr::Attribute(a) = &*call.func else { return };
         if a.attr.as_str() == "sudo" && call.arguments.args.first().is_some_and(names_user) {
-            self.api_use(Kind::SudoUser, &a.attr);
+            let alone = call.arguments.args.len() == 1 && call.arguments.keywords.is_empty();
+            let fix = alone.then(|| self.loc.replace(a.attr.range(), "with_user"));
+            self.fixed_api_use(Kind::SudoUser, &a.attr, fix);
         }
         if self.own_method(&a.value, a.attr.as_str()) {
             return;
@@ -2693,8 +2746,12 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
     }
 
     fn api_use(&mut self, kind: Kind, node: &impl Ranged) {
+        self.fixed_api_use(kind, node, None);
+    }
+
+    fn fixed_api_use(&mut self, kind: Kind, node: &impl Ranged, fix: Option<Fix>) {
         if let Some((code, message)) = api_table::stage(api_table::row_of(kind), self.series) {
-            self.diag(code, node, message);
+            self.fixed_diag(code, node, message, fix);
         }
     }
 
@@ -3007,10 +3064,15 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
         if matches!(a.attr.as_str(), "_cr" | "_uid" | "_context")
             && matches!(&*a.value, Expr::Name(n) if n.id.as_str() == "self")
         {
-            self.diag(
+            let public = &a.attr.as_str()[1..];
+            // Outside a model `self` may be anything, and a write would set another attribute.
+            let read_on_model = a.ctx.is_load() && matches!(self.class_facts.last(), Some(Some(_)));
+            let fix = read_on_model.then(|| self.loc.replace(a.attr.range(), &format!("env.{public}")));
+            self.fixed_diag(
                 "OD109",
                 expr,
-                format!("self.{} is deprecated; use self.env.{}", a.attr, &a.attr.as_str()[1..]),
+                format!("self.{} is deprecated; use self.env.{public}", a.attr),
+                fix,
             );
         }
     }
@@ -5451,5 +5513,161 @@ mod tests {
         assert_eq!(codes(&src("ValueError"), Series::parse("saas~19.1")), ["OD126"]);
         let fallback = "try:\n    import lxml\nexcept ImportError:\n    from odoo.osv import expression\n";
         assert_eq!(codes(fallback, Series::parse("saas~19.1")), ["OD126"]);
+    }
+
+    /// `src` with the fixes of its `code` findings applied, and the findings left unfixed.
+    fn fixed(src: &str, series: &str, code: &str) -> (String, usize) {
+        let facts = analyze(src, Series::parse(series));
+        let found: Vec<&RawDiag> = facts.diags.iter().filter(|d| d.code == code).collect();
+        assert!(!found.is_empty(), "{code} on {src}");
+        let fixes: Vec<&Fix> = found.iter().filter_map(|d| d.fix.as_ref()).collect();
+        let (out, outcomes) = fix::apply(src.as_bytes(), &fixes);
+        assert!(outcomes.iter().all(|o| *o == fix::Outcome::Applied), "{src}");
+        (String::from_utf8(out).unwrap(), found.len() - fixes.len())
+    }
+
+    /// Fixes every `code` finding of `src`, then checks the result reports `code` no more.
+    fn rewrites(src: &str, series: &str, code: &str) -> String {
+        let (out, left) = fixed(src, series, code);
+        assert_eq!(left, 0, "{src}");
+        let again = analyze(&out, Series::parse(series));
+        assert!(again.diags.iter().all(|d| d.code != code && d.code != "OD000"), "{out}");
+        out
+    }
+
+    fn unfixed(src: &str, series: &str, code: &str) {
+        assert_eq!(fixed(src, series, code), (src.to_owned(), 1), "{src}");
+    }
+
+    const MODEL: &str =
+        "from odoo import api, fields, models\n\n\nclass X(models.Model):\n    _inherit = 'res.partner'\n";
+
+    #[test]
+    fn api_multi_alone_on_its_line_is_dropped() {
+        let src = format!("{MODEL}\n    @api.multi\n    def f(self):\n        return self\n");
+        let out = rewrites(&src, "13.0", "OD107");
+        assert_eq!(out, format!("{MODEL}\n    def f(self):\n        return self\n"));
+        let stacked = format!("{MODEL}\n    @api.depends('name')\n    @api.multi\n    def f(self):\n        pass\n");
+        assert!(rewrites(&stacked, "13.0", "OD107").contains("    @api.depends('name')\n    def f"));
+    }
+
+    #[test]
+    fn api_one_and_a_commented_api_multi_stay() {
+        unfixed(
+            &format!("{MODEL}\n    @api.one\n    def f(self):\n        pass\n"),
+            "13.0",
+            "OD107",
+        );
+        unfixed(
+            &format!("{MODEL}\n    @api.multi  # batch\n    def f(self):\n        pass\n"),
+            "13.0",
+            "OD107",
+        );
+    }
+
+    #[test]
+    fn group_operator_becomes_aggregator() {
+        let src = format!("{MODEL}\n    x = fields.Float(\n        group_operator = 'avg',\n    )\n");
+        let out = rewrites(&src, "18.0", "OD108");
+        assert!(out.contains("        aggregator = 'avg',\n"), "{out}");
+    }
+
+    #[test]
+    fn group_operator_beside_an_aggregator_stays() {
+        unfixed(
+            &format!("{MODEL}\n    x = fields.Float(group_operator='avg', aggregator='sum')\n"),
+            "18.0",
+            "OD108",
+        );
+        unfixed(
+            &format!("{MODEL}\n    x = fields.Float(group_operator='avg', **OPTS)\n"),
+            "18.0",
+            "OD108",
+        );
+    }
+
+    #[test]
+    fn private_env_shortcuts_read_on_a_model_go_through_env() {
+        let src = format!(
+            "{MODEL}\n    def f(self):\n        self._cr.execute('SELECT 1')\n        \
+             return self._context.get('lang'), self._uid\n"
+        );
+        let out = rewrites(&src, "19.0", "OD109");
+        assert!(
+            out.contains(
+                "self.env.cr.execute('SELECT 1')\n        return self.env.context.get('lang'), self.env.uid\n"
+            ),
+            "{out}"
+        );
+    }
+
+    #[test]
+    fn a_private_env_shortcut_written_or_outside_a_model_stays() {
+        unfixed(
+            &format!("{MODEL}\n    def f(self):\n        self._context = {{}}\n"),
+            "19.0",
+            "OD109",
+        );
+        unfixed(
+            "class Helper:\n    def f(self):\n        self._cr.execute('SELECT 1')\n",
+            "19.0",
+            "OD109",
+        );
+        unfixed("def f(self):\n    return self._uid\n", "19.0", "OD109");
+    }
+
+    #[test]
+    fn sudo_given_a_user_becomes_with_user() {
+        let src = format!("{MODEL}\n    def f(self, user):\n        return self.sudo(user).name\n");
+        let out = rewrites(&src, "saas~12.5", "OD125");
+        assert!(out.contains("return self.with_user(user).name\n"), "{out}");
+        rewrites(&src, "saas~15.3", "OD126");
+    }
+
+    #[test]
+    fn sudo_given_more_than_the_user_stays() {
+        for args in ["user, True", "user, **opts"] {
+            unfixed(
+                &format!("{MODEL}\n    def f(self, user):\n        return self.sudo({args}).name\n"),
+                "saas~12.5",
+                "OD125",
+            );
+        }
+    }
+
+    #[test]
+    fn track_visibility_becomes_tracking() {
+        let src = format!("{MODEL}\n    x = fields.Char(track_visibility=\"onchange\", index=True)\n");
+        let out = rewrites(&src, "saas~13.4", "OD125");
+        assert!(out.contains("fields.Char(tracking=True, index=True)\n"), "{out}");
+        rewrites(&src, "saas~18.1", "OD126");
+    }
+
+    #[test]
+    fn track_visibility_that_is_false_unknown_or_beside_tracking_stays() {
+        for option in [
+            "track_visibility=False",
+            "track_visibility=''",
+            "track_visibility=MODE",
+            "track_visibility='always', tracking=10",
+            "track_visibility='always', track_sequence=2",
+            "track_visibility='always', **OPTS",
+        ] {
+            unfixed(
+                &format!("{MODEL}\n    x = fields.Char({option})\n"),
+                "saas~13.4",
+                "OD125",
+            );
+        }
+    }
+
+    /// Passes with no guard, because `unread_facts` reads only the attributes that name models and
+    /// none of them carries a fix; it pins that invariant for a reader that would read more.
+    #[test]
+    fn a_file_that_does_not_parse_has_no_fix() {
+        let src = format!("{MODEL}\n    x = fields.Float(group_operator='avg')\n    def (\n");
+        let facts = analyze(&src, Series::parse("18.0"));
+        assert!(facts.diags.iter().any(|d| d.code == "OD000"));
+        assert!(facts.diags.iter().all(|d| d.fix.is_none()));
     }
 }

@@ -1,0 +1,96 @@
+---
+source: crates/odooscan/tests/cli.rs
+expression: diff
+---
+--- a/custom/bad_sale/models/models.py
++++ b/custom/bad_sale/models/models.py
+@@ -6,7 +6,7 @@
+     _inherit = ["mail.thread", "res.nothing"]
+     _sql_constraints = [("name_uniq", "unique(name)", "Name must be unique")]
+ 
+-    name = fields.Char(group_operator="count")
++    name = fields.Char(aggregator="count")
+     date = fields.Date(default=fields.Date.today())
+     partner_id = fields.Many2one("res.partner")
+     country_code = fields.Char(related="partner_id.country_id.cde")
+@@ -20,7 +20,6 @@
+         for order in self:
+             order.total = sum(order.line_ids.mapped("amount"))
+ 
+-    @api.multi
+     def name_get(self):
+         return []
+ 
+--- a/custom/legacy14/models/upgrade.py
++++ b/custom/legacy14/models/upgrade.py
+@@ -4,7 +4,7 @@
+ class ResPartnerUpgrade(models.Model):
+     _inherit = "res.partner"
+ 
+-    x_manager_id = fields.Many2one("res.users", track_visibility="onchange")
++    x_manager_id = fields.Many2one("res.users", tracking=True)
+ 
+     def _x_reload(self):
+         self.refresh()
+--- a/custom/legacy154/models/upgrade.py
++++ b/custom/legacy154/models/upgrade.py
+@@ -6,7 +6,7 @@
+     _inherit = "res.company"
+ 
+     def _x_as_manager(self, user):
+-        self.sudo(user).flush()
++        self.with_user(user).flush()
+         self.env["res.company"].recompute()
+         self.invalidate_cache()
+         self.refresh()
+--- a/custom/modern19/models/partner.py
++++ b/custom/modern19/models/partner.py
+@@ -6,7 +6,7 @@
+     _sql_constraints = [("name_uniq", "unique(name)", "Name must be unique")]
+ 
+     def action_reset(self):
+-        self._cr.execute("UPDATE res_partner SET name = NULL WHERE id IN %s", (tuple(self.ids),))
++        self.env.cr.execute("UPDATE res_partner SET name = NULL WHERE id IN %s", (tuple(self.ids),))
+ 
+ 
+ class ModernNote(models.AbstractModel):
+--- a/custom/modern19/models/upgrade.py
++++ b/custom/modern19/models/upgrade.py
+@@ -9,4 +9,4 @@
+         return expression.AND([[("name", "=", "x")], [("country_id", "=", False)]])
+ 
+     def _x_reset_lang(self):
+-        return self.with_context(lang=self._context.get("lang"), reset_by=self._uid)
++        return self.with_context(lang=self.env.context.get("lang"), reset_by=self.env.uid)
+--- a/custom/saas125/models/upgrade.py
++++ b/custom/saas125/models/upgrade.py
+@@ -8,10 +8,10 @@
+     x_user_can_edit = fields.Boolean()
+ 
+     def _x_as_manager(self, user):
+-        return self.sudo(user) | self.sudo(user.id) | self.sudo(1)
++        return self.with_user(user) | self.with_user(user.id) | self.with_user(1)
+ 
+     def _x_as_admin(self):
+-        return self.sudo(self.env["res.users"].browse(2)) | self.sudo(self.env["res.users"].browse(2).id)
++        return self.with_user(self.env["res.users"].browse(2)) | self.with_user(self.env["res.users"].browse(2).id)
+ 
+     def _x_as_caller(self, is_superuser, as_superuser, is_user):
+         return (
+@@ -23,4 +23,4 @@
+         )
+ 
+     def _x_as_root(self):
+-        return self.sudo(SUPERUSER_ID)
++        return self.with_user(SUPERUSER_ID)
+--- a/custom/saas181/models/upgrade.py
++++ b/custom/saas181/models/upgrade.py
+@@ -4,7 +4,7 @@
+ class ResPartnerUpgrade(models.Model):
+     _inherit = "res.partner"
+ 
+-    x_manager_id = fields.Many2one("res.users", track_visibility="onchange")
++    x_manager_id = fields.Many2one("res.users", tracking=True)
+ 
+     def _x_check(self):
+         self.check_access_rights("write")

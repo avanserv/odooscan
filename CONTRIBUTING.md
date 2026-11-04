@@ -25,8 +25,9 @@ zizmor, schema and timeout checks).
 
 - `odooscan_core` holds the parsers, the index and every rule. It never prints, and never reads
   anything but the paths it is given.
-- `odooscan` is the CLI, built as the `oscn` executable: flags, output formats, the exit status and
-  fetching the core of `--target-series` with git into the user cache. It holds no rule logic.
+- `odooscan` is the CLI, built as the `oscn` executable: flags, output formats, the exit status,
+  fetching the core of `--target-series` with git into the user cache, and rewriting files with the
+  fixes of `--fix` (`fixes.rs`). It holds no rule logic.
 
 A dependency is declared in the same change as the code that uses it, never ahead of it:
 cargo-machete fails otherwise.
@@ -46,6 +47,11 @@ request. A code is never renumbered or reused: a retired rule's code stays a gap
 Every rule fires at least once in `crates/odooscan_core/tests/fixtures/custom`, and a rule gated
 by series also has a module of an earlier series where it stays silent. After changing what a rule
 reports, run `cargo insta review` and read every changed line.
+
+A rule with a fix attaches it where it raises the finding, guarded against every form the rewrite
+could change the meaning of. The fix gets a row in the table of `docs/fixing.md`, a Fixing section
+on the rule's page, and tests that rewrite each fixed form, re-analyze it clean, and leave each
+guarded form unfixed.
 
 Fixtures are written by hand. Nothing is copied from Odoo, Odoo Enterprise or a customer module.
 

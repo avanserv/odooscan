@@ -4,4 +4,5 @@
 configuration file, and later runs given `--baseline odooscan-baseline.json` (or the `baseline`
 key) report only new ones. A finding is recorded by file, code and message, not line, so edits
 around it do not bring it back. When findings are fixed, a notice says so; write the baseline again
-to drop them and keep the file shrinking.
+to drop them and keep the file shrinking. `--fix` leaves the findings the baseline hides as they
+are, as [Fixing findings](fixing.md) describes.

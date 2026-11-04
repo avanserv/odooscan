@@ -20,6 +20,7 @@ roxmltree = "0.21"
 rustc-hash = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+similar = "2"
 toml = "1"
 regex = "1"
 # oxc releases often and breaks its AST between minor versions, so it is pinned exactly; a bump goes

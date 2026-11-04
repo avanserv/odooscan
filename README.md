@@ -24,8 +24,9 @@ The [documentation](https://avanserv.github.io/odooscan/) covers the options,
 [configuration](https://avanserv.github.io/odooscan/configuration/),
 [CI](https://avanserv.github.io/odooscan/ci/),
 [series](https://avanserv.github.io/odooscan/series/),
-[baselines](https://avanserv.github.io/odooscan/baseline/) and
-[suppression](https://avanserv.github.io/odooscan/suppressing/), with a
+[baselines](https://avanserv.github.io/odooscan/baseline/),
+[suppression](https://avanserv.github.io/odooscan/suppressing/) and
+[fixing](https://avanserv.github.io/odooscan/fixing/), with a
 [page per rule](https://avanserv.github.io/odooscan/rules/). `oscn explain OD203` prints a rule's
 page in the terminal.
 

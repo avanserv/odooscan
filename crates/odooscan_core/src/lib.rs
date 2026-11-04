@@ -5,6 +5,7 @@ mod csvdata;
 mod decode;
 mod domain;
 mod facts;
+pub mod fix;
 mod flows;
 mod index;
 mod js;
@@ -32,6 +33,7 @@ use rayon::prelude::*;
 use serde::Serialize;
 
 use crate::facts::RawDiag;
+use crate::fix::Fix;
 use crate::rules::{SUPERSEDED, Severity, rule};
 use crate::series::Series;
 
@@ -58,6 +60,9 @@ pub struct Diagnostic {
     /// The path a data flow takes from its source to the finding.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub flow: Vec<FlowStep>,
+    /// The rewrite `oscn check --fix` applies, which no report format carries.
+    #[serde(skip)]
+    pub fix: Option<Fix>,
 }
 
 #[derive(Debug, Serialize)]
@@ -88,6 +93,7 @@ impl Diagnostic {
             column: d.pos.col,
             message: d.message,
             flow,
+            fix: d.fix,
         }
     }
 }
@@ -203,6 +209,7 @@ mod tests {
             column: 5,
             message: String::new(),
             flow: vec![],
+            fix: None,
         }
     }
 

@@ -605,6 +605,8 @@ custom/modern19/models/partner.py:49:73: OD213 'partner_id' is required, so Odoo
 custom/modern19/models/partner.py:63:30: OD220 'ref' has the label 'ID' of field 'id' of modern.seal, so Odoo logs a warning and users cannot tell them apart; give it another string
 custom/modern19/models/partner.py:69:21: OD120 'time' in an ormcache key is not a parameter of _quarter_hour_rates(), so every call raises NameError; key on a parameter or on self
 custom/modern19/models/upgrade.py:2:1: OD125 importing odoo.osv is deprecated from 19.0; use odoo.fields.Domain
+custom/modern19/models/upgrade.py:12:39: OD109 self._context is deprecated; use self.env.context
+custom/modern19/models/upgrade.py:12:75: OD109 self._uid is deprecated; use self.env.uid
 custom/modern19/models/views.py:15:5: OD226 _auto = False leaves modern.gauge without a table, and nothing creates the view modern_gauge; create it in init(), or drop _auto = False
 custom/modern19/static/src/base_calls.js:4:45: OD604 model 'res.partner' has no method 'is_transient'
 custom/modern19/static/src/base_calls.js:5:45: OD604 model 'res.partner' has no method 'ids'

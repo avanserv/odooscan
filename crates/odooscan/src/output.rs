@@ -228,6 +228,7 @@ mod tests {
             column: 5,
             message: message.to_owned(),
             flow: vec![],
+            fix: None,
         };
         let step = |line, label: &str| FlowStep {
             path: PathBuf::from("bad_sale/controllers/main.py"),
