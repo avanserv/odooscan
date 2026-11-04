@@ -42,6 +42,9 @@ pub struct ScanOptions {
     pub addons_paths: Vec<PathBuf>,
     /// Series for modules whose manifest version does not name one.
     pub default_series: Option<Series>,
+    /// Series every checked module is checked as, whatever its manifest version names, and the
+    /// default for the rest.
+    pub target_series: Option<Series>,
 }
 
 #[derive(Debug, Serialize)]
@@ -115,10 +118,11 @@ pub struct Report {
 }
 
 pub fn scan(opts: &ScanOptions) -> Report {
-    let discovery = project::load(&opts.paths, &opts.addons_paths, opts.default_series);
+    let default_series = opts.target_series.or(opts.default_series);
+    let discovery = project::load(&opts.paths, &opts.addons_paths, default_series, opts.target_series);
     let mut notices = discovery.notices;
     let modules = discovery.modules;
-    let index = index::Index::build(&modules, opts.default_series);
+    let index = index::Index::build(&modules, default_series);
     if !index.has_base && modules.iter().any(|m| m.checked) {
         notices.push(
             "module base is not indexed, so cross-module rules are off; pass --addons-path with an Odoo checkout"
@@ -130,7 +134,7 @@ pub fn scan(opts: &ScanOptions) -> Report {
         .enumerate()
         .filter(|(_, m)| m.checked)
         .flat_map_iter(|(mi, module)| {
-            let series = module.series.or(opts.default_series);
+            let series = module.series.or(default_series);
             let local = module
                 .python
                 .iter()

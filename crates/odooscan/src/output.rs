@@ -3,7 +3,8 @@ use std::io::Write;
 use std::path::Path;
 
 use odooscan_core::Diagnostic;
-use odooscan_core::rules::{RULES, Severity, rule};
+use odooscan_core::rules::{Kind, RULES, Severity, rule};
+use odooscan_core::series::Series;
 use serde_json::json;
 
 /// Where the release workflow publishes `docs/`.
@@ -34,6 +35,17 @@ pub fn print_statistics(out: &mut impl Write, diags: &[&Diagnostic]) {
     for (code, n) in counts {
         let _ = writeln!(out, "{n:>6}  {code}  {}", rule(code).name);
     }
+}
+
+/// The counts per kind, every kind listed so that they add up to the total, then per rule.
+pub fn print_summary(out: &mut impl Write, diags: &[&Diagnostic], target: Series) {
+    let _ = writeln!(out, "Findings by kind, checked as {target}:");
+    for kind in Kind::ALL {
+        let n = diags.iter().filter(|d| rule(d.code).kind(d.severity) == kind).count();
+        let _ = writeln!(out, "{n:>6}  {}", kind.label());
+    }
+    let _ = writeln!(out);
+    print_statistics(out, diags);
 }
 
 /// On a terminal, the code is coloured and links to its page (OSC 8), which terminals that do not
@@ -262,6 +274,29 @@ mod tests {
     fn text_links_the_code_on_a_terminal_only() {
         insta::assert_snapshot!("text_piped", text(false));
         insta::assert_snapshot!("text_terminal", text(true).escape_debug().to_string());
+    }
+
+    #[test]
+    fn summary_counts_every_kind_then_every_rule() {
+        let mut diags = diags();
+        diags[0].code = "OD126";
+        let mut out = vec![];
+        print_summary(
+            &mut out,
+            &diags.iter().collect::<Vec<_>>(),
+            Series::parse("18.0").unwrap(),
+        );
+        let expected = "Findings by kind, checked as 18.0:
+     1  removed API
+     0  deprecated API
+     0  missing upstream
+     2  other
+
+     1  OD126  python-api-removed
+     1  OD111  public-route-sudo
+     1  OD701  sql-injection-flow
+";
+        assert_eq!(String::from_utf8(out).unwrap(), expected);
     }
 
     #[test]

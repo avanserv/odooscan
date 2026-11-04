@@ -19,6 +19,38 @@ pub enum Category {
     Quality,
 }
 
+/// What a finding asks of a port to another series, in the order an upgrade summary lists them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Kind {
+    Removed,
+    Deprecated,
+    Upstream,
+    Other,
+}
+
+impl Kind {
+    pub const ALL: [Self; 4] = [Self::Removed, Self::Deprecated, Self::Upstream, Self::Other];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Removed => "removed API",
+            Self::Deprecated => "deprecated API",
+            Self::Upstream => "missing upstream",
+            Self::Other => "other",
+        }
+    }
+}
+
+/// Index rules whose finding means the modules in scope lack the model, field, column, method, id,
+/// template, element, selection value or module the code names, or no longer take or call a method
+/// it overrides or hooks: on a port, what the target core dropped, renamed or reshaped. A field the
+/// core retyped or made required (OD205, OD207, OD324) counts as other.
+const UPSTREAM: &[&str] = &[
+    "OD201", "OD202", "OD203", "OD204", "OD206", "OD210", "OD211", "OD212", "OD224", "OD227", "OD229", "OD230",
+    "OD301", "OD302", "OD304", "OD309", "OD310", "OD311", "OD312", "OD314", "OD316", "OD320", "OD322", "OD503",
+    "OD601", "OD602", "OD603", "OD604", "OD605", "OD606",
+];
+
 /// Info-level security rules are hotspots: code to review, not a confirmed flaw.
 pub struct Rule {
     pub code: &'static str,
@@ -64,6 +96,17 @@ impl Rule {
             .iter()
             .find(|(code, spec, _)| *code == self.code && module_series.is_some_and(|s| series::matches(spec, s)))
             .map_or(self.severity, |(_, _, severity)| *severity)
+    }
+
+    /// The kind of a finding of this rule at `severity`, the one the diagnostic carries, since a
+    /// deprecation becomes an error from the series that removes what it reports.
+    pub fn kind(&self, severity: Severity) -> Kind {
+        match self.category {
+            Category::Deprecation if severity == Severity::Error => Kind::Removed,
+            Category::Deprecation => Kind::Deprecated,
+            _ if UPSTREAM.contains(&self.code) => Kind::Upstream,
+            _ => Kind::Other,
+        }
     }
 
     /// A module of unknown series gets only the rules that carry no range.
@@ -386,6 +429,31 @@ mod tests {
             for series in reported {
                 assert!(r.applies_to(Series::parse(series)), "{code} skips {series}");
             }
+        }
+    }
+
+    #[test]
+    fn a_deprecation_is_removed_at_error_and_deprecated_below() {
+        assert_eq!(rule("OD126").kind(Severity::Error), Kind::Removed);
+        assert_eq!(rule("OD108").kind(Severity::Warning), Kind::Deprecated);
+        let od326 = rule("OD326");
+        assert_eq!(od326.kind(od326.severity_for(Series::parse("18.0"))), Kind::Deprecated);
+        assert_eq!(
+            od326.kind(od326.severity_for(Series::parse("saas~18.1"))),
+            Kind::Removed
+        );
+        assert_eq!(rule("OD201").kind(Severity::Error), Kind::Upstream);
+        assert_eq!(rule("OD230").kind(Severity::Info), Kind::Upstream);
+        assert_eq!(rule("OD103").kind(Severity::Warning), Kind::Other);
+        assert_eq!(rule("OD101").kind(Severity::Error), Kind::Other);
+    }
+
+    #[test]
+    fn every_upstream_rule_is_registered_and_needs_the_index() {
+        for code in UPSTREAM {
+            let r = RULES.iter().find(|r| r.code == *code);
+            assert!(r.is_some_and(|r| r.needs_index), "{code} is not an index rule");
+            assert_ne!(rule(code).category, Category::Deprecation, "{code} is a deprecation");
         }
     }
 

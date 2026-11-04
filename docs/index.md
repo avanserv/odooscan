@@ -28,6 +28,8 @@ Other options:
 - `--select OD3` and `--ignore OD111` filter by code prefix.
 - `--exclude migrations/,tests/` hides findings in files matching gitignore-style patterns.
 - `--statistics` prints counts per rule.
+- `--target-series 19.0` checks the modules given to `check` as of that series and summarizes the
+  upgrade, as [Series](series.md) describes.
 
 The exit status is 1 when anything is reported, and 2 when the settings are invalid.
 
