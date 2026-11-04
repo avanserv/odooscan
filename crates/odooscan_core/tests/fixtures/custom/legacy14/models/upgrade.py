@@ -8,3 +8,6 @@ class ResPartnerUpgrade(models.Model):
 
     def _x_reload(self):
         self.refresh()
+
+    def _x_in_company(self):
+        return self.with_context(force_company=1)

@@ -5519,7 +5519,7 @@ mod tests {
             "records.with_context({'force_company': company.id})",
         ];
         for line in keyed {
-            assert_eq!(codes(&src(line), Series::parse("saas~13.1")), ["OD126"], "{line}");
+            assert_eq!(codes(&src(line), Series::parse("saas~13.1")), ["OD125"], "{line}");
             assert_eq!(codes(&src(line), Series::parse("13.0")), [""; 0], "{line}");
         }
         let unkeyed = [
@@ -5571,7 +5571,7 @@ mod tests {
     }
 
     #[test]
-    fn an_onchange_returning_a_domain_warns_then_fails() {
+    fn an_onchange_returning_a_domain_warns_then_is_ignored() {
         let src = |decorator: &str| {
             format!(
                 "class X(models.Model):\n    _inherit = 'x'\n\n    {decorator}\n    def f(self):\n        \
@@ -5581,7 +5581,7 @@ mod tests {
         let onchange = src("@api.onchange('a')");
         assert_eq!(codes(&onchange, Series::parse("saas~13.1")), [""; 0]);
         assert_eq!(codes(&onchange, Series::parse("saas~13.2")), ["OD125"]);
-        assert_eq!(codes(&onchange, Series::parse("saas~16.3")), ["OD126"]);
+        assert_eq!(codes(&onchange, Series::parse("saas~16.3")), ["OD125"]);
         assert_eq!(codes(&src("@api.depends('a')"), Series::parse("17.0")), [""; 0]);
     }
 
@@ -5598,7 +5598,7 @@ mod tests {
         );
         assert_eq!(
             codes(&src("models.Model", "_name_search"), Series::parse("18.0")),
-            ["OD126"]
+            ["OD125"]
         );
         assert_eq!(
             codes(&src("models.Model", "read_group"), Series::parse("20.0")),
@@ -5786,7 +5786,7 @@ mod tests {
         let src = format!("{MODEL}\n    x = fields.Char(track_visibility=\"onchange\", index=True)\n");
         let out = rewrites(&src, "saas~13.4", "OD125");
         assert!(out.contains("fields.Char(tracking=True, index=True)\n"), "{out}");
-        rewrites(&src, "saas~18.1", "OD126");
+        assert_eq!(rewrites(&src, "saas~18.1", "OD125"), out);
     }
 
     #[test]

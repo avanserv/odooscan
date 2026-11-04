@@ -164,10 +164,10 @@ rules! {
     "OD122" "sql-write-without-invalidation" Correctness Warning None, false, "An SQL write runs without invalidating the cache, so the ORM keeps stale values.";
     "OD123" "patch-at-import" Correctness Warning None, false, "Code run at import patches Odoo, for every database the server runs.";
     "OD124" "module-level-cache" Correctness Warning None, false, "A module-level dict, list or set filled at runtime is shared by every database.";
-    // Each form of `api_table.rs` is reported from its own series, so the gate is the earliest bound
-    // in `api_table::ROWS`, which a test there asserts.
-    "OD125" "python-api-deprecated" Deprecation Warning Some(">=saas~12.5"), false, "The module uses a Python API its series deprecates.";
-    "OD126" "python-api-removed" Deprecation Error Some(">=saas~12.5"), false, "The module uses a Python API its series removed or ignores.";
+    // Each form of `api_table.rs` is reported from its own series, so each gate is the earliest bound
+    // of its stages in `api_table::ROWS`, which a test there asserts.
+    "OD125" "python-api-deprecated" Deprecation Warning Some(">=saas~12.5"), false, "The module uses a Python API its series deprecates or ignores.";
+    "OD126" "python-api-removed" Deprecation Error Some(">=saas~13.1"), false, "The module uses a Python API its series removed.";
     "OD201" "unknown-model" Correctness Error None, true, "The model is not defined by any indexed module.";
     "OD202" "model-not-in-depends" Correctness Error None, true, "The model comes from a module missing from depends.";
     "OD203" "unresolved-field-path" Correctness Error None, true, "A field path does not resolve on its model.";
@@ -405,7 +405,7 @@ mod tests {
             ("OD117", &["saas~15.1", "saas~18.2"], &["saas~15.2", "saas~18.1"]),
             ("OD118", &["saas~18.1"], &["saas~18.2"]),
             ("OD125", &["saas~12.4"], &["saas~12.5", "20.0"]),
-            ("OD126", &["saas~12.4"], &["saas~12.5", "20.0"]),
+            ("OD126", &["saas~12.5"], &["saas~13.1", "20.0"]),
             ("OD219", &["saas~13.5"], &["14.0"]),
             ("OD221", &["saas~14.3"], &["saas~14.4"]),
             ("OD222", &["saas~12.4"], &["saas~12.5"]),

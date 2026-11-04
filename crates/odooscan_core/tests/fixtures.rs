@@ -253,8 +253,10 @@ fn python_api_stages_keep_their_severity() {
     let deprecated = [
         "legacy14",
         "legacy154",
+        "legacy17",
         "modern19",
         "saas125",
+        "saas131",
         "saas132",
         "saas181",
         "saas182",
@@ -268,7 +270,6 @@ fn python_api_stages_keep_their_severity() {
         "legacy154",
         "legacy17",
         "modern20",
-        "saas125",
         "saas131",
         "saas181",
         "saas192",

@@ -62,8 +62,8 @@ Python code checked on its own: security, deprecated APIs and ORM mistakes visib
 | [OD122](OD122.md) | `sql-write-without-invalidation` | An SQL write runs without invalidating the cache, so the ORM keeps stale values. |
 | [OD123](OD123.md) | `patch-at-import` | Code run at import patches Odoo, for every database the server runs. |
 | [OD124](OD124.md) | `module-level-cache` | A module-level dict, list or set filled at runtime is shared by every database. |
-| [OD125](OD125.md) | `python-api-deprecated` | The module uses a Python API its series deprecates. |
-| [OD126](OD126.md) | `python-api-removed` | The module uses a Python API its series removed or ignores. |
+| [OD125](OD125.md) | `python-api-deprecated` | The module uses a Python API its series deprecates or ignores. |
+| [OD126](OD126.md) | `python-api-removed` | The module uses a Python API its series removed. |
 
 ## OD2: models and fields
 

@@ -1,6 +1,6 @@
 //! The Python APIs Odoo deprecates and later removes or ignores, with the series of each stage.
-//! OD125 reports a form from the series Odoo warns about it, OD126 from the one where it fails or
-//! has no effect; `python.rs` finds the forms.
+//! OD125 reports a form from the series Odoo warns about it or ignores it, OD126 from the one where
+//! it fails; `python.rs` finds the forms.
 
 use crate::series::Series;
 
@@ -41,8 +41,10 @@ pub(crate) struct Row {
     form: &'static str,
     /// From which series Odoo warns about the form.
     warned: Option<Series>,
-    /// From which series the form fails or has no effect.
+    /// From which series the form fails.
     removed: Option<Series>,
+    /// From which series Odoo accepts the form and does nothing with it, so nothing fails.
+    ignored: Option<Series>,
     /// From which series the name stands for another API, which the row no longer describes.
     reused: Option<Series>,
     /// The advice that ends the message, such as `use tracking=`.
@@ -78,6 +80,7 @@ const fn row(
         form,
         warned,
         removed,
+        ignored: None,
         reused: None,
         instead,
         instead_before: None,
@@ -88,24 +91,31 @@ const fn row(
 
 /// Each bound is the first series whose source shows the stage, and the comments cite that source.
 pub(crate) static ROWS: &[Row] = &[
-    // saas~12.5 warns that the parameter is no longer supported (`odoo/fields.py:453`).
-    row(
-        Kind::FieldOption("oldname"),
-        "oldname=",
-        None,
-        at(12, 5),
-        "use an upgrade script that renames the column",
-    ),
+    // saas~12.5 logs that the parameter is no longer supported and renames no column
+    // (`odoo/fields.py:37`, `:453`).
+    Row {
+        ignored: at(12, 5),
+        ..row(
+            Kind::FieldOption("oldname"),
+            "oldname=",
+            None,
+            None,
+            "use an upgrade script that renames the column",
+        )
+    },
     // saas~13.4 warns of an unknown parameter (`odoo/fields.py:357`), as mail.thread accepts only
     // `tracking` (`addons/mail/models/mail_thread.py:115`), and saas~18.1 mail.thread no longer
     // reads it where 18.0 does (`addons/mail/models/mail_thread.py:591`).
-    row(
-        Kind::FieldOption("track_visibility"),
-        "track_visibility=",
-        at(13, 4),
-        at(18, 1),
-        "use tracking=",
-    ),
+    Row {
+        ignored: at(18, 1),
+        ..row(
+            Kind::FieldOption("track_visibility"),
+            "track_visibility=",
+            at(13, 4),
+            None,
+            "use tracking=",
+        )
+    },
     // saas~12.5 warns (`odoo/models.py:4921`), saas~15.3 asserts a bool (`odoo/models.py:5327`).
     row(
         Kind::SudoUser,
@@ -124,22 +134,28 @@ pub(crate) static ROWS: &[Row] = &[
     ),
     // saas~13.1 logs that the key is no longer supported (`odoo/models.py:5101`) and adds
     // with_company() (`:5047`), and nothing under `odoo/` reads the key any more.
-    row(
-        Kind::ContextKey("force_company"),
-        "the context key force_company",
-        None,
-        at(13, 1),
-        "use with_company(company)",
-    ),
+    Row {
+        ignored: at(13, 1),
+        ..row(
+            Kind::ContextKey("force_company"),
+            "the context key force_company",
+            None,
+            None,
+            "use with_company(company)",
+        )
+    },
     // saas~13.2 logs a domain an onchange returns as deprecated (`odoo/models.py:5923`), and from
     // saas~16.3 `_onchange_eval` reads only its value and warning (`odoo/models.py:6507`).
-    row(
-        Kind::OnchangeKey("domain"),
-        "an onchange returning a domain",
-        at(13, 2),
-        at(16, 3),
-        "set the domain on the field or in the view",
-    ),
+    Row {
+        ignored: at(16, 3),
+        ..row(
+            Kind::OnchangeKey("domain"),
+            "an onchange returning a domain",
+            at(13, 2),
+            None,
+            "set the domain on the field or in the view",
+        )
+    },
     // saas~15.4 warns (`odoo/models.py:5790`, `:6331`, `:6151`), saas~15.2 for refresh()
     // (`odoo/models.py:6028`), and saas~16.2 has none of the four. Which replacement fits hangs on
     // the arguments: without any the call acts on the whole environment, with fields on the model,
@@ -208,14 +224,17 @@ pub(crate) static ROWS: &[Row] = &[
         "remove it",
     ),
     // saas~17.4 name_search() calls it (`odoo/models.py:1733`), and 18.0 searches through
-    // _search_display_name() instead (`odoo/models.py:1885`, `:1823`).
-    row(
-        Kind::Override("_name_search"),
-        "overriding _name_search()",
-        None,
-        at(18, 0),
-        "override _search_display_name()",
-    ),
+    // _search_display_name() instead (`odoo/models.py:1885`, `:1823`), so an override never runs.
+    Row {
+        ignored: at(18, 0),
+        ..row(
+            Kind::Override("_name_search"),
+            "overriding _name_search()",
+            None,
+            None,
+            "override _search_display_name()",
+        )
+    },
     // 18.0 warns (`odoo/models.py:4512`, `:4527`), saas~19.1 has neither. With `raise_exception`
     // false, check_access_rights() returns has_access() (18.0 `odoo/models.py:4518`).
     Row {
@@ -333,21 +352,26 @@ pub(crate) fn stage_if_negative(row: &Row, series: Option<Series>) -> Option<(&'
 
 fn staged(row: &Row, series: Option<Series>, advice: Option<&'static str>) -> Option<(&'static str, String)> {
     let series = series?;
-    let reached = |bound: Option<Series>| bound.filter(|b| series >= *b);
-    if reached(row.reused).is_some() {
+    if row.reused.is_some_and(|b| series >= b) {
         return None;
     }
+    let (code, verb, from) = stage_reached(row, series)?;
     let instead = match row.instead_before {
         Some((bound, earlier)) if series < bound => earlier,
         _ => advice.unwrap_or(row.instead),
     };
-    if let Some(from) = reached(row.removed) {
-        let message = format!("{} no longer works from {}; {instead}", row.form, label(from));
-        return Some(("OD126", message));
-    }
-    let from = reached(row.warned)?;
-    let message = format!("{} is deprecated from {}; {instead}", row.form, label(from));
-    Some(("OD125", message))
+    Some((code, format!("{} {verb} {}; {instead}", row.form, label(from))))
+}
+
+/// The code, the verb and the bound of the latest stage of the row that `series` has reached.
+fn stage_reached(row: &Row, series: Series) -> Option<(&'static str, &'static str, Series)> {
+    [
+        (row.removed, "OD126", "no longer works from"),
+        (row.ignored, "OD125", "is ignored from"),
+        (row.warned, "OD125", "is deprecated from"),
+    ]
+    .into_iter()
+    .find_map(|(bound, code, verb)| bound.filter(|b| series >= *b).map(|b| (code, verb, b)))
 }
 
 #[cfg(test)]
@@ -359,21 +383,30 @@ mod tests {
     }
 
     #[test]
-    fn each_row_is_silent_then_deprecated_then_removed() {
-        // (kind, last silent, first warned, first removed), from the sources the comments in
-        // `ROWS` cite.
-        let cases: [(Kind, &str, Option<&str>, Option<&str>); 22] = [
-            (Kind::FieldOption("oldname"), "saas~12.4", None, Some("saas~12.5")),
+    fn each_row_is_silent_then_deprecated_then_ignored_or_removed() {
+        // (kind, last silent, first warned, first ignored, first removed), from the sources the
+        // comments in `ROWS` cite.
+        type Case = (
+            Kind,
+            &'static str,
+            Option<&'static str>,
+            Option<&'static str>,
+            Option<&'static str>,
+        );
+        let cases: [Case; 22] = [
+            (Kind::FieldOption("oldname"), "saas~12.4", None, Some("saas~12.5"), None),
             (
                 Kind::FieldOption("track_visibility"),
                 "saas~13.3",
                 Some("saas~13.4"),
                 Some("saas~18.1"),
+                None,
             ),
-            (Kind::SudoUser, "saas~12.4", Some("saas~12.5"), Some("saas~15.3")),
+            (Kind::SudoUser, "saas~12.4", Some("saas~12.5"), None, Some("saas~15.3")),
             (
                 Kind::Keywords("message_post", &["subtype"]),
                 "13.0",
+                None,
                 None,
                 Some("saas~13.1"),
             ),
@@ -381,64 +414,92 @@ mod tests {
                 Kind::RecordsetMethod("flush"),
                 "saas~15.3",
                 Some("saas~15.4"),
+                None,
                 Some("saas~16.2"),
             ),
             (
                 Kind::RecordsetMethod("recompute"),
                 "saas~15.3",
                 Some("saas~15.4"),
+                None,
                 Some("saas~16.2"),
             ),
             (
                 Kind::RecordsetMethod("invalidate_cache"),
                 "saas~15.3",
                 Some("saas~15.4"),
+                None,
                 Some("saas~16.2"),
             ),
             (
                 Kind::RecordsetMethod("refresh"),
                 "saas~15.1",
                 Some("saas~15.2"),
+                None,
                 Some("saas~16.2"),
             ),
-            (Kind::Method("user_has_groups"), "saas~17.1", None, Some("saas~17.2")),
+            (
+                Kind::Method("user_has_groups"),
+                "saas~17.1",
+                None,
+                None,
+                Some("saas~17.2"),
+            ),
             (
                 Kind::Method("check_access_rights"),
                 "saas~17.4",
                 Some("18.0"),
+                None,
                 Some("saas~19.1"),
             ),
             (
                 Kind::Method("check_access_rule"),
                 "saas~17.4",
                 Some("18.0"),
+                None,
                 Some("saas~19.1"),
             ),
             (
                 Kind::Method("read_group"),
                 "saas~18.1",
                 Some("saas~18.2"),
+                None,
                 Some("saas~19.1"),
             ),
             (
                 Kind::Keywords("read_group", &["fields", "orderby", "lazy"]),
                 "saas~19.4",
                 None,
+                None,
                 Some("20.0"),
             ),
-            (Kind::Import("odoo.osv"), "saas~18.4", Some("19.0"), Some("saas~19.1")),
-            (Kind::RequestAttr("jsonrequest"), "saas~15.2", None, Some("saas~15.3")),
-            (Kind::RouteType("json"), "18.0", Some("saas~18.1"), None),
-            (Kind::ContextKey("force_company"), "13.0", None, Some("saas~13.1")),
+            (
+                Kind::Import("odoo.osv"),
+                "saas~18.4",
+                Some("19.0"),
+                None,
+                Some("saas~19.1"),
+            ),
+            (
+                Kind::RequestAttr("jsonrequest"),
+                "saas~15.2",
+                None,
+                None,
+                Some("saas~15.3"),
+            ),
+            (Kind::RouteType("json"), "18.0", Some("saas~18.1"), None, None),
+            (Kind::ContextKey("force_company"), "13.0", None, Some("saas~13.1"), None),
             (
                 Kind::OnchangeKey("domain"),
                 "saas~13.1",
                 Some("saas~13.2"),
                 Some("saas~16.3"),
+                None,
             ),
             (
                 Kind::WrittenField("ir.cron", "numbercall"),
                 "saas~17.2",
+                None,
                 None,
                 Some("saas~17.3"),
             ),
@@ -446,23 +507,29 @@ mod tests {
                 Kind::WrittenField("ir.cron", "doall"),
                 "saas~17.2",
                 None,
+                None,
                 Some("saas~17.3"),
             ),
-            (Kind::Override("_name_search"), "saas~17.4", None, Some("18.0")),
+            (Kind::Override("_name_search"), "saas~17.4", None, Some("18.0"), None),
             (
                 Kind::Override("read_group"),
                 "saas~18.1",
                 Some("saas~18.2"),
+                None,
                 Some("saas~19.1"),
             ),
         ];
-        for (kind, silent, warned, removed) in cases {
+        let message = |kind, series| stage(row_of(kind), Series::parse(series)).map(|(_, m)| m);
+        for (kind, silent, warned, ignored, removed) in cases {
             assert_eq!(code(kind, silent), None, "{kind:?} on {silent}");
-            if let Some(series) = warned {
-                assert_eq!(code(kind, series), Some("OD125"), "{kind:?} on {series}");
-            }
-            if let Some(series) = removed {
-                assert_eq!(code(kind, series), Some("OD126"), "{kind:?} on {series}");
+            let stages = [
+                (warned, "OD125", " is deprecated from "),
+                (ignored, "OD125", " is ignored from "),
+                (removed, "OD126", " no longer works from "),
+            ];
+            for (series, expected, verb) in stages.into_iter().filter_map(|(s, c, v)| Some((s?, c, v))) {
+                assert_eq!(code(kind, series), Some(expected), "{kind:?} on {series}");
+                assert!(message(kind, series).unwrap().contains(verb), "{kind:?} on {series}");
             }
         }
         assert_eq!(ROWS.len(), cases.len());
@@ -470,9 +537,42 @@ mod tests {
     }
 
     #[test]
+    fn a_form_odoo_ignores_stays_a_warning_on_later_series() {
+        let ignored = [
+            (
+                Kind::FieldOption("oldname"),
+                "oldname= is ignored from saas~12.5; use an upgrade script that renames the column",
+            ),
+            (
+                Kind::FieldOption("track_visibility"),
+                "track_visibility= is ignored from saas~18.1; use tracking=",
+            ),
+            (
+                Kind::ContextKey("force_company"),
+                "the context key force_company is ignored from saas~13.1; use with_company(company)",
+            ),
+            (
+                Kind::OnchangeKey("domain"),
+                "an onchange returning a domain is ignored from saas~16.3; set the domain on the field or in the view",
+            ),
+            (
+                Kind::Override("_name_search"),
+                "overriding _name_search() is ignored from 18.0; override _search_display_name()",
+            ),
+        ];
+        for (kind, expected) in ignored {
+            for series in ["19.0", "20.0"] {
+                let found = stage(row_of(kind), Series::parse(series));
+                assert_eq!(found, Some(("OD125", expected.to_owned())), "{kind:?} on {series}");
+            }
+        }
+    }
+
+    #[test]
     fn the_rule_gates_start_at_the_earliest_bound() {
-        let earliest = ROWS.iter().flat_map(|r| [r.warned, r.removed]).flatten().min();
-        for code in ["OD125", "OD126"] {
+        let od125 = ROWS.iter().flat_map(|r| [r.warned, r.ignored]).flatten().min();
+        let od126 = ROWS.iter().filter_map(|r| r.removed).min();
+        for (code, earliest) in [("OD125", od125), ("OD126", od126)] {
             let gate = crate::rules::rule(code).series.and_then(|s| s.strip_prefix(">="));
             assert_eq!(gate.and_then(Series::parse), earliest, "{code}");
         }

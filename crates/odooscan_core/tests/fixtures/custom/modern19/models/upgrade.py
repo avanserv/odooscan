@@ -1,9 +1,11 @@
-from odoo import models
+from odoo import fields, models
 from odoo.osv import expression
 
 
 class ResPartnerUpgrade(models.Model):
     _inherit = "res.partner"
+
+    x_legacy_code = fields.Char(oldname="x_code")
 
     def _x_domain(self):
         return expression.AND([[("name", "=", "x")], [("country_id", "=", False)]])
