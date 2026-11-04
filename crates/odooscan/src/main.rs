@@ -117,16 +117,13 @@ impl Settings {
         } else {
             Exclude::new(cwd, &args.exclude)?
         };
-        let baseline = args.baseline.clone().or(file.baseline);
-        let baseline = match baseline {
-            None if args.write_baseline => Some(dir.join(baseline::DEFAULT_FILE)),
-            b => b,
-        };
+        let baseline = baseline_path(args, file.baseline, &dir);
         let mut scan = ScanOptions {
             paths: args.paths.clone(),
             addons_paths: addons_paths(&or(&args.addons_path, file.addons_path))?,
             default_series: odoo_version,
             target_series: args.target_series,
+            taint: file.taint.table()?,
         };
         target_core(&mut scan)?;
         Ok(Self {
@@ -142,6 +139,12 @@ impl Settings {
         let matches = |list: &[String]| list.iter().any(|p| d.code.starts_with(p.as_str()));
         (self.select.is_empty() || matches(&self.select)) && !matches(&self.ignore) && !self.exclude.matches(&d.path)
     }
+}
+
+/// The flag, else the file, else the default name beside the file when the baseline is to be written.
+fn baseline_path(args: &CheckArgs, file: Option<PathBuf>, dir: &Path) -> Option<PathBuf> {
+    let default = || args.write_baseline.then(|| dir.join(baseline::DEFAULT_FILE));
+    args.baseline.clone().or(file).or_else(default)
 }
 
 /// With a target series and no core given, the target's core from odoo/odoo, indexed last so that

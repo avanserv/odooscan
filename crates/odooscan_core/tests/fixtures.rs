@@ -2,16 +2,22 @@ use std::path::PathBuf;
 
 use odooscan_core::rules::{Kind, Severity, rule};
 use odooscan_core::series::Series;
-use odooscan_core::{ScanOptions, scan};
+use odooscan_core::{ScanOptions, TaintTable, scan};
 
 #[test]
 fn fixtures() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+    // As an odooscan.toml names them, for bad_sale/controllers/configured.py.
+    let mut taint = TaintTable::default();
+    taint.source("lib.read_form").unwrap();
+    taint.sink("OD701", "lib.run_query").unwrap();
+    taint.sanitizer("lib.clean_term").unwrap();
     let report = scan(&ScanOptions {
         paths: vec![root.join("custom")],
         addons_paths: vec![root.join("core")],
         default_series: None,
         target_series: None,
+        taint,
     });
     let lines: Vec<String> = report
         .diagnostics
@@ -38,6 +44,7 @@ fn base_creates_none_of_its_ids() {
         addons_paths: vec![],
         default_series: None,
         target_series: None,
+        ..Default::default()
     });
     let lines: Vec<u32> = report
         .diagnostics
@@ -57,6 +64,7 @@ fn series_notice_only_without_default() {
             addons_paths: vec![],
             default_series,
             target_series: None,
+            ..Default::default()
         })
         .notices
         .into_iter()
@@ -76,6 +84,7 @@ fn python_2_files_of_checked_modules_get_a_notice() {
             addons_paths,
             default_series: None,
             target_series: None,
+            ..Default::default()
         })
         .notices
         .into_iter()
@@ -107,6 +116,7 @@ fn default_series_reads_a_seriesless_auto_install_list() {
             addons_paths: vec![root.join("core")],
             default_series,
             target_series: None,
+            ..Default::default()
         })
         .diagnostics
         .iter()
@@ -125,6 +135,7 @@ fn a_seriesless_auto_install_reads_as_the_module_checked() {
             addons_paths: vec![root.join("core")],
             default_series,
             target_series: None,
+            ..Default::default()
         })
         .diagnostics
         .iter()
@@ -146,6 +157,7 @@ fn unassigned_compute_waits_for_a_known_series() {
             addons_paths: vec![root.join("core")],
             default_series,
             target_series: None,
+            ..Default::default()
         })
         .diagnostics
         .iter()
@@ -164,6 +176,7 @@ fn delegate_without_ondelete_waits_for_a_known_series() {
             addons_paths: vec![root.join("core")],
             default_series,
             target_series: None,
+            ..Default::default()
         })
         .diagnostics
         .iter()
@@ -182,6 +195,7 @@ fn severities(code: &str) -> Vec<(String, Severity)> {
         addons_paths: vec![root.join("core")],
         default_series: None,
         target_series: None,
+        ..Default::default()
     });
     let mut found: Vec<(String, Severity)> = report
         .diagnostics
@@ -300,6 +314,7 @@ fn a_row_with_no_group_needs_no_base() {
         addons_paths: vec![],
         default_series: None,
         target_series: None,
+        ..Default::default()
     });
     let lines: Vec<u32> = report
         .diagnostics
@@ -318,6 +333,7 @@ fn a_file_a_hook_loads_reports_its_rows() {
         addons_paths: vec![],
         default_series: None,
         target_series: None,
+        ..Default::default()
     });
     let lines = |file: &str| -> Vec<u32> {
         let od402 = report.diagnostics.iter().filter(|d| d.code == "OD402");
@@ -336,6 +352,7 @@ fn a_calendar_the_client_registers_still_needs_a_date_field() {
         addons_paths: vec![root.join("core")],
         default_series: None,
         target_series: None,
+        ..Default::default()
     });
     let reported = |message: &str| {
         let od318 = report.diagnostics.iter().filter(|d| d.code == "OD318");
@@ -356,6 +373,7 @@ fn a_public_row_needs_no_base() {
         addons_paths: vec![],
         default_series: None,
         target_series: None,
+        ..Default::default()
     });
     let lines: Vec<u32> = report
         .diagnostics
@@ -375,6 +393,7 @@ fn refused_server_code_needs_no_base() {
             addons_paths: vec![],
             default_series: None,
             target_series: None,
+            ..Default::default()
         });
         report.diagnostics.iter().filter(|d| d.code == "OD319").count()
     };
@@ -391,6 +410,7 @@ fn a_refused_file_name_needs_no_base() {
         addons_paths: vec![],
         default_series: None,
         target_series: None,
+        ..Default::default()
     });
     let in_file = |code: &str, name: &str| {
         let matching = report.diagnostics.iter().filter(|d| d.code == code);
@@ -410,6 +430,7 @@ fn a_report_tag_waits_for_a_known_series() {
             addons_paths: vec![root.join("core")],
             default_series,
             target_series: None,
+            ..Default::default()
         });
         let found = report.diagnostics.iter();
         found
@@ -431,6 +452,7 @@ fn hierarchy_and_label_rules_wait_for_their_series_but_not_for_an_unknown_one() 
             addons_paths: vec![root.join("core")],
             default_series,
             target_series: None,
+            ..Default::default()
         });
         let found = report.diagnostics.into_iter();
         found
@@ -457,6 +479,7 @@ fn import_patches_without_base_take_the_advice_of_the_path() {
         addons_paths: vec![],
         default_series: None,
         target_series: None,
+        ..Default::default()
     });
     let advice: Vec<(u32, bool)> = report
         .diagnostics
@@ -481,6 +504,7 @@ fn a_target_series_checks_a_module_as_of_that_series() {
             addons_paths: vec![root.join("core")],
             default_series: None,
             target_series,
+            ..Default::default()
         });
         let found = report.diagnostics.iter();
         found
@@ -509,6 +533,7 @@ fn an_indexed_module_keeps_its_own_series_under_a_target() {
         addons_paths: vec![root.join("core")],
         default_series: None,
         target_series: Series::parse("18.0"),
+        ..Default::default()
     });
     let found = report.diagnostics.iter();
     assert!(
@@ -528,6 +553,7 @@ fn a_seriesless_indexed_module_takes_the_target() {
             addons_paths: vec![root.join("core")],
             default_series: None,
             target_series,
+            ..Default::default()
         });
         let found = report.diagnostics.iter();
         found

@@ -26,6 +26,8 @@ custom/auto_scope_reader_new/thing.py:8:23: OD210 'country_any_stamp': field 'co
 custom/auto_scope_reader_ten/thing.py:9:23: OD210 'list_any_stamp': field 'list_any_stamp' of auto.scope.thing comes from module auto_scope_list_any, which is not in depends
 custom/auto_scope_v131/data.xml:7:17: OD210 'next_stamp': field 'next_stamp' of auto.scope.thing comes from module auto_scope_next, which is not in depends
 custom/bad_sale/__manifest__.py:11:9: OD501 'data/missing.xml' does not exist
+custom/bad_sale/controllers/configured.py:11:9: OD701 route parameter 'term' reaches the query of lib.run_query(); pass it as a query parameter or build the query with odoo.tools.SQL
+custom/bad_sale/controllers/configured.py:15:16: OD702 lib.read_form() reaches safe_eval() through 'form', which runs it as code
 custom/bad_sale/controllers/flows.py:14:9: OD701 route parameter 'term' reaches the query of cr.execute() through 'where', 'query'; pass it as a query parameter or build the query with odoo.tools.SQL
 custom/bad_sale/controllers/flows.py:15:9: OD701 route parameter 'kw' reaches the query of cr.execute(); pass it as a query parameter or build the query with odoo.tools.SQL
 custom/bad_sale/controllers/flows.py:25:16: OD702 request.get_json_data() reaches safe_eval() through 'data', which runs it as code

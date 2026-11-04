@@ -78,12 +78,80 @@ const TABLE: &[(&str, Role)] = &[
 /// Keywords that carry the argument a sink checks when it is not passed by position.
 const SINK_KEYWORDS: &[&str] = &["query", "code", "expr", "vals", "vals_list"];
 
-/// The row a dotted path matches, with its pattern.
-fn lookup(path: &[String]) -> Option<(&'static str, Role)> {
-    TABLE
+/// The built-in row a dotted path matches, with its pattern.
+fn built_in(path: &[String]) -> Option<(&'static str, Role)> {
+    TABLE.iter().copied().find(|(pattern, _)| matches_path(pattern, path))
+}
+
+/// The rows a configuration adds to `TABLE`, matched by the same dotted patterns. They match
+/// first, so that a team's `sandbox.safe_eval` sanitizer wins over the built-in `safe_eval` sink.
+/// A configured source is read as a mapping, whose keys the user picks too.
+#[derive(Clone, Debug, Default)]
+pub struct TaintTable {
+    rows: Vec<(String, Role)>,
+}
+
+impl TaintTable {
+    pub fn source(&mut self, pattern: &str) -> Result<(), String> {
+        self.add(pattern, Role::Source(Kind::Keys))
+    }
+
+    pub fn sanitizer(&mut self, pattern: &str) -> Result<(), String> {
+        self.add(pattern, Role::Sanitizer)
+    }
+
+    /// A sink reported as `rule`, the code or name of one of OD701 to OD704.
+    pub fn sink(&mut self, rule: &str, pattern: &str) -> Result<(), String> {
+        let sink = match crate::rules::find(rule).map(|r| r.code) {
+            Some("OD701") => Sink::Sql,
+            Some("OD702") => Sink::Eval,
+            Some("OD703") => Sink::Markup,
+            Some("OD704") => Sink::SudoWrite,
+            _ => {
+                return Err(format!(
+                    "'{rule}' is not a taint rule: name OD701 to OD704 by code or name"
+                ));
+            }
+        };
+        self.add(pattern, Role::Sink(sink))
+    }
+
+    fn add(&mut self, pattern: &str, role: Role) -> Result<(), String> {
+        if !valid_pattern(pattern) {
+            return Err(format!(
+                "'{pattern}' is not a taint pattern: write dotted names such as cr.execute, where a name but the last may end in () and [] stands for an item"
+            ));
+        }
+        self.rows.push((pattern.to_owned(), role));
+        Ok(())
+    }
+
+    /// The row a dotted path matches, with its pattern: a configured one before a built-in one.
+    fn lookup(&self, path: &[String]) -> Option<(&str, Role)> {
+        self.rows
+            .iter()
+            .find(|(pattern, _)| matches_path(pattern, path))
+            .map(|(pattern, role)| (pattern.as_str(), *role))
+            .or_else(|| built_in(path))
+    }
+}
+
+/// Whether each segment of `pattern` is a name, a name and `()`, or `[]`, the last no call, as
+/// `Flows::path` writes a path and `matches_path` compares one.
+fn valid_pattern(pattern: &str) -> bool {
+    let identifier = |s: &str| {
+        let mut chars = s.chars();
+        chars.next().is_some_and(|c| c == '_' || c.is_alphabetic()) && chars.all(|c| c == '_' || c.is_alphanumeric())
+    };
+    let segments: Vec<&str> = pattern.split('.').collect();
+    let last = segments.len() - 1;
+    segments
         .iter()
-        .find(|(pattern, _)| matches_path(pattern, path))
-        .map(|&(pattern, role)| (pattern, role))
+        .enumerate()
+        .all(|(i, segment)| match segment.strip_suffix("()") {
+            Some(name) => i != last && identifier(name),
+            None => *segment == "[]" || identifier(segment),
+        })
 }
 
 fn matches_path(pattern: &str, path: &[String]) -> bool {
@@ -166,9 +234,11 @@ pub fn function(
     params: Params,
     owner: Option<Receiver>,
     loc: &Locator,
+    table: &TaintTable,
 ) -> (Vec<RawDiag>, Option<FlowSummary>) {
     let mut flows = Flows {
         loc,
+        table,
         state: State::default(),
         locals: FxHashSet::default(),
         owner,
@@ -192,6 +262,7 @@ pub fn function(
 
 struct Flows<'a> {
     loc: &'a Locator<'a>,
+    table: &'a TaintTable,
     state: State,
     /// Every name the function binds, so that `x.f()` on another name is a module's function.
     locals: FxHashSet<String>,
@@ -555,7 +626,7 @@ impl Flows<'_> {
     fn expr(&mut self, expr: &Expr) -> Option<Taint> {
         match expr {
             Expr::Name(n) => self.state.vars.get(n.id.as_str()).cloned(),
-            Expr::Attribute(a) => match lookup(&self.path(expr)) {
+            Expr::Attribute(a) => match self.table.lookup(&self.path(expr)) {
                 Some((pattern, Role::Source(kind))) => self.source(pattern.to_owned(), expr, kind),
                 _ => values(self.expr(&a.value)),
             },
@@ -636,8 +707,10 @@ impl Flows<'_> {
         if b.op == Operator::BitOr { t } else { values(t) }
     }
 
+    /// Only the built-in row: a configured OD703 sink, such as one that marks a value safe, does
+    /// not escape what `%` puts in it.
     fn is_markup(&self, expr: &Expr) -> bool {
-        matches!(expr, Expr::Call(c) if lookup(&self.path(&c.func)).is_some_and(|(_, r)| r == Role::Sink(Sink::Markup)))
+        matches!(expr, Expr::Call(c) if built_in(&self.path(&c.func)).is_some_and(|(_, r)| r == Role::Sink(Sink::Markup)))
     }
 
     fn fstring(&mut self, f: &ast::ExprFString) -> Option<Taint> {
@@ -700,7 +773,7 @@ impl Flows<'_> {
         let args: Vec<Option<Taint>> = call.arguments.args.iter().map(|a| self.expr(a)).collect();
         let keywords: Vec<Option<Taint>> = call.arguments.keywords.iter().map(|k| self.expr(&k.value)).collect();
         let path = self.path(&call.func);
-        match lookup(&path) {
+        match self.table.lookup(&path) {
             Some((pattern, Role::Source(kind))) => self.source(format!("{pattern}()"), expr, kind),
             Some((_, Role::Sanitizer)) => None,
             Some((pattern, Role::Sink(sink))) => {
@@ -924,12 +997,16 @@ mod tests {
 
     /// The findings of the first function in `src`, as `code message`.
     fn scan(params: Params, src: &str) -> Vec<String> {
+        scan_with(&TaintTable::default(), params, src)
+    }
+
+    fn scan_with(table: &TaintTable, params: Params, src: &str) -> Vec<String> {
         let parsed = parse_module(src).expect("valid Python");
         let Some(Stmt::FunctionDef(func)) = parsed.syntax().body.first() else {
             panic!("no function");
         };
         let loc = Locator::new(src);
-        function(func, params, None, &loc)
+        function(func, params, None, &loc, table)
             .0
             .into_iter()
             .map(|d| format!("{} {}", d.code, d.message.split(';').next().unwrap_or_default()))
@@ -953,7 +1030,7 @@ mod tests {
         let Some(Stmt::FunctionDef(func)) = parsed.syntax().body.first() else {
             panic!()
         };
-        let (diags, _) = function(func, Params::None, None, &Locator::new(src));
+        let (diags, _) = function(func, Params::None, None, &Locator::new(src), &TaintTable::default());
         let flow: Vec<_> = diags[0].flow.iter().map(|s| (s.pos.line, s.label.as_str())).collect();
         assert_eq!(flow, [(2, "request.get_json_data()"), (2, "data"), (3, "safe_eval()")]);
     }
@@ -1037,7 +1114,9 @@ mod tests {
             panic!("no function");
         };
         let owner = Some(Receiver::Model("x.y".to_owned()));
-        function(func, params, owner, &Locator::new(src)).1.expect("a summary")
+        function(func, params, owner, &Locator::new(src), &TaintTable::default())
+            .1
+            .expect("a summary")
     }
 
     #[test]
@@ -1079,6 +1158,76 @@ mod tests {
                 (FlowOrigin::Return(1), FlowTarget::Sink("OD703")),
             ]
         );
+    }
+
+    #[test]
+    fn a_configured_source_reaches_a_built_in_sink() {
+        let mut table = TaintTable::default();
+        table.source("lib.read_form").unwrap();
+        let src = "def f(self):\n    term = lib.read_form()\n    self.env.cr.execute('SELECT %s' % term)\n";
+        assert_eq!(
+            scan_with(&table, Params::None, src),
+            ["OD701 lib.read_form() reaches the query of cr.execute() through 'term'"]
+        );
+    }
+
+    #[test]
+    fn a_configured_sink_receives_a_route_parameter() {
+        let mut table = TaintTable::default();
+        table.sink("OD702", "tools.run_code").unwrap();
+        let src = "def f(self, code):\n    tools.run_code(code)\n";
+        assert_eq!(
+            scan_with(&table, Params::Route, src),
+            ["OD702 route parameter 'code' reaches tools.run_code(), which runs it as code"]
+        );
+    }
+
+    #[test]
+    fn a_configured_sanitizer_ends_the_flow() {
+        let mut table = TaintTable::default();
+        table.sanitizer("lib.clean_term").unwrap();
+        let src = "def f(self, x):\n    self.env.cr.execute('SELECT %s' % lib.clean_term(x))\n";
+        assert_eq!(scan(Params::Rpc, src).len(), 1);
+        assert!(scan_with(&table, Params::Rpc, src).is_empty());
+    }
+
+    #[test]
+    fn a_configured_row_wins_over_a_built_in_one() {
+        let mut table = TaintTable::default();
+        table.sanitizer("sandbox.safe_eval").unwrap();
+        let eval = |call: &str| scan_with(&table, Params::Rpc, &format!("def f(self, x):\n    {call}(x)\n"));
+        assert!(eval("sandbox.safe_eval").is_empty());
+        assert_eq!(
+            eval("safe_eval"),
+            ["OD702 RPC argument 'x' reaches safe_eval(), which runs it as code"]
+        );
+    }
+
+    #[test]
+    fn a_configured_markup_sink_escapes_nothing() {
+        let mut table = TaintTable::default();
+        table.sink("markup-injection-flow", "raw").unwrap();
+        let src = "def f(self, x):\n    return Markup(raw('%s') % x)\n";
+        assert_eq!(
+            scan_with(&table, Params::Rpc, src),
+            ["OD703 RPC argument 'x' reaches Markup() unescaped"]
+        );
+    }
+
+    #[test]
+    fn configured_rows_take_patterns_and_taint_rules_only() {
+        let mut table = TaintTable::default();
+        for pattern in ["", "a..b", "a.b()", "1a", "a.", "a.[]()", "a-b"] {
+            assert!(table.source(pattern).is_err(), "{pattern}");
+        }
+        for pattern in ["cr.execute", "sudo().write", "env.[].create", "_x9"] {
+            assert!(table.source(pattern).is_ok(), "{pattern}");
+        }
+        let error = table.sink("OD101", "lib.run").unwrap_err();
+        assert!(error.contains("'OD101'"), "{error}");
+        assert!(table.sink("no-such-rule", "lib.run").is_err());
+        assert!(table.sink("sql-injection-flow", "lib.run").is_ok());
+        assert!(table.sink("od704", "lib.run").is_ok());
     }
 
     #[test]
