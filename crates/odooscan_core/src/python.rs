@@ -2657,7 +2657,7 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
             Params::None
         };
         let owner = self.owners.last().cloned().flatten();
-        let (diags, summary) = taint::function(func, params, owner, self.loc, self.taint);
+        let (diags, summary) = taint::function(func, params, owner, self.series, self.loc, self.taint);
         self.facts.diags.extend(diags);
         self.facts.flows.extend(summary);
     }

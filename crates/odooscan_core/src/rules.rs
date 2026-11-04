@@ -274,6 +274,9 @@ rules! {
     "OD702" "code-injection-flow" Security Error None, false, "Data a user controls reaches safe_eval(), eval() or exec().";
     "OD703" "markup-injection-flow" Security Warning None, false, "Data a user controls is wrapped in Markup() without escaping.";
     "OD704" "sudo-mass-assignment" Security Error None, false, "A mapping a user controls is written as superuser, so the user picks the fields.";
+    "OD705" "open-redirect-flow" Security Warning None, false, "Data a user controls picks the site a redirect sends the browser to.";
+    "OD706" "server-request-forgery-flow" Security Error None, false, "Data a user controls picks the URL the server sends a request to.";
+    "OD707" "path-traversal-flow" Security Error None, false, "Data a user controls picks the path of a file the server opens.";
 }
 
 pub fn rule(code: &str) -> &'static Rule {
