@@ -8,8 +8,8 @@
 use std::hash::{BuildHasher, Hasher};
 use std::io::{ErrorKind, Read, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output, Stdio};
-use std::sync::OnceLock;
+use std::process::{Child, Command, ExitStatus, Output, Stdio};
+use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -67,6 +67,10 @@ const ANSWER: Duration = Duration::from_secs(60);
 const TRANSFER: Duration = Duration::from_secs(30 * 60);
 
 const POLL: Duration = Duration::from_millis(10);
+
+/// How long the pipes of a step that exited are still read: a helper it started may hold them open
+/// for as long as it runs.
+const LINGER: Duration = Duration::from_secs(2);
 
 /// How long a temporary or unrecorded entry stays in the cache: far longer than the deadlines let a
 /// fetch run, so that a sweep never takes one from under a concurrent run.
@@ -390,13 +394,14 @@ fn checkout(dir: &Path, remote: &str, sha: &str) -> Result<(), Failure> {
     Ok(())
 }
 
-/// The standard output of git run in `dir`, or the error its standard error gives.
+/// The standard output of git run in `dir`, or the error its standard error gives. Only `ls-remote`
+/// writes nothing, so only its failure is the remote's: a fetch or a checkout also fails on a full
+/// disk or a lock, and git translates the messages that would tell them apart.
 fn git(dir: &Path, args: &[&str]) -> Result<String, Failure> {
     let step = args[0];
-    // The blobs of a filtered fetch come at checkout, so it too fails for the remote's sake.
-    let fail = |why| match step {
-        "ls-remote" | "fetch" | "checkout" => Failure::Unreachable(why),
-        _ => Failure::Other(why),
+    let fail = |why: String| match step {
+        "ls-remote" => Failure::Unreachable(why),
+        _ => Failure::Other(format!("git {step} failed: {why}")),
     };
     let limit = if matches!(step, "fetch" | "checkout") {
         TRANSFER
@@ -405,65 +410,176 @@ fn git(dir: &Path, args: &[&str]) -> Result<String, Failure> {
     };
     let out = output_within(command(dir).args(args), limit)
         .map_err(|e| Failure::Other(format!("git could not run ({e})")))?
-        .ok_or_else(|| fail(format!("git {step} ran for over {} s", limit.as_secs())))?;
+        .ok_or_else(|| fail(format!("ran for over {} s", limit.as_secs())))?;
     if out.status.success() {
         return Ok(String::from_utf8_lossy(&out.stdout).into_owned());
     }
-    Err(fail(error_of(&out, step)))
+    Err(fail(error_of(&out)))
 }
 
 /// The first fatal line of standard error says why; the last is often advice such as "and the
 /// repository exists.".
-fn error_of(out: &Output, step: &str) -> String {
+fn error_of(out: &Output) -> String {
     let stderr = String::from_utf8_lossy(&out.stderr);
     let fatal = stderr.lines().find_map(|l| l.strip_prefix("fatal: "));
     let why = fatal.or_else(|| stderr.lines().rev().map(str::trim).find(|l| !l.is_empty()));
-    why.map_or_else(|| format!("git {step} exited with {}", out.status), str::to_owned)
+    why.map_or_else(|| format!("exited with {}", out.status), str::to_owned)
 }
 
-/// The output of `command`, or `None` once it has run longer than `limit` and is killed. The pipes
-/// are read on threads, so that a full one never blocks the child, and left unread after a kill,
-/// since a helper the child started may hold them open past it.
+/// The output of `command`, or `None` once it has run longer than `limit` and is killed with every
+/// process it started. The pipes are read on threads, so that a full one never blocks the child,
+/// and for at most `LINGER` after it exits, since a helper it started may hold them open past it.
 fn output_within(command: &mut Command, limit: Duration) -> std::io::Result<Option<Output>> {
     let mut child = command
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()?;
-    let stdout = drain(child.stdout.take());
-    let stderr = drain(child.stderr.take());
+    let pipes = [drain(child.stdout.take()), drain(child.stderr.take())];
+    let Some(status) = wait_within(&mut child, limit)? else {
+        return Ok(None);
+    };
+    let closed = Instant::now() + LINGER;
+    while pipes.iter().any(|(reader, _)| !reader.is_finished()) && Instant::now() < closed {
+        std::thread::sleep(POLL);
+    }
+    let [stdout, stderr] = pipes.map(|(_, bytes)| std::mem::take(&mut *lock(&bytes)));
+    Ok(Some(Output { status, stdout, stderr }))
+}
+
+fn wait_within(child: &mut Child, limit: Duration) -> std::io::Result<Option<ExitStatus>> {
     let start = Instant::now();
-    let status = loop {
+    loop {
         if let Some(status) = child.try_wait()? {
-            break status;
+            return Ok(Some(status));
         }
         if start.elapsed() > limit {
+            kill_tree(child.id());
             let _ = child.kill();
             let _ = child.wait();
             return Ok(None);
         }
         std::thread::sleep(POLL);
-    };
-    let read = |pipe: JoinHandle<Vec<u8>>| pipe.join().unwrap_or_default();
-    Ok(Some(Output {
-        status,
-        stdout: read(stdout),
-        stderr: read(stderr),
-    }))
+    }
 }
 
-fn drain(pipe: Option<impl Read + Send + 'static>) -> JoinHandle<Vec<u8>> {
-    std::thread::spawn(move || {
-        let mut bytes = vec![];
-        if let Some(mut pipe) = pipe {
-            let _ = pipe.read_to_end(&mut bytes);
+type Sink = Arc<Mutex<Vec<u8>>>;
+
+/// The bytes read so far stay with the caller, who may stop waiting before the pipe closes.
+fn drain(pipe: Option<impl Read + Send + 'static>) -> (JoinHandle<()>, Sink) {
+    let sink = Sink::default();
+    let bytes = Arc::clone(&sink);
+    let reader = std::thread::spawn(move || {
+        let Some(mut pipe) = pipe else {
+            return;
+        };
+        let mut chunk = [0; 8192];
+        loop {
+            match pipe.read(&mut chunk) {
+                Ok(0) => break,
+                Ok(n) => lock(&bytes).extend_from_slice(&chunk[..n]),
+                Err(e) if e.kind() == ErrorKind::Interrupted => {}
+                Err(_) => break,
+            }
         }
-        bytes
-    })
+    });
+    (reader, sink)
+}
+
+fn lock(sink: &Sink) -> std::sync::MutexGuard<'_, Vec<u8>> {
+    sink.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// Stops `root`, then round by round the processes the stopped ones started, so that none forks
+/// past the kill. A stopped parent reaps no child, so an id found stays its process's until the
+/// kill. The rounds end when none is new, or after 8 against a tree that keeps growing.
+#[cfg(unix)]
+fn kill_tree(root: u32) {
+    let mut tree = vec![root];
+    let mut new = tree.clone();
+    for _ in 0..8 {
+        signal("STOP", &new);
+        new = processes()
+            .into_iter()
+            .filter(|(pid, parent)| tree.contains(parent) && !tree.contains(pid))
+            .map(|(pid, _)| pid)
+            .collect();
+        if new.is_empty() {
+            break;
+        }
+        tree.extend(&new);
+    }
+    signal("KILL", &tree);
+}
+
+/// Sends `name` through the shell's `kill`, since a slim image may have no `kill` program.
+#[cfg(unix)]
+fn signal(name: &str, pids: &[u32]) {
+    let _ = Command::new("sh")
+        .arg("-c")
+        .arg(format!("kill -s {name} -- \"$@\""))
+        .arg("sh")
+        .args(pids.iter().map(u32::to_string))
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
+}
+
+/// Every process id with its parent's.
+#[cfg(target_os = "linux")]
+fn processes() -> Vec<(u32, u32)> {
+    let Ok(entries) = std::fs::read_dir("/proc") else {
+        return vec![];
+    };
+    entries
+        .flatten()
+        .filter_map(|e| {
+            let pid = e.file_name().to_str()?.parse().ok()?;
+            let stat = std::fs::read_to_string(e.path().join("stat")).ok()?;
+            Some((pid, parent_in(&stat)?))
+        })
+        .collect()
+}
+
+/// The parent id in a `/proc/<pid>/stat`. The command name before it is in parentheses and may
+/// hold any character, so the fields count from the last `)`.
+#[cfg(target_os = "linux")]
+fn parent_in(stat: &str) -> Option<u32> {
+    let (_, fields) = stat.rsplit_once(')')?;
+    fields.split_whitespace().nth(1)?.parse().ok()
+}
+
+/// Every process id with its parent's.
+#[cfg(all(unix, not(target_os = "linux")))]
+fn processes() -> Vec<(u32, u32)> {
+    let out = Command::new("ps")
+        .args(["-A", "-o", "pid=", "-o", "ppid="])
+        .stdin(Stdio::null())
+        .stderr(Stdio::null())
+        .output();
+    let text = out.map_or_else(|_| String::new(), |o| String::from_utf8_lossy(&o.stdout).into_owned());
+    text.lines()
+        .filter_map(|l| {
+            let mut ids = l.split_whitespace().map(str::parse);
+            Some((ids.next()?.ok()?, ids.next()?.ok()?))
+        })
+        .collect()
+}
+
+#[cfg(windows)]
+fn kill_tree(root: u32) {
+    let _ = Command::new("taskkill")
+        .args(["/T", "/F", "/PID"])
+        .arg(root.to_string())
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
 }
 
 /// Git in `dir` alone: no repository above it, none the caller's environment names, and none of
-/// the user's hooks. A remote that asks for credentials fails rather than waiting on a prompt
+/// the user's hooks, the fsmonitor one included, which `core.hooksPath` does not cover. A remote that asks for credentials fails rather than waiting on a prompt
 /// nobody may see.
 fn command(dir: &Path) -> Command {
     let mut command = isolated(dir);
@@ -473,6 +589,7 @@ fn command(dir: &Path) -> Command {
     let hooks = dir.join(".git/hooks");
     command
         .args(STALL)
+        .args(["-c", "core.fsmonitor=false"])
         .arg("-c")
         .arg(format!("core.hooksPath={}", hooks.display()));
     command
@@ -599,11 +716,9 @@ mod tests {
         let _ = std::fs::remove_dir_all(core);
     }
 
-    /// Another container may run a fetch under the same process id, so its directory is no leftover.
-    #[test]
-    fn a_fetch_neither_takes_nor_uses_a_foreign_temporary_directory() {
-        let root = std::env::temp_dir().join(format!("odooscan-claim-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&root);
+    /// A repository in `root` with one commit holding `odoo/release.py`, and that commit.
+    fn remote_in(root: &Path) -> (String, String) {
+        let _ = std::fs::remove_dir_all(root);
         let remote = root.join("odoo.git");
         std::fs::create_dir_all(remote.join("odoo")).unwrap();
         std::fs::write(
@@ -620,9 +735,16 @@ mod tests {
         )
         .unwrap();
         let sha = git(&remote, &["rev-parse", "HEAD"]).unwrap().trim().to_owned();
+        (remote.display().to_string(), sha)
+    }
+
+    /// Another container may run a fetch under the same process id, so its directory is no leftover.
+    #[test]
+    fn a_fetch_neither_takes_nor_uses_a_foreign_temporary_directory() {
+        let root = std::env::temp_dir().join(format!("odooscan-claim-{}", std::process::id()));
+        let (remote, sha) = remote_in(&root);
         let core = root.join("core");
         let mut cache = cache_in(&core);
-        let remote = remote.display().to_string();
         cache.remote = &remote;
         let foreign = format!(".{}", std::process::id());
         std::fs::create_dir(core.join(&foreign)).unwrap();
@@ -652,5 +774,53 @@ mod tests {
             .unwrap()
             .unwrap();
         assert!(String::from_utf8_lossy(&out.stdout).starts_with("git version"));
+    }
+
+    #[test]
+    fn a_failed_checkout_is_not_blamed_on_the_remote() {
+        let root = std::env::temp_dir().join(format!("odooscan-lock-{}", std::process::id()));
+        let (remote, sha) = remote_in(&root);
+        let dir = root.join("checkout");
+        std::fs::create_dir_all(dir.join(".git")).unwrap();
+        std::fs::write(dir.join(".git/index.lock"), "").unwrap();
+        let failure = checkout(&dir, &remote, &sha).unwrap_err();
+        let cause = failure.cause(&remote);
+        assert!(matches!(failure, Failure::Other(_)), "{cause}");
+        assert!(
+            cause.starts_with("git checkout failed: ") && !cause.contains("could not reach"),
+            "{cause}"
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// Without the tree kill, the subshell outlives its killed parent and writes the mark.
+    #[cfg(unix)]
+    #[test]
+    fn a_step_past_its_deadline_is_killed_with_what_it_started() {
+        let mark = std::env::temp_dir().join(format!("odooscan-tree-{}", std::process::id()));
+        let _ = std::fs::remove_file(&mark);
+        let script = format!("(sleep 1; touch '{}') & wait", mark.display());
+        let out = output_within(Command::new("sh").args(["-c", &script]), Duration::from_millis(200)).unwrap();
+        assert!(out.is_none());
+        std::thread::sleep(Duration::from_millis(1500));
+        assert!(!mark.exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_helper_holding_the_pipes_open_delays_the_output_by_at_most_the_linger() {
+        let start = Instant::now();
+        let out = output_within(Command::new("sh").args(["-c", "sleep 30 & echo done"]), ANSWER)
+            .unwrap()
+            .unwrap();
+        assert_eq!(String::from_utf8_lossy(&out.stdout), "done\n");
+        assert!(start.elapsed() < Duration::from_secs(5));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn the_parent_id_follows_the_last_parenthesis_of_a_stat() {
+        assert_eq!(parent_in("12 (a) b) S 7 7 1 0"), Some(7));
+        assert_eq!(parent_in("12 a S 7"), None);
     }
 }

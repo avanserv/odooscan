@@ -21,12 +21,12 @@ shows no literal start, and for a class of unknown series the name the other rea
 unless that name is one of the class's parents.
 
 `--target-series 19.0` checks every module given to `check` as if its manifest named 19.0, against
-the core on the addons path, so a port shows what that series removed or no longer defines. A
-module on the addons path keeps the series its own manifest names, and one whose manifest names none
-takes the target. When an addons path entry is the root of an Odoo checkout and its
-`odoo/release.py` names another series, a notice says so; an entry such as the checkout's
-`odoo/addons` gives none, since the scan reads nothing outside the paths it is given. The flag
-conflicts with `--odoo-version` and has no configuration key.
+the core on the addons path, or the one fetched below when none is given, so a port shows what that
+series removed or no longer defines. A module on the addons path keeps the series its own manifest
+names, and one whose manifest names none takes the target. When an addons path entry is the root of
+an Odoo checkout and its `odoo/release.py` names another series, a notice says so; an entry such as
+the checkout's `odoo/addons` gives none, since the scan reads nothing outside the paths it is given.
+The flag conflicts with `--odoo-version` and has no configuration key.
 
 A summary then counts the findings per kind and per rule. A deprecation rule reporting at error
 severity counts as a removed API, below it as a deprecated API. The index rules OD201-OD204, OD206,
@@ -50,12 +50,13 @@ the cache removes nothing. The cache is `$ODOOSCAN_CACHE_DIR`, else
 `$XDG_CACHE_HOME/odooscan` for an absolute `XDG_CACHE_HOME`, `%LOCALAPPDATA%\odooscan` on Windows,
 or `~/.cache/odooscan`. On Windows, a cache in a deep directory may need `git config --global
 core.longpaths true`. `ODOOSCAN_ODOO_REMOTE` replaces `https://github.com/odoo/odoo`, for a mirror
-or a local clone. An ssh remote never prompts, unless `GIT_SSH_COMMAND`, `GIT_SSH` or
+or a local clone. An ssh remote never prompts, gives up on a host that does not answer within 30
+seconds and drops a connection silent for about 45 seconds, unless `GIT_SSH_COMMAND`, `GIT_SSH` or
 `core.sshCommand` says how to run ssh.
 
-Resolving the head gives up after a minute, and the fetch and the checkout after 30 minutes each.
-A transfer also gives up when it stays below 1 kB/s for 30 seconds over HTTP, or when an ssh
-connection stays silent for about 45 seconds. When the remote cannot be reached, a transfer stalls
-or runs out of time, the branch is missing, `git` cannot run or the cache cannot be written, a
-notice says why and the commit last fetched for the branch is used. Without one, `oscn` exits with
-status 2 and asks for `--addons-path`.
+Resolving the head gives up after a minute, and the fetch and the checkout after 30 minutes each; a
+step that runs out of time is killed with every process it started. A transfer also gives up when it
+stays below 1 kB/s for 30 seconds over HTTP. When the remote cannot be reached, a transfer stalls or
+runs out of time, the branch is missing, `git` cannot run or the cache cannot be written, a notice
+says why and the commit last fetched for the branch is used. Without one, `oscn` exits with status 2
+and asks for `--addons-path`.
