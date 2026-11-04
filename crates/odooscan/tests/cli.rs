@@ -622,6 +622,7 @@ const GUARDED: &[&str] = &[
     "custom/modern20/views/pages.xml:5:13: OD325",
     "custom/modern20/views/pages.xml:18:21: OD325",
     "custom/modern20/views/pages.xml:42:9: OD325",
+    "custom/modern20/views/pages.xml:52:9: OD325",
     "custom/tree_paths/views/partner.xml:8:21: OD306",
     "custom/tree_paths/views/partner.xml:29:13: OD306",
     "custom/tree_paths/views/partner.xml:48:13: OD306",
@@ -641,7 +642,7 @@ fn a_diff_writes_nothing_and_a_second_fix_changes_nothing() {
 
     let (code, _, stderr) = run(check_in(&dir, &[&checked[..], &["--fix"]].concat()));
     assert_eq!(code, Some(1), "{stderr}");
-    assert!(stderr.contains("fixed 19 diagnostics in 9 files"), "{stderr}");
+    assert!(stderr.contains("fixed 20 diagnostics in 9 files"), "{stderr}");
     let fixed = contents(&dir);
     let (_, _, stderr) = run(check_in(&dir, &[&checked[..], &["--fix"]].concat()));
     assert!(stderr.contains("fixed 0 diagnostics in 0 files"), "{stderr}");
@@ -1089,16 +1090,27 @@ fn a_fix_keeps_what_a_child_view_finds_or_sets_by_the_old_name() {
     let dir = scratch("fix_old_names");
     let parent =
         |id: &str| format!("<odoo><template id=\"{id}\"><span class=\"{id}\" t-esc=\"a\"/></template></odoo>\n");
-    let child = |id: &str, parent: &str, attr: &str| {
+    let child = |id: &str, parent: &str, spec: &str| {
         format!(
-            "<odoo><template id=\"{id}\" inherit_id=\"{parent}\"><xpath expr=\"//span[hasclass('{parent}')]\" position=\"attributes\"><attribute name=\"{attr}\">b</attribute></xpath></template></odoo>\n"
+            "<odoo><template id=\"{id}\" inherit_id=\"{parent}\"><xpath expr=\"//span[hasclass('{parent}')]\" position=\"attributes\">{spec}</xpath></template></odoo>\n"
         )
     };
     let views = [
         ("label.xml", parent("label")),
-        ("coded.xml", child("coded", "label", "t-esc")),
+        (
+            "coded.xml",
+            child("coded", "label", "<attribute name=\"t-esc\">b</attribute>"),
+        ),
         ("badge.xml", parent("badge")),
-        ("fielded.xml", child("fielded", "badge", "t-field")),
+        (
+            "fielded.xml",
+            child("fielded", "badge", "<attribute name=\"t-field\">b</attribute>"),
+        ),
+        ("tag.xml", parent("tag")),
+        (
+            "joined.xml",
+            child("joined", "tag", "<attribute name=\"t-out\" add=\"b\"/>"),
+        ),
     ];
     let files: Vec<(&str, &[u8])> = views.iter().map(|(f, v)| (*f, v.as_bytes())).collect();
     let pages = module(&dir, "pages", "20.0", &files);
@@ -1119,7 +1131,11 @@ fn a_fix_keeps_what_a_child_view_finds_or_sets_by_the_old_name() {
     let (code, stdout, stderr) = run(check_in(&dir, &["mods", "--fix"]));
     assert_eq!(code, Some(1), "{stderr}");
     assert!(stderr.contains("fixed 0 diagnostics in 0 files"), "{stderr}");
-    for place in ["pages/models/label.xml:1:", "pages/models/badge.xml:1:"] {
+    for place in [
+        "pages/models/label.xml:1:",
+        "pages/models/badge.xml:1:",
+        "pages/models/tag.xml:1:",
+    ] {
         assert!(reports(&stdout, place, "OD325"), "{place}: {stdout}");
     }
     assert!(reports(&stdout, "rows/models/list.xml:1:", "OD306"), "{stdout}");

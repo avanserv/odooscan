@@ -61,7 +61,7 @@ const LOCATING_ATTRS: [&str; 3] = ["name", "id", "t-call"];
 static ACTION_REF: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"%\(([\w.]+)\)d").unwrap());
 
 /// Output attributes an `<attribute>` spec may set, over which a renamed `t-out` would win.
-const OUT_BESIDE_ESCAPE: [&str; 3] = ["t-esc", "t-field", "t-raw"];
+const OUT_BESIDE_ESCAPE: [&str; 2] = ["t-esc", "t-field"];
 
 /// Attributes that make the value of a `<field>` something other than its `eval` or its text.
 const INDIRECT_VALUE: [&str; 4] = ["ref", "search", "file", "type"];
@@ -1322,9 +1322,9 @@ fn renamed(node: Node) -> Option<ArchElement> {
 
 /// Notes a spec that finds the parent's element by a name OD306 or OD325 rewrites, which keeps the
 /// tree from being fixed, and a `<tree>` the arch adds, which a `<tree>` spec may find. An
-/// `<attribute>` setting `t-esc`, `t-field` or `t-raw` puts it beside the parent's renamed `t-out`,
-/// which 20.0 `_compile_directive_out` reads first (`ir_qweb.py:2476-2480`), so the child's value
-/// would be lost.
+/// `<attribute>` setting `t-esc` or `t-field` puts it beside the parent's renamed `t-out`, which
+/// 20.0 `_compile_directive_out` reads first (`ir_qweb.py:2476-2480`), so the child's value would
+/// be lost. A `t-raw` renders nothing from saas~19.1 with or without the rename.
 fn old_names(node: Node, view: &mut ViewFact) {
     if node.has_tag_name("xpath") {
         let expr = node.attribute("expr").unwrap_or_default();
@@ -1332,13 +1332,22 @@ fn old_names(node: Node, view: &mut ViewFact) {
             XPATH_TREE.is_match(expr) || (XPATH_NAME_CALL.is_match(expr) && XPATH_TREE_STRING.is_match(expr));
         view.escape_specs |= expr.contains("t-esc");
     } else if node.has_tag_name("attribute") {
-        view.escape_specs |= node.attribute("name").is_some_and(|n| OUT_BESIDE_ESCAPE.contains(&n));
+        view.escape_specs |= meets_escape(node);
     } else if locates(node) {
         view.tree_specs |= node.has_tag_name("tree");
         view.escape_specs |= node.has_attribute("t-esc");
     } else {
         view.tree_elements |= node.has_tag_name("tree");
     }
+}
+
+/// Whether the `<attribute>` spec `node` meets a parent's `t-esc` once renamed. A `t-out` spec
+/// setting plain text replaces the parent's value either way, but a non-empty `add` or `remove`
+/// joins it (`x,y`, not `y`) and an empty one deletes it (20.0 `template_inheritance.py:256-311`).
+fn meets_escape(node: Node) -> bool {
+    let name = node.attribute("name").unwrap_or_default();
+    let text = !filled(node, "add") && !filled(node, "remove") && !node.text().unwrap_or_default().is_empty();
+    OUT_BESIDE_ESCAPE.contains(&name) || (name == "t-out" && !text)
 }
 
 /// OD325 on `node`. 19.0 `_compile_directive_out` renders the first of `t-out`, `t-field`, `t-esc`
@@ -3537,7 +3546,7 @@ mod tests {
     }
 
     #[test]
-    fn a_prefixed_tree_or_one_from_an_entity_stays() {
+    fn a_prefixed_name_or_one_from_an_entity_stays() {
         unfixed(&arch_record(r#"<x:tree xmlns:x="urn:x"><field name="a"/></x:tree>"#));
         let entity = r#"<!DOCTYPE odoo [<!ENTITY t "<tree/>">]>"#;
         unfixed(&format!(
@@ -3631,11 +3640,25 @@ mod tests {
             escapes
         );
         assert_eq!(noted(r#"<span t-esc="a" position="replace"/>"#), escapes);
-        let set = |name: &str| format!(r#"<span position="attributes"><attribute name="{name}">b</attribute></span>"#);
-        for name in ["t-esc", "t-field", "t-raw"] {
-            assert_eq!(noted(&set(name)), escapes, "{name}");
+        let set = |spec: &str| format!(r#"<span position="attributes">{spec}</span>"#);
+        for spec in [
+            r#"<attribute name="t-esc">b</attribute>"#,
+            r#"<attribute name="t-field">b</attribute>"#,
+            r#"<attribute name="t-out" add="b"/>"#,
+            r#"<attribute name="t-out" remove="b"/>"#,
+            r#"<attribute name="t-out"/>"#,
+            r#"<attribute name="t-out"><!-- c -->b</attribute>"#,
+        ] {
+            assert_eq!(noted(&set(spec)), escapes, "{spec}");
         }
-        assert_eq!(noted(&set("t-out")), none);
+        for spec in [
+            r#"<attribute name="t-raw">b</attribute>"#,
+            r#"<attribute name="t-out">b</attribute>"#,
+            r#"<attribute name="t-out" add="">b</attribute>"#,
+            r#"<attribute name="t-out" separator=" ">b</attribute>"#,
+        ] {
+            assert_eq!(noted(&set(spec)), none, "{spec}");
+        }
         assert_eq!(
             noted(r#"<xpath expr="//p" position="after"><tree/><span t-esc="a"/></xpath>"#),
             (false, false, false, true)

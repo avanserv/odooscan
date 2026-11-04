@@ -47,4 +47,24 @@
             <attribute name="t-esc">lamp.code</attribute>
         </xpath>
     </template>
+
+    <template id="lamp_tag">
+        <i class="lamp_tag" t-esc="lamp.code"/>
+    </template>
+
+    <template id="lamp_tag_named" inherit_id="lamp_tag">
+        <xpath expr="//i[hasclass('lamp_tag')]" position="attributes">
+            <attribute name="t-out" add="lamp.name" separator=" or "/>
+        </xpath>
+    </template>
+
+    <template id="lamp_title">
+        <h1 class="lamp_title" t-esc="lamp.name"/>
+    </template>
+
+    <template id="lamp_title_coded" inherit_id="lamp_title">
+        <xpath expr="//h1[hasclass('lamp_title')]" position="attributes">
+            <attribute name="t-out">lamp.code</attribute>
+        </xpath>
+    </template>
 </odoo>

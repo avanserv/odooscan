@@ -568,10 +568,10 @@ fn renamed_lists<'m>(index: &Index<'m>, mi: usize, out: &mut Out<'m>) {
     }
 }
 
-/// Whether a view of the tree of `view` finds a `<tree>` by its name: an xpath naming `tree`, or an
-/// unchecked module, which the fix leaves as it is, holding a `<tree>` spec or element. A `<tree>`
-/// spec of a checked module guards too while the tree adds a `<tree>`, since `--exclude`, the
-/// baseline or a write skip could apply one of the two fixes without the other.
+/// Whether a view in the inheritance tree of `view` finds a `<tree>` by its name: an xpath naming
+/// `tree`, or an unchecked module, which the fix leaves as it is, holding a `<tree>` spec or element.
+/// A `<tree>` spec of a checked module guards too while the tree adds a `<tree>` it may find, since
+/// `--exclude`, the baseline or a write skip could apply one of the two fixes without the other.
 fn tree_guarded(index: &Index, mi: usize, view: &ViewFact) -> bool {
     let finds_tree =
         |m: usize, v: &ViewFact| v.tree_paths || (!index.modules[m].checked && (v.tree_specs || !v.renamed.is_empty()));
@@ -591,7 +591,7 @@ fn push_guarded<'m>(out: &mut Out<'m>, path: &'m Path, diags: &[RawDiag], guarde
     }));
 }
 
-/// Whether `view` of module `mi`, or a view of its inheritance tree as far as the index holds it,
+/// Whether `view` of module `mi`, or a view in its inheritance tree as far as the index holds it,
 /// satisfies `holds`, given its module. Views outside the scan are out of reach.
 fn tree_holds(index: &Index, mi: usize, view: &ViewFact, holds: impl Fn(usize, &ViewFact) -> bool) -> bool {
     let start = view.inherit.as_deref().or(view.id.as_deref());

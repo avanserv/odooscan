@@ -742,8 +742,9 @@ pub struct ViewFact {
     /// OD325 on each element the arch adds with `t-esc`, which a spec only locates, reported only
     /// when the tree turns out to be QWeb.
     pub escapes: Vec<RawDiag>,
-    /// A spec carries or sets `t-esc`, or an xpath names it, so renaming the parent's would lose its
-    /// target or its value.
+    /// A spec locates by `t-esc` or an xpath names it, so renaming the parent's would lose its
+    /// target. Or an `<attribute>` sets `t-esc` or `t-field`, which the renamed `t-out` would hide,
+    /// or sets `t-out` other than to plain text, which would join the renamed value or delete it.
     pub escape_specs: bool,
     /// OD306 on each `<tree>` of the arch, reported whatever the tree, whose fix the tree may forbid.
     pub renamed: Vec<RawDiag>,
