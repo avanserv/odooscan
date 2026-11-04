@@ -2842,36 +2842,65 @@ impl<'m> Inheritance<'m> {
     /// The elements of every node in the tree under `root`.
     pub fn tree(&self, root: String, modules: &'m [Module], sees: impl Fn(usize) -> bool) -> ViewTree<'m> {
         let mut tree = ViewTree::default();
+        for node in self.under(&root) {
+            let module = modules[node.module].name.as_str();
+            let elements = node.fact.elements.iter().map(|e| located(e, module));
+            tree.subviews.extend(node.fact.subviews.iter());
+            tree.valued.extend(node.fact.valued.iter().map(|v| ArchValued {
+                elements: v.elements.iter().map(|e| located(e, module)).collect(),
+                attrs: v.attrs.clone(),
+            }));
+            tree.emptied.extend(node.fact.emptied.iter().map(|e| ArchEmptied {
+                attr: e.attr,
+                target: e.target.as_ref().map(|t| located(t, module)),
+            }));
+            if sees(node.module) {
+                tree.visible.extend(elements);
+            } else {
+                for e in elements {
+                    tree.hidden.entry(e).or_insert(module);
+                }
+            }
+        }
+        tree.root = root;
+        tree
+    }
+
+    /// Whether a node of the tree under `root` holds, given its module and its view.
+    pub fn any(&self, root: &str, holds: impl Fn(usize, &ViewFact) -> bool) -> bool {
+        self.under(root).into_iter().any(|n| holds(n.module, n.fact))
+    }
+
+    /// The nodes of the tree under `root`, each once.
+    fn under(&self, root: &str) -> Vec<&ViewNode<'m>> {
+        let mut nodes = vec![];
         let mut seen = FxHashSet::default();
-        let mut stack = vec![root.as_str()];
+        let mut stack = vec![root];
         while let Some(id) = stack.pop() {
             if !seen.insert(id) {
                 continue;
             }
-            for node in self.nodes.get(id).map(Vec::as_slice).unwrap_or_default() {
-                let module = modules[node.module].name.as_str();
-                let elements = node.fact.elements.iter().map(|e| located(e, module));
-                tree.subviews.extend(node.fact.subviews.iter());
-                tree.valued.extend(node.fact.valued.iter().map(|v| ArchValued {
-                    elements: v.elements.iter().map(|e| located(e, module)).collect(),
-                    attrs: v.attrs.clone(),
-                }));
-                tree.emptied.extend(node.fact.emptied.iter().map(|e| ArchEmptied {
-                    attr: e.attr,
-                    target: e.target.as_ref().map(|t| located(t, module)),
-                }));
-                if sees(node.module) {
-                    tree.visible.extend(elements);
-                } else {
-                    for e in elements {
-                        tree.hidden.entry(e).or_insert(module);
-                    }
-                }
-            }
+            nodes.extend(self.nodes.get(id).into_iter().flatten());
             stack.extend(self.children.get(id).into_iter().flatten().map(String::as_str));
         }
-        tree.root = root;
-        tree
+        nodes
+    }
+
+    /// The top of `id`'s inheritance as far as the index holds it: the first id on the way whose
+    /// nodes name no parent, or that no indexed view defines, whose indexed children are then all
+    /// the tree the scan knows.
+    pub fn top(&self, mut id: String) -> String {
+        for _ in 0..32 {
+            match self
+                .nodes
+                .get(&id)
+                .and_then(|nodes| nodes.iter().find_map(|n| n.inherit.clone()))
+            {
+                Some(parent) => id = parent,
+                None => break,
+            }
+        }
+        id
     }
 }
 

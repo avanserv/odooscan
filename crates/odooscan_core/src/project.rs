@@ -385,15 +385,15 @@ impl ModuleContext<'_> {
         };
         let text = decoded(&path, &bytes, self.series);
         let text = text.as_deref();
-        (self.parsed(path, text), text.is_none())
+        (self.parsed(path, text, &bytes), text.is_none())
     }
 
-    fn parsed(&self, path: PathBuf, text: Option<&str>) -> Option<ParsedFile> {
+    fn parsed(&self, path: PathBuf, text: Option<&str>, bytes: &[u8]) -> Option<ParsedFile> {
         if path.extension().is_some_and(|e| e == "py") {
             let facts = python::analyze(text?, self.series);
             return Some(Ok(self.source(path, text)?.with(facts)));
         }
-        let facts = self.data_facts(&path, text);
+        let facts = self.data_facts(&path, text, bytes);
         Some(Err(self.source(path, text)?.with(facts)))
     }
 
@@ -413,7 +413,7 @@ impl ModuleContext<'_> {
         })
     }
 
-    fn data_facts(&self, path: &Path, text: Option<&str>) -> DataFacts {
+    fn data_facts(&self, path: &Path, text: Option<&str>, bytes: &[u8]) -> DataFacts {
         let Some(text) = text else {
             return DataFacts {
                 unreadable: true,
@@ -421,7 +421,11 @@ impl ModuleContext<'_> {
             };
         };
         if path.extension().is_some_and(|e| e == "xml") {
-            return xml::analyze(text, self.series);
+            let mut facts = xml::analyze(text, self.series);
+            if text.as_bytes() != bytes {
+                facts.drop_fixes();
+            }
+            return facts;
         }
         csvdata::analyze(text, &loads_into(path))
     }

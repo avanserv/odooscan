@@ -210,7 +210,8 @@ fn company_check_severity_follows_the_module_series() {
 
 #[test]
 fn tree_severity_is_an_error() {
-    assert_eq!(severities("OD306"), [("bad_sale".to_owned(), Severity::Error)]);
+    let expected = [("bad_sale", Severity::Error), ("tree_paths", Severity::Error)];
+    assert_eq!(severities("OD306"), expected.map(|(m, s)| (m.to_owned(), s)));
 }
 
 #[test]

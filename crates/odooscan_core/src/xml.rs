@@ -1,3 +1,4 @@
+use std::ops::Range;
 use std::sync::LazyLock;
 
 use regex::{Captures, Regex};
@@ -9,6 +10,7 @@ use crate::facts::{
     ArchModifier, ArchSubview, ArchValued, DataFacts, DomainFact, FieldWrite, FunctionCall, Lines, Pos, RawDiag,
     RecordFact, RecordWrite, ReportFact, RuleFact, ServerFact, Spanned, ViewFact, WrittenValue, XmlDef, XmlRef,
 };
+use crate::fix::{Edit, Fix};
 use crate::modifier;
 use crate::record_eval;
 use crate::series::Series;
@@ -39,6 +41,8 @@ static XPATH_LAST_SUBVIEW: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r#"field\[@name=['"]\w+['"]\]/+([\w-]+)(\[[^\]]*\])*$"#).unwrap());
 /// A step on a view tag other than through a field may land in the main view or in any subview.
 static XPATH_AMBIGUOUS: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(^|/)(list|tree|kanban|column)\b").unwrap());
+/// An xpath that names `tree` as a tag, in a step or an axis, rather than in an attribute or a string.
+static XPATH_TREE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"(^|[^\w.@'"-])tree($|[^\w.'"-])"#).unwrap());
 
 /// Path segment for an arch position whose model cannot be told without the parent view.
 pub const UNKNOWN_CONTEXT: &str = "?";
@@ -312,7 +316,7 @@ impl Walker<'_> {
             let pos = self.pos(n);
             arch_element(n, pos, &mut view);
             if n.has_attribute("t-esc") && !locates(n) {
-                view.escapes.push(pos);
+                view.escapes.push(escape(n, pos));
             }
         }
         self.facts.views.push(view);
@@ -619,10 +623,9 @@ impl Walker<'_> {
             self.view_key(field);
         }
         if name == "view_mode" && field.text().is_some_and(|t| t.split(',').any(|m| m.trim() == "tree")) {
-            let pos = self.pos(field);
-            self.facts
-                .diags
-                .push(RawDiag::new("OD306", pos, "view_mode 'tree' is renamed 'list'"));
+            let mut diag = RawDiag::new("OD306", self.pos(field), "view_mode 'tree' is renamed 'list'");
+            diag.fix = listed_modes(field);
+            self.facts.diags.push(diag);
         }
     }
 
@@ -692,7 +695,7 @@ impl Walker<'_> {
         self.arch_modifiers(node, path, view);
         self.arch_attrs(node, pos);
         self.groups(node);
-        self.arch_tag(node, tag, pos);
+        self.arch_tag(node, tag, pos, view);
         Self::arch_markup(node, tag, pos, view);
         if tag == "field"
             && let Some(name) = node.attribute("name").filter(|n| !n.contains('.'))
@@ -804,12 +807,13 @@ impl Walker<'_> {
         }
     }
 
-    fn arch_tag(&mut self, node: Node, tag: &str, pos: Pos) {
+    fn arch_tag(&mut self, node: Node, tag: &str, pos: Pos, view: &mut ViewFact) {
         match tag {
-            "tree" => self
-                .facts
-                .diags
-                .push(RawDiag::new("OD306", pos, "the <tree> view is renamed <list>")),
+            "tree" => {
+                let mut diag = RawDiag::new("OD306", pos, "the <tree> view is renamed <list>");
+                diag.fix = rename_tag(node, "list");
+                view.renamed.push(diag);
+            }
             "attribute" if matches!(node.attribute("name"), Some("attrs" | "states")) => {
                 self.facts.diags.push(RawDiag::new("OD305", pos, "the attrs and states attributes are removed; write invisible, readonly or required as a Python expression"));
             }
@@ -825,7 +829,7 @@ impl Walker<'_> {
             return;
         }
         if node.has_attribute("t-esc") {
-            view.escapes.push(pos);
+            view.escapes.push(escape(node, pos));
         }
         if node.attribute("t-name") == Some("kanban-box") && !beside_card(node) {
             view.dropped
@@ -1258,6 +1262,7 @@ fn arch_domain(
 /// can locate. A spec on another tag than field matches every attribute it carries, so checking one
 /// that names the element is a necessary condition.
 fn arch_element(node: Node, pos: Pos, view: &mut ViewFact) {
+    old_names(node, view);
     match node.tag_name().name() {
         "xpath" => view
             .locators
@@ -1305,6 +1310,117 @@ fn renamed(node: Node) -> Option<ArchElement> {
         attr: attr.to_owned(),
         value: node.text()?.trim().to_owned(),
     })
+}
+
+/// Notes a spec that finds the parent's element by a name OD306 or OD325 rewrites, which keeps the
+/// tree from being fixed.
+fn old_names(node: Node, view: &mut ViewFact) {
+    if node.has_tag_name("xpath") {
+        let expr = node.attribute("expr").unwrap_or_default();
+        view.tree_paths |= XPATH_TREE.is_match(expr);
+        view.escape_specs |= expr.contains("t-esc");
+    } else if locates(node) {
+        view.tree_specs |= node.has_tag_name("tree");
+        view.escape_specs |= node.has_attribute("t-esc");
+    }
+}
+
+/// OD325 on `node`. 19.0 `_compile_directive_out` renders the first of `t-out`, `t-field`, `t-esc`
+/// and `t-raw` the element carries (`ir_qweb.py:2363-2372`), so beside another one the rename would
+/// repeat `t-out` or change which one renders.
+fn escape(node: Node, pos: Pos) -> RawDiag {
+    let mut diag = RawDiag::new(
+        "OD325",
+        pos,
+        "the server no longer knows t-esc and renders nothing for it; write t-out",
+    );
+    let alone = !["t-out", "t-field", "t-raw"].iter().any(|a| node.has_attribute(*a));
+    diag.fix = alone.then(|| rename_attr(node, "t-esc", "t-out")).flatten();
+    diag
+}
+
+/// Whether the text of `node` is in the document's body: what a DOCTYPE entity expands to has the
+/// offsets of the entity's definition.
+fn in_body(node: Node) -> bool {
+    node.range().start >= node.document().root_element().range().start
+}
+
+/// The edit writing `to` over `from` at `start` of `text`, when `from` is there.
+fn renaming(text: &str, start: usize, from: &str, to: &str) -> Option<Edit> {
+    (text.get(start..start + from.len())? == from).then(|| Edit {
+        start,
+        end: start + from.len(),
+        expected: from.to_owned(),
+        replacement: to.to_owned(),
+    })
+}
+
+/// The fix renaming element `node` to `to`, in its opening tag and its closing one if any. A
+/// prefixed name stays, since the text holds the prefix where the bare name is looked for.
+fn rename_tag(node: Node, to: &str) -> Option<Fix> {
+    let text = node.document().input_text();
+    let (range, name) = (node.range(), node.tag_name().name());
+    let open = range.start + 1;
+    let ends_name = |b: &u8| matches!(b, b' ' | b'\t' | b'\r' | b'\n' | b'/' | b'>');
+    if !in_body(node) || !text.as_bytes().get(open + name.len()).is_some_and(ends_name) {
+        return None;
+    }
+    let mut edits = vec![renaming(text, open, name, to)?];
+    let element = text.get(range.clone())?;
+    if !element.ends_with("/>") {
+        let close = element.strip_suffix('>')?.trim_end_matches([' ', '\t', '\r', '\n']);
+        let start = range.start + close.strip_suffix(name)?.strip_suffix("</")?.len() + 2;
+        edits.push(renaming(text, start, name, to)?);
+    }
+    Some(Fix { edits })
+}
+
+/// The fix renaming attribute `from` of `node` to `to`.
+fn rename_attr(node: Node, from: &str, to: &str) -> Option<Fix> {
+    let attr = node
+        .attributes()
+        .find(|a| a.name() == from && a.namespace().is_none())?;
+    let start = attr.range_qname().start;
+    in_body(node)
+        .then(|| renaming(node.document().input_text(), start, from, to))
+        .flatten()
+        .map(Fix::single)
+}
+
+/// The fix renaming each `tree` of a `view_mode` to `list`. Odoo refuses a mode listed twice (18.0
+/// `ir_actions.py:293-298`, 20.0 `:283-287`), so a `view_mode` that lists `list` stays.
+fn listed_modes(field: Node) -> Option<Fix> {
+    if INDIRECT_VALUE.iter().chain(&["eval"]).any(|a| field.has_attribute(*a)) {
+        return None;
+    }
+    let (input, range) = plain_text(field)?;
+    let modes: Vec<&str> = input[range.clone()].split(',').collect();
+    if modes.iter().any(|m| m.trim() == "list") {
+        return None;
+    }
+    let mut at = range.start;
+    let mut edits = vec![];
+    for mode in modes {
+        let lead = mode.len() - mode.trim_start().len();
+        if mode.trim() == "tree" {
+            edits.extend(renaming(input, at + lead, "tree", "list"));
+        }
+        at += mode.len() + 1;
+    }
+    (!edits.is_empty()).then_some(Fix { edits })
+}
+
+/// The document's text and the range of the text of `field` in it, when that text is the field's
+/// only content, closed by its end tag, and spelled as Odoo reads it: no entity and no CDATA.
+fn plain_text<'i>(field: Node<'_, 'i>) -> Option<(&'i str, Range<usize>)> {
+    let mut children = field.children();
+    let node = children.next().filter(Node::is_text)?;
+    let input = node.document().input_text();
+    let range = node.range();
+    let raw = input.get(range.clone())?;
+    let spelled = node.text() == Some(raw) && !raw.contains('&');
+    let closed = input[range.end..].starts_with("</");
+    (spelled && closed && children.next().is_none() && in_body(node)).then_some((input, range))
 }
 
 /// Whether Odoo looks `node` up in the parent view rather than adding it: a spec, or the child of a
@@ -3322,7 +3438,7 @@ mod tests {
     }
 
     fn escape_lines(view: &ViewFact) -> Vec<u32> {
-        view.escapes.iter().map(|p| p.line).collect()
+        view.escapes.iter().map(|d| d.pos.line).collect()
     }
 
     #[test]
@@ -3343,5 +3459,144 @@ mod tests {
             "<record id=\"v\" model=\"ir.ui.view\"><field name=\"inherit_id\" ref=\"p\"/><field name=\"arch\" type=\"xml\"><data><span t-esc=\"a\" position=\"replace\"/><xpath expr=\"//p\" position=\"after\">\n<em t-esc=\"b\"/></xpath></data></field></record>",
         );
         assert_eq!(escape_lines(&record), [2]);
+    }
+
+    /// The OD306 and OD325 findings of `facts`, wherever the facts hold them.
+    fn renames(facts: &DataFacts) -> Vec<&RawDiag> {
+        let views = facts.views.iter().flat_map(|v| v.renamed.iter().chain(&v.escapes));
+        let all = facts.diags.iter().chain(views);
+        all.filter(|d| matches!(d.code, "OD306" | "OD325")).collect()
+    }
+
+    /// `text` with the fixes of its OD306 and OD325 findings applied, and how many had none.
+    fn fixed(text: &str) -> (String, usize) {
+        let facts = analyze(text);
+        let found = renames(&facts);
+        assert!(!found.is_empty(), "{text}");
+        let fixes: Vec<&Fix> = found.iter().filter_map(|d| d.fix.as_ref()).collect();
+        let (out, outcomes) = crate::fix::apply(text.as_bytes(), &fixes);
+        assert!(outcomes.iter().all(|o| *o == crate::fix::Outcome::Applied), "{text}");
+        (String::from_utf8(out).unwrap(), found.len() - fixes.len())
+    }
+
+    /// Fixes every finding of `text`, then checks the result reads and reports none.
+    fn rewrites(text: &str) -> String {
+        let (out, left) = fixed(text);
+        assert_eq!(left, 0, "{text}");
+        let again = analyze(&out);
+        assert!(!again.unreadable && renames(&again).is_empty(), "{out}");
+        out
+    }
+
+    fn unfixed(text: &str) {
+        assert_eq!(fixed(text), (text.to_owned(), 1), "{text}");
+    }
+
+    fn arch_record(arch: &str) -> String {
+        format!(
+            r#"<odoo><record id="v" model="ir.ui.view"><field name="arch" type="xml">{arch}</field></record></odoo>"#
+        )
+    }
+
+    fn window_action(view_mode: &str) -> String {
+        format!(
+            r#"<odoo><record id="a" model="ir.actions.act_window"><field name="view_mode">{view_mode}</field></record></odoo>"#
+        )
+    }
+
+    #[test]
+    fn a_tree_becomes_a_list_in_both_its_tags() {
+        let spaced = arch_record("<tree string=\"x\">\n<field name=\"a\"/></tree >");
+        assert_eq!(
+            rewrites(&spaced),
+            arch_record("<list string=\"x\">\n<field name=\"a\"/></list >")
+        );
+        let empty = arch_record(r#"<form><field name="l"><tree/></field></form>"#);
+        assert_eq!(rewrites(&empty), empty.replace("<tree/>", "<list/>"));
+        let crlf = format!(
+            "\u{feff}<?xml version=\"1.0\"?>\r\n{}\r\n",
+            arch_record("<tree\r\n>\r\n</tree\r\n>")
+        );
+        assert_eq!(rewrites(&crlf), crlf.replace("tree", "list"));
+    }
+
+    #[test]
+    fn a_prefixed_tree_or_one_from_an_entity_stays() {
+        unfixed(&arch_record(r#"<x:tree xmlns:x="urn:x"><field name="a"/></x:tree>"#));
+        let entity = r#"<!DOCTYPE odoo [<!ENTITY t "<tree/>">]>"#;
+        unfixed(&format!(
+            "{entity}{}",
+            arch_record(r#"<form><field name="l">&t;</field></form>"#)
+        ));
+        let entity = r#"<!DOCTYPE odoo [<!ENTITY s "<span t-esc='a'/>">]>"#;
+        unfixed(&format!(
+            "{entity}<odoo><template id=\"t\"><div>&s;</div></template></odoo>"
+        ));
+    }
+
+    #[test]
+    fn each_tree_of_a_view_mode_becomes_list() {
+        assert_eq!(rewrites(&window_action(" tree , form")), window_action(" list , form"));
+        assert_eq!(rewrites(&window_action("kanban,tree")), window_action("kanban,list"));
+    }
+
+    #[test]
+    fn a_view_mode_listing_list_or_spelled_otherwise_stays() {
+        for view_mode in [
+            "tree,list",
+            "tree, list",
+            "tr&#101;e,form",
+            "<![CDATA[tree,form]]>",
+            "tree,form<!-- kanban -->",
+        ] {
+            unfixed(&window_action(view_mode));
+        }
+        let evaluated = window_action("tree,form").replace(r#"name="view_mode""#, r#"name="view_mode" eval="'list'""#);
+        unfixed(&evaluated);
+    }
+
+    #[test]
+    fn t_esc_becomes_t_out() {
+        let template = "<odoo><template id=\"t\"><span class=\"a\" t-esc=\"a\" t-options=\"{}\"/></template></odoo>";
+        assert_eq!(rewrites(template), template.replace("t-esc", "t-out"));
+    }
+
+    #[test]
+    fn t_esc_beside_another_output_stays() {
+        for other in ["t-out", "t-field", "t-raw"] {
+            unfixed(&format!(
+                "<odoo><template id=\"t\"><span t-esc=\"a\" {other}=\"b\"/></template></odoo>"
+            ));
+        }
+    }
+
+    #[test]
+    fn notes_the_specs_that_find_an_old_name() {
+        let noted = |arch: &str| {
+            let v = extension(arch);
+            (v.tree_paths, v.tree_specs, v.escape_specs)
+        };
+        assert_eq!(
+            noted(r#"<xpath expr="//field[@name='a']/tree" position="inside"/>"#),
+            (true, false, false)
+        );
+        assert_eq!(
+            noted(r#"<xpath expr="//tree[1]" position="inside"/>"#),
+            (true, false, false)
+        );
+        assert_eq!(
+            noted(r#"<xpath expr="//field[@name='tree']" position="inside"/>"#),
+            (false, false, false)
+        );
+        assert_eq!(noted(r#"<tree position="attributes"/>"#), (false, true, false));
+        assert_eq!(
+            noted(r#"<xpath expr="//span[@t-esc='a']" position="replace"/>"#),
+            (false, false, true)
+        );
+        assert_eq!(noted(r#"<span t-esc="a" position="replace"/>"#), (false, false, true));
+        assert_eq!(
+            noted(r#"<xpath expr="//p" position="after"><tree/><span t-esc="a"/></xpath>"#),
+            (false, false, false)
+        );
     }
 }

@@ -243,6 +243,7 @@ pub fn check_module<'m>(index: &Index<'m>, mi: usize, series: Option<Series>) ->
     refused_server_code(index, mi, series, &mut out);
     refused_file_names(index, mi, series, &mut out);
     removed_escapes(index, mi, &mut out);
+    renamed_lists(index, mi, &mut out);
     dropped_markup(index, mi, &mut out);
     for (_, file) in es_modules(index, mi, series) {
         if let Some(e) = &file.facts.syntax_error {
@@ -552,16 +553,48 @@ fn removed_escapes<'m>(index: &Index<'m>, mi: usize, out: &mut Out<'m>) {
     let module = &index.modules[mi];
     for file in module.data.iter().filter(|f| f.rank.is_some()) {
         for view in file.facts.views.iter().filter(|v| qweb_view(index, module, v)) {
-            for pos in &view.escapes {
-                out.push(
-                    &file.path,
-                    "OD325",
-                    *pos,
-                    "the server no longer knows t-esc and renders nothing for it; write t-out",
-                );
-            }
+            let guarded = || tree_holds(index, mi, view, |_, v| v.escape_specs);
+            push_guarded(out, &file.path, &view.escapes, guarded);
         }
     }
+}
+
+/// OD306 on each `<tree>` of a view. A `<tree>` spec of a checked module is renamed with the element
+/// it finds, so the fix waits only while an xpath of the tree names `tree`, or an unchecked module,
+/// which the fix leaves as it is, holds a `<tree>` spec or element in it.
+fn renamed_lists<'m>(index: &Index<'m>, mi: usize, out: &mut Out<'m>) {
+    let finds_tree =
+        |m: usize, v: &ViewFact| v.tree_paths || !index.modules[m].checked && (v.tree_specs || !v.renamed.is_empty());
+    for file in &index.modules[mi].data {
+        for view in &file.facts.views {
+            push_guarded(out, &file.path, &view.renamed, || {
+                tree_holds(index, mi, view, finds_tree)
+            });
+        }
+    }
+}
+
+/// Reports `diags`, without their fixes when `guarded` says the tree forbids them.
+fn push_guarded<'m>(out: &mut Out<'m>, path: &'m Path, diags: &[RawDiag], guarded: impl FnOnce() -> bool) {
+    let unfixed = diags.iter().any(|d| d.fix.is_some()) && guarded();
+    out.diags.extend(diags.iter().map(|d| {
+        let mut d = d.clone();
+        if unfixed {
+            d.fix = None;
+        }
+        (path, d)
+    }));
+}
+
+/// Whether `view` of module `mi`, or a view of its inheritance tree as far as the index holds it,
+/// satisfies `holds`, given its module. Views outside the scan are out of reach.
+fn tree_holds(index: &Index, mi: usize, view: &ViewFact, holds: impl Fn(usize, &ViewFact) -> bool) -> bool {
+    let start = view.inherit.as_deref().or(view.id.as_deref());
+    let tree = |start: &str| {
+        let top = index.views.top(full_id(&index.modules[mi].name, start));
+        index.views.any(&top, &holds)
+    };
+    holds(mi, view) || start.is_some_and(tree)
 }
 
 /// OD326 and OD327 on the markup the web client stops reading, unless the view's tree is QWeb, as a

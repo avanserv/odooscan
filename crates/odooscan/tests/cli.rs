@@ -532,7 +532,7 @@ fn a_fetch_runs_none_of_the_users_hooks() {
     assert!(!ran.exists(), "{stderr}");
 }
 
-/// The findings `--fix` rewrites in the fixture, by message.
+/// The findings `--fix` rewrites in the fixture, by message, but those of `GUARDED`.
 const FIXED: &[&str] = &[
     "@api.multi no longer exists",
     "group_operator is renamed",
@@ -541,6 +541,16 @@ const FIXED: &[&str] = &[
     "self._context is deprecated",
     "sudo(user)",
     "track_visibility=",
+    "the <tree> view is renamed",
+    "view_mode 'tree' is renamed",
+    "the server no longer knows t-esc",
+];
+
+/// The findings of `FIXED` that a view of their tree keeps unfixed, by their path and position.
+const GUARDED: &[&str] = &[
+    "custom/modern20/views/pages.xml:5:13: OD325",
+    "custom/modern20/views/pages.xml:18:21: OD325",
+    "custom/tree_paths/views/partner.xml:8:21: OD306",
 ];
 
 #[test]
@@ -557,15 +567,19 @@ fn a_diff_writes_nothing_and_a_second_fix_changes_nothing() {
 
     let (code, _, stderr) = run(check_in(&dir, &[&checked[..], &["--fix"]].concat()));
     assert_eq!(code, Some(1), "{stderr}");
-    assert!(stderr.contains("fixed 14 diagnostics in 7 files"), "{stderr}");
+    assert!(stderr.contains("fixed 18 diagnostics in 9 files"), "{stderr}");
     let fixed = contents(&dir);
     let (_, _, stderr) = run(check_in(&dir, &[&checked[..], &["--fix"]].concat()));
     assert!(stderr.contains("fixed 0 diagnostics in 0 files"), "{stderr}");
     assert!(contents(&dir) == fixed, "the second --fix wrote");
 
     let (_, stdout, _) = run(check_in(&dir, &checked));
-    let left: Vec<&str> = stdout.lines().filter(|l| FIXED.iter().any(|m| l.contains(m))).collect();
+    let left = stdout.lines().filter(|l| FIXED.iter().any(|m| l.contains(m)));
+    let left: Vec<&str> = left.filter(|l| !GUARDED.iter().any(|g| l.contains(g))).collect();
     assert!(left.is_empty(), "{left:?}");
+    for guarded in GUARDED {
+        assert!(stdout.contains(guarded), "{guarded}: {stdout}");
+    }
 }
 
 /// A module of `series` named `name` under `dir/mods`, holding `files` under `models/`.
@@ -578,6 +592,15 @@ fn module(dir: &Path, name: &str, series: &str, files: &[(&str, &[u8])]) -> Path
         fs::write(root.join("models").join(file), bytes).unwrap();
     }
     root.join("models")
+}
+
+/// Lists `files`, under `models/` of the module, in the manifest's data.
+fn load(models: &Path, files: &[&str]) {
+    let data: Vec<String> = files.iter().map(|f| format!("\"models/{f}\"")).collect();
+    let manifest = models.parent().unwrap().join("__manifest__.py");
+    let text = fs::read_to_string(&manifest).unwrap();
+    let listed = format!("\"data\": [{}], \"depends\"", data.join(", "));
+    fs::write(&manifest, text.replace("\"depends\"", &listed)).unwrap();
 }
 
 const AVERAGED: &str = "from odoo import fields, models\n\n\nclass X(models.Model):\n    _inherit = 'res.partner'\n\n    x = fields.Float(group_operator='avg')\n";
@@ -594,6 +617,55 @@ fn a_fix_keeps_the_bom_and_the_crlf_line_ends() {
         String::from_utf8(fs::read(models.join("x.py")).unwrap()).unwrap(),
         expected
     );
+}
+
+/// A list view of `id` in an `<odoo>` document, its lines ended by `eol`.
+fn tree_view(id: &str, eol: &str) -> String {
+    [
+        "<odoo>",
+        &format!("    <record id=\"{id}\" model=\"ir.ui.view\">"),
+        "        <field name=\"model\">res.partner</field>",
+        "        <field name=\"arch\" type=\"xml\"><tree string=\"NAME\"><field name=\"name\"/></tree></field>",
+        "    </record>",
+        "</odoo>",
+        "",
+    ]
+    .join(eol)
+}
+
+#[test]
+fn an_xml_fix_keeps_its_bytes_and_skips_a_text_that_is_not_them() {
+    let dir = scratch("fix_xml_bytes");
+    let latin1 = |id: &str, name: &[u8]| {
+        let text = format!(
+            "<?xml version=\"1.0\" encoding=\"ISO-8859-1\"?>\n{}",
+            tree_view(id, "\n")
+        );
+        let (head, tail) = text.split_once("NAME").unwrap();
+        [head.as_bytes(), name, tail.as_bytes()].concat()
+    };
+    let accented = latin1("accented", b"R\xe9sum\xe9");
+    let ascii = latin1("ascii", b"Resume");
+    let crlf = format!("\u{feff}<?xml version=\"1.0\"?>\r\n{}", tree_view("crlf", "\r\n"));
+    let files: [(&str, &[u8]); 3] = [
+        ("accented.xml", &accented),
+        ("ascii.xml", &ascii),
+        ("crlf.xml", crlf.as_bytes()),
+    ];
+    let models = module(&dir, "xml_bytes", "18.0", &files);
+    load(&models, &["accented.xml", "ascii.xml", "crlf.xml"]);
+    let (code, _, stderr) = run(check_in(&dir, &["mods", "--fix"]));
+    assert_eq!(code, Some(1), "{stderr}");
+    // The accented file has no fix to drop as stale, rather than one that no longer matches.
+    assert!(
+        stderr.contains("fixed 2 diagnostics in 2 files") && !stderr.contains("not fixed"),
+        "{stderr}"
+    );
+    let listed = |bytes: &[u8]| String::from_utf8_lossy(bytes).replace("tree", "list").into_bytes();
+    let read = |file: &str| fs::read(models.join(file)).unwrap();
+    assert_eq!(read("accented.xml"), accented);
+    assert_eq!(read("ascii.xml"), listed(&ascii));
+    assert_eq!(read("crlf.xml"), listed(crlf.as_bytes()));
 }
 
 #[test]
@@ -782,4 +854,57 @@ fn a_diff_of_nothing_reported_exits_0() {
     module(&dir, "clean", "18.0", &[("x.py", clean.as_bytes())]);
     let (code, stdout, stderr) = run(check_in(&dir, &["mods", "--diff"]));
     assert_eq!((code, stdout.as_str()), (Some(0), ""), "{stderr}");
+}
+
+/// A view of `res.partner` holding `arch`, inheriting `parent` when one is given.
+fn partner_view(id: &str, parent: Option<&str>, arch: &str) -> String {
+    let inherit = parent.map(|p| format!("<field name=\"inherit_id\" ref=\"{p}\"/>"));
+    let fields = format!(
+        "<field name=\"model\">res.partner</field>{}",
+        inherit.unwrap_or_default()
+    );
+    format!(
+        "<odoo><record id=\"{id}\" model=\"ir.ui.view\">{fields}<field name=\"arch\" type=\"xml\">{arch}</field></record></odoo>\n"
+    )
+}
+
+#[test]
+fn a_tree_whose_inheritance_an_unchecked_module_shares_stays_unfixed() {
+    let dir = scratch("fix_unchecked_tree");
+    let list = partner_view("list", None, "<tree><field name=\"name\"/></tree>");
+    let spec = partner_view(
+        "spec",
+        Some("other.list"),
+        "<tree position=\"inside\"><field name=\"name\"/></tree>",
+    );
+    let own = module(
+        &dir,
+        "own",
+        "18.0",
+        &[("list.xml", list.as_bytes()), ("spec.xml", spec.as_bytes())],
+    );
+    load(&own, &["list.xml", "spec.xml"]);
+    // Alone, the scan knows no other view of either tree.
+    let (code, _, stderr) = run(check_in(&dir, &["mods", "--diff"]));
+    assert_eq!(code, Some(1), "{stderr}");
+    assert!(stderr.contains("2 of 2 diagnostics have a fix"), "{stderr}");
+
+    // Another module's spec finds own.list by its tag, and own.spec finds its <tree>.
+    let other = module(&dir, "other", "18.0", &[]);
+    let finder = partner_view(
+        "finder",
+        Some("own.list"),
+        "<tree position=\"inside\"><field name=\"name\"/></tree>",
+    );
+    let found = partner_view("list", None, "<tree><field name=\"name\"/></tree>");
+    fs::write(other.join("finder.xml"), finder).unwrap();
+    fs::write(other.join("list.xml"), found).unwrap();
+    load(&other, &["finder.xml", "list.xml"]);
+    fs::create_dir_all(dir.join("addons")).unwrap();
+    fs::rename(dir.join("mods/other"), dir.join("addons/other")).unwrap();
+    let (code, _, stderr) = run(check_in(&dir, &["mods", "--addons-path", "addons", "--fix"]));
+    assert_eq!(code, Some(1), "{stderr}");
+    assert!(stderr.contains("fixed 0 diagnostics in 0 files"), "{stderr}");
+    assert_eq!(fs::read_to_string(own.join("list.xml")).unwrap(), list);
+    assert_eq!(fs::read_to_string(own.join("spec.xml")).unwrap(), spec);
 }
