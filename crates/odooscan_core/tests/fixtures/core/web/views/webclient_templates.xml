@@ -6,4 +6,6 @@
             </body>
         </html>
     </template>
+
+    <template id="assets_backend"/>
 </odoo>

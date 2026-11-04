@@ -497,6 +497,8 @@ custom/legacy15/static/src/base_calls.js:9:45: OD604 model 'res.partner' has no 
 custom/legacy15/static/src/base_calls.js:10:45: OD604 model 'res.partner' has no method 'get_property_definition'
 custom/legacy154/data/calls.xml:4:41: OD314 res.partner has no method '_neutralized'
 custom/legacy154/models/res_company.py:14:24: OD211 no parent class of res.company defines '_neutralized', so this super() call fails
+custom/legacy16/__manifest__.py:7:5: OD505 Odoo ignores the qweb key, so the templates it lists that no bundle loads are missing; list them under web.assets_backend in assets
+custom/legacy16/__manifest__.py:10:9: OD506 Odoo no longer loads web.assets_qweb, so the templates it lists that no other bundle loads are missing; list them under web.assets_backend
 custom/legacy16/models/gauge.py:7:5: OD226 _auto = False leaves legacy.gauge without a table, and nothing creates the view legacy_gauge; create it in init(), or drop _auto = False
 custom/legacy16/models/res_partner.py:6:34: OD203 'nickname': res.partner has no field 'nickname'
 custom/legacy16/models/res_partner.py:12:5: OD117 @api.model on create() makes Odoo call it once per record; decorate it with @api.model_create_multi and take a list of dicts
@@ -505,6 +507,7 @@ custom/legacy16/models/res_partner.py:23:41: OD220 'touched_on' has the label 'L
 custom/legacy16/models/res_partner.py:31:40: OD220 'turned_on' has the label 'Last Modified on' of field '__last_update' of legacy.turnstile, so Odoo logs a warning and users cannot tell them apart; give it another string
 custom/legacy16/models/res_partner.py:37:21: OD120 'time' in an ormcache key is not a parameter of _quarter_hour_rates(), so every call raises NameError; key on a parameter or on self
 custom/legacy16/models/res_partner.py:49:68: OD222 'home_country_id' has check_company=True, but res.country has no company_id field to check; remove check_company
+custom/legacy16/views/assets.xml:2:5: OD328 'web.assets_frontend' is no longer a template but an asset bundle; list the files under it in the manifest's assets
 custom/legacy17/data/res.partner-translated.csv:1:1: OD309 res.partner has no field 'name@fr'
 custom/legacy17/data/translated.xml:5:9: OD309 res.partner has no field 'name@fr'
 custom/legacy17/models/res_partner.py:7:68: OD222 'home_country_id' has check_company=True, but res.country has no company_id field to check; remove check_company
@@ -726,6 +729,7 @@ custom/qweb_partial/__manifest__.py:4:24: OD503 module 'ghost_enterprise' is not
 custom/qweb_partial/views/partial.xml:5:20: OD311 no indexed module defines template 'web.layot'
 custom/qweb_partial/views/partial.xml:23:35: OD311 no indexed module defines template 'web.layot_report'
 custom/qweb_partial/views/partial.xml:28:24: OD311 no indexed module defines template 'web.layot_inside_enterprise'
+custom/qweb_unindexed/__manifest__.py:5:5: OD505 Odoo ignores the qweb key, so the templates it lists that no bundle loads are missing; list them under web.assets_qweb in assets
 custom/record_required/data/creates.xml:2:5: OD324 rr.thing.name is required and has no default, so creating this record fails if the column is NOT NULL; give the field a value
 custom/record_required/data/creates.xml:3:5: OD324 rr.thing.name is required and has no default, so creating this record fails if the column is NOT NULL; give the field a value
 custom/record_required/data/creates.xml:6:5: OD324 rr.thing.name is required and has no default, so creating this record fails if the column is NOT NULL; give the field a value
@@ -980,10 +984,14 @@ custom/saas132/models/wizards.py:4:7: OD401 model 'saas.later.pass.wizard' has n
 custom/saas132/security/ir.model.access.csv:2:1: OD402 no group limits this row, so every user, public and portal included, gets write, create or unlink on model_saas_later_note_wizard; name a group
 custom/saas132/security/ir.model.access.csv:3:1: OD402 base.group_portal gets write, create or unlink on model_saas_later_note_wizard; public and portal access should be read-only and go through controllers
 custom/saas133/models/res_partner.py:10:9: OD223 _compute_monogram() can leave 'monogram' unassigned on a record, so reading it raises ValueError; assign it on every path through the loop, False when there is no value
+custom/saas143/__manifest__.py:6:5: OD505 Odoo ignores the qweb key, so the templates it lists that no bundle loads are missing; list them under web.assets_qweb in assets
 custom/saas143/models/badge.py:9:60: OD218 'currency_id' has delegate=True, so it must be required with ondelete 'cascade' or 'restrict'; give it required=True
 custom/saas143/models/badge.py:14:54: OD218 'view_id' has delegate=True, so it must be required with ondelete 'cascade' or 'restrict'; give it required=True
 custom/saas143/models/badge.py:15:53: OD218 'model_id' has delegate=True, so it must be required with ondelete 'cascade' or 'restrict'; give it ondelete="cascade"
 custom/saas143/models/badge.py:22:53: OD218 'model_id' has delegate=True, so it must be required with ondelete 'cascade' or 'restrict'; give it required=True, ondelete="cascade"
+custom/saas143/views/assets.xml:2:5: OD328 'web.assets_backend' is no longer a template but an asset bundle; list the files under it in the manifest's assets
+custom/saas143/views/assets.xml:10:9: OD328 'web.assets_common' is no longer a template but an asset bundle; list the files under it in the manifest's assets
+custom/saas143/views/old_assets.xml:1:1: OD502 'views/old_assets.xml' is not in the manifest's init_xml, update_xml, data, demo_xml or demo, so Odoo never loads it
 custom/saas144/models/badge.py:7:33: OD218 _inherits delegates to 'partner_id', which must be required with ondelete 'cascade' or 'restrict'; give it ondelete="cascade"
 custom/saas144/models/badge.py:10:58: OD218 'country_id' has delegate=True, so it must be required with ondelete 'cascade' or 'restrict'; give it ondelete="cascade"
 custom/saas144/models/badge.py:18:58: OD228 'country_id' has delegate=True and no ondelete, so Odoo fails with AttributeError when it sets up the registry; give it ondelete="cascade"

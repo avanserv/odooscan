@@ -178,3 +178,29 @@ pub fn scan(opts: &ScanOptions) -> Report {
         notices,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn diag(code: &'static str, line: u32) -> Diagnostic {
+        Diagnostic {
+            code,
+            severity: Severity::Error,
+            path: PathBuf::from("views/assets.xml"),
+            line,
+            column: 5,
+            message: String::new(),
+            flow: vec![],
+        }
+    }
+
+    #[test]
+    fn a_bundle_reference_reports_only_od328() {
+        let codes = [("OD301", 2), ("OD328", 2), ("OD302", 10), ("OD328", 10), ("OD302", 14)];
+        let mut diags: Vec<_> = codes.iter().map(|&(code, line)| diag(code, line)).collect();
+        drop_superseded(&mut diags);
+        let left: Vec<_> = diags.iter().map(|d| (d.code, d.line)).collect();
+        assert_eq!(left, [("OD328", 2), ("OD328", 10), ("OD302", 14)]);
+    }
+}

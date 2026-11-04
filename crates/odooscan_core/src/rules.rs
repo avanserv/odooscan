@@ -36,7 +36,8 @@ pub struct Rule {
 
 /// Rules that say less than another rule reporting at the same position, as (code, by).
 /// A flow from a known source is the finding a pattern match on the same call only suspects.
-pub const SUPERSEDED: &[(&str, &str)] = &[("OD101", "OD701")];
+/// An id missing from `web` because it became a bundle is missing for the reason OD328 gives.
+pub const SUPERSEDED: &[(&str, &str)] = &[("OD101", "OD701"), ("OD301", "OD328"), ("OD302", "OD328")];
 
 /// Severities that replace a rule's own from some series on, as (code, series range, severity).
 /// From saas~19.4, `odoo/addons/base/__manifest__.py:81` loads `ir.access.csv` where saas~19.3
@@ -191,12 +192,21 @@ rules! {
     // saas~17.1 compiles `div.oe_chatter` into the chatter (`addons/mail/static/src/chatter/web/form_compiler.js:74`),
     // saas~17.2 only `chatter` (`:42`).
     "OD327" "chatter-div-replaced" Deprecation Warning Some(">=saas~17.2"), false, "A form's div with class oe_chatter no longer shows the chatter; use <chatter/>.";
+    // saas~14.2 defines the bundles as templates (`addons/web/views/webclient_templates.xml:56`), saas~14.3
+    // only in `assets` (`addons/web/__manifest__.py:61`), so a reference to one fails
+    // (`odoo/addons/base/models/ir_model.py:1923`).
+    "OD328" "bundle-template-removed" Deprecation Error Some(">=saas~14.3"), false, "A data file inherits or references an asset bundle, which is no longer a template.";
     "OD401" "model-without-access" Security Warning None, true, "A new model has no ir.model.access rule, or from saas~19.4 no ir.access rule with a group.";
     "OD402" "public-write-access" Security Warning None, false, "An access row gives public or portal users write, create or unlink, through their group or no group.";
     "OD501" "manifest-data-missing" Correctness Error None, false, "A file listed in the manifest does not exist.";
     "OD502" "data-file-not-loaded" Quality Warning None, false, "A data file is listed under no manifest key Odoo reads, so Odoo never loads it.";
     "OD503" "unknown-dependency" Correctness Error None, true, "A module in depends is not on the addons path.";
     "OD504" "circular-dependency" Correctness Error None, true, "A module in depends depends back on this module.";
+    // saas~14.2 globs the `qweb` key (`addons/web/controllers/main.py:231`), saas~14.3 reads only
+    // `web.assets_qweb` (`:557`).
+    "OD505" "qweb-key-ignored" Deprecation Warning Some(">=saas~14.3"), false, "The manifest lists templates under qweb, which Odoo ignores.";
+    // saas~15.4 fetches `web.assets_qweb` (`addons/web/models/ir_http.py:121`), 16.0 never.
+    "OD506" "assets-qweb-unloaded" Deprecation Warning Some(">=16.0"), false, "The manifest adds files to web.assets_qweb, which Odoo no longer loads.";
     "OD601" "unresolved-js-import" Correctness Error None, true, "A JS import names a module or an export no indexed module provides.";
     "OD602" "orphan-patch-super" Correctness Error Some(">=17.0"), true, "A patch calls a super method the class it patches does not have.";
     "OD603" "unknown-rpc-model" Correctness Error None, true, "An ORM call from JS names a model no indexed module defines.";
@@ -330,7 +340,7 @@ mod tests {
 
     #[test]
     fn series_gates_follow_source() {
-        let gates: [(&str, &[&str], &[&str]); 11] = [
+        let gates: [(&str, &[&str], &[&str]); 14] = [
             ("OD117", &["saas~15.1", "saas~18.2"], &["saas~15.2", "saas~18.1"]),
             ("OD118", &["saas~18.1"], &["saas~18.2"]),
             ("OD219", &["saas~13.5"], &["14.0"]),
@@ -342,6 +352,9 @@ mod tests {
             ("OD325", &["19.0"], &["saas~19.1", "20.0"]),
             ("OD326", &["saas~17.4"], &["18.0", "20.0"]),
             ("OD327", &["saas~17.1"], &["saas~17.2", "20.0"]),
+            ("OD328", &["saas~14.2"], &["saas~14.3", "20.0"]),
+            ("OD505", &["saas~14.2"], &["saas~14.3", "20.0"]),
+            ("OD506", &["saas~15.4"], &["16.0", "20.0"]),
         ];
         for (code, silent, reported) in gates {
             let r = rule(code);

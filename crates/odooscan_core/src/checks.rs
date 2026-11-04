@@ -3,6 +3,7 @@
 use std::path::Path;
 use std::rc::Rc;
 
+use globset::GlobSet;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::facts::{
@@ -13,7 +14,7 @@ use crate::facts::{
 };
 use crate::index::{
     BASE_MODEL_METHODS, Export, FieldDef, FieldInfo, Index, JsSpec, PathError, Placed, RELATIONAL_TYPES, Scope, Status,
-    ViewTree, base_private_method, full_id, js_module_path, loaded_data, located,
+    ViewTree, asset_glob_set, base_private_method, full_id, js_module_path, loaded_data, located,
 };
 use crate::project::{Module, SourceFile, code_loaded};
 use crate::rules::rule;
@@ -172,6 +173,15 @@ const TUPLE_LISTED: Series = Series { major: 18, minor: 1 };
 /// there, which `listed_values` cannot tell apart from a lone one.
 const TUPLE_CHECKED: Series = Series { major: 19, minor: 3 };
 
+/// The first series that loads the XML of a bundle with its scripts
+/// (`odoo/addons/base/models/assetsbundle.py:420` on 16.0). It never loads `web.assets_qweb`,
+/// which 15.0 fetches apart (`addons/web/models/ir_http.py:72`).
+const XML_IN_BUNDLES: Series = Series { major: 16, minor: 0 };
+
+/// The bundles that are templates up to saas~14.2 (`addons/web/views/webclient_templates.xml:56`),
+/// and from saas~14.3 only the manifest's `assets` declares (`addons/web/__manifest__.py:61`).
+const BUNDLE_TEMPLATES: [&str; 3] = ["web.assets_backend", "web.assets_common", "web.assets_frontend"];
+
 /// The series whose loader reads `<report>` as a write to `ir.actions.report`. 18446f23f11e removes
 /// the tag in saas~16.1 (`_tag_report`, `odoo/tools/convert.py:275` on 16.0).
 const REPORT_TAG: &str = ">=11.0,<saas~16.1";
@@ -207,6 +217,8 @@ pub fn check_module<'m>(index: &Index<'m>, mi: usize, series: Option<Series>) ->
     let module = &index.modules[mi];
     let mut out = Out { diags: vec![] };
     manifest_files(module, &mut out);
+    unread_template_lists(module, series, &mut out);
+    bundle_templates(module, &mut out);
     unloaded_files(module, series, &mut out);
     ids_repeated_in_a_file(module, series, &mut out);
     ids_repeated_across_files(module, series, &mut out);
@@ -741,6 +753,84 @@ fn manifest_files<'m>(module: &'m Module, out: &mut Out<'m>) {
                 file.pos,
                 format!("'{}' does not exist", file.value),
             );
+        }
+    }
+}
+
+/// OD505 on a `qweb` key, which from saas~14.3 nothing reads (`addons/web/controllers/main.py:557`),
+/// and OD506 on a `web.assets_qweb` bundle, which nothing loads from `XML_IN_BUNDLES`, when a file
+/// they name is in no bundle that gives templates in the series. A module moving to `assets` often
+/// keeps the dead list beside the bundle that loads the same files.
+fn unread_template_lists<'m>(module: &'m Module, series: Option<Series>, out: &mut Out<'m>) {
+    let manifest = &module.manifest;
+    let xml_in_bundles = series.is_some_and(|s| s >= XML_IN_BUNDLES);
+    let loading = |assets_qweb: bool| {
+        let bundles = manifest
+            .bundles
+            .iter()
+            .filter(|b| (b.name.value == "web.assets_qweb") == assets_qweb);
+        asset_glob_set(bundles.flat_map(|b| &b.globs))
+    };
+    if let Some(qweb) = &manifest.qweb {
+        let listed: Vec<_> = qweb.value.iter().map(|f| format!("{}/{f}", module.name)).collect();
+        if lost(module, &listed, &loading(!xml_in_bundles)) {
+            let bundle = if xml_in_bundles {
+                "web.assets_backend"
+            } else {
+                "web.assets_qweb"
+            };
+            let message = format!(
+                "Odoo ignores the qweb key, so the templates it lists that no bundle loads are missing; list them under {bundle} in assets"
+            );
+            out.push(&module.manifest_path, "OD505", qweb.pos, message);
+        }
+    }
+    let others = loading(false);
+    for bundle in manifest.bundles.iter().filter(|b| b.name.value == "web.assets_qweb") {
+        if lost(module, &bundle.globs, &others) {
+            out.push(
+                &module.manifest_path,
+                "OD506",
+                bundle.name.pos,
+                "Odoo no longer loads web.assets_qweb, so the templates it lists that no other bundle loads are missing; list them under web.assets_backend",
+            );
+        }
+    }
+}
+
+/// Whether a file of `listed`, globs relative to the addons directory, is one `loads` misses. A
+/// glob that matches none of the module's templates stands for itself, so that a file the scan
+/// does not index, such as one outside `static/src`, still counts.
+fn lost(module: &Module, listed: &[String], loads: &GlobSet) -> bool {
+    let templates: Vec<String> = module
+        .templates
+        .iter()
+        .map(|t| format!("{}/{}", module.name, t.rel))
+        .collect();
+    listed.iter().any(|glob| {
+        let set = asset_glob_set([glob]);
+        let named: Vec<&str> = templates
+            .iter()
+            .map(String::as_str)
+            .filter(|t| set.is_match(t))
+            .collect();
+        let named = if named.is_empty() { vec![glob.as_str()] } else { named };
+        named.iter().any(|f| !loads.is_match(f))
+    })
+}
+
+/// OD328 on a reference, `inherit_id` included, to a bundle that is no longer a template, in what
+/// the manifest loads: the record holding it fails to install.
+fn bundle_templates<'m>(module: &'m Module, out: &mut Out<'m>) {
+    for file in module.data.iter().filter(|f| f.rank.is_some()) {
+        for r in &file.facts.refs {
+            let id = full_id(&module.name, &r.id);
+            if BUNDLE_TEMPLATES.contains(&id.as_str()) {
+                let message = format!(
+                    "'{id}' is no longer a template but an asset bundle; list the files under it in the manifest's assets"
+                );
+                out.push(&file.path, "OD328", r.pos, message);
+            }
         }
     }
 }

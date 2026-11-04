@@ -226,6 +226,19 @@ fn chatter_div_is_reported_from_saas_17_2() {
 }
 
 #[test]
+fn asset_declarations_are_reported_from_their_series() {
+    let expected = [("legacy16", Severity::Error), ("saas143", Severity::Error)];
+    assert_eq!(severities("OD328"), expected.map(|(m, s)| (m.to_owned(), s)));
+    let expected = [
+        ("legacy16", Severity::Warning),
+        ("qweb_unindexed", Severity::Warning),
+        ("saas143", Severity::Warning),
+    ];
+    assert_eq!(severities("OD505"), expected.map(|(m, s)| (m.to_owned(), s)));
+    assert_eq!(severities("OD506"), [("legacy16".to_owned(), Severity::Warning)]);
+}
+
+#[test]
 fn access_severity_follows_the_module_series() {
     let expected = [
         ("bad_sale", Severity::Warning),
