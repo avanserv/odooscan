@@ -1,5 +1,35 @@
 # Changelog
 
+## [0.10.0](https://github.com/avanserv/odooscan/compare/v0.9.0...v0.10.0) (2026-11-04)
+
+
+### Features
+
+* **checks:** Report asset declarations that later series no longer load ([#220](https://github.com/avanserv/odooscan/issues/220)) ([ecd2270](https://github.com/avanserv/odooscan/commit/ecd2270dc7ded8681daf75d446d1b5738f8976fe))
+* **checks:** Report hook methods that nothing defines or names ([#224](https://github.com/avanserv/odooscan/issues/224)) ([7ca7959](https://github.com/avanserv/odooscan/commit/7ca79594a893e1f44333949c2c9a12b90912076c))
+* **checks:** Report overrides whose signature no longer fits the parent method ([#223](https://github.com/avanserv/odooscan/issues/223)) ([b9b2f9c](https://github.com/avanserv/odooscan/commit/b9b2f9c9a78289577618133e200976e764d3e402))
+* **checks:** Rewrite tree to list and t-esc to t-out with --fix ([#228](https://github.com/avanserv/odooscan/issues/228)) ([50780a1](https://github.com/avanserv/odooscan/commit/50780a1fa336f9f8f159282c31af71fd936e6256))
+* **cli:** Check modules as of a target series and summarize the upgrade ([#225](https://github.com/avanserv/odooscan/issues/225)) ([623829d](https://github.com/avanserv/odooscan/commit/623829d8d29acde6dd8bbeb85ce2d7cbf72a37c3))
+* **cli:** Fetch the core of the target series when none is given ([#226](https://github.com/avanserv/odooscan/issues/226)) ([9322d2c](https://github.com/avanserv/odooscan/commit/9322d2cece228217e8fd34c03f69ab7f80c6f789))
+* **cli:** Rewrite mechanical Python deprecations with --fix and --diff ([#227](https://github.com/avanserv/odooscan/issues/227)) ([0ccf269](https://github.com/avanserv/odooscan/commit/0ccf269ddc29a2f1d85b8bd84734f5ff972b8770))
+* **python:** Report deprecated and removed Python APIs per series ([#221](https://github.com/avanserv/odooscan/issues/221)) ([ad81dab](https://github.com/avanserv/odooscan/commit/ad81dabc32f9db39fe38f1ead5d79f4b244a1d60))
+* **python:** Report removed context, onchange, override and cron APIs ([#222](https://github.com/avanserv/odooscan/issues/222)) ([6238ff3](https://github.com/avanserv/odooscan/commit/6238ff3d563f1cff018c16e1ea1dac27218ff9a8))
+* **xml:** Report t-esc, kanban-box and oe_chatter that later drop ([#219](https://github.com/avanserv/odooscan/issues/219)) ([7e2afc3](https://github.com/avanserv/odooscan/commit/7e2afc3fca768dfb8aebf71fcf6a9c50688a62f5))
+
+
+### Bug Fixes
+
+* **checks:** Keep a t-esc unfixed beside a t-out add or remove spec ([#237](https://github.com/avanserv/odooscan/issues/237)) ([d24fc41](https://github.com/avanserv/odooscan/commit/d24fc4116cfc664d020f2357cb5aa65f21da5199))
+* **checks:** Leave a tree or t-esc unfixed while a spec still finds it by its old name ([#236](https://github.com/avanserv/odooscan/issues/236)) ([aed854c](https://github.com/avanserv/odooscan/commit/aed854c204376e22503ad1eab150934f78e22bec))
+* **checks:** Report forms Odoo ignores as OD125 warnings ([#240](https://github.com/avanserv/odooscan/issues/240)) ([7eacfda](https://github.com/avanserv/odooscan/commit/7eacfda0b120057c7450816f9bd047db80178d2d))
+* **cli:** Keep a fixed file's group and leave out of --diff what --fix skips ([#235](https://github.com/avanserv/odooscan/issues/235)) ([aa29e8a](https://github.com/avanserv/odooscan/commit/aa29e8a754109afdbde5f943443999b7d971421e))
+* **cli:** Kill a timed-out core fetch tree and word its failures ([#234](https://github.com/avanserv/odooscan/issues/234)) ([ba446ab](https://github.com/avanserv/odooscan/commit/ba446ab25458b9a95170c1a92f5deba290afc526))
+* **index:** Compare a __name override with the classes of its class name ([#231](https://github.com/avanserv/odooscan/issues/231)) ([a9da6f0](https://github.com/avanserv/odooscan/commit/a9da6f03b2a06d8846c6349d9286221ac729a861))
+* **index:** Read the methods of a plain base class defined above in its file ([#233](https://github.com/avanserv/odooscan/issues/233)) ([dd8330e](https://github.com/avanserv/odooscan/commit/dd8330ebd18b11027a72cf477a8ffe1583953fa6))
+* **python:** Report a read_group override once and advise dropping numbercall -1 ([#230](https://github.com/avanserv/odooscan/issues/230)) ([6f37ce9](https://github.com/avanserv/odooscan/commit/6f37ce9643af65a79b7df64962b06600bd17876c))
+* **rules:** Count a retyped or required core field as missing upstream ([#241](https://github.com/avanserv/odooscan/issues/241)) ([77e0842](https://github.com/avanserv/odooscan/commit/77e084208f1087983ebfaadf467fc44d9060d0cb))
+* **rules:** Report OD306 as an error on 18.0 and later ([#218](https://github.com/avanserv/odooscan/issues/218)) ([438984a](https://github.com/avanserv/odooscan/commit/438984a24104f1990e06573ed6c86e324dae7761))
+
 ## [0.9.0](https://github.com/avanserv/odooscan/compare/v0.8.1...v0.9.0) (2026-11-03)
 
 
