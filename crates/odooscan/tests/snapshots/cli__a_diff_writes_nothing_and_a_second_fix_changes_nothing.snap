@@ -122,6 +122,15 @@ expression: diff
      </template>
  
      <template id="lamp_label">
+@@ -59,7 +59,7 @@
+     </template>
+ 
+     <template id="lamp_title">
+-        <h1 class="lamp_title" t-esc="lamp.name"/>
++        <h1 class="lamp_title" t-out="lamp.name"/>
+     </template>
+ 
+     <template id="lamp_title_coded" inherit_id="lamp_title">
 --- a/custom/saas125/models/upgrade.py
 +++ b/custom/saas125/models/upgrade.py
 @@ -8,10 +8,10 @@
