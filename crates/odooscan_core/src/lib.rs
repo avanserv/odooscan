@@ -24,6 +24,7 @@ pub mod rules;
 pub mod series;
 mod server_code;
 mod sql;
+mod superuser;
 mod suppress;
 mod taint;
 mod xml;
