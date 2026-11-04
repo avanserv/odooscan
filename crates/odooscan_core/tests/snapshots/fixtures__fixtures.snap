@@ -85,6 +85,19 @@ custom/bad_sale/controllers/routes.py:30:66: OD128 cors='*' lets a script on any
 custom/bad_sale/controllers/routes.py:35:9: OD129 route with auth='none' reads request.env.user, which is empty as the route runs with no user; use auth='public' or set the user with request.update_env()
 custom/bad_sale/controllers/routes.py:39:9: OD129 route with auth='none' calls create(), but runs with no user, so the write belongs to no one; use auth='public' or set the user with request.update_env()
 custom/bad_sale/controllers/routes.py:48:50: OD112 csrf=False lets other sites submit this form on the user's behalf
+custom/bad_sale/controllers/routes.py:92:9: OD111 route with auth='none' runs as superuser through update_env(); check that every record it reads or writes is filtered by an access check
+custom/bad_sale/controllers/routes.py:93:9: OD130 update_env() switches the request to another user; check that the caller has proven to be that user
+custom/bad_sale/controllers/routes.py:98:9: OD111 route with auth='none' runs as superuser through Environment(); check that every record it reads or writes is filtered by an access check
+custom/bad_sale/controllers/session.py:8:9: OD111 route with auth='public' runs as superuser through with_user(); check that every record it reads or writes is filtered by an access check
+custom/bad_sale/controllers/session.py:12:9: OD111 route with auth='public' runs as superuser through with_user(); check that every record it reads or writes is filtered by an access check
+custom/bad_sale/controllers/session.py:16:9: OD111 route with auth='public' runs as superuser through env(); check that every record it reads or writes is filtered by an access check
+custom/bad_sale/controllers/session.py:20:9: OD111 route with auth='public' runs as superuser through env(); check that every record it reads or writes is filtered by an access check
+custom/bad_sale/controllers/session.py:24:9: OD111 route with auth='public' runs as superuser through update_env(); check that every record it reads or writes is filtered by an access check
+custom/bad_sale/controllers/session.py:29:9: OD111 route with auth='public' runs as superuser through Environment(); check that every record it reads or writes is filtered by an access check
+custom/bad_sale/controllers/session.py:34:9: OD111 route with auth='public' runs as superuser through Environment(); check that every record it reads or writes is filtered by an access check
+custom/bad_sale/controllers/session.py:47:9: OD130 update_env() switches the request to another user; check that the caller has proven to be that user
+custom/bad_sale/controllers/session.py:48:9: OD130 assigning the session's uid switches the user the browser's requests run as; check that the caller has proven to be that user
+custom/bad_sale/controllers/session.py:66:12: OD131 != between secrets takes longer the more of the secret a guess gets right, which lets a caller find it a character at a time; compare them with consteq() or hmac.compare_digest()
 custom/bad_sale/data/orphan.xml:1:1: OD502 'data/orphan.xml' is not in the manifest's data or demo, so Odoo never loads it
 custom/bad_sale/models/callers.py:8:9: OD704 route parameter 'post' reaches self.write() through '_apply_values()', so the user picks the fields it sets as superuser; copy only the fields the user may set
 custom/bad_sale/models/domains.py:7:64: OD210 'is_company': res.partner has no field 'is_company'
@@ -97,6 +110,7 @@ custom/bad_sale/models/flows.py:13:9: OD122 UPDATE on bad_order bypasses the ORM
 custom/bad_sale/models/flows.py:17:9: OD101 query built by string formatting; pass parameters separately or build it with odoo.tools.SQL
 custom/bad_sale/models/flows.py:17:9: OD122 UPDATE on bad_order bypasses the ORM, so records this transaction already read keep stale values; call flush_model() before the query and invalidate_model() after it (flush() and invalidate_cache() before 16.0)
 custom/bad_sale/models/flows.py:33:9: OD701 route parameter 'term' reaches the query of cr.execute() through '_search_by()', 'query'; pass it as a query parameter or build the query with odoo.tools.SQL
+custom/bad_sale/models/ir_http.py:9:9: OD130 _auth_method_kiosk() decides which user every route with auth='kiosk' runs as; check that it sets only a user the request has proven to be
 custom/bad_sale/models/models.py:6:17: OD202 model 'mail.thread' comes from module mail; add it to depends
 custom/bad_sale/models/models.py:6:32: OD201 no indexed module defines model 'res.nothing'
 custom/bad_sale/models/models.py:9:24: OD108 group_operator is renamed aggregator

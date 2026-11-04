@@ -12,12 +12,13 @@ use crate::facts::{
     Param, Pos, PyFacts, RawDiag, Receiver, Signature, Spanned, SqlColumn, SqlView, Subject, UNREAD_TYPE, XmlRef,
 };
 use crate::fix::{self, Edit, Fix};
-use crate::route_body::RouteBody;
+use crate::route_body::{self, RouteBody};
 use crate::series::Series;
 use crate::sql::{
     self, Created, CursorUse, QueryVars, Write, is_self, odoo_cursor, query_head, query_source, query_text,
     self_cursor, source_offset,
 };
+use crate::superuser::{self, Escalation};
 use crate::taint::{self, Params, TaintTable};
 use crate::{async_names, domain, method_body, module_state, python2};
 
@@ -188,6 +189,49 @@ fn names_user(arg: &Expr) -> bool {
                 (words.last(), id),
                 (Some(&("user" | "uid")), _) | (Some(&"superuser"), true)
             )
+    })
+}
+
+/// `request.session.uid` or `request.session['uid']`.
+fn is_session_uid(target: &Expr) -> bool {
+    let (session, uid) = match target {
+        Expr::Attribute(a) => (&*a.value, a.attr.as_str() == "uid"),
+        Expr::Subscript(s) => (&*s.value, str_lit(&s.slice) == Some("uid")),
+        _ => return false,
+    };
+    uid && matches!(session, Expr::Attribute(s) if s.attr.as_str() == "session" && route_body::is_request(&s.value))
+}
+
+/// Whether a user given to `update_env()` or assigned as the uid switches to another one: not `None`,
+/// which keeps the user, nor `request.session.uid`, the user Odoo checked the session of before any
+/// `_auth_method_*()` (18.0 `odoo/addons/base/models/ir_http.py:268-272`).
+fn switches_user(user: &Expr) -> bool {
+    !user.is_none_literal_expr() && !is_session_uid(user)
+}
+
+/// `write()`, or an onchange by its decorator or its `_onchange_` name.
+fn checks_change(func: &ast::StmtFunctionDef) -> bool {
+    let onchange = |d: &ast::Decorator| matches!(&d.expression, Expr::Call(c) if is_api(&c.func, "onchange"));
+    func.name.as_str() == "write" || func.name.starts_with("_onchange_") || func.decorator_list.iter().any(onchange)
+}
+
+/// Whether `expr` names a token, a secret or a signature: the last word of its name, attribute,
+/// literal key, `.get()` key or called method, as `access_token`, `kw['token']`,
+/// `kw.get('signature')` or `self._get_secret()`.
+fn names_secret(expr: &Expr) -> bool {
+    let name = match expr {
+        Expr::Subscript(s) => str_lit(&s.slice),
+        Expr::Call(c) => match &*c.func {
+            Expr::Attribute(a) if a.attr.as_str() == "get" => c.arguments.args.first().and_then(str_lit),
+            func => tail_name(func),
+        },
+        _ => tail_name(expr),
+    };
+    let last = name.and_then(|n| n.rsplit('_').find(|w| !w.is_empty()));
+    last.is_some_and(|w| {
+        ["token", "secret", "signature"]
+            .iter()
+            .any(|s| w.eq_ignore_ascii_case(s))
     })
 }
 
@@ -1904,6 +1948,12 @@ struct PyVisitor<'a, 'ast> {
     /// Whether the code is in the `init()` or `_auto_init()` of a class, which creates the view of
     /// the model the class is or is mixed into, and which Odoo runs ahead of the module's data.
     in_view_maker: bool,
+    /// Whether the code is in an `_auth_method_*()`, which sets the user of a request by design, or
+    /// in an override of `update_env()`, which passes on the user its caller gives.
+    in_user_setter: bool,
+    /// Whether the code is in a `write()` or an onchange, which compare a stored value with the
+    /// one it is set to.
+    in_change_check: bool,
     /// How many enclosing `try` bodies have a handler that catches a failed import.
     import_shims: usize,
     /// The names the file's imports from `odoo` bind at import.
@@ -1942,6 +1992,8 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
             self_cursors: vec![],
             cursor_uses: vec![],
             in_view_maker: false,
+            in_user_setter: false,
+            in_change_check: false,
             import_shims: 0,
             odoo_names: module_state::odoo_names(&top)
                 .into_iter()
@@ -2758,9 +2810,15 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
     }
 
     fn route_sudo(&mut self, func: &ast::StmtFunctionDef, auth: &str) {
-        if matches!(auth, "public" | "none") && body_contains(&func.body, Some("sudo")) {
-            self.diag("OD111", &func.name, format!("route with auth='{auth}' calls sudo(); check that every record it reads or writes is filtered by an access check"));
+        if !matches!(auth, "public" | "none") {
+            return;
         }
+        let what = match superuser::escalation(&func.body, self.series) {
+            Some(Escalation::Sudo) => "calls sudo()".to_owned(),
+            Some(Escalation::Switch(form)) => format!("runs as superuser through {form}"),
+            None => return,
+        };
+        self.diag("OD111", &func.name, format!("route with auth='{auth}' {what}; check that every record it reads or writes is filtered by an access check"));
     }
 
     fn route_type(&mut self, call: &ast::ExprCall) {
@@ -2858,6 +2916,80 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
         self.sql_columns(call);
         self.added_columns(call);
         self.created_views(call);
+        self.update_env_user(call);
+    }
+
+    /// OD130 on `update_env()` with a user, which runs the rest of the request as that user (18.0
+    /// `odoo/http.py:1702-1712`). In a user setter it is the override or the caller that is reported.
+    fn update_env_user(&mut self, call: &ast::ExprCall) {
+        if self.in_user_setter || tail_name(&call.func) != Some("update_env") {
+            return;
+        }
+        let user = call.arguments.find_argument_value("user", 0);
+        if user.is_some_and(switches_user) {
+            self.diag(
+                "OD130",
+                call,
+                "update_env() switches the request to another user; check that the caller has proven to be that user",
+            );
+        }
+    }
+
+    /// OD130 on `request.session.uid = ...`, the `uid` key of the session (18.0
+    /// `odoo/http.py:1058-1062`), which later requests of the browser run as, and on `request.uid =
+    /// ...`, which runs the rest of the request as that user before `REQUEST_UID_END`.
+    fn session_uid(&mut self, assign: &ast::StmtAssign) {
+        if self.in_user_setter || !switches_user(&assign.value) {
+            return;
+        }
+        let request_uid = self.series.is_none_or(|s| s < superuser::REQUEST_UID_END);
+        for target in &assign.targets {
+            let message = if is_session_uid(target) {
+                "assigning the session's uid switches the user the browser's requests run as; check that the caller has proven to be that user"
+            } else if request_uid && superuser::is_request_uid(target) {
+                "assigning request.uid switches the request to another user; check that the caller has proven to be that user"
+            } else {
+                continue;
+            };
+            self.diag("OD130", target, message);
+        }
+    }
+
+    /// OD130 on an override of `_auth_method_*()` of `ir.http`, which Odoo calls to set the user of
+    /// every route of that auth (18.0 `odoo/addons/base/models/ir_http.py:272`).
+    fn auth_method_override(&mut self, func: &ast::StmtFunctionDef) {
+        let Some(auth) = func.name.strip_prefix("_auth_method_") else {
+            return;
+        };
+        let ir_http = matches!(self.owners.last(), Some(Some(Receiver::Model(m))) if m == "ir.http");
+        let inherited = matches!(self.class_facts.last(), Some(Some(i)) if !self.facts.classes[*i].new_model);
+        if ir_http && inherited {
+            self.diag(
+                "OD130",
+                &func.name,
+                format!("_auth_method_{auth}() decides which user every route with auth='{auth}' runs as; check that it sets only a user the request has proven to be"),
+            );
+        }
+    }
+
+    /// OD131 on `==` or `!=` between two secrets, which takes longer the more of the secret a guess
+    /// gets right. In `write()` or an onchange it tells whether a stored value changes, which only a
+    /// user who may set it sees.
+    fn secret_compare(&mut self, compare: &ast::ExprCompare) {
+        if self.in_change_check {
+            return;
+        }
+        let mut pairs = compare.ops.iter().zip(compare.operands.windows(2));
+        let found = pairs.find(|(op, pair)| {
+            matches!(op, CmpOp::Eq | CmpOp::NotEq) && names_secret(&pair[0]) && names_secret(&pair[1])
+        });
+        if let Some((op, _)) = found {
+            self.diag(
+                "OD131",
+                compare,
+                format!("{op} between secrets takes longer the more of the secret a guess gets right, which lets a caller find it a character at a time; compare them with consteq() or hmac.compare_digest()"),
+            );
+        }
     }
 
     /// The calls `api_table` has a row for, but those of a method the class defines itself, and
@@ -3330,12 +3462,19 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
         let maker = in_class && matches!(func.name.as_str(), "init" | "_auto_init");
         let in_view_maker = self.in_view_maker;
         self.in_view_maker |= maker;
+        self.auth_method_override(func);
+        let in_user_setter = self.in_user_setter;
+        self.in_user_setter |= func.name.starts_with("_auth_method_") || func.name.as_str() == "update_env";
+        let in_change_check = self.in_change_check;
+        self.in_change_check |= in_class && checks_change(func);
         self.owners.push(None);
         self.cursor_uses.push(uses);
         visitor::walk_stmt(self, stmt);
         self.cursor_uses.pop();
         self.owners.pop();
         self.in_view_maker = in_view_maker;
+        self.in_user_setter = in_user_setter;
+        self.in_change_check = in_change_check;
         self.holders.names = names;
         if outermost {
             self.query_vars = None;
@@ -3421,6 +3560,7 @@ impl<'ast> Visitor<'ast> for PyVisitor<'_, 'ast> {
             }
             Stmt::Try(t) => return self.visit_try(t),
             Stmt::For(f) => self.holders.unbind(&f.target),
+            Stmt::Assign(a) => self.session_uid(a),
             Stmt::Import(_) | Stmt::ImportFrom(_) => self.api_imports(stmt),
             _ => {}
         }
@@ -3437,6 +3577,7 @@ impl<'ast> Visitor<'ast> for PyVisitor<'_, 'ast> {
                 return self.branches(&i.test, |v| v.visit_expr(&i.body), |v| v.visit_expr(&i.orelse));
             }
             Expr::Subscript(sub) => self.env_model(sub),
+            Expr::Compare(c) => self.secret_compare(c),
             Expr::Attribute(a) => {
                 self.private_attr(a, expr);
                 self.request_attr(a, expr);
@@ -5630,18 +5771,15 @@ mod tests {
             "request.env = request.env(user=uid)",
             "authenticate(request.session, request.env, kw)",
         ] {
-            assert_eq!(
-                none(&format!("{set}\n        return request.env.user.name")),
-                [""; 0],
-                "{set}"
-            );
+            let codes = none(&format!("{set}\n        return request.env.user.name"));
+            assert!(!codes.contains(&"OD129"), "{set}");
         }
         for own in [
             "env = api.Environment(request.env.cr, SUPERUSER_ID, {})\n        env['x'].create({})",
             "env = request.env(user=SUPERUSER_ID)\n        env['x'].create({})",
             "request.env['x'].with_user(SUPERUSER_ID).create({})",
         ] {
-            assert_eq!(none(own), [""; 0], "{own}");
+            assert!(!none(own).contains(&"OD129"), "{own}");
         }
         assert_eq!(none("return request.env.cr.dbname"), [""; 0]);
         let public = "@http.route('/a', auth='public', methods=['POST'])";
@@ -5651,6 +5789,149 @@ mod tests {
             analyze(src, None).diags[0].message,
             "route with auth='none' calls create(), but runs with no user, so the write belongs to no one; use auth='public' or set the user with request.update_env()"
         );
+    }
+
+    #[test]
+    fn a_public_route_that_runs_as_superuser_is_reported_with_the_form_it_uses() {
+        let message = |body: &str| {
+            let src = format!(
+                "class C(http.Controller):\n    @http.route('/a', auth='public')\n    def f(self):\n        {body}\n"
+            );
+            let diags = analyze(&src, None).diags;
+            diags.iter().find(|d| d.code == "OD111").map(|d| d.message.clone())
+        };
+        let through = |form: &str| {
+            format!(
+                "route with auth='public' runs as superuser through {form}; check that every record it reads or writes is filtered by an access check"
+            )
+        };
+        for (body, form) in [
+            (
+                "return request.env['x'].with_user(SUPERUSER_ID).search([])",
+                "with_user()",
+            ),
+            ("return request.env['x'].with_user(1).search([])", "with_user()"),
+            ("return request.env(user=1, su=False)['x'].search([])", "env()"),
+            ("return request.env(su=True)['x'].search([])", "env()"),
+            ("request.update_env(user=SUPERUSER_ID)", "update_env()"),
+            (
+                "return api.Environment(request.cr, SUPERUSER_ID, {})['x'].search([])",
+                "Environment()",
+            ),
+            (
+                "return api.Environment(request.cr, uid, {}, su=True)['x'].search([])",
+                "Environment()",
+            ),
+            (
+                "return api.Environment(request.cr, uid=SUPERUSER_ID, context={})['x'].search([])",
+                "Environment()",
+            ),
+            ("request.uid = SUPERUSER_ID", "request.uid"),
+        ] {
+            assert_eq!(message(body), Some(through(form)), "{body}");
+        }
+        for body in [
+            "return request.env['x'].with_user(request.env.user).search([])",
+            "return request.env(su=False)['x'].search([])",
+            "return request.env['x'].sudo(False).search([])",
+            "request.update_env(context={})",
+        ] {
+            assert_eq!(message(body), None, "{body}");
+        }
+        let sudo = message("request.env['x'].with_user(1)\n        return request.env['x'].sudo().search([])");
+        assert!(sudo.is_some_and(|m| m.contains("calls sudo()")));
+    }
+
+    #[test]
+    fn a_switch_of_the_request_or_session_user_is_reported_but_where_odoo_sets_it() {
+        let user = |body: &str| route("@http.route('/a', methods=['POST'])", body);
+        for body in [
+            "request.update_env(user=uid)",
+            "request.update_env(uid)",
+            "http.request.update_env(user=request.env.ref('base.public_user').id)",
+            "request.session.uid = uid",
+            "uid = request.session.uid = SUPERUSER_ID",
+            "request.session['uid'] = uid",
+            "request.uid = uid",
+        ] {
+            assert_eq!(user(body), ["OD130"], "{body}");
+        }
+        for body in [
+            "request.update_env(context={})",
+            "request.update_env(user=None)",
+            "request.session.uid = None",
+            "request.session['uid'] = None",
+            "request.session.context = {}",
+            "uid = request.session.uid",
+            "self.session.uid = uid",
+            "request.update_env(user=request.session.uid)",
+            "request.update_env(user=http.request.session['uid'])",
+            "request.uid = request.session.uid",
+            "request.uid = None",
+        ] {
+            assert_eq!(user(body), [""; 0], "{body}");
+        }
+        let src = "class C(http.Controller):\n    @http.route('/a', methods=['POST'])\n    def f(self):\n        request.uid = uid\n";
+        let at = |series| codes(src, Series::parse(series));
+        assert_eq!(at("15.0"), ["OD130"]);
+        assert_eq!(at("16.0"), [""; 0]);
+        let forward = "class R(Request):\n    def update_env(self, user=None, context=None, su=None):\n        Request.update_env(self, user, context, su)\n";
+        assert_eq!(codes(forward, None), [""; 0]);
+        let http = |base: &str| {
+            format!(
+                "class H(models.AbstractModel):\n    {base}\n\n    @classmethod\n    def _auth_method_key(cls):\n        request.update_env(user=uid)\n        request.session.uid = uid\n"
+            )
+        };
+        let diags = analyze(&http("_inherit = 'ir.http'"), None).diags;
+        let found: Vec<_> = diags.iter().map(|d| (d.code, d.pos.line, d.message.as_str())).collect();
+        let message = "_auth_method_key() decides which user every route with auth='key' runs as; check that it sets only a user the request has proven to be";
+        assert_eq!(found, [("OD130", 5, message)]);
+        assert_eq!(codes(&http("_name = 'ir.http'"), None), [""; 0]);
+        assert_eq!(codes(&http("_inherit = 'res.users'"), None), [""; 0]);
+    }
+
+    #[test]
+    fn two_secrets_compared_with_eq_are_reported_and_a_secret_against_anything_else_is_not() {
+        let compare = |test: &str| codes(&format!("if {test}:\n    pass\n"), None);
+        for test in [
+            "token != order.access_token",
+            "kw['token'] == record.signature",
+            "kw.get('access_token') == self._get_token()",
+            "API_SECRET == request.params.get('secret')",
+            "a < b == access_token != self.access_token",
+        ] {
+            assert_eq!(compare(test), ["OD131"], "{test}");
+        }
+        for test in [
+            "consteq(token, order.access_token)",
+            "token_type == 'bearer'",
+            "token == False",
+            "token is order.access_token",
+            "token == tokens[0]",
+            "kw.get(key) == order.access_token",
+            "token_count == order.token_ids",
+        ] {
+            assert_eq!(compare(test), [""; 0], "{test}");
+        }
+        let message = &analyze("token != order.access_token\n", None).diags[0].message;
+        assert_eq!(
+            message,
+            "!= between secrets takes longer the more of the secret a guess gets right, which lets a caller find it a character at a time; compare them with consteq() or hmac.compare_digest()"
+        );
+        let model = |head: &str| {
+            let src = format!(
+                "class M(models.Model):\n    _inherit = 'x'\n\n    {head}\n        if vals.get('webhook_secret') != self.webhook_secret:\n            pass\n"
+            );
+            codes(&src, None)
+        };
+        assert_eq!(model("def check(self, vals):"), ["OD131"]);
+        for head in [
+            "def write(self, vals):",
+            "def _onchange_secret(self, vals):",
+            "@api.onchange('webhook_secret')\n    def _check(self, vals):",
+        ] {
+            assert!(!model(head).contains(&"OD131"), "{head}");
+        }
     }
 
     /// `route_check` raises every route rule, so a change to one must leave the others as they were.
