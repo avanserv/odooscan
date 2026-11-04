@@ -525,7 +525,7 @@ pub enum FlowTarget {
 
 /// The OD7 codes a tainted value is harmless for, as bits by the number after `OD7`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct Safe(u16);
+pub struct Safe(u32);
 
 impl Safe {
     pub fn of(codes: &[&str]) -> Self {
@@ -545,10 +545,10 @@ impl Safe {
     }
 }
 
-fn bit(code: &str) -> u16 {
+fn bit(code: &str) -> u32 {
     code.strip_prefix("OD7")
         .and_then(|n| n.parse::<u32>().ok())
-        .and_then(|n| 1u16.checked_shl(n))
+        .and_then(|n| 1u32.checked_shl(n))
         .unwrap_or(0)
 }
 

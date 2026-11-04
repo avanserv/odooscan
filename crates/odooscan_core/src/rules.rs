@@ -281,6 +281,10 @@ rules! {
     "OD709" "unsafe-deserialization-flow" Security Error None, false, "Data a user controls is loaded by pickle, marshal or an unsafe YAML loader.";
     "OD710" "xml-entity-flow" Security Warning None, false, "Data a user controls is parsed as XML by a parser that resolves entities.";
     "OD711" "header-injection-flow" Security Warning None, false, "Data a user controls reaches the headers of a response.";
+    "OD712" "sudo-model-injection" Security Error None, false, "Data a user controls picks the model of records read or written as superuser.";
+    "OD713" "method-injection-flow" Security Error None, false, "Data a user controls names the method that getattr() looks up and the code calls.";
+    "OD714" "sudo-field-injection" Security Error None, false, "Data a user controls picks the field read as superuser.";
+    "OD715" "sudo-domain-injection" Security Error None, false, "Data a user controls picks the fields of a domain or a grouping searched as superuser.";
 }
 
 pub fn rule(code: &str) -> &'static Rule {
