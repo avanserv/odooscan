@@ -182,7 +182,8 @@ module.
 
 ## OD7: data flows
 
-Values a user controls, followed through one function to the calls that must not receive them.
+Values a user controls, followed through one function to the calls that must not receive them or,
+for OD716, to what a route returns.
 
 The sources are the parameters of a controller method behind `@route`; the parameters of a public
 model method (no leading `_`, no `@api.private`), which any user with access to the model can call
@@ -195,8 +196,10 @@ A value stays tainted through assignments, attributes of `self` set in the same 
 concatenation, f-strings, string methods, items, attributes, collections, comprehensions and module
 functions such as `json.loads()`. What a recordset method such as `browse()` or `search()` returns
 is not tainted, but for OD712, which follows the records of `env[t]` or `env.get(t)` through locals,
-`sudo()`, `browse()`, `exists()` and `filtered()`. Both branches of an `if` are followed, a branch
-that returns or raises adds nothing after it, and a loop body is read twice.
+`sudo()`, `browse()`, `exists()` and `filtered()`, and OD716, which follows the records `browse()`
+reads by an id the user picks into what a route returns, until a check of them. Both branches of an
+`if` are followed, a branch that returns or raises adds nothing after it, and a loop body is read
+twice.
 
 A value passed to a method of `self`, of `env["x"]` or of a local bound to one is followed into
 every definition of that method the module's dependencies hold, overrides included, up to four calls
@@ -215,7 +218,8 @@ flow but those of OD712, OD714 and OD715. Some steps make a value harmless for o
 `os.path.basename()`, `io.BytesIO()` and `io.StringIO()` for OD707, `shlex.quote()` and
 `shlex.join()` for OD708, a start the code picks for OD705 and OD706, a name built with text of the
 code's for OD713, and a condition whose field and operator the code picks for OD715, as their pages
-say.
+say. An id stays the user's for OD716 through `int()` and `float()`, and ends at the access checks
+its page lists.
 
 A project adds its own sources, sinks and sanitizers in the
 [`[taint]` table of its configuration](../configuration.md#taint-table).
@@ -237,3 +241,4 @@ A project adds its own sources, sinks and sanitizers in the
 | [OD713](OD713.md) | `method-injection-flow` | Data a user controls names the method that getattr() looks up and the code calls. |
 | [OD714](OD714.md) | `sudo-field-injection` | Data a user controls picks the field read as superuser. |
 | [OD715](OD715.md) | `sudo-domain-injection` | Data a user controls picks the fields of a domain or a grouping searched as superuser. |
+| [OD716](OD716.md) | `sudo-record-exposure` | A route returns records read as superuser by an id a user controls. |

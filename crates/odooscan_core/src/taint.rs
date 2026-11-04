@@ -8,6 +8,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use crate::facts::{
     ArgSlot, CallSite, FlowEdge, FlowOrigin, FlowSummary, FlowTarget, RawDiag, Receiver, RunsAs, Safe, Spanned, Step,
 };
+use crate::method_body::arguments;
 use crate::python::{Locator, SAME_MODEL, exits, str_lit, tail_name};
 use crate::series::Series;
 
@@ -36,6 +37,10 @@ enum Sink {
     Method,
     Field,
     Domain,
+    /// Records a route returns, browsed by an id the user picks under `sudo()`. Only `Flows` finds
+    /// it, at a `return`, so no row of `TABLE` or of a configuration names it, and only from an
+    /// id the route itself reads from the user, so no summary edge keeps it.
+    Record,
 }
 
 /// The arguments of a call that a sink checks.
@@ -349,6 +354,7 @@ const SINKS: &[(Sink, &str)] = &[
     (Sink::Method, "OD713"),
     (Sink::Field, "OD714"),
     (Sink::Domain, "OD715"),
+    (Sink::Record, "OD716"),
 ];
 
 /// Keywords that carry the argument a sink checks when it is not passed by position.
@@ -379,13 +385,14 @@ impl TaintTable {
         self.add(pattern, Role::Sanitizer)
     }
 
-    /// A sink reported as `rule`, the code or name of a rule of `SINKS`.
+    /// A sink reported as `rule`, the code or name of a rule of `SINKS` that a call reports.
     pub fn sink(&mut self, rule: &str, pattern: &str) -> Result<(), String> {
         let code = crate::rules::find(rule).map(|r| r.code);
-        let Some((kind, _)) = SINKS.iter().find(|(_, c)| Some(*c) == code) else {
-            let (first, last) = (SINKS[0].1, SINKS[SINKS.len() - 1].1);
+        let mut called = SINKS.iter().filter(|(s, _)| *s != Sink::Record);
+        let Some((kind, _)) = called.clone().find(|(_, c)| Some(*c) == code) else {
+            let (first, last) = (SINKS[0].1, called.next_back().map_or("", |(_, c)| *c));
             return Err(format!(
-                "'{rule}' is not a taint rule: name {first} to {last} by code or name"
+                "'{rule}' is not a taint rule a call reports: name {first} to {last} by code or name"
             ));
         };
         self.add(pattern, sink(*kind))
@@ -717,6 +724,43 @@ struct State {
     /// Locals bound to the records of a model the user picks, as `env[t]` does, with the taint of
     /// the model's name.
     picked: FxHashMap<String, Taint>,
+    /// Locals that hold records browsed by an id the user picks, or a value holding them.
+    browsed: FxHashMap<String, Browsed>,
+    /// Locals a check vouches for, whose records the route may show: an id naming one of them is
+    /// not one the user picks for OD716 when each local in it that holds a value is checked too.
+    checked: FxHashSet<String>,
+    /// Locals bound to `int()` or `float()` of a value the user sets, which still pick records.
+    ids: FxHashMap<String, Taint>,
+}
+
+/// Records browsed by an id the user picks.
+#[derive(Clone, Debug)]
+struct Browsed {
+    id: Taint,
+    /// Whether they are read as superuser.
+    sudo: bool,
+    /// The locals of the id and those bound to the records or to a value read from them, so that
+    /// a check of any of them vouches for the records.
+    names: Vec<String>,
+}
+
+fn join_browsed(a: Option<Browsed>, b: Option<Browsed>) -> Option<Browsed> {
+    match (a, b) {
+        (Some(a), Some(b)) => {
+            let mut names = a.names;
+            for n in b.names {
+                if !names.contains(&n) {
+                    names.push(n);
+                }
+            }
+            Some(Browsed {
+                id: joined(a.id, b.id),
+                sudo: a.sudo || b.sudo,
+                names,
+            })
+        }
+        (a, b) => a.or(b),
+    }
 }
 
 impl State {
@@ -737,12 +781,12 @@ impl State {
         }
         // A name is known only where both paths agree on it.
         self.names.retain(|name, mine| other.names.get(name) == Some(mine));
-        for (name, t) in other.picked {
-            let mine = self.picked.remove(&name);
-            if let Some(t) = join(mine, Some(t)) {
-                self.picked.insert(name, t);
-            }
-        }
+        join_into(&mut self.picked, other.picked, join);
+        join_into(&mut self.browsed, other.browsed, join_browsed);
+        join_into(&mut self.ids, other.ids, join);
+        // A check on one path only still vouches for the records: as at 18.0
+        // payment/controllers/portal.py:76-78, the path without it browses no id.
+        self.checked.extend(other.checked);
     }
 }
 
@@ -762,6 +806,7 @@ pub fn function(
     let mut flows = Flows {
         loc,
         table,
+        route: matches!(params, Params::Route(_)),
         series,
         odoo,
         state: State::default(),
@@ -788,6 +833,8 @@ pub fn function(
 struct Flows<'a> {
     loc: &'a Locator<'a>,
     table: &'a TaintTable,
+    /// Whether the function is a route, whose return value the browser receives.
+    route: bool,
     series: Option<Series>,
     odoo: &'a [&'a str],
     state: State,
@@ -892,6 +939,7 @@ impl Flows<'_> {
                 if let Some(t) = self.expr(v) {
                     self.edge(t, FlowTarget::Return);
                 }
+                self.exposed(v);
             }
             Stmt::If(i) => self.if_stmt(i),
             _ => self.compound(stmt),
@@ -956,6 +1004,7 @@ impl Flows<'_> {
         self.state = before.clone();
         if let Some(test) = test {
             self.expr(test);
+            self.vouch(self.tested(test, CmpOp::In));
         }
         self.body(body);
         if !exits(body) {
@@ -969,6 +1018,7 @@ impl Flows<'_> {
     /// is the comparison the check holds for: `in` after an `assert`, `not in` after an `if` that
     /// raises.
     fn guard(&mut self, test: &Expr, op: CmpOp) {
+        self.vouch(self.tested(test, op));
         let mut checks = Checks::new(op);
         checks.visit_expr(test);
         for name in checks.values {
@@ -1021,7 +1071,10 @@ impl Flows<'_> {
                 self.sink(Sink::Header, label, t, target);
             }
             Expr::Subscript(ast::ExprSubscript { value: base, .. })
-            | Expr::Attribute(ast::ExprAttribute { value: base, .. }) => self.add_to(base, values(t)),
+            | Expr::Attribute(ast::ExprAttribute { value: base, .. }) => {
+                self.hold(base, value);
+                self.add_to(base, values(t));
+            }
             _ => {}
         }
     }
@@ -1029,6 +1082,8 @@ impl Flows<'_> {
     /// Binds a local, and what the value tells of it beyond its taint.
     fn bind_name(&mut self, name: &str, target: &Expr, t: Option<Taint>, value: Option<&Expr>) {
         self.locals.insert(name.to_owned());
+        // First, so that an id read from the local reads it as it was before this binding.
+        self.bind_records(name, target, value);
         let sudo = value.is_some_and(|v| self.is_sudo(v));
         toggle(&mut self.state.sudo, name, sudo);
         let records = value.is_some_and(|v| self.records(v));
@@ -1466,6 +1521,7 @@ impl Flows<'_> {
             _ => true,
         });
         self.picks(call, expr);
+        self.vouch(self.checked_by(call));
         match row {
             Some((pattern, Role::Source(kind))) => self.source(format!("{pattern}()"), expr, kind),
             Some((_, Role::Sanitizer)) => None,
@@ -1542,6 +1598,251 @@ impl Flows<'_> {
             m if SAME_MODEL.contains(&m) || SAME_RECORDS.contains(&m) => self.picked(&a.value),
             _ => None,
         }
+    }
+
+    /// Reports records browsed by an id the user picks and read as superuser that a route returns,
+    /// rendered or not.
+    fn exposed(&mut self, value: &Expr) {
+        if !self.route {
+            return;
+        }
+        if let Some(b) = self.browsed(value).filter(|b| b.sudo) {
+            self.sink(Sink::Record, "browse()".to_owned(), Some(b.id), value);
+        }
+    }
+
+    /// The records browsed by an id the user picks that `expr` holds: `browse(id)` and a local
+    /// bound to them, kept by the methods that change the environment, `exists()`, `filtered()`,
+    /// `read()` and `mapped()`, ended by any other of their methods, and kept by an attribute or an
+    /// item when read as superuser. Any other call, a container or an expression holds those of its
+    /// parts, records read as superuser first.
+    fn browsed(&mut self, expr: &Expr) -> Option<Browsed> {
+        match expr {
+            Expr::Name(n) => self.state.browsed.get(n.id.as_str()).cloned(),
+            Expr::Call(c) => self.browsed_call(c),
+            Expr::Attribute(ast::ExprAttribute { value, .. }) | Expr::Subscript(ast::ExprSubscript { value, .. }) => {
+                self.browsed(value).filter(|b| b.sudo)
+            }
+            e => self.first_browsed(parts(e)),
+        }
+    }
+
+    fn browsed_call(&mut self, c: &ast::ExprCall) -> Option<Browsed> {
+        let Expr::Attribute(a) = &*c.func else {
+            let counted = matches!(tail_name(&c.func), Some("len" | "bool"));
+            return if counted {
+                None
+            } else {
+                self.first_browsed(arguments(c))
+            };
+        };
+        if a.attr.as_str() == "browse" {
+            return self.browse(c, &a.value);
+        }
+        match self.browsed(&a.value) {
+            Some(b) => kept(b, c, a.attr.as_str()),
+            None => self.first_browsed(arguments(c)),
+        }
+    }
+
+    /// The records `browse()` returns on `records` when the user picks the id, unless a check
+    /// vouched for each local the id names that holds a value.
+    fn browse(&mut self, c: &ast::ExprCall, records: &Expr) -> Option<Browsed> {
+        let keyword = || c.arguments.find_keyword("ids").map(|k| &k.value);
+        let arg = c.arguments.args.first().or_else(keyword)?;
+        let names = self.names_in(arg);
+        if self.vouched(&names) {
+            return None;
+        }
+        Some(Browsed {
+            id: self.id_of(arg)?,
+            sudo: self.is_sudo(records),
+            names,
+        })
+    }
+
+    /// The taint of an id, through `int()`, `float()`, `map()`, a list, a comprehension and an `if`
+    /// expression, which end other flows but still pick the records.
+    fn id_of(&mut self, e: &Expr) -> Option<Taint> {
+        match e {
+            Expr::Name(n) => {
+                let vars = self.state.vars.get(n.id.as_str());
+                vars.or_else(|| self.state.ids.get(n.id.as_str())).cloned()
+            }
+            Expr::Call(c) if is_cast(e) => self.id_of(c.arguments.args.first()?),
+            Expr::Call(c) if tail_name(&c.func) == Some("map") => self.id_of(c.arguments.args.get(1)?),
+            _ => match id_parts(e) {
+                Some(parts) => parts.into_iter().fold(None, |acc, p| {
+                    let t = self.id_of(p);
+                    join(acc, t)
+                }),
+                None => self.expr(e),
+            },
+        }
+    }
+
+    /// The records the first of `exprs` holding records read as superuser holds, or else the first
+    /// holding any.
+    fn first_browsed<'e>(&mut self, exprs: impl IntoIterator<Item = &'e Expr>) -> Option<Browsed> {
+        let mut first = None;
+        for e in exprs {
+            match self.browsed(e) {
+                Some(b) if b.sudo => return Some(b),
+                b => first = first.or(b),
+            }
+        }
+        first
+    }
+
+    /// Binds what a local holds of records browsed by an id the user picks: the records, the id
+    /// cast by `int()` or `float()`, and the check of a local it is bound from. A local bound from
+    /// held records joins their names, so that a check of it vouches for them.
+    fn bind_records(&mut self, name: &str, target: &Expr, value: Option<&Expr>) {
+        let named = value.map(|v| self.names_in(v)).unwrap_or_default();
+        for (key, b) in &mut self.state.browsed {
+            if named.contains(key) && !b.names.iter().any(|n| n == name) {
+                b.names.push(name.to_owned());
+            }
+        }
+        let checked = self.vouched(&named);
+        toggle(&mut self.state.checked, name, checked);
+        let step = Spanned {
+            value: name.to_owned(),
+            pos: self.loc.at(target),
+        };
+        match value.and_then(|v| self.browsed(v)) {
+            Some(b) => self.state.browsed.insert(name.to_owned(), b.bound(step.clone())),
+            None => self.state.browsed.remove(name),
+        };
+        match value.filter(|v| is_cast(v)).and_then(|v| self.id_of(v)) {
+            Some(mut t) => {
+                t.steps.push(step);
+                self.state.ids.insert(name.to_owned(), t)
+            }
+            None => self.state.ids.remove(name),
+        };
+    }
+
+    /// Adds the records `values` hold, as `Flows::first_browsed` picks them, to the local `base`
+    /// names, as `vals["x"] = r` or `vals.update(x=r)` do.
+    fn hold<'e>(&mut self, base: &Expr, values: impl IntoIterator<Item = &'e Expr>) {
+        let Expr::Name(n) = base else { return };
+        let Some(b) = self.first_browsed(values) else { return };
+        let step = Spanned {
+            value: n.id.to_string(),
+            pos: self.loc.at(base),
+        };
+        let mine = self.state.browsed.remove(n.id.as_str());
+        if let Some(b) = join_browsed(mine, Some(b.bound(step))) {
+            self.state.browsed.insert(n.id.to_string(), b);
+        }
+    }
+
+    /// The locals `expr` names, but `self`.
+    fn names_in(&self, expr: &Expr) -> Vec<String> {
+        let mut names = Names::default();
+        names.visit_expr(expr);
+        names
+            .0
+            .retain(|n| self.locals.contains(n) && !matches!(n.as_str(), "self" | "cls"));
+        names.0
+    }
+
+    /// Vouches for the records that the locals `names` hold or pick. Drops the held records that
+    /// name one of them, or one of the names of the records they hold, and marks all those names
+    /// checked, so that a later id naming only checked locals picks nothing for the user.
+    fn vouch(&mut self, mut names: Vec<String>) {
+        if names.is_empty() {
+            return;
+        }
+        let browsed = &self.state.browsed;
+        let named: Vec<String> = names
+            .iter()
+            .filter_map(|n| browsed.get(n))
+            .flat_map(|b| b.names.clone())
+            .collect();
+        names.extend(named);
+        let checked = |n: &String| names.contains(n);
+        self.state
+            .browsed
+            .retain(|key, b| !checked(key) && !b.names.iter().any(checked));
+        self.state.checked.extend(names);
+    }
+
+    /// Whether a check vouched for an id naming `names`: for one of them, and for each that holds a
+    /// value, so that an unchecked part still picks the records.
+    fn vouched(&self, names: &[String]) -> bool {
+        let checked = |n: &String| self.state.checked.contains(n);
+        let holds = |n: &&String| self.state.vars.contains_key(*n) || self.state.ids.contains_key(*n);
+        names.iter().any(checked) && names.iter().filter(holds).all(checked)
+    }
+
+    /// The locals a call checks the access to: the id of a document or a token check, what a
+    /// token is compared to, the arguments and records of a `_check` method, and the records of
+    /// an access check outside `sudo()`, which skips them (18.0 `odoo/models.py:4456`, `:4464`;
+    /// 16.0 `:3524`), or after a later `with_user()`, as `kept()` reads it. `check_access_rights()`
+    /// checks the model only (18.0 `odoo/models.py:4516`).
+    fn checked_by(&self, call: &ast::ExprCall) -> Vec<String> {
+        let receiver = match &*call.func {
+            Expr::Attribute(a) => Some(&*a.value),
+            _ => None,
+        };
+        // A field or an item of sudo records keeps their environment (18.0 `odoo/fields.py:3341`),
+        // so the last switch anywhere on the path decides.
+        let skipped = |r: &&Expr| {
+            let path = self.path(r);
+            path.iter()
+                .rfind(|p| matches!(p.as_str(), "sudo()" | "sudo(False)" | "with_user()"))
+                .is_some_and(|p| p == "sudo()")
+        };
+        let checked: Vec<&Expr> = match tail_name(&call.func).unwrap_or_default() {
+            "check_access" | "check_access_rule" | "has_access" => {
+                receiver.filter(|r| !skipped(r)).into_iter().collect()
+            }
+            "_document_check_access" => call
+                .arguments
+                .find_argument_value("document_id", 1)
+                .into_iter()
+                .collect(),
+            // `check_access_token(token, *values)` signs the values, the ids among them.
+            "check_access_token" => call.arguments.args.iter().skip(1).collect(),
+            "consteq" | "compare_digest" => arguments(call).filter(|a| !self.sent(a)).collect(),
+            n if n.starts_with("_check") && !n.starts_with("_checkout") => arguments(call).chain(receiver).collect(),
+            _ => vec![],
+        };
+        checked.into_iter().flat_map(|a| self.names_in(a)).collect()
+    }
+
+    /// Whether `expr` is a token as the user sent it, such as `token` or `kw.get("token")`, which
+    /// vouches for nothing it is compared to, unlike a value read from or computed for records.
+    fn sent(&self, expr: &Expr) -> bool {
+        let root = match expr {
+            Expr::Subscript(s) => &*s.value,
+            Expr::Call(c) if tail_name(&c.func) == Some("get") => match &*c.func {
+                Expr::Attribute(a) => &*a.value,
+                _ => return false,
+            },
+            e => e,
+        };
+        let held = |n: &str| {
+            self.state
+                .browsed
+                .iter()
+                .any(|(k, b)| k == n || b.names.iter().any(|m| m == n))
+        };
+        root.as_name_expr().is_some_and(|n| !held(n.id.as_str()))
+    }
+
+    /// The locals a test vouches for where it holds: those of a check it calls, of records whose
+    /// field it reads or that it compares, and `x` for `x <op> allowed` or `int(x) <op> allowed`.
+    fn tested(&self, test: &Expr, op: CmpOp) -> Vec<String> {
+        let mut tests = Tests {
+            flows: self,
+            op,
+            names: vec![],
+        };
+        tests.visit_expr(test);
+        tests.names
     }
 
     /// What a call that no row names returns, keeping a write on `self` or a call of a model's
@@ -1655,6 +1956,7 @@ impl Flows<'_> {
             return if keeps { args } else { values(args) };
         };
         if method == "update" {
+            self.hold(&a.value, arguments(call));
             self.add_to(&a.value, args);
             return None;
         }
@@ -1706,6 +2008,9 @@ impl Flows<'_> {
         }
         let pos = self.loc.at(expr);
         if !t.origin.is_user() {
+            if sink == Sink::Record {
+                return;
+            }
             t.steps.push(Spanned { value: callee, pos });
             return self.edge(t, FlowTarget::Sink(code));
         }
@@ -1758,6 +2063,179 @@ fn conjuncts(test: &Expr) -> Vec<&Expr> {
 
 /// Methods that return some of the records they are called on.
 const SAME_RECORDS: &[&str] = &["browse", "exists", "filtered"];
+
+/// What a test may compare of records, beyond `SAME_MODEL` and `SAME_RECORDS`, without checking
+/// who may see them.
+const UNCHECKED: &[&str] = &["ensure_one", "ids", "get"];
+
+impl Browsed {
+    /// The records once bound to a local, which the flow names and a check of it vouches for.
+    fn bound(mut self, step: Spanned<String>) -> Self {
+        if !self.names.contains(&step.value) {
+            self.names.push(step.value.clone());
+        }
+        self.id.steps.push(step);
+        self
+    }
+}
+
+/// What the method `method` of records `b` returns of them, called as `c`.
+fn kept(b: Browsed, c: &ast::ExprCall, method: &str) -> Option<Browsed> {
+    match method {
+        "sudo" => Some(Browsed {
+            sudo: call_suffix(c) == "()",
+            ..b
+        }),
+        "with_user" => Some(Browsed { sudo: false, ..b }),
+        m if SAME_MODEL.contains(&m) || SAME_RECORDS.contains(&m) || matches!(m, "read" | "mapped") => Some(b),
+        _ => None,
+    }
+}
+
+/// The parts of an id that each pick records: the items of a list, the iterables of a
+/// comprehension and the values of an `if` expression.
+fn id_parts(e: &Expr) -> Option<Vec<&Expr>> {
+    match e {
+        Expr::List(ast::ExprList { elts, .. })
+        | Expr::Tuple(ast::ExprTuple { elts, .. })
+        | Expr::Set(ast::ExprSet { elts, .. }) => Some(elts.iter().collect()),
+        Expr::ListComp(ast::ExprListComp { generators, .. })
+        | Expr::SetComp(ast::ExprSetComp { generators, .. })
+        | Expr::Generator(ast::ExprGenerator { generators, .. }) => Some(generators.iter().map(|g| &g.iter).collect()),
+        Expr::If(i) => Some(vec![&*i.body, &*i.orelse]),
+        _ => None,
+    }
+}
+
+/// Whether `expr` is `int(x)` or `float(x)`, or an `if` expression one of whose values is.
+fn is_cast(expr: &Expr) -> bool {
+    match expr {
+        Expr::Call(c) => matches!(&*c.func, Expr::Name(n) if matches!(n.id.as_str(), "int" | "float")),
+        Expr::If(i) => is_cast(&i.body) || is_cast(&i.orelse),
+        _ => false,
+    }
+}
+
+/// The parts of a container or an expression whose value may be one of them.
+fn parts(expr: &Expr) -> Vec<&Expr> {
+    fn comprehension<'e>(elt: &'e Expr, generators: &'e [ast::Comprehension]) -> Vec<&'e Expr> {
+        std::iter::once(elt).chain(generators.iter().map(|g| &g.iter)).collect()
+    }
+    match expr {
+        Expr::List(ast::ExprList { elts, .. })
+        | Expr::Tuple(ast::ExprTuple { elts, .. })
+        | Expr::Set(ast::ExprSet { elts, .. }) => elts.iter().collect(),
+        Expr::Dict(d) => d.items.iter().map(|i| &i.value).collect(),
+        Expr::BoolOp(b) => b.values.iter().collect(),
+        Expr::If(i) => vec![&*i.body, &*i.orelse],
+        Expr::Starred(ast::ExprStarred { value, .. }) | Expr::Await(ast::ExprAwait { value, .. }) => vec![&**value],
+        Expr::ListComp(ast::ExprListComp { elt, generators, .. })
+        | Expr::SetComp(ast::ExprSetComp { elt, generators, .. })
+        | Expr::Generator(ast::ExprGenerator { elt, generators, .. }) => comprehension(elt, generators),
+        Expr::DictComp(d) => comprehension(&d.value, &d.generators),
+        _ => vec![],
+    }
+}
+
+/// The names an expression reads.
+#[derive(Default)]
+struct Names(Vec<String>);
+
+impl<'a> Visitor<'a> for Names {
+    fn visit_expr(&mut self, expr: &'a Expr) {
+        if let Expr::Name(n) = expr
+            && !self.0.iter().any(|m| m == n.id.as_str())
+        {
+            self.0.push(n.id.to_string());
+        }
+        visitor::walk_expr(self, expr);
+    }
+}
+
+/// The locals a test of `Flows::tested` vouches for.
+struct Tests<'f, 'a> {
+    flows: &'f Flows<'a>,
+    op: CmpOp,
+    names: Vec<String>,
+}
+
+impl Tests<'_, '_> {
+    /// The local of the held records `expr` is, or reads data of, as `order.partner_id` or
+    /// `group._access_token()` do; `order.sudo().exists()`, `values.get("x")` and `ids` read none.
+    fn held<'e>(&self, expr: &'e Expr) -> Option<&'e str> {
+        let (mut e, mut reads) = (expr, Expr::is_name_expr(expr));
+        loop {
+            match e {
+                Expr::Attribute(a) => {
+                    let method = a.attr.as_str();
+                    reads |= !(UNCHECKED.contains(&method)
+                        || SAME_MODEL.contains(&method)
+                        || SAME_RECORDS.contains(&method));
+                    e = &a.value;
+                }
+                Expr::Call(c) => e = &c.func,
+                _ => break,
+            }
+        }
+        let name = e.as_name_expr()?.id.as_str();
+        (reads && self.flows.state.browsed.contains_key(name)).then_some(name)
+    }
+
+    /// Records the test compares or compares a field of, and the id it holds to values the code
+    /// allows.
+    fn compared(&mut self, operands: &[Expr], op: CmpOp) {
+        let held: Vec<String> = operands
+            .iter()
+            .filter_map(|o| self.held(o))
+            .map(str::to_owned)
+            .collect();
+        self.names.extend(held);
+        let id = match &operands[0] {
+            Expr::Call(call) if is_cast(&operands[0]) => call.arguments.args.first(),
+            e => Some(e),
+        };
+        let allowed = !tail_name(&operands[1]).is_some_and(|n| EXISTING.contains(&n));
+        if let Some(id) = id.and_then(Expr::as_name_expr).filter(|_| allowed && op == self.op) {
+            self.names.push(id.id.to_string());
+        }
+    }
+}
+
+impl<'a> Visitor<'a> for Tests<'_, '_> {
+    fn visit_expr(&mut self, expr: &'a Expr) {
+        if let Expr::Call(c) = expr {
+            self.names.extend(self.flows.checked_by(c));
+        }
+        if let Some((operands, op)) = comparison(expr) {
+            self.compared(operands, op);
+        }
+        walk_compared(self, expr);
+    }
+}
+
+/// The comparison under `not` that reads as its negation, as `not x in y` reads as `x not in y`.
+fn negated(expr: &Expr) -> Option<&ast::ExprCompare> {
+    let Expr::UnaryOp(u) = expr else { return None };
+    let c = u.operand.as_compare_expr().filter(|_| u.op == ast::UnaryOp::Not)?;
+    matches!(c.ops[..], [CmpOp::In | CmpOp::NotIn]).then_some(c)
+}
+
+/// The operands of a comparison with one operator, and that operator.
+fn comparison(expr: &Expr) -> Option<(&[Expr], CmpOp)> {
+    match expr {
+        Expr::Compare(c) if c.ops.len() == 1 => Some((&c.operands, c.ops[0])),
+        e => negated(e).map(|c| (&c.operands[..], c.ops[0].negate())),
+    }
+}
+
+/// Walks `expr`, but the comparison under a `not` that `negated` reads, which holds for the
+/// negated operator only.
+fn walk_compared<'a, V: Visitor<'a>>(visitor: &mut V, expr: &'a Expr) {
+    match negated(expr) {
+        Some(c) => c.operands.iter().for_each(|o| visitor.visit_expr(o)),
+        None => visitor::walk_expr(visitor, expr),
+    }
+}
 
 /// How a call ends its name in a dotted path: `sudo(False)` runs with the user's rights again, so
 /// it reads as no `sudo()`.
@@ -1985,6 +2463,20 @@ fn existing() -> Safe {
     Safe::of(&codes)
 }
 
+/// Joins each entry of `other` into the one of `mine` under its name.
+fn join_into<T>(
+    mine: &mut FxHashMap<String, T>,
+    other: FxHashMap<String, T>,
+    join: fn(Option<T>, Option<T>) -> Option<T>,
+) {
+    for (name, t) in other {
+        let kept = mine.remove(&name);
+        if let Some(t) = join(kept, Some(t)) {
+            mine.insert(name, t);
+        }
+    }
+}
+
 fn merge_into(joined: &mut Option<State>, state: State) {
     match joined {
         Some(j) => j.merge(state),
@@ -2017,9 +2509,9 @@ impl Checks {
 
     /// The name a membership test checks, and whether its container holds every model or field.
     fn checked(&self, expr: &Expr) -> Option<(String, bool)> {
-        let Expr::Compare(c) = expr else { return None };
-        let name = c.operands[0].as_name_expr().filter(|_| c.ops[..] == [self.op])?;
-        let every = tail_name(&c.operands[1]).is_some_and(|n| EXISTING.contains(&n));
+        let (operands, op) = comparison(expr)?;
+        let name = operands[0].as_name_expr().filter(|_| op == self.op)?;
+        let every = tail_name(&operands[1]).is_some_and(|n| EXISTING.contains(&n));
         Some((name.id.to_string(), every))
     }
 
@@ -2078,7 +2570,7 @@ impl<'a> Visitor<'a> for Checks {
                 self.starts.extend(self.started(expr));
             }
         }
-        visitor::walk_expr(self, expr);
+        walk_compared(self, expr);
     }
 }
 
@@ -2250,6 +2742,11 @@ const MESSAGES: &[(&str, &str, &str)] = &[
         "OD715",
         "the domain or the fields of ",
         ", so the user searches or groups by any field as superuser; build each condition with a field and an operator the code picks",
+    ),
+    (
+        "OD716",
+        "the id of ",
+        ", whose records the route returns read as superuser; check them with _document_check_access(), consteq(), check_access() from 18.0 or check_access_rule() before 18.0",
     ),
 ];
 
@@ -2535,6 +3032,8 @@ mod tests {
         assert!(table.sink("no-such-rule", "lib.run").is_err());
         assert!(table.sink("sql-injection-flow", "lib.run").is_ok());
         assert!(table.sink("od704", "lib.run").is_ok());
+        let error = table.sink("sudo-record-exposure", "lib.show").unwrap_err();
+        assert!(error.contains("OD701 to OD715"), "{error}");
     }
 
     #[test]
@@ -3130,6 +3629,10 @@ mod tests {
         assert!(codes_of(&checked).is_empty());
         let allowed = format!("    if t not in ('name', 'ref'):{raises}\n    P.sudo()[t]");
         assert!(codes_of(&allowed).is_empty());
+        let negated = format!("    if not t in ('name', 'ref'):{raises}\n    P.sudo()[t]");
+        assert!(codes_of(&negated).is_empty());
+        let asserted = "    assert not (t in ('name', 'ref'))\n    P.sudo()[t]";
+        assert_eq!(codes_of(asserted), ["OD714"]);
     }
 
     #[test]
@@ -3300,5 +3803,145 @@ mod tests {
         let write = |records: &str| format!("def f(self, **post):\n    self.env['x.y'].{records}.write(post)\n");
         assert!(scan(Params::Route(&[]), &write("sudo(False)")).is_empty());
         assert_eq!(code_list(&scan(Params::Route(&[]), &write("sudo()"))), ["OD704"]);
+    }
+
+    /// The codes of a route body where `order_id` and `token` are its parameters and `O` the
+    /// orders read as superuser.
+    fn returned(params: Params, body: &str) -> Vec<String> {
+        let src = format!("def f(self, order_id, token):\n    O = request.env['sale.order'].sudo()\n{body}\n");
+        code_list(&scan(params, &src)).into_iter().map(str::to_owned).collect()
+    }
+
+    #[test]
+    fn a_route_returning_records_the_user_picks_as_superuser_reports_them() {
+        for body in [
+            "    return O.browse(int(order_id)).name",
+            "    order = request.env['sale.order'].browse(order_id).sudo()\n    return order",
+            "    order = O.browse([int(i) for i in order_id.split(',')])\n    return request.render('t', {'order': order})",
+            "    order = O.browse(map(int, order_id.split(',')))\n    return order.read(['name'])",
+            "    order_id = int(order_id)\n    order = O.browse(order_id).exists()\n    return order.partner_id",
+            "    values = {}\n    values['order'] = O.browse(order_id)\n    return request.render('t', values)",
+            "    values = {}\n    values.update(order=O.browse(order_id))\n    return request.render('t', values)",
+            "    order = O.browse(order_id)\n    order.sudo().check_access('read')\n    return order",
+            "    order = O.browse(order_id)\n    order.with_user(request.env.user).sudo().check_access('read')\n    return order",
+            "    order = O.browse(order_id)\n    if not order.exists():\n        raise NotFound()\n    return order",
+            "    order = O.browse(order_id)\n    if order:\n        return order.name",
+            "    self._document_check_access('sale.order', order_id, token)\n    order_id = token\n    return O.browse(order_id)",
+            "    self._document_check_access('sale.order', order_id, token)\n    return O.browse([int(order_id), int(token)])",
+            "    order = O.browse(order_id)\n    if not order.sudo().exists():\n        raise NotFound()\n    return order",
+            "    order = O.browse(order_id)\n    if order.id:\n        return order",
+            "    values = {'order': O.browse(order_id)}\n    if values.get('error'):\n        return values",
+            "    values = {'order': O.browse(order_id)}\n    if values.get('error') == 'x':\n        return values",
+            "    order = O.browse(order_id)\n    if order.with_context(lang='en_US').name:\n        return order",
+            "    self._checkout_form_save(order_id)\n    return O.browse(order_id)",
+            "    order_id = int(order_id) if order_id else False\n    return O.browse(order_id)",
+            "    return O.browse(int(order_id) if order_id else False)",
+            "    order_sudo = O.browse(int(order_id))\n    order_sudo.partner_id.check_access('read')\n    return order_sudo",
+        ] {
+            assert_eq!(returned(Params::Route(&[]), body), ["OD716"], "{body}");
+        }
+        let token_in_kw = "def f(self, order_id, **kw):\n    self._document_check_access('sale.order', order_id, kw.get('access_token'))\n    return request.env['res.partner'].sudo().browse(int(kw['partner_id']))\n";
+        assert_eq!(code_list(&scan(Params::Route(&[]), token_in_kw)), ["OD716"]);
+        let compared_to_kw = "def f(self, order_id, **kw):\n    order = request.env['sale.order'].sudo().browse(order_id)\n    if not consteq(order.access_token, kw['token']):\n        raise NotFound()\n    return request.env['res.partner'].sudo().browse(int(kw['partner_id']))\n";
+        assert_eq!(code_list(&scan(Params::Route(&[]), compared_to_kw)), ["OD716"]);
+        let found = scan(
+            Params::Route(&[]),
+            "def f(self, order_id):\n    order = request.env['sale.order'].sudo().browse(order_id)\n    return order.name\n",
+        );
+        assert_eq!(
+            found,
+            [
+                "OD716 route parameter 'order_id' reaches the id of browse() through 'order', whose records the route returns read as superuser"
+            ]
+        );
+    }
+
+    #[test]
+    fn a_check_vouches_for_the_records_a_route_returns() {
+        for body in [
+            "    order = O.browse(order_id)\n    order = self._document_check_access('sale.order', order.id, token)\n    return order",
+            "    self._document_check_access('sale.order', order_id, token)\n    return O.browse(order_id)",
+            "    order = O.browse(int(order_id))\n    if not consteq(order.access_token, token):\n        raise NotFound()\n    return order",
+            "    order = O.browse(order_id)\n    secret = order._token()\n    if not hmac.compare_digest(secret, token):\n        raise NotFound()\n    return order",
+            "    if not payment_utils.check_access_token(token, order_id):\n        raise NotFound()\n    return O.browse(order_id)",
+            "    order = O.browse(order_id)\n    self._check_order(order, token)\n    return order",
+            "    request.env['sale.order'].browse(order_id).check_access('read')\n    return O.browse(order_id)",
+            "    order = request.env['sale.order'].browse(order_id)\n    order.check_access_rule('read')\n    return order.sudo()",
+            "    order = O.browse(order_id)\n    if not request.env['sale.order'].browse(order_id).has_access('read'):\n        raise NotFound()\n    return order",
+            "    order = O.browse(order_id)\n    if order.partner_id != request.env.user.partner_id:\n        raise NotFound()\n    return order",
+            "    order = O.browse(order_id)\n    if order.state == 'sale':\n        return order.name",
+            "    order = O.browse(order_id)\n    if token != order._access_token():\n        raise NotFound()\n    return order",
+            "    order = O.browse(order_id)\n    if order.id not in allowed_ids:\n        raise NotFound()\n    return order",
+            "    order_sudo = O.browse(int(order_id))\n    order_sudo.with_user(request.env.user).check_access('read')\n    return request.render('t', {'order': order_sudo})",
+            "    order = O.browse(order_id)\n    assert order in request.env.user.order_ids\n    return order",
+            "    if int(order_id) not in request.env.user.order_ids.ids:\n        raise NotFound()\n    return O.browse(int(order_id))",
+            "    if order_id:\n        if not payment_utils.check_access_token(token, order_id):\n            raise NotFound()\n    return O.browse(order_id)",
+            "    self._document_check_access('sale.order', order_id, token)\n    oid = int(order_id)\n    return O.browse(oid)",
+            "    if not order_id in allowed:\n        raise NotFound()\n    return O.browse(order_id)",
+            "    order_id = int(order_id)\n    if order_id not in allowed:\n        raise NotFound()\n    return O.browse(order_id)",
+            "    order = O.browse(order_id)\n    if not order.sudo(False).has_access('read'):\n        raise NotFound()\n    return order",
+        ] {
+            assert!(returned(Params::Route(&[]), body).is_empty(), "{body}");
+        }
+    }
+
+    #[test]
+    fn only_routes_returning_records_read_as_superuser_report_them() {
+        for (params, body) in [
+            (Params::Rpc, "    return O.browse(order_id)"),
+            (Params::None, "    return O.browse(order_id)"),
+            (Params::Route(&["order_id"]), "    return O.browse(order_id.id)"),
+            (
+                Params::Route(&[]),
+                "    return request.env['sale.order'].browse(order_id)",
+            ),
+            (
+                Params::Route(&[]),
+                "    return O.browse(order_id).with_user(request.env.user)",
+            ),
+            (Params::Route(&[]), "    return O.browse(order_id).sudo(False)"),
+            (Params::Route(&[]), "    return O.browse(order_id).get_portal_url()"),
+            (Params::Route(&[]), "    return len(O.browse(order_id))"),
+            (
+                Params::Route(&[]),
+                "    return request.env['sale.order'].browse(order_id).name",
+            ),
+            (
+                Params::Route(&[]),
+                "    order = O.browse(order_id)\n    order = O.browse(1)\n    return order",
+            ),
+        ] {
+            assert!(returned(params, body).is_empty(), "{body}");
+        }
+    }
+
+    #[test]
+    fn records_a_called_method_picks_are_left_to_its_caller() {
+        let src = "def f(self, order_id):\n    oid = self._helper(order_id)\n    return request.env['sale.order'].sudo().browse(oid)\n";
+        let route = summary(Params::Route(&[]), src);
+        assert!(!route.edges.iter().any(|e| e.target == FlowTarget::Sink("OD716")));
+    }
+
+    #[test]
+    fn an_id_read_from_records_reads_them_as_they_were() {
+        let rebound = "    recs = self.env['x.y']\n    recs = self.env['x.y'].sudo().browse(recs.search(t).ids)";
+        assert!(codes_of(rebound).is_empty());
+    }
+
+    #[test]
+    fn records_leave_the_other_flows_as_they_were() {
+        let guarded = "    if not consteq(t, 'x'):\n        raise NotFound()\n    self.env.cr.execute('SELECT %s' % t)";
+        assert_eq!(codes_of(guarded), ["OD701"]);
+        let arm = "    r = P.sudo().browse(t)\n    if r.name:\n        Markup(t)";
+        assert_eq!(codes_of(arm), ["OD703"]);
+        let update =
+            "def f(self, **post):\n    vals = {}\n    vals.update(post)\n    self.env['x.y'].sudo().create(vals)\n";
+        assert_eq!(code_list(&scan(Params::Route(&[]), update)), ["OD704"]);
+        assert_eq!(
+            codes_of(
+                "    r = P.sudo().browse(t)\n    response = request.make_response('')\n    response.headers['X-A'] = t"
+            ),
+            ["OD711"]
+        );
     }
 }

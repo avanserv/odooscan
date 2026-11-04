@@ -285,6 +285,7 @@ rules! {
     "OD713" "method-injection-flow" Security Error None, false, "Data a user controls names the method that getattr() looks up and the code calls.";
     "OD714" "sudo-field-injection" Security Error None, false, "Data a user controls picks the field read as superuser.";
     "OD715" "sudo-domain-injection" Security Error None, false, "Data a user controls picks the fields of a domain or a grouping searched as superuser.";
+    "OD716" "sudo-record-exposure" Security Warning None, false, "A route returns records read as superuser by an id a user controls.";
 }
 
 pub fn rule(code: &str) -> &'static Rule {
