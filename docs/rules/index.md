@@ -204,9 +204,11 @@ sink when the module holds it, otherwise at the call that leaves the module. A m
 writes on `self`, or on the records of a call on `self`, is a superuser write.
 
 The flow ends at a sanitizer: `int()`, `float()`, `bool()`, `len()`, `SQL.identifier()`,
-`escape()`, `html_escape()`, `html_sanitize()` and `plaintext2html()`; at `assert x in (...)` or
-`if x not in allowed: raise`; and at an intersection with values the code chose, such as
-`set(vals) & allowed`.
+`escape()`, `html_escape()`, `html_sanitize()`, `plaintext2html()`, `urlencode()`, `url_encode()`
+and `secure_filename()`; at `assert x in (...)` or `if x not in allowed: raise`; and at an
+intersection with values the code chose, such as `set(vals) & allowed`. Some steps make a value
+harmless for one rule only: `os.path.basename()`, `io.BytesIO()` and `io.StringIO()` for OD707,
+and a start the code picks for OD705 and OD706, as their pages say.
 
 A project adds its own sources, sinks and sanitizers in the
 [`[taint]` table of its configuration](../configuration.md#taint-table).
@@ -217,3 +219,6 @@ A project adds its own sources, sinks and sanitizers in the
 | [OD702](OD702.md) | `code-injection-flow` | Data a user controls reaches safe_eval(), eval() or exec(). |
 | [OD703](OD703.md) | `markup-injection-flow` | Data a user controls is wrapped in Markup() without escaping. |
 | [OD704](OD704.md) | `sudo-mass-assignment` | A mapping a user controls is written as superuser, so the user picks the fields. |
+| [OD705](OD705.md) | `open-redirect-flow` | Data a user controls picks the site a redirect sends the browser to. |
+| [OD706](OD706.md) | `server-request-forgery-flow` | Data a user controls picks the URL the server sends a request to. |
+| [OD707](OD707.md) | `path-traversal-flow` | Data a user controls picks the path of a file the server opens. |

@@ -6,9 +6,10 @@ use ruff_python_ast::{self as ast, CmpOp, Expr, Operator, Stmt};
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::facts::{
-    ArgSlot, CallSite, FlowEdge, FlowOrigin, FlowSummary, FlowTarget, RawDiag, Receiver, RunsAs, Spanned, Step,
+    ArgSlot, CallSite, FlowEdge, FlowOrigin, FlowSummary, FlowTarget, RawDiag, Receiver, RunsAs, Safe, Spanned, Step,
 };
 use crate::python::{Locator, SAME_MODEL, exits, str_lit, tail_name};
+use crate::series::Series;
 
 /// What the user controls in a tainted value.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -24,14 +25,89 @@ enum Sink {
     Eval,
     Markup,
     SudoWrite,
+    Redirect,
+    Request,
+    Path,
+}
+
+/// The arguments of a call that a sink checks.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Arg {
+    /// The first positional argument, or without one a keyword of `SINK_KEYWORDS`.
+    First,
+    /// The positional argument at the index, or without it one of the keywords.
+    At(usize, &'static [&'static str]),
+    /// Every positional argument.
+    Any,
+}
+
+/// A literal a call must pass, by keyword or position, for it to be the sink, as `local=False` for
+/// `request.redirect()`. Before `since` the callee has no such parameter and always acts as if the
+/// literal were passed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct Guard {
+    keyword: &'static str,
+    pos: usize,
+    value: bool,
+    since: Option<Series>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct SinkRow {
+    sink: Sink,
+    arg: Arg,
+    guard: Option<Guard>,
+    /// The pattern matches the bare name alone, so that `Image.open` is no `open`.
+    whole: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Role {
     Source(Kind),
-    Sink(Sink),
+    Sink(SinkRow),
     Sanitizer,
+    /// Returns what its arguments carry, made harmless for the rule of that code.
+    Clears(&'static str),
+    /// Returns what the positional arguments at these indexes, or these keywords, carry, and
+    /// nothing of the others.
+    Keeps(&'static [usize], &'static [&'static str]),
 }
+
+const fn sink(sink: Sink) -> Role {
+    sink_at(sink, Arg::First)
+}
+
+const fn sink_at(sink: Sink, arg: Arg) -> Role {
+    Role::Sink(SinkRow {
+        sink,
+        arg,
+        guard: None,
+        whole: false,
+    })
+}
+
+const fn guarded(sink: Sink, arg: Arg, guard: Guard) -> Role {
+    Role::Sink(SinkRow {
+        sink,
+        arg,
+        guard: Some(guard),
+        whole: false,
+    })
+}
+
+/// The keywords of the URL of a redirect: `url` in the `request.redirect` of 14.0 and before.
+const LOCATION: Arg = Arg::At(0, &["location", "url"]);
+const URL: Arg = Arg::At(0, &["url"]);
+const FILE: Arg = Arg::At(0, &["file", "name", "path_or_file", "filepath_or_fp"]);
+
+/// From 15.0 `request.redirect()` takes `local`, which drops the scheme and the host of the URL
+/// unless it is false (`odoo/http.py:303`); before, it redirects to any URL.
+const REDIRECT_LOCAL: Guard = Guard {
+    keyword: "local",
+    pos: 2,
+    value: false,
+    since: Some(Series { major: 15, minor: 0 }),
+};
 
 /// Where user data enters, where it must not arrive, and what makes it harmless. A pattern matches
 /// a dotted callee or attribute that ends with its last name and holds its other names in order, so
@@ -52,15 +128,50 @@ const TABLE: &[(&str, Role)] = &[
     ("request.httprequest.get_json", Role::Source(Kind::Keys)),
     ("request.httprequest.data", Role::Source(Kind::Value)),
     ("request.httprequest.get_data", Role::Source(Kind::Value)),
-    ("cr.execute", Role::Sink(Sink::Sql)),
-    ("_cr.execute", Role::Sink(Sink::Sql)),
-    ("SQL", Role::Sink(Sink::Sql)),
-    ("safe_eval", Role::Sink(Sink::Eval)),
-    ("eval", Role::Sink(Sink::Eval)),
-    ("exec", Role::Sink(Sink::Eval)),
-    ("Markup", Role::Sink(Sink::Markup)),
-    ("sudo().create", Role::Sink(Sink::SudoWrite)),
-    ("sudo().write", Role::Sink(Sink::SudoWrite)),
+    ("cr.execute", sink(Sink::Sql)),
+    ("_cr.execute", sink(Sink::Sql)),
+    ("SQL", sink(Sink::Sql)),
+    ("safe_eval", sink(Sink::Eval)),
+    ("eval", sink(Sink::Eval)),
+    ("exec", sink(Sink::Eval)),
+    ("Markup", sink(Sink::Markup)),
+    ("sudo().create", sink(Sink::SudoWrite)),
+    ("sudo().write", sink(Sink::SudoWrite)),
+    ("werkzeug.utils.redirect", sink_at(Sink::Redirect, LOCATION)),
+    ("werkzeug.redirect", sink_at(Sink::Redirect, LOCATION)),
+    ("request.redirect", guarded(Sink::Redirect, LOCATION, REDIRECT_LOCAL)),
+    (
+        "request.redirect_query",
+        guarded(
+            Sink::Redirect,
+            LOCATION,
+            Guard {
+                pos: 3,
+                since: None,
+                ..REDIRECT_LOCAL
+            },
+        ),
+    ),
+    ("requests.get", sink_at(Sink::Request, URL)),
+    ("requests.post", sink_at(Sink::Request, URL)),
+    ("requests.put", sink_at(Sink::Request, URL)),
+    ("requests.patch", sink_at(Sink::Request, URL)),
+    ("requests.delete", sink_at(Sink::Request, URL)),
+    ("requests.head", sink_at(Sink::Request, URL)),
+    ("requests.options", sink_at(Sink::Request, URL)),
+    ("requests.request", sink_at(Sink::Request, Arg::At(1, &["url"]))),
+    ("urlopen", sink_at(Sink::Request, URL)),
+    (
+        "open",
+        Role::Sink(SinkRow {
+            sink: Sink::Path,
+            arg: FILE,
+            guard: None,
+            whole: true,
+        }),
+    ),
+    ("send_file", sink_at(Sink::Path, FILE)),
+    ("os.path.join", sink_at(Sink::Path, Arg::Any)),
     ("int", Role::Sanitizer),
     ("float", Role::Sanitizer),
     ("bool", Role::Sanitizer),
@@ -73,6 +184,17 @@ const TABLE: &[(&str, Role)] = &[
     // QWeb escapes the values it renders.
     ("_render", Role::Sanitizer),
     ("_render_template", Role::Sanitizer),
+    ("urlencode", Role::Sanitizer),
+    ("url_encode", Role::Sanitizer),
+    ("secure_filename", Role::Sanitizer),
+    // An attribute's value, or the default, and not its name.
+    ("getattr", Role::Keeps(&[0, 2], &[])),
+    // The query parameters go URL-encoded into the query of the URL (portal/controllers/portal.py).
+    ("_build_url_w_params", Role::Keeps(&[0], &["url_string"])),
+    // A name without its directories, or a stream of the data, opens no other file.
+    ("basename", Role::Clears("OD707")),
+    ("BytesIO", Role::Clears("OD707")),
+    ("StringIO", Role::Clears("OD707")),
 ];
 
 /// Keywords that carry the argument a sink checks when it is not passed by position.
@@ -80,7 +202,10 @@ const SINK_KEYWORDS: &[&str] = &["query", "code", "expr", "vals", "vals_list"];
 
 /// The built-in row a dotted path matches, with its pattern.
 fn built_in(path: &[String]) -> Option<(&'static str, Role)> {
-    TABLE.iter().copied().find(|(pattern, _)| matches_path(pattern, path))
+    TABLE.iter().copied().find(|(pattern, role)| {
+        let whole = matches!(role, Role::Sink(row) if row.whole);
+        matches_path(pattern, path) && (!whole || path.len() == 1)
+    })
 }
 
 /// The rows a configuration adds to `TABLE`, matched by the same dotted patterns. They match
@@ -100,20 +225,23 @@ impl TaintTable {
         self.add(pattern, Role::Sanitizer)
     }
 
-    /// A sink reported as `rule`, the code or name of one of OD701 to OD704.
+    /// A sink reported as `rule`, the code or name of one of OD701 to OD707.
     pub fn sink(&mut self, rule: &str, pattern: &str) -> Result<(), String> {
-        let sink = match crate::rules::find(rule).map(|r| r.code) {
+        let kind = match crate::rules::find(rule).map(|r| r.code) {
             Some("OD701") => Sink::Sql,
             Some("OD702") => Sink::Eval,
             Some("OD703") => Sink::Markup,
             Some("OD704") => Sink::SudoWrite,
+            Some("OD705") => Sink::Redirect,
+            Some("OD706") => Sink::Request,
+            Some("OD707") => Sink::Path,
             _ => {
                 return Err(format!(
-                    "'{rule}' is not a taint rule: name OD701 to OD704 by code or name"
+                    "'{rule}' is not a taint rule: name OD701 to OD707 by code or name"
                 ));
             }
         };
-        self.add(pattern, Role::Sink(sink))
+        self.add(pattern, sink(kind))
     }
 
     fn add(&mut self, pattern: &str, role: Role) -> Result<(), String> {
@@ -182,6 +310,7 @@ struct Taint {
     origin: FlowOrigin,
     /// Where the value entered, then each local it was assigned to.
     steps: Vec<Spanned<String>>,
+    safe: Safe,
 }
 
 impl Taint {
@@ -189,16 +318,143 @@ impl Taint {
         self.kind = kind;
         self
     }
+
+    fn safe(mut self, safe: Safe) -> Self {
+        self.safe = self.safe.union(safe);
+        self
+    }
 }
 
-/// Of two values, the one from a source wins over one a caller or callee may taint, so that a
-/// finding in the function is never traded for a summary edge.
+/// Of two values, the one the user sets on entry wins over one a caller or callee may taint, so
+/// that a finding in the function is never traded for a summary edge. Among those, keys win so
+/// that OD704 still sees them. A source joined to an RPC argument stays the source, with the keys
+/// of either: a Python caller sets only the argument, so its edge would drop the source. The
+/// result is harmless only where both are.
 fn join(a: Option<Taint>, b: Option<Taint>) -> Option<Taint> {
-    let rank = |t: &Taint| (t.origin == FlowOrigin::Source, t.kind);
+    let rank = |t: &Taint| (t.origin.is_user(), t.kind);
     match (a, b) {
-        (Some(a), Some(b)) => Some(if rank(&b) > rank(&a) { b } else { a }),
+        (Some(a), Some(b)) => {
+            let safe = a.safe.intersect(b.safe);
+            let kind = a.kind.max(b.kind);
+            let mut t = match (a.origin, b.origin) {
+                (FlowOrigin::Source, FlowOrigin::Rpc(_)) => a.kind(kind),
+                (FlowOrigin::Rpc(_), FlowOrigin::Source) => b.kind(kind),
+                _ if rank(&b) > rank(&a) => b,
+                _ => a,
+            };
+            t.safe = safe;
+            Some(t)
+        }
         (a, b) => a.or(b),
     }
+}
+
+/// The codes a string's start keeps harmless when the code, not the user, picks it: a redirect or
+/// a request then goes to the host the code chose.
+const FIXED: &[&str] = &["OD705", "OD706"];
+
+/// Whether a URL that starts with `s` has the host the code chose, whatever follows: `s` puts what
+/// follows in the query or the fragment, is a path on the same host, or names its host.
+fn fixes_start(s: &str) -> bool {
+    let path = s
+        .strip_prefix('/')
+        .and_then(|rest| rest.chars().next())
+        .is_some_and(|c| c != '/' && c != '\\');
+    let host = s.split_once("://").is_some_and(|(scheme, rest)| {
+        let scheme_ok = scheme.chars().next().is_some_and(|c| c.is_ascii_alphabetic())
+            && scheme.chars().all(|c| c.is_ascii_alphanumeric() || "+-.".contains(c));
+        scheme_ok
+            && rest
+                .split_once('/')
+                .is_some_and(|(host, _)| !host.is_empty() && !host.contains('\\'))
+    });
+    s.contains(['?', '#']) || path || host
+}
+
+/// What a string that starts with `expr`, of taint `t`, keeps harmless for its start.
+fn start_of(expr: &Expr, t: Option<&Taint>) -> Safe {
+    match constant(expr) {
+        Some(s) => literal_start(&s),
+        None => start_of_value(t),
+    }
+}
+
+fn literal_start(s: &str) -> Safe {
+    if fixes_start(s) {
+        Safe::of(FIXED)
+    } else {
+        Safe::default()
+    }
+}
+
+/// A value the user does not control, or one that starts as the code picked.
+fn start_of_value(t: Option<&Taint>) -> Safe {
+    t.map_or(Safe::of(FIXED), |t| t.safe.intersect(Safe::of(FIXED)))
+}
+
+/// The text of a string the code writes out whole: a literal, an f-string without fields, or a
+/// concatenation of them.
+fn constant(expr: &Expr) -> Option<String> {
+    match expr {
+        Expr::StringLiteral(s) => Some(s.value.to_str().to_owned()),
+        Expr::FString(f) => fstring_text(f),
+        Expr::BinOp(b) if b.op == Operator::Add => Some(constant(&b.left)? + &constant(&b.right)?),
+        _ => None,
+    }
+}
+
+fn fstring_text(f: &ast::ExprFString) -> Option<String> {
+    let mut text = String::new();
+    for part in f.value.iter() {
+        let elements = match part {
+            ast::FStringPartRef::Literal(l) => {
+                text.push_str(&l.value);
+                continue;
+            }
+            ast::FStringPartRef::FString(f) => &f.elements,
+        };
+        for e in elements {
+            let ast::InterpolatedStringElement::Literal(l) = e else {
+                return None;
+            };
+            text.push_str(&l.value);
+        }
+    }
+    Some(text)
+}
+
+/// Where `left <op> right` starts, `first` being the first value `%` puts in a template.
+fn bin_start(b: &ast::ExprBinOp, left: Option<&Taint>, first: Option<(&Expr, Option<Taint>)>) -> Safe {
+    match b.op {
+        Operator::Add => start_of(&b.left, left),
+        Operator::Mod => constant(&b.left).map_or_else(Safe::default, |template| {
+            match template_prefix(&template, '%') {
+                (prefix, _) if !prefix.is_empty() => literal_start(&prefix),
+                // A mapping's values have no first one.
+                (_, rest) if rest.starts_with('(') => Safe::default(),
+                _ => first.map_or_else(Safe::default, |(e, t)| start_of(e, t.as_ref())),
+            }
+        }),
+        _ => Safe::default(),
+    }
+}
+
+/// The text of a template before its first field, which `open` starts, and what follows the
+/// field's `open`. A doubled `open` is the character itself.
+fn template_prefix(template: &str, open: char) -> (String, &str) {
+    let mut prefix = String::new();
+    let mut chars = template.char_indices().peekable();
+    while let Some((i, c)) = chars.next() {
+        if c != open {
+            prefix.push(c);
+        } else if chars.peek().is_some_and(|(_, next)| *next == open) {
+            prefix.push(c);
+            chars.next();
+        } else {
+            return (prefix, &template[i + c.len_utf8()..]);
+        }
+    }
+    (prefix, "")
 }
 
 fn values(t: Option<Taint>) -> Option<Taint> {
@@ -228,17 +484,20 @@ impl State {
 }
 
 /// The flows of one function: findings for those that start in it, and its summary when data
-/// may cross into or out of the methods it calls. `owner` is what `self` is.
+/// may cross into or out of the methods it calls. `owner` is what `self` is, and `series` that of
+/// the module, an unknown one read as the newest.
 pub fn function(
     func: &ast::StmtFunctionDef,
     params: Params,
     owner: Option<Receiver>,
+    series: Option<Series>,
     loc: &Locator,
     table: &TaintTable,
 ) -> (Vec<RawDiag>, Option<FlowSummary>) {
     let mut flows = Flows {
         loc,
         table,
+        series,
         state: State::default(),
         locals: FxHashSet::default(),
         owner,
@@ -263,6 +522,7 @@ pub fn function(
 struct Flows<'a> {
     loc: &'a Locator<'a>,
     table: &'a TaintTable,
+    series: Option<Series>,
     state: State,
     /// Every name the function binds, so that `x.f()` on another name is a module's function.
     locals: FxHashSet<String>,
@@ -291,14 +551,23 @@ impl Flows<'_> {
                 Params::None => ("parameter", Kind::Keys, FlowOrigin::Param(names.len())),
                 Params::Route if mapping => ("route parameter", Kind::Keys, FlowOrigin::Source),
                 Params::Route => ("route parameter", Kind::Value, FlowOrigin::Source),
-                Params::Rpc => ("RPC argument", Kind::Keys, FlowOrigin::Source),
+                Params::Rpc => ("RPC argument", Kind::Keys, FlowOrigin::Rpc(names.len())),
             };
             names.push(name.to_owned());
             let steps = vec![Spanned {
                 value: format!("{label} '{name}'"),
                 pos: self.loc.at(param),
             }];
-            self.state.vars.insert(name.to_owned(), Taint { kind, origin, steps });
+            let safe = Safe::default();
+            self.state.vars.insert(
+                name.to_owned(),
+                Taint {
+                    kind,
+                    origin,
+                    steps,
+                    safe,
+                },
+            );
         }
         names
     }
@@ -433,6 +702,7 @@ impl Flows<'_> {
             op,
             values: vec![],
             keys: vec![],
+            starts: vec![],
         };
         checks.visit_expr(test);
         for name in checks.values {
@@ -441,6 +711,11 @@ impl Flows<'_> {
         for name in checks.keys {
             if let Some(t) = self.state.vars.get_mut(&name) {
                 t.kind = Kind::Value;
+            }
+        }
+        for name in checks.starts {
+            if let Some(t) = self.state.vars.get_mut(&name) {
+                t.safe = t.safe.union(Safe::of(FIXED));
             }
         }
     }
@@ -561,6 +836,7 @@ impl Flows<'_> {
             kind,
             origin: FlowOrigin::Source,
             steps,
+            safe: Safe::default(),
         })
     }
 
@@ -582,13 +858,20 @@ impl Flows<'_> {
     }
 
     fn edge(&mut self, t: Taint, target: FlowTarget) {
-        if self.edges.iter().any(|e| e.origin == t.origin && e.target == target) {
+        if let Some(e) = self
+            .edges
+            .iter_mut()
+            .find(|e| e.origin == t.origin && e.target == target)
+        {
+            // Harmless at the target only if it is so on every path that gets there.
+            e.safe = e.safe.intersect(t.safe);
             return;
         }
         self.edges.push(FlowEdge {
             origin: t.origin,
             target,
             keys: t.kind == Kind::Keys,
+            safe: t.safe,
             steps: t.steps,
         });
     }
@@ -639,6 +922,7 @@ impl Flows<'_> {
             kind: Kind::Keys,
             origin: FlowOrigin::Return(c),
             steps,
+            safe: Safe::default(),
         })
     }
 
@@ -715,7 +999,7 @@ impl Flows<'_> {
 
     fn bin_op(&mut self, b: &ast::ExprBinOp) -> Option<Taint> {
         let left = self.expr(&b.left);
-        let right = self.expr(&b.right);
+        let (right, first) = self.right_operand(b);
         // `Markup("<b>%s</b>") % value` escapes the value.
         if b.op == Operator::Mod && self.is_markup(&b.left) {
             return None;
@@ -725,26 +1009,68 @@ impl Flows<'_> {
         if b.op == Operator::BitAnd && (chosen(&left) || chosen(&right)) {
             return None;
         }
+        let start = bin_start(b, left.as_ref(), first);
         let t = join(left, right);
-        if b.op == Operator::BitOr { t } else { values(t) }
+        let t = if b.op == Operator::BitOr { t } else { values(t) };
+        t.map(|t| t.safe(start))
+    }
+
+    /// The taint of the right operand, and the first value it puts in a `%` template with its own.
+    fn right_operand<'e>(&mut self, b: &'e ast::ExprBinOp) -> (Option<Taint>, Option<(&'e Expr, Option<Taint>)>) {
+        match &*b.right {
+            Expr::Tuple(tuple) if b.op == Operator::Mod => {
+                let ts: Vec<Option<Taint>> = tuple.elts.iter().map(|e| self.expr(e)).collect();
+                let first = tuple.elts.first().zip(ts.first().cloned());
+                (ts.into_iter().fold(None, join), first)
+            }
+            right => {
+                let t = self.expr(right);
+                (t.clone(), Some((right, t)))
+            }
+        }
     }
 
     /// Only the built-in row: a configured OD703 sink, such as one that marks a value safe, does
     /// not escape what `%` puts in it.
     fn is_markup(&self, expr: &Expr) -> bool {
-        matches!(expr, Expr::Call(c) if built_in(&self.path(&c.func)).is_some_and(|(_, r)| r == Role::Sink(Sink::Markup)))
+        matches!(expr, Expr::Call(c) if built_in(&self.path(&c.func)).is_some_and(|(_, r)| matches!(r, Role::Sink(row) if row.sink == Sink::Markup)))
     }
 
+    /// An f-string starts with the text before its first field, or without any with that field.
     fn fstring(&mut self, f: &ast::ExprFString) -> Option<Taint> {
-        let parts: Vec<&Expr> = f
-            .value
-            .elements()
-            .filter_map(|e| match e {
-                ast::InterpolatedStringElement::Interpolation(i) => Some(&*i.expression),
-                ast::InterpolatedStringElement::Literal(_) => None,
-            })
-            .collect();
-        values(self.all(parts.into_iter()))
+        let mut prefix = String::new();
+        let mut first = None;
+        let mut t = None;
+        for part in f.value.iter() {
+            let elements = match part {
+                ast::FStringPartRef::Literal(l) => {
+                    if first.is_none() {
+                        prefix.push_str(&l.value);
+                    }
+                    continue;
+                }
+                ast::FStringPartRef::FString(f) => &f.elements,
+            };
+            for e in elements {
+                match e {
+                    ast::InterpolatedStringElement::Literal(l) if first.is_none() => prefix.push_str(&l.value),
+                    ast::InterpolatedStringElement::Literal(_) => {}
+                    ast::InterpolatedStringElement::Interpolation(i) => {
+                        let field = self.expr(&i.expression);
+                        if first.is_none() {
+                            first = Some(start_of(&i.expression, field.as_ref()));
+                        }
+                        t = join(t, field);
+                    }
+                }
+            }
+        }
+        let start = if prefix.is_empty() {
+            first.unwrap_or_default()
+        } else {
+            literal_start(&prefix)
+        };
+        values(t).map(|t| t.safe(start))
     }
 
     /// `{**t}` keeps the keys of `t`; a literal key set holds the user to the values.
@@ -798,9 +1124,26 @@ impl Flows<'_> {
         match self.table.lookup(&path) {
             Some((pattern, Role::Source(kind))) => self.source(format!("{pattern}()"), expr, kind),
             Some((_, Role::Sanitizer)) => None,
-            Some((pattern, Role::Sink(sink))) => {
-                let arg = sink_arg(call, &args, &keywords);
-                self.sink(sink, pattern, arg, expr);
+            Some((_, Role::Clears(code))) => {
+                let t = args.into_iter().chain(keywords).fold(None, join);
+                values(t).map(|t| t.safe(Safe::of(&[code])))
+            }
+            Some((_, Role::Keeps(positions, names))) => {
+                let kept = args.into_iter().enumerate().filter(|(i, _)| positions.contains(i));
+                let named = call
+                    .arguments
+                    .keywords
+                    .iter()
+                    .zip(keywords)
+                    .filter(|(k, _)| k.arg.as_ref().is_some_and(|a| names.contains(&a.as_str())));
+                let t = kept.map(|(_, t)| t).chain(named.map(|(_, t)| t)).fold(None, join);
+                values(t)
+            }
+            Some((pattern, Role::Sink(row))) => {
+                if row.guard.is_none_or(|g| self.met(g, call)) {
+                    let arg = sink_arg(row.arg, code(row.sink), call, &args, &keywords);
+                    self.sink(row.sink, pattern, arg, expr);
+                }
                 None
             }
             None => {
@@ -808,10 +1151,25 @@ impl Flows<'_> {
                 if receiver.is_none() && self.method_target(call) {
                     return self.method_call(call, expr, args, keywords);
                 }
+                let start = format_start(call, &args, &keywords);
                 let args = args.into_iter().chain(keywords).fold(None, join);
-                self.result(call, &path, receiver, args)
+                let t = self.result(call, &path, receiver, args);
+                t.map(|t| t.safe(start))
             }
         }
+    }
+
+    /// Whether a call passes the literal the guard asks for, or the module's series predates the
+    /// parameter.
+    fn met(&self, guard: Guard, call: &ast::ExprCall) -> bool {
+        if guard.since.is_some_and(|since| self.series.is_some_and(|s| s < since)) {
+            return true;
+        }
+        let arg = match call.arguments.find_keyword(guard.keyword) {
+            Some(k) => Some(&k.value),
+            None => call.arguments.args.get(guard.pos),
+        };
+        matches!(arg, Some(Expr::BooleanLiteral(b)) if b.value == guard.value)
     }
 
     /// Keeps a parameter whose keys the user may pick that `write()` or `create()` receives on the
@@ -825,7 +1183,7 @@ impl Flows<'_> {
         if runs_as(&records) != RunsAs::AsCaller {
             return;
         }
-        let Some(mut t) = sink_arg(call, args, keywords) else {
+        let Some(mut t) = sink_arg(Arg::First, "OD704", call, args, keywords) else {
             return;
         };
         if t.kind == Kind::Keys && matches!(t.origin, FlowOrigin::Param(_)) {
@@ -838,8 +1196,8 @@ impl Flows<'_> {
     }
 
     /// What a call no row names returns: string methods keep the taint of their receiver and
-    /// arguments, and a module's function that of its arguments. Methods of other objects, such
-    /// as recordsets, return values the user does not control.
+    /// arguments, and a module's function or a pattern's `match()` that of its arguments. Methods
+    /// of other objects, such as recordsets, return values the user does not control.
     fn result(
         &mut self,
         call: &ast::ExprCall,
@@ -868,8 +1226,11 @@ impl Flows<'_> {
             let kind = if method == "copy" { t.kind } else { Kind::Value };
             return join(Some(t.kind(kind)), values(args));
         }
+        // A compiled pattern's match holds the groups of the string it matched. `search` is
+        // left out, as on records it returns records rather than parts of the domain.
+        let matched = matches!(method, "match" | "fullmatch");
         let plain = matches!(&*a.value, Expr::StringLiteral(_)) || self.is_module(&a.value);
-        if plain { values(args) } else { None }
+        if plain || matched { values(args) } else { None }
     }
 
     /// A call of a model's method that a summary may describe; `sudo()` and the like return the
@@ -892,14 +1253,16 @@ impl Flows<'_> {
     /// Reports a value from a source at a sink, and keeps one from a parameter or a call for the
     /// callers' and callees' flows.
     fn sink(&mut self, sink: Sink, pattern: &str, t: Option<Taint>, expr: &Expr) {
-        let Some(mut t) = t else { return };
+        let code = code(sink);
+        let Some(mut t) = t.filter(|t| !t.safe.has(code)) else {
+            return;
+        };
         if sink == Sink::SudoWrite && t.kind != Kind::Keys {
             return;
         }
         let callee = format!("{pattern}()");
         let pos = self.loc.at(expr);
-        let code = code(sink);
-        if t.origin != FlowOrigin::Source {
+        if !t.origin.is_user() {
             t.steps.push(Spanned { value: callee, pos });
             return self.edge(t, FlowTarget::Sink(code));
         }
@@ -937,6 +1300,15 @@ fn self_attr(expr: &Expr) -> Option<String> {
     }
 }
 
+/// Whether every prefix `startswith()` takes, one or a tuple, keeps the host.
+fn fixed_prefixes(arg: &Expr) -> bool {
+    let prefixes = match arg {
+        Expr::Tuple(t) => t.elts.iter().collect(),
+        p => vec![p],
+    };
+    !prefixes.is_empty() && prefixes.iter().all(|p| str_lit(p).is_some_and(fixes_start))
+}
+
 fn merge_into(joined: &mut Option<State>, state: State) {
     match joined {
         Some(j) => j.merge(state),
@@ -945,11 +1317,13 @@ fn merge_into(joined: &mut Option<State>, state: State) {
 }
 
 /// The names a membership test checks: `x <op> allowed` checks `x`, and
-/// `any(k <op> allowed for k in vals)` checks the keys of `vals`.
+/// `any(k <op> allowed for k in vals)` checks the keys of `vals`. `starts` holds the names whose
+/// start `x.startswith(p)` checks, `not` before it for `not in`.
 struct Checks {
     op: CmpOp,
     values: Vec<String>,
     keys: Vec<String>,
+    starts: Vec<String>,
 }
 
 impl Checks {
@@ -960,11 +1334,24 @@ impl Checks {
         }
     }
 
+    /// The name whose start a `startswith()` test holds to prefixes that keep it harmless.
+    fn started(&self, expr: &Expr) -> Option<String> {
+        let call = match (self.op, expr) {
+            (CmpOp::In, Expr::Call(call)) => call,
+            (CmpOp::NotIn, Expr::UnaryOp(u)) if u.op == ast::UnaryOp::Not => u.operand.as_call_expr()?,
+            _ => return None,
+        };
+        let Expr::Attribute(a) = &*call.func else { return None };
+        let name = a.value.as_name_expr().filter(|_| a.attr.as_str() == "startswith")?;
+        fixed_prefixes(call.arguments.args.first()?).then(|| name.id.to_string())
+    }
+
     fn comprehension(&mut self, elt: &Expr, generators: &[ast::Comprehension]) {
         let mut inner = Checks {
             op: self.op,
             values: vec![],
             keys: vec![],
+            starts: vec![],
         };
         inner.visit_expr(elt);
         for g in generators {
@@ -995,22 +1382,65 @@ impl<'a> Visitor<'a> for Checks {
             | Expr::Generator(ast::ExprGenerator { elt, generators, .. }) => {
                 return self.comprehension(elt, generators);
             }
-            _ => self.values.extend(self.checked(expr)),
+            _ => {
+                self.values.extend(self.checked(expr));
+                self.starts.extend(self.started(expr));
+            }
         }
         visitor::walk_expr(self, expr);
     }
 }
 
-fn sink_arg(call: &ast::ExprCall, args: &[Option<Taint>], keywords: &[Option<Taint>]) -> Option<Taint> {
-    if !call.arguments.args.is_empty() {
-        return args.first().cloned().flatten();
+/// The value of a call that a sink of `code` checks. Of every positional argument, the first not
+/// harmless for the code.
+fn sink_arg(
+    arg: Arg,
+    code: &str,
+    call: &ast::ExprCall,
+    args: &[Option<Taint>],
+    keywords: &[Option<Taint>],
+) -> Option<Taint> {
+    let (pos, names) = match arg {
+        Arg::First => (0, SINK_KEYWORDS),
+        Arg::At(pos, names) => (pos, names),
+        Arg::Any => return args.iter().flatten().find(|t| !t.safe.has(code)).cloned(),
+    };
+    if call.arguments.args.len() > pos {
+        return args.get(pos).cloned().flatten();
     }
     call.arguments
         .keywords
         .iter()
         .zip(keywords)
-        .find(|(k, _)| k.arg.as_ref().is_some_and(|a| SINK_KEYWORDS.contains(&a.as_str())))
+        .find(|(k, _)| k.arg.as_ref().is_some_and(|a| names.contains(&a.as_str())))
         .and_then(|(_, t)| t.clone())
+}
+
+/// Where a literal template's `.format()` starts: the text before its first field, or the value
+/// of that field.
+fn format_start(call: &ast::ExprCall, args: &[Option<Taint>], keywords: &[Option<Taint>]) -> Safe {
+    let Expr::Attribute(a) = &*call.func else {
+        return Safe::default();
+    };
+    let Some(template) = constant(&a.value).filter(|_| a.attr.as_str() == "format") else {
+        return Safe::default();
+    };
+    let (prefix, rest) = template_prefix(&template, '{');
+    if !prefix.is_empty() {
+        return literal_start(&prefix);
+    }
+    let field = rest.split(['}', ':', '!', '.', '[']).next().unwrap_or_default();
+    let value = match field {
+        "" | "0" => call.arguments.args.first().zip(args.first()),
+        name => call
+            .arguments
+            .keywords
+            .iter()
+            .zip(keywords)
+            .find(|(k, _)| k.arg.as_ref().is_some_and(|a| a.as_str() == name))
+            .map(|(k, t)| (&k.value, t)),
+    };
+    value.map_or_else(Safe::default, |(e, t)| start_of(e, t.as_ref()))
 }
 
 fn step(s: &Spanned<String>) -> Step {
@@ -1027,6 +1457,9 @@ fn code(sink: Sink) -> &'static str {
         Sink::Eval => "OD702",
         Sink::Markup => "OD703",
         Sink::SudoWrite => "OD704",
+        Sink::Redirect => "OD705",
+        Sink::Request => "OD706",
+        Sink::Path => "OD707",
     }
 }
 
@@ -1052,6 +1485,15 @@ pub(crate) fn message(code: &str, callee: &str, origin: &str, names: &[&str]) ->
         "OD703" => format!(
             "{origin} reaches {callee}{through} unescaped; escape it, or pass it as an argument of Markup's % or format()"
         ),
+        "OD705" => format!(
+            "{origin} reaches the URL of {callee}{through}, so the user picks the site the browser goes to; start the URL with a path the code picks"
+        ),
+        "OD706" => format!(
+            "{origin} reaches the URL of {callee}{through}, so the user picks the host the server connects to; start the URL with a host the code picks"
+        ),
+        "OD707" => format!(
+            "{origin} reaches the path of {callee}{through}, so the user picks the file the server opens; pass the name through secure_filename() or os.path.basename()"
+        ),
         _ => format!(
             "{origin} reaches {callee}{through}, so the user picks the fields it sets as superuser; copy only the fields the user may set"
         ),
@@ -1070,12 +1512,18 @@ mod tests {
     }
 
     fn scan_with(table: &TaintTable, params: Params, src: &str) -> Vec<String> {
+        scan_in(table, None, params, src)
+    }
+
+    /// The findings of the first function in `src`, in a module of `series`.
+    fn scan_in(table: &TaintTable, series: Option<&str>, params: Params, src: &str) -> Vec<String> {
+        let series = series.and_then(Series::parse);
         let parsed = parse_module(src).expect("valid Python");
         let Some(Stmt::FunctionDef(func)) = parsed.syntax().body.first() else {
             panic!("no function");
         };
         let loc = Locator::new(src);
-        function(func, params, None, &loc, table)
+        function(func, params, None, series, &loc, table)
             .0
             .into_iter()
             .map(|d| format!("{} {}", d.code, d.message.split(';').next().unwrap_or_default()))
@@ -1099,7 +1547,14 @@ mod tests {
         let Some(Stmt::FunctionDef(func)) = parsed.syntax().body.first() else {
             panic!()
         };
-        let (diags, _) = function(func, Params::None, None, &Locator::new(src), &TaintTable::default());
+        let (diags, _) = function(
+            func,
+            Params::None,
+            None,
+            None,
+            &Locator::new(src),
+            &TaintTable::default(),
+        );
         let flow: Vec<_> = diags[0].flow.iter().map(|s| (s.pos.line, s.label.as_str())).collect();
         assert_eq!(flow, [(2, "request.get_json_data()"), (2, "data"), (3, "safe_eval()")]);
     }
@@ -1132,6 +1587,18 @@ mod tests {
         assert!(write("    M.create({'name': name})").is_empty());
         assert!(write("    M.create({k: kw[k] for k in kw if k in ('a',)})").is_empty());
         assert!(write("    request.env['x'].create(kw)").is_empty());
+    }
+
+    #[test]
+    fn a_source_value_keeps_the_keys_of_an_rpc_mapping() {
+        for body in [
+            "    vals['note'] = request.params.get('note')\n    self.sudo().write(vals)",
+            "    vals.update(note=request.params.get('note'))\n    self.sudo().write(vals)",
+            "    self.sudo().write(dict(vals, note=request.params.get('note')))",
+        ] {
+            let src = format!("def save(self, vals):\n{body}\n");
+            assert_eq!(scan(Params::Rpc, &src).len(), 1, "{body}");
+        }
     }
 
     #[test]
@@ -1183,7 +1650,7 @@ mod tests {
             panic!("no function");
         };
         let owner = Some(Receiver::Model("x.y".to_owned()));
-        function(func, params, owner, &Locator::new(src), &TaintTable::default())
+        function(func, params, owner, None, &Locator::new(src), &TaintTable::default())
             .1
             .expect("a summary")
     }
@@ -1342,6 +1809,7 @@ mod tests {
             func,
             Params::None,
             Some(owner),
+            None,
             &Locator::new(src),
             &TaintTable::default(),
         )
@@ -1384,6 +1852,170 @@ mod tests {
                 RunsAs::User,
             ]
         );
+    }
+
+    /// The codes `call` reports in a module of `series`, where `t` is a route parameter and `base`
+    /// a value the user does not control.
+    fn codes_in(series: Option<&str>, call: &str) -> Vec<String> {
+        let src = format!("def f(self, t):\n    base = self.get_base_url()\n    {call}\n");
+        let found = scan_in(&TaintTable::default(), series, Params::Route, &src);
+        found.iter().map(|f| f[..5].to_owned()).collect()
+    }
+
+    fn codes(call: &str) -> Vec<String> {
+        codes_in(None, call)
+    }
+
+    #[test]
+    fn redirects_requests_and_paths_are_sinks() {
+        for (call, code) in [
+            ("werkzeug.utils.redirect(t)", "OD705"),
+            ("werkzeug.redirect(location=t)", "OD705"),
+            ("request.redirect(t, local=False)", "OD705"),
+            ("request.redirect(t, 303, False)", "OD705"),
+            ("request.redirect_query(t, {}, 303, False)", "OD705"),
+            ("request.redirect_query(t, local=False)", "OD705"),
+            ("requests.get(t, timeout=5)", "OD706"),
+            ("requests.post(url=t)", "OD706"),
+            ("requests.Session().put(t)", "OD706"),
+            ("requests.request('GET', t)", "OD706"),
+            ("requests.request(method='GET', url=t)", "OD706"),
+            ("urllib.request.urlopen(t)", "OD706"),
+            ("open(t)", "OD707"),
+            ("open(file=t)", "OD707"),
+            ("http.send_file(filepath_or_fp=t)", "OD707"),
+            ("os.path.join(base, t)", "OD707"),
+        ] {
+            assert_eq!(codes(call), [code], "{call}");
+        }
+        for call in [
+            "request.redirect(t)",
+            "request.redirect(t, local=True)",
+            "request.redirect_query(t, {})",
+            "requests.request(t, base)",
+            "Image.open(t)",
+            "io.open(t)",
+            "os.path.join(base, 'x')",
+            "tools.file_open(t)",
+        ] {
+            assert!(codes(call).is_empty(), "{call}");
+        }
+    }
+
+    #[test]
+    fn a_redirect_is_local_from_15_0_on() {
+        for series in ["12.0", "14.0"] {
+            assert_eq!(codes_in(Some(series), "request.redirect(t)"), ["OD705"], "{series}");
+        }
+        for series in [Some("15.0"), Some("18.0"), None] {
+            assert!(codes_in(series, "request.redirect(t)").is_empty(), "{series:?}");
+        }
+        assert_eq!(codes_in(Some("18.0"), "request.redirect(t, local=False)"), ["OD705"]);
+    }
+
+    #[test]
+    fn a_name_without_its_directories_opens_no_other_file() {
+        for call in [
+            "open(os.path.basename(t))",
+            "os.path.join(base, os.path.basename(t))",
+            "http.send_file(io.BytesIO(t))",
+            "open(werkzeug.utils.secure_filename(t))",
+            "open('/tmp/' + basename(t))",
+        ] {
+            assert!(codes(call).is_empty(), "{call}");
+        }
+        assert_eq!(codes("open(basename(t) + t)"), ["OD707"]);
+        assert_eq!(codes("self.env.cr.execute('SELECT %s' % basename(t))"), ["OD701"]);
+        assert!(codes("self.env.cr.execute('SELECT %s' % secure_filename(t))").is_empty());
+    }
+
+    #[test]
+    fn a_start_the_code_picks_keeps_the_host() {
+        for call in [
+            "werkzeug.utils.redirect(f'/shop/{t}')",
+            "werkzeug.utils.redirect(f'https://example.com/{t}')",
+            "werkzeug.utils.redirect(f'{base}{t}')",
+            "werkzeug.utils.redirect('/shop?next=' + t)",
+            "werkzeug.utils.redirect('#' + t + t)",
+            "werkzeug.utils.redirect(base + t)",
+            "werkzeug.utils.redirect('/shop/%s' % t)",
+            "werkzeug.utils.redirect('%s/%s' % (base, t))",
+            "werkzeug.utils.redirect('/shop/{}'.format(t))",
+            "werkzeug.utils.redirect('{}/{}'.format(base, t))",
+            "werkzeug.utils.redirect('{root}{t}'.format(root=base, t=t))",
+            "requests.get('https://api.example.com/v1/%s' % t)",
+            "werkzeug.utils.redirect('/shop?' + urllib.parse.urlencode(t))",
+            "werkzeug.utils.redirect(werkzeug.urls.url_encode(t))",
+        ] {
+            assert!(codes(call).is_empty(), "{call}");
+        }
+        for call in [
+            "werkzeug.utils.redirect(f'/{t}')",
+            "werkzeug.utils.redirect(f'//{t}')",
+            "werkzeug.utils.redirect('/\\\\' + t)",
+            "werkzeug.utils.redirect(f'https://{t}')",
+            "werkzeug.utils.redirect('https://example.com' + t)",
+            "werkzeug.utils.redirect(t + '/shop')",
+            "werkzeug.utils.redirect('%s/shop' % t)",
+            "werkzeug.utils.redirect('%(a)s/shop' % {'a': t})",
+            "werkzeug.utils.redirect('{}/shop'.format(t))",
+            "werkzeug.utils.redirect(f'{t}/shop')",
+            "werkzeug.utils.redirect(urllib.parse.urljoin(base, t))",
+            "open('/tmp/' + t)",
+        ] {
+            assert_eq!(codes(call).len(), 1, "{call}");
+        }
+    }
+
+    #[test]
+    fn calls_that_keep_some_arguments() {
+        for call in [
+            "request.redirect(getattr(request.website, 'social_%s' % t, False), local=False)",
+            "request.redirect(_build_url_w_params(base, {'next': t}), local=False)",
+        ] {
+            assert!(codes(call).is_empty(), "{call}");
+        }
+        for call in [
+            "request.redirect(getattr(t, 'url'), local=False)",
+            "request.redirect(getattr(base, 'url', t), local=False)",
+            "request.redirect(_build_url_w_params(t, {}), local=False)",
+            "request.redirect(_build_url_w_params(url_string=t, query_params={}), local=False)",
+            "open(self.base_re.match(t).group('rest'))",
+            "pat = self.base_re\n    open(pat.fullmatch(t)[1])",
+        ] {
+            assert_eq!(codes(call).len(), 1, "{call}");
+        }
+    }
+
+    #[test]
+    fn a_checked_start_keeps_the_host() {
+        let redirect = |check: &str| {
+            scan(
+                Params::Route,
+                &format!("def f(self, t):\n{check}\n    return werkzeug.utils.redirect(t)\n"),
+            )
+        };
+        assert!(redirect("    if not t.startswith('/shop'):\n        raise ValueError()").is_empty());
+        assert!(redirect("    assert t.startswith(('/web', 'https://example.com/'))").is_empty());
+        assert_eq!(
+            redirect("    if not t.startswith('/'):\n        raise ValueError()").len(),
+            1
+        );
+        assert_eq!(
+            redirect("    if t.startswith('/shop'):\n        raise ValueError()").len(),
+            1
+        );
+        assert_eq!(redirect("    assert t.startswith(('/web', '//'))").len(), 1);
+    }
+
+    #[test]
+    fn a_value_harmless_on_one_branch_only_reaches_the_sink() {
+        let route = summary(
+            Params::None,
+            "def _h(self, t):\n    if self:\n        return '/shop/' + t\n    return t\n",
+        );
+        assert_eq!(route.edges.len(), 1);
+        assert!(!route.edges[0].safe.has("OD705"));
     }
 
     #[test]

@@ -463,6 +463,12 @@
       "count": 1
     },
     {
+      "path": "addons/html_editor/controllers/main.py",
+      "code": "OD706",
+      "message": "route parameter 'url' reaches the URL of requests.head() through '_attachment_create()', so the user picks the host the server connects to; start the URL with a host the code picks",
+      "count": 1
+    },
+    {
       "path": "addons/html_editor/static/src/main/table/table_plugin.js",
       "code": "OD601",
       "message": "'@html_editor/utils/dom_info' does not export 'isTableCell'",
@@ -1114,6 +1120,12 @@
       "path": "addons/mail_plugin/controllers/authenticate.py",
       "code": "OD111",
       "message": "route with auth='none' calls sudo(); check that every record it reads or writes is filtered by an access check",
+      "count": 1
+    },
+    {
+      "path": "addons/mail_plugin/controllers/authenticate.py",
+      "code": "OD705",
+      "message": "route parameter 'redirect' reaches the URL of request.redirect() through 'parsed_redirect', 'updated_redirect', so the user picks the site the browser goes to; start the URL with a path the code picks",
       "count": 1
     },
     {
@@ -1879,6 +1891,12 @@
       "count": 2
     },
     {
+      "path": "addons/web/controllers/binary.py",
+      "code": "OD707",
+      "message": "route parameter 'fontname' reaches the path of os.path.join(), so the user picks the file the server opens; pass the name through secure_filename() or os.path.basename()",
+      "count": 1
+    },
+    {
       "path": "addons/web/controllers/database.py",
       "code": "OD112",
       "message": "csrf=False lets other sites submit this form on the user's behalf",
@@ -1900,6 +1918,18 @@
       "path": "addons/web/controllers/webclient.py",
       "code": "OD111",
       "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
+      "count": 1
+    },
+    {
+      "path": "addons/web_editor/models/ir_qweb_fields.py",
+      "code": "OD706",
+      "message": "RPC argument 'url' reaches the URL of requests.get(), so the user picks the host the server connects to; start the URL with a host the code picks",
+      "count": 1
+    },
+    {
+      "path": "addons/web_editor/models/ir_qweb_fields.py",
+      "code": "OD707",
+      "message": "RPC argument 'url' reaches the path of os.path.join() through 'match', so the user picks the file the server opens; pass the name through secure_filename() or os.path.basename()",
       "count": 1
     },
     {
@@ -1936,6 +1966,12 @@
       "path": "addons/website/models/ir_module_module.py",
       "code": "OD122",
       "message": "UPDATE on website_menu bypasses the ORM, so records this transaction already read keep stale values; call flush_model() before the query and invalidate_model() after it (flush() and invalidate_cache() before 16.0)",
+      "count": 1
+    },
+    {
+      "path": "addons/website/models/website.py",
+      "code": "OD706",
+      "message": "RPC argument 'kwargs' reaches the URL of requests.get() through 'theme_name', '_website_api_rpc()', '_api_rpc()', 'custom_resources', 'images', 'image_src', so the user picks the host the server connects to; start the URL with a host the code picks",
       "count": 1
     },
     {
@@ -2069,6 +2105,12 @@
       "code": "OD111",
       "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
       "count": 2
+    },
+    {
+      "path": "addons/website_forum/controllers/website_forum.py",
+      "code": "OD706",
+      "message": "route parameter 'kwargs' reaches the URL of requests.get(), so the user picks the host the server connects to; start the URL with a host the code picks",
+      "count": 1
     },
     {
       "path": "addons/website_forum/security/ir.model.access.csv",

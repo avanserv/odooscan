@@ -484,7 +484,26 @@ pub struct CallSite {
 pub enum FlowOrigin {
     Source,
     Param(usize),
+    /// A parameter of a public model method: a source when a client calls the method over RPC,
+    /// and the caller's argument when Python code calls it.
+    Rpc(usize),
     Return(usize),
+}
+
+impl FlowOrigin {
+    /// Whether the user sets the value on entry to the function, so that a flow from it is a
+    /// finding there.
+    pub fn is_user(self) -> bool {
+        matches!(self, Self::Source | Self::Rpc(_))
+    }
+
+    /// The parameter a caller's argument fills.
+    pub fn param(self) -> Option<usize> {
+        match self {
+            Self::Param(i) | Self::Rpc(i) => Some(i),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -504,12 +523,43 @@ pub enum FlowTarget {
     SelfWrite,
 }
 
+/// The OD7 codes a tainted value is harmless for, as bits by the number after `OD7`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Safe(u16);
+
+impl Safe {
+    pub fn of(codes: &[&str]) -> Self {
+        Self(codes.iter().fold(0, |bits, code| bits | bit(code)))
+    }
+
+    pub fn has(self, code: &str) -> bool {
+        self.0 & bit(code) != 0
+    }
+
+    pub fn union(self, other: Self) -> Self {
+        Self(self.0 | other.0)
+    }
+
+    pub fn intersect(self, other: Self) -> Self {
+        Self(self.0 & other.0)
+    }
+}
+
+fn bit(code: &str) -> u16 {
+    code.strip_prefix("OD7")
+        .and_then(|n| n.parse::<u32>().ok())
+        .and_then(|n| 1u16.checked_shl(n))
+        .unwrap_or(0)
+}
+
 #[derive(Debug)]
 pub struct FlowEdge {
     pub origin: FlowOrigin,
     pub target: FlowTarget,
     /// The user still picks the keys of the value at the target, if they picked those of the origin.
     pub keys: bool,
+    /// The value is harmless at the target for these codes, whatever it is at the origin.
+    pub safe: Safe,
     /// The origin, each local in between, and for a sink the call that receives the value.
     pub steps: Vec<Spanned<String>>,
 }
