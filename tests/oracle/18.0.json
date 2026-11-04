@@ -109,6 +109,12 @@
       "count": 1
     },
     {
+      "path": "addons/account_peppol/models/res_config_settings.py",
+      "code": "OD230",
+      "message": "no parent class of res.config.settings defines '_compute_account_peppol_mode_constraint' and no file names it, so Odoo never runs it",
+      "count": 1
+    },
+    {
       "path": "addons/account_peppol/wizard/peppol_registration.py",
       "code": "OD103",
       "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
@@ -1684,6 +1690,12 @@
       "path": "addons/sale/data/sale_demo.xml",
       "code": "OD303",
       "message": "XML id 'sale_order_9' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/sale/wizard/res_config_settings.py",
+      "code": "OD230",
+      "message": "no parent class of res.config.settings defines '_onchange_group_discount_per_so_line' and no file names it, so Odoo never runs it",
       "count": 1
     },
     {

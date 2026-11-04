@@ -2236,20 +2236,21 @@ impl<'m> Index<'m> {
     /// Whether a class in scope of `model`, or of a model it inherits or delegates to, may get fields
     /// from a parent the scan cannot read.
     pub fn hidden_field_parents(&self, model: &str, scope: &Scope) -> bool {
-        self.unread_bases(model, scope, true, |c| &c.field_bases)
+        self.unread_bases(model, scope, true, |c| &c.opaque_bases)
     }
 
     /// Whether a class in scope of `model`, or of a model it inherits, may get methods from a parent
     /// the scan cannot read. A model reached through `_inherits` gives fields, not methods.
     pub fn hidden_method_parents(&self, model: &str, scope: &Scope) -> bool {
-        self.unread_bases(model, scope, false, |c| &c.plain_bases)
+        self.unread_bases(model, scope, false, |c| &c.opaque_bases)
     }
 
     /// The signature of each definition of `method`, among `merged` (`merged_classes` of the model of
     /// `class`, of module `mi`), that `class` overrides: those of other modules, short of one that
     /// depends on `mi`, and of classes above `class` in its file, whose name mangles `method` alike.
     /// The order of the files of `mi` is that of the imports, which is not indexed, so its other files
-    /// count neither way. None when one of them has no signature to compare.
+    /// count neither way. None when one of them has no signature to compare, as a class whose plain
+    /// base binds `method` has unless it defines `method` itself.
     pub fn method_parents(
         &self,
         mi: usize,
@@ -2267,7 +2268,7 @@ impl<'m> Index<'m> {
         };
         merged
             .iter()
-            .filter(|&&(m, c)| c.methods.iter().any(|n| n == method) && overridden(m, c))
+            .filter(|&&(m, c)| (c.methods.iter().any(|n| n == method) || c.base_binds(method)) && overridden(m, c))
             .filter(|(_, c)| mangles_alike(method, &class.class_name, &c.class_name))
             .map(|&(m, c)| c.signature(method).map(|s| (m, s)))
             .collect()
@@ -2602,20 +2603,19 @@ impl<'m> Index<'m> {
         Some(model)
     }
 
-    /// Whether `BaseModel`, `object` or a class other than `except`, of `model` or of a model it
-    /// inherits by `_inherit`, defines `method`. A parent it delegates to does not count, since
-    /// `super()` follows the class bases, which Odoo builds from `_inherit` and `base`. Modules
-    /// outside the scope count: an override of a method from a module that is not in depends is
-    /// called only by that module.
+    /// Whether `BaseModel`, `object`, a class other than `except`, of `model` or of a model it
+    /// inherits by `_inherit`, or a plain base a class of them reads, `except`'s included, defines
+    /// `method`. A parent it delegates to does not count, since `super()` follows the class bases,
+    /// which Odoo builds from `_inherit` and `base`. Modules outside the scope count: an override of
+    /// a method from a module that is not in depends is called only by that module.
     pub fn has_parent_method(&self, model: &str, method: &str, except: &ClassFact, series: Option<Series>) -> bool {
+        let parent =
+            |c: &ClassFact| c.base_binds(method) || (!std::ptr::eq(c, except) && c.methods.iter().any(|m| m == method));
         BASE_MODEL_METHODS.contains(&method)
             || BASE_MODEL_EXTRA.contains(&method)
             || old_base_method(method, series)
             || BASE_MODEL_DUNDERS.contains(&method)
-            || self
-                .chain_classes(model)
-                .iter()
-                .any(|(_, c)| !std::ptr::eq(*c, except) && c.methods.iter().any(|m| m == method))
+            || self.chain_classes(model).iter().any(|(_, c)| parent(c))
     }
 
     /// Whether a file of any module names the hook method `name`, whole or by a prefix it is built

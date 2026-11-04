@@ -204,9 +204,12 @@ pub struct ClassFact {
     /// first three. Each is its bare name, or empty for a base a class of the file cannot be, such
     /// as `Layout()` or `mixins.Layout`.
     pub plain_bases: Vec<String>,
-    /// The entries of `plain_bases` that may give the class a field: all but the classes its file
-    /// defines above it that can hold none. Those still hide methods, so they stay in `plain_bases`.
-    pub field_bases: Vec<String>,
+    /// The entries of `plain_bases` the scan does not read: all but the classes its file defines
+    /// above it that can hold no field. Those still give the class methods, so they stay in
+    /// `plain_bases`.
+    pub opaque_bases: Vec<String>,
+    /// The names the `plain_bases` the scan reads bind, other than those starting with `__`.
+    pub base_methods: Vec<String>,
     /// The value of `_table`, when the class sets it.
     pub table: Option<OptionValue>,
     /// `_parent_store`, `_auto`, `_log_access`, `_register`, `_date_name` and `_defaults`, when the
@@ -277,7 +280,8 @@ impl ClassFact {
             own_view: false,
             definitions: vec![],
             plain_bases: vec![],
-            field_bases: vec![],
+            opaque_bases: vec![],
+            base_methods: vec![],
         }
     }
 
@@ -299,6 +303,12 @@ impl ClassFact {
     /// better than one.
     pub fn hidden_parents(&self) -> bool {
         !self.plain_bases.is_empty() || self.inherit_unknown
+    }
+
+    /// Whether a plain base the scan reads binds `name`, which the class then has unless it binds
+    /// the name itself.
+    pub fn base_binds(&self, name: &str) -> bool {
+        self.base_methods.iter().any(|m| m == name)
     }
 
     /// The signature `name` has on the class, when every binding of it is a `def` of the body. The
