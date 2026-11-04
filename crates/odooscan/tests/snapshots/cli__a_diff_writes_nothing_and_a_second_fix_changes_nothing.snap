@@ -105,7 +105,7 @@ expression: diff
  class ModernNote(models.AbstractModel):
 --- a/custom/modern19/models/upgrade.py
 +++ b/custom/modern19/models/upgrade.py
-@@ -9,4 +9,4 @@
+@@ -11,4 +11,4 @@
          return expression.AND([[("name", "=", "x")], [("country_id", "=", False)]])
  
      def _x_reset_lang(self):
