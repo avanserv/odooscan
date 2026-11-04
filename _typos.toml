@@ -6,3 +6,8 @@ extend-exclude = ["crates/*/tests/fixtures/custom/", "tests/oracle/"]
 # The spelling of a BaseModel method of Odoo 17.0.
 [default.extend-identifiers]
 _read_group_get_annoted_groupby = "_read_group_get_annoted_groupby"
+
+# Release Please links each changelog entry to its commit, and a short hash such as ba446ab reads
+# as a word.
+[default]
+extend-ignore-re = ["/commit/[0-9a-f]{40}", "\\[[0-9a-f]{7}\\]\\("]
