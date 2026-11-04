@@ -105,6 +105,7 @@ custom/bad_sale/views/views.xml:34:9: OD309 res.partner has no field 'email'
 custom/bad_sale/views/views.xml:36:5: OD303 XML id 'partner_demo' is already defined earlier in this file
 custom/bad_sale/views/views.xml:49:9: OD307 t-raw renders unescaped HTML; use t-out and wrap trusted HTML in Markup
 custom/bad_sale/views/views.xml:53:9: OD306 view_mode 'tree' is renamed 'list'
+custom/bad_sale/views/views.xml:61:21: OD306 the <tree> view is renamed <list>
 custom/base_only/data/ghost.nowhere.csv:1:1: OD201 no indexed module defines model 'ghost.nowhere'
 custom/base_only/data/project.project.csv:1:1: OD202 model 'project.project' comes from module project; add it to depends
 custom/base_only/data/res.partner-extra.csv:1:1: OD309 res.partner has no field 'name@fr'

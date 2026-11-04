@@ -52,4 +52,17 @@
     <record id="action_orders" model="ir.actions.act_window">
         <field name="view_mode">tree,form</field>
     </record>
+
+    <record id="view_order_form_lines" model="ir.ui.view">
+        <field name="model">bad.order</field>
+        <field name="arch" type="xml">
+            <form>
+                <field name="line_ids">
+                    <tree>
+                        <field name="amount"/>
+                    </tree>
+                </field>
+            </form>
+        </field>
+    </record>
 </odoo>

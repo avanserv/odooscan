@@ -200,6 +200,11 @@ fn company_check_severity_follows_the_module_series() {
 }
 
 #[test]
+fn tree_severity_is_an_error() {
+    assert_eq!(severities("OD306"), [("bad_sale".to_owned(), Severity::Error)]);
+}
+
+#[test]
 fn access_severity_follows_the_module_series() {
     let expected = [
         ("bad_sale", Severity::Warning),
