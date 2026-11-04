@@ -25,7 +25,8 @@ zizmor, schema and timeout checks).
 
 - `odooscan_core` holds the parsers, the index and every rule. It never prints, and never reads
   anything but the paths it is given.
-- `odooscan` is the CLI, built as the `oscn` executable: flags, output formats and the exit status, and no rule logic.
+- `odooscan` is the CLI, built as the `oscn` executable: flags, output formats, the exit status and
+  fetching the core of `--target-series` with git into the user cache. It holds no rule logic.
 
 A dependency is declared in the same change as the code that uses it, never ahead of it:
 cargo-machete fails otherwise.

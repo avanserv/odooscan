@@ -117,6 +117,11 @@ pub struct Report {
     pub notices: Vec<String>,
 }
 
+/// Whether `opts` give an Odoo core for the cross-module rules to check against.
+pub fn has_core(opts: &ScanOptions) -> bool {
+    project::has_core(&opts.paths, &opts.addons_paths)
+}
+
 pub fn scan(opts: &ScanOptions) -> Report {
     let default_series = opts.target_series.or(opts.default_series);
     let discovery = project::load(&opts.paths, &opts.addons_paths, default_series, opts.target_series);

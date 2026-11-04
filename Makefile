@@ -48,6 +48,7 @@ site-serve: ## Serve the documentation site locally, rebuilding on change
 	uv sync --locked --only-group docs --no-install-project
 	uv run --no-sync zensical serve
 
+# SPARSE in crates/odooscan/src/fetch.rs repeats these patterns for the core of --target-series.
 oracle-fetch: ## Fetch the pinned Odoo core of SERIES (default 18.0) into .oracle/, without tests and assets but scripts and templates
 	rm -rf $(ORACLE)
 	git init -q $(ORACLE)

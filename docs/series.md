@@ -36,3 +36,25 @@ XML id, template, view element, selection value or module that the code names an
 depends on defines, or an override or hook that no longer fits its parent. Every other finding
 counts as other. With `--format text` the summary follows the
 findings, and `--statistics` prints it alone; with any other format it goes to stderr.
+
+When no addons path entry is an Odoo checkout and no `base` module is found on the addons path or
+among the checked paths, `oscn` fetches the target's core with `git`, which must be on `PATH`. It
+asks odoo/odoo for the head of the series' branch on each run, `18.0` for 18.0 and `saas-18.1` for
+saas~18.1, and fetches that commit unless the cache holds it, without tests, translations and
+assets other than scripts and templates. Each commit is a directory of `core/` in the cache. The
+branch keeps its newest commit and the one before it, so that a run still reading the one before
+keeps it. A run that brings the cache up to the head then removes leftovers untouched for a day:
+what an interrupted run left, and commit directories no branch records. A run that falls back to
+the cache removes nothing. The cache is `$ODOOSCAN_CACHE_DIR`, else
+`$XDG_CACHE_HOME/odooscan` for an absolute `XDG_CACHE_HOME`, `%LOCALAPPDATA%\odooscan` on Windows,
+or `~/.cache/odooscan`. On Windows, a cache in a deep directory may need `git config --global
+core.longpaths true`. `ODOOSCAN_ODOO_REMOTE` replaces `https://github.com/odoo/odoo`, for a mirror
+or a local clone. An ssh remote never prompts, unless `GIT_SSH_COMMAND`, `GIT_SSH` or
+`core.sshCommand` says how to run ssh.
+
+Resolving the head gives up after a minute, and the fetch and the checkout after 30 minutes each.
+A transfer also gives up when it stays below 1 kB/s for 30 seconds over HTTP, or when an ssh
+connection stays silent for about 45 seconds. When the remote cannot be reached, a transfer stalls
+or runs out of time, the branch is missing, `git` cannot run or the cache cannot be written, a
+notice says why and the commit last fetched for the branch is used. Without one, `oscn` exits with
+status 2 and asks for `--addons-path`.
