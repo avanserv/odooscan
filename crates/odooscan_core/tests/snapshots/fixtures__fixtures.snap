@@ -54,6 +54,12 @@ custom/bad_sale/controllers/outbound.py:28:16: OD706 route parameter 'url' reach
 custom/bad_sale/controllers/outbound.py:37:9: OD707 route parameter 'name' reaches the path of open(), so the user picks the file the server opens; pass the name through secure_filename() or os.path.basename()
 custom/bad_sale/controllers/outbound.py:38:9: OD707 route parameter 'name' reaches the path of os.path.join(), so the user picks the file the server opens; pass the name through secure_filename() or os.path.basename()
 custom/bad_sale/controllers/outbound.py:39:16: OD707 route parameter 'name' reaches the path of send_file(), so the user picks the file the server opens; pass the name through secure_filename() or os.path.basename()
+custom/bad_sale/controllers/picks.py:21:16: OD712 route parameter 'model' reaches the model of sudo().read(), so the user picks the model the superuser reads or writes; pick the model from those the code allows
+custom/bad_sale/controllers/picks.py:27:16: OD713 route parameter 'action' reaches the name of getattr(), whose result the code calls, so the user picks the method that runs; pick the name from those the code allows
+custom/bad_sale/controllers/picks.py:33:9: OD714 route parameter 'fields' reaches the field of sudo().read(), so the user reads any field as superuser; pick the field from those the code allows
+custom/bad_sale/controllers/picks.py:34:16: OD714 route parameter 'name' reaches the field of sudo()[...], so the user reads any field as superuser; pick the field from those the code allows
+custom/bad_sale/controllers/picks.py:40:9: OD715 route parameter 'groupby' reaches the domain or the fields of sudo().read_group(), so the user searches or groups by any field as superuser; build each condition with a field and an operator the code picks
+custom/bad_sale/controllers/picks.py:41:16: OD715 route parameter 'domain' reaches the domain or the fields of sudo().search_read(), so the user searches or groups by any field as superuser; build each condition with a field and an operator the code picks
 custom/bad_sale/data/orphan.xml:1:1: OD502 'data/orphan.xml' is not in the manifest's data or demo, so Odoo never loads it
 custom/bad_sale/models/callers.py:8:9: OD704 route parameter 'post' reaches self.write() through '_apply_values()', so the user picks the fields it sets as superuser; copy only the fields the user may set
 custom/bad_sale/models/domains.py:7:64: OD210 'is_company': res.partner has no field 'is_company'
