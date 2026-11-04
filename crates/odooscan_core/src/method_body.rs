@@ -24,7 +24,8 @@ fn is_str(expr: &Expr, text: &str) -> bool {
     matches!(expr, Expr::StringLiteral(s) if s.value.to_str() == text)
 }
 
-fn arguments(call: &ast::ExprCall) -> impl Iterator<Item = &Expr> {
+/// The values of a call, positional and keyword.
+pub(crate) fn arguments(call: &ast::ExprCall) -> impl Iterator<Item = &Expr> + Clone {
     let keywords = call.arguments.keywords.iter().map(|k| &k.value);
     call.arguments.args.iter().chain(keywords)
 }
