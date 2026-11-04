@@ -158,6 +158,9 @@ rules! {
     "OD226" "sql-view-not-created" Correctness Error None, true, "A model sets _auto = False, and nothing creates its SQL view.";
     "OD227" "sql-definition-unknown-column" Correctness Error None, true, "An SQL constraint or index names a column its model's table does not have.";
     "OD228" "delegate-without-ondelete" Correctness Error Some(">=saas~14.4,<saas~18.3"), true, "A delegate=True Many2one has no ondelete, so Odoo fails when it sets up the registry.";
+    // saas~12.4's metaclass wraps every method in `api.guess` (`odoo/api.py:112`, `:666`), which adapts
+    // old-style calls; saas~12.5's has no such wrapper (`odoo/api.py:93`-`:108`).
+    "OD229" "override-signature-mismatch" Correctness Error Some(">=saas~12.5"), true, "An override refuses a call that the method it overrides takes.";
     "OD301" "unresolved-xmlid" Correctness Error None, true, "The XML id is not defined by its module.";
     "OD302" "xmlid-not-in-depends" Correctness Error None, true, "The XML id comes from a module missing from depends.";
     "OD303" "duplicate-xmlid" Correctness Warning None, false, "The same XML id is defined twice in one file, with another model or overwriting a field.";
@@ -352,7 +355,7 @@ mod tests {
 
     #[test]
     fn series_gates_follow_source() {
-        let gates: [(&str, &[&str], &[&str]); 16] = [
+        let gates: [(&str, &[&str], &[&str]); 17] = [
             ("OD117", &["saas~15.1", "saas~18.2"], &["saas~15.2", "saas~18.1"]),
             ("OD118", &["saas~18.1"], &["saas~18.2"]),
             ("OD125", &["saas~12.4"], &["saas~12.5", "20.0"]),
@@ -360,6 +363,7 @@ mod tests {
             ("OD219", &["saas~13.5"], &["14.0"]),
             ("OD221", &["saas~14.3"], &["saas~14.4"]),
             ("OD222", &["saas~12.4"], &["saas~12.5"]),
+            ("OD229", &["saas~12.4"], &["saas~12.5", "20.0"]),
             ("OD315", &["saas~16.4"], &["17.0", "20.0"]),
             ("OD316", &["saas~16.4"], &["17.0", "20.0"]),
             ("OD317", &["saas~16.4", "saas~17.3"], &["17.0", "saas~17.2"]),

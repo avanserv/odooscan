@@ -124,7 +124,7 @@ pub(crate) fn root(expr: &Expr) -> Option<&str> {
 }
 
 /// `a.b.c` as written, or its root followed by `...` when an item or a call breaks the chain.
-fn dotted(expr: &Expr) -> String {
+pub(crate) fn dotted(expr: &Expr) -> String {
     match expr {
         Expr::Name(n) => n.id.to_string(),
         Expr::Attribute(a) => format!("{}.{}", dotted(&a.value), a.attr),
