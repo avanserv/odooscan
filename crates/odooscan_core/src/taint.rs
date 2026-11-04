@@ -32,6 +32,10 @@ enum Sink {
     Deserialize,
     Entity,
     Header,
+    Model,
+    Method,
+    Field,
+    Domain,
 }
 
 /// The arguments of a call that a sink checks.
@@ -43,6 +47,8 @@ enum Arg {
     At(usize, &'static [&'static str]),
     /// Every positional argument.
     Any,
+    /// Each of these, as the domain and the fields of `search_read()`.
+    Each(&'static [Arg]),
 }
 
 /// What the argument a guard reads must be for a call to be the sink.
@@ -90,6 +96,8 @@ enum Role {
     /// Returns what the positional arguments at these indexes, or these keywords, carry, and
     /// nothing of the others.
     Keeps(&'static [usize], &'static [&'static str]),
+    /// Builds a domain's condition from a field, an operator and a value, as `Domain(f, op, v)`.
+    Leaf,
 }
 
 const fn sink(sink: Sink) -> Role {
@@ -173,6 +181,20 @@ const RESOLVES: Guard = Guard {
 };
 
 const HEADERS: Arg = Arg::At(1, &["headers"]);
+
+/// The domain of a search, the keyword `args` of `search()` and `search_count()` through 15.0
+/// (`odoo/models.py:1792`, `:1805`), and the fields a search reads.
+const DOMAIN: Arg = Arg::At(0, &["domain", "args"]);
+const SEARCH_READ: Arg = Arg::Each(&[DOMAIN, Arg::At(1, &["fields", "field_names"])]);
+/// `read_group(domain, fields, groupby)` through 19.0 (18.0 `odoo/models.py:2819`), and
+/// `(domain, groupby, aggregates)` for `_read_group` from 17.0 (18.0 `odoo/models.py:1978`),
+/// `formatted_read_group` from 19.0 and `read_group` in 20.0 (`odoo/orm/models.py:1932`,
+/// `addons/web/models/models.py:1022`).
+const READ_GROUP: Arg = Arg::Each(&[
+    DOMAIN,
+    Arg::At(1, &["fields", "groupby"]),
+    Arg::At(2, &["groupby", "aggregates"]),
+]);
 
 /// Where user data enters, where it must not arrive, and what makes it harmless. A pattern matches
 /// a dotted callee or attribute that ends with its last name and holds its other names in order, so
@@ -267,6 +289,16 @@ const TABLE: &[(&str, Role)] = &[
     ("Response", sink_at(Sink::Header, Arg::At(2, &["headers"]))),
     ("headers.add", sink_at(Sink::Header, Arg::Any)),
     ("headers.set", sink_at(Sink::Header, Arg::Any)),
+    ("sudo().read", sink_at(Sink::Field, Arg::At(0, &["fields"]))),
+    ("sudo().mapped", sink_at(Sink::Field, Arg::At(0, &["func"]))),
+    ("sudo().search", sink_at(Sink::Domain, DOMAIN)),
+    ("sudo().search_count", sink_at(Sink::Domain, DOMAIN)),
+    ("sudo().search_read", sink_at(Sink::Domain, SEARCH_READ)),
+    ("sudo().search_fetch", sink_at(Sink::Domain, SEARCH_READ)),
+    ("sudo().read_group", sink_at(Sink::Domain, READ_GROUP)),
+    ("sudo()._read_group", sink_at(Sink::Domain, READ_GROUP)),
+    ("sudo().formatted_read_group", sink_at(Sink::Domain, READ_GROUP)),
+    ("Domain", Role::Leaf),
     ("int", Role::Sanitizer),
     ("float", Role::Sanitizer),
     ("bool", Role::Sanitizer),
@@ -313,6 +345,10 @@ const SINKS: &[(Sink, &str)] = &[
     (Sink::Deserialize, "OD709"),
     (Sink::Entity, "OD710"),
     (Sink::Header, "OD711"),
+    (Sink::Model, "OD712"),
+    (Sink::Method, "OD713"),
+    (Sink::Field, "OD714"),
+    (Sink::Domain, "OD715"),
 ];
 
 /// Keywords that carry the argument a sink checks when it is not passed by position.
@@ -343,12 +379,13 @@ impl TaintTable {
         self.add(pattern, Role::Sanitizer)
     }
 
-    /// A sink reported as `rule`, the code or name of one of OD701 to OD711.
+    /// A sink reported as `rule`, the code or name of a rule of `SINKS`.
     pub fn sink(&mut self, rule: &str, pattern: &str) -> Result<(), String> {
         let code = crate::rules::find(rule).map(|r| r.code);
         let Some((kind, _)) = SINKS.iter().find(|(_, c)| Some(*c) == code) else {
+            let (first, last) = (SINKS[0].1, SINKS[SINKS.len() - 1].1);
             return Err(format!(
-                "'{rule}' is not a taint rule: name OD701 to OD711 by code or name"
+                "'{rule}' is not a taint rule: name {first} to {last} by code or name"
             ));
         };
         self.add(pattern, sink(*kind))
@@ -436,28 +473,64 @@ impl Taint {
     }
 }
 
-/// Of two values, the one the user sets on entry wins over one a caller or callee may taint, so
-/// that a finding in the function is never traded for a summary edge. Among those, keys win so
-/// that OD704 still sees them. A source joined to an RPC argument stays the source, with the keys
-/// of either: a Python caller sets only the argument, so its edge would drop the source. The
-/// result is harmless only where both are.
 fn join(a: Option<Taint>, b: Option<Taint>) -> Option<Taint> {
-    let rank = |t: &Taint| (t.origin.is_user(), t.kind);
     match (a, b) {
-        (Some(a), Some(b)) => {
-            let safe = a.safe.intersect(b.safe);
-            let kind = a.kind.max(b.kind);
-            let mut t = match (a.origin, b.origin) {
-                (FlowOrigin::Source, FlowOrigin::Rpc(_)) => a.kind(kind),
-                (FlowOrigin::Rpc(_), FlowOrigin::Source) => b.kind(kind),
-                _ if rank(&b) > rank(&a) => b,
-                _ => a,
-            };
-            t.safe = safe;
-            Some(t)
-        }
+        (Some(a), Some(b)) => Some(joined(a, b)),
         (a, b) => a.or(b),
     }
+}
+
+/// Of two values, the one the user sets on entry wins over one a caller or callee may taint, so
+/// that a finding in the function is never traded for a summary edge. Among those, a part of a
+/// domain the user may pick wins over a value a condition holds, then a value harmless for fewer
+/// rules, both with the keys of either, so that an edge blames the value a sink may report; then
+/// keys win so that OD704 still sees them. A source joined to an RPC argument stays the source,
+/// with the keys of either: a Python caller sets only the argument, so its edge would drop the
+/// source. The result is harmless only where both are, but for OD715 when what a call returns is
+/// dropped: its domain is as often one the code built.
+fn joined(a: Taint, b: Taint) -> Taint {
+    let kind = a.kind.max(b.kind);
+    let (second, widen) = pick(&a, &b);
+    let (keep, drop) = if second { (b, a) } else { (a, b) };
+    let keep = if widen { keep.kind(kind) } else { keep };
+    let returned = matches!(drop.origin, FlowOrigin::Return(_)) && drop.origin != keep.origin;
+    let dropped = if returned {
+        drop.safe.union(Safe::of(&["OD715"]))
+    } else {
+        drop.safe
+    };
+    Taint {
+        safe: keep.safe.intersect(dropped),
+        ..keep
+    }
+}
+
+/// Whether a join keeps the second of two values, and whether it gives it the keys of either.
+fn pick(a: &Taint, b: &Taint) -> (bool, bool) {
+    let rank = |t: &Taint| (t.origin.is_user(), t.kind);
+    match (a.origin, b.origin) {
+        (FlowOrigin::Source, FlowOrigin::Rpc(_)) => (false, true),
+        (FlowOrigin::Rpc(_), FlowOrigin::Source) => (true, true),
+        _ => match pick_peer(a, b) {
+            Some(second) => (second, true),
+            None => (rank(b) > rank(a), false),
+        },
+    }
+}
+
+/// Whether a join keeps the second of two values the user sets alike: the one a condition does
+/// not hold, else the one harmless for fewer rules. `None` when only one of them comes from the
+/// user, or when both are held alike and neither's rules contain the other's.
+fn pick_peer(a: &Taint, b: &Taint) -> Option<bool> {
+    let held = |t: &Taint| t.safe.has("OD715");
+    let fewer = |x: &Taint, y: &Taint| x.safe != y.safe && x.safe.intersect(y.safe) == x.safe;
+    if a.origin.is_user() != b.origin.is_user() {
+        return None;
+    }
+    if held(a) != held(b) {
+        return Some(held(a));
+    }
+    (fewer(a, b) || fewer(b, a)).then(|| fewer(b, a))
 }
 
 /// The codes a string's start keeps harmless when the code, not the user, picks it: a redirect or
@@ -550,6 +623,62 @@ fn bin_start(b: &ast::ExprBinOp, left: Option<&Taint>, first: Option<(&Expr, Opt
     }
 }
 
+/// What a name built around text the code writes keeps harmless: one with a letter or a digit of
+/// its own names a method of a family the code picks, as `'_get_%s_view' % t` does, where `'_' + t`
+/// names any private method.
+fn affixed(text: &str) -> Safe {
+    if text.chars().any(char::is_alphanumeric) {
+        Safe::of(&["OD713"])
+    } else {
+        Safe::default()
+    }
+}
+
+/// The text `+` or a literal template's `%` writes around the values it takes.
+fn bin_affix(b: &ast::ExprBinOp) -> Safe {
+    let text = match b.op {
+        Operator::Add => [&*b.left, &*b.right].into_iter().filter_map(constant).collect(),
+        Operator::Mod => constant(&b.left).map(|t| literal_text(&t, '%')).unwrap_or_default(),
+        _ => String::new(),
+    };
+    affixed(&text)
+}
+
+fn format_affix(call: &ast::ExprCall) -> Safe {
+    let Expr::Attribute(a) = &*call.func else {
+        return Safe::default();
+    };
+    let template = constant(&a.value).filter(|_| a.attr.as_str() == "format");
+    template.map_or_else(Safe::default, |t| affixed(&literal_text(&t, '{')))
+}
+
+/// The text of a template outside its fields, which `open` starts.
+fn literal_text(template: &str, open: char) -> String {
+    let mut text = String::new();
+    let mut rest = template;
+    while !rest.is_empty() {
+        let (prefix, field) = template_prefix(rest, open);
+        text.push_str(&prefix);
+        rest = past_field(field, open);
+    }
+    text
+}
+
+/// What follows a field whose `open` is gone: `%(name)-5.2f` or `{0!r:>10}`.
+fn past_field(field: &str, open: char) -> &str {
+    if open == '{' {
+        return field.split_once('}').map_or("", |(_, rest)| rest);
+    }
+    let field = match field.strip_prefix('(') {
+        Some(named) => named.split_once(')').map_or("", |(_, rest)| rest),
+        None => field,
+    };
+    let field = field.trim_start_matches(|c: char| c.is_ascii_digit() || "#0- +*.hlL".contains(c));
+    let mut chars = field.chars();
+    chars.next();
+    chars.as_str()
+}
+
 /// The text of a template before its first field, which `open` starts, and what follows the
 /// field's `open`. A doubled `open` is the character itself.
 fn template_prefix(template: &str, open: char) -> (String, &str) {
@@ -577,12 +706,17 @@ struct State {
     vars: FxHashMap<String, Taint>,
     /// Locals bound to a recordset under `sudo()`.
     sudo: FxHashSet<String>,
+    /// Locals bound to records rather than to what a method of them returns.
+    records: FxHashSet<String>,
     /// Locals bound to a model, as `Orders = env["sale.order"]` does.
     models: FxHashMap<String, Receiver>,
     /// Locals bound to an lxml `XMLParser()`.
     parsers: FxHashMap<String, Entities>,
     /// Locals bound to a dotted name, by its last name, as `Loader = yaml.SafeLoader`.
     names: FxHashMap<String, String>,
+    /// Locals bound to the records of a model the user picks, as `env[t]` does, with the taint of
+    /// the model's name.
+    picked: FxHashMap<String, Taint>,
 }
 
 impl State {
@@ -594,6 +728,7 @@ impl State {
             }
         }
         self.sudo.extend(other.sudo);
+        self.records.extend(other.records);
         self.models.extend(other.models);
         // A parser that may resolve entities on either path may on the merged one.
         for (name, e) in other.parsers {
@@ -602,6 +737,12 @@ impl State {
         }
         // A name is known only where both paths agree on it.
         self.names.retain(|name, mine| other.names.get(name) == Some(mine));
+        for (name, t) in other.picked {
+            let mine = self.picked.remove(&name);
+            if let Some(t) = join(mine, Some(t)) {
+                self.picked.insert(name, t);
+            }
+        }
     }
 }
 
@@ -828,12 +969,7 @@ impl Flows<'_> {
     /// is the comparison the check holds for: `in` after an `assert`, `not in` after an `if` that
     /// raises.
     fn guard(&mut self, test: &Expr, op: CmpOp) {
-        let mut checks = Checks {
-            op,
-            values: vec![],
-            keys: vec![],
-            starts: vec![],
-        };
+        let mut checks = Checks::new(op);
         checks.visit_expr(test);
         for name in checks.values {
             self.state.vars.remove(&name);
@@ -846,6 +982,11 @@ impl Flows<'_> {
         for name in checks.starts {
             if let Some(t) = self.state.vars.get_mut(&name) {
                 t.safe = t.safe.union(Safe::of(FIXED));
+            }
+        }
+        for name in checks.exists {
+            if let Some(t) = self.state.vars.get_mut(&name) {
+                t.safe = t.safe.union(existing());
             }
         }
     }
@@ -888,11 +1029,10 @@ impl Flows<'_> {
     /// Binds a local, and what the value tells of it beyond its taint.
     fn bind_name(&mut self, name: &str, target: &Expr, t: Option<Taint>, value: Option<&Expr>) {
         self.locals.insert(name.to_owned());
-        if value.is_some_and(|v| self.is_sudo(v)) {
-            self.state.sudo.insert(name.to_owned());
-        } else {
-            self.state.sudo.remove(name);
-        }
+        let sudo = value.is_some_and(|v| self.is_sudo(v));
+        toggle(&mut self.state.sudo, name, sudo);
+        let records = value.is_some_and(|v| self.records(v));
+        toggle(&mut self.state.records, name, records);
         match value.and_then(|v| self.receiver(v)) {
             Some(r) => self.state.models.insert(name.to_owned(), r),
             None => self.state.models.remove(name),
@@ -904,6 +1044,10 @@ impl Flows<'_> {
         match value.and_then(|v| self.named(v)) {
             Some(named) => self.state.names.insert(name.to_owned(), named.to_owned()),
             None => self.state.names.remove(name),
+        };
+        match value.and_then(|v| self.picked(v)) {
+            Some(model) => self.state.picked.insert(name.to_owned(), model),
+            None => self.state.picked.remove(name),
         };
         self.set(name.to_owned(), target, t);
     }
@@ -971,7 +1115,7 @@ impl Flows<'_> {
             Expr::Call(c) => {
                 let mut path = self.path(&c.func);
                 if let Some(last) = path.last_mut() {
-                    last.push_str("()");
+                    last.push_str(call_suffix(c));
                 }
                 path
             }
@@ -986,6 +1130,21 @@ impl Flows<'_> {
 
     fn is_sudo(&self, expr: &Expr) -> bool {
         matches!(expr, Expr::Call(_) | Expr::Name(_)) && self.path(expr).iter().any(|p| p == "sudo()")
+    }
+
+    /// Whether `expr` is records rather than what one of their methods returns: a model of `env`,
+    /// a local bound to records, or a call of a method that returns records.
+    fn records(&self, expr: &Expr) -> bool {
+        match expr {
+            Expr::Name(n) => self.state.records.contains(n.id.as_str()),
+            Expr::Subscript(s) => tail_name(&s.value) == Some("env"),
+            Expr::Call(c) => tail_name(&c.func).is_some_and(|m| {
+                SAME_MODEL.contains(&m)
+                    || SAME_RECORDS.contains(&m)
+                    || matches!(m, "search" | "search_fetch" | "sorted")
+            }),
+            _ => false,
+        }
     }
 
     fn source(&self, label: String, expr: &Expr, kind: Kind) -> Option<Taint> {
@@ -1097,10 +1256,7 @@ impl Flows<'_> {
                     None => values(self.expr(&a.value)),
                 },
             },
-            Expr::Subscript(s) => {
-                self.expr(&s.slice);
-                values(self.expr(&s.value))
-            }
+            Expr::Subscript(s) => self.item(s, expr),
             Expr::Call(c) => self.call(c, expr),
             Expr::BinOp(b) => self.bin_op(b),
             Expr::FString(f) => self.fstring(f),
@@ -1115,9 +1271,12 @@ impl Flows<'_> {
 
     fn collection(&mut self, expr: &Expr) -> Option<Taint> {
         match expr {
-            Expr::List(ast::ExprList { elts, .. })
-            | Expr::Tuple(ast::ExprTuple { elts, .. })
-            | Expr::Set(ast::ExprSet { elts, .. }) => self.all(elts.iter()),
+            Expr::List(ast::ExprList { elts, .. }) | Expr::Tuple(ast::ExprTuple { elts, .. }) => {
+                let mut ts: Vec<Option<Taint>> = elts.iter().map(|e| self.expr(e)).collect();
+                hold_value(elts, &mut ts);
+                ts.into_iter().fold(None, join)
+            }
+            Expr::Set(ast::ExprSet { elts, .. }) => self.all(elts.iter()),
             Expr::Dict(d) => self.dict(d),
             Expr::DictComp(d) => self.dict_comp(d),
             Expr::ListComp(ast::ExprListComp { elt, generators, .. })
@@ -1170,7 +1329,7 @@ impl Flows<'_> {
         if b.op == Operator::BitAnd && (chosen(&left) || chosen(&right)) {
             return None;
         }
-        let start = bin_start(b, left.as_ref(), first);
+        let start = bin_start(b, left.as_ref(), first).union(bin_affix(b));
         let t = join(left, right);
         let t = if b.op == Operator::BitOr { t } else { values(t) };
         t.map(|t| t.safe(start))
@@ -1199,39 +1358,36 @@ impl Flows<'_> {
 
     /// An f-string starts with the text before its first field, or without any with that field.
     fn fstring(&mut self, f: &ast::ExprFString) -> Option<Taint> {
-        let mut prefix = String::new();
-        let mut first = None;
+        let mut text = String::new();
+        // The length of the text before the first field, and where that field starts.
+        let mut first: Option<(usize, Safe)> = None;
         let mut t = None;
         for part in f.value.iter() {
             let elements = match part {
                 ast::FStringPartRef::Literal(l) => {
-                    if first.is_none() {
-                        prefix.push_str(&l.value);
-                    }
+                    text.push_str(&l.value);
                     continue;
                 }
                 ast::FStringPartRef::FString(f) => &f.elements,
             };
             for e in elements {
                 match e {
-                    ast::InterpolatedStringElement::Literal(l) if first.is_none() => prefix.push_str(&l.value),
-                    ast::InterpolatedStringElement::Literal(_) => {}
+                    ast::InterpolatedStringElement::Literal(l) => text.push_str(&l.value),
                     ast::InterpolatedStringElement::Interpolation(i) => {
                         let field = self.expr(&i.expression);
-                        if first.is_none() {
-                            first = Some(start_of(&i.expression, field.as_ref()));
-                        }
+                        let start = start_of(&i.expression, field.as_ref());
+                        first.get_or_insert((text.len(), start));
                         t = join(t, field);
                     }
                 }
             }
         }
-        let start = if prefix.is_empty() {
-            first.unwrap_or_default()
-        } else {
-            literal_start(&prefix)
+        let start = match first {
+            Some((0, start)) => start,
+            Some((len, _)) => literal_start(&text[..len]),
+            None => literal_start(&text),
         };
-        values(t).map(|t| t.safe(start))
+        values(t).map(|t| t.safe(start).safe(affixed(&text)))
     }
 
     /// `{**t}` keeps the keys of `t`; a literal key set holds the user to the values.
@@ -1268,10 +1424,31 @@ impl Flows<'_> {
             let t = values(self.expr(&g.iter));
             self.bind(&g.target, t, None);
             self.all(g.ifs.iter());
+            // The element is built only where each test holds, which says nothing of a
+            // comparison under `or` or `not`.
+            for test in g.ifs.iter().flat_map(conjuncts) {
+                if matches!(test, Expr::Compare(_)) {
+                    self.guard(test, CmpOp::In);
+                }
+            }
         }
         let t = elt(self);
         self.state = before;
         t
+    }
+
+    /// The taints of a call's positional arguments. The list `expression.AND()` or `Domain.OR()`
+    /// takes holds domains, never one condition.
+    fn args(&mut self, call: &ast::ExprCall) -> Vec<Option<Taint>> {
+        let joins = is_domain_join(&call.func);
+        let args = call.arguments.args.iter();
+        args.map(|a| match a {
+            Expr::List(ast::ExprList { elts, .. }) | Expr::Tuple(ast::ExprTuple { elts, .. }) if joins => {
+                self.all(elts.iter())
+            }
+            a => self.expr(a),
+        })
+        .collect()
     }
 
     fn call(&mut self, call: &ast::ExprCall, expr: &Expr) -> Option<Taint> {
@@ -1279,7 +1456,7 @@ impl Flows<'_> {
             Expr::Attribute(a) => self.expr(&a.value),
             _ => None,
         };
-        let args: Vec<Option<Taint>> = call.arguments.args.iter().map(|a| self.expr(a)).collect();
+        let args = self.args(call);
         let keywords: Vec<Option<Taint>> = call.arguments.keywords.iter().map(|k| self.expr(&k.value)).collect();
         let path = self.path(&call.func);
         // A call whose guard fails is no sink, and returns what any other call would, as
@@ -1288,24 +1465,10 @@ impl Flows<'_> {
             Role::Sink(row) => self.is_sink(*row, &path, call),
             _ => true,
         });
+        self.picks(call, expr);
         match row {
             Some((pattern, Role::Source(kind))) => self.source(format!("{pattern}()"), expr, kind),
             Some((_, Role::Sanitizer)) => None,
-            Some((_, Role::Clears(code))) => {
-                let t = args.into_iter().chain(keywords).fold(None, join);
-                values(t).map(|t| t.safe(Safe::of(&[code])))
-            }
-            Some((_, Role::Keeps(positions, names))) => {
-                let kept = args.into_iter().enumerate().filter(|(i, _)| positions.contains(i));
-                let named = call
-                    .arguments
-                    .keywords
-                    .iter()
-                    .zip(keywords)
-                    .filter(|(k, _)| k.arg.as_ref().is_some_and(|a| names.contains(&a.as_str())));
-                let t = kept.map(|(_, t)| t).chain(named.map(|(_, t)| t)).fold(None, join);
-                values(t)
-            }
             Some((pattern, Role::Sink(row))) => {
                 let arg = sink_arg(row.arg, code(row.sink), call, &args, &keywords);
                 let callee = format!("{pattern}()");
@@ -1314,18 +1477,70 @@ impl Flows<'_> {
                     _ => callee,
                 };
                 self.sink(row.sink, callee, arg, expr);
-                // A parser, a loader or a command hands back the data in another form, so the
-                // flows that pass through it go on as they would without the row.
+                // A parser, a loader or a command hands back the data in another form, and a
+                // search or a read stays a call of the model's method, so the flows that pass
+                // through it go on as they would without the row.
                 let passes = matches!(
                     row.sink,
-                    Sink::Command | Sink::Deserialize | Sink::Entity | Sink::Header
+                    Sink::Command | Sink::Deserialize | Sink::Entity | Sink::Header | Sink::Field | Sink::Domain
                 );
                 if !passes {
                     return None;
                 }
                 self.plain_call(call, expr, &path, receiver, args, keywords)
             }
+            Some((_, role)) => transformed(role, call, args, keywords),
             None => self.plain_call(call, expr, &path, receiver, args, keywords),
+        }
+    }
+
+    /// An item's value, reporting a key the user picks on records under `sudo()`, which reads any
+    /// field as superuser.
+    fn item(&mut self, s: &ast::ExprSubscript, expr: &Expr) -> Option<Taint> {
+        let key = self.expr(&s.slice);
+        if self.is_sudo(&s.value) && self.records(&s.value) {
+            self.sink(Sink::Field, "sudo()[...]".to_owned(), key, expr);
+        }
+        values(self.expr(&s.value))
+    }
+
+    /// Reports a method the user names that the call runs, as `getattr(records, t)()`, and a data
+    /// method on the records of a model the user picks under `sudo()`.
+    fn picks(&mut self, call: &ast::ExprCall, expr: &Expr) {
+        match &*call.func {
+            Expr::Call(inner) if tail_name(&inner.func) == Some("getattr") => {
+                let Some(name) = inner.arguments.args.get(1) else {
+                    return;
+                };
+                let t = self.expr(name);
+                self.sink(Sink::Method, "getattr()".to_owned(), t, expr);
+            }
+            Expr::Attribute(a) if is_data_method(a.attr.as_str()) && self.is_sudo(&a.value) => {
+                let t = self.picked(&a.value);
+                self.sink(Sink::Model, format!("sudo().{}()", a.attr), t, expr);
+            }
+            _ => {}
+        }
+    }
+
+    /// The taint of the model's name when `expr` is the records of a model the user picks:
+    /// `env[t]`, `env.get(t)`, a local bound to them, and the same records through `sudo()` and
+    /// the like, `browse()`, `exists()` or `filtered()`.
+    fn picked(&mut self, expr: &Expr) -> Option<Taint> {
+        match expr {
+            Expr::Name(n) => self.state.picked.get(n.id.as_str()).cloned(),
+            Expr::Subscript(s) if tail_name(&s.value) == Some("env") => self.expr(&s.slice),
+            Expr::Call(c) => self.picked_call(c),
+            _ => None,
+        }
+    }
+
+    fn picked_call(&mut self, c: &ast::ExprCall) -> Option<Taint> {
+        let Expr::Attribute(a) = &*c.func else { return None };
+        match a.attr.as_str() {
+            "get" if tail_name(&a.value) == Some("env") => self.expr(c.arguments.args.first()?),
+            m if SAME_MODEL.contains(&m) || SAME_RECORDS.contains(&m) => self.picked(&a.value),
+            _ => None,
         }
     }
 
@@ -1344,7 +1559,12 @@ impl Flows<'_> {
         if receiver.is_none() && self.method_target(call) {
             return self.method_call(call, expr, args, keywords);
         }
-        let start = format_start(call, &args, &keywords);
+        let start = format_start(call, &args, &keywords).union(format_affix(call));
+        let mut args = args;
+        // A mapping's `get()` returns one of its values, whoever picks the key.
+        if receiver.is_some() && path.last().is_some_and(|m| m == "get") {
+            args.iter_mut().take(1).for_each(|key| *key = None);
+        }
         let args = args.into_iter().chain(keywords).fold(None, join);
         let t = self.result(call, path, receiver, args);
         t.map(|t| t.safe(start))
@@ -1528,6 +1748,135 @@ fn xml_parser(expr: &Expr) -> Option<Entities> {
     )
 }
 
+/// The tests that each hold where `test` does: the operands of an `and`, or `test` itself.
+fn conjuncts(test: &Expr) -> Vec<&Expr> {
+    match test {
+        Expr::BoolOp(b) if b.op == ast::BoolOp::And => b.values.iter().flat_map(conjuncts).collect(),
+        _ => vec![test],
+    }
+}
+
+/// Methods that return some of the records they are called on.
+const SAME_RECORDS: &[&str] = &["browse", "exists", "filtered"];
+
+/// How a call ends its name in a dotted path: `sudo(False)` runs with the user's rights again, so
+/// it reads as no `sudo()`.
+fn call_suffix(c: &ast::ExprCall) -> &'static str {
+    let flag = c
+        .arguments
+        .args
+        .first()
+        .or_else(|| c.arguments.find_keyword("flag").map(|k| &k.value));
+    let off = matches!(flag, Some(Expr::BooleanLiteral(b)) if !b.value);
+    if off && tail_name(&c.func) == Some("sudo") {
+        "(False)"
+    } else {
+        "()"
+    }
+}
+
+fn toggle(set: &mut FxHashSet<String>, name: &str, on: bool) {
+    if on {
+        set.insert(name.to_owned());
+    } else {
+        set.remove(name);
+    }
+}
+
+/// The methods that read, write or search the records they are called on.
+fn is_data_method(name: &str) -> bool {
+    name.starts_with("search")
+        || matches!(
+            name,
+            "read_group" | "_read_group" | "formatted_read_group" | "read" | "mapped" | "create" | "write" | "unlink"
+        )
+}
+
+/// What a call of a row that neither enters, ends nor reports a flow returns: what `Clears`,
+/// `Keeps` or `Leaf` keep of its arguments.
+fn transformed(
+    role: Role,
+    call: &ast::ExprCall,
+    args: Vec<Option<Taint>>,
+    keywords: Vec<Option<Taint>>,
+) -> Option<Taint> {
+    match role {
+        Role::Clears(code) => {
+            let t = args.into_iter().chain(keywords).fold(None, join);
+            values(t).map(|t| t.safe(Safe::of(&[code])))
+        }
+        Role::Keeps(positions, names) => {
+            let kept = args.into_iter().enumerate().filter(|(i, _)| positions.contains(i));
+            let named = call
+                .arguments
+                .keywords
+                .iter()
+                .zip(keywords)
+                .filter(|(k, _)| k.arg.as_ref().is_some_and(|a| names.contains(&a.as_str())));
+            let t = kept.map(|(_, t)| t).chain(named.map(|(_, t)| t)).fold(None, join);
+            values(t)
+        }
+        Role::Leaf => {
+            let mut args = args;
+            hold_value(&call.arguments.args, &mut args);
+            values(args.into_iter().chain(keywords).fold(None, join))
+        }
+        Role::Source(_) | Role::Sink(_) | Role::Sanitizer => None,
+    }
+}
+
+/// Marks the value of a domain's condition of the elements `elts`, of taints `ts`, harmless for
+/// OD715: it filters on the condition's field only, unless the operator takes a domain. The field
+/// and the operator keep their taint, so the condition is harmless only where the code picks both.
+fn hold_value(elts: &[Expr], ts: &mut [Option<Taint>]) {
+    if let (true, Some(Some(t))) = (is_condition(elts), ts.get_mut(2)) {
+        t.safe = t.safe.union(Safe::of(&["OD715"]));
+    }
+}
+
+/// The operators of a condition whose value filters the condition's field only, from 18.0
+/// `odoo/osv/expression.py:140` and 20.0 `odoo/orm/domains.py:80`; `any` and its kin take a
+/// domain.
+const VALUE_OPERATORS: &[&str] = &[
+    "=",
+    "!=",
+    "<",
+    ">",
+    "<=",
+    ">=",
+    "=?",
+    "like",
+    "not like",
+    "ilike",
+    "not ilike",
+    "=like",
+    "not =like",
+    "=ilike",
+    "not =ilike",
+    "in",
+    "not in",
+    "child_of",
+    "parent_of",
+];
+
+/// Whether three elements read as a condition rather than as three conditions, three domains or
+/// three fields: an operator, or a local that may hold one, after a field that opens no domain.
+fn is_condition(elts: &[Expr]) -> bool {
+    let [field, op, _] = elts else { return false };
+    let opens =
+        matches!(field, Expr::List(_) | Expr::Tuple(_)) || str_lit(field).is_some_and(|f| matches!(f, "|" | "&" | "!"));
+    let operator = match op {
+        Expr::Name(_) => true,
+        _ => str_lit(op).is_some_and(|o| VALUE_OPERATORS.contains(&o)),
+    };
+    !opens && operator
+}
+
+fn is_domain_join(func: &Expr) -> bool {
+    matches!(func, Expr::Attribute(a) if matches!(a.attr.as_str(), "AND" | "OR")
+        && tail_name(&a.value).is_some_and(|n| matches!(n, "expression" | "Domain")))
+}
+
 /// Whose rights a method called on the records of the dotted path `records` runs with.
 fn runs_as(records: &[String]) -> RunsAs {
     let last = |name: &str| records.iter().rposition(|p| p == name);
@@ -1559,6 +1908,7 @@ fn arg_expr(arg: Arg, call: &ast::ExprCall) -> Option<&Expr> {
         Arg::First => (0, SINK_KEYWORDS),
         Arg::At(pos, names) => (pos, names),
         Arg::Any => (0, &[][..]),
+        Arg::Each(each) => return each.first().and_then(|a| arg_expr(*a, call)),
     };
     match call.arguments.args.get(pos) {
         Some(e) => Some(e),
@@ -1623,6 +1973,18 @@ fn fixed_prefixes(arg: &Expr) -> bool {
     !prefixes.is_empty() && prefixes.iter().all(|p| str_lit(p).is_some_and(fixes_start))
 }
 
+/// The containers whose membership proves only that a model or a field exists: `env`, the
+/// registry or `pool`, and `_fields`.
+const EXISTING: &[&str] = &["env", "registry", "pool", "_fields"];
+
+/// The rules an existing model or field name is harmless for: those of a model, a field or a
+/// domain stay open, as the user still picks which one.
+fn existing() -> Safe {
+    let open = ["OD712", "OD714", "OD715"];
+    let codes: Vec<&str> = SINKS.iter().map(|(_, c)| *c).filter(|c| !open.contains(c)).collect();
+    Safe::of(&codes)
+}
+
 fn merge_into(joined: &mut Option<State>, state: State) {
     match joined {
         Some(j) => j.merge(state),
@@ -1632,20 +1994,33 @@ fn merge_into(joined: &mut Option<State>, state: State) {
 
 /// The names a membership test checks: `x <op> allowed` checks `x`, and
 /// `any(k <op> allowed for k in vals)` checks the keys of `vals`. `starts` holds the names whose
-/// start `x.startswith(p)` checks, `not` before it for `not in`.
+/// start `x.startswith(p)` checks, `not` before it for `not in`, and `exists` those a test
+/// against a container of `EXISTING`, as `x <op> self.env`, `self.pool` or `Model._fields`, checks.
 struct Checks {
     op: CmpOp,
     values: Vec<String>,
     keys: Vec<String>,
     starts: Vec<String>,
+    exists: Vec<String>,
 }
 
 impl Checks {
-    fn checked(&self, expr: &Expr) -> Option<String> {
-        match expr {
-            Expr::Compare(c) if c.ops[..] == [self.op] => c.operands[0].as_name_expr().map(|n| n.id.to_string()),
-            _ => None,
+    fn new(op: CmpOp) -> Self {
+        Self {
+            op,
+            values: vec![],
+            keys: vec![],
+            starts: vec![],
+            exists: vec![],
         }
+    }
+
+    /// The name a membership test checks, and whether its container holds every model or field.
+    fn checked(&self, expr: &Expr) -> Option<(String, bool)> {
+        let Expr::Compare(c) = expr else { return None };
+        let name = c.operands[0].as_name_expr().filter(|_| c.ops[..] == [self.op])?;
+        let every = tail_name(&c.operands[1]).is_some_and(|n| EXISTING.contains(&n));
+        Some((name.id.to_string(), every))
     }
 
     /// The name whose start a `startswith()` test holds to prefixes that keep it harmless.
@@ -1661,12 +2036,7 @@ impl Checks {
     }
 
     fn comprehension(&mut self, elt: &Expr, generators: &[ast::Comprehension]) {
-        let mut inner = Checks {
-            op: self.op,
-            values: vec![],
-            keys: vec![],
-            starts: vec![],
-        };
+        let mut inner = Checks::new(self.op);
         inner.visit_expr(elt);
         for g in generators {
             let Some(target) = g.target.as_name_expr() else {
@@ -1679,8 +2049,11 @@ impl Checks {
                 },
                 e => e,
             };
+            // Keys tested against `_fields` end OD704 too: such a test shows the code means to
+            // take any field the model has.
+            let mut checked = inner.values.iter().chain(&inner.exists);
             if let Some(m) = mapping.as_name_expr()
-                && inner.values.iter().any(|v| v == target.id.as_str())
+                && checked.any(|v| v == target.id.as_str())
             {
                 self.keys.push(m.id.to_string());
             }
@@ -1697,7 +2070,11 @@ impl<'a> Visitor<'a> for Checks {
                 return self.comprehension(elt, generators);
             }
             _ => {
-                self.values.extend(self.checked(expr));
+                match self.checked(expr) {
+                    Some((name, true)) => self.exists.push(name),
+                    Some((name, false)) => self.values.push(name),
+                    None => {}
+                }
                 self.starts.extend(self.started(expr));
             }
         }
@@ -1705,8 +2082,8 @@ impl<'a> Visitor<'a> for Checks {
     }
 }
 
-/// The value of a call that a sink of `code` checks. Of every positional argument, the first not
-/// harmless for the code.
+/// The value of a call that a sink of `code` checks. Of every positional argument, or of each
+/// argument `Each` lists, the first not harmless for the code.
 fn sink_arg(
     arg: Arg,
     code: &str,
@@ -1718,6 +2095,10 @@ fn sink_arg(
         Arg::First => (0, SINK_KEYWORDS),
         Arg::At(pos, names) => (pos, names),
         Arg::Any => return args.iter().flatten().find(|t| !t.safe.has(code)).cloned(),
+        Arg::Each(each) => {
+            let open = |a: &Arg| sink_arg(*a, code, call, args, keywords).filter(|t| !t.safe.has(code));
+            return each.iter().find_map(open);
+        }
     };
     if call.arguments.args.len() > pos {
         return args.get(pos).cloned().flatten();
@@ -1849,6 +2230,26 @@ const MESSAGES: &[(&str, &str, &str)] = &[
         "OD711",
         "",
         ", so the user picks how the browser reads the response; pick the value from those the code allows",
+    ),
+    (
+        "OD712",
+        "the model of ",
+        ", so the user picks the model the superuser reads or writes; pick the model from those the code allows",
+    ),
+    (
+        "OD713",
+        "the name of ",
+        ", whose result the code calls, so the user picks the method that runs; pick the name from those the code allows",
+    ),
+    (
+        "OD714",
+        "the field of ",
+        ", so the user reads any field as superuser; pick the field from those the code allows",
+    ),
+    (
+        "OD715",
+        "the domain or the fields of ",
+        ", so the user searches or groups by any field as superuser; build each condition with a field and an operator the code picks",
     ),
 ];
 
@@ -2603,5 +3004,301 @@ mod tests {
     fn loops_carry_taint_around() {
         let src = "def f(self, items):\n    q = 'a'\n    for item in items:\n        self.env.cr.execute(q)\n        q = item\n";
         assert_eq!(scan(Params::Rpc, src).len(), 1);
+    }
+
+    /// The codes of a function body where `t` is a route parameter and `P` the records of a model
+    /// the code picks.
+    fn codes_of(body: &str) -> Vec<String> {
+        let src = format!("def f(self, t):\n    P = self.env['res.partner']\n{body}\n");
+        let found = scan(Params::Route(&[]), &src);
+        found.iter().map(|f| f[..5].to_owned()).collect()
+    }
+
+    #[test]
+    fn models_methods_fields_and_domains_are_sinks() {
+        for (call, code) in [
+            ("self.env[t].sudo().search([])", "OD712"),
+            ("request.env.get(t).sudo().browse(1).unlink()", "OD712"),
+            ("self.env[t].with_context(a=1).sudo().exists().write({'a': 1})", "OD712"),
+            ("self.env[t].sudo().filtered('active').mapped('name')", "OD712"),
+            ("self.env[t].sudo()._read_group([], ['a'])", "OD712"),
+            ("getattr(P, t)()", "OD713"),
+            ("getattr(P.sudo(), '_' + t)(1)", "OD713"),
+            ("P.sudo()[t]", "OD714"),
+            ("P.sudo().browse(1).read([t])", "OD714"),
+            ("P.sudo().read(fields=t)", "OD714"),
+            ("P.sudo().mapped(t)", "OD714"),
+            ("P.sudo().search(t)", "OD715"),
+            ("P.sudo().search_count(domain=t)", "OD715"),
+            ("P.sudo().search_read([], t)", "OD715"),
+            ("P.sudo().search_fetch([], field_names=[t])", "OD715"),
+            ("P.sudo().search([(t, '=', 1)])", "OD715"),
+            ("P.sudo().search([('a', t, 1)])", "OD715"),
+            ("P.sudo().search([('child_ids', 'any', t)])", "OD715"),
+            ("P.sudo().search(Domain(t, '=', 1))", "OD715"),
+            ("P.sudo().search([('a', '=', 1), [t, '=', 1]])", "OD715"),
+        ] {
+            assert_eq!(codes_of(&format!("    {call}")), [code], "{call}");
+        }
+        for call in [
+            "self.env[t].search([])",
+            "self.env[t].sudo()._get_mail_message_access([1], 'read')",
+            "self.env['x'].sudo().search([])",
+            "getattr(P, t)",
+            "getattr(P, 'name')()",
+            "P[t]",
+            "P.read([t])",
+            "P.search(t)",
+            "P.sudo().search([('name', 'ilike', t)])",
+            "P.sudo().search(['|', ('a', '=', t), ['b', 'in', t]])",
+            "P.sudo().search(Domain('name', '=', t) | Domain('ref', '=', t))",
+            "P.sudo().search(expression.AND([[('a', '=', 1)], [('name', '=', t)]]))",
+            "P.sudo().search([], order=t)",
+        ] {
+            assert!(codes_of(&format!("    {call}")).is_empty(), "{call}");
+        }
+    }
+
+    #[test]
+    fn both_read_group_signatures_check_the_fields() {
+        for call in [
+            "P.sudo().read_group([], [t], ['a'])",
+            "P.sudo().read_group([], ['a'], [t])",
+            "P.sudo().read_group([], ['a'], ['b'], t)",
+            "P.sudo().read_group([], groupby=[t])",
+            "P.sudo().read_group([], fields=[t], groupby=['a'])",
+            "P.sudo()._read_group([], aggregates=[t])",
+            "P.sudo().formatted_read_group([(t, '=', 1)], ['a'])",
+        ] {
+            let expected: &[&str] = if call.ends_with(", t)") { &[] } else { &["OD715"] };
+            assert_eq!(codes_of(&format!("    {call}")), expected, "{call}");
+        }
+    }
+
+    #[test]
+    fn a_name_built_with_text_of_the_code_picks_the_method_family() {
+        for name in [
+            "'_get_%s_view' % t",
+            "t + '_rate'",
+            "f'a_{t}'",
+            "'x_{}'.format(t)",
+            "'_' + t + '_rate'",
+        ] {
+            assert!(codes_of(&format!("    getattr(P, {name})()")).is_empty(), "{name}");
+        }
+        for name in [
+            "'_' + t",
+            "'%s' % t",
+            "f'_{t}'",
+            "'{}'.format(t)",
+            "'%(a)s' % {'a': t}",
+            "'_%%_%s' % t",
+        ] {
+            assert_eq!(codes_of(&format!("    getattr(P, {name})()")), ["OD713"], "{name}");
+        }
+        assert_eq!(
+            codes_of("    self.env.cr.execute('SELECT %s' % (t + '_rate'))"),
+            ["OD701"]
+        );
+    }
+
+    #[test]
+    fn locals_keep_the_model_the_user_picks() {
+        let picked = "    M = request.env[t]\n    R = M.sudo()\n    S = R.browse(1)\n";
+        assert_eq!(codes_of(&format!("{picked}    S.read(['name'])")), ["OD712"]);
+        assert_eq!(codes_of(&format!("{picked}    R.create({{}})")), ["OD712"]);
+        assert!(codes_of(&format!("{picked}    M.search([])")).is_empty());
+        assert!(codes_of(&format!("{picked}    S.check_access('read')")).is_empty());
+        let rebound = "    M = request.env[t]\n    M = self.env['res.partner']\n    M.sudo().search([])";
+        assert!(codes_of(rebound).is_empty());
+        let branch = "    M = self.env['res.partner']\n    if t:\n        M = request.env[t]\n    M.sudo().search([])";
+        assert_eq!(codes_of(branch), ["OD712"]);
+    }
+
+    #[test]
+    fn an_existing_model_or_field_is_still_one_the_user_picks() {
+        let raises = "\n        raise ValueError()";
+        for (check, call, code) in [
+            ("t not in request.env", "self.env[t].sudo().search([])", "OD712"),
+            ("t not in P._fields", "P.sudo()[t]", "OD714"),
+            ("t not in self.pool", "P.sudo().search([(t, '=', 1)])", "OD715"),
+        ] {
+            let body = format!("    if {check}:{raises}\n    {call}");
+            assert_eq!(codes_of(&body), [code], "{check}");
+        }
+        let checked = format!("    if t not in P._fields:{raises}\n    self.env.cr.execute('SELECT %s' % t)");
+        assert!(codes_of(&checked).is_empty());
+        let allowed = format!("    if t not in ('name', 'ref'):{raises}\n    P.sudo()[t]");
+        assert!(codes_of(&allowed).is_empty());
+    }
+
+    #[test]
+    fn a_comprehension_builds_its_element_where_its_tests_hold() {
+        let allowed = "    P.sudo().read([f for f in t if f in ('name', 'ref')])";
+        assert!(codes_of(allowed).is_empty());
+        let existing = "    P.sudo().read([f for f in t if f in P._fields])";
+        assert_eq!(codes_of(existing), ["OD714"]);
+        let filtered = "    P.sudo().read([f for f in t if f])";
+        assert_eq!(codes_of(filtered), ["OD714"]);
+    }
+
+    #[test]
+    fn a_condition_blames_its_field_and_not_its_value() {
+        let sinks = |src: &str| -> Vec<FlowOrigin> {
+            let found = summary(Params::None, src);
+            let sinks = found.edges.iter().filter(|e| e.target == FlowTarget::Sink("OD715"));
+            sinks.map(|e| e.origin).collect()
+        };
+        let condition = "def _s(self, field, value):\n    self.env['x.y'].sudo().search([(field, '=', value)])\n";
+        assert_eq!(sinks(condition), [FlowOrigin::Param(0)]);
+        let joined = "def _s(self, emails, extra):\n    d = expression.AND([[('email', 'in', emails)], extra])\n    self.env['x.y'].sudo().search(d)\n";
+        assert_eq!(sinks(joined), [FlowOrigin::Param(1)]);
+        let returned = "def _s(self, ids):\n    d = Domain('id', 'in', ids) | Domain(self._base())\n    self.env['x.y'].sudo().search(d)\n";
+        assert_eq!(sinks(returned), [FlowOrigin::Return(0)]);
+    }
+
+    #[test]
+    fn a_domain_a_call_returns_keeps_the_conditions_of_the_user_harmless() {
+        let codes = |body: &str| -> Vec<&'static str> {
+            let src = format!("def f(self, t):\n    d = self._base()\n{body}\n    self.sudo().search(d)\n");
+            let parsed = parse_module(&src).expect("valid Python");
+            let Some(Stmt::FunctionDef(func)) = parsed.syntax().body.first() else {
+                panic!("no function");
+            };
+            let owner = Some(Receiver::Model("x.y".to_owned()));
+            let loc = Locator::new(&src);
+            let found = function(func, Params::Route(&[]), owner, None, &[], &loc, &TaintTable::default()).0;
+            found.iter().map(|d| d.code).collect()
+        };
+        assert!(codes("    d += [('name', 'ilike', t)]").is_empty());
+        assert_eq!(codes("    d += [(t, 'ilike', 'a')]"), ["OD715"]);
+    }
+
+    #[test]
+    fn only_records_under_sudo_read_a_field_by_item() {
+        for body in [
+            "    P.sudo(False)[t]",
+            "    self.env[t].sudo(False).search([])",
+            "    P.sudo()._mapping()[t]",
+            "    m = P.sudo()._mapping()\n    m[t]",
+        ] {
+            assert!(codes_of(body).is_empty(), "{body}");
+        }
+        for body in [
+            "    r = P.sudo().browse(1)\n    r[t]",
+            "    r = P.sudo().search([])\n    r.with_context(a=1)[t]",
+        ] {
+            assert_eq!(codes_of(body), ["OD714"], "{body}");
+        }
+    }
+
+    #[test]
+    fn a_mapping_get_returns_a_value_whoever_picks_the_key() {
+        let leaves = "    filters = {'a': [('name', '=', t)]}\n";
+        assert!(
+            codes_of(&format!(
+                "{leaves}    filters = dict(filters)\n    P.sudo().search(filters.get(t))"
+            ))
+            .is_empty()
+        );
+        assert_eq!(
+            codes_of(&format!(
+                "{leaves}    filters = dict(filters)\n    P.sudo().search(filters.get('a', t))"
+            )),
+            ["OD715"]
+        );
+    }
+
+    fn code_list(found: &[String]) -> Vec<&str> {
+        found.iter().map(|f| &f[..5]).collect()
+    }
+
+    #[test]
+    fn three_conditions_domains_or_fields_are_no_condition() {
+        for call in [
+            "P.sudo().search([('a', '=', 1), ('b', '=', 2), (t, '=', 3)])",
+            "P.sudo().search(['|', ('a', '=', 1), t])",
+            "P.sudo().search_read([], ['name', 'ref', t])",
+            "P.sudo().read_group([], ['a', 'b', t], ['c'])",
+            "P.sudo().search(expression.AND([[('a', '=', 1)], [('b', '=', 2)], t]))",
+        ] {
+            assert_eq!(codes_of(&format!("    {call}")), ["OD715"], "{call}");
+        }
+        for call in [
+            "P.sudo().search([('a', op, t)])",
+            "P.sudo().search([('a', 'not =ilike', t)])",
+        ] {
+            assert!(codes_of(&format!("    {call}")).is_empty(), "{call}");
+        }
+    }
+
+    #[test]
+    fn a_returned_value_still_reports_what_the_kept_one_is_harmless_for() {
+        let in_model = |params: Params, src: &str| -> Vec<&'static str> {
+            let parsed = parse_module(src).expect("valid Python");
+            let Some(Stmt::FunctionDef(func)) = parsed.syntax().body.first() else {
+                panic!("no function");
+            };
+            let owner = Some(Receiver::Model("x.y".to_owned()));
+            let loc = Locator::new(src);
+            let found = function(func, params, owner, None, &[], &loc, &TaintTable::default()).0;
+            found.iter().map(|d| d.code).collect()
+        };
+        let src = "def f(self, field, domain):\n    if field not in self._fields:\n        raise ValueError()\n    self.env.cr.execute('SELECT %s FROM t WHERE %s' % (field, self._where(domain)))\n";
+        assert_eq!(in_model(Params::Rpc, src), ["OD701"]);
+        let src = "def f(self, name, ext):\n    open(os.path.basename(name) + self._suffix(ext))\n";
+        assert_eq!(in_model(Params::Route(&[]), src), ["OD707"]);
+    }
+
+    #[test]
+    fn a_join_keeps_the_value_harmless_for_fewer_rules() {
+        let src = "def _set(self, field, value):\n    if field not in self._fields:\n        raise ValueError()\n    self.env.cr.execute(\"UPDATE t SET %s = '%s'\" % (field, value))\n";
+        let found = summary(Params::None, src);
+        let sinks = found.edges.iter().filter(|e| e.target == FlowTarget::Sink("OD701"));
+        assert_eq!(sinks.map(|e| e.origin).collect::<Vec<_>>(), [FlowOrigin::Param(1)]);
+    }
+
+    #[test]
+    fn the_list_a_domain_join_takes_holds_domains() {
+        for join in ["expression.AND", "expression.OR", "Domain.AND", "Domain.OR"] {
+            let body = format!("    P.sudo().search({join}([d1, d2, t]))");
+            assert_eq!(codes_of(&body), ["OD715"], "{join}");
+        }
+    }
+
+    #[test]
+    fn an_allow_list_named_like_fields_confines_every_rule() {
+        let raises = "\n        raise ValueError()";
+        assert!(codes_of(&format!("    if t not in allowed_fields:{raises}\n    P.sudo()[t]")).is_empty());
+        assert!(
+            codes_of(&format!(
+                "    if t not in self._readable_fields:{raises}\n    P.sudo()[t]"
+            ))
+            .is_empty()
+        );
+        for allowed in ["allowed_fields", "self.env['x.y']._fields"] {
+            let src = format!(
+                "def f(self, **post):\n    if any(k not in {allowed} for k in post):{raises}\n    self.env['x.y'].sudo().create(post)\n"
+            );
+            assert!(scan(Params::Route(&[]), &src).is_empty(), "{allowed}");
+        }
+    }
+
+    #[test]
+    fn a_comprehension_guards_only_on_what_each_test_holds() {
+        let either = "    cols = [c for c in t if c in ALLOWED or c.startswith('x_')]\n    self.env.cr.execute('SELECT %s FROM t' % ', '.join(cols))";
+        assert_eq!(codes_of(either), ["OD701"]);
+        assert_eq!(
+            codes_of("    P.sudo().read([f for f in t if not f in allowed])"),
+            ["OD714"]
+        );
+        assert!(codes_of("    P.sudo().read([f for f in t if f and f in ('name', 'ref')])").is_empty());
+    }
+
+    #[test]
+    fn sudo_false_writes_with_the_rights_of_the_user() {
+        let write = |records: &str| format!("def f(self, **post):\n    self.env['x.y'].{records}.write(post)\n");
+        assert!(scan(Params::Route(&[]), &write("sudo(False)")).is_empty());
+        assert_eq!(code_list(&scan(Params::Route(&[]), &write("sudo()"))), ["OD704"]);
     }
 }
