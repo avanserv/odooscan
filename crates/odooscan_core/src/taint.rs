@@ -503,6 +503,10 @@ struct Taint {
     /// The value is a parameter's own, copied but not derived, so a caller's file when it is one.
     own: bool,
     upload: Option<Upload>,
+    /// Each value of a parameter or a call joined into this one, as it is alone, so that each
+    /// keeps its own edge: the primary's among them unless it is a source. Empty when the value
+    /// has one origin.
+    origins: Vec<Taint>,
 }
 
 /// What a value holds of the files a request uploads.
@@ -517,15 +521,61 @@ enum Upload {
 
 impl Taint {
     /// The value derived from this one, of `kind`.
-    fn kind(mut self, kind: Kind) -> Self {
-        self.kind = kind;
-        self.own = false;
+    fn kind(self, kind: Kind) -> Self {
+        self.each(|t| {
+            t.kind = kind;
+            t.own = false;
+        })
+    }
+
+    fn safe(self, safe: Safe) -> Self {
+        self.each(|t| t.safe = t.safe.union(safe))
+    }
+
+    /// Changes the value and each origin joined into it alike.
+    fn each(mut self, f: impl Fn(&mut Taint)) -> Self {
+        self.each_mut(f);
         self
     }
 
-    fn safe(mut self, safe: Safe) -> Self {
-        self.safe = self.safe.union(safe);
-        self
+    fn each_mut(&mut self, f: impl Fn(&mut Taint)) {
+        f(self);
+        self.origins.iter_mut().for_each(f);
+    }
+
+    /// Takes the values of a parameter or a call this one holds, each as it is alone.
+    fn take_origins(&mut self) -> Vec<Taint> {
+        if !self.origins.is_empty() {
+            std::mem::take(&mut self.origins)
+        } else if self.origin == FlowOrigin::Source {
+            vec![]
+        } else {
+            vec![self.clone()]
+        }
+    }
+
+    /// Adds one step to the value and to each origin.
+    fn step(&mut self, step: &Spanned<String>) {
+        self.each_mut(|t| t.steps.push(step.clone()));
+    }
+
+    /// The values that each keep an edge: the source when it is the primary, then each origin as
+    /// it is alone. The primary's comes first: of the findings several origins make at one sink,
+    /// the solver keeps the first unless a later one passes through fewer methods, and `primary`
+    /// picks the value a sink may report.
+    fn split(mut self) -> Vec<Taint> {
+        let mut origins = std::mem::take(&mut self.origins);
+        if origins.is_empty() {
+            return vec![self];
+        }
+        if let Some(i) = origins.iter().position(|o| o.origin == self.origin) {
+            let primary = origins.remove(i);
+            origins.insert(0, primary);
+        }
+        if self.origin == FlowOrigin::Source {
+            origins.insert(0, self);
+        }
+        origins
     }
 }
 
@@ -536,15 +586,40 @@ fn join(a: Option<Taint>, b: Option<Taint>) -> Option<Taint> {
     }
 }
 
-/// Of two values, the one the user sets on entry wins over one a caller or callee may taint, so
-/// that a finding in the function is never traded for a summary edge. Among those, a part of a
+/// The value two values join into: the primary `primary` picks, which a finding in the function
+/// reads, holding the origins of either, which each keep their own edge.
+fn joined(mut a: Taint, mut b: Taint) -> Taint {
+    let origins = union_origins(a.take_origins(), b.take_origins());
+    let mut t = primary(a, b);
+    // One origin alone is the primary itself.
+    let alone = t.origin != FlowOrigin::Source && origins.len() == 1;
+    t.origins = if alone { vec![] } else { origins };
+    t
+}
+
+/// Adds the origins of `other` to `mine`, joining two of the same origin into one.
+fn union_origins(mut mine: Vec<Taint>, other: Vec<Taint>) -> Vec<Taint> {
+    for o in other {
+        match mine.iter().position(|m| m.origin == o.origin) {
+            Some(i) => {
+                let m = mine.remove(i);
+                mine.insert(i, primary(m, o));
+            }
+            None => mine.push(o),
+        }
+    }
+    mine
+}
+
+/// Of two joined values, the one the user sets on entry wins over one a caller or callee may taint,
+/// so that a finding in the function is never traded for a summary edge. Among those, a part of a
 /// domain the user may pick wins over a value a condition holds, then a value harmless for fewer
-/// rules, both with the keys of either, so that an edge blames the value a sink may report; then
+/// rules, both with the keys of either, so that a finding names the value a sink may report; then
 /// keys win so that OD704 still sees them. A source joined to an RPC argument stays the source,
 /// with the keys of either: a Python caller sets only the argument, so its edge would drop the
 /// source. The result is harmless only where both are, but for OD715 when what a call returns is
 /// dropped: its domain is as often one the code built.
-fn joined(a: Taint, b: Taint) -> Taint {
+fn primary(a: Taint, b: Taint) -> Taint {
     let kind = a.kind.max(b.kind);
     let (second, widen) = pick(&a, &b);
     let (keep, drop) = if second { (b, a) } else { (a, b) };
@@ -767,25 +842,23 @@ const FILES: &str = "request.httprequest.files";
 /// field is that field, which the code wrote.
 fn attribute(t: Option<Taint>, name: &str) -> Option<Taint> {
     let t = t.filter(|t| name != "name" || t.upload != Some(Upload::Picked))?;
-    Some(Taint {
-        named: name == "name" && t.own,
-        upload: None,
-        ..t.kind(Kind::Value)
-    })
+    let t = t.each(|t| {
+        t.named = name == "name" && t.own;
+        t.upload = None;
+    });
+    Some(t.kind(Kind::Value))
 }
 
 /// What an item of a value of taint `t` holds, `key` being the item's literal key: a file of the
 /// uploads by a field the code names is picked, and so are those of a list of picked files.
 fn item_of(t: Option<Taint>, key: Option<&str>) -> Option<Taint> {
     t.map(|t| {
-        let upload = match t.upload {
-            Some(Upload::Mapping) => key.map(|_| Upload::Picked),
-            u => u,
-        };
-        Taint {
-            upload,
-            ..t.kind(Kind::Value)
-        }
+        let t = t.each(|t| {
+            if t.upload == Some(Upload::Mapping) {
+                t.upload = key.map(|_| Upload::Picked);
+            }
+        });
+        t.kind(Kind::Value)
     })
 }
 
@@ -1070,6 +1143,7 @@ impl Flows<'_> {
                     named: false,
                     own: true,
                     upload: None,
+                    origins: vec![],
                 },
             );
         }
@@ -1123,7 +1197,7 @@ impl Flows<'_> {
             }
             Stmt::Return(ast::StmtReturn { value: Some(v), .. }) => {
                 if let Some(t) = self.expr(v) {
-                    self.edge(t, FlowTarget::Return);
+                    self.edges(t, &FlowTarget::Return);
                 }
                 self.exposed(v);
             }
@@ -1214,17 +1288,17 @@ impl Flows<'_> {
         }
         for name in checks.keys {
             if let Some(t) = self.state.vars.get_mut(&name) {
-                t.kind = Kind::Value;
+                t.each_mut(|t| t.kind = Kind::Value);
             }
         }
         for name in checks.starts {
             if let Some(t) = self.state.vars.get_mut(&name) {
-                t.safe = t.safe.union(Safe::of(FIXED));
+                t.each_mut(|t| t.safe = t.safe.union(Safe::of(FIXED)));
             }
         }
         for name in checks.exists {
             if let Some(t) = self.state.vars.get_mut(&name) {
-                t.safe = t.safe.union(existing());
+                t.each_mut(|t| t.safe = t.safe.union(existing()));
             }
         }
     }
@@ -1265,10 +1339,31 @@ impl Flows<'_> {
             }
             Expr::Attribute(ast::ExprAttribute { value: base, .. }) => {
                 self.hold(base, value);
-                self.add_to(base, values(t));
+                let t = self.set_on(base, values(t));
+                self.add_to(base, t);
             }
             _ => {}
         }
+    }
+
+    /// What setting an attribute on `base` adds to it. On a local a call returned, only a value the
+    /// user sets on entry, without the origins joined into it: the attribute is one part of what
+    /// the callee built, and an edge from a parameter or call set on it would reach every other
+    /// part a sink reads, as `stream.etag` would reach `open(stream.path)`.
+    fn set_on(&self, base: &Expr, t: Option<Taint>) -> Option<Taint> {
+        let Expr::Name(n) = base else { return t };
+        let returned = self
+            .state
+            .vars
+            .get(n.id.as_str())
+            .is_some_and(|mine| matches!(mine.origin, FlowOrigin::Return(_)));
+        if !returned {
+            return t;
+        }
+        t.filter(|t| t.origin.is_user()).map(|mut t| {
+            t.origins.clear();
+            t
+        })
     }
 
     /// Binds the attachment values a local's value holds, the flow of their content going through
@@ -1279,7 +1374,7 @@ impl Flows<'_> {
             return;
         };
         if let Some(t) = &mut vals.content {
-            t.steps.push(Spanned {
+            t.step(&Spanned {
                 value: name.to_owned(),
                 pos: self.loc.at(target),
             });
@@ -1303,7 +1398,7 @@ impl Flows<'_> {
             return;
         }
         let t = t.map(|mut t| {
-            t.steps.push(Spanned {
+            t.step(&Spanned {
                 value: n.id.to_string(),
                 pos,
             });
@@ -1445,7 +1540,7 @@ impl Flows<'_> {
     fn set(&mut self, key: String, target: &Expr, t: Option<Taint>) {
         match t {
             Some(mut t) => {
-                t.steps.push(Spanned {
+                t.step(&Spanned {
                     value: key.clone(),
                     pos: self.loc.at(target),
                 });
@@ -1573,6 +1668,7 @@ impl Flows<'_> {
             named: false,
             own: false,
             upload,
+            origins: vec![],
         })
     }
 
@@ -1589,6 +1685,13 @@ impl Flows<'_> {
                 _ => None,
             },
             _ => None,
+        }
+    }
+
+    /// Keeps an edge to `target` for each value `Taint::split` gives.
+    fn edges(&mut self, t: Taint, target: &FlowTarget) {
+        for t in t.split() {
+            self.edge(t, target.clone());
         }
     }
 
@@ -1658,7 +1761,7 @@ impl Flows<'_> {
         );
         for (slot, t) in slots.zip(args.into_iter().chain(keywords)) {
             if let Some(t) = t {
-                self.edge(t, FlowTarget::Arg(c, slot));
+                self.edges(t, &FlowTarget::Arg(c, slot));
             }
         }
         let steps = vec![Spanned {
@@ -1673,6 +1776,7 @@ impl Flows<'_> {
             named: false,
             own: false,
             upload: None,
+            origins: vec![],
         })
     }
 
@@ -2263,7 +2367,7 @@ impl Flows<'_> {
         };
         match value.filter(|v| is_cast(v)).and_then(|v| self.id_of(v)) {
             Some(mut t) => {
-                t.steps.push(step);
+                t.step(&step);
                 self.state.ids.insert(name.to_owned(), t)
             }
             None => self.state.ids.remove(name),
@@ -2470,15 +2574,18 @@ impl Flows<'_> {
         if runs_as(&records) != RunsAs::AsCaller {
             return;
         }
-        let Some(mut t) = sink_arg(Arg::First, "OD704", call, args, keywords) else {
+        let Some(t) = sink_arg(Arg::First, "OD704", call, args, keywords) else {
             return;
         };
-        if t.kind == Kind::Keys && matches!(t.origin, FlowOrigin::Param(_)) {
-            t.steps.push(Spanned {
-                value: format!("{}.{}()", records.join("."), a.attr),
-                pos: self.loc.at(call),
-            });
-            self.edge(t, FlowTarget::SelfWrite);
+        let step = Spanned {
+            value: format!("{}.{}()", records.join("."), a.attr),
+            pos: self.loc.at(call),
+        };
+        for mut t in t.split() {
+            if t.kind == Kind::Keys && matches!(t.origin, FlowOrigin::Param(_)) {
+                t.steps.push(step.clone());
+                self.edge(t, FlowTarget::SelfWrite);
+            }
         }
     }
 
@@ -2511,9 +2618,15 @@ impl Flows<'_> {
             return receiver;
         }
         if let Some(t) = receiver {
-            let kind = if method == "copy" { t.kind } else { Kind::Value };
-            let upload = picks(&t, method, call);
-            return join(Some(Taint { upload, ..t.kind(kind) }), values(args));
+            let copy = method == "copy";
+            let t = t.each(|t| {
+                t.upload = picks(t, method, call);
+                if !copy {
+                    t.kind = Kind::Value;
+                }
+                t.own = false;
+            });
+            return join(Some(t), values(args));
         }
         // A compiled pattern's match holds the groups of the string it matched. `search` is
         // left out, as on records it returns records rather than parts of the domain.
@@ -2546,21 +2659,31 @@ impl Flows<'_> {
         self.sink_pos(sink, callee, t, pos);
     }
 
+    /// A value the user sets on entry is a finding, which names it alone. Any other value keeps an
+    /// edge for each of its origins the sink may report, but for OD716, whose records only a route
+    /// returns.
     fn sink_pos(&mut self, sink: Sink, callee: String, t: Option<Taint>, pos: Pos) {
         let code = code(sink);
-        let Some(mut t) = t.filter(|t| !t.safe.has(code)) else {
+        let reported = |t: &Taint| !t.safe.has(code) && (sink != Sink::SudoWrite || t.kind == Kind::Keys);
+        let Some(t) = t.filter(reported) else {
             return;
         };
-        if sink == Sink::SudoWrite && t.kind != Kind::Keys {
+        if t.origin.is_user() {
+            return self.report(code, callee, &t, pos);
+        }
+        if sink == Sink::Record {
             return;
         }
-        if !t.origin.is_user() {
-            if sink == Sink::Record {
-                return;
-            }
-            t.steps.push(Spanned { value: callee, pos });
-            return self.edge(t, FlowTarget::Sink(code));
+        for mut t in t.split().into_iter().filter(reported) {
+            t.steps.push(Spanned {
+                value: callee.clone(),
+                pos,
+            });
+            self.edge(t, FlowTarget::Sink(code));
         }
+    }
+
+    fn report(&mut self, code: &'static str, callee: String, t: &Taint, pos: Pos) {
         let origin = &t.steps[0].value;
         let names: Vec<&str> = t.steps[1..].iter().map(|s| s.value.as_str()).collect();
         let message = message(code, &callee, origin, &names);
@@ -2626,7 +2749,7 @@ impl Browsed {
         if !self.names.contains(&step.value) {
             self.names.push(step.value.clone());
         }
-        self.id.steps.push(step);
+        self.id.step(&step);
         self
     }
 }
@@ -2889,10 +3012,11 @@ fn getattr_name(call: &ast::ExprCall) -> Option<&str> {
 /// What a call returns of values of taint `t`: no file of the uploads, and a value derived from
 /// them rather than their own, so that the `name` of a tar member is no picked file's field.
 fn derived(t: Option<Taint>) -> Option<Taint> {
-    t.map(|t| Taint {
-        upload: None,
-        own: false,
-        ..t
+    t.map(|t| {
+        t.each(|t| {
+            t.upload = None;
+            t.own = false;
+        })
     })
 }
 
@@ -2913,7 +3037,7 @@ fn picks(t: &Taint, method: &str, call: &ast::ExprCall) -> Option<Upload> {
 /// and the operator keep their taint, so the condition is harmless only where the code picks both.
 fn hold_value(elts: &[Expr], ts: &mut [Option<Taint>]) {
     if let (true, Some(Some(t))) = (is_condition(elts), ts.get_mut(2)) {
-        t.safe = t.safe.union(Safe::of(&["OD715"]));
+        t.each_mut(|t| t.safe = t.safe.union(Safe::of(&["OD715"])));
     }
 }
 
@@ -5210,6 +5334,133 @@ mod tests {
             ),
         ] {
             assert_eq!(opened(&body), [unchecked[0].clone(), unchecked[0].clone()], "{body}");
+        }
+    }
+
+    /// The findings and the summary of the first function of `src`, a method of `x.y`, as codes
+    /// and as the origins of the edges to each target.
+    fn flows_of(params: Params, src: &str) -> (Vec<&'static str>, Vec<(FlowTarget, FlowOrigin)>) {
+        let parsed = parse_module(src).expect("valid Python");
+        let Some(Stmt::FunctionDef(func)) = parsed.syntax().body.first() else {
+            panic!("no function");
+        };
+        let owner = Some(Receiver::Model("x.y".to_owned()));
+        let loc = Locator::new(src);
+        let (diags, summary) = function(func, params, owner, None, &[], &loc, &TaintTable::default());
+        let edges = summary.map_or_else(Vec::new, |s| {
+            s.edges.iter().map(|e| (e.target.clone(), e.origin)).collect()
+        });
+        (diags.iter().map(|d| d.code).collect(), edges)
+    }
+
+    /// The origins of the edges to `target`, sorted.
+    fn origins_to(edges: &[(FlowTarget, FlowOrigin)], target: &FlowTarget) -> Vec<String> {
+        origins_where(edges, |t| t == target)
+    }
+
+    fn origins_where(edges: &[(FlowTarget, FlowOrigin)], target: impl Fn(&FlowTarget) -> bool) -> Vec<String> {
+        let mut found: Vec<String> = edges
+            .iter()
+            .filter(|(t, _)| target(t))
+            .map(|(_, o)| format!("{o:?}"))
+            .collect();
+        found.sort();
+        found
+    }
+
+    #[test]
+    fn a_join_keeps_an_edge_for_each_origin() {
+        const SOURCE: &str = "request.params.get('x')";
+        const CALL: &str = "self._x()";
+        // Each pair of values and the sorted origins a join of them returns; a parameter and an
+        // RPC argument never share a function.
+        let pairs: &[(Params, &str, &str, &[&str])] = &[
+            (Params::None, SOURCE, SOURCE, &["Source"]),
+            (Params::None, SOURCE, "a", &["Param(0)", "Source"]),
+            (Params::Rpc, SOURCE, "a", &["Rpc(0)", "Source"]),
+            (Params::None, SOURCE, CALL, &["Return(0)", "Source"]),
+            (Params::None, "a", "b", &["Param(0)", "Param(1)"]),
+            (Params::None, "a", CALL, &["Param(0)", "Return(0)"]),
+            (Params::Rpc, "a", "b", &["Rpc(0)", "Rpc(1)"]),
+            (Params::Rpc, "a", CALL, &["Return(0)", "Rpc(0)"]),
+            (Params::None, CALL, "self._y()", &["Return(0)", "Return(1)"]),
+        ];
+        for &(params, x, y, returned) in pairs {
+            for (first, second) in [(x, y), (y, x)] {
+                let src = format!(
+                    "def _f(self, a, b):\n    v = {first} + {second}\n    Markup(v)\n    self._z(v)\n    return v\n"
+                );
+                let (found, edges) = flows_of(params, &src);
+                assert_eq!(origins_to(&edges, &FlowTarget::Return), returned, "{src}");
+                let passed = origins_where(&edges, |t| matches!(t, FlowTarget::Arg(..)));
+                assert_eq!(passed, returned, "{src}");
+                // A value the user sets is a finding, and keeps no edge to the sink.
+                let user = returned.iter().any(|o| *o == "Source" || o.starts_with("Rpc"));
+                let (expected, sunk): (&[&str], &[&str]) = if user { (&["OD703"], &[]) } else { (&[], returned) };
+                assert_eq!(found, expected, "{src}");
+                assert_eq!(origins_to(&edges, &FlowTarget::Sink("OD703")), sunk, "{src}");
+            }
+        }
+    }
+
+    #[test]
+    fn each_rule_follows_each_origin_of_a_joined_value() {
+        let sudo_write = ("OD704", "self.env['res.partner'].sudo().write(#)");
+        for &(code, sink) in SINK_OF.iter().chain([&sudo_write]) {
+            for value in ["a or self._x()", "self._x() or a"] {
+                let src = format!("def _f(self, a):\n    {}\n", sink.replace('#', value));
+                let (found, edges) = flows_of(Params::None, &src);
+                assert!(found.is_empty(), "{code}: {value}");
+                // A route alone returns the records of OD716.
+                let sunk: &[&str] = if code == "OD716" {
+                    &[]
+                } else {
+                    &["Param(0)", "Return(0)"]
+                };
+                assert_eq!(origins_to(&edges, &FlowTarget::Sink(code)), sunk, "{code}: {value}");
+                let (params, user) = if code == "OD716" {
+                    (Params::Route(&[]), "route")
+                } else {
+                    (Params::Rpc, "RPC")
+                };
+                let (found, edges) = flows_of(params, &src);
+                assert_eq!(found, [code], "{code}: {user} {value}");
+                assert!(
+                    origins_to(&edges, &FlowTarget::Sink(code)).is_empty(),
+                    "{code}: {user} {value}"
+                );
+            }
+        }
+        for value in ["a or self._x()", "self._x() or a"] {
+            let src = format!("def _f(self, a):\n    self.write({value})\n");
+            let (_, edges) = flows_of(Params::None, &src);
+            assert_eq!(origins_to(&edges, &FlowTarget::SelfWrite), ["Param(0)"], "{value}");
+            let (found, edges) = flows_of(Params::Rpc, &src);
+            assert!(found.is_empty(), "RPC {value}");
+            assert!(origins_to(&edges, &FlowTarget::SelfWrite).is_empty(), "RPC {value}");
+        }
+    }
+
+    #[test]
+    fn a_bound_condition_blames_the_value_harmless_for_fewer_rules() {
+        let src = "def _set(self, field, value):\n    if field not in self._fields:\n        raise ValueError()\n    args = ('t', field, value)\n    self.env.cr.execute(\"UPDATE %s SET %s = '%s'\" % args)\n";
+        let (_, edges) = flows_of(Params::None, src);
+        assert_eq!(origins_to(&edges, &FlowTarget::Sink("OD701")), ["Param(1)"]);
+    }
+
+    #[test]
+    fn an_attribute_set_on_a_returned_value_keeps_only_a_user_value() {
+        for set in [
+            "stream.etag += f'{crop}'",
+            "stream.etag = stream.etag + f'{crop}'",
+            "stream.etag = f'{crop}'",
+        ] {
+            let src = format!("def _f(self, crop):\n    stream = self._s()\n    {set}\n    open(stream.path)\n");
+            let (_, edges) = flows_of(Params::None, &src);
+            assert_eq!(origins_to(&edges, &FlowTarget::Sink("OD707")), ["Return(0)"], "{set}");
+            let user = set.replace("f'{crop}'", "request.params['x']");
+            let src = format!("def _f(self):\n    stream = self._s()\n    {user}\n    open(stream.path)\n");
+            assert_eq!(flows_of(Params::None, &src).0, ["OD707"], "{user}");
         }
     }
 
