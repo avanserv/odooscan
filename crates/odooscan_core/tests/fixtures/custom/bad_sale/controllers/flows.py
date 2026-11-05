@@ -1,6 +1,6 @@
 from markupsafe import Markup, escape
 
-from odoo import http
+from odoo import SUPERUSER_ID, http
 from odoo.http import request
 from odoo.tools import SQL
 from odoo.tools.safe_eval import safe_eval
@@ -57,3 +57,10 @@ class Flows(http.Controller):
 
     def _banner_text(self):
         return request.params.get("banner")
+
+    @http.route("/bad/switch", auth="user", methods=["POST"])
+    def switch(self, **post):
+        request.env["bad.order"].sudo().with_user(request.env.user).write(post)
+        request.env["bad.order"].sudo().sudo(False).write(post)
+        request.env["bad.order"].with_user(SUPERUSER_ID).write(post)
+        request.env(su=True)["bad.order"].create(post)
