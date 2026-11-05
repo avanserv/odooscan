@@ -41,23 +41,37 @@ pub(crate) fn escalation(body: &[Stmt], series: Option<Series>) -> Option<Escala
 /// `SUPERUSER_ID` or `1`, or it passes `su=True`. `with_user()` drops superuser mode for any other
 /// user (18.0 `odoo/models.py:6341`), so only its user counts.
 pub(crate) fn switch(call: &ast::ExprCall) -> Option<&'static str> {
-    // The keyword and position of the user, and the position of `su`, in each signature.
-    let (label, (keyword, user), su) = match tail_name(&call.func)? {
+    let (label, _, su) = signature(call)?;
+    let su = su
+        .and_then(|i| call.arguments.find_argument_value("su", i))
+        .is_some_and(|v| matches!(v, Expr::BooleanLiteral(b) if b.value));
+    (root(call) || su).then_some(label)
+}
+
+/// Whether a call `switch` reads builds the environment of uid 1, which stays in superuser mode
+/// after a later `sudo(False)`, unlike one built with `su=True`.
+pub(crate) fn root(call: &ast::ExprCall) -> bool {
+    signature(call).is_some_and(|(_, (keyword, user), _)| {
+        call.arguments
+            .find_argument_value(keyword, user)
+            .is_some_and(is_superuser)
+    })
+}
+
+/// The label of a call that may build an environment for another user, the keyword and position
+/// of its user, and the position of its `su`.
+fn signature(call: &ast::ExprCall) -> Option<(&'static str, (&'static str, usize), Option<usize>)> {
+    Some(match tail_name(&call.func)? {
         "with_user" => ("with_user()", ("user", 0), None),
         "env" => ("env()", ("user", 1), Some(3)),
         "update_env" => ("update_env()", ("user", 0), Some(2)),
         "Environment" => ("Environment()", ("uid", 1), Some(3)),
         _ => return None,
-    };
-    let args = &call.arguments;
-    let root = args.find_argument_value(keyword, user).is_some_and(is_superuser);
-    let su = su
-        .and_then(|i| args.find_argument_value("su", i))
-        .is_some_and(|v| matches!(v, Expr::BooleanLiteral(b) if b.value));
-    (root || su).then_some(label)
+    })
 }
 
-fn is_superuser(user: &Expr) -> bool {
+/// `SUPERUSER_ID` or `1`.
+pub(crate) fn is_superuser(user: &Expr) -> bool {
     match user {
         Expr::NumberLiteral(n) => matches!(&n.value, ast::Number::Int(i) if i.as_u8() == Some(1)),
         _ => tail_name(user) == Some("SUPERUSER_ID"),
@@ -168,6 +182,32 @@ mod tests {
     }
 
     #[test]
+    fn only_a_switch_to_uid_1_builds_the_environment_of_the_superuser() {
+        let root = |line: &str| {
+            let module = parse_module(line).unwrap().into_syntax();
+            let Stmt::Expr(e) = &module.body[0] else {
+                panic!("{line}")
+            };
+            root(e.value.as_call_expr().unwrap())
+        };
+        for line in [
+            "x.with_user(1)",
+            "request.env(user=SUPERUSER_ID, su=False)",
+            "api.Environment(cr, SUPERUSER_ID, {})",
+        ] {
+            assert!(root(line), "{line}");
+        }
+        for line in [
+            "request.env(su=True)",
+            "x.with_user(user)",
+            "api.Environment(cr, uid, {}, True)",
+            "x.sudo()",
+        ] {
+            assert!(!root(line), "{line}");
+        }
+    }
+
+    #[test]
     fn request_uid_is_a_switch_only_before_it_raises_on_assignment() {
         let module = parse_module("request.uid = SUPERUSER_ID").unwrap().into_syntax();
         let at = |series| escalation(&module.body, Series::parse(series));
@@ -180,6 +220,9 @@ mod tests {
         assert_eq!(of("x.with_user(1)\nx.sudo()"), Some(Escalation::Sudo));
         assert_eq!(of("x.sudo(False).sudo()"), Some(Escalation::Sudo));
         assert_eq!(of("x.sudo"), Some(Escalation::Sudo));
+        // Taint reads a computed flag as leaving superuser mode; a hotspot reports it all the same.
+        assert_eq!(of("x.sudo(flag)"), Some(Escalation::Sudo));
+        assert_eq!(of("x.sudo(flag=self.flag)"), Some(Escalation::Sudo));
         assert_eq!(of("x.sudo(False).search([], limit=y.sudo().n)"), Some(Escalation::Sudo));
         let first = of("request.env(su=True)\nx.with_user(1)");
         assert_eq!(first, Some(Escalation::Switch("env()")));
