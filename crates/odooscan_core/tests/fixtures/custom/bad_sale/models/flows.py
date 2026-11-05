@@ -24,6 +24,11 @@ class SaleOrderFlows(models.Model):
         self.env.cr.execute("SELECT id FROM bad_order WHERE name = %s", [term])
         return self.env.cr.fetchall()
 
+    def _store_upload(self, upload):
+        with open(getattr(upload, "name", None), "rb") as source:
+            source.read()
+        return open(upload.filename, "rb")
+
 
 class SaleOrderSearch(models.Model):
     _inherit = "bad.order"
