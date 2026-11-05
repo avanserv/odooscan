@@ -11,7 +11,7 @@ use crate::mentions::Mentions;
 use crate::series::Series;
 use crate::suppress::Suppressions;
 use crate::taint::TaintTable;
-use crate::{csvdata, decode, js, owl, python, sql, xml};
+use crate::{csvdata, decode, js, owl, python, routing, sql, xml};
 
 const MANIFESTS: &[&str] = &["__manifest__.py", "__openerp__.py"];
 
@@ -285,11 +285,13 @@ pub fn load(
         .par_iter_mut()
         .for_each(|module| parse_module_files(module, default_series, taint));
     let known = python::field_classes(modules.iter().flat_map(|m| &m.python).map(|f| &f.facts));
-    if !known.is_empty() {
-        modules
-            .par_iter_mut()
-            .for_each(|module| read_field_calls(module, default_series, &known, taint));
-    }
+    let files = modules
+        .iter()
+        .flat_map(|m| m.python.iter().map(|f| (m.name.as_str(), f.rel.as_str(), &f.facts)));
+    let routes = routing::Table::of(files);
+    modules
+        .par_iter_mut()
+        .for_each(|module| read_again(module, default_series, &known, &routes, taint));
     notices.extend(python2_notices(&modules, default_series));
     Discovery { modules, notices }
 }
@@ -315,24 +317,36 @@ fn python2_notices(modules: &[Module], default_series: Option<Series>) -> Vec<St
     notices
 }
 
-/// Reads again the files whose class attributes call a field class of the scan. A class may live
-/// in any module, so the first pass takes such a call for a method.
-fn read_field_calls(
+/// Reads again the files the first pass could not read whole: those whose class attributes call
+/// a field class of the scan, which the first pass takes for a method, and those with a route that
+/// inherits from a controller of the scan. Either may live in any module.
+fn read_again(
     module: &mut Module,
     default_series: Option<Series>,
     known: &python::FieldClasses,
+    routes: &routing::Table,
     taint: &TaintTable,
 ) {
     let series = module.series.or(default_series);
-    module
-        .python
-        .par_iter_mut()
-        .filter(|file| file.facts.attr_calls.iter().any(|name| known.contains_key(name)))
-        .for_each(|file| {
-            if let Ok(text) = std::fs::read_to_string(&file.path) {
-                file.facts = python::analyze_with(&text, series, known, taint);
-            }
-        });
+    let addon = module.name.as_str();
+    let unread = python::FieldClasses::default();
+    module.python.par_iter_mut().for_each(|file| {
+        let calls_fields = file.facts.attr_calls.iter().any(|name| known.contains_key(name));
+        if !(calls_fields || file.facts.inherits_routes) {
+            return;
+        }
+        // A file read again for its routes alone reads no field class of the scan, as the first
+        // pass did: they also decide the groups a call outside a class attribute references.
+        let fields = if calls_fields { known } else { &unread };
+        if let Ok(text) = std::fs::read_to_string(&file.path) {
+            let scope = routing::Scope {
+                table: routes,
+                addon,
+                rel: &file.rel,
+            };
+            file.facts = python::analyze_with(&text, series, fields, taint, scope);
+        }
+    });
 }
 
 /// Module directories by name, with whether each is checked, keeping the first of each name.
@@ -418,7 +432,8 @@ impl ModuleContext<'_> {
 
     fn parsed(&self, path: PathBuf, text: Option<&str>, bytes: &[u8]) -> Option<ParsedFile> {
         if path.extension().is_some_and(|e| e == "py") {
-            let facts = python::analyze_with(text?, self.series, &python::FieldClasses::default(), self.taint);
+            let unread = python::FieldClasses::default();
+            let facts = python::analyze_with(text?, self.series, &unread, self.taint, routing::Scope::default());
             return Some(Ok(self.source(path, text)?.with(facts)));
         }
         let facts = self.data_facts(&path, text, bytes);
@@ -598,6 +613,58 @@ mod tests {
         };
         assert!(!lost("encoded_broken"));
         assert!(lost("orphan_hooks_lost"));
+    }
+
+    #[test]
+    fn a_file_whose_route_inherits_is_read_again_with_the_routes_of_the_scan() {
+        let custom = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/custom");
+        let paths = [custom.join("route_overrides"), custom.join("bad_sale")];
+        let modules = load(&paths, &[], None, None, &TaintTable::default()).modules;
+        let module = modules.iter().find(|m| m.name == "route_overrides").unwrap();
+        let file = module.python.iter().find(|f| f.rel == "controllers/routes.py").unwrap();
+        assert!(file.facts.inherits_routes);
+        let lines: Vec<(&str, u32)> = file.facts.diags.iter().map(|d| (d.code, d.pos.line)).collect();
+        assert_eq!(lines, [("OD127", 8), ("OD127", 13), ("OD111", 18), ("OD129", 22)]);
+    }
+
+    #[test]
+    fn a_file_read_again_for_its_routes_alone_reads_no_field_class_of_the_scan() {
+        let dir = std::env::temp_dir().join(format!("odooscan-route-reread-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let files = [
+            (
+                "orm_tags/orm/tag.py",
+                "from odoo import fields\n\nclass Tag(fields.Char):\n    pass\n",
+            ),
+            (
+                "shop/controllers/main.py",
+                "from odoo import http\n\nclass Shop(http.Controller):\n    @http.route('/a', auth='public')\n    def a(self):\n        pass\n",
+            ),
+            (
+                "ext/controllers/main.py",
+                "from odoo import http\nfrom odoo.addons.orm_tags.orm.tag import Tag\nfrom odoo.addons.shop.controllers.main import Shop\nfrom odoo.http import request\n\nLABEL = Tag(groups='base.group_user')\n\nclass Ext(Shop):\n    @http.route()\n    def a(self):\n        return request.env['x'].sudo().search([])\n",
+            ),
+        ];
+        for (rel, src) in files {
+            let path = dir.join(rel);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, src).unwrap();
+        }
+        let paths = ["orm_tags", "shop", "ext"].map(|name| {
+            std::fs::write(dir.join(name).join("__manifest__.py"), "{'version': '18.0.1.0.0'}").unwrap();
+            dir.join(name)
+        });
+        let modules = load(&paths, &[], None, None, &TaintTable::default()).modules;
+        let _ = std::fs::remove_dir_all(&dir);
+        let module = modules.iter().find(|m| m.name == "ext").unwrap();
+        let facts = &module
+            .python
+            .iter()
+            .find(|f| f.rel == "controllers/main.py")
+            .unwrap()
+            .facts;
+        assert_eq!(facts.diags.iter().map(|d| d.code).collect::<Vec<_>>(), ["OD111"]);
+        assert!(facts.group_refs.is_empty(), "{:?}", facts.group_refs);
     }
 
     fn checkout(name: &str, release: &str) -> PathBuf {
