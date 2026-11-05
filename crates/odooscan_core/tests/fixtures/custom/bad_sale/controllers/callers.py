@@ -25,3 +25,8 @@ class Callers(http.Controller):
     @http.route("/bad/label", auth="user")
     def label(self):
         return Markup(request.env["bad.order"].label("Order "))
+
+    @http.route("/bad/apply_public", auth="user", methods=["POST"])
+    def apply_public(self, **post):
+        request.env["bad.order"].sudo().apply_values(post)
+        return request.redirect("/bad/thanks")
