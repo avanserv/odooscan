@@ -3011,13 +3011,12 @@ mod tests {
 
     use super::{
         BASE_MODEL_DUNDERS, BASE_MODEL_EXTRA, BASE_MODEL_METHODS, BASE_PRIVATE_METHODS, BASE_RPC_METHODS,
-        FIELD_CLASSES, FieldHolder, FieldSpelling, Index, Module, OLD_BASE_METHODS, PlacedWrite, Scope, XmlIdDef,
+        FIELD_CLASSES, FieldHolder, FieldSpelling, Index, OLD_BASE_METHODS, PlacedWrite, Scope, XmlIdDef,
         base_private_method, base_rpc_method, class_file, field_id_prefixes, fold_writes, last_text, mangles_alike,
         old_base_method, unseen_table_id,
     };
-    use crate::manifest;
     use crate::mentions::Mentions;
-    use crate::project::SourceFile;
+    use crate::project::{SourceFile, module};
     use crate::python;
     use crate::series::Series;
     use crate::xml;
@@ -3354,24 +3353,6 @@ mod tests {
         let count = "_check_record_rules_result_count";
         assert!(has(count, "saas~11.4") && !has(count, "saas~11.5"));
         assert!(!old_base_method("create_workflow", None));
-    }
-
-    fn module(name: &str, text: &str) -> Module {
-        let manifest = manifest::parse(text).unwrap();
-        Module {
-            name: name.to_owned(),
-            dir: PathBuf::new(),
-            manifest_path: PathBuf::new(),
-            series: manifest.series(),
-            manifest,
-            checked: true,
-            python: vec![],
-            data: vec![],
-            js: vec![],
-            templates: vec![],
-            sql_views: vec![],
-            lost_text: false,
-        }
     }
 
     #[test]
