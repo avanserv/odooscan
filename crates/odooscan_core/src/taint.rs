@@ -2564,7 +2564,9 @@ impl Flows<'_> {
     }
 
     /// Keeps a parameter whose keys the user may pick that `write()` or `create()` receives on the
-    /// records of a model method, for the callers that call the method under `sudo()`.
+    /// records of a model method, for the callers that call the method under `sudo()`. A public
+    /// method's parameter is one too: an RPC call runs as the user, but a Python caller may call it
+    /// under `sudo()`.
     fn self_write(&mut self, call: &ast::ExprCall, args: &[Option<Taint>], keywords: &[Option<Taint>]) {
         let Expr::Attribute(a) = &*call.func else { return };
         if !matches!(self.owner, Some(Receiver::Model(_))) || !matches!(a.attr.as_str(), "write" | "create") {
@@ -2582,7 +2584,7 @@ impl Flows<'_> {
             pos: self.loc.at(call),
         };
         for mut t in t.split() {
-            if t.kind == Kind::Keys && matches!(t.origin, FlowOrigin::Param(_)) {
+            if t.kind == Kind::Keys && t.origin.param().is_some() {
                 t.steps.push(step.clone());
                 self.edge(t, FlowTarget::SelfWrite);
             }
@@ -3962,15 +3964,16 @@ mod tests {
         assert_eq!(calls, ["_h"]);
     }
 
-    /// Whether the first function of `src`, a method of `owner`, writes a parameter on its records.
-    fn self_writes(owner: Receiver, src: &str) -> bool {
+    /// Whether the first function of `src`, a method of `owner` taking `params`, writes a parameter
+    /// on its records.
+    fn self_writes(params: Params, owner: Receiver, src: &str) -> bool {
         let parsed = parse_module(src).expect("valid Python");
         let Some(Stmt::FunctionDef(func)) = parsed.syntax().body.first() else {
             panic!("no function");
         };
         let summary = function(
             func,
-            Params::None,
+            params,
             Some(owner),
             None,
             &[],
@@ -3984,16 +3987,20 @@ mod tests {
     #[test]
     fn a_model_method_writing_a_parameter_on_its_records_is_a_self_write() {
         let model = Receiver::Model("x.y".to_owned());
-        let write =
-            |owner: &Receiver, call: &str| self_writes(owner.clone(), &format!("def _f(self, vals):\n    {call}\n"));
-        assert!(write(&model, "self.write(vals)"));
-        assert!(write(&model, "self.browse(1).create(vals_list=vals)"));
-        assert!(write(&model, "self.with_context(a=1).write(vals)"));
-        assert!(!write(&model, "self.write({'name': vals['name']})"));
-        assert!(!write(&model, "self.partner_id.write(vals)"));
-        assert!(!write(&model, "self.env['y'].create(vals)"));
-        assert!(!write(&model, "self.with_user(1).write(vals)"));
-        assert!(!write(&Receiver::Class("C".to_owned()), "self.write(vals)"));
+        for (params, name) in [(Params::None, "_f"), (Params::Rpc, "f")] {
+            let write = |owner: &Receiver, call: &str| {
+                self_writes(params, owner.clone(), &format!("def {name}(self, vals):\n    {call}\n"))
+            };
+            assert!(write(&model, "self.write(vals)"), "{name}");
+            assert!(write(&model, "self.browse(1).create(vals_list=vals)"), "{name}");
+            assert!(write(&model, "self.with_context(a=1).write(vals)"), "{name}");
+            assert!(!write(&model, "self.write({'name': vals['name']})"), "{name}");
+            assert!(!write(&model, "self.partner_id.write(vals)"), "{name}");
+            assert!(!write(&model, "self.env['y'].create(vals)"), "{name}");
+            assert!(!write(&model, "self.with_user(1).write(vals)"), "{name}");
+            assert!(!write(&model, "self.write(request.params)"), "{name}");
+            assert!(!write(&Receiver::Class("C".to_owned()), "self.write(vals)"), "{name}");
+        }
     }
 
     #[test]
@@ -5437,7 +5444,7 @@ mod tests {
             assert_eq!(origins_to(&edges, &FlowTarget::SelfWrite), ["Param(0)"], "{value}");
             let (found, edges) = flows_of(Params::Rpc, &src);
             assert!(found.is_empty(), "RPC {value}");
-            assert!(origins_to(&edges, &FlowTarget::SelfWrite).is_empty(), "RPC {value}");
+            assert_eq!(origins_to(&edges, &FlowTarget::SelfWrite), ["Rpc(0)"], "RPC {value}");
         }
     }
 

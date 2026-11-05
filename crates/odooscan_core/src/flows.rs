@@ -43,6 +43,8 @@ struct Hit<'m> {
     /// The locals and methods in between, for the message.
     names: Vec<String>,
     via: Vec<HitState>,
+    /// The path from an RPC entry crosses the RPC argument of a public method that is its own entry.
+    relayed: bool,
 }
 
 /// What a return of a method carries: a source's value, or a parameter of the method.
@@ -63,7 +65,7 @@ struct Ret {
 pub fn check<'m>(index: &Index<'m>, mi: usize, scope: &Scope, out: &mut Out<'m>) {
     let module = &index.modules[mi];
     let mut solver = Solver::new(index, scope);
-    let mut seen = FxHashSet::default();
+    let mut found = vec![];
     for file in &module.python {
         for summary in &file.facts.flows {
             let at = FlowRef {
@@ -71,11 +73,16 @@ pub fn check<'m>(index: &Index<'m>, mi: usize, scope: &Scope, out: &mut Out<'m>)
                 file,
                 summary,
             };
-            for (path, diag) in solver.findings(at) {
-                if seen.insert((path, diag.pos, diag.code)) {
-                    out.diags.push((path, diag));
-                }
-            }
+            found.extend(solver.findings(at));
+        }
+    }
+    // An RPC entry reaching a sink through another one only repeats the callee's own finding, so
+    // it fills a slot that nothing else reports and never renames a finding the callee reports.
+    found.sort_by_key(|f| f.0);
+    let mut seen = FxHashSet::default();
+    for (_, (path, diag)) in found {
+        if seen.insert((path, diag.pos, diag.code)) {
+            out.diags.push((path, diag));
         }
     }
 }
@@ -83,9 +90,10 @@ pub fn check<'m>(index: &Index<'m>, mi: usize, scope: &Scope, out: &mut Out<'m>)
 struct Solver<'a, 'm> {
     index: &'a Index<'m>,
     scope: &'a Scope,
-    /// By summary, parameter, whether the method runs as superuser, and depth: a result found
-    /// with fewer calls left would hide a deeper sink from a caller that has more.
-    memo: FxHashMap<(usize, usize, bool, u8), Vec<Hit<'m>>>,
+    /// By summary, parameter, whether the method runs as superuser, whether the entry is an RPC
+    /// argument, and depth: a result found with fewer calls left would hide a deeper sink from a
+    /// caller that has more.
+    memo: FxHashMap<(usize, usize, bool, bool, u8), Vec<Hit<'m>>>,
     /// By summary and depth, for the same reason.
     returns: FxHashMap<(usize, u8), Vec<Ret>>,
 }
@@ -100,17 +108,24 @@ impl<'a, 'm> Solver<'a, 'm> {
         }
     }
 
-    /// The flows from a source in `at` that cross into another method.
-    fn findings(&mut self, at: FlowRef<'m>) -> Vec<(&'m Path, RawDiag)> {
+    /// The flows from a source in `at` that cross into another method, each with whether it is an
+    /// RPC entry's flow through another RPC entry, which `check` keeps only when nothing else
+    /// reports its sink.
+    fn findings(&mut self, at: FlowRef<'m>) -> Vec<(bool, (&'m Path, RawDiag))> {
         let mut found = vec![];
         for edge in &at.summary.edges {
             match (edge.origin, &edge.target) {
-                (origin, FlowTarget::Arg(c, slot)) if origin.is_user() => {
-                    for hit in self.passed(at, edge, *c, slot, 0, false) {
-                        found.extend(self.reported(at, edge, *c, hit));
+                (origin, FlowTarget::Arg(c, _)) if origin.is_user() => {
+                    let rpc = matches!(origin, FlowOrigin::Rpc(_));
+                    for hit in self.passed(at, edge, 0, false, rpc) {
+                        let low = hit.relayed;
+                        found.extend(self.reported(at, edge, *c, hit).map(|f| (low, f)));
                     }
                 }
-                (FlowOrigin::Return(c), FlowTarget::Sink(code)) => found.extend(self.returned(at, edge, c, code)),
+                (FlowOrigin::Return(c), FlowTarget::Sink(code)) => {
+                    let returned = self.returned(at, edge, c, code);
+                    found.extend(returned.into_iter().map(|f| (false, f)));
+                }
                 _ => {}
             }
         }
@@ -156,56 +171,64 @@ impl<'a, 'm> Solver<'a, 'm> {
         }
     }
 
-    /// The sinks a value reaches once `edge` passes it to the call `c` of `at`, which runs as
-    /// superuser when `sudo` holds.
-    fn passed(
-        &mut self,
-        at: FlowRef<'m>,
-        edge: &FlowEdge,
-        c: usize,
-        slot: &ArgSlot,
-        depth: u8,
-        sudo: bool,
-    ) -> Vec<Hit<'m>> {
-        let call = &at.summary.calls[c];
+    /// The sinks a value reaches once `edge` passes it to a call of `at`, which runs as superuser
+    /// when `sudo` holds. `rpc` holds when the value entered as an RPC argument.
+    fn passed(&mut self, at: FlowRef<'m>, edge: &FlowEdge, depth: u8, sudo: bool, rpc: bool) -> Vec<Hit<'m>> {
+        let FlowTarget::Arg(c, slot) = &edge.target else {
+            return vec![];
+        };
+        let call = &at.summary.calls[*c];
         let sudo = match call.runs_as {
             RunsAs::Superuser => true,
             RunsAs::AsCaller => sudo,
             RunsAs::User => false,
         };
+        // The call's own `SelfWrite` or sink already reports the mapping a superuser `write()` or
+        // `create()` receives, so what its overrides do with it would report it twice.
+        let mapped = sudo && matches!(call.method.as_str(), "write" | "create");
         let mut hits = vec![];
         for callee in self.callees(at, call) {
             let Some(param) = param_index(callee.summary, slot) else {
                 continue;
             };
             // The `name` of a file picked by its field is that field, which the code wrote.
-            let hits_of = self.hits(callee, param, depth + 1, sudo);
-            let kept = hits_of.into_iter().filter(|h| !(edge.upload && h.named));
+            let hits_of = self.hits(callee, param, depth + 1, sudo, rpc);
+            let kept = hits_of
+                .into_iter()
+                .filter(|h| !(edge.upload && h.named) && !(mapped && h.code == "OD704"));
             hits.extend(kept.map(|hit| prepend(at, edge, call, hit)));
         }
         hits
     }
 
     /// The sinks parameter `param` of a method reaches, in it or in the methods it passes it to.
-    /// What the method writes on its own records is one only when it runs as superuser.
-    fn hits(&mut self, at: FlowRef<'m>, param: usize, depth: u8, sudo: bool) -> Vec<Hit<'m>> {
+    /// What the method writes on its own records is one only when it runs as superuser. A public
+    /// method's parameter is followed too, for the Python callers that fill it.
+    fn hits(&mut self, at: FlowRef<'m>, param: usize, depth: u8, sudo: bool, rpc: bool) -> Vec<Hit<'m>> {
         let state = (std::ptr::from_ref(at.summary) as usize, param, sudo);
-        let key = (state.0, param, sudo, depth);
+        let key = (state.0, param, sudo, rpc, depth);
         if let Some(hits) = self.memo.get(&key) {
             return hits.clone();
         }
         let mut hits = vec![];
-        for edge in at.summary.edges.iter().filter(|e| e.origin == FlowOrigin::Param(param)) {
+        for edge in at.summary.edges.iter().filter(|e| e.origin.param() == Some(param)) {
+            let from = hits.len();
             match &edge.target {
                 FlowTarget::Sink(code) => hits.push(sink_hit(at, edge, code)),
                 FlowTarget::SelfWrite if sudo => hits.push(sink_hit(at, edge, "OD704")),
-                FlowTarget::Arg(c, slot) if depth < DEPTH => hits.extend(self.passed(at, edge, *c, slot, depth, sudo)),
+                FlowTarget::Arg(..) if depth < DEPTH => hits.extend(self.passed(at, edge, depth, sudo, rpc)),
                 _ => {}
+            }
+            // Only an RPC entry tells a relayed path apart; from any other the shortest path wins.
+            if rpc && matches!(edge.origin, FlowOrigin::Rpc(_)) {
+                hits[from..].iter_mut().for_each(|h| h.relayed = true);
             }
         }
         hits.retain_mut(|h| enter(&mut h.via, state));
+        // A relayed path must not displace one that is not, which `check` prefers.
         let same = |a: &Hit, b: &Hit| {
-            (a.code, a.path, a.pos, a.keys, a.safe, a.named) == (b.code, b.path, b.pos, b.keys, b.safe, b.named)
+            (a.code, a.path, a.pos, a.keys, a.safe, a.named, a.relayed)
+                == (b.code, b.path, b.pos, b.keys, b.safe, b.named, b.relayed)
         };
         let hits = distinct(hits, same, |h| h.via.len());
         self.memo.insert(key, hits.clone());
@@ -389,6 +412,7 @@ fn sink_hit<'m>(at: FlowRef<'m>, edge: &FlowEdge, code: &'static str) -> Hit<'m>
         steps: path_steps(at, &edge.steps),
         names: edge.steps[1..last].iter().map(|s| s.value.clone()).collect(),
         via: vec![],
+        relayed: false,
     }
 }
 
@@ -593,8 +617,8 @@ mod tests {
                 let fresh = Solver::new(&index, &scope).findings(route(name));
                 let found = shared.findings(route(name));
                 assert_eq!(
-                    found.iter().map(shown).collect::<Vec<_>>(),
-                    fresh.iter().map(shown).collect::<Vec<_>>(),
+                    found.iter().map(|(_, f)| shown(f)).collect::<Vec<_>>(),
+                    fresh.iter().map(|(_, f)| shown(f)).collect::<Vec<_>>(),
                     "{order:?} {name}"
                 );
             }
@@ -810,7 +834,11 @@ mod tests {
         };
         let mut solver = Solver::new(&index, &scope);
         let rets = solver.returns(m1, 1).into_iter().map(|r| r.label).collect();
-        let hits = solver.hits(m1, 0, 1, false).into_iter().map(|h| h.code).collect();
+        let hits = solver
+            .hits(m1, 0, 1, false, false)
+            .into_iter()
+            .map(|h| h.code)
+            .collect();
         (rets, hits)
     }
 
@@ -925,5 +953,222 @@ mod tests {
                 "model.py:9 OD707 request.httprequest.files reaches the path of os.path.join() through '_a()', 'm', '_b()'"
             ]
         );
+    }
+
+    /// A route taking `**post` whose body is `call`.
+    fn applying(call: &str) -> String {
+        format!("    def r(self, **post):\n        {call}\n")
+    }
+
+    #[test]
+    fn a_public_method_called_under_sudo_writes_its_records_as_superuser() {
+        let sudo = "request.env['x.y'].sudo()";
+        for name in ["_apply", "apply"] {
+            let methods = format!("    def {name}(self, vals):\n        self.write(vals)\n");
+            assert_eq!(
+                scan_messages(&applying(&format!("{sudo}.{name}(post)")), &methods),
+                [format!(
+                    "model.py:5 OD704 route parameter 'post' reaches self.write() through '{name}()'"
+                )],
+                "{name}"
+            );
+        }
+        let apply = "    def apply(self, vals):\n        self.write(vals)\n";
+        for call in [
+            "request.env['x.y'].apply(post)",
+            "request.env['x.y'].sudo().with_user(request.env.user).apply(post)",
+            "request.env['x.y'].sudo().apply({'name': 'x'})",
+            "return post",
+        ] {
+            assert!(scan_messages(&applying(call), apply).is_empty(), "{call}");
+        }
+        // A sink in a public method's own body reports the RPC argument there and keeps no edge.
+        let own = "    def apply(self, vals):\n        self.sudo().write(vals)\n";
+        assert!(scan_messages(&applying(&format!("{sudo}.apply(post)")), own).is_empty());
+    }
+
+    #[test]
+    fn sudo_reaches_a_write_between_public_and_private_methods() {
+        let route = applying("request.env['x.y'].sudo()._apply(post)");
+        for (first, second) in [("apply", "_store"), ("_apply", "store")] {
+            let methods = format!(
+                "    def {first}(self, vals):\n        self.{second}(vals)\n\n    def {second}(self, vals):\n        self.write(vals)\n"
+            );
+            assert_eq!(
+                scan_messages(&route.replace("_apply", first), &methods),
+                [format!(
+                    "model.py:8 OD704 route parameter 'post' reaches self.write() through '{first}()', '{second}()'"
+                )],
+                "{first}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_write_override_adds_nothing_to_the_mapping_its_caller_reports() {
+        let sync = "    def write(self, vals):\n        self._sync(vals)\n        return super().write(vals)\n\n    def _sync(self, vals):\n        self.create(vals)\n";
+        let methods = format!("    def apply(self, vals):\n        self.write(vals)\n\n{sync}");
+        assert_eq!(
+            scan_messages(&applying("request.env['x.y'].sudo().apply(post)"), &methods),
+            ["model.py:5 OD704 route parameter 'post' reaches self.write() through 'apply()'"]
+        );
+        // The route's own `sudo().write()` reports the mapping, outside the flows across methods.
+        assert!(scan_messages(&applying("request.env['x.y'].sudo().write(post)"), sync).is_empty());
+    }
+
+    /// A public `relay` of `x.y` passing `v` to `_a`, which runs `sink` on `value`.
+    fn relay(sink: &str, value: &str) -> String {
+        format!(
+            "    def relay(self, v):\n        self._a(v)\n\n    def _a(self, v):\n        {}\n",
+            sink.replace('#', value)
+        )
+    }
+
+    /// A finding `shown` gives, up to its origin.
+    fn origin(finding: &str) -> String {
+        finding.split(" reaches ").next().unwrap_or_default().to_owned()
+    }
+
+    /// The findings of `module(route, methods)` as `file:line code origin`.
+    fn origins(route: &str, methods: &str) -> Vec<String> {
+        scan_messages(route, methods).iter().map(|f| origin(f)).collect()
+    }
+
+    #[test]
+    fn a_helper_sink_behind_a_public_method_is_reached_from_a_route() {
+        for (code, sink) in METHOD_SINK_OF {
+            let methods = relay(sink, "v");
+            assert_eq!(
+                origins("    def r(self, t):\n        request.env['x.y'].relay(t)\n", &methods),
+                [format!("model.py:8 {code} route parameter 't'")],
+                "{code}"
+            );
+            assert_eq!(
+                origins("    def r(self):\n        request.env['x.y'].relay('x')\n", &methods),
+                [format!("model.py:8 {code} RPC argument 'v'")],
+                "{code}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_helper_sink_behind_a_public_method_of_a_dependency_is_reported_at_the_route_call() {
+        let route = "    def r(self, t):\n        request.env['x.y'].relay(t)\n";
+        for (code, sink) in METHOD_SINK_OF {
+            let mut main = module(route, &relay(sink, "v"));
+            let mut dep = crate::project::module("dep", "{'version': '18.0.1.0'}");
+            dep.python = vec![main.python.remove(1)];
+            main.manifest = crate::manifest::parse("{'version': '18.0.1.0', 'depends': ['dep']}").unwrap();
+            let modules = [main, dep];
+            let index = Index::build(&modules, None);
+            let found: Vec<Vec<String>> = (0..2)
+                .map(|mi| {
+                    let mut out = Out { diags: vec![] };
+                    check(&index, mi, &index.scope(mi), &mut out);
+                    out.diags.iter().map(|d| origin(&shown(d))).collect()
+                })
+                .collect();
+            assert_eq!(
+                found,
+                [
+                    [format!("route.py:4 {code} route parameter 't'")],
+                    [format!("model.py:8 {code} RPC argument 'v'")]
+                ],
+                "{code}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_rpc_entry_relaying_to_another_keeps_the_message_of_the_other() {
+        for (code, sink) in METHOD_SINK_OF {
+            let methods = format!("    def outer(self, m):\n        self.relay(m)\n\n{}", relay(sink, "v"));
+            assert_eq!(
+                origins("    def r(self):\n        pass\n", &methods),
+                [format!("model.py:11 {code} RPC argument 'v'")],
+                "{code}"
+            );
+            // The longer path stays the entry's own, so its message names the entry's argument.
+            let methods = format!(
+                "    def outer(self, m):\n        self._x(m)\n\n    def _x(self, v):\n        self.relay(v)\n        self._b(v)\n\n    def _b(self, v):\n        self._c(v)\n\n    def _c(self, v):\n        self._a(v)\n\n{}",
+                relay(sink, "v")
+            );
+            assert_eq!(
+                origins("    def r(self):\n        pass\n", &methods),
+                [format!("model.py:21 {code} RPC argument 'm'")],
+                "{code}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_route_reaching_a_sink_directly_and_through_a_public_method_names_the_shorter_path() {
+        let route = "    def r(self, t):\n        request.env['x.y']._x(t)\n";
+        for (code, sink) in METHOD_SINK_OF {
+            let methods = format!(
+                "    def _x(self, v):\n        self.relay(v)\n        self._a(v)\n\n{}",
+                relay(sink, "v")
+            );
+            let found = scan_messages(route, &methods);
+            assert_eq!(found.len(), 1, "{code}: {found:?}");
+            assert!(
+                found[0].starts_with(&format!("model.py:12 {code} route parameter 't'"))
+                    && found[0].contains(" through '_x()', '_a()'"),
+                "{code}: {found:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_rpc_entry_reaching_a_sink_only_through_another_reports_it() {
+        let methods = "    def outer(self, vals):\n        self.sudo().apply(vals)\n\n    def apply(self, vals):\n        self.write(vals)\n";
+        assert_eq!(
+            scan_messages("    def r(self):\n        pass\n", methods),
+            ["model.py:8 OD704 RPC argument 'vals' reaches self.write() through 'apply()'"]
+        );
+        let outer = "    def outer(self, m):\n        self.relay(m)\n";
+        for (code, sink) in METHOD_SINK_OF {
+            let mut main = module("    def r(self):\n        pass\n", outer);
+            let mut dep = crate::project::module("dep", "{'version': '18.0.1.0'}");
+            dep.python = vec![module("", &relay(sink, "v")).python.remove(1)];
+            dep.python[0].path = PathBuf::from("dep.py");
+            main.manifest = crate::manifest::parse("{'version': '18.0.1.0', 'depends': ['dep']}").unwrap();
+            let modules = [main, dep];
+            let index = Index::build(&modules, None);
+            let found: Vec<Vec<String>> = (0..2)
+                .map(|mi| {
+                    let mut out = Out { diags: vec![] };
+                    check(&index, mi, &index.scope(mi), &mut out);
+                    out.diags.iter().map(|d| origin(&shown(d))).collect()
+                })
+                .collect();
+            assert_eq!(
+                found,
+                [
+                    [format!("model.py:5 {code} RPC argument 'm'")],
+                    [format!("dep.py:8 {code} RPC argument 'v'")]
+                ],
+                "{code}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_public_method_passing_on_the_name_of_a_file_picked_by_its_field_reports_only_its_rpc_argument() {
+        let route = "    def r(self):\n        for f in request.httprequest.files.getlist('ufile'):\n            request.env['x.y'].relay(f)\n";
+        for (code, sink) in METHOD_SINK_OF {
+            assert_eq!(
+                origins(route, &relay(sink, "getattr(v, 'name', None)")),
+                [format!("model.py:8 {code} RPC argument 'v'")],
+                "{code}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_public_method_returning_records_read_as_superuser_adds_nothing() {
+        let methods = "    def show(self, i):\n        return self.sudo().browse(i)\n";
+        let route = "    def r(self, t):\n        return request.env['x.y'].show(t)\n";
+        assert!(scan_messages(route, methods).is_empty());
     }
 }
