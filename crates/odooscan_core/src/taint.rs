@@ -11,6 +11,7 @@ use crate::facts::{
 use crate::method_body::arguments;
 use crate::python::{Locator, SAME_MODEL, exits, str_lit, tail_name};
 use crate::series::Series;
+use crate::superuser;
 
 /// What the user controls in a tainted value.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -719,8 +720,8 @@ fn values(t: Option<Taint>) -> Option<Taint> {
 #[derive(Clone, Default)]
 struct State {
     vars: FxHashMap<String, Taint>,
-    /// Locals bound to a recordset under `sudo()`.
-    sudo: FxHashSet<String>,
+    /// Locals bound to a recordset under `sudo()`, with the segments of its path that make it so.
+    sudo: FxHashMap<String, Vec<String>>,
     /// Locals bound to records rather than to what a method of them returns.
     records: FxHashSet<String>,
     /// Locals bound to a model, as `Orders = env["sale.order"]` does.
@@ -788,6 +789,8 @@ struct Browsed {
     id: Taint,
     /// Whether they are read as superuser.
     sudo: bool,
+    /// Whether they belong to uid 1, which `sudo(False)` leaves in superuser mode.
+    root: bool,
     /// The locals of the id and those bound to the records or to a value read from them, so that
     /// a check of any of them vouches for the records.
     names: Vec<String>,
@@ -805,6 +808,7 @@ fn join_browsed(a: Option<Browsed>, b: Option<Browsed>) -> Option<Browsed> {
             Some(Browsed {
                 id: joined(a.id, b.id),
                 sudo: a.sudo || b.sudo,
+                root: a.root || b.root,
                 names,
             })
         }
@@ -820,7 +824,13 @@ impl State {
                 self.vars.insert(name, t);
             }
         }
-        self.sudo.extend(other.sudo);
+        // The path of uid 1 wins, as it alone stays superuser after a later `sudo(False)`.
+        for (name, path) in other.sudo {
+            let root = |p: &Vec<String>| p.iter().any(|s| s == UID_1);
+            if !self.sudo.get(&name).is_some_and(|mine| root(mine) && !root(&path)) {
+                self.sudo.insert(name, path);
+            }
+        }
         self.records.extend(other.records);
         self.models.extend(other.models);
         // A parser that may resolve entities on either path may on the merged one.
@@ -1256,8 +1266,15 @@ impl Flows<'_> {
         self.locals.insert(name.to_owned());
         // First, so that an id read from the local reads it as it was before this binding.
         self.bind_records(name, target, value);
-        let sudo = value.is_some_and(|v| self.is_sudo(v));
-        toggle(&mut self.state.sudo, name, sudo);
+        let sudo = value.filter(|v| self.is_sudo(v)).map(|v| {
+            let mut path = self.path(v);
+            path.retain(|p| p == "sudo()" || p == UID_1);
+            path
+        });
+        match sudo {
+            Some(path) => self.state.sudo.insert(name.to_owned(), path),
+            None => self.state.sudo.remove(name),
+        };
         let records = value.is_some_and(|v| self.records(v));
         toggle(&mut self.state.records, name, records);
         match value.and_then(|v| self.receiver(v)) {
@@ -1330,23 +1347,20 @@ impl Flows<'_> {
     }
 
     /// The dotted path of a callee or attribute, a call ending a name with `()` and an item
-    /// access adding `[]`. A local bound under `sudo()` reads as `sudo()`.
+    /// access adding `[]`. A local bound under `sudo()` reads as the segments that make it so, so
+    /// that a `sudo()` segment on a path, as `runs_as_superuser` reads it, means the superuser.
     fn path(&self, expr: &Expr) -> Vec<String> {
         match expr {
-            Expr::Name(n) if self.state.sudo.contains(n.id.as_str()) => vec!["sudo()".to_owned()],
-            Expr::Name(n) => vec![n.id.to_string()],
+            Expr::Name(n) => match self.state.sudo.get(n.id.as_str()) {
+                Some(path) => path.clone(),
+                None => vec![n.id.to_string()],
+            },
             Expr::Attribute(a) => {
                 let mut path = self.path(&a.value);
                 path.push(a.attr.to_string());
                 path
             }
-            Expr::Call(c) => {
-                let mut path = self.path(&c.func);
-                if let Some(last) = path.last_mut() {
-                    last.push_str(call_suffix(c));
-                }
-                path
-            }
+            Expr::Call(c) => self.call_path(c),
             Expr::Subscript(s) => {
                 let mut path = self.path(&s.value);
                 path.push("[]".to_owned());
@@ -1356,16 +1370,57 @@ impl Flows<'_> {
         }
     }
 
-    fn is_sudo(&self, expr: &Expr) -> bool {
-        matches!(expr, Expr::Call(_) | Expr::Name(_)) && self.path(expr).iter().any(|p| p == "sudo()")
+    /// Whether `sudo()` takes a flag in the module's series, an unknown one read as the newest.
+    fn flag_sudo(&self) -> bool {
+        self.series.is_none_or(|s| s >= SUDO_FLAG)
     }
 
-    /// Whether `expr` is records rather than what one of their methods returns: a model of `env`,
-    /// a local bound to records, or a call of a method that returns records.
+    /// The path of a call. `sudo(flag)` sets `su` to its flag and `with_user()` clears it (18.0
+    /// `odoo/models.py:6331`, `:6343`; 20.0 `odoo/orm/models.py:5464`, `:5474`), so a call leaving
+    /// superuser mode drops the `sudo()` segments before it, and one `superuser::switch` labels,
+    /// which builds a superuser environment, is followed by one, behind `UID_1` for uid 1.
+    fn call_path(&self, c: &ast::ExprCall) -> Vec<String> {
+        let mut path = self.path(&c.func);
+        let suffix = call_suffix(c);
+        if let Some(last) = path.last_mut() {
+            last.push_str(suffix);
+        }
+        let root = is_root(c);
+        let user = !root && tail_name(&c.func) == Some("with_user");
+        if suffix == "(False)" || user {
+            let last = path.pop();
+            leave(&mut path, user || !self.flag_sudo());
+            path.extend(last);
+        }
+        if root {
+            path.push(UID_1.to_owned());
+        }
+        if root || superuser::switch(c).is_some() {
+            path.push("sudo()".to_owned());
+        }
+        path
+    }
+
+    /// Whether `expr` holds records or an environment as superuser: a call or a local, or an item
+    /// of an environment or of a superuser local, as `request.env(su=True)[t]` is.
+    fn is_sudo(&self, expr: &Expr) -> bool {
+        let item = |s: &ast::ExprSubscript| {
+            is_env(&s.value) || matches!(&*s.value, Expr::Name(n) if self.state.sudo.contains_key(n.id.as_str()))
+        };
+        let held = match expr {
+            Expr::Call(_) | Expr::Name(_) => true,
+            Expr::Subscript(s) => item(s),
+            _ => false,
+        };
+        held && runs_as_superuser(&self.path(expr))
+    }
+
+    /// Whether `expr` is records rather than what one of their methods returns: a model of an
+    /// environment, a local bound to records, or a call of a method that returns records.
     fn records(&self, expr: &Expr) -> bool {
         match expr {
             Expr::Name(n) => self.state.records.contains(n.id.as_str()),
-            Expr::Subscript(s) => tail_name(&s.value) == Some("env"),
+            Expr::Subscript(s) => is_env(&s.value),
             Expr::Call(c) => tail_name(&c.func).is_some_and(|m| {
                 SAME_MODEL.contains(&m)
                     || SAME_RECORDS.contains(&m)
@@ -1389,14 +1444,13 @@ impl Flows<'_> {
     }
 
     /// The methods a call on `expr` runs, when a summary may tell what they do: `self`, a model
-    /// of `env`, or a local bound to one, through methods that keep the model such as `sudo()`.
+    /// of an environment, or a local bound to one, through methods that keep the model such as
+    /// `sudo()`.
     fn receiver(&self, expr: &Expr) -> Option<Receiver> {
         match expr {
             Expr::Name(n) if n.id.as_str() == "self" => self.owner.clone(),
             Expr::Name(n) => self.state.models.get(n.id.as_str()).cloned(),
-            Expr::Subscript(sub) if tail_name(&sub.value) == Some("env") => {
-                str_lit(&sub.slice).map(|m| Receiver::Model(m.to_owned()))
-            }
+            Expr::Subscript(sub) if is_env(&sub.value) => str_lit(&sub.slice).map(|m| Receiver::Model(m.to_owned())),
             Expr::Call(c) => match &*c.func {
                 Expr::Attribute(a) if SAME_MODEL.contains(&a.attr.as_str()) => self.receiver(&a.value),
                 _ => None,
@@ -1701,10 +1755,11 @@ impl Flows<'_> {
             Some((_, Role::Sanitizer)) => None,
             Some((pattern, Role::Sink(row))) => {
                 let arg = sink_arg(row.arg, code(row.sink), call, &args, &keywords);
-                let callee = format!("{pattern}()");
                 let callee = match row.sink {
-                    Sink::Header => header_label(arg_expr(row.arg, call).and_then(header_name), &callee),
-                    _ => callee,
+                    Sink::Header => {
+                        header_label(arg_expr(row.arg, call).and_then(header_name), &format!("{pattern}()"))
+                    }
+                    _ => sink_callee(pattern, call),
                 };
                 self.sink(row.sink, callee, arg, expr);
                 // A parser, a loader or a command hands back the data in another form, and a
@@ -1729,7 +1784,7 @@ impl Flows<'_> {
     fn item(&mut self, s: &ast::ExprSubscript, expr: &Expr) -> Option<Taint> {
         let key = self.expr(&s.slice);
         if self.is_sudo(&s.value) && self.records(&s.value) {
-            self.sink(Sink::Field, "sudo()[...]".to_owned(), key, expr);
+            self.sink(Sink::Field, format!("{}[...]", superuser_call(&s.value)), key, expr);
         }
         values(self.expr(&s.value))
     }
@@ -1747,7 +1802,8 @@ impl Flows<'_> {
             }
             Expr::Attribute(a) if is_data_method(a.attr.as_str()) && self.is_sudo(&a.value) => {
                 let t = self.picked(&a.value);
-                self.sink(Sink::Model, format!("sudo().{}()", a.attr), t, expr);
+                let callee = format!("{}.{}()", superuser_call(&a.value), a.attr);
+                self.sink(Sink::Model, callee, t, expr);
             }
             _ => {}
         }
@@ -1769,7 +1825,7 @@ impl Flows<'_> {
         let file = file.and_then(|f| arg_expr(f, call)).and_then(|f| self.expr(f));
         self.sink(
             Sink::Attachment,
-            format!("sudo().{method}()"),
+            format!("{}.{method}()", superuser_call(&a.value)),
             join(vals.content, file),
             expr,
         );
@@ -1781,7 +1837,7 @@ impl Flows<'_> {
     fn picked(&mut self, expr: &Expr) -> Option<Taint> {
         match expr {
             Expr::Name(n) => self.state.picked.get(n.id.as_str()).cloned(),
-            Expr::Subscript(s) if tail_name(&s.value) == Some("env") => self.expr(&s.slice),
+            Expr::Subscript(s) if is_env(&s.value) => self.expr(&s.slice),
             Expr::Call(c) => self.picked_call(c),
             _ => None,
         }
@@ -1790,7 +1846,7 @@ impl Flows<'_> {
     fn picked_call(&mut self, c: &ast::ExprCall) -> Option<Taint> {
         let Expr::Attribute(a) = &*c.func else { return None };
         match a.attr.as_str() {
-            "get" if tail_name(&a.value) == Some("env") => self.expr(c.arguments.args.first()?),
+            "get" if is_env(&a.value) => self.expr(c.arguments.args.first()?),
             m if SAME_MODEL.contains(&m) || SAME_RECORDS.contains(&m) => self.picked(&a.value),
             _ => None,
         }
@@ -1836,7 +1892,7 @@ impl Flows<'_> {
             return self.browse(c, &a.value);
         }
         match self.browsed(&a.value) {
-            Some(b) => kept(b, c, a.attr.as_str()),
+            Some(b) => kept(b, c, a.attr.as_str(), self.flag_sudo()),
             None => self.first_browsed(arguments(c)),
         }
     }
@@ -1853,6 +1909,7 @@ impl Flows<'_> {
         Some(Browsed {
             id: self.id_of(arg)?,
             sudo: self.is_sudo(records),
+            root: self.path(records).iter().any(|p| p == UID_1),
             names,
         })
     }
@@ -1975,22 +2032,17 @@ impl Flows<'_> {
 
     /// The locals a call checks the access to: the id of a document or a token check, what a
     /// token is compared to, the arguments and records of a `_check` method, and the records of
-    /// an access check outside `sudo()`, which skips them (18.0 `odoo/models.py:4456`, `:4464`;
-    /// 16.0 `:3524`), or after a later `with_user()`, as `kept()` reads it. `check_access_rights()`
-    /// checks the model only (18.0 `odoo/models.py:4516`).
+    /// an access check on records that do not run as superuser, which skips them (18.0
+    /// `odoo/models.py:4456`, `:4464`; 16.0 `:3524`), as `runs_as_superuser` reads their path.
+    /// `check_access_rights()` checks the model only (18.0 `odoo/models.py:4516`).
     fn checked_by(&self, call: &ast::ExprCall) -> Vec<String> {
         let receiver = match &*call.func {
             Expr::Attribute(a) => Some(&*a.value),
             _ => None,
         };
         // A field or an item of sudo records keeps their environment (18.0 `odoo/fields.py:3341`),
-        // so the last switch anywhere on the path decides.
-        let skipped = |r: &&Expr| {
-            let path = self.path(r);
-            path.iter()
-                .rfind(|p| matches!(p.as_str(), "sudo()" | "sudo(False)" | "with_user()"))
-                .is_some_and(|p| p == "sudo()")
-        };
+        // so a `sudo()` anywhere on the path skips the check.
+        let skipped = |r: &&Expr| runs_as_superuser(&self.path(r));
         let checked: Vec<&Expr> = match tail_name(&call.func).unwrap_or_default() {
             "check_access" | "check_access_rule" | "has_access" => {
                 receiver.filter(|r| !skipped(r)).into_iter().collect()
@@ -2275,14 +2327,22 @@ impl Browsed {
     }
 }
 
-/// What the method `method` of records `b` returns of them, called as `c`.
-fn kept(b: Browsed, c: &ast::ExprCall, method: &str) -> Option<Browsed> {
+/// What the method `method` of records `b` returns of them, called as `c`, where `flag` says that
+/// `sudo(False)` keeps uid 1 in superuser mode, from `SUDO_FLAG`.
+fn kept(b: Browsed, c: &ast::ExprCall, method: &str, flag: bool) -> Option<Browsed> {
     match method {
-        "sudo" => Some(Browsed {
-            sudo: call_suffix(c) == "()",
-            ..b
-        }),
-        "with_user" => Some(Browsed { sudo: false, ..b }),
+        "sudo" => {
+            let root = flag && b.root;
+            Some(Browsed {
+                sudo: root || call_suffix(c) == "()",
+                root: root || is_root(c),
+                ..b
+            })
+        }
+        "with_user" => {
+            let root = superuser::switch(c).is_some();
+            Some(Browsed { sudo: root, root, ..b })
+        }
         m if SAME_MODEL.contains(&m) || SAME_RECORDS.contains(&m) || matches!(m, "read" | "mapped") => Some(b),
         _ => None,
     }
@@ -2433,16 +2493,12 @@ fn walk_compared<'a, V: Visitor<'a>>(visitor: &mut V, expr: &'a Expr) {
     }
 }
 
-/// How a call ends its name in a dotted path: `sudo(False)` runs with the user's rights again, so
-/// it reads as no `sudo()`.
+/// How a call ends its name in a dotted path: a `sudo()` whose argument is neither absent, `True`
+/// nor the superuser reads as `sudo(False)`, since a flag the code computes may leave superuser
+/// mode, and before saas~15.3 any other argument is a user.
 fn call_suffix(c: &ast::ExprCall) -> &'static str {
-    let flag = c
-        .arguments
-        .args
-        .first()
-        .or_else(|| c.arguments.find_keyword("flag").map(|k| &k.value));
-    let off = matches!(flag, Some(Expr::BooleanLiteral(b)) if !b.value);
-    if off && tail_name(&c.func) == Some("sudo") {
+    let superuser = |a: &Expr| is_true(a) || superuser::is_superuser(a);
+    if tail_name(&c.func) == Some("sudo") && !sudo_argument(c).is_none_or(superuser) {
         "(False)"
     } else {
         "()"
@@ -2555,14 +2611,95 @@ fn is_domain_join(func: &Expr) -> bool {
         && tail_name(&a.value).is_some_and(|n| matches!(n, "expression" | "Domain")))
 }
 
-/// Whose rights a method called on the records of the dotted path `records` runs with.
+/// Whose rights a method called on the records of the dotted path `records` runs with. A
+/// `with_user()` ends the caller's environment, and `sudo(False)` clears `su` whatever the caller's
+/// is (18.0 `odoo/models.py:6331`).
 fn runs_as(records: &[String]) -> RunsAs {
-    let last = |name: &str| records.iter().rposition(|p| p == name);
-    let on_self = records.first().is_some_and(|p| p == "self") && records[1..].iter().all(|p| p.ends_with("()"));
-    match (last("sudo()"), last("with_user()")) {
-        (Some(sudo), user) if user.is_none_or(|user| sudo > user) => RunsAs::Superuser,
-        (_, None) if on_self => RunsAs::AsCaller,
-        _ => RunsAs::User,
+    let kept = |p: &String| p.ends_with("()") && p != "with_user()";
+    let on_self = records.first().is_some_and(|p| p == "self") && records[1..].iter().all(kept);
+    if runs_as_superuser(records) {
+        RunsAs::Superuser
+    } else if on_self {
+        RunsAs::AsCaller
+    } else {
+        RunsAs::User
+    }
+}
+
+/// Whether the dotted path `records`, as `Flows::path` writes it, runs as the superuser.
+fn runs_as_superuser(records: &[String]) -> bool {
+    records.iter().any(|p| p == "sudo()")
+}
+
+/// The segment `Flows::path` puts before the `sudo()` of a call building the environment of uid
+/// 1, which Odoo keeps in superuser mode whatever `su` is (18.0 `odoo/api.py:571-572`, 20.0
+/// `odoo/orm/environments.py:66-67`). No pattern names it, as it is no identifier.
+const UID_1: &str = "(uid 1)";
+
+/// The first series whose `sudo()` takes a flag (saas~12.5 `odoo/models.py`). Before it,
+/// `sudo(False)` calls `env(user=False)`, which runs as uid 0, so even uid 1 leaves superuser mode
+/// (12.0 `odoo/api.py:859`, `odoo/models.py:4818`).
+const SUDO_FLAG: Series = Series { major: 12, minor: 5 };
+
+/// Drops from `path` the superuser mode a call leaves: `with_user()` for another user, when `user`,
+/// drops each `sudo()` and `UID_1`, and `sudo(False)` each `sudo()` but those of uid 1. Callers
+/// pass `user` for a `sudo(False)` before `SUDO_FLAG` too, as it then runs as uid 0.
+fn leave(path: &mut Vec<String>, user: bool) {
+    let mut after_root = false;
+    path.retain(|p| {
+        let root = std::mem::replace(&mut after_root, p == UID_1);
+        match p.as_str() {
+            "sudo()" => !user && root,
+            UID_1 => !user,
+            _ => true,
+        }
+    });
+}
+
+/// Whether a call builds the environment of uid 1: a switch to `SUPERUSER_ID`, or a `sudo()` given
+/// the superuser as its user, as `sudo(user)` reads it before saas~15.3.
+fn is_root(c: &ast::ExprCall) -> bool {
+    superuser::root(c) || tail_name(&c.func) == Some("sudo") && sudo_argument(c).is_some_and(superuser::is_superuser)
+}
+
+/// The flag of a `sudo()`, or before saas~15.3 its user: by position, or by name, `user` up to 12.0
+/// (12.0 `odoo/models.py:4789`; 15.0 `:5286-5288`).
+fn sudo_argument(c: &ast::ExprCall) -> Option<&Expr> {
+    let args = &c.arguments;
+    args.find_argument_value("flag", 0)
+        .or_else(|| args.find_keyword("user").map(|k| &k.value))
+}
+
+/// The call on the chain of `records` that makes them superuser, as the code writes it: the
+/// nearest `sudo()` or switch, or `sudo()` for a local bound under one.
+fn superuser_call(records: &Expr) -> String {
+    let inner = match records {
+        Expr::Call(c) if is_root(c) || superuser::switch(c).is_some() => {
+            return format!("{}()", tail_name(&c.func).unwrap_or("sudo"));
+        }
+        Expr::Call(c) if tail_name(&c.func) == Some("sudo") && call_suffix(c) == "()" => None,
+        Expr::Call(c) => Some(&*c.func),
+        Expr::Attribute(a) => Some(&*a.value),
+        Expr::Subscript(s) => Some(&*s.value),
+        _ => None,
+    };
+    inner.map_or_else(|| "sudo()".to_owned(), superuser_call)
+}
+
+/// How a finding names the call of a sink row's `pattern`. `sudo().write` also matches what a
+/// switch makes superuser, so a `sudo().` pattern names the call that does.
+fn sink_callee(pattern: &str, call: &ast::ExprCall) -> String {
+    match (pattern.strip_prefix("sudo()."), &*call.func) {
+        (Some(m), Expr::Attribute(a)) if !m.contains('.') => format!("{}.{m}()", superuser_call(&a.value)),
+        _ => format!("{pattern}()"),
+    }
+}
+
+/// Whether `expr` is an environment: `env`, or a call of `env` or `Environment` that builds one.
+fn is_env(expr: &Expr) -> bool {
+    match expr {
+        Expr::Call(c) => matches!(tail_name(&c.func), Some("env" | "Environment")),
+        e => tail_name(e) == Some("env"),
     }
 }
 
@@ -3253,6 +3390,36 @@ mod tests {
     }
 
     #[test]
+    fn a_configured_sudo_segment_matches_what_runs_as_superuser() {
+        let mut table = TaintTable::default();
+        table.sink("OD702", "sudo().run").unwrap();
+        table.sink("OD702", "sudo().with_user().launch").unwrap();
+        let run = |call: &str| {
+            scan_with(
+                &table,
+                Params::Rpc,
+                &format!("def f(self, x):\n    self.env['a.b'].{call}(x)\n"),
+            )
+        };
+        for call in [
+            "sudo().run",
+            "with_user(1).run",
+            "with_user(SUPERUSER_ID).sudo(False).run",
+            "sudo().with_user(SUPERUSER_ID).launch",
+        ] {
+            assert_eq!(code_list(&run(call)), ["OD702"], "{call}");
+        }
+        for call in [
+            "run",
+            "sudo(False).run",
+            "sudo().with_user(self.env.user).run",
+            "sudo().with_user(self.env.user).launch",
+        ] {
+            assert!(run(call).is_empty(), "{call}");
+        }
+    }
+
+    #[test]
     fn configured_rows_take_patterns_and_taint_rules_only() {
         let mut table = TaintTable::default();
         for pattern in ["", "a..b", "a.b()", "1a", "a.", "a.[]()", "a-b"] {
@@ -3351,24 +3518,46 @@ mod tests {
 
     #[test]
     fn a_call_runs_as_its_receiver_shows() {
-        let route = summary(
-            Params::Route(&[]),
-            "def f(self, **kw):\n    M = request.env['x.y'].sudo()\n    M._a(kw)\n    request.env['x.y']._a(kw)\n    request.env['x.y'].sudo()._a(kw)\n    request.env['x.y'].with_user(1).sudo()._a(kw)\n    request.env['x.y'].sudo().with_user(1)._a(kw)\n    self._a(kw)\n    self.with_context(a=1)._a(kw)\n    self.with_user(1)._a(kw)\n",
-        );
-        let runs_as: Vec<RunsAs> = route.calls.iter().map(|c| c.runs_as).collect();
-        assert_eq!(
-            runs_as,
-            [
-                RunsAs::Superuser,
+        let leaves =
+            "    L = request.env['x.y'].sudo().with_user(request.env.user)\n    F = request.env['x.y'].sudo(False)\n";
+        for (receiver, expected) in [
+            ("M", RunsAs::Superuser),
+            ("request.env['x.y']", RunsAs::User),
+            ("request.env['x.y'].sudo()", RunsAs::Superuser),
+            ("request.env['x.y'].sudo(True)", RunsAs::Superuser),
+            ("request.env['x.y'].with_user(1).sudo()", RunsAs::Superuser),
+            ("request.env['x.y'].sudo().with_user(1)", RunsAs::Superuser),
+            ("request.env['x.y'].with_user(SUPERUSER_ID)", RunsAs::Superuser),
+            ("request.env(su=True)['x.y']", RunsAs::Superuser),
+            ("request.env(user=SUPERUSER_ID)['x.y']", RunsAs::Superuser),
+            ("api.Environment(cr, SUPERUSER_ID, {})['x.y']", RunsAs::Superuser),
+            ("request.env['x.y'].sudo().with_user(request.env.user)", RunsAs::User),
+            (
+                "request.env['x.y'].with_user(1).with_user(request.env.user)",
                 RunsAs::User,
-                RunsAs::Superuser,
-                RunsAs::Superuser,
-                RunsAs::User,
-                RunsAs::AsCaller,
-                RunsAs::AsCaller,
-                RunsAs::User,
-            ]
-        );
+            ),
+            ("request.env['x.y'].sudo(False)", RunsAs::User),
+            ("request.env['x.y'].sudo().sudo(False)", RunsAs::User),
+            ("request.env['x.y'].sudo().sudo(flag)", RunsAs::User),
+            ("L", RunsAs::User),
+            ("F", RunsAs::User),
+            ("self", RunsAs::AsCaller),
+            ("self.with_context(a=1)", RunsAs::AsCaller),
+            ("self.with_user(1)", RunsAs::Superuser),
+            ("self.with_user(request.env.user)", RunsAs::User),
+            ("self.sudo(False)", RunsAs::User),
+            ("request.env['x.y'].with_user(1).sudo(False)", RunsAs::Superuser),
+            ("request.env['x.y'].sudo(SUPERUSER_ID)", RunsAs::Superuser),
+            ("request.env['x.y'].sudo(user=request.env.user)", RunsAs::User),
+            ("request.env(su=True)['x.y'].sudo(False)", RunsAs::User),
+        ] {
+            let route = summary(
+                Params::Route(&[]),
+                &format!("def f(self, **kw):\n    M = request.env['x.y'].sudo()\n{leaves}    {receiver}._a(kw)\n"),
+            );
+            let runs_as: Vec<RunsAs> = route.calls.iter().map(|c| c.runs_as).collect();
+            assert_eq!(runs_as, [expected], "{receiver}");
+        }
     }
 
     /// The codes `call` reports in a module of `series`, where `t` is a route parameter and `base`
@@ -3595,6 +3784,28 @@ mod tests {
     }
 
     #[test]
+    fn a_superuser_environment_leaves_the_other_sinks_as_they_were() {
+        let locals = "env = request.env(su=True)\n    R = request.env['x'].sudo().with_user(request.env.user)\n    ";
+        for (call, code) in [
+            ("env.cr.execute(t)", "OD701"),
+            ("R.env.cr.execute(t)", "OD701"),
+            ("request.env(su=True).cr.execute(t)", "OD701"),
+            ("api.Environment(env.cr, SUPERUSER_ID, {}).cr.execute(t)", "OD701"),
+            ("safe_eval(t, {'env': env, 'records': R})", "OD702"),
+            ("Markup(t)", "OD703"),
+            ("request.redirect(t, local=False)", "OD705"),
+            ("requests.get(t, timeout=5)", "OD706"),
+            ("open(t)", "OD707"),
+            ("os.system(t)", "OD708"),
+            ("pickle.loads(t)", "OD709"),
+            ("etree.fromstring(t, etree.XMLParser(resolve_entities=True))", "OD710"),
+            ("request.make_response(base, [('X-Name', t)])", "OD711"),
+        ] {
+            assert_eq!(codes(&format!("{locals}{call}")), [code], "{call}");
+        }
+    }
+
+    #[test]
     fn a_safe_yaml_loader_builds_plain_values() {
         for loader in ["yaml.Loader", "yaml.UnsafeLoader", "yaml.FullLoader", "loader"] {
             assert_eq!(codes(&format!("yaml.load(t, Loader={loader})")), ["OD709"], "{loader}");
@@ -3782,6 +3993,16 @@ mod tests {
             ("P.sudo().search([('child_ids', 'any', t)])", "OD715"),
             ("P.sudo().search(Domain(t, '=', 1))", "OD715"),
             ("P.sudo().search([('a', '=', 1), [t, '=', 1]])", "OD715"),
+            ("request.env(su=True)[t].search([])", "OD712"),
+            ("self.env[t].with_user(SUPERUSER_ID).search([])", "OD712"),
+            ("env = request.env(su=True)\n    env[t].search([])", "OD712"),
+            ("getattr(P.sudo().with_user(request.env.user), t)()", "OD713"),
+            ("request.env(su=True)['x'][t]", "OD714"),
+            ("M = request.env(su=True)['x']\n    M[t]", "OD714"),
+            ("P.with_user(1)[t]", "OD714"),
+            ("request.env(su=True)['x'].search(t)", "OD715"),
+            ("M = request.env(su=True)['x']\n    M.search(t)", "OD715"),
+            ("P.with_user(SUPERUSER_ID).search(t)", "OD715"),
         ] {
             assert_eq!(codes_of(&format!("    {call}")), [code], "{call}");
         }
@@ -3799,6 +4020,12 @@ mod tests {
             "P.sudo().search(Domain('name', '=', t) | Domain('ref', '=', t))",
             "P.sudo().search(expression.AND([[('a', '=', 1)], [('name', '=', t)]]))",
             "P.sudo().search([], order=t)",
+            "request.env(su=False)[t].search([])",
+            "self.env[t].sudo().with_user(request.env.user).search([])",
+            "self.env[t].sudo(flag).search([])",
+            "M = request.env[t].sudo().with_user(request.env.user)\n    M.search([])",
+            "P.sudo().with_user(request.env.user).search(t)",
+            "M = request.env(su=True)['x'].with_user(request.env.user)\n    M.search(t)",
         ] {
             assert!(codes_of(&format!("    {call}")).is_empty(), "{call}");
         }
@@ -3930,12 +4157,20 @@ mod tests {
             "    self.env[t].sudo(False).search([])",
             "    P.sudo()._mapping()[t]",
             "    m = P.sudo()._mapping()\n    m[t]",
+            "    request.env(su=True)[t]",
+            "    m = request.env(su=True)\n    m[t]",
+            "    r = P.sudo().with_user(request.env.user)\n    r[t]",
+            "    r = P.sudo(False)\n    r[t]",
+            "    P.sudo(flag)[t]",
         ] {
             assert!(codes_of(body).is_empty(), "{body}");
         }
         for body in [
             "    r = P.sudo().browse(1)\n    r[t]",
             "    r = P.sudo().search([])\n    r.with_context(a=1)[t]",
+            "    request.env(su=True)['x'][t]",
+            "    M = request.env(su=True)['x']\n    M[t]",
+            "    r = P.with_user(SUPERUSER_ID)\n    r[t]",
         ] {
             assert_eq!(codes_of(body), ["OD714"], "{body}");
         }
@@ -4046,9 +4281,160 @@ mod tests {
 
     #[test]
     fn sudo_false_writes_with_the_rights_of_the_user() {
-        let write = |records: &str| format!("def f(self, **post):\n    self.env['x.y'].{records}.write(post)\n");
-        assert!(scan(Params::Route(&[]), &write("sudo(False)")).is_empty());
-        assert_eq!(code_list(&scan(Params::Route(&[]), &write("sudo()"))), ["OD704"]);
+        let write = |body: &str| {
+            let src = format!("def f(self, flag, **post):\n{body}.write(post)\n");
+            code_list(&scan(Params::Route(&[]), &src))
+                .into_iter()
+                .map(str::to_owned)
+                .collect::<Vec<_>>()
+        };
+        for body in [
+            "    self.env['x.y'].sudo()",
+            "    self.env['x.y'].sudo(True)",
+            "    self.env['x.y'].sudo(flag=True)",
+            "    self.env['x.y'].with_user(SUPERUSER_ID)",
+            "    self.env['x.y'].with_user(1)",
+            "    self.env['x.y'].with_user(request.env.user).sudo()",
+            "    self.env['x.y'].sudo().with_user(SUPERUSER_ID)",
+            "    self.env['x.y'].sudo(False).sudo()",
+            "    request.env(su=True)['x.y']",
+            "    request.env(user=SUPERUSER_ID)['x.y']",
+            "    api.Environment(request.cr, SUPERUSER_ID, {})['x.y']",
+            "    env = request.env(su=True)\n    env['x.y']",
+            "    R = self.env['x.y'].sudo().with_user(SUPERUSER_ID)\n    R",
+            "    R = self.env['x.y'].with_user(request.env.user)\n    R.sudo()",
+            "    self.env['x.y'].sudo(SUPERUSER_ID)",
+            "    self.env['x.y'].sudo(1)",
+            "    self.env['x.y'].sudo(user=SUPERUSER_ID)",
+            "    self.env['x.y'].sudo(SUPERUSER_ID).sudo(False)",
+            "    self.env['x.y'].with_user(SUPERUSER_ID).sudo(False)",
+            "    self.env['x.y'].with_user(1).sudo().sudo(False)",
+            "    request.env(user=SUPERUSER_ID)['x.y'].sudo(False)",
+            "    api.Environment(request.cr, SUPERUSER_ID, {})['x.y'].sudo(False)",
+            "    R = self.env['x.y'].with_user(SUPERUSER_ID)\n    R.sudo(False)",
+            "    R = self.env['x.y'].with_user(1).sudo(False)\n    R.sudo(False)",
+        ] {
+            assert_eq!(write(body), ["OD704"], "{body}");
+        }
+        for body in [
+            "    self.env['x.y'].sudo(False)",
+            "    self.env['x.y'].sudo(flag=False)",
+            "    self.env['x.y'].sudo(flag)",
+            "    self.env['x.y'].sudo().sudo(False)",
+            "    self.env['x.y'].sudo().with_user(request.env.user)",
+            "    self.env['x.y'].with_user(1).with_user(request.env.user)",
+            "    self.env['x.y'].sudo().with_context(a=1).with_user(request.env.user).with_context(b=1)",
+            "    request.env(su=False)['x.y']",
+            "    request.env(su=True)['x.y'].with_user(request.env.user)",
+            "    R = self.env['x.y'].sudo().with_user(request.env.user)\n    R",
+            "    R = self.env['x.y'].sudo(False)\n    R",
+            "    R = self.env['x.y'].sudo()\n    R.sudo(False)",
+            "    R = self.env['x.y'].sudo()\n    R.with_user(request.env.user)",
+            "    self.env['x.y'].sudo(user=request.env.user)",
+            "    self.env['x.y'].sudo(request.env.user)",
+            "    request.env(su=True)['x.y'].sudo(False)",
+            "    self.env['x.y'].with_user(1).sudo(False).with_user(request.env.user)",
+            "    R = self.env['x.y'].with_user(1)\n    R.with_user(request.env.user)",
+            "    R = request.env(su=True)['x.y']\n    R.sudo(False)",
+        ] {
+            assert!(write(body).is_empty(), "{body}");
+        }
+    }
+
+    #[test]
+    fn sudo_false_keeps_uid_1_superuser_from_saas_12_5() {
+        let found = |series: Option<&str>, body: &str| {
+            let src = format!("def f(self, order_id, **post):\n{body}\n");
+            let found = scan_in(&TaintTable::default(), series, Params::Route(&[]), &src);
+            code_list(&found).into_iter().map(str::to_owned).collect::<Vec<_>>()
+        };
+        for (body, code) in [
+            (
+                "    self.env['x.y'].sudo(SUPERUSER_ID).sudo(False).write(post)",
+                "OD704",
+            ),
+            (
+                "    self.env['x.y'].sudo(user=SUPERUSER_ID).sudo(False).write(post)",
+                "OD704",
+            ),
+            (
+                "    request.env(user=SUPERUSER_ID)['x.y'].sudo(False).write(post)",
+                "OD704",
+            ),
+            (
+                "    api.Environment(request.cr, SUPERUSER_ID, {})['x.y'].sudo(False).write(post)",
+                "OD704",
+            ),
+            (
+                "    R = self.env['x.y'].sudo(SUPERUSER_ID)\n    R.sudo(False).write(post)",
+                "OD704",
+            ),
+            (
+                "    return request.env['sale.order'].browse(order_id).sudo(SUPERUSER_ID).sudo(False)",
+                "OD716",
+            ),
+        ] {
+            for series in [Some("saas~12.5"), Some("13.0"), None] {
+                assert_eq!(found(series, body), [code], "{body} on {series:?}");
+            }
+            for series in ["12.0", "saas~12.4"] {
+                assert!(found(Some(series), body).is_empty(), "{body} on {series}");
+            }
+        }
+    }
+
+    #[test]
+    fn a_local_superuser_on_either_branch_keeps_uid_1() {
+        for (first, second) in [
+            ("self.env['x.y'].with_user(SUPERUSER_ID)", "self.env['x.y'].sudo()"),
+            ("self.env['x.y'].sudo()", "self.env['x.y'].with_user(SUPERUSER_ID)"),
+        ] {
+            let src = format!(
+                "def f(self, c, **post):\n    if c:\n        R = {first}\n    else:\n        R = {second}\n    R.sudo(False).write(post)\n"
+            );
+            assert_eq!(code_list(&scan(Params::Route(&[]), &src)), ["OD704"], "{first}");
+        }
+    }
+
+    #[test]
+    fn a_sudo_sink_names_the_call_that_makes_it_superuser() {
+        for (body, callee) in [
+            ("self.env['x.y'].sudo().write(post)", "sudo().write()"),
+            (
+                "self.env['x.y'].with_user(SUPERUSER_ID).write(post)",
+                "with_user().write()",
+            ),
+            (
+                "self.env['x.y'].with_user(1).sudo(False).write(post)",
+                "with_user().write()",
+            ),
+            (
+                "self.env['x.y'].with_user(1).with_user(u).sudo().write(post)",
+                "sudo().write()",
+            ),
+            ("request.env(su=True)['x.y'].create(post)", "env().create()"),
+            (
+                "api.Environment(request.cr, SUPERUSER_ID, {})['x.y'].write(post)",
+                "Environment().write()",
+            ),
+            (
+                "R = self.env['x.y'].with_user(SUPERUSER_ID)\n    R.write(post)",
+                "sudo().write()",
+            ),
+            ("request.env(su=True)[t].search([])", "env().search()"),
+            ("self.env['x.y'].with_user(1)[t]", "with_user()[...]"),
+            (
+                "request.env(su=True)['ir.attachment'].create({'raw': t, 'public': True})",
+                "env().create()",
+            ),
+        ] {
+            let src = format!("def f(self, t, u, **post):\n    {body}\n");
+            let found = scan_in(&TaintTable::default(), Some("18.0"), Params::Route(&[]), &src);
+            assert!(
+                found.iter().any(|f| f.contains(&format!(" {callee}"))),
+                "{body}: {found:?}"
+            );
+        }
     }
 
     /// The codes of a route body where `order_id` and `token` are its parameters and `O` the
@@ -4083,6 +4469,14 @@ mod tests {
             "    order_id = int(order_id) if order_id else False\n    return O.browse(order_id)",
             "    return O.browse(int(order_id) if order_id else False)",
             "    order_sudo = O.browse(int(order_id))\n    order_sudo.partner_id.check_access('read')\n    return order_sudo",
+            "    order = request.env['sale.order'].with_user(SUPERUSER_ID).browse(order_id)\n    return order",
+            "    return request.env(su=True)['sale.order'].browse(order_id)",
+            "    env = request.env(su=True)\n    return env['sale.order'].browse(order_id)",
+            "    return request.env['sale.order'].browse(order_id).with_user(SUPERUSER_ID)",
+            "    order = O.browse(order_id)\n    order.with_user(SUPERUSER_ID).check_access('read')\n    return order",
+            "    order = O.browse(order_id)\n    order.with_user(1).sudo(False).check_access('read')\n    return order",
+            "    return request.env['sale.order'].browse(order_id).with_user(SUPERUSER_ID).sudo(False)",
+            "    return request.env['sale.order'].with_user(1).browse(order_id).sudo(False)",
         ] {
             assert_eq!(returned(Params::Route(&[]), body), ["OD716"], "{body}");
         }
@@ -4126,6 +4520,7 @@ mod tests {
             "    if not order_id in allowed:\n        raise NotFound()\n    return O.browse(order_id)",
             "    order_id = int(order_id)\n    if order_id not in allowed:\n        raise NotFound()\n    return O.browse(order_id)",
             "    order = O.browse(order_id)\n    if not order.sudo(False).has_access('read'):\n        raise NotFound()\n    return order",
+            "    order_sudo = O.browse(int(order_id))\n    order = order_sudo.with_user(request.env.user)\n    order.check_access('read')\n    return request.render('t', {'order': order_sudo})",
         ] {
             assert!(returned(Params::Route(&[]), body).is_empty(), "{body}");
         }
@@ -4146,6 +4541,15 @@ mod tests {
                 "    return O.browse(order_id).with_user(request.env.user)",
             ),
             (Params::Route(&[]), "    return O.browse(order_id).sudo(False)"),
+            (Params::Route(&[]), "    return O.browse(order_id).sudo(token)"),
+            (
+                Params::Route(&[]),
+                "    return O.browse(order_id).sudo().with_user(request.env.user)",
+            ),
+            (
+                Params::Route(&[]),
+                "    return request.env['sale.order'].with_user(1).with_user(request.env.user).browse(order_id)",
+            ),
             (Params::Route(&[]), "    return O.browse(order_id).get_portal_url()"),
             (Params::Route(&[]), "    return len(O.browse(order_id))"),
             (
@@ -4216,6 +4620,11 @@ mod tests {
             "    A._upload_file(file=upload, create_vals={'name': 'a', 'public': True})",
             "    vals = {'raw': upload}\n    if post:\n        vals = {'raw': upload, 'public': True}\n    A.create(vals)",
             "    public = {'raw': upload, 'public': True}\n    vals = public\n    A.create(vals)",
+            "    request.env['ir.attachment'].with_user(1).create({'raw': upload, 'public': True})",
+            "    request.env['ir.attachment'].sudo().with_user(SUPERUSER_ID).create({'raw': upload, 'public': True})",
+            "    request.env(su=True)['ir.attachment'].create({'raw': upload, 'public': True})",
+            "    request.env['ir.attachment'].with_user(1).sudo(False).create({'raw': upload, 'public': True})",
+            "    B = request.env['ir.attachment'].with_user(1)\n    B.sudo(False).create({'raw': upload, 'public': True})",
         ] {
             assert_eq!(stored(Some("18.0"), body), ["OD717"], "{body}");
         }
@@ -4238,8 +4647,12 @@ mod tests {
         for body in [
             "    request.env['ir.attachment'].create({'raw': upload, 'public': True})",
             "    A.with_user(request.env.user).create({'raw': upload, 'public': True})",
-            "    request.env['ir.attachment'].sudo().with_user(1).create({'raw': upload, 'public': True})",
+            "    request.env['ir.attachment'].sudo().with_user(request.env.user).create({'raw': upload, 'public': True})",
+            "    request.env['ir.attachment'].sudo(flag).create({'raw': upload, 'public': True})",
             "    request.env['ir.attachment'].sudo(False).create({'raw': upload, 'public': True})",
+            "    B = request.env['ir.attachment'].sudo().with_user(request.env.user)\n    B.create({'raw': upload, 'public': True})",
+            "    B = request.env['ir.attachment'].sudo(False)\n    B.create({'raw': upload, 'public': True})",
+            "    B = request.env(su=True)['ir.attachment'].sudo(False)\n    B.create({'raw': upload, 'public': True})",
             "    request.env['res.partner'].sudo().create({'raw': upload, 'public': True})",
             "    A.create({'raw': upload})",
             "    A.create({'raw': upload, 'public': bool(post)})",

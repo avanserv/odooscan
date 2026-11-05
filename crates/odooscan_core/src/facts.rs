@@ -463,9 +463,11 @@ pub enum Receiver {
 /// Whose rights a called method runs with, as the receiver of the call shows.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RunsAs {
-    /// Under `sudo()`, after any `with_user()`.
+    /// Under `sudo()`, `with_user(SUPERUSER_ID)` or an environment built for the superuser, with
+    /// no later call that leaves superuser mode.
     Superuser,
-    /// On `self` or the records of calls on it, which keep the caller's environment.
+    /// On `self` or the records of calls on it, which keep the caller's environment, as
+    /// `with_user()` and `sudo(False)` do not.
     AsCaller,
     User,
 }
