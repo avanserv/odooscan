@@ -612,7 +612,7 @@ pub fn full_id(module: &str, id: &str) -> String {
 
 /// The addon, the files that may define the class, and the class of a dotted path
 /// `odoo.addons.<addon>.<a>...<z>.<Class>`: `<a>/.../<z>.py` and `<a>/.../<z>/__init__.py`.
-fn class_file(path: &str) -> Option<(&str, [String; 2], &str)> {
+pub(crate) fn class_file(path: &str) -> Option<(&str, [String; 2], &str)> {
     let (addon, rest) = path.strip_prefix("odoo.addons.")?.split_once('.')?;
     let (module, class) = rest.rsplit_once('.')?;
     let dir = module.replace('.', "/");

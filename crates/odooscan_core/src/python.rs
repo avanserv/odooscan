@@ -13,6 +13,7 @@ use crate::facts::{
 };
 use crate::fix::{self, Edit, Fix};
 use crate::route_body::{self, RouteBody};
+use crate::routing::{self, Routing, Scope};
 use crate::series::Series;
 use crate::sql::{
     self, Created, CursorUse, QueryVars, Write, is_self, odoo_cursor, query_head, query_source, query_text,
@@ -128,7 +129,7 @@ pub(crate) fn tail_name(expr: &Expr) -> Option<&str> {
     }
 }
 
-fn keyword<'a>(call: &'a ast::ExprCall, name: &str) -> Option<&'a Expr> {
+pub(crate) fn keyword<'a>(call: &'a ast::ExprCall, name: &str) -> Option<&'a Expr> {
     keyword_arg(call, name).map(|k| &k.value)
 }
 
@@ -1125,7 +1126,7 @@ fn model_kind(class: &ast::StmtClassDef, kinds: &FxHashMap<String, ModelKind>) -
         .find_map(|name| orm_kind(name).or_else(|| kinds.get(name).copied()))
 }
 
-fn declares_model(class: &ast::StmtClassDef) -> bool {
+pub(crate) fn declares_model(class: &ast::StmtClassDef) -> bool {
     class
         .body
         .iter()
@@ -1592,17 +1593,30 @@ fn unread_facts(src: &str, visitor: PyVisitor<'_, '_>) -> PyFacts {
 /// The facts of a Python file of a module of `series`, which names a class without `_name`.
 #[cfg(test)]
 pub fn analyze(src: &str, series: Option<Series>) -> PyFacts {
-    analyze_with(src, series, &FieldClasses::default(), &TaintTable::default())
+    analyze_with(
+        src,
+        series,
+        &FieldClasses::default(),
+        &TaintTable::default(),
+        Scope::default(),
+    )
 }
 
 /// The facts of a Python file of a module of `series`, reading a call of a class of `known` as a
-/// field and following data by the rows of `taint` as well as the built-in ones.
-pub fn analyze_with(src: &str, series: Option<Series>, known: &FieldClasses, taint: &TaintTable) -> PyFacts {
+/// field, following data by the rows of `taint` as well as the built-in ones, and reading a route
+/// with what it inherits from the controllers of `scope`.
+pub fn analyze_with(
+    src: &str,
+    series: Option<Series>,
+    known: &FieldClasses,
+    taint: &TaintTable,
+    scope: Scope,
+) -> PyFacts {
     let loc = Locator::new(src);
     let module = match async_names::parse(src, series) {
         Ok(module) => module,
         Err(e) => {
-            let mut visitor = PyVisitor::new(&loc, series, known, taint, &[]);
+            let mut visitor = PyVisitor::new(&loc, series, known, taint, scope, &[]);
             let error = if python2::runs_on(series) {
                 python2::remaining_error(src, series)
             } else {
@@ -1616,7 +1630,9 @@ pub fn analyze_with(src: &str, series: Option<Series>, known: &FieldClasses, tai
         }
     };
     let body = &module.body;
-    let mut v = PyVisitor::new(&loc, series, known, taint, body);
+    let mut v = PyVisitor::new(&loc, series, known, taint, scope, body);
+    v.facts.controllers = routing::controllers(body);
+    v.facts.inherits_routes = routing::inherits_routes(&v.facts.controllers);
     v.visit_body(body);
     let (patches, diags) = module_state::check(body, &loc);
     v.facts.import_patches = patches;
@@ -1850,19 +1866,34 @@ fn dotted(class_name: &str) -> String {
     out.to_lowercase()
 }
 
-/// The parameters a `model` or `models` converter fills with records in every URL of a function's
-/// routes that names them (18.0 `odoo/addons/base/models/ir_http.py:58-88`): the user picks their
-/// ids, not their values.
-fn record_params(func: &ast::StmtFunctionDef) -> Vec<&str> {
+/// The parameters a `model` or `models` converter fills with records in every URL (18.0
+/// `odoo/addons/base/models/ir_http.py:58-88`): the user picks their ids, not their values. A URL
+/// that does not name one leaves it to the query string (18.0 `odoo/http.py:2279`, 20.0
+/// `odoo/http/dispatcher.py:244`), which may give any value.
+fn record_params<'u>(urls: &[&'u str]) -> Vec<&'u str> {
+    let filled = |url: &str, name: &str| url_converters(url).any(|(c, n)| n == name && matches!(c, "model" | "models"));
+    let mut records = vec![];
+    for (converter, name) in urls.iter().flat_map(|url| url_converters(url)) {
+        if matches!(converter, "model" | "models")
+            && !records.contains(&name)
+            && urls.iter().all(|url| filled(url, name))
+        {
+            records.push(name);
+        }
+    }
+    records
+}
+
+/// The parameters a `model` or `models` converter fills with records in some URL and no other
+/// converter fills in any: what a route's body may write as records whichever URL served it.
+fn converted_records<'u>(urls: &[&'u str]) -> Vec<&'u str> {
     let mut records = vec![];
     let mut others = vec![];
-    for url in route_urls(func) {
-        for (converter, name) in url_converters(url) {
-            if matches!(converter, "model" | "models") {
-                records.push(name);
-            } else {
-                others.push(name);
-            }
+    for (converter, name) in urls.iter().flat_map(|url| url_converters(url)) {
+        if matches!(converter, "model" | "models") {
+            records.push(name);
+        } else {
+            others.push(name);
         }
     }
     records.retain(|name| !others.contains(name));
@@ -1920,11 +1951,60 @@ fn accepts_get(call: &ast::ExprCall) -> bool {
     elts.iter().filter_map(str_lit).any(|m| m.eq_ignore_ascii_case("GET"))
 }
 
+/// The URLs of a route, those it inherits included.
+fn merged_urls<'r>(func: &'r ast::StmtFunctionDef, routing: Option<&'r Routing>) -> Vec<&'r str> {
+    match routing.and_then(|r| r.urls.as_ref()) {
+        Some(urls) => urls.iter().map(String::as_str).collect(),
+        None => route_urls(func),
+    }
+}
+
+/// The `auth` of a route, the one it inherits when it gives none, `user` by default. Each `merged_`
+/// key reads the route's own decorator when a definition the scan does not read may give the key.
+fn merged_auth<'r>(call: &'r ast::ExprCall, routing: Option<&'r Routing>) -> &'r str {
+    match routing.and_then(|r| r.auth.as_deref()) {
+        Some(auth) => auth,
+        None => keyword(call, "auth").and_then(str_lit).unwrap_or("user"),
+    }
+}
+
+/// The type of a route, the one of the route it overrides whatever it says, none when the type
+/// is no literal.
+fn merged_type<'r>(call: &'r ast::ExprCall, routing: Option<&'r Routing>) -> Option<&'r str> {
+    match routing.and_then(|r| r.kind.as_deref()) {
+        Some(kind) => Some(kind),
+        None => keyword(call, "type").map_or(Some("http"), str_lit),
+    }
+}
+
+fn merged_has_url(call: &ast::ExprCall, routing: Option<&Routing>) -> bool {
+    match routing.and_then(|r| r.urls.as_ref()) {
+        Some(urls) => !urls.is_empty(),
+        None => call.arguments.args.first().or_else(|| keyword(call, "route")).is_some(),
+    }
+}
+
+fn merged_accepts_get(call: &ast::ExprCall, routing: Option<&Routing>) -> bool {
+    match routing.and_then(|r| r.methods.as_ref()) {
+        Some(Some(methods)) => methods.iter().any(|m| m.eq_ignore_ascii_case("GET")),
+        Some(None) => true,
+        None => accepts_get(call),
+    }
+}
+
+fn merged_csrf_off(call: &ast::ExprCall, routing: Option<&Routing>) -> bool {
+    match routing.and_then(|r| r.csrf) {
+        Some(csrf) => !csrf,
+        None => csrf_off(call).is_some(),
+    }
+}
+
 struct PyVisitor<'a, 'ast> {
     loc: &'a Locator<'a>,
     series: Option<Series>,
     known: &'a FieldClasses,
     taint: &'a TaintTable,
+    scope: Scope<'a>,
     facts: PyFacts,
     /// Model classes of the file by Python class name.
     kinds: FxHashMap<String, ModelKind>,
@@ -1975,6 +2055,7 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
         series: Option<Series>,
         known: &'a FieldClasses,
         taint: &'a TaintTable,
+        scope: Scope<'a>,
         body: &'ast [Stmt],
     ) -> Self {
         let top = module_state::top_level(body);
@@ -1983,6 +2064,7 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
             series,
             known,
             taint,
+            scope,
             facts: PyFacts::default(),
             kinds: FxHashMap::default(),
             fieldless: fieldless_classes(body),
@@ -2766,14 +2848,14 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
 
     /// Routes take their parameters from the request, and public model methods from RPC callers,
     /// unless `@api.private` keeps them from RPC.
-    fn flows(&mut self, func: &ast::StmtFunctionDef) {
+    fn flows(&mut self, func: &ast::StmtFunctionDef, routing: Option<&Routing>) {
         let decorated = |name: &str| {
             func.decorator_list.iter().any(|d| match &d.expression {
                 Expr::Call(call) => tail_name(&call.func) == Some(name),
                 e => tail_name(e) == Some(name),
             })
         };
-        let records = record_params(func);
+        let records = record_params(&merged_urls(func, routing));
         let params = if decorated("route") {
             Params::Route(&records)
         } else if matches!(self.owners.last(), Some(Some(Receiver::Model(_))))
@@ -2791,24 +2873,39 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
         self.facts.flows.extend(summary);
     }
 
-    fn route_checks(&mut self, func: &ast::StmtFunctionDef) {
-        let records = record_params(func);
+    /// The routing Odoo merges for a method of a class at the top of the file.
+    fn routing(&self, func: &ast::StmtFunctionDef) -> Option<Routing> {
+        let [Some(Receiver::Class(class))] = self.owners.as_slice() else {
+            return None;
+        };
+        self.scope.routing(class, &func.name)
+    }
+
+    fn route_checks(&mut self, func: &ast::StmtFunctionDef, routing: Option<&Routing>) {
+        let urls = merged_urls(func, routing);
+        let records = converted_records(&urls);
         let mut body = None;
         for decorator in &func.decorator_list {
             if let Expr::Call(call) = &decorator.expression
                 && tail_name(&call.func) == Some("route")
             {
                 let body = body.get_or_insert_with(|| RouteBody::of(func, &records));
-                self.route_check(func, call, body);
+                self.route_check(func, call, routing, body);
             }
         }
     }
 
-    fn route_check(&mut self, func: &ast::StmtFunctionDef, call: &ast::ExprCall, body: &RouteBody) {
-        let auth = keyword(call, "auth").and_then(str_lit).unwrap_or("user");
+    fn route_check(
+        &mut self,
+        func: &ast::StmtFunctionDef,
+        call: &ast::ExprCall,
+        routing: Option<&Routing>,
+        body: &RouteBody,
+    ) {
+        let auth = merged_auth(call, routing);
         self.route_sudo(func, auth);
-        self.route_type(call);
-        self.route_get_writes(func, call, body);
+        self.route_type(call, routing);
+        self.route_get_writes(func, call, routing, body);
         self.route_cors(call);
         self.route_no_user(func, auth, body);
     }
@@ -2825,12 +2922,14 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
         self.diag("OD111", &func.name, format!("route with auth='{auth}' {what}; check that every record it reads or writes is filtered by an access check"));
     }
 
-    fn route_type(&mut self, call: &ast::ExprCall) {
-        let kind = keyword_arg(call, "type").map(|k| (k, str_lit(&k.value).unwrap_or("http")));
-        match kind {
-            Some((k, "json")) => self.api_use(Kind::RouteType("json"), k),
-            None | Some((_, "http")) => self.route_csrf(call),
-            _ => {}
+    /// OD125 reads the route's own `type`, while Odoo keeps the type the route it overrides has,
+    /// which decides whether it checks a CSRF token.
+    fn route_type(&mut self, call: &ast::ExprCall, routing: Option<&Routing>) {
+        if let Some(k) = keyword_arg(call, "type").filter(|k| str_lit(&k.value) == Some("json")) {
+            self.api_use(Kind::RouteType("json"), k);
+        }
+        if merged_type(call, routing).is_none_or(|kind| kind == "http") {
+            self.route_csrf(call);
         }
     }
 
@@ -2844,12 +2943,18 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
         }
     }
 
-    /// A route without a URL is an override, which keeps the routing of the route it overrides
-    /// (18.0 `odoo/http.py:880-891`), so its methods are not known here.
-    fn route_get_writes(&mut self, func: &ast::StmtFunctionDef, call: &ast::ExprCall, body: &RouteBody) {
-        let http = keyword(call, "type").is_none_or(|t| str_lit(t) == Some("http"));
-        let has_url = call.arguments.args.first().or_else(|| keyword(call, "route")).is_some();
-        if !(http && has_url && accepts_get(call)) || csrf_off(call).is_some() || body.checks_token {
+    /// A route with no URL the scan reads is an override of a route it does not, whose methods it
+    /// does not know either.
+    fn route_get_writes(
+        &mut self,
+        func: &ast::StmtFunctionDef,
+        call: &ast::ExprCall,
+        routing: Option<&Routing>,
+        body: &RouteBody,
+    ) {
+        let http = merged_type(call, routing) == Some("http");
+        let open = http && merged_has_url(call, routing) && merged_accepts_get(call, routing);
+        if !open || merged_csrf_off(call, routing) || body.checks_token {
             return;
         }
         if let Some(write) = body.unguarded_write {
@@ -3450,10 +3555,11 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
     }
 
     fn visit_function(&mut self, func: &'ast ast::StmtFunctionDef, stmt: &'ast Stmt) {
-        self.route_checks(func);
+        let routing = self.routing(func);
+        self.route_checks(func, routing.as_ref());
         let uses = CursorUse::scan(func, self.cursor_uses.last());
         self.rollback_checks(func, &uses);
-        self.flows(func);
+        self.flows(func, routing.as_ref());
         let outermost = self.query_vars.is_none();
         if outermost {
             self.query_vars = Some(QueryVars::of(func));
@@ -3875,7 +3981,7 @@ mod tests {
         let known = FieldClasses::from_iter([pair("Mark", UNREAD_TYPE)]);
         let src = "class X(models.Model):\n    _name = 'x'\n    a = Mark('p.q')\n    b = Mark(string='B')\n    \
                    c = Mark('p.q', delegate=True)\n    d = Mark()\n";
-        let facts = analyze_with(src, None, &known, &TaintTable::default());
+        let facts = analyze_with(src, None, &known, &TaintTable::default(), Scope::default());
         let class = &facts.classes[0];
         let [a, b, c, d] = class.fields.as_slice() else {
             panic!("{:?}", class.fields);
@@ -3947,7 +4053,7 @@ mod tests {
         assert_eq!(unknown.attr_calls, ["Vector", "Link", "Other"]);
         assert!(unknown.classes[0].fields.is_empty());
         let known = FieldClasses::from_iter([pair("Vector", "Vector"), pair("Link", "Many2one")]);
-        let facts = analyze_with(src, None, &known, &TaintTable::default());
+        let facts = analyze_with(src, None, &known, &TaintTable::default(), Scope::default());
         let class = &facts.classes[0];
         let declared: Vec<_> = class
             .fields
@@ -3977,7 +4083,7 @@ mod tests {
         let src = "class X(models.Model):\n    _name = 'x'\n    a = Link('p.q', delegate=True)\n    \
                    b = Link('r.s', delegate=flag)\n    c = Tag(groups='base.group_user', default=fields.Date.today())\n    \
                    _table_query = Tag()\n";
-        let facts = analyze_with(src, None, &known, &TaintTable::default());
+        let facts = analyze_with(src, None, &known, &TaintTable::default(), Scope::default());
         let class = &facts.classes[0];
         assert_eq!(class.inherits, [("p.q".to_owned(), "a".to_owned())]);
         assert!(class.delegate_unknown);
@@ -5682,8 +5788,12 @@ mod tests {
         };
         let one = route("'/p/<model(\"res.partner\"):partner>/<int:id>'");
         assert!(one.contains("'id'") && !one.contains("'partner'"), "{one}");
-        let list = route("['/p/<models(\"res.partner\", \"[]\"):partner>', '/q/<int:id>']");
+        let list =
+            route("['/p/<models(\"res.partner\", \"[]\"):partner>/<int:id>', '/q/<model(\"res.partner\"):partner>']");
         assert!(list.contains("'id'") && !list.contains("'partner'"), "{list}");
+        // The query string fills a parameter a URL leaves out, with any value.
+        let mixed = route("['/p/<models(\"res.partner\", \"[]\"):partner>', '/q/<int:id>']");
+        assert!(mixed.contains("'id'") && mixed.contains("'partner'"), "{mixed}");
         let other = route("['/p/<model(\"res.partner\"):partner>', '/q/<partner>']");
         assert!(other.contains("'partner'"), "{other}");
         let both = route("route='/p/<int:partner>'");
@@ -5937,6 +6047,113 @@ mod tests {
         ] {
             assert!(!model(head).contains(&"OD131"), "{head}");
         }
+    }
+
+    /// The routes an override of `SHOP_ROUTES` inherits from.
+    const SHOP_ROUTES: &str = "from odoo import http\n\nclass Shop(http.Controller):\n    @http.route('/public', auth='public')\n    def public(self):\n        pass\n\n    @http.route('/none', auth='none')\n    def none(self):\n        pass\n\n    @http.route('/get')\n    def get(self):\n        pass\n\n    @http.route('/post', methods=['POST'])\n    def post(self):\n        pass\n\n    @http.route('/hook', csrf=False)\n    def hook(self):\n        pass\n\n    @http.route('/data', type='json')\n    def data(self):\n        pass\n\n    @http.route('/record/<model(\"x\"):order>')\n    def record(self, order):\n        pass\n\n    @http.route(['/mixed', '/mixed/<model(\"x\"):order>'])\n    def mixed(self, order=None):\n        pass\n";
+
+    /// The diagnostics of an override of `method` of `SHOP_ROUTES` in a module of `series`, with
+    /// `decorator` and `body`, read with the routes of both files when `bases` names `Shop` from
+    /// its addon.
+    fn override_diags(series: &str, bases: &str, decorator: &str, method: &str, body: &str) -> Vec<RawDiag> {
+        let series = Series::parse(series);
+        let leaf = format!(
+            "from odoo import http\nfrom odoo.addons.shop.controllers.main import Shop\nfrom odoo.http import request\n\nclass Ext({bases}):\n    {decorator}\n    def {method}(self, order=None):\n        {body}\n"
+        );
+        let files = [
+            ("shop", "controllers/main.py", SHOP_ROUTES),
+            ("ext", "controllers/main.py", leaf.as_str()),
+        ];
+        let facts: Vec<PyFacts> = files.iter().map(|(_, _, src)| analyze(src, series)).collect();
+        let table = routing::Table::of(files.iter().zip(&facts).map(|((addon, rel, _), f)| (*addon, *rel, f)));
+        let scope = Scope {
+            table: &table,
+            addon: "ext",
+            rel: "controllers/main.py",
+        };
+        analyze_with(&leaf, series, &FieldClasses::default(), &TaintTable::default(), scope).diags
+    }
+
+    fn override_codes(decorator: &str, method: &str, body: &str) -> Vec<&'static str> {
+        let diags = override_diags("18.0", "Shop", decorator, method, body);
+        diags.iter().map(|d| d.code).collect()
+    }
+
+    const WRITE: &str = "request.env['x'].create({})";
+
+    #[test]
+    fn an_override_reads_the_auth_it_leaves_out_from_the_route_it_overrides() {
+        let sudo = "request.env['x'].sudo().search([])";
+        let diags = override_diags("18.0", "Shop", "@http.route()", "public", sudo);
+        let message = "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check";
+        assert_eq!(
+            diags.iter().map(|d| (d.code, d.message.as_str())).collect::<Vec<_>>(),
+            [("OD111", message)]
+        );
+        assert_eq!(override_codes("@http.route(auth='user')", "public", sudo), [""; 0]);
+        assert_eq!(
+            override_codes("@http.route()", "none", "return request.env.user.name"),
+            ["OD129"]
+        );
+        assert_eq!(
+            override_codes("@http.route('/none', methods=['POST'])", "none", WRITE),
+            ["OD129"]
+        );
+        // OD130 and OD131 read no routing, so an override reports them as a route does.
+        let switch = "request.update_env(user=order)\n        return order.token == request.params['token']";
+        assert_eq!(
+            override_codes("@http.route(methods=['POST'])", "get", switch),
+            ["OD130", "OD131"]
+        );
+    }
+
+    #[test]
+    fn an_override_reads_the_methods_urls_type_and_csrf_it_leaves_out() {
+        assert_eq!(override_codes("@http.route()", "get", WRITE), ["OD127"]);
+        assert_eq!(override_codes("@http.route('/get')", "get", WRITE), ["OD127"]);
+        assert_eq!(override_codes("@http.route('/post')", "post", WRITE), [""; 0]);
+        assert_eq!(override_codes("@http.route()", "hook", WRITE), [""; 0]);
+        assert_eq!(override_codes("@http.route()", "data", WRITE), [""; 0]);
+        // Odoo keeps the type of the first definition, whatever an override gives.
+        assert_eq!(override_codes("@http.route(type='http')", "data", WRITE), [""; 0]);
+        assert_eq!(override_codes("@http.route(type='json')", "get", WRITE), ["OD127"]);
+        assert_eq!(override_codes("@http.route(methods=['POST'])", "get", WRITE), [""; 0]);
+    }
+
+    #[test]
+    fn an_override_reads_its_own_csrf_type_and_cors_for_od112_od125_and_od128() {
+        assert_eq!(override_codes("@http.route(csrf=False)", "data", "pass"), [""; 0]);
+        assert_eq!(override_codes("@http.route(csrf=False)", "get", "pass"), ["OD112"]);
+        let json = override_diags("saas~18.1", "Shop", "@http.route(type='json')", "get", "pass");
+        assert_eq!(json.iter().map(|d| d.code).collect::<Vec<_>>(), ["OD125"]);
+        assert_eq!(override_codes("@http.route(cors='*')", "data", "pass"), ["OD128"]);
+    }
+
+    #[test]
+    fn an_override_reads_its_records_from_the_urls_it_inherits() {
+        let header = "return request.make_response('', [('X-Order', order.name)])";
+        assert_eq!(override_codes("@http.route()", "record", header), [""; 0]);
+        assert_eq!(override_codes("@http.route()", "mixed", header), ["OD711"]);
+        assert_eq!(override_codes("@http.route()", "record", "order.write({})"), ["OD127"]);
+    }
+
+    #[test]
+    fn an_override_of_a_base_the_scan_does_not_read_reads_as_its_own_route() {
+        let codes = |bases: &str, method: &str, body: &str| {
+            let diags = override_diags("18.0", bases, "@http.route()", method, body);
+            diags.iter().map(|d| d.code).collect::<Vec<_>>()
+        };
+        let header = "return request.make_response('', [('X-Order', order.name)])";
+        for bases in ["Mixin", "Mixin, Shop"] {
+            assert_eq!(codes(bases, "get", WRITE), [""; 0], "{bases}");
+            assert_eq!(codes(bases, "public", "request.env['x'].sudo()"), [""; 0], "{bases}");
+            assert_eq!(codes(bases, "record", header), ["OD711"], "{bases}");
+        }
+        // Shop comes after Mixin in the merge, so its URLs and auth stand, while the methods Mixin
+        // may give read as the override's own.
+        assert_eq!(codes("Shop, Mixin", "get", WRITE), ["OD127"]);
+        assert_eq!(codes("Shop, Mixin", "public", "request.env['x'].sudo()"), ["OD111"]);
+        assert_eq!(codes("Shop, Mixin", "record", header), [""; 0]);
     }
 
     /// `route_check` raises every route rule, so a change to one must leave the others as they were.
