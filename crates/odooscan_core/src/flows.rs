@@ -204,6 +204,10 @@ impl<'a, 'm> Solver<'a, 'm> {
             }
         }
         hits.retain_mut(|h| enter(&mut h.via, state));
+        let same = |a: &Hit, b: &Hit| {
+            (a.code, a.path, a.pos, a.keys, a.safe, a.named) == (b.code, b.path, b.pos, b.keys, b.safe, b.named)
+        };
+        let hits = distinct(hits, same, |h| h.via.len());
         self.memo.insert(key, hits.clone());
         hits
     }
@@ -249,6 +253,8 @@ impl<'a, 'm> Solver<'a, 'm> {
             }
         }
         rets.retain_mut(|r| enter(&mut r.via, (summary, r.origin)));
+        let same = |a: &Ret, b: &Ret| (a.origin, &a.label, a.keys, a.safe) == (b.origin, &b.label, b.keys, b.safe);
+        let rets = distinct(rets, same, |r| r.via.len());
         self.returns.insert(key, rets.clone());
         rets
     }
@@ -275,6 +281,21 @@ fn enter<S: PartialEq>(via: &mut Vec<S>, state: S) -> bool {
         via.push(state);
     }
     fresh
+}
+
+/// Keeps one of the items `same` finds alike, the first unless a later one passes through fewer
+/// methods. A value joined from several calls has an edge for each, so without it the paths to one
+/// sink grow with the product of the calls at each depth.
+fn distinct<T>(items: Vec<T>, same: impl Fn(&T, &T) -> bool, via: impl Fn(&T) -> usize) -> Vec<T> {
+    let mut kept: Vec<T> = vec![];
+    for item in items {
+        match kept.iter_mut().find(|k| same(k, &item)) {
+            Some(k) if via(&item) < via(k) => *k = item,
+            Some(_) => {}
+            None => kept.push(item),
+        }
+    }
+    kept
 }
 
 /// How the value `ret` carries enters the call `c` of `caller`: from a source of the callee
@@ -745,6 +766,60 @@ mod tests {
             let methods = format!("    def label(self, prefix):\n        return {body}\n");
             assert_eq!(scan_messages(route, &methods).len(), 1, "{body}");
         }
+    }
+
+    #[test]
+    fn a_call_joined_to_a_public_method_parameter_is_returned_whatever_the_caller_passes() {
+        let route = "    def r(self):\n        return Markup(request.env['x.y'].label('x'))\n";
+        let methods = "    def label(self, prefix):\n        return prefix + self._suffix()\n\n    def _suffix(self):\n        return request.params.get('n')\n";
+        assert_eq!(
+            scan_messages(route, methods),
+            ["route.py:4 OD703 request.params reaches Markup() through 'label()', '_suffix()' unescaped"]
+        );
+    }
+
+    #[test]
+    fn each_parameter_a_public_method_joins_is_returned() {
+        let route = "    def r(self, t):\n        return Markup(request.env['x.y'].label('x', t))\n";
+        let methods = "    def label(self, a, b):\n        return a + b\n";
+        assert_eq!(
+            scan_messages(route, methods),
+            ["route.py:4 OD703 route parameter 't' reaches Markup() through 'label()' unescaped"]
+        );
+    }
+
+    /// What `_m1` of `x.y` returns and the sinks its parameter reaches, by label and by code, of
+    /// methods `_m1` to `_m4` where the last runs `last` and each other `body` with `#` the next.
+    fn solved(body: &str, last: &str) -> (Vec<String>, Vec<&'static str>) {
+        let method = |i: usize| match i {
+            4 => format!("    def _m4(self, v):\n        {last}\n"),
+            i => format!(
+                "    def _m{i}(self, v):\n        {}\n",
+                body.replace('#', &format!("_m{}", i + 1))
+            ),
+        };
+        let methods: Vec<String> = (1..=4).map(method).collect();
+        let modules = [module("    def r(self):\n        pass\n", &methods.join("\n"))];
+        let index = Index::build(&modules, None);
+        let scope = index.scope(0);
+        let file = &modules[0].python[1];
+        let m1 = FlowRef {
+            module: 0,
+            file,
+            summary: file.facts.flows.iter().find(|s| s.method == "_m1").unwrap(),
+        };
+        let mut solver = Solver::new(&index, &scope);
+        let rets = solver.returns(m1, 1).into_iter().map(|r| r.label).collect();
+        let hits = solver.hits(m1, 0, 1, false).into_iter().map(|h| h.code).collect();
+        (rets, hits)
+    }
+
+    #[test]
+    fn a_value_through_two_calls_at_each_depth_is_followed_once() {
+        let (rets, _) = solved("return self.#(v) + self.#(v)", "return request.params.get('x')");
+        assert_eq!(rets, ["request.params"]);
+        let (_, hits) = solved("self.#(v)\n        self.#(v)", "requests.get(v, timeout=5)");
+        assert_eq!(hits, ["OD706"]);
     }
 
     #[test]

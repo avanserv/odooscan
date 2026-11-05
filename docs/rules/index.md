@@ -214,16 +214,17 @@ raises adds nothing after it, and a loop body is read twice.
 
 A value passed to a method of `self`, of `env["x"]` or of a local bound to one is followed into
 every definition of that method the module's dependencies hold, overrides included, up to four calls
-deep; so is a value such a method returns, or returns from a method it calls. The finding is at the
-sink when the module holds it, otherwise at the call that leaves the module. Records run as
-superuser after `sudo()`, `sudo(SUPERUSER_ID)`, `with_user(SUPERUSER_ID)` or `with_user(1)`, and
-so do those of an environment built by `env(su=True)`, `env(user=SUPERUSER_ID)` or
-`Environment(cr, SUPERUSER_ID, ...)`, until `with_user()` for another user. `sudo(False)`, and a
-`sudo(flag)` whose flag the code computes, end it too, except from saas~12.5 on the records of the
-superuser, which Odoo runs in superuser mode whatever `su` is. A method called as superuser runs
-so, and so do the methods it calls on `self`. For OD704, a mapping such a method is passed and
-writes on `self`, or on the records of a call on `self`, is a superuser write; a mapping the method
-reads from the request itself is not followed.
+deep; so is a value such a method returns, or returns from a method it calls. A value built from
+several parameters or calls, such as `a + b`, `x or self._y()` or the two arms of an `if`, is
+followed from each. The finding is at the sink when the module holds it, otherwise at the call that
+leaves the module. Records run as superuser after `sudo()`, `sudo(SUPERUSER_ID)`,
+`with_user(SUPERUSER_ID)` or `with_user(1)`, and so do those of an environment built by
+`env(su=True)`, `env(user=SUPERUSER_ID)` or `Environment(cr, SUPERUSER_ID, ...)`, until
+`with_user()` for another user. `sudo(False)`, and a `sudo(flag)` whose flag the code computes, end
+it too, except from saas~12.5 on the records of the superuser, which Odoo runs in superuser mode
+whatever `su` is. A method called as superuser runs so, and so do the methods it calls on `self`.
+For OD704, a mapping such a method is passed and writes on `self`, or on the records of a call on
+`self`, is a superuser write; a mapping the method reads from the request itself is not followed.
 
 The flow ends at a sanitizer: `int()`, `float()`, `bool()`, `len()`, `SQL.identifier()`, `escape()`,
 `html_escape()`, `html_sanitize()`, `plaintext2html()`, `urlencode()`, `url_encode()`,
