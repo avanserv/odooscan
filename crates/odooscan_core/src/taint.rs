@@ -11,6 +11,7 @@ use crate::facts::{
 };
 use crate::method_body::arguments;
 use crate::python::{Locator, SAME_MODEL, exits, str_lit, tail_name};
+use crate::python2;
 use crate::series::Series;
 use crate::superuser;
 
@@ -95,6 +96,8 @@ struct SinkRow {
     /// The path names the standard library's module, not the one of that name an import from
     /// `odoo` binds: 17.0 `odoo.tools.pickle` loads only plain data (`odoo/tools/misc.py:1689`).
     stdlib: bool,
+    /// The argument in a module on Python 2, where it differs from `arg`.
+    python2: Option<Arg>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -122,6 +125,7 @@ const fn sink_at(sink: Sink, arg: Arg) -> Role {
         guard: None,
         whole: false,
         stdlib: false,
+        python2: None,
     })
 }
 
@@ -132,6 +136,7 @@ const fn guarded(sink: Sink, arg: Arg, guard: Guard) -> Role {
         guard: Some(guard),
         whole: false,
         stdlib: false,
+        python2: None,
     })
 }
 
@@ -142,13 +147,17 @@ const fn stdlib(sink: Sink, arg: Arg) -> Role {
         guard: None,
         whole: false,
         stdlib: true,
+        python2: None,
     })
 }
 
 /// The keywords of the URL of a redirect: `url` in the `request.redirect` of 14.0 and before.
 const LOCATION: Arg = Arg::At(0, &["location", "url"]);
 const URL: Arg = Arg::At(0, &["url"]);
-const FILE: Arg = Arg::At(0, &["file", "name", "path_or_file", "filepath_or_fp"]);
+const FILE: Arg = Arg::At(0, &["file", "path_or_file", "filepath_or_fp"]);
+/// The built-in `open(name, mode, buffering)` of Python 2, which 9.0 and 10.0 run on, and the
+/// `file` of the `io.open()` that `from io import open` binds to the same bare name.
+const OPEN_PY2: Arg = Arg::At(0, &["name", "file"]);
 
 /// From 15.0 `request.redirect()` takes `local`, which drops the scheme and the host of the URL
 /// unless it is false (`odoo/http.py:303`); before, it redirects to any URL.
@@ -272,8 +281,10 @@ const TABLE: &[(&str, Role)] = &[
             guard: None,
             whole: true,
             stdlib: false,
+            python2: Some(OPEN_PY2),
         }),
     ),
+    ("io.open", sink_at(Sink::Path, FILE)),
     ("send_file", sink_at(Sink::Path, FILE)),
     ("os.path.join", sink_at(Sink::Path, Arg::Any)),
     ("os.system", sink_at(Sink::Command, Arg::At(0, &["command"]))),
@@ -2042,7 +2053,8 @@ impl Flows<'_> {
         matches!(expr, Expr::Call(c) if built_in(&self.path(&c.func)).is_some_and(|(_, r)| matches!(r, Role::Sink(row) if row.sink == Sink::Markup)))
     }
 
-    /// An f-string starts with the text before its first field, or without any with that field.
+    /// An f-string starts with the text before its first field or, when no text comes before the
+    /// first field, with that field's value.
     fn fstring(&mut self, f: &ast::ExprFString) -> Option<Taint> {
         let mut text = String::new();
         // The length of the text before the first field, and where that field starts.
@@ -2158,11 +2170,10 @@ impl Flows<'_> {
             Some((pattern, Role::Source(kind))) => self.source(format!("{pattern}()"), expr, kind),
             Some((_, Role::Sanitizer)) => None,
             Some((pattern, Role::Sink(row))) => {
-                let arg = sink_arg(row.arg, code(row.sink), call, &args, &keywords);
+                let param = self.param(row);
+                let arg = sink_arg(param, code(row.sink), call, &args, &keywords);
                 let callee = match row.sink {
-                    Sink::Header => {
-                        header_label(arg_expr(row.arg, call).and_then(header_name), &format!("{pattern}()"))
-                    }
+                    Sink::Header => header_label(arg_expr(param, call).and_then(header_name), &format!("{pattern}()")),
                     _ => sink_callee(pattern, call),
                 };
                 self.reach(row.sink, callee, arg, expr);
@@ -2521,6 +2532,14 @@ impl Flows<'_> {
         let args = args.into_iter().chain(keywords).fold(None, join);
         let t = self.result(call, path, receiver, args);
         t.map(|t| t.safe(start))
+    }
+
+    /// The argument of a sink that the module's Python takes.
+    fn param(&self, row: SinkRow) -> Arg {
+        match row.python2 {
+            Some(arg) if python2::runs_on(self.series) => arg,
+            _ => row.arg,
+        }
     }
 
     /// Whether a call of `path` that `row` matches is the sink: its guard is met, it calls no
@@ -4082,6 +4101,8 @@ mod tests {
             ("urllib.request.urlopen(t)", "OD706"),
             ("open(t)", "OD707"),
             ("open(file=t)", "OD707"),
+            ("io.open(t)", "OD707"),
+            ("io.open(file=t)", "OD707"),
             ("http.send_file(filepath_or_fp=t)", "OD707"),
             ("os.path.join(base, t)", "OD707"),
         ] {
@@ -4093,11 +4114,27 @@ mod tests {
             "request.redirect_query(t, {})",
             "requests.request(t, base)",
             "Image.open(t)",
-            "io.open(t)",
+            "http.send_file(name=t)",
             "os.path.join(base, 'x')",
             "tools.file_open(t)",
+            // A session is followed only when built in the call's own expression.
+            "s = requests.Session(); s.get(t)",
+            "self.session = requests.Session(); self.session.get(t)",
         ] {
             assert!(codes(call).is_empty(), "{call}");
+        }
+    }
+
+    #[test]
+    fn open_takes_its_path_as_name_on_python_2_only() {
+        for series in ["9.0", "10.0"] {
+            assert_eq!(codes_in(Some(series), "open(name=t)"), ["OD707"], "{series}");
+            assert_eq!(codes_in(Some(series), "open(t)"), ["OD707"], "{series}");
+        }
+        assert_eq!(codes_in(Some("10.0"), "open(file=t)"), ["OD707"]);
+        for series in [Some("11.0"), Some("18.0"), None] {
+            assert!(codes_in(series, "open(name=t)").is_empty(), "{series:?}");
+            assert_eq!(codes_in(series, "open(file=t)"), ["OD707"], "{series:?}");
         }
     }
 
@@ -4116,6 +4153,7 @@ mod tests {
     fn a_name_without_its_directories_opens_no_other_file() {
         for call in [
             "open(os.path.basename(t))",
+            "io.open(os.path.basename(t))",
             "os.path.join(base, os.path.basename(t))",
             "http.send_file(io.BytesIO(t))",
             "open(werkzeug.utils.secure_filename(t))",

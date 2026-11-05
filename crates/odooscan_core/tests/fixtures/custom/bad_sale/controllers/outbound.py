@@ -65,3 +65,8 @@ class Outbound(http.Controller):
         for note in request.env["bad.registry.note"].search([]):
             open(note.label, "rb")
             note.res_id = kw["res_id"]
+
+    @http.route("/bad/outbound/legacy", auth="user")
+    def legacy(self, name):
+        io.open(os.path.join(DOCS, os.path.basename(name)), "rb")
+        return io.open(DOCS + "/" + name, "rb")
