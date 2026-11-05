@@ -1,0 +1,9 @@
+<odoo>
+    <record id="access_desk_public_xml" model="ir.access">
+        <field name="name">desk public by record</field>
+        <field name="model_id" ref="model_exposure20_desk"/>
+        <field name="group_id" ref="base.group_public"/>
+        <field name="operation">r</field>
+        <field name="domain">['&amp;', (1, '=', 1), (1, '=', 1)]</field>
+    </record>
+</odoo>
