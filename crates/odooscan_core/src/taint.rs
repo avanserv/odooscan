@@ -6,7 +6,8 @@ use ruff_python_ast::{self as ast, CmpOp, Expr, Operator, Stmt};
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::facts::{
-    ArgSlot, CallSite, FlowEdge, FlowOrigin, FlowSummary, FlowTarget, RawDiag, Receiver, RunsAs, Safe, Spanned, Step,
+    ArgSlot, CallSite, FlowEdge, FlowOrigin, FlowSummary, FlowTarget, Pos, RawDiag, Receiver, RunsAs, Safe, Spanned,
+    Step,
 };
 use crate::method_body::arguments;
 use crate::python::{Locator, SAME_MODEL, exits, str_lit, tail_name};
@@ -209,13 +210,18 @@ const READ_GROUP: Arg = Arg::Each(&[
 /// Where user data enters, where it must not arrive, and what makes it harmless. A pattern matches
 /// a dotted callee or attribute that ends with its last name and holds its other names in order, so
 /// `cr.execute` matches `self.env.cr.execute` and `sudo().write` matches
-/// `env["x"].sudo().browse(ids).write`. The parameters of routes and of public model methods are
-/// sources too; `python.rs` tells which functions those are.
+/// `env["x"].sudo().browse(ids).write`. A source's names stand together, so that
+/// `request.httprequest.files.values()` reads the files rather than the `values` source. The
+/// parameters of routes and of public model methods are sources too; `python.rs` tells which
+/// functions those are.
 const TABLE: &[(&str, Role)] = &[
     ("request.params", Role::Source(Kind::Keys)),
     ("request.get_http_params", Role::Source(Kind::Keys)),
     ("request.get_json_data", Role::Source(Kind::Keys)),
     ("request.jsonrequest", Role::Source(Kind::Keys)),
+    // Its form from saas~15.4 (16.0 addons/payment_adyen/controllers/main.py:274), which the
+    // contiguous match of a source does not read as the row above.
+    ("request.dispatcher.jsonrequest", Role::Source(Kind::Keys)),
     ("request.httprequest.args", Role::Source(Kind::Keys)),
     ("request.httprequest.form", Role::Source(Kind::Keys)),
     ("request.httprequest.values", Role::Source(Kind::Keys)),
@@ -327,6 +333,9 @@ const TABLE: &[(&str, Role)] = &[
     // Its file lies under the addons paths, whatever name it is given (18.0
     // odoo/tools/misc.py:187-260).
     ("file_open", Role::Sanitizer),
+    // An addon's manifest from the addons paths, for a name matching `^\w{1,256}$`, or `None` (20.0
+    // odoo/modules/module.py:56, :338-351).
+    ("Manifest.for_addon", Role::Sanitizer),
     // Quotes a file name for the header, so that it ends no parameter (18.0 odoo/http.py:328-331).
     ("content_disposition", Role::Sanitizer),
     // An attribute's value, or the default, and not its name.
@@ -370,8 +379,21 @@ const SINK_KEYWORDS: &[&str] = &["query", "code", "expr", "vals", "vals_list"];
 fn built_in(path: &[String]) -> Option<(&'static str, Role)> {
     TABLE.iter().copied().find(|(pattern, role)| {
         let whole = matches!(role, Role::Sink(row) if row.whole);
-        matches_path(pattern, path) && (!whole || path.len() == 1)
+        let source = matches!(role, Role::Source(_));
+        let fits = if source {
+            ends_with(pattern, path)
+        } else {
+            matches_path(pattern, path)
+        };
+        fits && (!whole || path.len() == 1)
     })
+}
+
+/// Whether `path` ends with the names of `pattern`, none between them.
+fn ends_with(pattern: &str, path: &[String]) -> bool {
+    let names: Vec<&str> = pattern.split('.').collect();
+    let start = path.len().checked_sub(names.len());
+    start.is_some_and(|start| path[start..].iter().zip(names).all(|(p, n)| p == n))
 }
 
 /// The rows a configuration adds to `TABLE`, matched by the same dotted patterns. They match
@@ -475,11 +497,29 @@ struct Taint {
     /// Where the value entered, then each local it was assigned to.
     steps: Vec<Spanned<String>>,
     safe: Safe,
+    /// The value is the `name` of a parameter's own value, harmless when a caller passes a file
+    /// picked by its field.
+    named: bool,
+    /// The value is a parameter's own, copied but not derived, so a caller's file when it is one.
+    own: bool,
+    upload: Option<Upload>,
+}
+
+/// What a value holds of the files a request uploads.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Upload {
+    /// Every file, by the field of the form that sent it, which the user names.
+    Mapping,
+    /// The files of a field the code names, whose `name` werkzeug sets to that field (3.0.1
+    /// `formparser.py:392-400`).
+    Picked,
 }
 
 impl Taint {
+    /// The value derived from this one, of `kind`.
     fn kind(mut self, kind: Kind) -> Self {
         self.kind = kind;
+        self.own = false;
         self
     }
 
@@ -517,6 +557,9 @@ fn joined(a: Taint, b: Taint) -> Taint {
     };
     Taint {
         safe: keep.safe.intersect(dropped),
+        named: keep.named && drop.named,
+        own: keep.own && drop.own,
+        upload: keep.upload.filter(|u| drop.upload == Some(*u)),
         ..keep
     }
 }
@@ -717,6 +760,35 @@ fn values(t: Option<Taint>) -> Option<Taint> {
     t.map(|t| t.kind(Kind::Value))
 }
 
+/// The source of the files a request uploads.
+const FILES: &str = "request.httprequest.files";
+
+/// What the attribute `name` of a value of taint `t` carries. The `name` of a file picked by its
+/// field is that field, which the code wrote.
+fn attribute(t: Option<Taint>, name: &str) -> Option<Taint> {
+    let t = t.filter(|t| name != "name" || t.upload != Some(Upload::Picked))?;
+    Some(Taint {
+        named: name == "name" && t.own,
+        upload: None,
+        ..t.kind(Kind::Value)
+    })
+}
+
+/// What an item of a value of taint `t` holds, `key` being the item's literal key: a file of the
+/// uploads by a field the code names is picked, and so are those of a list of picked files.
+fn item_of(t: Option<Taint>, key: Option<&str>) -> Option<Taint> {
+    t.map(|t| {
+        let upload = match t.upload {
+            Some(Upload::Mapping) => key.map(|_| Upload::Picked),
+            u => u,
+        };
+        Taint {
+            upload,
+            ..t.kind(Kind::Value)
+        }
+    })
+}
+
 #[derive(Clone, Default)]
 struct State {
     vars: FxHashMap<String, Taint>,
@@ -742,7 +814,38 @@ struct State {
     ids: FxHashMap<String, Taint>,
     /// Locals bound to values a create of `ir.attachment` may take.
     vals: FxHashMap<String, Vals>,
+    /// Locals bound to a path that an `os.path.join()` of `Flows::held` built.
+    paths: FxHashMap<String, Sites>,
 }
+
+/// The `os.path.join()` calls a path may come from, and whether a normalizer resolved its `..` on
+/// every path, so that a test of its start holds for what it opens.
+#[derive(Clone, Debug)]
+struct Sites {
+    at: Vec<Pos>,
+    normalized: bool,
+    /// A check of its start holds here on every path, so a read uses no join unchecked.
+    confined: bool,
+}
+
+fn join_sites(a: Option<Sites>, b: Option<Sites>) -> Option<Sites> {
+    match (a, b) {
+        (Some(mut a), Some(b)) => {
+            for pos in b.at {
+                if !a.at.contains(&pos) {
+                    a.at.push(pos);
+                }
+            }
+            a.normalized &= b.normalized;
+            a.confined &= b.confined;
+            Some(a)
+        }
+        (a, b) => a.or(b),
+    }
+}
+
+/// The normalizers that resolve the `..` of a path.
+const NORMALIZERS: &[&str] = &["os.path.normpath", "os.path.realpath", "os.path.abspath"];
 
 /// What values for `ir.attachment` set: `public` to a literal `True`, and the taint of the content
 /// they store.
@@ -844,6 +947,7 @@ impl State {
         join_into(&mut self.browsed, other.browsed, join_browsed);
         join_into(&mut self.ids, other.ids, join);
         join_into(&mut self.vals, other.vals, join_vals);
+        join_into(&mut self.paths, other.paths, join_sites);
         // A check on one path only still vouches for the records: as at 18.0
         // payment/controllers/portal.py:76-78, the path without it browses no id.
         self.checked.extend(other.checked);
@@ -875,9 +979,13 @@ pub fn function(
         calls: vec![],
         edges: vec![],
         diags: vec![],
+        held_join: None,
+        held: FxHashMap::default(),
+        quiet: false,
     };
     let names = flows.params(&func.parameters, params);
     flows.body(&func.body);
+    flows.report_held();
     let mut seen = FxHashSet::default();
     flows.diags.retain(|d| seen.insert((d.code, d.pos)));
     let summary = (!flows.edges.is_empty()).then(|| FlowSummary {
@@ -904,6 +1012,21 @@ struct Flows<'a> {
     calls: Vec<CallSite>,
     edges: Vec<FlowEdge>,
     diags: Vec<RawDiag>,
+    /// The `os.path.join()` the assignment being read binds to one local, held rather than reported.
+    held_join: Option<Pos>,
+    /// The joins held until a read of their local uses them unchecked.
+    held: FxHashMap<Pos, Held>,
+    /// The expression being read copies a held path or tests its start, so it uses no join.
+    quiet: bool,
+}
+
+/// A join `Flows::reach` holds.
+struct Held {
+    taint: Taint,
+    callee: String,
+    /// A check of its local's start confined it on some path, so it is reported only when read
+    /// where none holds.
+    checked: bool,
 }
 
 impl Flows<'_> {
@@ -944,6 +1067,9 @@ impl Flows<'_> {
                     origin,
                     steps,
                     safe,
+                    named: false,
+                    own: true,
+                    upload: None,
                 },
             );
         }
@@ -975,7 +1101,7 @@ impl Flows<'_> {
     fn stmt(&mut self, stmt: &Stmt) {
         match stmt {
             Stmt::Assign(a) => {
-                let t = self.expr(&a.value);
+                let t = self.assigned(&a.targets, &a.value);
                 for target in &a.targets {
                     self.bind(target, t.clone(), Some(&a.value));
                 }
@@ -985,7 +1111,7 @@ impl Flows<'_> {
                 value: Some(value),
                 ..
             }) => {
-                let t = self.expr(value);
+                let t = self.assigned(std::slice::from_ref(target), value);
                 self.bind(target, t, Some(value));
             }
             Stmt::AugAssign(a) => {
@@ -1065,6 +1191,7 @@ impl Flows<'_> {
         if let Some(test) = test {
             self.expr(test);
             self.vouch(self.tested(test, CmpOp::In));
+            self.confine(test, CmpOp::In);
         }
         self.body(body);
         if !exits(body) {
@@ -1079,6 +1206,7 @@ impl Flows<'_> {
     /// raises.
     fn guard(&mut self, test: &Expr, op: CmpOp) {
         self.vouch(self.tested(test, op));
+        self.confine(test, op);
         let mut checks = Checks::new(op);
         checks.visit_expr(test);
         for name in checks.values {
@@ -1294,6 +1422,7 @@ impl Flows<'_> {
             None => self.state.picked.remove(name),
         };
         self.bind_vals(name, target, value);
+        self.bind_path(name, value);
         self.set(name.to_owned(), target, t);
     }
 
@@ -1431,6 +1560,7 @@ impl Flows<'_> {
     }
 
     fn source(&self, label: String, expr: &Expr, kind: Kind) -> Option<Taint> {
+        let upload = (label == FILES).then_some(Upload::Mapping);
         let steps = vec![Spanned {
             value: label,
             pos: self.loc.at(expr),
@@ -1440,6 +1570,9 @@ impl Flows<'_> {
             origin: FlowOrigin::Source,
             steps,
             safe: Safe::default(),
+            named: false,
+            own: false,
+            upload,
         })
     }
 
@@ -1467,6 +1600,15 @@ impl Flows<'_> {
         {
             // Harmless at the target only if it is so on every path that gets there.
             e.safe = e.safe.intersect(t.safe);
+            e.upload &= t.upload == Some(Upload::Picked);
+            e.own &= t.own;
+            // A held join reaches its sink after the sinks below it, though it runs first.
+            let sink_at = |steps: &[Spanned<String>]| steps.last().map(|s| s.pos);
+            let earlier = matches!(target, FlowTarget::Sink(_)) && sink_at(&t.steps) < sink_at(&e.steps);
+            if (e.named && !t.named) || (e.named == t.named && earlier) {
+                e.named = t.named;
+                e.steps = t.steps;
+            }
             return;
         }
         self.edges.push(FlowEdge {
@@ -1474,6 +1616,9 @@ impl Flows<'_> {
             target,
             keys: t.kind == Kind::Keys,
             safe: t.safe,
+            upload: t.upload == Some(Upload::Picked),
+            named: t.named,
+            own: t.own,
             steps: t.steps,
         });
     }
@@ -1525,21 +1670,161 @@ impl Flows<'_> {
             origin: FlowOrigin::Return(c),
             steps,
             safe: Safe::default(),
+            named: false,
+            own: false,
+            upload: None,
         })
+    }
+
+    /// The taint of a value assigned to `targets`, holding the `os.path.join()` that builds it when
+    /// it is bound to one local, bare or in normalizers, until a check of its start may confine it.
+    fn assigned(&mut self, targets: &[Expr], value: &Expr) -> Option<Taint> {
+        let local = matches!(targets, [Expr::Name(_)]);
+        self.held_join = local.then(|| self.join_site(value)).flatten();
+        let copy = local && self.held_join.is_none() && self.sites_of(value).is_some();
+        let quiet = std::mem::replace(&mut self.quiet, copy);
+        let t = self.expr(value);
+        self.quiet = quiet;
+        self.held_join = None;
+        t
+    }
+
+    /// The position of the built-in `os.path.join()` that `value` is, or that normalizers take.
+    fn join_site(&self, value: &Expr) -> Option<Pos> {
+        let Expr::Call(c) = value else { return None };
+        if let Some(path) = self.normalized(c) {
+            return self.join_site(path);
+        }
+        let row = self.table.lookup(&self.path(&c.func));
+        matches!(row, Some(("os.path.join", Role::Sink(r))) if r.sink == Sink::Path).then(|| self.loc.at(value))
+    }
+
+    /// The path a call of a normalizer takes.
+    fn normalized<'e>(&self, c: &'e ast::ExprCall) -> Option<&'e Expr> {
+        let path = self.path(&c.func);
+        let normalizer = NORMALIZERS.iter().any(|n| matches_path(n, &path));
+        c.arguments.args.first().filter(|_| normalizer)
+    }
+
+    /// The joins of `Flows::held` that `value` holds: a held join itself, a normalizer of one, or a
+    /// local bound to one.
+    fn sites_of(&self, value: &Expr) -> Option<Sites> {
+        match value {
+            Expr::Name(n) => self.state.paths.get(n.id.as_str()).cloned(),
+            Expr::Call(c) => match self.normalized(c) {
+                Some(path) => self.sites_of(path).map(|s| Sites { normalized: true, ..s }),
+                None => {
+                    let pos = self.loc.at(value);
+                    self.held.contains_key(&pos).then(|| Sites {
+                        at: vec![pos],
+                        normalized: false,
+                        confined: false,
+                    })
+                }
+            },
+            _ => None,
+        }
+    }
+
+    fn bind_path(&mut self, name: &str, value: Option<&Expr>) {
+        match value.and_then(|v| self.sites_of(v)) {
+            Some(sites) => self.state.paths.insert(name.to_owned(), sites),
+            None => self.state.paths.remove(name),
+        };
+    }
+
+    /// Reports a sink, but holds the join `Flows::assigned` holds.
+    fn reach(&mut self, sink: Sink, callee: String, t: Option<Taint>, expr: &Expr) {
+        let pos = self.loc.at(expr);
+        if self.held_join != Some(pos) {
+            return self.sink_pos(sink, callee, t, pos);
+        }
+        let Some(t) = t.filter(|t| !t.safe.has(code(sink))) else {
+            return;
+        };
+        let (taint, checked) = match self.held.remove(&pos) {
+            Some(kept) => (joined(kept.taint, t), kept.checked),
+            None => (t, false),
+        };
+        self.held.insert(pos, Held { taint, callee, checked });
+    }
+
+    /// Reports the held joins a read of the local `name` uses where no check confines them.
+    fn read(&mut self, name: &str) {
+        let Some(sites) = self.state.paths.get(name).filter(|s| !s.confined && !self.quiet) else {
+            return;
+        };
+        for pos in sites.at.clone() {
+            if let Some(held) = self.held.remove(&pos) {
+                self.sink_pos(Sink::Path, held.callee, Some(held.taint), pos);
+            }
+        }
+    }
+
+    /// Confines a normalized local whose start `test` holds to prefixes the code picks, where
+    /// `test` holds for `op` as in `Flows::guard`: no `..` then leaves the prefix. Any prefix
+    /// past the root counts, though `/srv/docs` admits `/srv/docs2`. In an `if` the state is the arm's, so a
+    /// read after it, as after a test that raises on a prefix it denies, is still unchecked.
+    fn confine(&mut self, test: &Expr, op: CmpOp) {
+        let each = if op == CmpOp::In {
+            ast::BoolOp::And
+        } else {
+            ast::BoolOp::Or
+        };
+        for t in operands(test, each) {
+            let Some((name, prefix)) = started(t, op) else {
+                continue;
+            };
+            let Some(sites) = self.state.paths.get(name).filter(|s| s.normalized).cloned() else {
+                continue;
+            };
+            if !fixed_prefixes(prefix, |p| self.picked_prefix(p)) {
+                continue;
+            }
+            for pos in &sites.at {
+                if let Some(held) = self.held.get_mut(pos) {
+                    held.checked = true;
+                }
+            }
+            if let Some(sites) = self.state.paths.get_mut(name) {
+                sites.confined = true;
+            }
+        }
+    }
+
+    /// Whether the code picks a prefix that confines a path: the user sets none of it, no held
+    /// join built it, and it is more than the root, which every absolute path starts with.
+    fn picked_prefix(&mut self, prefix: &Expr) -> bool {
+        let root =
+            str_lit(prefix).is_some_and(|s| matches!(s, "" | "/" | "\\")) || matches_path("os.sep", &self.path(prefix));
+        let siteless = self.names_in(prefix).iter().all(|n| !self.state.paths.contains_key(n));
+        !root && siteless && self.expr(prefix).is_none()
+    }
+
+    /// Reports, at the call of each, the held joins no read reported and no check ever confined.
+    fn report_held(&mut self) {
+        let mut held: Vec<(Pos, Held)> = std::mem::take(&mut self.held).into_iter().collect();
+        held.sort_by_key(|(pos, _)| *pos);
+        for (pos, held) in held.into_iter().filter(|(_, h)| !h.checked) {
+            self.sink_pos(Sink::Path, held.callee, Some(held.taint), pos);
+        }
     }
 
     fn expr(&mut self, expr: &Expr) -> Option<Taint> {
         match expr {
-            Expr::Name(n) => self.state.vars.get(n.id.as_str()).cloned(),
+            Expr::Name(n) => {
+                self.read(n.id.as_str());
+                self.state.vars.get(n.id.as_str()).cloned()
+            }
             Expr::Attribute(a) => match self.table.lookup(&self.path(expr)) {
                 Some((pattern, Role::Source(kind))) => self.source(pattern.to_owned(), expr, kind),
                 _ => match self_attr(expr).and_then(|key| self.state.vars.get(&key)) {
                     Some(t) => Some(t.clone()),
-                    None => values(self.expr(&a.value)),
+                    None => attribute(self.expr(&a.value), a.attr.as_str()),
                 },
             },
             Expr::Subscript(s) => self.item(s, expr),
-            Expr::Call(c) => self.call(c, expr),
+            Expr::Call(c) => self.called(c, expr),
             Expr::BinOp(b) => self.bin_op(b),
             Expr::FString(f) => self.fstring(f),
             Expr::Named(n) => {
@@ -1549,6 +1834,15 @@ impl Flows<'_> {
             }
             _ => self.collection(expr),
         }
+    }
+
+    /// What a call returns; a test of a path's start reads no file, so it uses no held join.
+    fn called(&mut self, c: &ast::ExprCall, expr: &Expr) -> Option<Taint> {
+        let quiet = self.quiet || started(expr, CmpOp::In).is_some();
+        let quiet = std::mem::replace(&mut self.quiet, quiet);
+        let t = self.call(c, expr);
+        self.quiet = quiet;
+        t
     }
 
     fn collection(&mut self, expr: &Expr) -> Option<Taint> {
@@ -1761,7 +2055,7 @@ impl Flows<'_> {
                     }
                     _ => sink_callee(pattern, call),
                 };
-                self.sink(row.sink, callee, arg, expr);
+                self.reach(row.sink, callee, arg, expr);
                 // A parser, a loader or a command hands back the data in another form, and a
                 // search or a read stays a call of the model's method, so the flows that pass
                 // through it go on as they would without the row.
@@ -1786,7 +2080,7 @@ impl Flows<'_> {
         if self.is_sudo(&s.value) && self.records(&s.value) {
             self.sink(Sink::Field, format!("{}[...]", superuser_call(&s.value)), key, expr);
         }
-        values(self.expr(&s.value))
+        item_of(self.expr(&s.value), str_lit(&s.slice))
     }
 
     /// Reports a method the user names that the call runs, as `getattr(records, t)()`, and a data
@@ -2201,7 +2495,7 @@ impl Flows<'_> {
         let method = path.last().map(String::as_str).unwrap_or_default();
         let Expr::Attribute(a) = &*call.func else {
             let keeps = method == "dict";
-            return if keeps { args } else { values(args) };
+            return derived(if keeps { args } else { values(args) });
         };
         if method == "update" {
             self.hold(&a.value, arguments(call));
@@ -2218,13 +2512,14 @@ impl Flows<'_> {
         }
         if let Some(t) = receiver {
             let kind = if method == "copy" { t.kind } else { Kind::Value };
-            return join(Some(t.kind(kind)), values(args));
+            let upload = picks(&t, method, call);
+            return join(Some(Taint { upload, ..t.kind(kind) }), values(args));
         }
         // A compiled pattern's match holds the groups of the string it matched. `search` is
         // left out, as on records it returns records rather than parts of the domain.
         let matched = matches!(method, "match" | "fullmatch");
         let plain = matches!(&*a.value, Expr::StringLiteral(_)) || self.is_module(&a.value);
-        if plain || matched { values(args) } else { None }
+        if plain || matched { derived(args) } else { None }
     }
 
     /// A call of a model's method that a summary may describe; `sudo()` and the like return the
@@ -2247,6 +2542,11 @@ impl Flows<'_> {
     /// Reports a value from a source at a sink, and keeps one from a parameter or a call for the
     /// callers' and callees' flows.
     fn sink(&mut self, sink: Sink, callee: String, t: Option<Taint>, expr: &Expr) {
+        let pos = self.loc.at(expr);
+        self.sink_pos(sink, callee, t, pos);
+    }
+
+    fn sink_pos(&mut self, sink: Sink, callee: String, t: Option<Taint>, pos: Pos) {
         let code = code(sink);
         let Some(mut t) = t.filter(|t| !t.safe.has(code)) else {
             return;
@@ -2254,7 +2554,6 @@ impl Flows<'_> {
         if sink == Sink::SudoWrite && t.kind != Kind::Keys {
             return;
         }
-        let pos = self.loc.at(expr);
         if !t.origin.is_user() {
             if sink == Sink::Record {
                 return;
@@ -2303,8 +2602,13 @@ fn xml_parser(expr: &Expr) -> Option<Entities> {
 
 /// The tests that each hold where `test` does: the operands of an `and`, or `test` itself.
 fn conjuncts(test: &Expr) -> Vec<&Expr> {
+    operands(test, ast::BoolOp::And)
+}
+
+/// The operands of `test` under `op`, nested ones included, or `test` itself.
+fn operands(test: &Expr, op: ast::BoolOp) -> Vec<&Expr> {
     match test {
-        Expr::BoolOp(b) if b.op == ast::BoolOp::And => b.values.iter().flat_map(conjuncts).collect(),
+        Expr::BoolOp(b) if b.op == op => b.values.iter().flat_map(|v| operands(v, op)).collect(),
         _ => vec![test],
     }
 }
@@ -2534,28 +2838,73 @@ fn transformed(
     args: Vec<Option<Taint>>,
     keywords: Vec<Option<Taint>>,
 ) -> Option<Taint> {
-    match role {
+    let t = match role {
         Role::Clears(code) => {
             let t = args.into_iter().chain(keywords).fold(None, join);
             values(t).map(|t| t.safe(Safe::of(&[code])))
         }
-        Role::Keeps(positions, names) => {
-            let kept = args.into_iter().enumerate().filter(|(i, _)| positions.contains(i));
-            let named = call
-                .arguments
-                .keywords
-                .iter()
-                .zip(keywords)
-                .filter(|(k, _)| k.arg.as_ref().is_some_and(|a| names.contains(&a.as_str())));
-            let t = kept.map(|(_, t)| t).chain(named.map(|(_, t)| t)).fold(None, join);
-            values(t)
-        }
+        Role::Keeps(positions, names) => match getattr_name(call) {
+            Some(name) => {
+                let mut args = args.into_iter();
+                let object = attribute(args.next().flatten(), name);
+                join(object, args.nth(1).flatten())
+            }
+            None => keeps(positions, names, call, args, keywords),
+        },
         Role::Leaf => {
             let mut args = args;
             hold_value(&call.arguments.args, &mut args);
             values(args.into_iter().chain(keywords).fold(None, join))
         }
         Role::Source(_) | Role::Sink(_) | Role::Sanitizer => None,
+    };
+    derived(t)
+}
+
+/// What the positional arguments at `positions`, and the keywords `names`, carry.
+fn keeps(
+    positions: &[usize],
+    names: &[&str],
+    call: &ast::ExprCall,
+    args: Vec<Option<Taint>>,
+    keywords: Vec<Option<Taint>>,
+) -> Option<Taint> {
+    let kept = args.into_iter().enumerate().filter(|(i, _)| positions.contains(i));
+    let named = call
+        .arguments
+        .keywords
+        .iter()
+        .zip(keywords)
+        .filter(|(k, _)| k.arg.as_ref().is_some_and(|a| names.contains(&a.as_str())));
+    let t = kept.map(|(_, t)| t).chain(named.map(|(_, t)| t)).fold(None, join);
+    values(t)
+}
+
+/// The literal name `getattr()` reads, which reads as that attribute.
+fn getattr_name(call: &ast::ExprCall) -> Option<&str> {
+    let name = call.arguments.args.get(1).and_then(str_lit);
+    name.filter(|_| tail_name(&call.func) == Some("getattr"))
+}
+
+/// What a call returns of values of taint `t`: no file of the uploads, and a value derived from
+/// them rather than their own, so that the `name` of a tar member is no picked file's field.
+fn derived(t: Option<Taint>) -> Option<Taint> {
+    t.map(|t| Taint {
+        upload: None,
+        own: false,
+        ..t
+    })
+}
+
+/// The files `method` of a value of taint `t` returns, called as `call`: `get()` and `getlist()`
+/// of the uploads pick those of a field the code names, and `values()` keeps them all.
+fn picks(t: &Taint, method: &str, call: &ast::ExprCall) -> Option<Upload> {
+    let field = call.arguments.args.first().and_then(str_lit);
+    let picked = matches!(method, "get" | "getlist") && field.is_some();
+    match t.upload? {
+        Upload::Mapping if picked => Some(Upload::Picked),
+        Upload::Mapping => (method == "values").then_some(Upload::Mapping),
+        Upload::Picked => None,
     }
 }
 
@@ -2779,13 +3128,26 @@ fn self_attr(expr: &Expr) -> Option<String> {
     }
 }
 
-/// Whether every prefix `startswith()` takes, one or a tuple, keeps the host.
-fn fixed_prefixes(arg: &Expr) -> bool {
-    let prefixes = match arg {
+/// Whether every prefix `startswith()` takes, one or a tuple, is `fixed`.
+fn fixed_prefixes(arg: &Expr, fixed: impl FnMut(&Expr) -> bool) -> bool {
+    let prefixes: Vec<&Expr> = match arg {
         Expr::Tuple(t) => t.elts.iter().collect(),
         p => vec![p],
     };
-    !prefixes.is_empty() && prefixes.iter().all(|p| str_lit(p).is_some_and(fixes_start))
+    !prefixes.is_empty() && prefixes.into_iter().all(fixed)
+}
+
+/// The local whose start `expr` tests where it holds for `op`, `p.startswith(prefix)` for `in`
+/// and `not p.startswith(prefix)` for `not in`, with what `startswith()` takes.
+fn started(expr: &Expr, op: CmpOp) -> Option<(&str, &Expr)> {
+    let call = match (op, expr) {
+        (CmpOp::In, Expr::Call(call)) => call,
+        (CmpOp::NotIn, Expr::UnaryOp(u)) if u.op == ast::UnaryOp::Not => u.operand.as_call_expr()?,
+        _ => return None,
+    };
+    let Expr::Attribute(a) = &*call.func else { return None };
+    let name = a.value.as_name_expr().filter(|_| a.attr.as_str() == "startswith")?;
+    Some((name.id.as_str(), call.arguments.args.first()?))
 }
 
 /// The containers whose membership proves only that a model or a field exists: `env`, the
@@ -2854,14 +3216,8 @@ impl Checks {
 
     /// The name whose start a `startswith()` test holds to prefixes that keep it harmless.
     fn started(&self, expr: &Expr) -> Option<String> {
-        let call = match (self.op, expr) {
-            (CmpOp::In, Expr::Call(call)) => call,
-            (CmpOp::NotIn, Expr::UnaryOp(u)) if u.op == ast::UnaryOp::Not => u.operand.as_call_expr()?,
-            _ => return None,
-        };
-        let Expr::Attribute(a) = &*call.func else { return None };
-        let name = a.value.as_name_expr().filter(|_| a.attr.as_str() == "startswith")?;
-        fixed_prefixes(call.arguments.args.first()?).then(|| name.id.to_string())
+        let (name, prefix) = started(expr, self.op)?;
+        fixed_prefixes(prefix, |p| str_lit(p).is_some_and(fixes_start)).then(|| name.to_owned())
     }
 
     fn comprehension(&mut self, elt: &Expr, generators: &[ast::Comprehension]) {
@@ -4710,5 +5066,176 @@ mod tests {
         );
         let targets: Vec<_> = helper.edges.iter().map(|e| (e.origin, e.target.clone())).collect();
         assert_eq!(targets, [(FlowOrigin::Param(0), FlowTarget::Sink("OD717"))]);
+    }
+
+    /// A sink of each rule but OD704, which needs a mapping, receiving `#`.
+    const SINK_OF: &[(&str, &str)] = &[
+        ("OD701", "self.env.cr.execute(#)"),
+        ("OD702", "safe_eval(#)"),
+        ("OD703", "Markup(#)"),
+        ("OD705", "request.redirect(#, local=False)"),
+        ("OD706", "requests.get(#, timeout=5)"),
+        ("OD707", "open(#)"),
+        ("OD708", "os.system(#)"),
+        ("OD709", "pickle.loads(#)"),
+        ("OD710", "etree.fromstring(#, etree.XMLParser(resolve_entities=True))"),
+        ("OD711", "request.make_response('', [('X-Name', #)])"),
+        ("OD712", "self.env[#].sudo().search([])"),
+        ("OD713", "getattr(self.env['res.partner'], #)()"),
+        ("OD714", "self.env['res.partner'].sudo()[#]"),
+        ("OD715", "self.env['res.partner'].sudo().search(#)"),
+        ("OD716", "return self.env['res.partner'].sudo().browse(#)"),
+        (
+            "OD717",
+            "self.env['ir.attachment'].sudo().create({'raw': #, 'public': True})",
+        ),
+    ];
+
+    /// The codes of a route of parameter `t` that runs `before`, then `sink` on `value`.
+    fn sunk(before: &str, sink: &str, value: &str) -> Vec<String> {
+        let src = format!("def f(self, t):\n    {before}{}\n", sink.replace('#', value));
+        code_list(&scan(Params::Route(&[]), &src))
+            .into_iter()
+            .map(str::to_owned)
+            .collect()
+    }
+
+    #[test]
+    fn reads_the_json_request_of_the_dispatcher() {
+        let src = "def f(self):\n    data = request.dispatcher.jsonrequest\n    self.env.cr.execute(f\"SELECT {data['x']}\")\n";
+        assert_eq!(
+            scan(Params::None, src),
+            ["OD701 request.dispatcher.jsonrequest reaches the query of cr.execute() through 'data'"]
+        );
+    }
+
+    #[test]
+    fn the_name_of_a_file_picked_by_its_field_is_no_user_data() {
+        let get = "f = request.httprequest.files.get('ufile')\n    ";
+        let loop_over = |files: &str| format!("for f in request.httprequest.files.{files}:\n        ");
+        let item = "f = request.httprequest.files['ufile']\n    ";
+        for (code, sink) in SINK_OF {
+            for (before, value) in [
+                (get, "getattr(f, 'name')"),
+                (item, "f.name"),
+                (&loop_over("getlist('ufile')"), "getattr(f, 'name', None)"),
+                ("", "Manifest.for_addon(t).path"),
+            ] {
+                assert!(sunk(before, sink, value).is_empty(), "{code}: {before}{value}");
+            }
+            for (before, value) in [
+                (get, "getattr(f, 'filename')"),
+                (item, "f.filename"),
+                (&loop_over("getlist(t)"), "f.name"),
+                (&loop_over("values()"), "f.name"),
+                (&loop_over("getlist('ufile')"), "f.stream.name"),
+                (&loop_over("getlist('ufile')"), "copy.copy(f).name"),
+                ("", "t.name"),
+                (&format!("{get}g = f or t\n    "), "g.name"),
+            ] {
+                assert_eq!(sunk(before, sink, value), [*code], "{code}: {before}{value}");
+            }
+        }
+        let src = format!("def f(self):\n    {}open(f.name)\n", loop_over("values()"));
+        assert_eq!(
+            scan(Params::Route(&[]), &src),
+            [
+                "OD707 request.httprequest.files reaches the path of open() through 'f', so the user picks the file the server opens"
+            ]
+        );
+    }
+
+    /// The findings of a controller's route of parameter `t` that runs `body`, where `ROOT` is a
+    /// module's constant.
+    fn opened(body: &str) -> Vec<String> {
+        let src = format!("def f(self, t):\n{body}\n");
+        let parsed = parse_module(&src).expect("valid Python");
+        let Some(Stmt::FunctionDef(func)) = parsed.syntax().body.first() else {
+            panic!("no function");
+        };
+        let owner = Some(Receiver::Class("Main".to_owned()));
+        let loc = Locator::new(&src);
+        let found = function(func, Params::Route(&[]), owner, None, &[], &loc, &TaintTable::default()).0;
+        let message = |d: RawDiag| format!("{} {}", d.code, d.message.split(';').next().unwrap_or_default());
+        found.into_iter().map(message).collect()
+    }
+
+    #[test]
+    fn a_normalized_path_kept_under_a_prefix_the_code_picks_is_not_reported() {
+        let joined = "os.path.normpath(os.path.join(ROOT, t))";
+        for body in [
+            "    p = os.path.realpath(os.path.abspath(os.path.join(ROOT, t)))\n    if p.startswith(ROOT):\n        open(p)".to_owned(),
+            "    p = os.path.join(ROOT, t)\n    p = os.path.normpath(p)\n    if p.startswith('/srv/docs'):\n        return open(p)".to_owned(),
+            format!("    p = {joined}\n    if not p.startswith(ROOT):\n        raise ValueError()\n    open(p)"),
+            format!("    p = {joined}\n    if t:\n        return\n    if not p.startswith(ROOT) or not ROOT:\n        raise ValueError()\n    open(p)"),
+            format!("    p = {joined}\n    assert p.startswith((ROOT, '/srv/docs'))\n    open(p)"),
+            format!("    p = {joined}\n    q = p\n    if ROOT and q.startswith(ROOT):\n        open(q)"),
+            format!("    root = os.path.join(ROOT, 'static', '')\n    p = {joined}\n    if p.startswith(root):\n        open(p)"),
+            format!("    if ROOT:\n        p = {joined}\n    else:\n        p = os.path.normpath(os.path.join('/srv', t))\n    if p.startswith(ROOT):\n        open(p)"),
+            format!("    for t in t:\n        p = {joined}\n        if not p.startswith(ROOT):\n            continue\n        open(p)"),
+        ] {
+            assert!(opened(&body).is_empty(), "{body}");
+        }
+        let unchecked = opened("    os.path.join(ROOT, t)");
+        assert_eq!(
+            unchecked,
+            [
+                "OD707 route parameter 't' reaches the path of os.path.join(), so the user picks the file the server opens"
+            ]
+        );
+        for body in [
+            "    p = os.path.join(ROOT, t)\n    if p.startswith(ROOT):\n        open(p)".to_owned(),
+            format!("    p = {joined}\n    if p.startswith(t):\n        open(p)"),
+            format!("    base = self.get_base_url()\n    p = {joined}\n    if p.startswith(base):\n        open(p)"),
+            format!("    p = {joined}\n    p = p + '/..'\n    if p.startswith(ROOT):\n        open(p)"),
+            format!("    p = {joined}\n    if p.startswith(ROOT) or t:\n        open(p)"),
+            format!("    p = {joined}\n    open(p)"),
+            format!("    p = q = {joined}\n    if p.startswith(ROOT):\n        open(p)"),
+            format!("    p = {joined}\n    if p.startswith(ROOT):\n        open(p)\n    open(p)"),
+            format!("    p = {joined}\n    if p.startswith('/etc'):\n        raise ValueError()\n    open(p)"),
+            format!("    p = {joined}\n    if t:\n        return open(p)\n    if not p.startswith(ROOT):\n        raise ValueError()\n    open(p)"),
+            format!("    p = {joined}\n    data = open(p).read()\n    if not p.startswith(ROOT):\n        raise ValueError()\n    return data"),
+            "    raw = os.path.join(ROOT, t)\n    open(raw)\n    p = os.path.normpath(raw)\n    if p.startswith(ROOT):\n        open(p)".to_owned(),
+            "    raw = os.path.join(ROOT, t)\n    p = os.path.normpath(raw)\n    if p.startswith(ROOT):\n        open(raw)".to_owned(),
+            format!("    p = {joined}\n    if p.startswith('/'):\n        open(p)"),
+            format!("    p = {joined}\n    if p.startswith(('/srv', '')):\n        open(p)"),
+            format!("    p = {joined}\n    if p.startswith(os.sep):\n        open(p)"),
+        ] {
+            assert_eq!(opened(&body), unchecked, "{body}");
+        }
+        for body in [
+            format!("    root = os.path.join(ROOT, t)\n    p = {joined}\n    if p.startswith(root):\n        open(p)"),
+            format!(
+                "    if ROOT:\n        p = {joined}\n    else:\n        p = os.path.join(ROOT, t)\n    if p.startswith(ROOT):\n        open(p)"
+            ),
+        ] {
+            assert_eq!(opened(&body), [unchecked[0].clone(), unchecked[0].clone()], "{body}");
+        }
+    }
+
+    #[test]
+    fn a_held_join_a_helper_never_checks_keeps_the_edge_for_its_callers() {
+        let sinks = |body: &str| {
+            let helper = summary(Params::None, &format!("def _open(self, name):\n{body}\n"));
+            let edges = helper.edges.iter().filter(|e| e.target == FlowTarget::Sink("OD707"));
+            edges.map(|e| e.origin).collect::<Vec<_>>()
+        };
+        let p = "    p = os.path.normpath(os.path.join('/srv', name))\n";
+        assert_eq!(sinks(&format!("{p}    open(p)")), [FlowOrigin::Param(0)]);
+        assert!(
+            sinks(&format!(
+                "{p}    if p.startswith('/srv/'):\n        open(p)\n    return name"
+            ))
+            .is_empty()
+        );
+        let helper = summary(
+            Params::None,
+            "def _open(self, name):\n    p = os.path.join('/srv', name)\n    open(name)\n",
+        );
+        let sink = helper.edges.iter().find(|e| e.target == FlowTarget::Sink("OD707"));
+        let at = sink
+            .and_then(|e| e.steps.last())
+            .map(|s| (s.value.as_str(), s.pos.line));
+        assert_eq!(at, Some(("os.path.join()", 2)));
     }
 }

@@ -562,6 +562,12 @@ pub struct FlowEdge {
     pub keys: bool,
     /// The value is harmless at the target for these codes, whatever it is at the origin.
     pub safe: Safe,
+    /// The value is a file of the uploads picked by a field the code names.
+    pub upload: bool,
+    /// The value at the target is the `name` of the origin's, so a picked file's field.
+    pub named: bool,
+    /// The value at the target is the origin's own, copied but not derived, on every path.
+    pub own: bool,
     /// The origin, each local in between, and for a sink the call that receives the value.
     pub steps: Vec<Spanned<String>>,
 }

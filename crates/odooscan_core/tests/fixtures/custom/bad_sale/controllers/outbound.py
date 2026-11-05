@@ -8,6 +8,7 @@ from werkzeug.utils import secure_filename
 
 from odoo import http
 from odoo.http import request
+from odoo.modules.module import Manifest
 from odoo.tools import file_open
 
 DOCS = "/srv/bad_sale/docs"
@@ -37,3 +38,23 @@ class Outbound(http.Controller):
         open(DOCS + "/" + name, "rb")
         os.path.join(DOCS, name)
         return http.send_file(name)
+
+    @http.route("/bad/outbound/upload", auth="user", methods=["POST"])
+    def upload(self, **kw):
+        # werkzeug names each uploaded file by its form field, which the code picks here.
+        for upload in request.httprequest.files.getlist("manual"):
+            open(getattr(upload, "name"), "rb")
+            open(upload.filename, "rb")
+            request.env["bad.order"]._store_upload(upload)
+        for upload in request.httprequest.files.values():
+            open(upload.name, "rb")
+
+    @http.route("/bad/outbound/page", auth="user")
+    def page(self, **kw):
+        page = os.path.normpath(os.path.join(DOCS, kw["page"]))
+        if page.startswith(DOCS):
+            open(page, "rb")
+        unchecked = os.path.normpath(os.path.join(DOCS, kw["page"]))
+        open(unchecked, "rb")
+        manifest = Manifest.for_addon(kw["addon"])
+        return http.send_file(os.path.join(manifest.path, "README.rst"))

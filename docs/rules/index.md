@@ -227,16 +227,19 @@ reads from the request itself is not followed.
 
 The flow ends at a sanitizer: `int()`, `float()`, `bool()`, `len()`, `SQL.identifier()`, `escape()`,
 `html_escape()`, `html_sanitize()`, `plaintext2html()`, `urlencode()`, `url_encode()`,
-`secure_filename()`, `content_disposition()` and `file_open()`; at `assert x in (...)` or
-`if x not in allowed: raise`, and inside a comprehension at its `if x in allowed`; and at an
-intersection with values the code chose, such as `set(vals) & allowed`. A test that `x` is in `env`,
-`registry`, `pool` or `_fields` proves only that the model or the field exists, so it ends every
-flow but those of OD712, OD714 and OD715. Some steps make a value harmless for one rule only:
-`os.path.basename()`, `io.BytesIO()` and `io.StringIO()` for OD707, `shlex.quote()` and
-`shlex.join()` for OD708, a start the code picks for OD705 and OD706, a name built with text of the
-code's for OD713, and a condition whose field and operator the code picks for OD715, as their pages
-say. An id stays the user's for OD716 through `int()` and `float()`, and ends at the access checks
-its page lists.
+`secure_filename()`, `content_disposition()`, `file_open()` and `Manifest.for_addon()`; at the
+`name` of a file read from `request.httprequest.files` by a field the code names with `get()`,
+`getlist()` or an item, which werkzeug sets to that field, in the method or a method it is passed
+to; at `assert x in (...)` or `if x not in allowed: raise`, and inside a comprehension at its
+`if x in allowed`; and at an intersection with values the code chose, such as `set(vals) & allowed`.
+A test that `x` is in `env`, `registry`, `pool` or `_fields` proves only that the model or the
+field exists, so it ends every flow but those of OD712, OD714 and OD715. Some steps make a value
+harmless for one rule only: `os.path.basename()`, `io.BytesIO()`, `io.StringIO()` and a normalized
+`os.path.join()` kept under a prefix the code picks for OD707, `shlex.quote()` and `shlex.join()`
+for OD708, a start the code picks for OD705 and OD706, a name built with text of the code's for
+OD713, and a condition whose field and operator the code picks for OD715, as their pages say. An id
+stays the user's for OD716 through `int()` and `float()`, and ends at the access checks its page
+lists.
 
 A project adds its own sources, sinks and sanitizers in the
 [`[taint]` table of its configuration](../configuration.md#taint-table).
