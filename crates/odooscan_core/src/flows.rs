@@ -274,9 +274,10 @@ fn enter<S: PartialEq>(via: &mut Vec<S>, state: S) -> bool {
     fresh
 }
 
-/// How the value `ret` carries enters the call `c` of `at`: from a source of the callee (`None`),
-/// or by each edge of `at` that passes a source's value or a parameter to the callee's parameter.
-/// A public method's parameter is one here too: a Python call, not a client, sets it.
+/// How the value `ret` carries enters the call `c` of `caller`: from a source of the callee
+/// (`None`), or by each edge of `caller` that passes a source's value or a parameter to the
+/// callee's parameter. A public method's parameter is one here too: a Python call, not a client,
+/// sets it.
 fn entries<'s>(caller: &'s FlowSummary, c: usize, callee: &FlowSummary, ret: &Ret) -> Vec<Option<&'s FlowEdge>> {
     let Some(k) = ret.origin.param() else {
         return vec![None];
@@ -395,7 +396,6 @@ mod tests {
     use crate::checks::Out;
     use crate::facts::RawDiag;
     use crate::index::{FlowRef, Index};
-    use crate::manifest;
     use crate::mentions::Mentions;
     use crate::project::{Module, SourceFile};
     use crate::python;
@@ -413,21 +413,9 @@ mod tests {
             suppressions: Default::default(),
             mentions: Mentions::scan(src),
         };
-        let manifest = manifest::parse("{'version': '18.0.1.0'}").unwrap();
-        Module {
-            name: "main".to_owned(),
-            dir: PathBuf::new(),
-            manifest_path: PathBuf::new(),
-            series: manifest.series(),
-            manifest,
-            checked: true,
-            python: vec![file("route.py", &route), file("model.py", &model)],
-            data: vec![],
-            js: vec![],
-            templates: vec![],
-            sql_views: vec![],
-            lost_text: false,
-        }
+        let mut module = crate::project::module("main", "{'version': '18.0.1.0'}");
+        module.python = vec![file("route.py", &route), file("model.py", &model)];
+        module
     }
 
     /// A finding as `file:line code message` up to the advice.
@@ -438,7 +426,7 @@ mod tests {
     }
 
     /// The cross-method findings of `module(route, methods)`.
-    fn findings(route: &str, methods: &str) -> Vec<String> {
+    fn scan_messages(route: &str, methods: &str) -> Vec<String> {
         let modules = [module(route, methods)];
         let index = Index::build(&modules, None);
         let mut out = Out { diags: vec![] };
@@ -450,7 +438,7 @@ mod tests {
     fn a_method_called_under_sudo_writes_its_records_as_superuser() {
         let apply = "    def _apply(self, vals):\n        self.write(vals)\n";
         let call = |receiver: &str| {
-            findings(
+            scan_messages(
                 &format!("    def r(self, **post):\n        {receiver}._apply(post)\n"),
                 apply,
             )
@@ -465,6 +453,17 @@ mod tests {
             call("request.env['x.y'].sudo().with_user(SUPERUSER_ID)"),
             ["model.py:5 OD704 route parameter 'post' reaches self.write() through '_apply()'"]
         );
+        assert_eq!(
+            call("request.env['x.y'].with_user(request.env.user).sudo()"),
+            ["model.py:5 OD704 route parameter 'post' reaches self.write() through '_apply()'"]
+        );
+        // Only a parameter's origin leaves the callee, so `docs/rules/index.md` (OD7: data flows)
+        // says a mapping the method reads from the request itself is not followed.
+        let own = scan_messages(
+            "    def r(self, **post):\n        request.env['x.y'].sudo()._own()\n",
+            "    def _own(self):\n        self.write(request.params)\n",
+        );
+        assert!(own.is_empty());
     }
 
     #[test]
@@ -472,7 +471,7 @@ mod tests {
         let methods =
             "    def _apply(self, vals):\n        CALL\n\n    def _store(self, vals):\n        self.write(vals)\n";
         let call = |call: &str| {
-            findings(
+            scan_messages(
                 "    def r(self, **post):\n        request.env['x.y'].sudo()._apply(post)\n",
                 &methods.replace("CALL", call),
             )
@@ -523,7 +522,7 @@ mod tests {
         let methods = pass_chain(5, "requests.get(v, timeout=5)");
         for order in [["a", "b"], ["b", "a"]] {
             assert_eq!(
-                findings(&routes(order, passing), &methods),
+                scan_messages(&routes(order, passing), &methods),
                 ["model.py:17 OD706 route parameter 'b' reaches the URL of requests.get() through '_m4()', '_m5()'"],
                 "{order:?}"
             );
@@ -535,7 +534,7 @@ mod tests {
         let methods = chain(5, "request.params.get('x')");
         for (order, line) in [(["a", "b"], 8), (["b", "a"], 4)] {
             assert_eq!(
-                findings(
+                scan_messages(
                     &routes(order, |name, m| format!(
                         "    def {name}(self):\n        return Markup(request.env['x.y']._m{m}(1))\n"
                     )),
@@ -579,13 +578,13 @@ mod tests {
     fn a_method_calling_itself_is_reported_without_the_loop() {
         let methods = "    def _m1(self, v):\n        self._m1(v)\n        requests.get(v, timeout=5)\n";
         assert_eq!(
-            findings("    def r(self, t):\n        request.env['x.y']._m1(t)\n", methods),
+            scan_messages("    def r(self, t):\n        request.env['x.y']._m1(t)\n", methods),
             ["model.py:6 OD706 route parameter 't' reaches the URL of requests.get() through '_m1()'"]
         );
         let methods = "    def _m1(self, v):\n        if v:\n            return self._m1(v)\n        return request.params.get('x')\n";
         let route = "    def r(self):\n        return Markup(request.env['x.y']._m1(1))\n";
         assert_eq!(
-            findings(route, methods),
+            scan_messages(route, methods),
             ["route.py:4 OD703 request.params reaches Markup() through '_m1()' unescaped"]
         );
     }
@@ -599,7 +598,7 @@ mod tests {
     #[test]
     fn methods_calling_each_other_are_reported_without_the_loop() {
         assert_eq!(
-            findings(CALLS_A, MUTUAL),
+            scan_messages(CALLS_A, MUTUAL),
             ["model.py:6 OD706 route parameter 't' reaches the URL of requests.get() through '_a()'"]
         );
     }
@@ -630,7 +629,7 @@ mod tests {
     #[test]
     fn methods_returning_each_other_are_reported_without_the_loop() {
         assert_eq!(
-            findings(RETURNS_A, MUTUAL_RETURN),
+            scan_messages(RETURNS_A, MUTUAL_RETURN),
             ["route.py:4 OD703 request.params reaches Markup() through '_a()' unescaped"]
         );
     }
@@ -653,7 +652,7 @@ mod tests {
     fn a_method_calling_itself_under_sudo_is_followed_as_superuser() {
         let methods = "    def _a(self, vals):\n        self.sudo()._a(vals)\n        self.write(vals)\n";
         assert_eq!(
-            findings(
+            scan_messages(
                 "    def r(self, **post):\n        request.env['x.y']._a(post)\n",
                 methods
             ),
@@ -665,7 +664,7 @@ mod tests {
     fn a_method_called_back_with_the_value_in_another_parameter_is_followed() {
         let methods = "    def _a(self, p, q):\n        self._b(p)\n        requests.get(q, timeout=5)\n\n    def _b(self, v):\n        self._a(1, v)\n";
         assert_eq!(
-            findings("    def r(self, t):\n        request.env['x.y']._a(t, 1)\n", methods),
+            scan_messages("    def r(self, t):\n        request.env['x.y']._a(t, 1)\n", methods),
             ["model.py:6 OD706 route parameter 't' reaches the URL of requests.get() through '_a()', '_b()', '_a()'"]
         );
     }
@@ -674,7 +673,7 @@ mod tests {
     fn a_source_is_returned_through_three_methods() {
         let route = "    def r(self):\n        return Markup(request.env['x.y']._m1(1))\n";
         assert_eq!(
-            findings(route, &chain(3, "request.params.get('x')")),
+            scan_messages(route, &chain(3, "request.params.get('x')")),
             ["route.py:4 OD703 request.params reaches Markup() through '_m1()', '_m2()', '_m3()' unescaped"]
         );
     }
@@ -683,7 +682,7 @@ mod tests {
     fn a_parameter_is_returned_through_two_methods() {
         let route = "    def r(self, term):\n        return Markup(request.env['x.y']._m1(term))\n";
         assert_eq!(
-            findings(route, &chain(2, "'<p>%s</p>' % v")),
+            scan_messages(route, &chain(2, "'<p>%s</p>' % v")),
             ["route.py:4 OD703 route parameter 'term' reaches Markup() through '_m1()', '_m2()' unescaped"]
         );
     }
@@ -691,7 +690,7 @@ mod tests {
     #[test]
     fn a_url_whose_start_the_caller_picks_reaches_no_host() {
         let call = |arg: &str| {
-            findings(
+            scan_messages(
                 &format!(
                     "    def r(self, t):\n        return self._get({arg})\n\n    def _get(self, url):\n        return requests.get(url, timeout=5)\n"
                 ),
@@ -708,15 +707,15 @@ mod tests {
     #[test]
     fn a_returned_value_harmless_for_the_sink_is_not_reported() {
         let route = "    def r(self, t):\n        return open(request.env['x.y']._m1(t))\n";
-        assert!(findings(route, &chain(1, "os.path.basename(v)")).is_empty());
-        assert_eq!(findings(route, &chain(1, "v")).len(), 1);
+        assert!(scan_messages(route, &chain(1, "os.path.basename(v)")).is_empty());
+        assert_eq!(scan_messages(route, &chain(1, "v")).len(), 1);
     }
 
     #[test]
     fn a_public_method_called_from_python_returns_what_its_caller_passes() {
         let methods = "    def get(self, key, default=False):\n        return self._find(key) or default\n";
         let call = |args: &str| {
-            findings(
+            scan_messages(
                 &format!("    def r(self, t):\n        return requests.get(request.env['x.y'].get({args}))\n"),
                 methods,
             )
@@ -738,23 +737,23 @@ mod tests {
             "prefix or request.params.get('n')",
         ] {
             let methods = format!("    def label(self, prefix):\n        return {body}\n");
-            assert_eq!(findings(route, &methods).len(), 1, "{body}");
+            assert_eq!(scan_messages(route, &methods).len(), 1, "{body}");
         }
     }
 
     #[test]
     fn returns_are_followed_four_calls_deep() {
         let route = "    def r(self):\n        return Markup(request.env['x.y']._m1(1))\n";
-        assert_eq!(findings(route, &chain(4, "request.params.get('x')")).len(), 1);
-        assert!(findings(route, &chain(5, "request.params.get('x')")).is_empty());
-        assert!(findings(route, &chain(1, "self._m1(v)")).is_empty());
+        assert_eq!(scan_messages(route, &chain(4, "request.params.get('x')")).len(), 1);
+        assert!(scan_messages(route, &chain(5, "request.params.get('x')")).is_empty());
+        assert!(scan_messages(route, &chain(1, "self._m1(v)")).is_empty());
     }
 
     #[test]
     fn a_helper_storing_a_route_upload_publicly_is_reported() {
         let store = "    def _store(self, data):\n        self.env['ir.attachment'].sudo().create({'raw': data, 'public': True})\n";
         let call = |arg: &str| {
-            findings(
+            scan_messages(
                 &format!("    def r(self, upload):\n        request.env['x.y']._store({arg})\n"),
                 store,
             )
