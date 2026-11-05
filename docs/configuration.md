@@ -1,8 +1,9 @@
 # Configuration
 
 `oscn check` reads the nearest `odooscan.toml`, or `pyproject.toml` with a `[tool.odooscan]`
-table, in the current directory or above it; `--config` names one instead. Its keys are the
-`check` flags, and a flag or `ODOOSCAN_ADDONS_PATH` replaces the key of the same name.
+table, in the current directory or above it; `--config` names one instead. Its keys but the
+[`taint` table](#taint-table) are the `check` flags, and a flag or `ODOOSCAN_ADDONS_PATH` replaces
+the key of the same name.
 
 ```toml
 [tool.odooscan]
@@ -33,10 +34,17 @@ OD701 = ["portal_tools.run_query"]
 code-injection-flow = ["sandbox.run"]
 ```
 
-A pattern is a dotted name. It matches a call or an attribute whose dotted path ends with the
-pattern's last name and holds its other names in order, so `cr.execute` matches
-`self.env.cr.execute` and `sudo().write` matches `env["x"].sudo().browse(ids).write`. A name other
-than the last may end in `()` for a call, and `[]` stands for an item, as in `env.[].create`.
+A pattern is a dotted name. It matches a dotted path that ends with the pattern's last name and
+holds its other names in order, so `cr.execute` matches `self.env.cr.execute` and `sudo().write`
+matches `env["x"].sudo().browse(ids).write`. A source matches a call or an attribute, but a
+sanitizer or a sink acts only on a call: the sanitizer `record.safe_text` ends the flow of
+`cr.execute(q % record.safe_text())`, not of `cr.execute(q % record.safe_text)`. A sanitizer or a
+sink on an attribute still hides a built-in source there, so `sanitizers = ["httprequest.data"]`
+leaves `request.httprequest.data` untainted.
+
+`[]` stands for an item, as in `env.[].create`, and a name other than the last may end in `()` for
+a call. A last `[]` matches only a call of an item, so the sink `handlers.[]` matches
+`handlers[k](x)`, and a source `forms.data.[]` never matches the read `forms.data['x']`.
 
 Configured rows match before the built-in ones, so the sanitizer `sandbox.safe_eval` silences
 `sandbox.safe_eval(x)` while `safe_eval(x)` still reports OD702. Among themselves, sources match

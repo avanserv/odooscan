@@ -408,7 +408,7 @@ impl TaintTable {
     fn add(&mut self, pattern: &str, role: Role) -> Result<(), String> {
         if !valid_pattern(pattern) {
             return Err(format!(
-                "'{pattern}' is not a taint pattern: write dotted names such as cr.execute, where a name but the last may end in () and [] stands for an item"
+                "'{pattern}' is not a taint pattern: write dotted names such as cr.execute, where [] stands for an item. A name but the last may end in () for a call, and a last [] matches a call of an item, never an item read"
             ));
         }
         self.rows.push((pattern.to_owned(), role));
@@ -426,7 +426,8 @@ impl TaintTable {
 }
 
 /// Whether each segment of `pattern` is a name, a name and `()`, or `[]`, the last no call, as
-/// `Flows::path` writes a path and `matches_path` compares one.
+/// `Flows::path` writes a path and `matches_path` compares one. A last `[]` stays valid: an item
+/// read never looks up its path, so it matches `handlers[k](x)` but never `handlers[k]`.
 fn valid_pattern(pattern: &str) -> bool {
     let identifier = |s: &str| {
         let mut chars = s.chars();
@@ -3200,6 +3201,35 @@ mod tests {
     }
 
     #[test]
+    fn a_configured_sanitizer_matches_a_call_only() {
+        let mut table = TaintTable::default();
+        table.sanitizer("record.safe_text").unwrap();
+        let query = |text: &str| {
+            let src = format!("def f(self, record):\n    self.env.cr.execute('SELECT %s' % {text})\n");
+            scan_with(&table, Params::Route(&[]), &src)
+        };
+        assert_eq!(query("record.safe_text").len(), 1);
+        assert!(query("record.safe_text()").is_empty());
+    }
+
+    #[test]
+    fn a_last_item_matches_a_call_of_an_item_only() {
+        let mut table = TaintTable::default();
+        table.sink("OD702", "handlers.[]").unwrap();
+        let src = "def f(self, k, x):\n    handlers[k](x)\n";
+        assert_eq!(
+            scan_with(&table, Params::Route(&[]), src),
+            ["OD702 route parameter 'x' reaches handlers.[](), which runs it as code"]
+        );
+        let mut table = TaintTable::default();
+        table.source("forms.data.[]").unwrap();
+        table.sink("OD702", "sandbox.run").unwrap();
+        let run = |arg: &str| scan_with(&table, Params::Rpc, &format!("def f(self):\n    sandbox.run({arg})\n"));
+        assert!(run("forms.data['code']").is_empty());
+        assert_eq!(run("forms.data[k]()").len(), 1);
+    }
+
+    #[test]
     fn a_configured_row_wins_over_a_built_in_one() {
         let mut table = TaintTable::default();
         table.sanitizer("sandbox.safe_eval").unwrap();
@@ -3228,9 +3258,19 @@ mod tests {
         for pattern in ["", "a..b", "a.b()", "1a", "a.", "a.[]()", "a-b"] {
             assert!(table.source(pattern).is_err(), "{pattern}");
         }
-        for pattern in ["cr.execute", "sudo().write", "env.[].create", "_x9"] {
+        for pattern in [
+            "cr.execute",
+            "sudo().write",
+            "env.[].create",
+            "_x9",
+            "handlers.[]",
+            "[]",
+        ] {
             assert!(table.source(pattern).is_ok(), "{pattern}");
         }
+        let error = table.source("a.b()").unwrap_err();
+        assert!(error.starts_with("'a.b()' is not a taint pattern"), "{error}");
+        assert!(error.contains("never an item read"), "{error}");
         let error = table.sink("OD101", "lib.run").unwrap_err();
         assert!(error.contains("'OD101'"), "{error}");
         assert!(table.sink("no-such-rule", "lib.run").is_err());
