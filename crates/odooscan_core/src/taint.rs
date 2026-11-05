@@ -1164,11 +1164,17 @@ impl Flows<'_> {
         self.state.merge(after);
     }
 
-    /// A loop body runs twice, so that a value tainted late in it reaches the code above.
-    fn repeat(&mut self, body: &[Stmt]) {
+    /// A loop body runs twice, so that a value tainted late in it reaches the code above. `enter`
+    /// runs before each pass, as a new iteration starts. The loop may stop after either pass, and
+    /// `enter` may drop what the first left on the target, so both reach the code after it.
+    fn repeat(&mut self, body: &[Stmt], mut enter: impl FnMut(&mut Self)) {
         self.branch(|f| {
+            enter(f);
             f.body(body);
-            f.body(body);
+            f.branch(|g| {
+                enter(g);
+                g.body(body);
+            });
         });
     }
 
@@ -1208,18 +1214,10 @@ impl Flows<'_> {
 
     fn compound(&mut self, stmt: &Stmt) {
         match stmt {
-            Stmt::For(f) => {
-                let t = values(self.expr(&f.iter));
-                self.branch(|s| {
-                    s.bind(&f.target, t, None);
-                    s.body(&f.body);
-                    s.body(&f.body);
-                });
-                self.body(&f.orelse);
-            }
+            Stmt::For(f) => self.for_stmt(f),
             Stmt::While(w) => {
                 self.expr(&w.test);
-                self.repeat(&w.body);
+                self.repeat(&w.body, |_| {});
                 self.body(&w.orelse);
             }
             Stmt::With(w) => {
@@ -1301,6 +1299,14 @@ impl Flows<'_> {
                 t.each_mut(|t| t.safe = t.safe.union(existing()));
             }
         }
+    }
+
+    /// Binds the target again before each pass: the second pass reads a new element, without what
+    /// the first pass set on the one before it.
+    fn for_stmt(&mut self, f: &ast::StmtFor) {
+        let t = values(self.expr(&f.iter));
+        self.repeat(&f.body, |s| s.bind(&f.target, t.clone(), None));
+        self.body(&f.orelse);
     }
 
     fn try_stmt(&mut self, t: &ast::StmtTry) {
@@ -4443,10 +4449,109 @@ mod tests {
         );
     }
 
+    /// Each rule's sink, and the route value it reports: `**kw` for OD704, which needs a mapping.
+    fn loop_sinks() -> impl Iterator<Item = (&'static str, &'static str, &'static str)> {
+        let sudo_write = ("OD704", "self.env['res.partner'].sudo().write(#)", "kw");
+        SINK_OF
+            .iter()
+            .map(|&(code, sink)| (code, sink, "t"))
+            .chain([sudo_write])
+    }
+
+    /// The codes of a route of parameters `t` and `**kw` running `body`, where `<loop>` opens a
+    /// loop over records as `x`, `<sink>` is `sink` on `arg` and `<t>` the route value.
+    fn looped(body: &str, sink: &str, arg: &str, t: &str) -> Vec<String> {
+        let body = body
+            .replace("<loop>", "for x in self.env['x.y'].search([]):")
+            .replace("<sink>", &sink.replace('#', arg))
+            .replace("<t>", t);
+        route_codes(&format!("def f(self, t, **kw):\n    {body}\n"))
+    }
+
     #[test]
     fn loops_carry_taint_around() {
-        let src = "def f(self, items):\n    q = 'a'\n    for item in items:\n        self.env.cr.execute(q)\n        q = item\n";
-        assert_eq!(scan(Params::Rpc, src).len(), 1);
+        for (code, sink, t) in loop_sinks() {
+            // A return in the body would leave the loop before a second pass, so OD716 keeps
+            // the records it browses there and returns them after the loop.
+            let (sink, after) = match sink.strip_prefix("return ") {
+                Some(call) => (format!("r = {call}"), "\n    return r"),
+                None => (sink.to_owned(), ""),
+            };
+            let late = format!("v = ''\n    <loop>\n        <sink>\n        v = <t>{after}");
+            let while_loop = format!("v = ''\n    while self:\n        <sink>\n        v = <t>{after}");
+            for body in [late, while_loop] {
+                assert_eq!(looped(&body, &sink, "v", t), [code], "{code}: {body}");
+            }
+        }
+        let vals = "vals = {'public': True}\n    <loop>\n        <sink>\n        vals['raw'] = <t>";
+        let create = "self.env['ir.attachment'].sudo().create(#)";
+        assert_eq!(looped(vals, create, "vals", "t"), ["OD717"]);
+    }
+
+    /// OD704 is left out: an element or an attribute holds a value of the mapping, not its keys.
+    #[test]
+    fn a_route_value_in_a_loop_is_reported_for_each_rule_but_od704() {
+        // The last case reads after the loop what only the first pass set on its target.
+        let cases = [
+            ("for x in <t>:\n        <sink>", "x"),
+            ("for k, v in kw.items():\n        <sink>", "v"),
+            ("<loop>\n        x.b = <t>\n        <sink>", "x.b"),
+            ("<loop>\n        x.b = <t>\n    <sink>", "x.b"),
+            (
+                "v = <t>\n    <loop>\n        x.b = v\n        v = ''\n    <sink>",
+                "x.a",
+            ),
+            ("v = <t>\n    <loop>\n        y = v\n        v = ''\n    <sink>", "y"),
+            (
+                "v = <t>\n    while self:\n        y = v\n        v = ''\n    <sink>",
+                "y",
+            ),
+        ];
+        for (code, sink) in SINK_OF {
+            for (body, arg) in cases {
+                assert_eq!(looped(body, sink, arg, "t"), [*code], "{code}: {body}");
+            }
+        }
+    }
+
+    /// What a loop body reads from its target `x` and sets on it for `code`: OD704 needs the keys
+    /// of a mapping, which only an update adds.
+    fn read_and_set(code: &str) -> (&'static str, &'static str) {
+        if code == "OD704" {
+            ("x", "x.update(<t>)")
+        } else {
+            ("x.a", "x.b = <t>")
+        }
+    }
+
+    #[test]
+    fn a_for_target_is_bound_again_before_each_pass() {
+        for (code, sink, t) in loop_sinks() {
+            let (read, set) = read_and_set(code);
+            let mut sets = vec![set];
+            if matches!(code, "OD701" | "OD707") {
+                sets.extend(["x['b'] = <t>", "x = <t>"]);
+            }
+            for set in sets {
+                let body = format!("<loop>\n        <sink>\n        {set}");
+                assert!(looped(&body, sink, read, t).is_empty(), "{code}: {body}");
+            }
+            // The shape of `_get_icon_image` in `ir_module.py`, which reads an attribute of a
+            // module and then sets another from a call.
+            let attr_set = set.replace("<t>", "self._x()").replace("x.b", "x.icon_flag");
+            let body = format!(
+                "for x in self:\n        {}\n        {attr_set}",
+                sink.replace('#', &read.replace(".a", ".icon"))
+            );
+            let (_, edges) = flows_of(Params::None, &format!("def _f(self):\n    {body}\n"));
+            // Outside a route OD716 keeps no edge to its sink, so the call it browses with stands
+            // in for it.
+            let reached = |t: &FlowTarget| match code {
+                "OD716" => matches!(t, FlowTarget::Arg(..)),
+                _ => *t == FlowTarget::Sink(code),
+            };
+            assert!(origins_where(&edges, reached).is_empty(), "{code}: {body}");
+        }
     }
 
     /// The codes of a function body where `t` is a route parameter and `P` the records of a model
@@ -5224,8 +5329,12 @@ mod tests {
 
     /// The codes of a route of parameter `t` that runs `before`, then `sink` on `value`.
     fn sunk(before: &str, sink: &str, value: &str) -> Vec<String> {
-        let src = format!("def f(self, t):\n    {before}{}\n", sink.replace('#', value));
-        code_list(&scan(Params::Route(&[]), &src))
+        route_codes(&format!("def f(self, t):\n    {before}{}\n", sink.replace('#', value)))
+    }
+
+    /// The codes of `src`, a route whose parameters are all user data.
+    fn route_codes(src: &str) -> Vec<String> {
+        code_list(&scan(Params::Route(&[]), src))
             .into_iter()
             .map(str::to_owned)
             .collect()

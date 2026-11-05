@@ -58,3 +58,10 @@ class Outbound(http.Controller):
         open(unchecked, "rb")
         manifest = Manifest.for_addon(kw["addon"])
         return http.send_file(os.path.join(manifest.path, "README.rst"))
+
+    @http.route("/bad/outbound/notes", auth="user")
+    def notes(self, **kw):
+        # Each pass reads a new note, so the id set from kw on the one before never reaches open().
+        for note in request.env["bad.registry.note"].search([]):
+            open(note.label, "rb")
+            note.res_id = kw["res_id"]
