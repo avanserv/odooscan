@@ -1,0 +1,97 @@
+<odoo>
+    <record id="rule_ticket_portal_all" model="ir.rule">
+        <field name="name">every ticket</field>
+        <field name="model_id" ref="model_exposure_ticket"/>
+        <field name="domain_force">[(1, '=', 1)]</field>
+        <field name="groups" eval="[(4, ref('base.group_portal'))]"/>
+    </record>
+    <record id="rule_ticket_portal_none" model="ir.rule">
+        <field name="name">no domain</field>
+        <field name="model_id" ref="model_exposure_ticket"/>
+        <field name="groups" eval="[Command.link(ref('base.group_portal'))]"/>
+        <field name="perm_write" eval="False"/>
+    </record>
+    <record id="rule_ticket_portal_own" model="ir.rule">
+        <field name="name">own tickets</field>
+        <field name="model_id" ref="model_exposure_ticket"/>
+        <field name="domain_force">[('partner_id', '=', user.partner_id.id)]</field>
+        <field name="groups" eval="[(4, ref('base.group_portal'))]"/>
+    </record>
+    <record id="rule_ticket_user_all" model="ir.rule">
+        <field name="name">employees see every ticket</field>
+        <field name="model_id" ref="model_exposure_ticket"/>
+        <field name="domain_force">[(1, '=', 1)]</field>
+        <field name="groups" eval="[(4, ref('base.group_user'))]"/>
+    </record>
+    <record id="rule_ticket_portal_off" model="ir.rule">
+        <field name="name">switched off</field>
+        <field name="model_id" ref="model_exposure_ticket"/>
+        <field name="domain_force">[]</field>
+        <field name="groups" eval="[(4, ref('base.group_portal'))]"/>
+        <field name="active" eval="False"/>
+    </record>
+    <record id="rule_ticket_portal_removed" model="ir.rule">
+        <field name="name">group removed again</field>
+        <field name="model_id" ref="model_exposure_ticket"/>
+        <field name="domain_force">[(1, '=', 1)]</field>
+        <field name="groups" eval="[(4, ref('base.group_portal')), (3, ref('base.group_user'))]"/>
+    </record>
+    <record id="rule_ticket_portal_unlink" model="ir.rule">
+        <field name="name">only what the rows do not grant</field>
+        <field name="model_id" ref="model_exposure_ticket"/>
+        <field name="domain_force">[(1, '=', 1)]</field>
+        <field name="groups" eval="[(4, ref('base.group_portal'))]"/>
+        <field name="perm_read" eval="False"/>
+        <field name="perm_write" eval="False"/>
+        <field name="perm_create" eval="False"/>
+    </record>
+    <record id="rule_ticket_portal_expression" model="ir.rule">
+        <field name="name">permission only a run tells</field>
+        <field name="model_id" ref="model_exposure_ticket"/>
+        <field name="domain_force">[(1, '=', 1)]</field>
+        <field name="groups" eval="[(4, ref('base.group_portal'))]"/>
+        <field name="perm_read" eval="bool(1)"/>
+        <field name="perm_write" eval="False"/>
+        <field name="perm_create" eval="False"/>
+        <field name="perm_unlink" eval="False"/>
+    </record>
+    <record id="rule_board_public" model="ir.rule">
+        <field name="name">no row for the public group</field>
+        <field name="model_id" ref="model_exposure_board"/>
+        <field name="domain_force">[]</field>
+        <field name="groups" eval="[(4, ref('base.group_public'))]"/>
+    </record>
+    <record id="rule_ticket_narrowed" model="ir.rule">
+        <field name="name">narrowed in a later file</field>
+        <field name="model_id" ref="model_exposure_ticket"/>
+        <field name="groups" eval="[(4, ref('base.group_portal'))]"/>
+    </record>
+    <record id="rule_ticket_no_permission" model="ir.rule">
+        <field name="name">applies to nothing</field>
+        <field name="model_id" ref="model_exposure_ticket"/>
+        <field name="domain_force">[('partner_id', '=', user.partner_id.id)]</field>
+        <field name="groups" eval="[(4, ref('base.group_user'))]"/>
+        <field name="perm_read" eval="False"/>
+        <field name="perm_write" eval="False"/>
+        <field name="perm_create" eval="False"/>
+        <field name="perm_unlink" eval="False"/>
+    </record>
+    <record id="rule_ticket_read_off" model="ir.rule">
+        <field name="name">loses its permissions over two writes</field>
+        <field name="model_id" ref="model_exposure_ticket"/>
+        <field name="domain_force">[('partner_id', '=', user.partner_id.id)]</field>
+        <field name="perm_read" eval="False"/>
+    </record>
+    <record id="rule_open_portal" model="ir.rule">
+        <field name="name">reached through the row with no group</field>
+        <field name="model_id" ref="model_exposure_open"/>
+        <field name="domain_force">[(1, '=', 1)]</field>
+        <field name="groups" eval="[(4, ref('base.group_portal'))]"/>
+    </record>
+    <record id="rule_everyone_all" model="ir.rule">
+        <field name="name">a group 18.0 lacks</field>
+        <field name="model_id" ref="model_exposure_everyone"/>
+        <field name="domain_force">[]</field>
+        <field name="groups" eval="[(4, ref('base.group_everyone'))]"/>
+    </record>
+</odoo>

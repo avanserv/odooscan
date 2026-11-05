@@ -227,12 +227,16 @@ fn names_secret(expr: &Expr) -> bool {
         },
         _ => tail_name(expr),
     };
-    let last = name.and_then(|n| n.rsplit('_').find(|w| !w.is_empty()));
-    last.is_some_and(|w| {
+    name.and_then(last_word).is_some_and(|w| {
         ["token", "secret", "signature"]
             .iter()
             .any(|s| w.eq_ignore_ascii_case(s))
     })
+}
+
+/// The last word of a snake-case name, as `token` of `access_token_`.
+pub(crate) fn last_word(name: &str) -> Option<&str> {
+    name.rsplit('_').find(|w| !w.is_empty())
 }
 
 /// `self`, through methods that keep the model, such as `self.sudo()`.
@@ -5910,6 +5914,7 @@ mod tests {
             "token == tokens[0]",
             "kw.get(key) == order.access_token",
             "token_count == order.token_ids",
+            "password == user.new_password",
         ] {
             assert_eq!(compare(test), [""; 0], "{test}");
         }

@@ -259,6 +259,13 @@ rules! {
     "OD328" "bundle-template-removed" Deprecation Error Some(">=saas~14.3"), false, "A data file inherits or references an asset bundle, which is no longer a template.";
     "OD401" "model-without-access" Security Warning None, true, "A new model has no ir.model.access rule, or from saas~19.4 no ir.access rule with a group.";
     "OD402" "public-write-access" Security Warning None, false, "An access row gives public or portal users write, create or unlink, through their group or no group.";
+    "OD403" "unsanitized-public-html" Security Error None, true, "An Html field that public or portal users can write is not sanitized.";
+    "OD404" "public-secret-field" Security Warning None, true, "A field named as a secret has no groups, on a model public or portal users can read.";
+    "OD405" "public-rule-always-true" Security Warning None, true, "A record rule or ir.access domain gives public or portal users every record of a model they can reach.";
+    // The CHECK of `ir.rule` refuses a rule with no permission as far back as 9.0
+    // (`openerp/addons/base/ir/ir_rule.py:81`; 18.0 `odoo/addons/base/models/ir_rule.py:29-33`);
+    // saas~19.4 replaces `ir.rule` with `ir.access`.
+    "OD406" "rule-without-permission" Correctness Error Some("<saas~19.4"), true, "A record rule sets every perm_* false, which Odoo refuses as it loads it.";
     "OD501" "manifest-data-missing" Correctness Error None, false, "A file listed in the manifest does not exist.";
     "OD502" "data-file-not-loaded" Quality Warning None, false, "A data file is listed under no manifest key Odoo reads, so Odoo never loads it.";
     "OD503" "unknown-dependency" Correctness Error None, true, "A module in depends is not on the addons path.";
@@ -513,9 +520,10 @@ mod tests {
         for (_, spec, s) in SEVERITY_BY_SERIES.iter().filter(|(code, ..)| *code == r.code) {
             severity += &format!(", {s:?} from {}", since(spec));
         }
-        let range = |spec: &str| match spec.split_once(",<") {
-            Some((from, before)) => format!("{} and later, before {before}", since(from)),
-            None => format!("{} and later", since(spec)),
+        let range = |spec: &str| match (spec.split_once(",<"), spec.strip_prefix('<')) {
+            (Some((from, before)), _) => format!("{} and later, before {before}", since(from)),
+            (None, Some(before)) => format!("before {before}"),
+            (None, None) => format!("{} and later", since(spec)),
         };
         let series = r.series.map_or_else(|| "all".to_owned(), range);
         let index = if r.needs_index { "yes" } else { "no" };

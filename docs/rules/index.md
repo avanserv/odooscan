@@ -150,12 +150,17 @@ XML ids, views and data records, within a file and across the dependency graph.
 
 ## OD4: access
 
-Access rights: models no one can reach, and rights granted too widely.
+Access rights: models no one can reach, rights granted too widely, fields and records they expose
+to public and portal users, and record rules Odoo refuses to load.
 
 | Code | Name | Reports |
 | --- | --- | --- |
 | [OD401](OD401.md) | `model-without-access` | A new model has no ir.model.access rule, or from saas~19.4 no ir.access rule with a group. |
 | [OD402](OD402.md) | `public-write-access` | An access row gives public or portal users write, create or unlink, through their group or no group. |
+| [OD403](OD403.md) | `unsanitized-public-html` | An Html field that public or portal users can write is not sanitized. |
+| [OD404](OD404.md) | `public-secret-field` | A field named as a secret has no groups, on a model public or portal users can read. |
+| [OD405](OD405.md) | `public-rule-always-true` | A record rule or ir.access domain gives public or portal users every record of a model they can reach. |
+| [OD406](OD406.md) | `rule-without-permission` | A record rule sets every perm_* false, which Odoo refuses as it loads it. |
 
 ## OD5: manifest and module graph
 

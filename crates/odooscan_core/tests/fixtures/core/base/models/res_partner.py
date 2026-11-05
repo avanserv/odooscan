@@ -126,6 +126,10 @@ class IrRule(models.Model):
     model_id = fields.Many2one("ir.model")
     groups = fields.Many2many("res.groups")
     domain_force = fields.Text()
+    perm_read = fields.Boolean()
+    perm_write = fields.Boolean()
+    perm_create = fields.Boolean()
+    perm_unlink = fields.Boolean()
 
 
 class IrAccess(models.Model):

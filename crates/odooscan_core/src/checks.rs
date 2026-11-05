@@ -8,10 +8,11 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::facts::{
     AccessRow, ActionFact, ActionValue, ActionViewId, Annotation, ArchElement, ArchModifier, ArchSubview, ClassFact,
-    DataFacts, DefinitionSource, DomainFact, FieldFact, FieldWrite, FunctionCall, GuardedRef, JsFacts, JsName,
+    DataFacts, DefinitionSource, DomainFact, FieldFact, FieldWrite, Flag, FunctionCall, GuardedRef, JsFacts, JsName,
     MethodDef, ModelKind, OptionValue, OrmCall, Pos, RawDiag, RecordFact, RecordWrite, Refusal, ReportFact, RuleFact,
     ServerFact, Signature, Spanned, SqlColumn, SqlView, Subject, UNREAD_TYPE, ViewFact, WrittenValue, XmlDef, XmlRef,
 };
+use crate::grants::{self, Grant, Grants};
 use crate::index::{
     BASE_MODEL_METHODS, Export, FieldDef, FieldInfo, Index, JsSpec, PathError, Placed, RELATIONAL_TYPES, Scope, Status,
     ViewTree, asset_glob_set, base_private_method, full_id, js_module_path, loaded_data, located,
@@ -21,7 +22,7 @@ use crate::project::{Module, SourceFile, code_loaded};
 use crate::rules::rule;
 use crate::series::{self, Series};
 use crate::xml::{LOCATOR, QWEB, UNKNOWN_CONTEXT};
-use crate::{flows, manifest, modifier, module_state};
+use crate::{domain, flows, manifest, modifier, module_state, python};
 
 /// Directories of upgrade scripts, which name XML ids of past versions.
 const UPGRADE_DIRS: &[&str] = &["migrations", "upgrades"];
@@ -258,6 +259,7 @@ pub fn check_module<'m>(index: &Index<'m>, mi: usize, series: Option<Series>) ->
         let installs = index.install_scope(mi, series);
         let loaded = index.loaded_scope(mi, &scope, &installs);
         let built = BuiltModels::of(module);
+        let grants = Grants::of(index, &scope, series, reads_model_access(series));
         let ctx = Ctx {
             index,
             mi,
@@ -271,6 +273,7 @@ pub fn check_module<'m>(index: &Index<'m>, mi: usize, series: Option<Series>) ->
             partial: index.partial_scope(&scope),
             lost: index.lost_scope(&scope),
             series,
+            grants: &grants,
         };
         ctx.dependencies(&mut out);
         ctx.python(&mut out);
@@ -1233,6 +1236,8 @@ struct Ctx<'a, 'm> {
     /// XML id, a view element, an access row or a value of a record, but no Python or JS.
     lost: bool,
     series: Option<Series>,
+    /// The access rows in scope that let public or portal users at a model.
+    grants: &'a Grants<'m>,
 }
 
 impl<'m> Ctx<'_, 'm> {
@@ -2019,6 +2024,8 @@ impl<'m> Ctx<'_, 'm> {
         }
         for rule in &file.facts.rules {
             self.rule_domain(out, path, rule);
+            self.public_rule(out, path, rule);
+            self.rule_without_permission(out, path, rule);
         }
         for server in &file.facts.servers {
             self.server_code(out, path, server);
@@ -2028,6 +2035,7 @@ impl<'m> Ctx<'_, 'm> {
         }
         self.domains(out, path, &file.facts.action_domains);
         self.actions(out, path, &file.facts.actions);
+        self.exposing_rows(out, file);
     }
 
     /// OD324 on the records of a loaded `file` that Odoo creates.
@@ -2396,16 +2404,29 @@ impl<'m> Ctx<'_, 'm> {
     /// so no demo write for a data file. Before, the query reads what the whole load left, without
     /// the demo writes a data file cannot count on.
     fn rule_state(&self, rule: &'m RuleFact) -> Vec<Placed<&'m RuleFact>> {
-        let id = rule.id.as_ref().map(|id| full_id(&self.module.name, id));
-        let Some(writes) = id.and_then(|id| self.index.rule_writes.get(&id)) else {
+        match self.record_rule_writes(rule) {
+            Some(writes) if self.series.is_some_and(|s| s < RULE_DOMAIN_VALIDATED) => {
+                writes.iter().filter(|w| self.scope.loads(w)).copied().collect()
+            }
+            _ => self.rule_upto(rule),
+        }
+    }
+
+    /// The writes of the record of `rule` that the scope reads, up to `rule`: what the record holds
+    /// once `rule` loads.
+    fn rule_upto(&self, rule: &'m RuleFact) -> Vec<Placed<&'m RuleFact>> {
+        let Some(writes) = self.record_rule_writes(rule) else {
             return vec![self.own(rule)];
         };
-        if self.series.is_some_and(|s| s < RULE_DOMAIN_VALIDATED) {
-            return writes.iter().filter(|w| self.scope.loads(w)).copied().collect();
-        }
         let upto = writes.iter().position(|w| std::ptr::eq(w.fact, rule));
         let upto = upto.map_or(writes.len(), |at| at + 1);
         writes[..upto].iter().filter(|w| self.scope.reads(w)).copied().collect()
+    }
+
+    /// Every write to the record of `rule`, in load order, when it has an id.
+    fn record_rule_writes(&self, rule: &'m RuleFact) -> Option<&[Placed<&'m RuleFact>]> {
+        let id = full_id(&self.module.name, rule.id.as_ref()?);
+        self.index.rule_writes.get(&id).map(Vec::as_slice)
     }
 
     /// The model of the last `model_id` of `writes`, whose XML id the module that wrote it resolves.
@@ -3945,6 +3966,7 @@ impl<'m> Ctx<'_, 'm> {
         self.check_company(out, path, field, own);
         self.duplicate_label(out, path, fields, own);
         self.view_field(out, path, fields, own);
+        self.exposure(out, path, field, own);
     }
 
     /// The fields of `model` as the registry builds them in scope, merged once for every rule.
@@ -5463,6 +5485,378 @@ fn has_certain_column(field: &Field) -> bool {
     let ftype = field.defs.first().map_or("", |d| d.2.ftype.as_str());
     let typed = !matches!(ftype, "One2many" | "Many2many" | "Binary" | "Image" | UNREAD_TYPE);
     typed && !company_dependent(field) && field.stored() == Some(true)
+}
+
+/// What a public or portal user reaches of a field through an access row: OD403 stores into an
+/// unsanitized Html field, OD404 reads a secret.
+#[derive(Clone, Copy)]
+enum Exposure {
+    Html,
+    Secret,
+}
+
+impl Exposure {
+    const ALL: [Self; 2] = [Self::Html, Self::Secret];
+
+    fn code(self) -> &'static str {
+        match self {
+            Self::Html => "OD403",
+            Self::Secret => "OD404",
+        }
+    }
+
+    fn kind(self) -> grants::Kind {
+        match self {
+            Self::Html => grants::stores,
+            Self::Secret => grants::reads,
+        }
+    }
+
+    /// What an access row lets its users do to the model, as the message says it.
+    fn verb(self) -> &'static str {
+        match self {
+            Self::Html => "write",
+            Self::Secret => "read",
+        }
+    }
+}
+
+/// The options that turn the sanitizer of an Html field off, all on by default.
+const SANITIZE_OPTIONS: [&str; 3] = ["sanitize", "sanitize_tags", "sanitize_attributes"];
+
+/// The last words of a field name that say it holds a secret. `signature`, which OD131 counts, is
+/// mostly the text of an email signature here.
+const SECRET_WORDS: [&str; 3] = ["password", "token", "secret"];
+
+fn sets_sanitize(own: &FieldFact) -> bool {
+    SANITIZE_OPTIONS.iter().any(|o| own.option(o).is_some())
+}
+
+/// Whether a field name says it holds a secret. `access_token` is the one portal links carry, which
+/// the portal user who follows them may read.
+fn secret_name(name: &str) -> bool {
+    let word = python::last_word(name).unwrap_or_default();
+    name != "access_token"
+        && (SECRET_WORDS.iter().any(|w| word.eq_ignore_ascii_case(w)) || name.to_ascii_lowercase().ends_with("api_key"))
+}
+
+/// The option, and how it is spelled, that leaves an Html field unsanitized. `'email_outgoing'`
+/// turns the tags and the attributes off unless the field sets them (18.0 `odoo/fields.py:2187`,
+/// 20.0 `odoo/orm/fields_textual.py:628`).
+fn unsanitized(field: &Field) -> Option<(&'static str, &'static str)> {
+    let off = |name: &str| field.get(name) != Merged::Unset && truth(field.get(name)) == Some(false);
+    let on = |name: &str| truth(field.get(name)) == Some(true);
+    let outgoing = matches!(field.get("sanitize"), Merged::Known(OptionValue::Str(s)) if s == "email_outgoing");
+    if off("sanitize") {
+        Some(("sanitize", "sanitize=False"))
+    } else if outgoing && !(on("sanitize_tags") && on("sanitize_attributes")) {
+        Some(("sanitize", "sanitize='email_outgoing'"))
+    } else if off("sanitize_tags") {
+        Some(("sanitize_tags", "sanitize_tags=False"))
+    } else {
+        off("sanitize_attributes").then_some(("sanitize_attributes", "sanitize_attributes=False"))
+    }
+}
+
+/// OD403 and OD404: a field public or portal users reach through an access row. The module that
+/// decides the field reports it at the field, given a row in scope; else the module whose row first
+/// lets them at the model reports it at the row.
+impl<'m> Ctx<'_, 'm> {
+    fn exposure(&self, out: &mut Out<'m>, path: &'m Path, field: &Field<'m>, own: &'m FieldFact) {
+        for exposure in Exposure::ALL {
+            let Some((option, why)) = self.exposed(field, exposure) else {
+                continue;
+            };
+            let decides = match exposure {
+                Exposure::Html => self.reported_at(field, own, sets_sanitize),
+                Exposure::Secret => self.introduces(field, own),
+            };
+            let grant = self.grants.public(field.model, exposure.kind()).next();
+            if let Some(grant) = grant.filter(|_| decides) {
+                let reach = format!("{} can {} {}", grant.whom(), exposure.verb(), field.model);
+                let message = exposure_message(exposure, field, &own.name, why, &reach);
+                out.push(
+                    path,
+                    exposure.code(),
+                    option.map_or(own.pos, |o| pos_of(own, o)),
+                    message,
+                );
+            }
+        }
+    }
+
+    /// What exposes `field` to a user who can reach its model, as the option at fault and its
+    /// spelling. None for a field `groups` limits, a related one, or one of a transient model.
+    fn exposed(&self, field: &Field<'m>, exposure: Exposure) -> Option<(Option<&'static str>, &'static str)> {
+        let transient = self.index.kind(field.model, self.scope) == Some(ModelKind::Transient);
+        if transient || field.get("groups") != Merged::Unset || field.get("related") != Merged::Unset {
+            return None;
+        }
+        let ftype = field.defs.first().map_or("", |d| d.2.ftype.as_str());
+        match exposure {
+            Exposure::Html if ftype == "Html" && self.writable(field) => {
+                unsanitized(field).map(|(option, why)| (Some(option), why))
+            }
+            Exposure::Secret if self.secret(field, ftype) => Some((None, "")),
+            _ => None,
+        }
+    }
+
+    /// Whether a write reaches the field's value: a compute without an inverse drops it.
+    fn writable(&self, field: &Field<'m>) -> bool {
+        truth(field.get("compute")) == Some(false) || field.get("inverse") != Merged::Unset
+    }
+
+    /// Whether the field stores a secret where its model's readers see it. `res.users` hides its
+    /// own from other users (18.0 `odoo/addons/base/models/res_users.py:580-585`).
+    fn secret(&self, field: &Field<'m>, ftype: &str) -> bool {
+        let name = field.defs.first().map_or("", |d| d.2.name.as_str());
+        matches!(ftype, "Char" | "Text")
+            && field.model != "res.users"
+            && secret_name(name)
+            && field.stored() == Some(true)
+    }
+
+    /// OD403 and OD404 at the public rows of `file` that first let public or portal users at a model
+    /// whose field another module decides.
+    fn exposing_rows(&self, out: &mut Out<'m>, file: &'m SourceFile<DataFacts>) {
+        if self.partial {
+            return;
+        }
+        for exposure in Exposure::ALL {
+            let mut granted: Vec<(&'m str, &Grant<'m>)> = self.grants.introduced_in(self.mi, exposure.kind()).collect();
+            granted.retain(|(_, g)| g.path == file.path);
+            granted.sort_by_key(|(model, _)| *model);
+            for (model, grant) in granted {
+                self.exposing_row(out, exposure, model, grant);
+            }
+        }
+    }
+
+    fn exposing_row(&self, out: &mut Out<'m>, exposure: Exposure, model: &'m str, grant: &Grant<'m>) {
+        if !self.index.introduced(model, self.scope) || self.index.hidden_parents(model, self.scope) {
+            return;
+        }
+        let fields = self.model_fields(model);
+        let mut names: Vec<&&'m str> = fields.fields.keys().collect();
+        names.sort();
+        for name in names {
+            let field = &fields.fields[*name];
+            let Some((_, why)) = self
+                .exposed(field, exposure)
+                .filter(|_| self.decided_elsewhere(field, exposure))
+            else {
+                continue;
+            };
+            let reach = format!("this row lets {} {} {model}", grant.whom(), exposure.verb());
+            let message = exposure_message(exposure, field, name, why, &reach);
+            out.push(grant.path, exposure.code(), grant.row.pos, message);
+        }
+    }
+
+    /// Whether another module decides what exposes `field`, a field of the model's own classes: a
+    /// field only a mixin defines is left out on either side.
+    fn decided_elsewhere(&self, field: &Field<'m>, exposure: Exposure) -> bool {
+        let me = self.index.by_name[self.module.name.as_str()];
+        let decided_here = match exposure {
+            Exposure::Html => field.defs.iter().any(|d| d.0 == me && sets_sanitize(d.2)),
+            Exposure::Secret => field.defs.iter().all(|d| d.0 == me),
+        };
+        !decided_here && field.defs.iter().any(|d| d.1.model == field.model)
+    }
+}
+
+/// The message of OD403 or OD404, where `reach` says who reaches the model and how.
+fn exposure_message(exposure: Exposure, field: &Field, name: &str, why: &str, reach: &str) -> String {
+    let model = field.model;
+    match exposure {
+        Exposure::Html => format!(
+            "Html field '{name}' of {model} is not sanitized ({why}) and {reach}, so they can store {} for whoever opens the record; keep the sanitizer on, or give the field groups",
+            unsanitized_markup(why)
+        ),
+        Exposure::Secret => format!(
+            "'{name}' of {model} holds a secret and has no groups, and {reach}, so they can read it over RPC; give the field groups, such as base.group_system"
+        ),
+    }
+}
+
+/// What an Html field stores that its sanitizer would remove, by the option at fault. Only
+/// `sanitize=False` skips the cleaner, whose defaults strip script and event handlers whatever the
+/// other options say (18.0 `odoo/tools/mail.py:328-365`).
+fn unsanitized_markup(why: &str) -> &'static str {
+    match why {
+        "sanitize=False" => "script that runs",
+        "sanitize_attributes=False" => "attributes the sanitizer would strip (not event handlers)",
+        _ => "style, base and SVG markup that restyles the page or redirects its links",
+    }
+}
+
+/// What the writes of a rule leave it holding, folded in load order.
+struct RuleState<'m> {
+    /// The last domain written, None when no write gives one.
+    domain: Option<&'m ActionValue>,
+    /// The groups, as full XML ids, the rule certainly holds.
+    groups: Vec<String>,
+    perms: [Flag; 4],
+    active: Option<bool>,
+}
+
+impl<'m> RuleState<'m> {
+    fn of(index: &Index<'m>, writes: &[Placed<&'m RuleFact>]) -> Self {
+        let mut state = Self {
+            domain: None,
+            groups: vec![],
+            perms: [Flag::Unset; 4],
+            active: None,
+        };
+        for write in writes {
+            let fact = write.fact;
+            if !matches!(fact.domain, ActionValue::Unset) {
+                state.domain = Some(&fact.domain);
+            }
+            // A write only a run tells may remove any group.
+            if fact.groups.opaque || !fact.groups.keeps {
+                state.groups.clear();
+            }
+            let module = &index.modules[write.module].name;
+            state
+                .groups
+                .extend(fact.groups.added.iter().map(|g| full_id(module, g)));
+            for (held, flag) in state.perms.iter_mut().zip(fact.perms) {
+                if flag != Flag::Unset {
+                    *held = flag;
+                }
+            }
+            state.active = fact.active.or(state.active);
+        }
+        state
+    }
+
+    /// How the domain holds every record, if it does. `ir.rule` reads a domain it lacks or that is
+    /// false as none (18.0 `odoo/addons/base/models/ir_rule.py:160,170`), which the parsers give as
+    /// an empty literal. An empty one is how an `ir.access` row grants without a restriction, so only
+    /// a written `TRUE_LEAF` counts there.
+    fn every_record(&self, access: bool) -> Option<&'static str> {
+        match self.domain {
+            None => (!access).then_some("is empty"),
+            Some(ActionValue::Literal(text)) => holds_every_record(&text.value, access),
+            _ => None,
+        }
+    }
+}
+
+/// How a domain written as `text` holds every record, if it does.
+fn holds_every_record(text: &str, access: bool) -> Option<&'static str> {
+    match domain::always_true(text) {
+        Some(leaves) if leaves > 0 => Some("is always true"),
+        _ if access => None,
+        Some(_) => Some("is empty"),
+        None => text.is_empty().then_some("is empty"),
+    }
+}
+
+/// Whether a write to a rule sets what decides whom it lets at which records.
+fn sets_reach(fact: &RuleFact) -> bool {
+    let groups = &fact.groups;
+    !matches!(fact.domain, ActionValue::Unset)
+        || !matches!(fact.model, ActionValue::Unset)
+        || groups.opaque
+        || !groups.keeps
+        || !groups.added.is_empty()
+        || fact.perms.iter().any(|p| *p != Flag::Unset)
+        || fact.active.is_some()
+}
+
+/// The operations of `Perms` in their order, as messages name them, and the grant of each.
+const OPERATIONS: [(&str, grants::Kind); 4] = [
+    ("read", |p| p.read),
+    ("write", |p| p.write),
+    ("create", |p| p.create),
+    ("unlink", |p| p.unlink),
+];
+
+/// OD405 and OD406, on what the records of `ir.rule` and `ir.access` hold.
+impl<'m> Ctx<'_, 'm> {
+    /// OD405 on the last write of this module to a rule for public or portal users whose domain
+    /// holds every record. A later write of the module may narrow it, and one of a module that
+    /// depends on it is not this module's to report.
+    fn public_rule(&self, out: &mut Out<'m>, path: &'m Path, rule: &'m RuleFact) {
+        let read = if rule.access {
+            self.series.is_none_or(|s| s >= IR_ACCESS)
+        } else {
+            reads_model_access(self.series)
+        };
+        if !read || !self.last_write_here(rule) {
+            return;
+        }
+        let writes = self.rule_state(rule);
+        let state = RuleState::of(self.index, &writes);
+        let Some(model) = self.rule_model(&writes).filter(|_| state.active != Some(false)) else {
+            return;
+        };
+        let Some(why) = state.every_record(rule.access) else {
+            return;
+        };
+        let group = state.groups.iter().find(|g| grants::public_group(g, self.series));
+        let Some((group, ops)) = group.map(|g| (g, self.reached_operations(&state, model, g, rule.access))) else {
+            return;
+        };
+        if ops.is_empty() {
+            return;
+        }
+        let what = if rule.access { "ir.access record" } else { "rule" };
+        let message = format!(
+            "this {what} gives {group} {} on every record of {model}, as its domain {why}; narrow the domain to the records those users own",
+            ops.join(", ")
+        );
+        let pos = match &rule.domain {
+            ActionValue::Literal(text) => text.pos,
+            _ => rule.pos,
+        };
+        out.push(path, "OD405", pos, message);
+    }
+
+    /// Whether `rule` is the last write of this module to its record that the scope loads, of a
+    /// module that writes what OD405 reads: one that only renames the rule leaves it to the others.
+    fn last_write_here(&self, rule: &'m RuleFact) -> bool {
+        let Some(writes) = self.record_rule_writes(rule) else {
+            return true;
+        };
+        let here: Vec<_> = writes
+            .iter()
+            .filter(|w| w.module == self.mi && self.scope.loads(w))
+            .collect();
+        here.last()
+            .is_none_or(|w| std::ptr::eq(w.fact, rule) && here.iter().any(|w| sets_reach(w.fact)))
+    }
+
+    /// The operations a rule for `group` opens on every record. An `ir.access` record grants them
+    /// itself; an `ir.rule` only lets through what an access row grants the group, all of them when
+    /// it names none. Every public grant reaches a rule for everyone, whose group holds them all.
+    fn reached_operations(&self, state: &RuleState<'m>, model: &str, group: &str, access: bool) -> Vec<&'static str> {
+        let granted = |flag: Flag| flag == Flag::Set(true) || (!access && flag == Flag::Unset);
+        let to_group = |g: &Grant| {
+            group == grants::EVERYONE || g.group.as_deref().is_none_or(|g| g == group || g == grants::EVERYONE)
+        };
+        let reached = |kind| access || self.grants.public(model, kind).any(to_group);
+        let ops = OPERATIONS.iter().zip(state.perms);
+        ops.filter(|((_, kind), flag)| granted(*flag) && reached(*kind))
+            .map(|((name, _), _)| *name)
+            .collect()
+    }
+
+    /// OD406 on a write that leaves a rule with every `perm_*` false, which the CHECK of `ir.rule`
+    /// refuses as it writes the row, whatever the writes after it give.
+    fn rule_without_permission(&self, out: &mut Out<'m>, path: &'m Path, rule: &'m RuleFact) {
+        if rule.access || rule.perms.iter().all(|p| *p == Flag::Unset) {
+            return;
+        }
+        let state = RuleState::of(self.index, &self.rule_upto(rule));
+        if state.perms == [Flag::Set(false); 4] {
+            let message = "perm_read, perm_write, perm_create and perm_unlink are all false here, which the CHECK of ir.rule refuses, so the file fails to load; leave the operations the rule restricts true";
+            out.push(path, "OD406", rule.pos, message);
+        }
+    }
 }
 
 #[cfg(test)]

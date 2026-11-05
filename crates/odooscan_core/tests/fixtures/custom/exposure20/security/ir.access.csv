@@ -1,0 +1,5 @@
+id,name,model_id,group_id/id,operation,domain
+access_desk_everyone,desk everyone,exposure20.desk,base.group_everyone,r,"[(1, '=', 1)]"
+access_desk_portal,desk portal,exposure20.desk,base.group_portal,cu,
+access_desk_portal_empty,desk portal empty,exposure20.desk,base.group_portal,r,[]
+access_desk_user,desk user,exposure20.desk,base.group_user,crud,
