@@ -619,6 +619,51 @@ pub struct FieldClass {
     pub bases: Vec<String>,
 }
 
+/// What a route's own decorator gives one key of its routing.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub enum RouteKey<T> {
+    /// Left to the route it overrides, or to Odoo's default.
+    #[default]
+    Absent,
+    Given(T),
+    /// Given as an expression the scan does not read.
+    Unknown,
+}
+
+/// A method's own `@route`, which Odoo merges with those of the methods it overrides.
+#[derive(Clone, Debug, Default)]
+pub struct RouteDef {
+    pub method: String,
+    pub urls: RouteKey<Vec<String>>,
+    /// The literal methods listed, none for `methods=None`, which lets every method through.
+    pub methods: RouteKey<Option<Vec<String>>>,
+    pub kind: RouteKey<String>,
+    pub auth: RouteKey<String>,
+    pub csrf: RouteKey<bool>,
+}
+
+/// A base of a class that is no model, as the file's imports name it.
+#[derive(Clone, Debug, PartialEq)]
+pub enum ClassBase {
+    /// `odoo.http.Controller` or `object`, which give no route.
+    Root,
+    /// The dotted path of a class an import from `odoo.addons` names.
+    Addon(String),
+    /// The class the file defines above that the name is bound to, by its place among the
+    /// file's controllers.
+    Local(usize),
+    /// Any other, whose routes the scan does not read.
+    Unread,
+}
+
+/// A class at the top of a file that is no model and has a base, so it may be a controller.
+#[derive(Clone, Debug)]
+pub struct ControllerFact {
+    pub name: String,
+    pub bases: Vec<ClassBase>,
+    pub routes: Vec<RouteDef>,
+}
+
 #[derive(Debug, Default)]
 pub struct PyFacts {
     pub classes: Vec<ClassFact>,
@@ -626,6 +671,10 @@ pub struct PyFacts {
     /// The last name of each call a class attribute holds where the class counted it as a method:
     /// it declares a field instead when the scan finds a field class of that name.
     pub attr_calls: Vec<String>,
+    pub controllers: Vec<ControllerFact>,
+    /// A route of the file sits in a class whose bases the whole scan may hold, so its routing
+    /// merges with that of the routes it overrides.
+    pub inherits_routes: bool,
     /// A class names its model with an expression, so models and their ids are built at runtime,
     /// lacks `_name` in a module of unknown series and is named apart before and from saas~18.1, or
     /// sits in a file that does not parse with a `_name` or an `_inherit` its tokens do not spell.

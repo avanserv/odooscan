@@ -44,6 +44,6 @@ class Inbound(http.Controller):
         headers = [("Content-Disposition", content_disposition(name))]
         response = request.make_response("", headers)
         if partner:
-            response.headers["X-Partner"] = partner.name
+            response.headers["X-Partner"] = partner
         response.headers["Content-Type"] = mimetype
         return request.make_response("", [("Content-Disposition", f"attachment; filename={name}")])

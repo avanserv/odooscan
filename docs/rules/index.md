@@ -199,8 +199,9 @@ The sources are the parameters of a controller method behind `@route`; the param
 model method (no leading `_`, no `@api.private`), which any user with access to the model can call
 over RPC; and the request: `request.params`, `request.get_json_data()`,
 `request.get_http_params()`, and the `args`, `form`, `values`, `files`, `cookies`, `headers`, `data`
-and JSON of `request.httprequest`. A route parameter that a `model` or `models` converter of its URL
-fills holds records, whose ids alone the user picks, and is no source.
+and JSON of `request.httprequest`. A route parameter that a `model` or `models` converter fills in
+every URL of the route, those an override inherits included, holds records, whose ids alone the
+user picks, and is no source. A URL that leaves it out lets the query string give any value.
 
 A value stays tainted through assignments, attributes of `self` set in the same method, formatting,
 concatenation, f-strings, string methods, items, attributes, collections, comprehensions and module
