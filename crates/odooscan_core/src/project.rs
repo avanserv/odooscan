@@ -97,6 +97,26 @@ impl Module {
     }
 }
 
+/// A checked module with no files, for tests to fill in.
+#[cfg(test)]
+pub(crate) fn module(name: &str, manifest: &str) -> Module {
+    let manifest = manifest::parse(manifest).unwrap();
+    Module {
+        name: name.to_owned(),
+        dir: PathBuf::new(),
+        manifest_path: PathBuf::new(),
+        series: manifest.series(),
+        manifest,
+        checked: true,
+        python: vec![],
+        data: vec![],
+        js: vec![],
+        templates: vec![],
+        sql_views: vec![],
+        lost_text: false,
+    }
+}
+
 /// Whether the module loads the file itself, given its `Module::code_mentions`: chart templates,
 /// any file its Python names by base name, and any file the manifest lists under a key Odoo loads
 /// nothing from, unless a legacy key `series` ignores lists it too: that file was meant to load
