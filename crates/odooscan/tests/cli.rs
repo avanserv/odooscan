@@ -137,6 +137,19 @@ fn check_rejects_a_sink_of_a_rule_that_follows_no_flow() {
     assert!(stderr.contains("'OD101'"), "{stderr}");
 }
 
+const RUNS_AN_ITEM: &str = "from odoo import http\n\n\nclass C(http.Controller):\n    @http.route('/run', auth='user')\n    def run(self):\n        return sandbox.run(forms.data['code'])\n";
+
+#[test]
+fn check_reads_a_last_item_of_a_source_as_a_call_only() {
+    let dir = scratch("taint_source_item");
+    module(&dir, "runs", "18.0", &[("run.py", RUNS_AN_ITEM.as_bytes())]);
+    let config =
+        "[taint]\nsources = [\"request.params.[]\", \"forms.data.[]\"]\n\n[taint.sinks]\nOD702 = [\"sandbox.run\"]\n";
+    fs::write(dir.join("odooscan.toml"), config).unwrap();
+    let (code, stdout, stderr) = run(check_in(&dir, &["mods"]));
+    assert_eq!(code, Some(0), "{stdout}{stderr}");
+}
+
 /// The OD203 findings of a scan of `cycles/<module>`. A stack overflow aborts the process and would
 /// take a test binary with it, so the scan is spawned: a signal gives no exit code.
 fn cycle_paths(module: &str) -> Vec<String> {
