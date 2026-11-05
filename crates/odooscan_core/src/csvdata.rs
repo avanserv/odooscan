@@ -1,11 +1,17 @@
 use crate::domain;
 use crate::facts::{
-    AccessRow, ActionValue, DataFacts, FieldWrite, Pos, RawDiag, RecordFact, RecordWrite, RuleFact, Spanned,
-    WrittenValue, XmlDef, XmlRef,
+    AccessRow, ActionValue, DataFacts, FieldWrite, Flag, Perms, Pos, RawDiag, RecordFact, RecordWrite, RuleFact,
+    RuleGroups, Spanned, WrittenValue, XmlDef, XmlRef,
 };
-use crate::xml::{literal, rule_domain_field};
+use crate::grants::PUBLIC_GROUPS;
+use crate::xml::{PERM_FIELDS, literal, operation_perms, rule_domain_field};
 
-const PUBLIC_GROUPS: &[&str] = &["base.group_public", "base.group_portal", "group_public", "group_portal"];
+/// Whether a CSV cell names a public or portal group, as a full XML id or as one of base's own.
+fn public_cell(group: &str) -> bool {
+    PUBLIC_GROUPS
+        .iter()
+        .any(|g| *g == group || g.strip_prefix("base.") == Some(group))
+}
 
 /// A data CSV is named after its model; its header names fields, with `:id` or `/id` for references.
 pub fn analyze(text: &str, model: &str) -> DataFacts {
@@ -163,38 +169,49 @@ fn cell<'r>(row: &'r csv::StringRecord, columns: &[(&str, bool)], name: &str) ->
     column(columns, name).and_then(|i| row.get(i)).unwrap_or_default()
 }
 
-/// Whether an access row gives more than read, or None for a file of another model. Odoo checks
-/// active rows only, and a file without the column leaves the field at its default, true.
-fn writes(row: &csv::StringRecord, columns: &[(&str, bool)], model: &str) -> Option<bool> {
+/// What an access row grants, or None for a file of another model. Odoo checks active rows only,
+/// and a file without the column leaves the field at its default, true.
+fn grants(row: &csv::StringRecord, columns: &[(&str, bool)], model: &str) -> Option<Perms> {
     let set = |name: &str| truthy(cell(row, columns, name));
-    let granted = match model {
-        "ir.model.access" => set("perm_write") || set("perm_create") || set("perm_unlink"),
-        "ir.access" => cell(row, columns, "operation").contains(['c', 'u', 'd']),
+    let [read, write, create, unlink] = match model {
+        "ir.model.access" => PERM_FIELDS.map(set),
+        "ir.access" => operation_perms(cell(row, columns, "operation")).map(|f| f == Flag::Set(true)),
         _ => return None,
     };
-    Some(granted && (column(columns, "active").is_none() || set("active")))
+    let perms = Perms {
+        read,
+        write,
+        create,
+        unlink,
+    };
+    let active = column(columns, "active").is_none() || set("active");
+    Some(if active { perms } else { Perms::default() })
 }
 
 /// An ir.model.access or ir.access row. Only one with a group grants on `ir.access`, where a row
 /// without restricts every user.
 fn access_row(facts: &mut DataFacts, row: &csv::StringRecord, columns: &[(&str, bool)], model: &str, pos: Pos) {
     let Some(i) = column(columns, "model_id") else { return };
-    let Some(write_like) = writes(row, columns, model) else {
+    let Some(grants) = grants(row, columns, model) else {
         return;
     };
     let target = row.get(i).unwrap_or_default().to_owned();
     let group = cell(row, columns, "group_id");
-    let no_group = group.is_empty() && database_id(row, columns, "group_id").unwrap_or_default().is_empty();
+    let by_db_id = !database_id(row, columns, "group_id").unwrap_or_default().is_empty();
+    let no_group = group.is_empty() && !by_db_id;
     if model == "ir.access" && no_group {
         return;
     }
+    let write_like = grants.writes();
     facts.access.push(AccessRow {
         id: row_id(row, columns),
         model: target,
         by_name: !columns[i].1,
         pos,
+        group: (!no_group).then(|| group.to_owned()),
+        grants,
         global_write: no_group && write_like,
-        public_write: (write_like && PUBLIC_GROUPS.contains(&group)).then(|| group.to_owned()),
+        public_write: (write_like && public_cell(group)).then(|| group.to_owned()),
         model_access: model == "ir.model.access",
     });
 }
@@ -219,27 +236,61 @@ fn rule_model(row: &csv::StringRecord, columns: &[(&str, bool)], model: &str, po
 }
 
 /// A row of an `ir.rule` or `ir.access` file. A column it lacks is left to the other writes of the
-/// record, and an empty cell clears the field.
+/// record, and an empty cell clears the field, which leaves an empty domain. The import stores a
+/// blank cell as it is, which the domain check refuses (18.0 `odoo/addons/base/models/ir_fields.py:123`).
 fn rule_row(facts: &mut DataFacts, row: &csv::StringRecord, columns: &[(&str, bool)], model: &str, pos: Pos) {
     let Some(domain_field) = rule_domain_field(model) else {
         return;
     };
     let cell = |name: &str| Some(row.get(column(columns, name)?).unwrap_or_default());
     let domain = cell(domain_field).map_or(ActionValue::Unset, |text| {
-        literal(Some(Spanned {
-            value: text.trim().to_owned(),
-            pos,
-        }))
+        let value = text.trim().to_owned();
+        let spanned = Spanned { value, pos };
+        if text.is_empty() {
+            ActionValue::Literal(spanned)
+        } else {
+            literal(Some(spanned))
+        }
     });
+    let access = model == "ir.access";
+    let perms = if access {
+        cell("operation").map_or([Flag::Unset; 4], operation_perms)
+    } else {
+        PERM_FIELDS.map(|name| cell(name).map_or(Flag::Unset, |c| Flag::Set(truthy(c))))
+    };
     let (target, by_name) = rule_model(row, columns, model, pos);
     facts.rules.push(RuleFact {
         id: row_id(row, columns),
+        pos,
+        access,
         model: target,
         by_name,
         fields: domain::written_fields(&domain),
         domain,
         active: cell("active").map(truthy),
+        groups: rule_groups(row, columns, if access { "group_id" } else { "groups" }),
+        perms,
     });
+}
+
+/// What a row gives the groups of a rule. The import replaces a many2many with the ids of its cell.
+fn rule_groups(row: &csv::StringRecord, columns: &[(&str, bool)], field: &str) -> RuleGroups {
+    let replaced = |added| RuleGroups {
+        added,
+        keeps: false,
+        opaque: false,
+    };
+    if let Some(i) = columns.iter().position(|&(c, is_ref)| c == field && is_ref) {
+        return replaced(ref_ids(row.get(i).unwrap_or_default()).map(str::to_owned).collect());
+    }
+    if database_id(row, columns, field).is_some() || column(columns, field).is_some() {
+        return RuleGroups {
+            added: vec![],
+            keeps: false,
+            opaque: true,
+        };
+    }
+    RuleGroups::default()
 }
 
 #[cfg(test)]
@@ -397,9 +448,85 @@ mod tests {
         assert_eq!(unset.active, None);
         let empty = &rules("id,model_id:id,domain_force,active\nr,,,\n", "ir.rule")[0];
         assert!(matches!(empty.model, ActionValue::Opaque));
-        assert!(matches!(empty.domain, ActionValue::Opaque));
+        assert!(matches!(&empty.domain, ActionValue::Literal(d) if d.value.is_empty()));
+        assert!(empty.fields.is_empty());
+        let blank = &rules("id,domain_force\nr,\"  \"\n", "ir.rule")[0];
+        assert!(matches!(blank.domain, ActionValue::Opaque));
+        let text_false = &rules("id,domain_force\nr,False\n", "ir.rule")[0];
+        assert!(matches!(&text_false.domain, ActionValue::Literal(d) if d.value == "False"));
         assert_eq!(empty.active, Some(false));
         let by_db_id = &rules("id,model_id/.id\nr,3\n", "ir.rule")[0];
         assert!(matches!(by_db_id.model, ActionValue::Opaque));
+    }
+
+    #[test]
+    fn an_access_row_grants_what_its_columns_say_once_active() {
+        let grants = |row: &str| access(&format!("{PERMS},active"), row).access[0].grants;
+        let perms = |read, write, create, unlink| Perms {
+            read,
+            write,
+            create,
+            unlink,
+        };
+        assert_eq!(grants("a,m,g,1,0,yes,0,1"), perms(true, false, true, false));
+        assert_eq!(grants("a,m,g,1,1,1,1,0"), Perms::default());
+        assert_eq!(
+            access(PERMS, "a,m,g,0,0,0,1").access[0].grants,
+            perms(false, false, false, true)
+        );
+        let on_access = |operation: &str| {
+            let text = format!("id,model_id,group_id/id,operation\na,x.y,base.group_portal,{operation}\n");
+            analyze(&text, "ir.access").access[0].grants
+        };
+        assert_eq!(on_access("r"), perms(true, false, false, false));
+        assert_eq!(on_access("cud"), perms(false, true, true, true));
+    }
+
+    /// OD401 counts every row of a model, so one that grants nothing still makes a row.
+    #[test]
+    fn a_row_that_grants_nothing_is_still_a_row() {
+        let rows = access(&format!("{PERMS},active"), "a,m,g,0,0,0,0,1\nb,m,,1,1,1,1,0");
+        assert_eq!(rows.access.len(), 2);
+        assert!(rows.access.iter().all(|r| r.grants == Perms::default()));
+    }
+
+    #[test]
+    fn an_access_row_names_its_group() {
+        let group = |header: &str, row: &str| access(header, row).access[0].group.clone();
+        assert_eq!(
+            group(PERMS, "a,m,base.group_portal,1,0,0,0").as_deref(),
+            Some("base.group_portal")
+        );
+        assert_eq!(group(PERMS, "a,m,,1,0,0,0"), None);
+        assert_eq!(group("id,model_id:id,perm_read", "a,m,1"), None);
+        let by_db_id = "id,model_id:id,group_id/.id,perm_read";
+        assert_eq!(group(by_db_id, "a,m,3,1").as_deref(), Some(""));
+    }
+
+    #[test]
+    fn a_rule_row_reads_its_groups_and_permissions() {
+        let rule = |header: &str, row: &str| rules(&format!("{header}\n{row}\n"), "ir.rule").remove(0);
+        let read = rule("id,groups/id,perm_read,perm_write", "r,\"base.group_portal, g\",0,1");
+        assert_eq!(read.groups.added, ["base.group_portal", "g"]);
+        assert!(!read.groups.keeps && !read.groups.opaque && !read.access);
+        assert_eq!(
+            read.perms,
+            [Flag::Set(false), Flag::Set(true), Flag::Unset, Flag::Unset]
+        );
+        let unset = rule("id,name", "r,n");
+        assert!(unset.groups.added.is_empty() && unset.groups.keeps && !unset.groups.opaque);
+        assert_eq!(unset.perms, [Flag::Unset; 4]);
+        assert!(rule("id,groups/.id", "r,3").groups.opaque);
+        assert!(rule("id,groups", "r,Portal").groups.opaque);
+        let cleared = rule("id,groups:id", "r,");
+        assert!(cleared.groups.added.is_empty() && !cleared.groups.keeps);
+        let access = &rules(
+            "id,model_id,group_id:id,operation\nr,a.b,base.group_portal,ru\n",
+            "ir.access",
+        )[0];
+        assert!(access.access);
+        assert_eq!(access.groups.added, ["base.group_portal"]);
+        let set = Flag::Set;
+        assert_eq!(access.perms, [set(true), set(true), set(false), set(false)]);
     }
 }

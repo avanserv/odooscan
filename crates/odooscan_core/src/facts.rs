@@ -876,6 +876,22 @@ pub struct RecordWrite {
     pub no_create: bool,
 }
 
+/// The operations an access row or a record rule applies to.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Perms {
+    pub read: bool,
+    pub write: bool,
+    pub create: bool,
+    pub unlink: bool,
+}
+
+impl Perms {
+    /// Whether it allows more than read.
+    pub fn writes(self) -> bool {
+        self.write || self.create || self.unlink
+    }
+}
+
 /// A row that grants access: a row of `ir.access` with no group restricts instead.
 #[derive(Debug)]
 pub struct AccessRow {
@@ -885,6 +901,10 @@ pub struct AccessRow {
     pub model: String,
     pub by_name: bool,
     pub pos: Pos,
+    /// The XML id of the group, as the row's module spells it, `Some("")` for a database id.
+    pub group: Option<String>,
+    /// What a CSV row gives its group once `active` is read. A `<record>` grants nothing here.
+    pub grants: Perms,
     /// A CSV row with no group gives every user a permission other than read.
     pub global_write: bool,
     /// The public or portal group a CSV row gives a permission other than read.
@@ -955,18 +975,58 @@ impl ActionFact {
     }
 }
 
+/// What one write gives a boolean field.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Flag {
+    #[default]
+    Unset,
+    Set(bool),
+    Opaque,
+}
+
+/// What one write gives the groups of a rule: `groups` of an `ir.rule`, `group_id` of an `ir.access`.
+#[derive(Debug)]
+pub struct RuleGroups {
+    /// The XML ids it adds, as the write's module spells them.
+    pub added: Vec<String>,
+    /// The groups written before stay.
+    pub keeps: bool,
+    /// Only a run tells which groups stay.
+    pub opaque: bool,
+}
+
+impl Default for RuleGroups {
+    /// What a write that leaves the field alone gives.
+    fn default() -> Self {
+        Self {
+            added: vec![],
+            keeps: true,
+            opaque: false,
+        }
+    }
+}
+
 /// One write to an `ir.rule`, or to an `ir.access` with a domain, by a `<record>` or a CSV row.
 #[derive(Debug)]
 pub struct RuleFact {
     pub id: Option<String>,
+    /// The record or the row.
+    pub pos: Pos,
+    /// A write to an `ir.access`, not to an `ir.rule`.
+    pub access: bool,
     /// What it gives `model_id`: an `ir.model` XML id, or a model name when `by_name`.
     pub model: ActionValue,
     pub by_name: bool,
+    /// An empty or false value is an empty literal, which `ir.rule` reads as no domain.
     pub domain: ActionValue,
     /// The field paths `domain` names, which a domain only a run can read leaves empty.
     pub fields: Vec<Spanned<String>>,
     /// What it gives `active`, where a value only a run tells counts as false.
     pub active: Option<bool>,
+    pub groups: RuleGroups,
+    /// What it gives read, write, create and unlink: the `perm_*` of an `ir.rule`, the letters of
+    /// the `operation` of an `ir.access`.
+    pub perms: [Flag; 4],
 }
 
 /// One write to an `ir.actions.server` or an `ir.cron`, by a `<record>`.

@@ -7,8 +7,9 @@ use roxmltree::{Document, Node, ParsingOptions};
 use crate::domain;
 use crate::facts::{
     AccessRow, ActionFact, ActionValue, ActionViewId, ArchButton, ArchDomain, ArchElement, ArchEmptied, ArchField,
-    ArchModifier, ArchSubview, ArchValued, DataFacts, DomainFact, FieldWrite, FunctionCall, Lines, Pos, RawDiag,
-    RecordFact, RecordWrite, ReportFact, RuleFact, ServerFact, Spanned, ViewFact, WrittenValue, XmlDef, XmlRef,
+    ArchModifier, ArchSubview, ArchValued, DataFacts, DomainFact, FieldWrite, Flag, FunctionCall, Lines, Perms, Pos,
+    RawDiag, RecordFact, RecordWrite, ReportFact, RuleFact, RuleGroups, ServerFact, Spanned, ViewFact, WrittenValue,
+    XmlDef, XmlRef,
 };
 use crate::fix::{Edit, Fix};
 use crate::modifier;
@@ -463,13 +464,32 @@ impl Walker<'_> {
             None => (ActionValue::Unset, false),
         };
         let domain = field_of(node, domain_field).map_or(ActionValue::Unset, |f| rule_domain(f, self.lines));
+        let access = domain_field == "domain";
+        let (groups, perms) = if access {
+            let groups = last_field_of(node, "group_id").map(|f| access_group(f, self.lines));
+            let operation = last_field_of(node, "operation");
+            (
+                groups,
+                operation.map_or([Flag::Unset; 4], |f| operation_flags(f, self.lines)),
+            )
+        } else {
+            let groups = last_field_of(node, "groups").map(rule_groups);
+            (
+                groups,
+                PERM_FIELDS.map(|name| last_field_of(node, name).map_or(Flag::Unset, flag)),
+            )
+        };
         self.facts.rules.push(RuleFact {
             id: node.attribute("id").map(str::to_owned),
+            pos: self.pos(node),
+            access,
             model,
             by_name,
             fields: domain::written_fields(&domain),
             domain,
             active: field_of(node, "active").map(rule_active),
+            groups: groups.unwrap_or_default(),
+            perms,
         });
     }
 
@@ -645,6 +665,8 @@ impl Walker<'_> {
                 model: id.to_owned(),
                 by_name: false,
                 pos,
+                group: None,
+                grants: Perms::default(),
                 global_write: false,
                 public_write: None,
                 model_access: model == "ir.model.access",
@@ -1095,12 +1117,80 @@ fn rule_model(field: Node, lines: &Lines) -> (ActionValue, bool) {
     })
 }
 
-/// Only an `eval` or the text tells a domain without a run.
+/// Only an `eval` or the text tells a domain without a run. What `ir.rule` reads as no domain is
+/// a literal empty one.
 fn rule_domain(field: Node, lines: &Lines) -> ActionValue {
     if INDIRECT_VALUE.iter().any(|a| field.has_attribute(*a)) {
         return ActionValue::Opaque;
     }
+    if writes_no_domain(field) {
+        let pos = lines.pos(field.range().start);
+        return ActionValue::Literal(Spanned {
+            value: String::new(),
+            pos,
+        });
+    }
     literal(attr_value(field, "eval", lines).or_else(|| spec_text(field, lines)))
+}
+
+/// Whether `field` writes a false or empty domain: an empty text (an empty `eval` reads the text),
+/// or an `eval` of `False`, `None` or `''`. A blank text or the text `False` is stored as written
+/// and fails the domain check (18.0 `odoo/addons/base/models/ir_rule.py:61-69`).
+fn writes_no_domain(field: Node) -> bool {
+    match field.attribute("eval").filter(|e| !e.is_empty()) {
+        Some(eval) => matches!(eval.trim(), "False" | "None" | "''" | "\"\""),
+        None => !field.has_children(),
+    }
+}
+
+/// The fields of an `ir.rule` that say which operations it applies to, in the order of `Perms`.
+pub const PERM_FIELDS: [&str; 4] = ["perm_read", "perm_write", "perm_create", "perm_unlink"];
+
+/// The operations an `ir.access` spells as letters of `operation`, in the order of `Perms`.
+pub fn operation_perms(operation: &str) -> [Flag; 4] {
+    ['r', 'u', 'c', 'd'].map(|letter| Flag::Set(operation.contains(letter)))
+}
+
+fn operation_flags(field: Node, lines: &Lines) -> [Flag; 4] {
+    match written(field, lines) {
+        WrittenValue::Text(text) => operation_perms(&text.value),
+        _ => [Flag::Opaque; 4],
+    }
+}
+
+/// What a `<field>` gives `group_id`, a many2one: one id, none for a false `eval`.
+fn access_group(field: Node, lines: &Lines) -> RuleGroups {
+    let replaced = |added| RuleGroups {
+        added,
+        keeps: false,
+        opaque: false,
+    };
+    match written(field, lines) {
+        WrittenValue::Ids(mut ids) if ids.len() == 1 => replaced(vec![ids.remove(0).value]),
+        _ if eval_of(field).is_some_and(record_eval::is_false) => replaced(vec![]),
+        _ => RuleGroups {
+            added: vec![],
+            keeps: false,
+            opaque: true,
+        },
+    }
+}
+
+/// What a `<field>` gives `groups`, a many2many: only the commands of an `eval` tell it.
+fn rule_groups(field: Node) -> RuleGroups {
+    let linked = eval_of(field).filter(|_| !INDIRECT_VALUE.iter().any(|a| field.has_attribute(*a)));
+    match linked.and_then(record_eval::linked) {
+        Some(linked) => RuleGroups {
+            added: linked.ids,
+            keeps: linked.keeps,
+            opaque: false,
+        },
+        None => RuleGroups {
+            added: vec![],
+            keeps: false,
+            opaque: true,
+        },
+    }
 }
 
 /// The parent a `<record>` gives a server action. Odoo sets the inverse of a one2many over whatever
@@ -1121,17 +1211,24 @@ fn server_parent(node: Node, lines: &Lines) -> ActionValue {
     }
 }
 
-/// An `eval` that is no constant counts as false. Odoo tests the text of a boolean untrimmed, so
-/// anything but these three spellings, an empty field too, is true.
+/// An `eval` that is no constant counts as false.
 fn rule_active(field: Node) -> bool {
+    flag(field) == Flag::Set(true)
+}
+
+/// What `field` gives a boolean. Odoo tests the text untrimmed, so anything but these three
+/// spellings, an empty field too, is true.
+fn flag(field: Node) -> Flag {
     if INDIRECT_VALUE.iter().any(|a| field.has_attribute(*a)) {
-        return false;
+        return Flag::Opaque;
     }
     match field.attribute("eval") {
-        Some(eval) => matches!(eval.trim(), "True" | "1"),
+        Some(eval) if matches!(eval.trim(), "True" | "1") => Flag::Set(true),
+        Some(eval) if record_eval::is_false(eval) => Flag::Set(false),
+        Some(_) => Flag::Opaque,
         None => {
             let text = field.text().unwrap_or_default().to_lowercase();
-            !matches!(text.as_str(), "0" | "false" | "off")
+            Flag::Set(!matches!(text.as_str(), "0" | "false" | "off"))
         }
     }
 }
@@ -2843,7 +2940,8 @@ mod tests {
             r#"<field name="domain_force" type="xml"><a/></field>"#,
             r#"<field name="domain_force" type="char">[('a', '=', 1)]</field>"#,
             r#"<field name="domain_force"><function model="m" name="n"/></field>"#,
-            r#"<field name="domain_force"/>"#,
+            r#"<field name="domain_force" type="xml"></field>"#,
+            "<field name=\"domain_force\">\n  </field>",
         ] {
             let rule = rule_of(field);
             assert!(matches!(rule.domain, ActionValue::Opaque), "{field}");
@@ -2851,6 +2949,90 @@ mod tests {
         }
         let unset = rule_of(r#"<field name="name">a</field>"#);
         assert!(matches!(unset.domain, ActionValue::Unset));
+    }
+
+    #[test]
+    fn a_false_or_empty_rule_domain_is_an_empty_literal() {
+        let empty = |field: &str| matches!(&rule_of(field).domain, ActionValue::Literal(d) if d.value.is_empty());
+        for field in [
+            r#"<field name="domain_force"/>"#,
+            r#"<field name="domain_force"></field>"#,
+            r#"<field name="domain_force" eval=""/>"#,
+            r#"<field name="domain_force" eval=" False "/>"#,
+            r#"<field name="domain_force" eval="None"/>"#,
+            r#"<field name="domain_force" eval="''"/>"#,
+        ] {
+            assert!(empty(field), "{field}");
+            assert!(rule_of(field).fields.is_empty(), "{field}");
+        }
+        for field in [
+            r#"<field name="domain_force">False</field>"#,
+            r#"<field name="domain_force" eval="0"/>"#,
+            "<field name=\"domain_force\">\n  </field>",
+            r#"<field name="domain_force" type="xml"/>"#,
+        ] {
+            assert!(!empty(field), "{field}");
+        }
+    }
+
+    #[test]
+    fn reads_the_groups_and_permissions_of_a_rule() {
+        let rule = rule_of(
+            r#"<field name="groups" eval="[(4, ref('base.group_portal'))]"/><field name="perm_read" eval="False"/><field name="perm_write">0</field><field name="perm_create" eval="x"/>"#,
+        );
+        assert_eq!(rule.groups.added, ["base.group_portal"]);
+        assert!(rule.groups.keeps && !rule.groups.opaque && !rule.access);
+        let set = Flag::Set;
+        assert_eq!(rule.perms, [set(false), set(false), Flag::Opaque, Flag::Unset]);
+        let unset = rule_of(r#"<field name="name">a</field>"#);
+        assert!(unset.groups.keeps && unset.groups.added.is_empty() && !unset.groups.opaque);
+        assert_eq!(unset.perms, [Flag::Unset; 4]);
+        for field in [
+            r#"<field name="groups" eval="[(3, ref('base.group_portal'))]"/>"#,
+            r#"<field name="groups" search="[]"/>"#,
+            r#"<field name="groups" eval="[(4, ref('a'))]" ref="b"/>"#,
+        ] {
+            assert!(rule_of(field).groups.opaque, "{field}");
+        }
+        let replaced = rule_of(r#"<field name="groups" eval="[Command.set([ref('a')])]"/>"#).groups;
+        assert_eq!(replaced.added, ["a"]);
+        assert!(!replaced.keeps);
+    }
+
+    #[test]
+    fn reads_the_group_and_operation_of_an_access_record() {
+        let access = |fields: &str| {
+            let record = format!(r#"<odoo><record id="r" model="ir.access">{fields}</record></odoo>"#);
+            analyze(&record).rules.remove(0)
+        };
+        let read = access(r#"<field name="group_id" ref="base.group_portal"/><field name="operation">r</field>"#);
+        assert!(read.access);
+        assert_eq!(read.groups.added, ["base.group_portal"]);
+        assert!(!read.groups.keeps && !read.groups.opaque);
+        let set = Flag::Set;
+        assert_eq!(read.perms, [set(true), set(false), set(false), set(false)]);
+        let by_eval = access(r#"<field name="group_id" eval="ref('g')"/><field name="operation" eval="'cud'"/>"#);
+        assert_eq!(by_eval.groups.added, ["g"]);
+        assert_eq!(by_eval.perms, [set(false), set(true), set(true), set(true)]);
+        let cleared = access(r#"<field name="group_id" eval="False"/><field name="operation" eval="op"/>"#);
+        assert!(cleared.groups.added.is_empty() && !cleared.groups.opaque);
+        assert_eq!(cleared.perms, [Flag::Opaque; 4]);
+        assert!(access(r#"<field name="group_id" eval="group"/>"#).groups.opaque);
+    }
+
+    #[test]
+    fn reads_a_flag_as_the_loader_does() {
+        let perm = |field: &str| rule_of(&format!(r#"<field name="perm_read" {field}"#)).perms[0];
+        assert_eq!(perm(r#"eval="True"/>"#), Flag::Set(true));
+        assert_eq!(perm(r#"eval=" 1 "/>"#), Flag::Set(true));
+        assert_eq!(perm(r#"eval="None"/>"#), Flag::Set(false));
+        assert_eq!(perm(r#"eval="0"/>"#), Flag::Set(false));
+        assert_eq!(perm(r#"eval="2"/>"#), Flag::Opaque);
+        assert_eq!(perm(r#"eval="not x"/>"#), Flag::Opaque);
+        assert_eq!(perm(r#"ref="a"/>"#), Flag::Opaque);
+        assert_eq!(perm(">off</field>"), Flag::Set(false));
+        assert_eq!(perm("> False </field>"), Flag::Set(true));
+        assert_eq!(perm("/>"), Flag::Set(true));
     }
 
     #[test]

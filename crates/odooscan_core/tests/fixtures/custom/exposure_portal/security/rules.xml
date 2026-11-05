@@ -1,0 +1,5 @@
+<odoo>
+    <record id="exposure.rule_ticket_portal_all" model="ir.rule">
+        <field name="name">every ticket, renamed</field>
+    </record>
+</odoo>

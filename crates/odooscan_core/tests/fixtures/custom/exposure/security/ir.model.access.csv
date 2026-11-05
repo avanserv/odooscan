@@ -1,0 +1,9 @@
+id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
+access_exposure_ticket_portal,ticket portal,model_exposure_ticket,base.group_portal,1,1,0,0
+access_exposure_ticket_user,ticket user,model_exposure_ticket,base.group_user,1,1,1,1
+access_exposure_wizard_portal,wizard portal,model_exposure_wizard,base.group_portal,1,1,1,0
+access_exposure_internal_user,internal user,model_exposure_internal,base.group_user,1,1,1,1
+access_exposure_board_portal,board portal,model_exposure_board,base.group_portal,1,0,0,0
+access_exposure_closed_portal,closed portal,model_exposure_closed,base.group_portal,0,0,0,0
+access_exposure_open_all,open all,model_exposure_open,,1,0,0,0
+access_exposure_everyone,everyone,model_exposure_everyone,base.group_everyone,1,0,0,0
