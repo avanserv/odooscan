@@ -14,7 +14,16 @@ use crate::index::{FlowRef, Index, Scope};
 use crate::taint;
 
 /// How many methods deep a value is followed from the call that first passes or returns it.
+/// Each nested call is one deeper, so a memo key is never re-entered while it is computed.
 const DEPTH: u8 = 4;
+
+/// A method a hit passes through: its summary, the parameter holding the value, and whether it
+/// runs as superuser. A path that comes back to one is a loop, and cutting the loop leaves a
+/// shorter path from the same method, with the same sinks, that is kept instead.
+type HitState = (usize, usize, bool);
+
+/// A method a return passes through, by summary and what the value is in it.
+type RetState = (usize, FlowOrigin);
 
 /// A sink that a parameter of a method reaches.
 #[derive(Clone)]
@@ -31,6 +40,7 @@ struct Hit<'m> {
     steps: Vec<Step>,
     /// The locals and methods in between, for the message.
     names: Vec<String>,
+    via: Vec<HitState>,
 }
 
 /// What a return of a method carries: a source's value, or a parameter of the method.
@@ -45,16 +55,12 @@ struct Ret {
     steps: Vec<Step>,
     /// The locals and methods in between, for the message.
     names: Vec<String>,
+    via: Vec<RetState>,
 }
 
 pub fn check<'m>(index: &Index<'m>, mi: usize, scope: &Scope, out: &mut Out<'m>) {
     let module = &index.modules[mi];
-    let mut solver = Solver {
-        index,
-        scope,
-        memo: FxHashMap::default(),
-        returns: FxHashMap::default(),
-    };
+    let mut solver = Solver::new(index, scope);
     let mut seen = FxHashSet::default();
     for file in &module.python {
         for summary in &file.facts.flows {
@@ -75,13 +81,23 @@ pub fn check<'m>(index: &Index<'m>, mi: usize, scope: &Scope, out: &mut Out<'m>)
 struct Solver<'a, 'm> {
     index: &'a Index<'m>,
     scope: &'a Scope,
-    /// By summary, parameter, and whether the method runs as superuser.
-    memo: FxHashMap<(usize, usize, bool), Vec<Hit<'m>>>,
-    /// By summary.
-    returns: FxHashMap<usize, Vec<Ret>>,
+    /// By summary, parameter, whether the method runs as superuser, and depth: a result found
+    /// with fewer calls left would hide a deeper sink from a caller that has more.
+    memo: FxHashMap<(usize, usize, bool, u8), Vec<Hit<'m>>>,
+    /// By summary and depth, for the same reason.
+    returns: FxHashMap<(usize, u8), Vec<Ret>>,
 }
 
-impl<'m> Solver<'_, 'm> {
+impl<'a, 'm> Solver<'a, 'm> {
+    fn new(index: &'a Index<'m>, scope: &'a Scope) -> Self {
+        Solver {
+            index,
+            scope,
+            memo: FxHashMap::default(),
+            returns: FxHashMap::default(),
+        }
+    }
+
     /// The flows from a source in `at` that cross into another method.
     fn findings(&mut self, at: FlowRef<'m>) -> Vec<(&'m Path, RawDiag)> {
         let mut found = vec![];
@@ -170,12 +186,11 @@ impl<'m> Solver<'_, 'm> {
     /// The sinks parameter `param` of a method reaches, in it or in the methods it passes it to.
     /// What the method writes on its own records is one only when it runs as superuser.
     fn hits(&mut self, at: FlowRef<'m>, param: usize, depth: u8, sudo: bool) -> Vec<Hit<'m>> {
-        let key = (std::ptr::from_ref(at.summary) as usize, param, sudo);
+        let state = (std::ptr::from_ref(at.summary) as usize, param, sudo);
+        let key = (state.0, param, sudo, depth);
         if let Some(hits) = self.memo.get(&key) {
             return hits.clone();
         }
-        // A method that calls itself back finds this empty entry and stops.
-        self.memo.insert(key, vec![]);
         let mut hits = vec![];
         for edge in at.summary.edges.iter().filter(|e| e.origin == FlowOrigin::Param(param)) {
             match &edge.target {
@@ -185,6 +200,7 @@ impl<'m> Solver<'_, 'm> {
                 _ => {}
             }
         }
+        hits.retain_mut(|h| enter(&mut h.via, state));
         self.memo.insert(key, hits.clone());
         hits
     }
@@ -208,12 +224,11 @@ impl<'m> Solver<'_, 'm> {
     /// What each return of `at` carries, following a call's value it returns while `depth` is
     /// below `DEPTH`.
     fn returns(&mut self, at: FlowRef<'m>, depth: u8) -> Vec<Ret> {
-        let key = std::ptr::from_ref(at.summary) as usize;
+        let summary = std::ptr::from_ref(at.summary) as usize;
+        let key = (summary, depth);
         if let Some(rets) = self.returns.get(&key) {
             return rets.clone();
         }
-        // A method that returns its own call finds this empty entry and stops.
-        self.returns.insert(key, vec![]);
         let mut rets = vec![];
         for edge in at.summary.edges.iter().filter(|e| e.target == FlowTarget::Return) {
             match edge.origin {
@@ -226,9 +241,11 @@ impl<'m> Solver<'_, 'm> {
                     label: edge.steps[0].value.clone(),
                     steps: path_steps(at, &edge.steps),
                     names: edge.steps[1..].iter().map(|s| s.value.clone()).collect(),
+                    via: vec![],
                 }),
             }
         }
+        rets.retain_mut(|r| enter(&mut r.via, (summary, r.origin)));
         self.returns.insert(key, rets.clone());
         rets
     }
@@ -245,6 +262,16 @@ impl<'m> Solver<'_, 'm> {
         }
         rets
     }
+}
+
+/// Adds `state` to the methods a path passes through and returns true, or returns false when the
+/// path already passed through it, so is a loop.
+fn enter<S: PartialEq>(via: &mut Vec<S>, state: S) -> bool {
+    let fresh = !via.contains(&state);
+    if fresh {
+        via.push(state);
+    }
+    fresh
 }
 
 /// How the value `ret` carries enters the call `c` of `at`: from a source of the callee (`None`),
@@ -279,6 +306,7 @@ fn through(at: FlowRef<'_>, arg: Option<&FlowEdge>, ret: &Ret, edge: &FlowEdge) 
         label: arg.map_or_else(|| ret.label.clone(), |a| a.steps[0].value.clone()),
         steps,
         names,
+        via: ret.via.clone(),
     }
 }
 
@@ -334,6 +362,7 @@ fn sink_hit<'m>(at: FlowRef<'m>, edge: &FlowEdge, code: &'static str) -> Hit<'m>
         callee: edge.steps[last].value.clone(),
         steps: path_steps(at, &edge.steps),
         names: edge.steps[1..last].iter().map(|s| s.value.clone()).collect(),
+        via: vec![],
     }
 }
 
@@ -360,19 +389,19 @@ fn prepend<'m>(at: FlowRef<'m>, edge: &FlowEdge, call: &CallSite, mut hit: Hit<'
 
 #[cfg(test)]
 mod tests {
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
 
-    use super::check;
+    use super::{Solver, check};
     use crate::checks::Out;
-    use crate::index::Index;
+    use crate::facts::RawDiag;
+    use crate::index::{FlowRef, Index};
     use crate::manifest;
     use crate::mentions::Mentions;
     use crate::project::{Module, SourceFile};
     use crate::python;
 
-    /// The cross-method findings of one module holding the route `route` and the model `x.y` with
-    /// the methods `methods`, as `file:line code message` up to the advice.
-    fn findings(route: &str, methods: &str) -> Vec<String> {
+    /// A checked module holding the route `route` and the model `x.y` with the methods `methods`.
+    fn module(route: &str, methods: &str) -> Module {
         let route = format!("class C(http.Controller):\n    @http.route('/r')\n{route}");
         let model = format!("class X(models.Model):\n    _name = 'x.y'\n\n{methods}");
         let file = |name: &str, src: &str| SourceFile {
@@ -385,7 +414,7 @@ mod tests {
             mentions: Mentions::scan(src),
         };
         let manifest = manifest::parse("{'version': '18.0.1.0'}").unwrap();
-        let module = Module {
+        Module {
             name: "main".to_owned(),
             dir: PathBuf::new(),
             manifest_path: PathBuf::new(),
@@ -398,19 +427,23 @@ mod tests {
             templates: vec![],
             sql_views: vec![],
             lost_text: false,
-        };
-        let modules = [module];
+        }
+    }
+
+    /// A finding as `file:line code message` up to the advice.
+    fn shown((path, d): &(&Path, RawDiag)) -> String {
+        let message = d.message.split(';').next().unwrap_or_default();
+        let message = message.split(", so ").next().unwrap_or_default();
+        format!("{}:{} {} {message}", path.display(), d.pos.line, d.code)
+    }
+
+    /// The cross-method findings of `module(route, methods)`.
+    fn findings(route: &str, methods: &str) -> Vec<String> {
+        let modules = [module(route, methods)];
         let index = Index::build(&modules, None);
         let mut out = Out { diags: vec![] };
         check(&index, 0, &index.scope(0), &mut out);
-        out.diags
-            .iter()
-            .map(|(path, d)| {
-                let message = d.message.split(';').next().unwrap_or_default();
-                let message = message.split(", so ").next().unwrap_or_default();
-                format!("{}:{} {} {message}", path.display(), d.pos.line, d.code)
-            })
-            .collect()
+        out.diags.iter().map(shown).collect()
     }
 
     #[test]
@@ -462,6 +495,179 @@ mod tests {
             i => format!("    def _m{i}(self, v):\n        return self._m{}(v)\n", i + 1),
         };
         (1..=n).map(method).collect::<Vec<_>>().join("\n")
+    }
+
+    /// Methods `_m1` to `_m<n>` of `x.y`, each passing `v` to the next and the last running `last`.
+    fn pass_chain(n: usize, last: &str) -> String {
+        let method = |i: usize| match i {
+            i if i == n => format!("    def _m{i}(self, v):\n        {last}\n"),
+            i => format!("    def _m{i}(self, v):\n        self._m{}(v)\n", i + 1),
+        };
+        (1..=n).map(method).collect::<Vec<_>>().join("\n")
+    }
+
+    /// Route `a` calling `_m1` and route `b` calling `_m4`, in `order`, each written by `route`
+    /// from its name and the number of the method it calls.
+    fn routes(order: [&str; 2], route: impl Fn(&str, usize) -> String) -> String {
+        let route = |name: &str| route(name, if name == "a" { 1 } else { 4 });
+        format!("{}\n    @http.route('/s')\n{}", route(order[0]), route(order[1]))
+    }
+
+    /// A route passing its parameter to `_m<m>`.
+    fn passing(name: &str, m: usize) -> String {
+        format!("    def {name}(self, {name}):\n        request.env['x.y']._m{m}({name})\n")
+    }
+
+    #[test]
+    fn a_sink_reached_from_a_shallow_and_a_deep_call_is_found_in_either_order() {
+        let methods = pass_chain(5, "requests.get(v, timeout=5)");
+        for order in [["a", "b"], ["b", "a"]] {
+            assert_eq!(
+                findings(&routes(order, passing), &methods),
+                ["model.py:17 OD706 route parameter 'b' reaches the URL of requests.get() through '_m4()', '_m5()'"],
+                "{order:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_return_reached_from_a_shallow_and_a_deep_call_is_found_in_either_order() {
+        let methods = chain(5, "request.params.get('x')");
+        for (order, line) in [(["a", "b"], 8), (["b", "a"], 4)] {
+            assert_eq!(
+                findings(
+                    &routes(order, |name, m| format!(
+                        "    def {name}(self):\n        return Markup(request.env['x.y']._m{m}(1))\n"
+                    )),
+                    &methods
+                ),
+                [format!(
+                    "route.py:{line} OD703 request.params reaches Markup() through '_m4()', '_m5()' unescaped"
+                )],
+                "{order:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn one_solver_finds_for_each_route_what_a_fresh_one_does() {
+        let methods = pass_chain(5, "requests.get(v, timeout=5)");
+        for order in [["a", "b"], ["b", "a"]] {
+            let modules = [module(&routes(order, passing), &methods)];
+            let index = Index::build(&modules, None);
+            let scope = index.scope(0);
+            let file = &modules[0].python[0];
+            let route = |name: &str| FlowRef {
+                module: 0,
+                file,
+                summary: file.facts.flows.iter().find(|s| s.method == name).unwrap(),
+            };
+            let mut shared = Solver::new(&index, &scope);
+            for name in order {
+                let fresh = Solver::new(&index, &scope).findings(route(name));
+                let found = shared.findings(route(name));
+                assert_eq!(
+                    found.iter().map(shown).collect::<Vec<_>>(),
+                    fresh.iter().map(shown).collect::<Vec<_>>(),
+                    "{order:?} {name}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_method_calling_itself_is_reported_without_the_loop() {
+        let methods = "    def _m1(self, v):\n        self._m1(v)\n        requests.get(v, timeout=5)\n";
+        assert_eq!(
+            findings("    def r(self, t):\n        request.env['x.y']._m1(t)\n", methods),
+            ["model.py:6 OD706 route parameter 't' reaches the URL of requests.get() through '_m1()'"]
+        );
+        let methods = "    def _m1(self, v):\n        if v:\n            return self._m1(v)\n        return request.params.get('x')\n";
+        let route = "    def r(self):\n        return Markup(request.env['x.y']._m1(1))\n";
+        assert_eq!(
+            findings(route, methods),
+            ["route.py:4 OD703 request.params reaches Markup() through '_m1()' unescaped"]
+        );
+    }
+
+    /// `_a` passing `v` to `_b`, which passes it back, then sending it to `requests.get()`.
+    const MUTUAL: &str = "    def _a(self, v):\n        self._b(v)\n        requests.get(v, timeout=5)\n\n    def _b(self, v):\n        self._a(v)\n";
+
+    /// The route that passes its parameter `t` to `_a`.
+    const CALLS_A: &str = "    def r(self, t):\n        request.env['x.y']._a(t)\n";
+
+    #[test]
+    fn methods_calling_each_other_are_reported_without_the_loop() {
+        assert_eq!(
+            findings(CALLS_A, MUTUAL),
+            ["model.py:6 OD706 route parameter 't' reaches the URL of requests.get() through '_a()'"]
+        );
+    }
+
+    #[test]
+    fn the_flow_through_methods_calling_each_other_leaves_out_the_loop() {
+        let modules = [module(CALLS_A, MUTUAL)];
+        let index = Index::build(&modules, None);
+        let mut out = Out { diags: vec![] };
+        check(&index, 0, &index.scope(0), &mut out);
+        let flows: Vec<Vec<&str>> = out
+            .diags
+            .iter()
+            .map(|(_, d)| d.flow.iter().map(|s| s.label.as_str()).collect())
+            .collect();
+        assert_eq!(
+            flows,
+            [["route parameter 't'", "_a()", "parameter 'v'", "requests.get()"]]
+        );
+    }
+
+    /// `_a` returning what `_b` returns, which returns what `_a` returns, or else a source.
+    const MUTUAL_RETURN: &str = "    def _a(self, v):\n        if v:\n            return self._b(v)\n        return request.params.get('x')\n\n    def _b(self, v):\n        return self._a(v)\n";
+
+    /// The route that marks safe what `_a` returns.
+    const RETURNS_A: &str = "    def r(self):\n        return Markup(request.env['x.y']._a(1))\n";
+
+    #[test]
+    fn methods_returning_each_other_are_reported_without_the_loop() {
+        assert_eq!(
+            findings(RETURNS_A, MUTUAL_RETURN),
+            ["route.py:4 OD703 request.params reaches Markup() through '_a()' unescaped"]
+        );
+    }
+
+    #[test]
+    fn the_flow_through_methods_returning_each_other_leaves_out_the_loop() {
+        let modules = [module(RETURNS_A, MUTUAL_RETURN)];
+        let index = Index::build(&modules, None);
+        let mut out = Out { diags: vec![] };
+        check(&index, 0, &index.scope(0), &mut out);
+        let flows: Vec<Vec<&str>> = out
+            .diags
+            .iter()
+            .map(|(_, d)| d.flow.iter().map(|s| s.label.as_str()).collect())
+            .collect();
+        assert_eq!(flows, [["request.params", "_a()", "Markup()"]]);
+    }
+
+    #[test]
+    fn a_method_calling_itself_under_sudo_is_followed_as_superuser() {
+        let methods = "    def _a(self, vals):\n        self.sudo()._a(vals)\n        self.write(vals)\n";
+        assert_eq!(
+            findings(
+                "    def r(self, **post):\n        request.env['x.y']._a(post)\n",
+                methods
+            ),
+            ["model.py:6 OD704 route parameter 'post' reaches self.write() through '_a()'"]
+        );
+    }
+
+    #[test]
+    fn a_method_called_back_with_the_value_in_another_parameter_is_followed() {
+        let methods = "    def _a(self, p, q):\n        self._b(p)\n        requests.get(q, timeout=5)\n\n    def _b(self, v):\n        self._a(1, v)\n";
+        assert_eq!(
+            findings("    def r(self, t):\n        request.env['x.y']._a(t, 1)\n", methods),
+            ["model.py:6 OD706 route parameter 't' reaches the URL of requests.get() through '_a()', '_b()', '_a()'"]
+        );
     }
 
     #[test]
