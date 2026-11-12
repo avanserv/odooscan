@@ -34,6 +34,9 @@ custom/bad_sale/controllers/attachments.py:32:9: OD717 route parameter 'first' r
 custom/bad_sale/controllers/attachments.py:41:9: OD704 route parameter 'post' reaches sudo().create(), so the user picks the fields it sets as superuser; copy only the fields the user may set
 custom/bad_sale/controllers/attachments.py:41:9: OD717 route parameter 'post' reaches the content of sudo().create(), which public=True lets anyone download; keep it private and share it with generate_access_token()
 custom/bad_sale/controllers/attachments.py:45:9: OD717 route parameter 'data' reaches the content of sudo().create(), which public=True lets anyone download; keep it private and share it with generate_access_token()
+custom/bad_sale/controllers/attachments.py:78:9: OD717 route parameter 'upload' reaches the content of sudo().create() through 'vals', which public=True lets anyone download; keep it private and share it with generate_access_token()
+custom/bad_sale/controllers/attachments.py:83:9: OD704 route parameter 'form' reaches sudo().create(), so the user picks the fields it sets as superuser; copy only the fields the user may set
+custom/bad_sale/controllers/attachments.py:83:9: OD717 route parameter 'form' reaches the content of sudo().create(), which public=True lets anyone download; keep it private and share it with generate_access_token()
 custom/bad_sale/controllers/callers.py:18:9: OD701 route parameter 'term' reaches the query of cr.execute() through 'self.term'; pass it as a query parameter or build the query with odoo.tools.SQL
 custom/bad_sale/controllers/callers.py:23:16: OD703 route parameter 'note' reaches Markup() through '_note_html()', '_note_paragraph()' unescaped; escape it, or pass it as an argument of Markup's % or format()
 custom/bad_sale/controllers/callers.py:27:16: OD703 request.params reaches Markup() through 'label()', '_label_suffix()' unescaped; escape it, or pass it as an argument of Markup's % or format()

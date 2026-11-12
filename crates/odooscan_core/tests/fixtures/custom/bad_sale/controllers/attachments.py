@@ -70,3 +70,30 @@ class Attachments(http.Controller):
     def named(self, name):
         logo = base64.b64decode(b"aGVsbG8=")
         request.env["ir.attachment"].sudo().create({"name": name, "raw": logo, "public": True})
+
+    @http.route("/bad/attachments/merged", type="http", auth="user", methods=["POST"])
+    def merged(self, upload):
+        vals = {"name": "note", "raw": upload.read()}
+        vals |= {"public": True}
+        request.env["ir.attachment"].sudo().create(vals)
+
+    @http.route("/bad/attachments/form", type="http", auth="user", methods=["POST"])
+    def form(self, **form):
+        form["public"] = True
+        request.env["ir.attachment"].sudo().create(form)
+
+    @http.route("/bad/attachments/pair", type="http", auth="user", methods=["POST"])
+    def pair(self, upload):
+        logo = base64.b64decode(b"aGVsbG8=")
+        request.env["ir.attachment"].sudo().create(
+            [
+                {"name": "logo", "raw": logo, "public": True},
+                {"name": "upload", "raw": upload.read()},
+            ]
+        )
+
+    @http.route("/bad/attachments/replaced", type="http", auth="user", methods=["POST"])
+    def replaced(self, upload):
+        vals = {"name": "note", "raw": upload.read(), "public": True}
+        vals["raw"] = base64.b64decode(b"aGVsbG8=")
+        request.env["ir.attachment"].sudo().create(vals)
