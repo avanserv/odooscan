@@ -2042,6 +2042,8 @@ struct PyVisitor<'a, 'ast> {
     import_shims: usize,
     /// The names the file's imports from `odoo` bind at import.
     odoo_names: Vec<&'ast str>,
+    /// The names the file binds to a collection of literals at import.
+    collections: Vec<&'ast str>,
     /// The names the file's imports from `ORM_PACKAGES` bind at import, each with its dotted path.
     orm_names: Vec<(&'ast str, String)>,
     /// Where the method name starts in each `super()` call of the overridden method made by an
@@ -2085,6 +2087,7 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
                 .into_iter()
                 .map(|(local, _)| local)
                 .collect(),
+            collections: module_state::collections(&top),
             orm_names: ORM_PACKAGES
                 .iter()
                 .flat_map(|package| module_state::imported_names(&top, package))
@@ -2867,8 +2870,11 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
             Params::None
         };
         let owner = self.owners.last().cloned().flatten();
-        let (diags, summary) =
-            taint::function(func, params, owner, self.series, &self.odoo_names, self.loc, self.taint);
+        let names = taint::FileNames {
+            odoo: &self.odoo_names,
+            collections: &self.collections,
+        };
+        let (diags, summary) = taint::function(func, params, owner, self.series, &names, self.loc, self.taint);
         self.facts.diags.extend(diags);
         self.facts.flows.extend(summary);
     }

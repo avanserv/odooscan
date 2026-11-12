@@ -39,3 +39,10 @@ class Picks(http.Controller):
         partners.search_count([("name", "ilike", term)])
         partners.read_group([], ["id:count"], groupby)
         return partners.search_read(domain, ["name"])
+
+    @http.route("/bad/picks/find", auth="user", type="json")
+    def find(self, field, term):
+        partners = request.env["res.partner"].sudo()
+        if field in self._FIELDS:
+            partners.search_count([(field, "ilike", term)])
+        return partners.search_read([(field, "=", term)], ["name"])
