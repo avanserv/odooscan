@@ -2579,15 +2579,15 @@ impl Flows<'_> {
     }
 
     /// The taints of a call's positional arguments. The list `expression.AND()`, `Domain.OR()` or
-    /// an `AND()` or `OR()` imported from `odoo.osv.expression` takes holds domains, and the field
-    /// list of `search_read()` or `search_fetch()` holds names: neither is ever one condition.
+    /// an `AND()` or `OR()` imported from `odoo.osv.expression` takes holds domains, and a list
+    /// `field_names()` returns holds names: neither is ever one condition.
     fn args(&mut self, call: &ast::ExprCall) -> Vec<Option<Taint>> {
         let joins = is_domain_join(&call.func, self.domain_joins, &self.locals);
         let fields = field_names(call);
         let args = call.arguments.args.iter();
         args.map(|a| match a {
             Expr::List(ast::ExprList { elts, .. }) | Expr::Tuple(ast::ExprTuple { elts, .. })
-                if joins || fields.is_some_and(|f| std::ptr::eq(f, a)) =>
+                if joins || fields.iter().any(|f| std::ptr::eq(*f, a)) =>
             {
                 self.all(elts.iter())
             }
@@ -2596,14 +2596,15 @@ impl Flows<'_> {
         .collect()
     }
 
-    /// The taints of a call's keyword arguments, the field names of a search read item by item.
+    /// The taints of a call's keyword arguments, the name lists of a search read or a read group item
+    /// by item.
     fn keywords(&mut self, call: &ast::ExprCall) -> Vec<Option<Taint>> {
         let fields = field_names(call);
         let keywords = call.arguments.keywords.iter();
         keywords
             .map(|k| match &k.value {
                 Expr::List(ast::ExprList { elts, .. }) | Expr::Tuple(ast::ExprTuple { elts, .. })
-                    if fields.is_some_and(|f| std::ptr::eq(f, &k.value)) =>
+                    if fields.iter().any(|f| std::ptr::eq(*f, &k.value)) =>
                 {
                     self.all(elts.iter())
                 }
@@ -3855,7 +3856,12 @@ fn hold_value(elts: &[Expr], list: bool, ts: &mut [Option<Taint>]) {
 
 /// The operators of a condition whose value filters the condition's field only, from 18.0
 /// `odoo/osv/expression.py:140` and 20.0 `odoo/orm/domains.py:80`; `any` and its kin take a
-/// domain.
+/// domain. `<>` spells `!=` up to 19.0 (18.0 `odoo/osv/expression.py:710,737`, 19.0
+/// `odoo/orm/domains.py:1283-1288`), `==` spells `=` in 19.0 only (`odoo/orm/domains.py:1291-1296`),
+/// and the value of `access`, from saas~19.3, names an operation (20.0
+/// `odoo/orm/domains.py:1926,1940-1942`). No series gate: a series that rejects one, `==` before
+/// 19.0, both spellings from saas~19.1 (20.0 `odoo/orm/domains.py:864-865`) and `access` before
+/// saas~19.3, raises before it searches, so holding the value hides no leak.
 const VALUE_OPERATORS: &[&str] = &[
     "=",
     "!=",
@@ -3876,6 +3882,9 @@ const VALUE_OPERATORS: &[&str] = &[
     "not in",
     "child_of",
     "parent_of",
+    "<>",
+    "==",
+    "access",
 ];
 
 /// Whether three elements read as a condition rather than as three conditions, three domains or
@@ -3922,12 +3931,22 @@ fn is_domain_join(func: &Expr, joins: &[&str], locals: &FxHashSet<String>) -> bo
     }
 }
 
-/// The list or tuple of field names a `search_read()` or `search_fetch()` call reads, which holds
-/// names, never a condition.
-fn field_names(call: &ast::ExprCall) -> Option<&Expr> {
-    let reads = tail_name(&call.func).is_some_and(|n| matches!(n, "search_read" | "search_fetch"));
-    let fields = arg_expr(FIELD_NAMES, call).filter(|e| matches!(e, Expr::List(_) | Expr::Tuple(_)));
-    fields.filter(|_| reads)
+/// The lists and tuples of field names a call reads, which hold names, never a condition: the
+/// fields of `search_read()` and `search_fetch()`, and the fields, groupby and aggregates of
+/// `read_group()`, `_read_group()` and `formatted_read_group()`, since a field may be named like
+/// an operator, as `access` is. Each position and keyword counts, not only the one the sink reads,
+/// as the sink takes the first keyword in the order the call writes them.
+fn field_names(call: &ast::ExprCall) -> Vec<&Expr> {
+    let (positions, names): (&[usize], &[&str]) = match tail_name(&call.func) {
+        Some("search_read" | "search_fetch") => (&[1], &["fields", "field_names"]),
+        Some("read_group" | "_read_group" | "formatted_read_group") => (&[1, 2], &["fields", "groupby", "aggregates"]),
+        _ => (&[], &[]),
+    };
+    let args = positions.iter().filter_map(|p| call.arguments.args.get(*p));
+    let keywords = call.arguments.keywords.iter();
+    let keywords = keywords.filter(|k| k.arg.as_ref().is_some_and(|a| names.contains(&a.as_str())));
+    let lists = args.chain(keywords.map(|k| &k.value));
+    lists.filter(|e| matches!(e, Expr::List(_) | Expr::Tuple(_))).collect()
 }
 
 /// Whose rights a method called on the records of the dotted path `records` runs with. A
@@ -5706,6 +5725,7 @@ mod tests {
             ("P.sudo().search(Domain('child_ids', 'any!', t))", "OD715"),
             ("P.sudo().search(Domain(t, '=', 1))", "OD715"),
             ("P.sudo().search([('a', '=', 1), [t, '=', 1]])", "OD715"),
+            ("P.sudo().search([(t, '==', 1)])", "OD715"),
             ("request.env(su=True)[t].search([])", "OD712"),
             ("self.env[t].with_user(SUPERUSER_ID).search([])", "OD712"),
             ("env = request.env(su=True)\n    env[t].search([])", "OD712"),
@@ -5729,6 +5749,9 @@ mod tests {
             "P.read([t])",
             "P.search(t)",
             "P.sudo().search([('name', 'ilike', t)])",
+            "P.sudo().search([('name', '<>', t)])",
+            "P.sudo().search([('name', '==', t)])",
+            "P.sudo().search(Domain('user_id', 'access', t))",
             "P.sudo().search(['|', ('a', '=', t), ['b', 'in', t]])",
             "P.sudo().search(Domain('name', '=', t) | Domain('ref', '=', t))",
             "P.sudo().search(expression.AND([[('a', '=', 1)], [('name', '=', t)]]))",
@@ -6072,6 +6095,14 @@ mod tests {
             "P.sudo().search(['|', ('a', '=', 1), t])",
             "P.sudo().search_read([], ['name', 'ref', t])",
             "P.sudo().read_group([], ['a', 'b', t], ['c'])",
+            "P.sudo().read_group([], ['user_id', 'access', t], ['c'])",
+            "P.sudo().read_group([], ['a'], ['user_id', 'access', t])",
+            "P.sudo()._read_group([], groupby=['user_id', 'access', t])",
+            "P.sudo().formatted_read_group([], aggregates=['user_id', 'access', t])",
+            "P.sudo()._read_group([], aggregates=['user_id', 'access', t], groupby=['a'])",
+            "P.sudo()._read_group([], groupby=['user_id', 'access', t], aggregates=['a'])",
+            "P.sudo().formatted_read_group([], aggregates=['user_id', 'access', t], groupby=['a'])",
+            "P.sudo().read_group([], groupby=['user_id', 'access', t], fields=['a'])",
             "P.sudo().search(expression.AND([[('a', '=', 1)], [('b', '=', 2)], t]))",
             "P.sudo().search([leaf_a, leaf_b, t])",
             "P.sudo().search([self._a(), b, t])",
