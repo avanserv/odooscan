@@ -1,5 +1,5 @@
-from odoo import api, models
-from odoo.http import request
+from odoo import api, fields, models
+from odoo.http import Stream, request
 from odoo.tools.safe_eval import safe_eval
 
 
@@ -48,3 +48,23 @@ class SaleOrderLabel(models.Model):
 
     def _label_suffix(self):
         return request.params.get("suffix", "")
+
+
+class SaleOrderParts(models.Model):
+    _inherit = "bad.order"
+
+    body_html = fields.Html()
+
+    def _note_card(self, body):
+        card = self._blank_card()
+        card.body_html = body
+        return card.body_html
+
+    def _blank_card(self):
+        return self.new({})
+
+    def _open_stream(self, path, crop):
+        stream = Stream.from_path(path)
+        stream.etag += f"-crop-{crop}"
+        with open(stream.path, "rb") as image:
+            return image.read()

@@ -30,3 +30,11 @@ class Callers(http.Controller):
     def apply_public(self, **post):
         request.env["bad.order"].sudo().apply_values(post)
         return request.redirect("/bad/thanks")
+
+    @http.route("/bad/card", auth="user")
+    def card(self, note):
+        return Markup(request.env["bad.order"]._note_card(note))
+
+    @http.route("/bad/cover", auth="user")
+    def cover(self, crop):
+        return request.env["bad.order"]._open_stream("/srv/bad/cover.png", crop)

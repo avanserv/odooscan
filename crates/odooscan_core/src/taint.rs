@@ -915,6 +915,10 @@ struct State {
     /// Locals bound to a value `Flows::chosen` or `Flows::fixed` reads as the code's, by whether
     /// it is a collection, and that took no value since.
     chosen: FxHashMap<String, bool>,
+    /// Locals and attributes of `self` bound to a value a caller passes or a call returns, whose
+    /// attributes `Flows::set_attr` keeps apart. What an attribute set adds to a base does not
+    /// count, so that a second set on a clean local reaches the whole object as the first does.
+    parted: FxHashSet<String>,
 }
 
 /// The `os.path.join()` calls a path may come from, and whether a normalizer resolved its `..` on
@@ -1130,6 +1134,7 @@ impl State {
         join_into(&mut self.vals, other.vals, join_vals);
         join_into(&mut self.paths, other.paths, join_sites);
         self.built.extend(other.built);
+        self.parted.extend(other.parted);
         // A check on one path only still vouches for the records: as at 18.0
         // payment/controllers/portal.py:76-78, the path without it browses no id.
         self.checked.extend(other.checked);
@@ -1276,6 +1281,7 @@ impl Flows<'_> {
                 pos: self.loc.at(param),
             }];
             let safe = Safe::default();
+            toggle(&mut self.state.parted, name, !origin.is_user());
             self.state.vars.insert(
                 name.to_owned(),
                 Taint {
@@ -1500,8 +1506,27 @@ impl Flows<'_> {
     /// the first pass set on the one before it.
     fn for_stmt(&mut self, f: &ast::StmtFor) {
         let t = values(self.expr(&f.iter));
-        self.repeat(&f.body, |s| s.bind(&f.target, t.clone(), None));
+        let parts = records_key(&f.iter).zip(var_key(&f.target));
+        self.repeat(&f.body, |s| {
+            s.bind(&f.target, t.clone(), None);
+            if let Some((from, to)) = &parts {
+                s.copy_parts(from, to);
+            }
+        });
         self.body(&f.orelse);
+    }
+
+    /// Gives `to` the attributes `Flows::set_attr` keeps apart on `from`, as a loop target is
+    /// one of the records the iterable holds, and so holds what was set on them.
+    fn copy_parts(&mut self, from: &str, to: &str) {
+        if matches!(from, "self" | "cls") || from == to {
+            return;
+        }
+        let prefix = format!("{from}.");
+        let parts: Vec<(String, Taint)> = (self.state.vars.iter())
+            .filter_map(|(k, t)| k.strip_prefix(&prefix).map(|attr| (format!("{to}.{attr}"), t.clone())))
+            .collect();
+        self.state.vars.extend(parts);
     }
 
     fn with_stmt(&mut self, w: &ast::StmtWith) {
@@ -1529,10 +1554,12 @@ impl Flows<'_> {
     }
 
     /// Assigns `t` to a target. A plain name or an attribute of `self` loses what it held; an item
-    /// or attribute set on either adds the value to it.
+    /// or attribute set on either adds the value to it, but for the attributes `Flows::set_attr`
+    /// keeps apart.
     fn bind(&mut self, target: &Expr, t: Option<Taint>, value: Option<&Expr>) {
         if let Some(key) = self_attr(target) {
             self.bind_client(&key, value);
+            self.bind_parts(&key, t.as_ref(), value);
             return self.set(key, target, t);
         }
         match target {
@@ -1556,33 +1583,49 @@ impl Flows<'_> {
                 self.hold(base, value);
                 self.add_to(base, values(t));
             }
-            Expr::Attribute(ast::ExprAttribute { value: base, .. }) => {
-                self.hold(base, value);
-                let t = self.set_on(base, values(t));
-                self.add_to(base, t);
+            Expr::Attribute(a) => {
+                self.hold(&a.value, value);
+                self.set_attr(a, target, values(t));
             }
             _ => {}
         }
     }
 
-    /// What setting an attribute on `base` adds to it. On a local a call returned, only a value the
-    /// user sets on entry, without the origins joined into it: the attribute is one part of what
-    /// the callee built, and an edge from a parameter or call set on it would reach every other
-    /// part a sink reads, as `stream.etag` would reach `open(stream.path)`.
-    fn set_on(&self, base: &Expr, t: Option<Taint>) -> Option<Taint> {
-        let Expr::Name(n) = base else { return t };
-        let returned = self
-            .state
-            .vars
-            .get(n.id.as_str())
-            .is_some_and(|mine| matches!(mine.origin, FlowOrigin::Return(_)));
-        if !returned {
-            return t;
+    /// Sets the attribute `a` names. On a local or an attribute of `self` bound to a value a caller
+    /// passes or a call returns, which may be built of parts, a parameter or call set on one part
+    /// reaches only reads of that part, as `stream.etag` does not reach `open(stream.path)`; a
+    /// value the user sets on entry, without the origins joined into it, reaches the whole object.
+    fn set_attr(&mut self, a: &ast::ExprAttribute, target: &Expr, t: Option<Taint>) {
+        let Some(key) = var_key(&a.value) else {
+            return self.add_to(&a.value, t);
+        };
+        let part = format!("{key}.{}", a.attr);
+        let parted =
+            self.state.parted.contains(&key) && self.state.vars.get(&key).is_some_and(|mine| !mine.origin.is_user());
+        if parted && !t.as_ref().is_some_and(|t| t.origin.is_user()) {
+            return self.set(part, target, t);
         }
-        t.filter(|t| t.origin.is_user()).map(|mut t| {
-            t.origins.clear();
+        // The whole object takes this set, so what the attribute kept apart is replaced.
+        self.state.vars.remove(&part);
+        let t = t.map(|mut t| {
+            if parted {
+                t.origins.clear();
+            }
             t
-        })
+        });
+        self.add_to(&a.value, t);
+    }
+
+    /// Binds what a local or an attribute of `self` holds of the parts `Flows::set_attr` keeps
+    /// apart. The attributes set on the object it held go with it, unless `value` is that object
+    /// in another environment, as `x = x.sudo()` is. Those of `self` stay whatever it is bound
+    /// to: a method rebinds it to its own records, filtered or in another environment.
+    fn bind_parts(&mut self, key: &str, t: Option<&Taint>, value: Option<&Expr>) {
+        toggle(&mut self.state.parted, key, t.is_some_and(|t| !t.origin.is_user()));
+        if !matches!(key, "self" | "cls") && !value.is_some_and(|v| same_records(v, key)) {
+            let prefix = format!("{key}.");
+            self.state.vars.retain(|k, _| !k.starts_with(&prefix));
+        }
     }
 
     /// Binds the attachment values a local's value holds, the flow of their content going through
@@ -1799,6 +1842,7 @@ impl Flows<'_> {
         self.bind_path(name, value);
         self.state.built.remove(name);
         self.bind_client(name, value);
+        self.bind_parts(name, t.as_ref(), value);
         self.set(name.to_owned(), target, t);
     }
 
@@ -2286,7 +2330,12 @@ impl Flows<'_> {
                 Some((pattern, Role::Source(kind))) => self.source(pattern.to_owned(), expr, kind),
                 _ => match self_attr(expr).and_then(|key| self.state.vars.get(&key)) {
                     Some(t) => Some(t.clone()),
-                    None => attribute(self.expr(&a.value), a.attr.as_str()),
+                    None => {
+                        let whole = attribute(self.expr(&a.value), a.attr.as_str());
+                        let key = records_key(&a.value).map(|k| format!("{k}.{}", a.attr));
+                        let set = key.and_then(|k| self.state.vars.get(&k)).cloned();
+                        join(set, whole)
+                    }
                 },
             },
             Expr::Subscript(s) => self.item(s, expr),
@@ -4068,6 +4117,30 @@ fn self_attr(expr: &Expr) -> Option<String> {
 /// The key a local or an attribute of `self` keeps a value under.
 fn var_key(expr: &Expr) -> Option<String> {
     self_attr(expr).or_else(|| expr.as_name_expr().map(|n| n.id.to_string()))
+}
+
+/// Whether `value` is the records `key` holds, through `SAME_MODEL` methods that change only their
+/// environment.
+fn same_records(value: &Expr, key: &str) -> bool {
+    matches!(value, Expr::Call(_)) && records_key(value).as_deref() == Some(key)
+}
+
+/// The key of the local or attribute of `self` whose records `expr` is, through `SAME_MODEL`
+/// methods that change only their environment, `SAME_RECORDS` methods and an item, as base carried
+/// the receiver's taint through them. A chain on `self` itself has none: `self_attr` alone reads
+/// the attributes of `self`.
+fn records_key(expr: &Expr) -> Option<String> {
+    let base = match expr {
+        Expr::Call(c) => match &*c.func {
+            Expr::Attribute(a) if SAME_MODEL.contains(&a.attr.as_str()) || SAME_RECORDS.contains(&a.attr.as_str()) => {
+                &a.value
+            }
+            _ => return var_key(expr),
+        },
+        Expr::Subscript(s) => &s.value,
+        _ => return var_key(expr),
+    };
+    records_key(base).filter(|k| !matches!(k.as_str(), "self" | "cls"))
 }
 
 /// Whether every prefix `startswith()` takes, one or a tuple, is `fixed`.
@@ -6963,19 +7036,188 @@ mod tests {
     }
 
     #[test]
-    fn an_attribute_set_on_a_returned_value_keeps_only_a_user_value() {
-        for set in [
-            "stream.etag += f'{crop}'",
-            "stream.etag = stream.etag + f'{crop}'",
-            "stream.etag = f'{crop}'",
-        ] {
-            let src = format!("def _f(self, crop):\n    stream = self._s()\n    {set}\n    open(stream.path)\n");
-            let (_, edges) = flows_of(Params::None, &src);
-            assert_eq!(origins_to(&edges, &FlowTarget::Sink("OD707")), ["Return(0)"], "{set}");
-            let user = set.replace("f'{crop}'", "request.params['x']");
-            let src = format!("def _f(self):\n    stream = self._s()\n    {user}\n    open(stream.path)\n");
-            assert_eq!(flows_of(Params::None, &src).0, ["OD707"], "{user}");
+    fn an_attribute_set_on_a_passed_or_returned_value_reaches_another_only_from_the_user() {
+        // Each base, as a function binding it and the expression reading it, with its origin.
+        let bases = [
+            ("def _f(self, crop):\n    stream = self._s()", "stream", "Return(0)"),
+            (
+                "def _f(self, crop):\n    self.stream = self._s()",
+                "self.stream",
+                "Return(0)",
+            ),
+            (
+                "def _f(self, path, crop):\n    stream = Stream.from_path(path)",
+                "stream",
+                "Param(0)",
+            ),
+        ];
+        for (bound, stream, origin) in bases {
+            for set in ["# += f'{crop}'", "# = # + f'{crop}'", "# = f'{crop}'"] {
+                let set = set.replace('#', &format!("{stream}.etag"));
+                let src = format!("{bound}\n    {set}\n    open({stream}.path)\n");
+                let (found, edges) = flows_of(Params::None, &src);
+                assert!(found.is_empty(), "{src}");
+                assert_eq!(origins_to(&edges, &FlowTarget::Sink("OD707")), [origin], "{src}");
+                let user = src.replace("f'{crop}'", "request.params['x']");
+                assert_eq!(flows_of(Params::None, &user).0, ["OD707"], "{user}");
+            }
         }
+    }
+
+    #[test]
+    fn an_attribute_set_on_a_returned_value_reaches_its_own_reads() {
+        let read = |set: &str, after: &str| {
+            let src =
+                format!("def _f(self, body):\n    m = self._m()\n    {set}\n{after}    return Markup(m.body_html)\n");
+            let (found, edges) = flows_of(Params::None, &src);
+            assert!(found.is_empty(), "{src}");
+            origins_to(&edges, &FlowTarget::Sink("OD703"))
+        };
+        assert_eq!(read("m.body_html = body", ""), ["Param(0)", "Return(0)"]);
+        assert_eq!(
+            read("if body:\n        m.body_html = body", ""),
+            ["Param(0)", "Return(0)"]
+        );
+        assert_eq!(read("m.body_html = body", "    m = self._n()\n"), ["Return(1)"]);
+    }
+
+    #[test]
+    fn an_attribute_set_in_a_loop_reaches_only_the_reads_after_it() {
+        let sunk = |body: &str| {
+            let src = format!("def _f(self, body):\n    for m in self._m():\n        {body}\n");
+            origins_to(&flows_of(Params::None, &src).1, &FlowTarget::Sink("OD703"))
+        };
+        assert_eq!(sunk("Markup(m.body_html)\n        m.body_html = body"), ["Return(0)"]);
+        assert_eq!(
+            sunk("m.body_html = body\n        Markup(m.body_html)"),
+            ["Param(0)", "Return(0)"]
+        );
+    }
+
+    /// Attributes are kept apart only on a base bound to a value: a value set on a local holding
+    /// nothing tainted, however many attributes it sets, or a user value set in the pass that reads
+    /// another attribute, reaches the whole object.
+    #[test]
+    fn an_attribute_set_on_a_clean_base_reaches_the_whole_object() {
+        let src = "def _f(self, crop):\n    x = Stream()\n    x.etag = crop\n    open(x.path)\n";
+        assert_eq!(
+            origins_to(&flows_of(Params::None, src).1, &FlowTarget::Sink("OD707")),
+            ["Param(0)"]
+        );
+        for (bound, x) in [
+            ("x = Request()\n    ", "x"),
+            ("self.x = Request()\n    ", "self.x"),
+            ("", "self.x"),
+        ] {
+            let sets = format!("def _f(self, body, url):\n    {bound}{x}.data = body\n    {x}.url = url\n");
+            let src = format!("{sets}    requests.get({x}, timeout=5)\n    self._z({x})\n    return {x}\n");
+            let edges = flows_of(Params::None, &src).1;
+            let both = ["Param(0)", "Param(1)"];
+            assert_eq!(origins_to(&edges, &FlowTarget::Sink("OD706")), both, "{src}");
+            assert_eq!(
+                origins_where(&edges, |t| matches!(t, FlowTarget::Arg(..))),
+                both,
+                "{src}"
+            );
+            assert_eq!(origins_to(&edges, &FlowTarget::Return), both, "{src}");
+        }
+        for (code, sink) in SINK_OF {
+            let (read, set) = read_and_set(code);
+            let body = format!("<loop>\n        {set}\n        <sink>");
+            assert_eq!(looped(&body, sink, read, "t"), [*code], "{code}: {body}");
+        }
+    }
+
+    /// A read of the attribute through another environment, or through a loop over the base, reads
+    /// what was set on it.
+    #[test]
+    fn an_attribute_set_on_a_base_reaches_reads_through_an_environment_or_a_loop() {
+        let rec = "def _r(self, rec, body):\n    rec.body_html = body\n    ";
+        let attr = "def _r(self, body):\n    self.m = self._m()\n    self.m.body_html = body\n    ";
+        for (read, set) in [
+            (format!("{rec}return Markup(rec.sudo().body_html)\n"), "Param(1)"),
+            (format!("{rec}for r in rec:\n        Markup(r.body_html)\n"), "Param(1)"),
+            (
+                format!("{rec}for r in rec.with_context(a=1):\n        Markup(r.body_html)\n"),
+                "Param(1)",
+            ),
+            (format!("{attr}return Markup(self.m.sudo().body_html)\n"), "Param(0)"),
+            (
+                format!("{attr}for r in self.m:\n        Markup(r.body_html)\n"),
+                "Param(0)",
+            ),
+            (
+                format!("{rec}return Markup(rec.filtered(lambda r: r.active).body_html)\n"),
+                "Param(1)",
+            ),
+            (format!("{rec}return Markup(rec.exists().body_html)\n"), "Param(1)"),
+            (format!("{rec}return Markup(rec[0].body_html)\n"), "Param(1)"),
+            (
+                format!("{rec}for r in rec.filtered('active'):\n        Markup(r.body_html)\n"),
+                "Param(1)",
+            ),
+        ] {
+            let sunk = origins_to(&flows_of(Params::None, &read).1, &FlowTarget::Sink("OD703"));
+            assert!(sunk.iter().any(|o| o == set), "{read}: {sunk:?}");
+        }
+    }
+
+    /// The trade of keeping attributes apart: a read of the whole object loses them.
+    #[test]
+    fn a_whole_read_loses_what_was_set_on_an_attribute_of_a_bound_base() {
+        let src = "def _f(self, crop):\n    stream = self._s()\n    stream.etag = crop\n    return stream\n";
+        assert_eq!(
+            origins_to(&flows_of(Params::None, src).1, &FlowTarget::Return),
+            ["Return(0)"]
+        );
+        let src =
+            "def _f(self, crop):\n    self.stream = self._s()\n    self.stream.etag = crop\n    self._z(self.stream)\n";
+        let edges = flows_of(Params::None, src).1;
+        assert_eq!(
+            origins_where(&edges, |t| matches!(t, FlowTarget::Arg(..))),
+            ["Return(0)"]
+        );
+    }
+
+    #[test]
+    fn rebinding_a_base_drops_its_attributes_but_in_another_environment() {
+        let read = |rebind: &str| {
+            let src = format!(
+                "def _f(self, body):\n    self.m = self._m()\n    self.m.body_html = body\n    {rebind}\n    return Markup(self.m.body_html)\n"
+            );
+            origins_to(&flows_of(Params::None, &src).1, &FlowTarget::Sink("OD703"))
+        };
+        assert_eq!(read("self.m = self._n()"), ["Return(1)"]);
+        assert_eq!(
+            read("self.m = self.m.sudo().with_context(a=1)"),
+            ["Param(0)", "Return(0)"]
+        );
+        let src = "def _f(self, body):\n    m = self._m()\n    m.body_html = body\n    m = m.with_company(1)\n    return Markup(m.body_html)\n";
+        let sunk = origins_to(&flows_of(Params::None, src).1, &FlowTarget::Sink("OD703"));
+        assert!(sunk.iter().any(|o| o == "Param(0)"), "{src}");
+        for env in [
+            "sudo()",
+            "with_env(self.env)",
+            "with_context(a=1)",
+            "with_user(2)",
+            "with_company(1)",
+            "browse(1)",
+        ] {
+            let src = format!(
+                "def f(self, term):\n    self.term = term\n    self = self.{env}\n    self.env.cr.execute(\"SELECT '%s'\" % self.term)\n"
+            );
+            assert_eq!(flows_of(Params::Rpc, &src).0, ["OD701"], "{src}");
+        }
+    }
+
+    /// A set the whole object takes, as one once the base holds a user value, replaces what an
+    /// earlier set kept on the attribute.
+    #[test]
+    fn a_set_on_a_user_held_base_replaces_the_kept_attribute() {
+        let src = "def _f(self, p, q):\n    m = self._m()\n    m.a = p\n    m.b = request.params['x']\n    m.a = q\n    return m.a\n";
+        let returned = origins_to(&flows_of(Params::None, src).1, &FlowTarget::Return);
+        assert!(!returned.iter().any(|o| o == "Param(0)"), "{returned:?}");
+        assert!(returned.iter().any(|o| o == "Param(1)"), "{returned:?}");
     }
 
     #[test]
