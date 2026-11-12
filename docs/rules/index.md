@@ -257,10 +257,11 @@ its `if x in allowed`, whatever `allowed` holds. In the arm of `if x in allowed`
 the code chose `allowed`: a list, tuple, set or dict literal whose items the code chose too, or a
 list or set comprehension over a container the code chose; a module constant bound to such a
 literal; `self._x` or `cls._x`, but `_fields`, `_context`, `_ids` and the other attributes the ORM
-sets; what a method of `self` returns for arguments the code chose too, but one that reads records
-or `fields_get()`; or a local bound to any of these that no rebinding, item set or call such as
-`append()` changed since. Anything else confines nothing there, such as a string, a parameter, a
-record's field or a list of a model's fields.
+sets; what a private `_get_*` method of `self` whose name does not end in `fields` returns for
+arguments the code chose too; or a local bound to any of these that no rebinding, item set or call
+such as `append()` changed since. Anything else confines nothing there, such as a string, a
+parameter, a record's field, a list of a model's fields or what another method of `self` returns,
+such as `sudo()` or `filtered()`.
 A test that `x` is in `env`, `registry`, `pool` or `_fields` proves only that the model or the
 field exists, so it ends every flow but those of OD712, OD714 and OD715. Some steps make a value
 harmless for some rules only: `os.path.basename()`, `io.BytesIO()`, `io.StringIO()` and a normalized
