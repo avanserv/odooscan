@@ -4,12 +4,13 @@
 //! first definition whatever an override says (18.0 `http.py:871-880`, 20.0 `routing_map.py:336-346`).
 
 use ruff_python_ast::{self as ast, Expr, Stmt};
+use ruff_text_size::{Ranged, TextSize};
 use rustc_hash::{FxBuildHasher, FxHashMap, FxHashSet};
 
 use crate::facts::{ClassBase, ControllerFact, PyFacts, RouteDef, RouteKey};
 use crate::index::class_file;
 use crate::module_state;
-use crate::python::{declares_model, keyword, str_lit, tail_name};
+use crate::python::{BoundNames, declares_model, keyword, str_lit, tail_name};
 
 /// The controllers of the scan by addon, then by file relative to it.
 #[derive(Debug, Default)]
@@ -34,7 +35,13 @@ impl Table {
         Some((rel.as_str(), classes))
     }
 
-    /// The class `name` of a file, the last of that name, which Python binds the name to.
+    /// The class of a file that starts at `start`.
+    fn at<'t>(&'t self, addon: &str, rel: &str, start: TextSize) -> Option<(&'t str, &'t ControllerFact)> {
+        let (rel, classes) = self.file(addon, rel)?;
+        Some((rel, classes.iter().find(|c| c.start == start)?))
+    }
+
+    /// The class `name` of a file, the last of that name, which an import of the name binds.
     fn class<'t>(&'t self, addon: &str, rel: &str, name: &str) -> Option<(&'t str, &'t ControllerFact)> {
         let (rel, classes) = self.file(addon, rel)?;
         Some((rel, classes.iter().rfind(|c| c.name == name)?))
@@ -80,10 +87,10 @@ pub struct Routing {
 }
 
 impl Scope<'_> {
-    /// The merged routing of `method` of the file's `class`, none when the table does not hold the
-    /// method's own route.
-    pub fn routing(&self, class: &str, method: &str) -> Option<Routing> {
-        let (rel, own) = self.table.class(self.addon, self.rel, class)?;
+    /// The merged routing of `method` of the file's class that starts at `start`, none when the
+    /// table does not hold the method's own route.
+    pub fn routing(&self, start: TextSize, method: &str) -> Option<Routing> {
+        let (rel, own) = self.table.at(self.addon, self.rel, start)?;
         if !own.routes.iter().any(|r| r.method == method) {
             return None;
         }
@@ -171,23 +178,57 @@ fn first_kind(layers: &[Option<&RouteDef>]) -> Option<String> {
 /// The classes at the top of a file that are no models and have a base, with the routes of their
 /// methods.
 pub(crate) fn controllers(body: &[Stmt]) -> Vec<ControllerFact> {
-    let top = module_state::top_level(body);
-    let imported = module_state::imported_names(&top, "odoo");
-    // Each class above, with its place among the controllers when it is one.
-    let mut above: Vec<(&str, Option<usize>)> = vec![];
+    // The names bound above, in source order, so that a base reads the nearest binding.
+    let mut bound: Vec<(&str, Binding)> = vec![];
     let mut controllers = vec![];
-    for class in top.iter().filter_map(|stmt| stmt.as_class_def_stmt()) {
+    for stmt in module_state::top_level(body) {
+        let Stmt::ClassDef(class) = stmt else {
+            bound.extend(import_bindings(stmt));
+            continue;
+        };
         let controller = (!class.bases().is_empty() && !declares_model(class)).then_some(controllers.len());
         if controller.is_some() {
             controllers.push(ControllerFact {
                 name: class.name.to_string(),
-                bases: class.bases().iter().map(|b| base(b, &imported, &above)).collect(),
+                start: class.start(),
+                bases: class.bases().iter().map(|b| base(b, &bound)).collect(),
                 routes: last_defs(&class.body).into_iter().filter_map(route_def).collect(),
             });
         }
-        above.push((class.name.as_str(), controller));
+        bound.push((class.name.as_str(), Binding::Class(controller)));
     }
     controllers
+}
+
+/// What a name at the top of a file is bound to, for a class below that names it as a base.
+enum Binding {
+    /// An import from `odoo`, with the dotted path of what it names.
+    Odoo(String),
+    /// Any other import, a relative one included, whose classes the scan does not look up.
+    Import,
+    /// A class of the file, with its place among the controllers when it is one.
+    Class(Option<usize>),
+}
+
+/// The names an import binds, in order.
+fn import_bindings(stmt: &Stmt) -> Vec<(&str, Binding)> {
+    let (aliases, relative) = match stmt {
+        Stmt::Import(i) => (&i.names, false),
+        Stmt::ImportFrom(i) => (&i.names, i.level > 0),
+        _ => return vec![],
+    };
+    let odoo = if relative {
+        vec![]
+    } else {
+        module_state::imported_names(&[stmt], "odoo")
+    };
+    let mut names = BoundNames::default();
+    names.aliases(aliases);
+    let binding = |name: &str| match odoo.iter().rfind(|(local, _)| *local == name) {
+        Some((_, path)) => Binding::Odoo(path.clone()),
+        None => Binding::Import,
+    };
+    names.0.into_iter().map(|name| (name, binding(name))).collect()
 }
 
 /// The methods a class body keeps: the last `def` of each name.
@@ -210,28 +251,34 @@ pub(crate) fn inherits_routes(controllers: &[ControllerFact]) -> bool {
     })
 }
 
-/// A base as an import names it: a class of `odoo.addons`, Odoo's `Controller`, or one defined
-/// `above` in the file. An import binds the name a class of the same name extends.
-fn base(expr: &Expr, imported: &[(&str, String)], above: &[(&str, Option<usize>)]) -> ClassBase {
-    if let Some(path) = module_state::imported_path(expr, imported) {
-        return if matches!(
-            path.as_str(),
-            "odoo.http.Controller" | "odoo.http.routing_map.Controller"
-        ) {
-            ClassBase::Root
-        } else if path.starts_with("odoo.addons.") {
-            ClassBase::Addon(path)
-        } else {
-            ClassBase::Unread
-        };
-    }
-    match expr {
-        Expr::Name(n) if n.id.as_str() == "object" => ClassBase::Root,
-        Expr::Name(n) => match above.iter().rfind(|(name, _)| *name == n.id.as_str()) {
-            Some((_, Some(at))) => ClassBase::Local(*at),
-            _ => ClassBase::Unread,
-        },
+/// A base as the last binding of its name above the class gives it: a class of `odoo.addons`,
+/// Odoo's `Controller`, or a controller of the file.
+fn base(expr: &Expr, bound: &[(&str, Binding)]) -> ClassBase {
+    let Some(name) = module_state::root(expr) else {
+        return ClassBase::Unread;
+    };
+    match bound.iter().rfind(|(n, _)| *n == name).map(|(_, b)| b) {
+        Some(Binding::Odoo(source)) => {
+            let path = module_state::imported_path(expr, &[(name, source.clone())]).unwrap_or_default();
+            odoo_base(path)
+        }
+        Some(Binding::Class(Some(at))) if expr.is_name_expr() => ClassBase::Local(*at),
+        None if name == "object" && expr.is_name_expr() => ClassBase::Root,
         _ => ClassBase::Unread,
+    }
+}
+
+/// A base an import from `odoo` names, by its dotted path.
+fn odoo_base(path: String) -> ClassBase {
+    if matches!(
+        path.as_str(),
+        "odoo.http.Controller" | "odoo.http.routing_map.Controller"
+    ) {
+        ClassBase::Root
+    } else if path.starts_with("odoo.addons.") {
+        ClassBase::Addon(path)
+    } else {
+        ClassBase::Unread
     }
 }
 
@@ -304,8 +351,20 @@ mod tests {
         Table::of(files.iter().zip(&facts).map(|((addon, rel, _), f)| (*addon, *rel, f)))
     }
 
-    fn routing(table: &Table, (addon, rel): (&str, &str), class: &str, method: &str) -> Option<Routing> {
-        Scope { table, addon, rel }.routing(class, method)
+    fn routing(table: &Table, file: (&str, &str), class: &str, method: &str) -> Option<Routing> {
+        nth_routing(table, file, (class, 0), method)
+    }
+
+    /// The routing of `method` of the `nth` class named `class` in the file.
+    fn nth_routing(
+        table: &Table,
+        (addon, rel): (&str, &str),
+        (class, nth): (&str, usize),
+        method: &str,
+    ) -> Option<Routing> {
+        let (_, classes) = table.file(addon, rel)?;
+        let start = classes.iter().filter(|c| c.name == class).nth(nth)?.start;
+        Scope { table, addon, rel }.routing(start, method)
     }
 
     const SHOP: (&str, &str, &str) = (
@@ -405,15 +464,88 @@ mod tests {
     }
 
     #[test]
-    fn python_keeps_the_last_class_and_the_last_def_of_a_name() {
+    fn a_subclass_of_a_same_named_class_reads_the_last_def_of_each_method() {
         let src = "from odoo import http\n\nclass Shop(http.Controller):\n    @http.route('/first', auth='public')\n    def a(self):\n        pass\n\n    @http.route('/second')\n    def a(self):\n        pass\n\nclass Shop(Shop):\n    @http.route()\n    def a(self):\n        pass\n\n    @http.route('/b', auth='public')\n    def b(self):\n        pass\n\n    def b(self):\n        pass\n";
         let scan = table(&[("shop", "main.py", src)]);
-        let a = routing(&scan, ("shop", "main.py"), "Shop", "a").unwrap();
+        let a = nth_routing(&scan, ("shop", "main.py"), ("Shop", 1), "a").unwrap();
         assert_eq!(
             (a.urls, a.auth.as_deref()),
             (Some(vec!["/second".to_owned()]), Some("user"))
         );
-        assert_eq!(routing(&scan, ("shop", "main.py"), "Shop", "b"), None);
+        assert_eq!(nth_routing(&scan, ("shop", "main.py"), ("Shop", 1), "b"), None);
+    }
+
+    #[test]
+    fn two_classes_of_one_name_each_read_their_own_routing() {
+        let class = |auth: &str| {
+            format!(
+                "class Main(http.Controller):\n    @http.route('/a', auth='{auth}')\n    def a(self):\n        pass\n"
+            )
+        };
+        let src = format!("from odoo import http\n\n{}\n{}", class("public"), class("user"));
+        let scan = table(&[("shop", "main.py", &src)]);
+        let auth = |nth| {
+            nth_routing(&scan, ("shop", "main.py"), ("Main", nth), "a")
+                .unwrap()
+                .auth
+        };
+        assert_eq!((auth(0).as_deref(), auth(1).as_deref()), (Some("public"), Some("user")));
+    }
+
+    #[test]
+    fn a_baseless_class_named_like_a_controller_merges_no_routing() {
+        let src = "from odoo import http\n\nclass Shop(http.Controller):\n    @http.route('/a', auth='public')\n    def a(self):\n        pass\n\nclass Shop:\n    @http.route('/b')\n    def a(self):\n        pass\n";
+        let scan = table(&[("shop", "main.py", src)]);
+        let scope = Scope {
+            table: &scan,
+            addon: "shop",
+            rel: "main.py",
+        };
+        let baseless = TextSize::try_from(src.rfind("class Shop:").unwrap()).unwrap();
+        assert_eq!(scope.routing(baseless, "a"), None);
+        let controller = routing(&scan, ("shop", "main.py"), "Shop", "a").unwrap();
+        assert_eq!(controller.auth.as_deref(), Some("public"));
+    }
+
+    #[test]
+    fn a_class_rebinding_an_imported_name_is_the_base_of_the_classes_below() {
+        let ext = "from odoo import http\nfrom odoo.addons.shop.controllers.main import Shop\n\nclass Shop(Shop):\n    @http.route(auth='user')\n    def a(self):\n        pass\n\nclass Leaf(Shop):\n    @http.route()\n    def a(self):\n        pass\n";
+        let scan = table(&[SHOP, ("ext", "main.py", ext)]);
+        let leaf = routing(&scan, ("ext", "main.py"), "Leaf", "a").unwrap();
+        assert_eq!(
+            (leaf.auth.as_deref(), leaf.kind.as_deref(), leaf.csrf),
+            (Some("user"), Some("json"), Some(false))
+        );
+    }
+
+    #[test]
+    fn a_base_reads_only_the_nearest_binding_above_it() {
+        let bases = |src: &str| {
+            analyze(src, None)
+                .controllers
+                .iter()
+                .map(|c| c.bases.clone())
+                .collect::<Vec<_>>()
+        };
+        let below = "from odoo import http\n\nclass Ext(Shop):\n    pass\n\nfrom odoo.addons.shop.controllers.main import Shop\n";
+        assert_eq!(bases(below), [[ClassBase::Unread]]);
+        for import in [
+            "from .main import Shop",
+            "from shop_lib import Shop",
+            "import shop_lib as Shop",
+        ] {
+            let src = format!(
+                "from odoo import http\n\nclass Shop(http.Controller):\n    pass\n\n{import}\n\nclass Ext(Shop):\n    pass\n"
+            );
+            assert_eq!(
+                bases(&src),
+                [vec![ClassBase::Root], vec![ClassBase::Unread]],
+                "{import}"
+            );
+        }
+        let nearer = "from odoo import http\n\nclass Shop(http.Controller):\n    pass\n\nfrom odoo.addons.shop.controllers.main import Shop\n\nclass Ext(Shop):\n    pass\n";
+        let addon = ClassBase::Addon("odoo.addons.shop.controllers.main.Shop".to_owned());
+        assert_eq!(bases(nearer)[1], [addon]);
     }
 
     #[test]

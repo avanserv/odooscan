@@ -1818,7 +1818,7 @@ fn may_reach_orm(class: &ast::StmtClassDef) -> bool {
 /// The names a statement of the module binds. It stops at a function or a class, whose body binds
 /// names of its own.
 #[derive(Default)]
-struct BoundNames<'a>(Vec<&'a str>);
+pub(crate) struct BoundNames<'a>(pub(crate) Vec<&'a str>);
 
 impl<'a> Visitor<'a> for BoundNames<'a> {
     fn visit_stmt(&mut self, stmt: &'a Stmt) {
@@ -1842,7 +1842,7 @@ impl<'a> Visitor<'a> for BoundNames<'a> {
 }
 
 impl<'a> BoundNames<'a> {
-    fn aliases(&mut self, aliases: &'a [ast::Alias]) {
+    pub(crate) fn aliases(&mut self, aliases: &'a [ast::Alias]) {
         for alias in aliases {
             let name = alias.asname.as_ref().unwrap_or(&alias.name);
             self.0.push(name.as_str().split('.').next().unwrap_or_default());
@@ -2097,6 +2097,8 @@ struct PyVisitor<'a, 'ast> {
     class_facts: Vec<Option<usize>>,
     /// What `self` is in a method of each enclosing class, none for an enclosing function.
     owners: Vec<Option<Receiver>>,
+    /// Where the outermost enclosing class starts, which the routing table knows it by.
+    class_start: Option<TextSize>,
     /// The query names of the outermost enclosing function, whose nested functions they count.
     query_vars: Option<QueryVars<'ast>>,
     /// Where each query literal `sql_columns` read starts.
@@ -2153,6 +2155,7 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
             class_models: vec![],
             class_facts: vec![],
             owners: vec![],
+            class_start: None,
             query_vars: None,
             read_queries: FxHashSet::default(),
             self_cursors: vec![],
@@ -2958,10 +2961,10 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
 
     /// The routing Odoo merges for a method of a class at the top of the file.
     fn routing(&self, func: &ast::StmtFunctionDef) -> Option<Routing> {
-        let [Some(Receiver::Class(class))] = self.owners.as_slice() else {
+        let ([Some(Receiver::Class(_))], Some(start)) = (self.owners.as_slice(), self.class_start) else {
             return None;
         };
-        self.scope.routing(class, &func.name)
+        self.scope.routing(start, &func.name)
     }
 
     fn route_checks(&mut self, func: &ast::StmtFunctionDef, routing: Option<&Routing>) {
@@ -3789,6 +3792,8 @@ impl<'ast> Visitor<'ast> for PyVisitor<'_, 'ast> {
                     Some(f) => Receiver::Model(f.model.clone()),
                     None => Receiver::Class(class.name.to_string()),
                 };
+                let class_start = self.class_start;
+                self.class_start = class_start.or(Some(class.start()));
                 self.owners.push(Some(owner));
                 self.class_facts
                     .push(fact.is_some().then_some(self.facts.classes.len()));
@@ -3802,6 +3807,7 @@ impl<'ast> Visitor<'ast> for PyVisitor<'_, 'ast> {
                 self.class_models.pop();
                 self.class_facts.pop();
                 self.owners.pop();
+                self.class_start = class_start;
                 return;
             }
             Stmt::FunctionDef(func) => return self.visit_function(func, stmt),
@@ -6396,6 +6402,30 @@ mod tests {
         assert_eq!(codes("Shop, Mixin", "get", WRITE), ["OD127"]);
         assert_eq!(codes("Shop, Mixin", "public", "request.env['x'].sudo()"), ["OD111"]);
         assert_eq!(codes("Shop, Mixin", "record", header), [""; 0]);
+    }
+
+    #[test]
+    fn each_of_two_controllers_of_one_name_reads_its_own_auth() {
+        let class = |auth: &str| {
+            format!(
+                "class Main(http.Controller):\n    @http.route('/stock', auth='{auth}')\n    def stock(self):\n        return request.env['x'].sudo().search([])\n"
+            )
+        };
+        let src = format!(
+            "from odoo import http\nfrom odoo.http import request\n\n{}\n{}",
+            class("public"),
+            class("user")
+        );
+        let facts = analyze(&src, None);
+        let table = routing::Table::of([("shop", "main.py", &facts)].into_iter());
+        let scope = Scope {
+            table: &table,
+            addon: "shop",
+            rel: "main.py",
+        };
+        let diags = analyze_with(&src, None, &FieldClasses::default(), &TaintTable::default(), scope).diags;
+        let found: Vec<_> = diags.iter().map(|d| (d.code, d.pos.line)).collect();
+        assert_eq!(found, [("OD111", 6)]);
     }
 
     /// `route_check` raises every route rule, so a change to one must leave the others as they were.
