@@ -47,3 +47,13 @@ class Inbound(http.Controller):
             response.headers["X-Partner"] = partner
         response.headers["Content-Type"] = mimetype
         return request.make_response("", [("Content-Disposition", f"attachment; filename={name}")])
+
+    @http.route("/bad/inbound/archive", auth="user")
+    def archive(self, name):
+        payload = base64.b64encode(b"archive")
+        headers = [
+            ("Cache-Control", "private"),
+            ("X-Archive-Lines", str(payload.count(b"\n"))),
+            ("Content-Disposition", "attachment; filename=" + name),
+        ]
+        return request.make_response(payload, headers)

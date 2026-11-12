@@ -903,6 +903,9 @@ struct State {
     paths: FxHashMap<String, Sites>,
     /// Locals and attributes of `self` bound to an outgoing client of `CLIENTS`.
     clients: FxHashSet<String>,
+    /// Locals bound to a header name or to a list or mapping of headers, by the header
+    /// `Flows::header_name` reads in it.
+    headers: FxHashMap<String, String>,
 }
 
 /// The `os.path.join()` calls a path may come from, and whether a normalizer resolved its `..` on
@@ -1030,6 +1033,7 @@ impl State {
         }
         // A name is known only where both paths agree on it.
         self.names.retain(|name, mine| other.names.get(name) == Some(mine));
+        self.headers.retain(|name, mine| other.headers.get(name) == Some(mine));
         join_into(&mut self.picked, other.picked, join);
         join_into(&mut self.browsed, other.browsed, join_browsed);
         join_into(&mut self.ids, other.ids, join);
@@ -1360,7 +1364,7 @@ impl Flows<'_> {
             Expr::Subscript(ast::ExprSubscript { value: base, slice, .. })
                 if headers_of(base).is_some_and(|owner| !self.is_client(owner)) =>
             {
-                let label = header_label(str_lit(slice), &self.path(base).join("."));
+                let label = header_label(self.header_name(slice), &self.path(base).join("."));
                 self.sink(Sink::Header, label, t, target);
             }
             Expr::Subscript(ast::ExprSubscript { value: base, slice, .. }) => {
@@ -1547,6 +1551,10 @@ impl Flows<'_> {
             Some(model) => self.state.picked.insert(name.to_owned(), model),
             None => self.state.picked.remove(name),
         };
+        match value.and_then(|v| self.header_name(v)).map(str::to_owned) {
+            Some(header) => self.state.headers.insert(name.to_owned(), header),
+            None => self.state.headers.remove(name),
+        };
         self.bind_vals(name, target, value);
         self.bind_path(name, value);
         self.bind_client(name, value);
@@ -1607,6 +1615,8 @@ impl Flows<'_> {
             },
         };
         let Some(t) = t else { return };
+        // The header the user set may no longer be the only one.
+        self.state.headers.remove(&name);
         let mine = self.state.vars.remove(&name);
         if let Some(t) = join(mine, Some(t)) {
             self.state.vars.insert(name, t);
@@ -2199,7 +2209,10 @@ impl Flows<'_> {
                 let param = self.param(row);
                 let arg = sink_arg(param, code(row.sink), call, &args, &keywords);
                 let callee = match row.sink {
-                    Sink::Header => header_label(arg_expr(param, call).and_then(header_name), &format!("{pattern}()")),
+                    Sink::Header => header_label(
+                        arg_expr(param, call).and_then(|e| self.header_name(e)),
+                        &format!("{pattern}()"),
+                    ),
                     _ => sink_callee(pattern, call),
                 };
                 self.reach(row.sink, callee, arg, expr);
@@ -2432,6 +2445,37 @@ impl Flows<'_> {
         }
     }
 
+    /// The header a literal names, or that a list of pairs or a mapping, inline or bound to a
+    /// local, sets in its one non-literal entry, or else in its one tainted entry, as
+    /// `Content-Disposition` beside `Content-Length` at 18.0 `addons/mail/controllers/attachment.py:40-46`.
+    fn header_name<'e>(&'e self, expr: &'e Expr) -> Option<&'e str> {
+        if let Expr::Name(n) = expr {
+            return self.state.headers.get(n.id.as_str()).map(String::as_str);
+        }
+        let Some(entries) = header_entries(expr) else {
+            return str_lit(expr);
+        };
+        let mut set: Vec<(&Expr, &Expr)> = entries.into_iter().filter(|(_, v)| constant(v).is_none()).collect();
+        if set.len() > 1 {
+            set.retain(|(_, v)| self.reads_user(v));
+        }
+        match set[..] {
+            [(key, _)] => str_lit(key),
+            _ => None,
+        }
+    }
+
+    /// Whether `expr` reads a value that would reach a header, judged without evaluating it
+    /// again, since that would report its sinks twice.
+    fn reads_user(&self, expr: &Expr) -> bool {
+        let mut reads = Reads {
+            flows: self,
+            found: false,
+        };
+        reads.visit_expr(expr);
+        reads.found
+    }
+
     /// The locals `expr` names, but `self`.
     fn names_in(&self, expr: &Expr) -> Vec<String> {
         let mut names = Names::default();
@@ -2534,8 +2578,10 @@ impl Flows<'_> {
         tests.names
     }
 
-    /// What a call that no row names returns, keeping a write on `self` or a call of a model's
-    /// method for the summary.
+    /// What a call returns when its row ends no flow: a call no row names, one whose row is no
+    /// sink here (its guard fails, an `odoo` import binds its module, it sets a client's headers),
+    /// and one whose sink passes its data on after reporting it. Keeps a write on `self` or a call
+    /// of a model's method for the summary.
     fn plain_call(
         &mut self,
         call: &ast::ExprCall,
@@ -2885,6 +2931,41 @@ impl<'a> Visitor<'a> for Names {
             self.0.push(n.id.to_string());
         }
         visitor::walk_expr(self, expr);
+    }
+}
+
+/// Whether an expression reads a source, or a local or attribute of `self` whose taint a header
+/// reports, other than through a sanitizer, as `Flows::expr` would find.
+struct Reads<'f, 'a> {
+    flows: &'f Flows<'a>,
+    found: bool,
+}
+
+impl<'e> Visitor<'e> for Reads<'_, '_> {
+    fn visit_expr(&mut self, expr: &'e Expr) {
+        if self.found {
+            return;
+        }
+        let flows = self.flows;
+        let role = match expr {
+            Expr::Attribute(_) => flows.table.lookup(&flows.path(expr)).map(|(_, role)| role),
+            Expr::Call(c) => flows.table.lookup(&flows.path(&c.func)).map(|(_, role)| role),
+            _ => None,
+        };
+        let key = match expr {
+            Expr::Name(n) => Some(n.id.to_string()),
+            e => self_attr(e),
+        };
+        let held = key
+            .and_then(|k| flows.state.vars.get(&k))
+            .map(|t| !t.safe.has(code(Sink::Header)));
+        match (role, held) {
+            (Some(Role::Source(_)), _) => self.found = true,
+            (Some(Role::Sanitizer), _) => {}
+            (Some(Role::Clears(cleared)), _) if cleared == code(Sink::Header) => {}
+            (_, Some(found)) => self.found = found,
+            _ => visitor::walk_expr(self, expr),
+        }
     }
 }
 
@@ -3275,29 +3356,21 @@ fn arg_expr(arg: Arg, call: &ast::ExprCall) -> Option<&Expr> {
     }
 }
 
-/// The header that `expr` names, or that the one entry of a list of pairs or of a mapping not
-/// written out whole sets, which is the entry the user may set.
-fn header_name(expr: &Expr) -> Option<&str> {
+/// The key and value of each entry of a list or tuple of pairs or of a mapping, as headers are
+/// passed, or `None` when `expr` is neither or holds an entry it cannot split, such as a starred
+/// item or a `**` spread, whose taint no named entry would account for.
+fn header_entries(expr: &Expr) -> Option<Vec<(&Expr, &Expr)>> {
     fn pair(e: &Expr) -> Option<(&Expr, &Expr)> {
         match e {
             Expr::Tuple(t) if t.elts.len() == 2 => Some((&t.elts[0], &t.elts[1])),
             _ => None,
         }
     }
-    let entries: Vec<(&Expr, &Expr)> = match expr {
+    match expr {
         Expr::List(ast::ExprList { elts, .. }) | Expr::Tuple(ast::ExprTuple { elts, .. }) => {
-            elts.iter().filter_map(pair).collect()
+            elts.iter().map(pair).collect()
         }
-        Expr::Dict(d) => d
-            .items
-            .iter()
-            .filter_map(|i| Some((i.key.as_ref()?, &i.value)))
-            .collect(),
-        e => return str_lit(e),
-    };
-    let mut set = entries.into_iter().filter(|(_, value)| constant(value).is_none());
-    match (set.next(), set.next()) {
-        (Some((key, _)), None) => str_lit(key),
+        Expr::Dict(d) => d.items.iter().map(|i| Some((i.key.as_ref()?, &i.value))).collect(),
         _ => None,
     }
 }
@@ -4035,6 +4108,16 @@ mod tests {
         assert_eq!(calls, ["_h"]);
     }
 
+    #[test]
+    fn a_search_or_read_that_reports_stays_a_call_of_the_model() {
+        let route = summary(
+            Params::Route(&[]),
+            "def f(self, t):\n    M = request.env['x.y'].sudo()\n    M.read(t)\n    M.search(t)\n",
+        );
+        let calls: Vec<_> = route.calls.iter().map(|c| c.method.as_str()).collect();
+        assert_eq!(calls, ["read", "search"]);
+    }
+
     /// Whether the first function of `src`, a method of `owner` taking `params`, writes a parameter
     /// on its records.
     fn self_writes(params: Params, owner: Receiver, src: &str) -> bool {
@@ -4496,6 +4579,15 @@ mod tests {
             codes("data = pickle.loads(t)\n    safe_eval(data['x'])"),
             ["OD709", "OD702"]
         );
+        assert_eq!(
+            codes("out = subprocess.check_output(t, shell=True)\n    self.env.cr.execute('SELECT %s' % out)"),
+            ["OD708", "OD701"]
+        );
+        // `result` keeps the arguments of a call on a name the function never binds.
+        assert_eq!(
+            codes("r = request.make_response(t, [('X-Name', t)])\n    self.env.cr.execute('SELECT %s' % r)"),
+            ["OD711", "OD701"]
+        );
         // No sink, so the tree keeps the taint of the text, as a module's function's result does.
         assert_eq!(
             codes_in(
@@ -4554,15 +4646,32 @@ mod tests {
             "r.headers.set('Content-Disposition', t)",
             "request.make_response('', [('Content-Type', 'text/csv'), ('Content-Disposition', 'a; filename=' + t)])",
             "request.make_response('', headers={'Content-Disposition': f'a; filename={t}'})",
+            "h = [('Content-Disposition', 'a; filename=' + t)]\n    request.make_response(base, h)",
+            "h = {'Content-Disposition': f'a; filename={t}'}\n    request.make_response(base, headers=h)",
+            "request.make_response(base, [('Content-Length', len(base)), ('Content-Disposition', 'a; filename=' + t)])",
+            // The shape of 18.0 addons/mail/controllers/attachment.py:40-46: two entries are not
+            // literals, and only one is tainted.
+            "body = base.encode()\n    headers = [\n        ('Cache-Control', 'no-store'),\n        ('X-Body-Size', str(body.count(b'x'))),\n        ('Content-Disposition', 'attachment; filename=' + t),\n    ]\n    request.make_response(body, headers)",
+            "request.make_response(t, [('Content-Length', len(t)), ('Content-Disposition', 'a; filename=' + request.params['n'])])",
+            "self.n = t\n    request.make_response(base, [('Content-Length', len(t)), ('Content-Disposition', 'a; filename=' + self.n)])",
+            "key = 'Content-Disposition'\n    r.headers.set(key, t)",
+            "key = 'Content-Disposition'\n    r.headers[key] = t",
         ] {
             assert!(
                 message(call).ends_with("; pass the file name through content_disposition()"),
                 "{call}"
             );
         }
-        let both =
-            message("request.make_response('', [('Content-Type', t), ('Content-Disposition', 'a; filename=' + t)])");
-        assert!(both.contains("reaches a header of make_response()"), "{both}");
+        for call in [
+            "request.make_response('', [('Content-Type', t), ('Content-Disposition', 'a; filename=' + t)])",
+            "h = {'Content-Disposition': 'a; filename=' + t}\n    h['Content-Type'] = t\n    request.make_response(base, headers=h)",
+            "h = [('Content-Disposition', 'a; filename=' + t)]\n    if base:\n        h = [('X-Name', t)]\n    request.make_response(base, h)",
+            "request.make_response(base, headers={**request.params, 'X-Lines': str(len(base))})",
+            "request.make_response(base, [*t, ('X-Lines', str(len(base)))])",
+        ] {
+            let found = message(call);
+            assert!(found.contains("reaches a header of make_response()"), "{call}: {found}");
+        }
     }
 
     #[test]
