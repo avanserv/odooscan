@@ -204,9 +204,11 @@ const RESOLVES: Guard = Guard {
 const HEADERS: Arg = Arg::At(1, &["headers"]);
 
 /// The domain of a search, the keyword `args` of `search()` and `search_count()` through 15.0
-/// (`odoo/models.py:1792`, `:1805`), and the fields a search reads.
+/// (`odoo/models.py:1792`, `:1805`).
 const DOMAIN: Arg = Arg::At(0, &["domain", "args"]);
-const SEARCH_READ: Arg = Arg::Each(&[DOMAIN, Arg::At(1, &["fields", "field_names"])]);
+/// The fields `search_read()` and `search_fetch()` read, a list of names rather than a domain.
+const FIELD_NAMES: Arg = Arg::At(1, &["fields", "field_names"]);
+const SEARCH_READ: Arg = Arg::Each(&[DOMAIN, FIELD_NAMES]);
 /// `read_group(domain, fields, groupby)` through 19.0 (18.0 `odoo/models.py:2819`), and
 /// `(domain, groupby, aggregates)` for `_read_group` from 17.0 (18.0 `odoo/models.py:1978`),
 /// `formatted_read_group` from 19.0 and `read_group` in 20.0 (`odoo/orm/models.py:1932`,
@@ -1057,6 +1059,19 @@ pub struct FileNames<'a> {
     pub odoo: &'a [&'a str],
     /// Those bound to a collection of literals, which `module_state::collections` reads.
     pub collections: &'a [&'a str],
+    /// Those bound to `odoo.osv.expression.AND` or `OR`, whose list holds domains.
+    pub domain_joins: &'a [&'a str],
+}
+
+/// The local names of `odoo_names`, as `module_state::odoo_names` lists them, that bind
+/// `odoo.osv.expression.AND` or `OR` (18.0 `odoo/osv/expression.py:303`, `:308`).
+pub fn domain_joins<'a>(odoo_names: &[(&'a str, String)]) -> Vec<&'a str> {
+    let joins = ["odoo.osv.expression.AND", "odoo.osv.expression.OR"];
+    odoo_names
+        .iter()
+        .filter(|(_, path)| joins.contains(&path.as_str()))
+        .map(|(local, _)| *local)
+        .collect()
 }
 
 /// The flows of one function: findings for those that start in it, and its summary when data
@@ -1078,6 +1093,7 @@ pub fn function(
         series,
         odoo: names.odoo,
         collections: names.collections,
+        domain_joins: names.domain_joins,
         state: State::default(),
         locals: FxHashSet::default(),
         owner,
@@ -1111,6 +1127,7 @@ struct Flows<'a> {
     series: Option<Series>,
     odoo: &'a [&'a str],
     collections: &'a [&'a str],
+    domain_joins: &'a [&'a str],
     state: State,
     /// Every name the function binds, so that `x.f()` on another name is a module's function.
     locals: FxHashSet<String>,
@@ -2062,7 +2079,7 @@ impl Flows<'_> {
         match expr {
             Expr::List(ast::ExprList { elts, .. }) | Expr::Tuple(ast::ExprTuple { elts, .. }) => {
                 let mut ts: Vec<Option<Taint>> = elts.iter().map(|e| self.expr(e)).collect();
-                hold_value(elts, &mut ts);
+                hold_value(elts, matches!(expr, Expr::List(_)), &mut ts);
                 ts.into_iter().fold(None, join)
             }
             Expr::Set(ast::ExprSet { elts, .. }) => self.all(elts.iter()),
@@ -2236,18 +2253,38 @@ impl Flows<'_> {
         t
     }
 
-    /// The taints of a call's positional arguments. The list `expression.AND()` or `Domain.OR()`
-    /// takes holds domains, never one condition.
+    /// The taints of a call's positional arguments. The list `expression.AND()`, `Domain.OR()` or
+    /// an `AND()` or `OR()` imported from `odoo.osv.expression` takes holds domains, and the field
+    /// list of `search_read()` or `search_fetch()` holds names: neither is ever one condition.
     fn args(&mut self, call: &ast::ExprCall) -> Vec<Option<Taint>> {
-        let joins = is_domain_join(&call.func);
+        let joins = is_domain_join(&call.func, self.domain_joins, &self.locals);
+        let fields = field_names(call);
         let args = call.arguments.args.iter();
         args.map(|a| match a {
-            Expr::List(ast::ExprList { elts, .. }) | Expr::Tuple(ast::ExprTuple { elts, .. }) if joins => {
+            Expr::List(ast::ExprList { elts, .. }) | Expr::Tuple(ast::ExprTuple { elts, .. })
+                if joins || fields.is_some_and(|f| std::ptr::eq(f, a)) =>
+            {
                 self.all(elts.iter())
             }
             a => self.expr(a),
         })
         .collect()
+    }
+
+    /// The taints of a call's keyword arguments, the field names of a search read item by item.
+    fn keywords(&mut self, call: &ast::ExprCall) -> Vec<Option<Taint>> {
+        let fields = field_names(call);
+        let keywords = call.arguments.keywords.iter();
+        keywords
+            .map(|k| match &k.value {
+                Expr::List(ast::ExprList { elts, .. }) | Expr::Tuple(ast::ExprTuple { elts, .. })
+                    if fields.is_some_and(|f| std::ptr::eq(f, &k.value)) =>
+                {
+                    self.all(elts.iter())
+                }
+                v => self.expr(v),
+            })
+            .collect()
     }
 
     fn call(&mut self, call: &ast::ExprCall, expr: &Expr) -> Option<Taint> {
@@ -2256,7 +2293,7 @@ impl Flows<'_> {
             _ => None,
         };
         let args = self.args(call);
-        let keywords: Vec<Option<Taint>> = call.arguments.keywords.iter().map(|k| self.expr(&k.value)).collect();
+        let keywords = self.keywords(call);
         self.mutates(call);
         let path = self.path(&call.func);
         // A call whose guard fails is no sink, and returns what any other call would, as
@@ -3269,7 +3306,7 @@ fn transformed(
         },
         Role::Leaf => {
             let mut args = args;
-            hold_value(&call.arguments.args, &mut args);
+            hold_value(&call.arguments.args, false, &mut args);
             values(args.into_iter().chain(keywords).fold(None, join))
         }
         Role::Source(_) | Role::Sink(_) | Role::Sanitizer => None,
@@ -3328,8 +3365,9 @@ fn picks(t: &Taint, method: &str, call: &ast::ExprCall) -> Option<Upload> {
 /// Marks the value of a domain's condition of the elements `elts`, of taints `ts`, harmless for
 /// OD715: it filters on the condition's field only, unless the operator takes a domain. The field
 /// and the operator keep their taint, so the condition is harmless only where the code picks both.
-fn hold_value(elts: &[Expr], ts: &mut [Option<Taint>]) {
-    if let (true, Some(Some(t))) = (is_condition(elts), ts.get_mut(2)) {
+/// `list` when the elements are a list, whose name operator counts only after a written field.
+fn hold_value(elts: &[Expr], list: bool, ts: &mut [Option<Taint>]) {
+    if let (true, Some(Some(t))) = (is_condition(elts, list), ts.get_mut(2)) {
         t.each_mut(|t| t.safe = t.safe.union(Safe::of(&["OD715"])));
     }
 }
@@ -3360,13 +3398,15 @@ const VALUE_OPERATORS: &[&str] = &[
 ];
 
 /// Whether three elements read as a condition rather than as three conditions, three domains or
-/// three fields: an operator, or a local that may hold one, after a field that opens no domain.
-fn is_condition(elts: &[Expr]) -> bool {
+/// three fields: an operator, or a name that may hold one, after a field that opens no domain.
+/// In a `list`, a name holds an operator only after a field written as text, as `[d1, d2, t]`
+/// lists three domains; a tuple or `Domain()` of three is a condition whatever its field.
+fn is_condition(elts: &[Expr], list: bool) -> bool {
     let [field, op, _] = elts else { return false };
     let opens =
         matches!(field, Expr::List(_) | Expr::Tuple(_)) || str_lit(field).is_some_and(|f| matches!(f, "|" | "&" | "!"));
     let operator = match op {
-        Expr::Name(_) => true,
+        Expr::Name(_) => !list || matches!(field, Expr::StringLiteral(_) | Expr::FString(_)),
         _ => str_lit(op).is_some_and(|o| VALUE_OPERATORS.contains(&o)),
     };
     !opens && operator
@@ -3388,9 +3428,25 @@ fn is_domain(expr: &Expr) -> bool {
     }
 }
 
-fn is_domain_join(func: &Expr) -> bool {
-    matches!(func, Expr::Attribute(a) if matches!(a.attr.as_str(), "AND" | "OR")
-        && tail_name(&a.value).is_some_and(|n| matches!(n, "expression" | "Domain")))
+/// Whether `func` joins domains: `AND` or `OR` of `expression` or `Domain`, or a name in `joins`
+/// the function does not rebind, as `from odoo.osv.expression import AND` binds it.
+fn is_domain_join(func: &Expr, joins: &[&str], locals: &FxHashSet<String>) -> bool {
+    match func {
+        Expr::Attribute(a) => {
+            matches!(a.attr.as_str(), "AND" | "OR")
+                && tail_name(&a.value).is_some_and(|n| matches!(n, "expression" | "Domain"))
+        }
+        Expr::Name(n) => joins.contains(&n.id.as_str()) && !locals.contains(n.id.as_str()),
+        _ => false,
+    }
+}
+
+/// The list or tuple of field names a `search_read()` or `search_fetch()` call reads, which holds
+/// names, never a condition.
+fn field_names(call: &ast::ExprCall) -> Option<&Expr> {
+    let reads = tail_name(&call.func).is_some_and(|n| matches!(n, "search_read" | "search_fetch"));
+    let fields = arg_expr(FIELD_NAMES, call).filter(|e| matches!(e, Expr::List(_) | Expr::Tuple(_)));
+    fields.filter(|_| reads)
 }
 
 /// Whose rights a method called on the records of the dotted path `records` runs with. A
@@ -3928,6 +3984,7 @@ mod tests {
     const NAMES: FileNames<'static> = FileNames {
         odoo: &[],
         collections: &[],
+        domain_joins: &[],
     };
 
     /// The findings of the first function in `src`, as `code message`.
@@ -3949,14 +4006,14 @@ mod tests {
             panic!("no function");
         };
         let top = crate::module_state::top_level(body);
-        let odoo: Vec<&str> = crate::module_state::odoo_names(&top)
-            .into_iter()
-            .map(|(local, _)| local)
-            .collect();
+        let imported = crate::module_state::odoo_names(&top);
+        let odoo: Vec<&str> = imported.iter().map(|(local, _)| *local).collect();
+        let domain_joins = domain_joins(&imported);
         let collections = crate::module_state::collections(&top);
         let names = FileNames {
             odoo: &odoo,
             collections: &collections,
+            domain_joins: &domain_joins,
         };
         let loc = Locator::new(src);
         function(func, params, None, series, &names, &loc, table)
@@ -5008,7 +5065,12 @@ mod tests {
     /// The codes of a function body where `t` is a route parameter and `P` the records of a model
     /// the code picks.
     fn codes_of(body: &str) -> Vec<String> {
-        let src = format!("def f(self, t):\n    P = self.env['res.partner']\n{body}\n");
+        codes_after("", body)
+    }
+
+    /// The codes of `codes_of(body)` in a module whose `imports` come before the function.
+    fn codes_after(imports: &str, body: &str) -> Vec<String> {
+        let src = format!("{imports}\ndef f(self, t):\n    P = self.env['res.partner']\n{body}\n");
         let found = scan(Params::Route(&[]), &src);
         found.iter().map(|f| f[..5].to_owned()).collect()
     }
@@ -5425,12 +5487,24 @@ mod tests {
             "P.sudo().search_read([], ['name', 'ref', t])",
             "P.sudo().read_group([], ['a', 'b', t], ['c'])",
             "P.sudo().search(expression.AND([[('a', '=', 1)], [('b', '=', 2)], t]))",
+            "P.sudo().search([leaf_a, leaf_b, t])",
+            "P.sudo().search([self._a(), b, t])",
+            "P.sudo().search_read([], [f1, f2, t])",
+            "P.sudo().search_read([], ['name', f, t])",
+            "P.sudo().search_fetch([], field_names=['name', '=', t])",
         ] {
             assert_eq!(codes_of(&format!("    {call}")), ["OD715"], "{call}");
         }
         for call in [
             "P.sudo().search([('a', op, t)])",
             "P.sudo().search([('a', 'not =ilike', t)])",
+            "P.sudo().search([(fname, '=', t)])",
+            "P.sudo().search([(f'partner_id.{key}', '=', t)])",
+            "P.sudo().search([(fname, op, t)])",
+            "P.sudo().search([(self._rec_name, op, t)])",
+            "P.sudo().search([('%s.name' % p, op, t)])",
+            "P.sudo().search(Domain(fname, op, t))",
+            "P.sudo().search(Domain('id' if x else 'name', op, t))",
         ] {
             assert!(codes_of(&format!("    {call}")).is_empty(), "{call}");
         }
@@ -5468,6 +5542,20 @@ mod tests {
             let body = format!("    P.sudo().search({join}([d1, d2, t]))");
             assert_eq!(codes_of(&body), ["OD715"], "{join}");
         }
+        let imported = |import: &str, body: &str| codes_after(import, &format!("    {body}"));
+        for (import, join) in [
+            ("from odoo.osv.expression import AND", "AND"),
+            ("from odoo.osv.expression import OR", "OR"),
+            ("from odoo.osv.expression import AND as all_of", "all_of"),
+        ] {
+            for list in ["[d1, d2, t]", "['name', op, t]"] {
+                let body = format!("P.sudo().search({join}({list}))");
+                assert_eq!(imported(import, &body), ["OD715"], "{import}: {body}");
+            }
+        }
+        assert!(imported("import os", "P.sudo().search(AND(['name', op, t]))").is_empty());
+        let import = "from odoo.osv.expression import AND";
+        assert!(imported(import, "P.sudo().search(AND([[('name', '=', t)], d2]))").is_empty());
     }
 
     #[test]

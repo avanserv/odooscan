@@ -2042,6 +2042,8 @@ struct PyVisitor<'a, 'ast> {
     import_shims: usize,
     /// The names the file's imports from `odoo` bind at import.
     odoo_names: Vec<&'ast str>,
+    /// The names the file's imports bind to `odoo.osv.expression.AND` or `OR`.
+    domain_joins: Vec<&'ast str>,
     /// The names the file binds to a collection of literals at import.
     collections: Vec<&'ast str>,
     /// The names the file's imports from `ORM_PACKAGES` bind at import, each with its dotted path.
@@ -2061,6 +2063,7 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
         body: &'ast [Stmt],
     ) -> Self {
         let top = module_state::top_level(body);
+        let odoo_imports = module_state::odoo_names(&top);
         Self {
             loc,
             series,
@@ -2083,10 +2086,8 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
             in_user_setter: false,
             in_change_check: false,
             import_shims: 0,
-            odoo_names: module_state::odoo_names(&top)
-                .into_iter()
-                .map(|(local, _)| local)
-                .collect(),
+            odoo_names: odoo_imports.iter().map(|(local, _)| *local).collect(),
+            domain_joins: taint::domain_joins(&odoo_imports),
             collections: module_state::collections(&top),
             orm_names: ORM_PACKAGES
                 .iter()
@@ -2873,6 +2874,7 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
         let names = taint::FileNames {
             odoo: &self.odoo_names,
             collections: &self.collections,
+            domain_joins: &self.domain_joins,
         };
         let (diags, summary) = taint::function(func, params, owner, self.series, &names, self.loc, self.taint);
         self.facts.diags.extend(diags);
