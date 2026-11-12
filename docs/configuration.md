@@ -46,10 +46,10 @@ leaves `request.httprequest.data` untainted.
 a call. A last `[]` matches only a call of an item, so the sink `handlers.[]` matches
 `handlers[k](x)`, and a source `forms.data.[]` never matches the read `forms.data['x']`.
 
-`sudo()` in a pattern stands for running as superuser, as the
-[OD7 rules](rules/index.md#od7-data-flows) read it, rather than for the call: a call that builds a
-superuser environment adds it, and `with_user()` for another user removes it, as `sudo(False)`
-does except on the records of the superuser. So `sudo().write` matches
+`sudo()` in a pattern stands for running as superuser, as the [OD7
+rules](rules/index.md#od7-data-flows) read it, rather than for the call: a call that builds a
+superuser environment adds it, and `with_user()` for another user removes it, as `sudo(False)` does
+except from saas~12.5 on the records of the superuser. So `sudo().write` matches
 `x.with_user(SUPERUSER_ID).write(vals)` but not `x.sudo().with_user(user).write(vals)`, and
 `sudo().with_user().write` matches only a `with_user()` for the superuser.
 
