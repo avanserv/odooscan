@@ -5833,6 +5833,10 @@ mod tests {
             ("@http.route('/a')", nested),
             ("@http.route('/a/<model(\"x\"):order>')", "order.write({})"),
             ("@http.route('/a')", "request.env['x'].with_user(1).create({})"),
+            (
+                "@http.route('/a')",
+                "new_env = request.env(user=uid)\n        new_env['x'].create({})",
+            ),
         ] {
             assert_eq!(route(decorator, body), ["OD127"], "{decorator} {body}");
         }
@@ -5885,6 +5889,8 @@ mod tests {
         assert_eq!(none("return http.request.env.user.name"), ["OD129"]);
         let check = "request.env['res.users'].authenticate(db, kw, env)\n        return request.env.user.name";
         assert_eq!(none(check), ["OD129"]);
+        let cleared = "request.update_env(user=None)\n        return request.env.user.name";
+        assert_eq!(none(cleared), ["OD129"]);
         for set in [
             "request.update_env(user=1)",
             "request.session.authenticate(request.db, kw)",
@@ -5900,6 +5906,9 @@ mod tests {
             "env = api.Environment(request.env.cr, SUPERUSER_ID, {})\n        env['x'].create({})",
             "env = request.env(user=SUPERUSER_ID)\n        env['x'].create({})",
             "request.env['x'].with_user(SUPERUSER_ID).create({})",
+            "env = request.env(user=uid)\n        env(context={'lang': 'fr'})['x'].create({})",
+            "base = request.env\n        base(user=uid)['x'].create({})",
+            "env = api.Environment(cr, uid, {})\n        env(user=None)['x'].create({})",
         ] {
             assert!(!none(own).contains(&"OD129"), "{own}");
         }

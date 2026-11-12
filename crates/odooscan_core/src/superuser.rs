@@ -51,11 +51,13 @@ pub(crate) fn switch(call: &ast::ExprCall) -> Option<&'static str> {
 /// Whether a call `switch` reads builds the environment of uid 1, which stays in superuser mode
 /// after a later `sudo(False)`, unlike one built with `su=True`.
 pub(crate) fn root(call: &ast::ExprCall) -> bool {
-    signature(call).is_some_and(|(_, (keyword, user), _)| {
-        call.arguments
-            .find_argument_value(keyword, user)
-            .is_some_and(is_superuser)
-    })
+    user_arg(call).is_some_and(is_superuser)
+}
+
+/// The user argument, by keyword or position, of a call that `signature` names.
+pub(crate) fn user_arg(call: &ast::ExprCall) -> Option<&Expr> {
+    let (_, (keyword, position), _) = signature(call)?;
+    call.arguments.find_argument_value(keyword, position)
 }
 
 /// The label of a call that may build an environment for another user, the keyword and position
