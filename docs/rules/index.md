@@ -234,7 +234,9 @@ The flow ends at a sanitizer: `int()`, `float()`, `bool()`, `len()`, `SQL.identi
 `secure_filename()`, `content_disposition()`, `file_open()` and `Manifest.for_addon()`; at the
 `name` of a file read from `request.httprequest.files` by a field the code names with `get()`,
 `getlist()` or an item, which werkzeug sets to that field, in the method or a method it is passed
-to; and at an intersection with values the code chose, such as `set(vals) & allowed`.
+to; and at an intersection with values the code chose, such as `set(vals) & allowed`, but not `&`
+with an operand written as a domain (`Domain(...)`, `Domain.TRUE`, `Domain.AND()` or a `&`, `|` or
+`~` of these), which joins two domains.
 It ends too after `assert x in allowed` or `if x not in allowed: raise`, and in a comprehension at
 its `if x in allowed`, whatever `allowed` holds. In the arm of `if x in allowed`, the `else` and
 `elif` after `if x not in allowed` and after `if x not in allowed: x = default`, it ends only where

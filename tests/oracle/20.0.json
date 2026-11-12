@@ -475,6 +475,18 @@
       "count": 6
     },
     {
+      "path": "addons/hr_attendance/controllers/main.py",
+      "code": "OD715",
+      "message": "route parameter 'domain' reaches the domain or the fields of sudo().search_count() through 'domain', so the user searches or groups by any field as superuser; build each condition with a field and an operator the code picks",
+      "count": 1
+    },
+    {
+      "path": "addons/hr_attendance/controllers/main.py",
+      "code": "OD715",
+      "message": "route parameter 'domain' reaches the domain or the fields of sudo().search_fetch() through 'domain', so the user searches or groups by any field as superuser; build each condition with a field and an operator the code picks",
+      "count": 1
+    },
+    {
       "path": "addons/hr_attendance/models/hr_attendance.py",
       "code": "OD105",
       "message": "copy() override never calls super(), so other modules' overrides and the ORM itself are skipped",
@@ -1727,6 +1739,12 @@
       "code": "OD103",
       "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
       "count": 1
+    },
+    {
+      "path": "addons/mass_mailing/models/mailing.py",
+      "code": "OD715",
+      "message": "RPC argument 'extra_domain' reaches the domain or the fields of sudo().search() through 'domain', so the user searches or groups by any field as superuser; build each condition with a field and an operator the code picks",
+      "count": 2
     },
     {
       "path": "addons/mass_mailing_sms/controllers/main.py",

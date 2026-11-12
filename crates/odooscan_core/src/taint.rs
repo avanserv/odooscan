@@ -2092,8 +2092,13 @@ impl Flows<'_> {
                 None
             }
             Expr::UnaryOp(u) => {
-                self.expr(&u.operand);
-                None
+                let t = self.expr(&u.operand);
+                // `~` of a domain negates its conditions, which the user still picks.
+                if u.op == ast::UnaryOp::Invert && is_domain(&u.operand) {
+                    t
+                } else {
+                    None
+                }
             }
             _ => None,
         }
@@ -2113,9 +2118,11 @@ impl Flows<'_> {
         if b.op == Operator::Mod && self.is_markup(&b.left) {
             return None;
         }
-        // An intersection with values the code chose holds only those values.
+        // An intersection with values the code chose holds only those values, but `&` of two
+        // domains joins their conditions as `expression.AND` does.
         let chosen = |t: &Option<Taint>| t.as_ref().is_none_or(|t| matches!(t.origin, FlowOrigin::Return(_)));
-        if b.op == Operator::BitAnd && (chosen(&left) || chosen(&right)) {
+        let domains = is_domain(&b.left) || is_domain(&b.right);
+        if b.op == Operator::BitAnd && !domains && (chosen(&left) || chosen(&right)) {
             return None;
         }
         let start = bin_start(b, left.as_ref(), first).union(bin_affix(b));
@@ -3363,6 +3370,22 @@ fn is_condition(elts: &[Expr]) -> bool {
         _ => str_lit(op).is_some_and(|o| VALUE_OPERATORS.contains(&o)),
     };
     !opens && operator
+}
+
+/// Whether `expr` is written as a domain: a `Domain` call or attribute, or `~`, `&` or `|` of one.
+/// `Domain.__and__` takes only a `Domain` (20.0 `odoo/orm/domains.py:317`), so one operand written
+/// as a domain proves both are.
+fn is_domain(expr: &Expr) -> bool {
+    let of_domain = |e: &Expr| matches!(e, Expr::Attribute(a) if tail_name(&a.value) == Some("Domain"));
+    match expr {
+        Expr::Call(c) => tail_name(&c.func) == Some("Domain") || of_domain(&c.func),
+        Expr::Attribute(_) => of_domain(expr),
+        Expr::UnaryOp(u) => u.op == ast::UnaryOp::Invert && is_domain(&u.operand),
+        Expr::BinOp(b) => {
+            matches!(b.op, Operator::BitAnd | Operator::BitOr) && (is_domain(&b.left) || is_domain(&b.right))
+        }
+        _ => false,
+    }
 }
 
 fn is_domain_join(func: &Expr) -> bool {
@@ -5052,6 +5075,37 @@ mod tests {
     }
 
     #[test]
+    fn a_domain_joined_with_and_keeps_the_user_side() {
+        for domain in [
+            "base & Domain(json.loads(t))",
+            "Domain('active', '=', True) & Domain(t)",
+            "Domain(t) & self._base()",
+            "base & ~Domain(t)",
+            "~Domain(t)",
+            "Domain.TRUE & Domain(t)",
+            "(base & Domain('a', '=', 1)) & Domain(t)",
+            "base | Domain(t)",
+        ] {
+            assert_eq!(
+                codes_of(&format!("    P.sudo().search({domain})")),
+                ["OD715"],
+                "{domain}"
+            );
+        }
+        for domain in [
+            "base & Domain('name', 'ilike', t)",
+            "~Domain('name', '=', t)",
+            "Domain('active', '=', True) & Domain('name', '=', t)",
+            "t & base",
+        ] {
+            assert!(
+                codes_of(&format!("    P.sudo().search({domain})")).is_empty(),
+                "{domain}"
+            );
+        }
+    }
+
+    #[test]
     fn both_read_group_signatures_check_the_fields() {
         for call in [
             "P.sudo().read_group([], [t], ['a'])",
@@ -5284,6 +5338,10 @@ mod tests {
         assert_eq!(sinks(joined), [FlowOrigin::Param(1)]);
         let returned = "def _s(self, ids):\n    d = Domain('id', 'in', ids) | Domain(self._base())\n    self.env['x.y'].sudo().search(d)\n";
         assert_eq!(sinks(returned), [FlowOrigin::Return(0)]);
+        let and_returned = "def _s(self, ids):\n    d = Domain('id', 'in', ids) & Domain(self._base())\n    self.env['x.y'].sudo().search(d)\n";
+        assert_eq!(sinks(and_returned), [FlowOrigin::Return(0)]);
+        let and_param = "def _s(self, emails, extra):\n    d = Domain(extra) & Domain('email', 'in', emails)\n    self.env['x.y'].sudo().search(d)\n";
+        assert_eq!(sinks(and_param), [FlowOrigin::Param(1)]);
     }
 
     #[test]
