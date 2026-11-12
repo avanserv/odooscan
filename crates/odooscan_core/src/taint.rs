@@ -13,6 +13,7 @@ use crate::method_body::arguments;
 use crate::module_state::{self, MUTATORS, dotted};
 use crate::python::{Locator, SAME_MODEL, exits, str_lit, tail_name};
 use crate::python2;
+use crate::route_body;
 use crate::series::Series;
 use crate::superuser;
 
@@ -1872,28 +1873,27 @@ impl Flows<'_> {
         }
     }
 
-    /// Whether `sudo()` takes a flag in the module's series, an unknown one read as the newest.
-    fn flag_sudo(&self) -> bool {
-        self.series.is_none_or(|s| s >= SUDO_FLAG)
-    }
-
-    /// The path of a call. `sudo(flag)` sets `su` to its flag and `with_user()` clears it (18.0
-    /// `odoo/models.py:6331`, `:6343`; 20.0 `odoo/orm/models.py:5464`, `:5474`), so a call leaving
-    /// superuser mode drops the `sudo()` segments before it, and one `superuser::switch` labels,
-    /// which builds a superuser environment, is followed by one, behind `UID_1` for uid 1.
+    /// The path of a call. A call that leaves superuser mode, as `Flows::effect` or `env_effect`
+    /// reads it, drops the `sudo()` segments before it, and one `superuser::switch` labels, which
+    /// builds a superuser environment, is followed by one, behind `UID_1` for uid 1. A call of an
+    /// environment keeps the callee's last segment, which may be the `sudo()` of `env(su=True)`.
     fn call_path(&self, c: &ast::ExprCall) -> Vec<String> {
         let mut path = self.path(&c.func);
-        let suffix = call_suffix(c);
-        if let Some(last) = path.last_mut() {
-            last.push_str(suffix);
+        let env = self.env_or_sudo_local(&c.func);
+        let effect = if env { env_effect(c) } else { self.effect(c) };
+        if effect == Effect::Same {
+            path.pop();
+            return path;
         }
-        let root = is_root(c);
-        let user = !root && tail_name(&c.func) == Some("with_user");
-        if suffix == "(False)" || user {
-            let last = path.pop();
-            leave(&mut path, user || !self.flag_sudo());
+        if !env && let Some(last) = path.last_mut() {
+            last.push_str(call_suffix(c, effect));
+        }
+        if matches!(effect, Effect::LeaveSu | Effect::LeaveUser) {
+            let last = if env { None } else { path.pop() };
+            leave(&mut path, effect == Effect::LeaveUser);
             path.extend(last);
         }
+        let root = is_root(c);
         if root {
             path.push(UID_1.to_owned());
         }
@@ -1903,15 +1903,72 @@ impl Flows<'_> {
         path
     }
 
+    /// Whether `expr` is an environment, or a local bound under `sudo()`, which its calls and
+    /// items read as one.
+    fn env_or_sudo_local(&self, expr: &Expr) -> bool {
+        is_env(expr) || matches!(expr, Expr::Name(n) if self.state.sudo.contains_key(n.id.as_str()))
+    }
+
+    /// What a method call does to superuser mode.
+    fn effect(&self, c: &ast::ExprCall) -> Effect {
+        match tail_name(&c.func) {
+            Some("with_user") => match superuser::user_arg(c) {
+                Some(u) if is_false(u) || u.is_none_literal_expr() => self.no_user(u),
+                _ if is_root(c) => Effect::Keep,
+                _ => Effect::LeaveUser,
+            },
+            Some("sudo") => self.sudo_effect(c),
+            _ => Effect::Keep,
+        }
+    }
+
+    /// What `with_user(u)` does for a `u` of `None` or `False`. From 13.0 it returns its receiver
+    /// (13.0 `odoo/models.py:5196-5197`, 18.0 `:6341-6342`); on saas~12.5 it builds
+    /// `env(user=u, su=False)` (saas-12.5 `odoo/models.py:4925-4932`), which keeps the user for
+    /// `None` and runs as uid 0 for `False` (saas-12.5 `odoo/api.py:504-506`).
+    fn no_user(&self, u: &Expr) -> Effect {
+        match self.series {
+            Some(s) if s < WITH_USER_SELF && is_false(u) => Effect::LeaveUser,
+            Some(s) if s < WITH_USER_SELF => Effect::LeaveSu,
+            _ => Effect::Same,
+        }
+    }
+
+    /// What `sudo(x)` does: before `SUDO_FLAG` it switches to the user `x`, then up to `SUDO_USER`
+    /// it does so unless `x` is a bool (saas~12.5 `odoo/models.py:4920-4922`, 14.0 `:5093-5095`),
+    /// and from it `x` is a flag. A computed `x` the code may mean as a user reads as one.
+    fn sudo_effect(&self, c: &ast::ExprCall) -> Effect {
+        let Some(arg) = sudo_argument(c).filter(|a| !is_true(a) && !superuser::is_superuser(a)) else {
+            return Effect::Keep;
+        };
+        if arg.is_none_literal_expr() {
+            return self.sudo_none(arg);
+        }
+        let boolean = matches!(arg, Expr::BooleanLiteral(_) | Expr::Compare(_))
+            || matches!(arg, Expr::UnaryOp(u) if u.op == ast::UnaryOp::Not);
+        match self.series {
+            Some(s) if s < SUDO_FLAG => Effect::LeaveUser,
+            Some(s) if s < SUDO_USER && !boolean => Effect::LeaveUser,
+            _ => Effect::LeaveSu,
+        }
+    }
+
+    /// What `sudo(None)` does: it keeps the user before `SUDO_FLAG` (12.0 `odoo/api.py:859`), then
+    /// up to `SUDO_USER` it is `with_user(None)`.
+    fn sudo_none(&self, none: &Expr) -> Effect {
+        match self.series {
+            Some(s) if s < SUDO_FLAG => Effect::Same,
+            Some(s) if s < SUDO_USER => self.no_user(none),
+            _ => Effect::LeaveSu,
+        }
+    }
+
     /// Whether `expr` holds records or an environment as superuser: a call or a local, or an item
     /// of an environment or of a superuser local, as `request.env(su=True)[t]` is.
     fn is_sudo(&self, expr: &Expr) -> bool {
-        let item = |s: &ast::ExprSubscript| {
-            is_env(&s.value) || matches!(&*s.value, Expr::Name(n) if self.state.sudo.contains_key(n.id.as_str()))
-        };
         let held = match expr {
             Expr::Call(_) | Expr::Name(_) => true,
-            Expr::Subscript(s) => item(s),
+            Expr::Subscript(s) => self.env_or_sudo_local(&s.value),
             _ => false,
         };
         held && runs_as_superuser(&self.path(expr))
@@ -2604,7 +2661,7 @@ impl Flows<'_> {
             return self.browse(c, &a.value);
         }
         match self.browsed(&a.value) {
-            Some(b) => kept(b, c, a.attr.as_str(), self.flag_sudo()),
+            Some(b) => kept(b, c, a.attr.as_str(), self.effect(c)),
             None => self.first_browsed(arguments(c)),
         }
     }
@@ -2876,7 +2933,11 @@ impl Flows<'_> {
         };
         // A field or an item of sudo records keeps their environment (18.0 `odoo/fields.py:3341`),
         // so a `sudo()` anywhere on the path skips the check.
-        let skipped = |r: &&Expr| runs_as_superuser(&self.path(r));
+        // So does a `sudo(flag)`, whose flag may be true.
+        let skipped = |r: &&Expr| {
+            let path = self.path(r);
+            runs_as_superuser(&path) || path.iter().any(|p| p.ends_with(FLAG))
+        };
         let checked: Vec<&Expr> = match tail_name(&call.func).unwrap_or_default() {
             "check_access" | "check_access_rule" | "has_access" => {
                 receiver.filter(|r| !skipped(r)).into_iter().collect()
@@ -3242,25 +3303,29 @@ impl Browsed {
     }
 }
 
-/// What the method `method` of records `b` returns of them, called as `c`, where `flag` says that
-/// `sudo(False)` keeps uid 1 in superuser mode, from `SUDO_FLAG`.
-fn kept(b: Browsed, c: &ast::ExprCall, method: &str, flag: bool) -> Option<Browsed> {
-    match method {
-        "sudo" => {
-            let root = flag && b.root;
-            Some(Browsed {
-                sudo: root || call_suffix(c) == "()",
-                root: root || is_root(c),
-                ..b
-            })
-        }
-        "with_user" => {
-            let root = superuser::switch(c).is_some();
-            Some(Browsed { sudo: root, root, ..b })
-        }
-        m if SAME_MODEL.contains(&m) || SAME_RECORDS.contains(&m) || matches!(m, "read" | "mapped") => Some(b),
-        _ => None,
+/// What the method `method` of records `b` returns of them, called as `c`, which has `effect` on
+/// superuser mode.
+fn kept(b: Browsed, c: &ast::ExprCall, method: &str, effect: Effect) -> Option<Browsed> {
+    let same = SAME_MODEL.contains(&method) || SAME_RECORDS.contains(&method);
+    if !same && !matches!(method, "read" | "mapped") {
+        return None;
     }
+    let b = match effect {
+        Effect::Same | Effect::Keep => b,
+        Effect::LeaveSu => Browsed { sudo: b.root, ..b },
+        Effect::LeaveUser => Browsed {
+            sudo: false,
+            root: false,
+            ..b
+        },
+    };
+    let root = is_root(c);
+    let sudo = root || method == "sudo" && effect == Effect::Keep;
+    Some(Browsed {
+        sudo: b.sudo || sudo,
+        root: b.root || root,
+        ..b
+    })
 }
 
 /// The parts of an id that each pick records: the items of a list, the iterables of a
@@ -3446,20 +3511,42 @@ fn walk_compared<'a, V: Visitor<'a>>(visitor: &mut V, expr: &'a Expr) {
     }
 }
 
-/// How a call ends its name in a dotted path: a `sudo()` whose argument is neither absent, `True`
-/// nor the superuser reads as `sudo(False)`, since a flag the code computes may leave superuser
-/// mode, and before saas~15.3 any other argument is a user.
-fn call_suffix(c: &ast::ExprCall) -> &'static str {
-    let superuser = |a: &Expr| is_true(a) || superuser::is_superuser(a);
-    if tail_name(&c.func) == Some("sudo") && !sudo_argument(c).is_none_or(superuser) {
-        "(False)"
-    } else {
-        "()"
+/// How a call with `effect` on superuser mode ends its name in a dotted path: `sudo(False)` for a
+/// `sudo()` that leaves it, but `sudo(flag)` for one that clears `su` by a flag the code computes,
+/// which may keep superuser mode, so that a check behind it vouches for nothing.
+fn call_suffix(c: &ast::ExprCall, effect: Effect) -> &'static str {
+    let flag = effect == Effect::LeaveSu && sudo_argument(c).is_some_and(|a| !is_false(a) && !a.is_none_literal_expr());
+    match effect {
+        _ if tail_name(&c.func) != Some("sudo") => "()",
+        Effect::Same | Effect::Keep => "()",
+        _ if flag => FLAG,
+        _ => "(False)",
     }
 }
 
+/// What a call of an environment does to superuser mode. `env(user=u)` clears `su`; with `su=True`
+/// too it reads as leaving here, and `call_path` puts `sudo()` back through `superuser::switch`.
+/// `env(su=False)` keeps the user (18.0 `odoo/api.py:647-649`, 20.0
+/// `odoo/orm/environments.py:145-147`).
+fn env_effect(c: &ast::ExprCall) -> Effect {
+    let user = route_body::env_user(c).filter(|u| !u.is_none_literal_expr());
+    let su = c.arguments.find_argument_value("su", 3);
+    match user {
+        Some(u) if !superuser::is_superuser(u) => Effect::LeaveUser,
+        None if su.is_some_and(is_false) => Effect::LeaveSu,
+        _ => Effect::Keep,
+    }
+}
+
+/// The suffix of a `sudo()` given a computed flag.
+const FLAG: &str = "(flag)";
+
 fn is_true(expr: &Expr) -> bool {
     matches!(expr, Expr::BooleanLiteral(b) if b.value)
+}
+
+fn is_false(expr: &Expr) -> bool {
+    matches!(expr, Expr::BooleanLiteral(b) if !b.value)
 }
 
 fn toggle(set: &mut FxHashSet<String>, name: &str, on: bool) {
@@ -3675,9 +3762,31 @@ const UID_1: &str = "(uid 1)";
 /// (12.0 `odoo/api.py:859`, `odoo/models.py:4818`).
 const SUDO_FLAG: Series = Series { major: 12, minor: 5 };
 
-/// Drops from `path` the superuser mode a call leaves: `with_user()` for another user, when `user`,
-/// drops each `sudo()` and `UID_1`, and `sudo(False)` each `sudo()` but those of uid 1. Callers
-/// pass `user` for a `sudo(False)` before `SUDO_FLAG` too, as it then runs as uid 0.
+/// The first series whose `sudo()` takes a flag only (saas~15.3 `odoo/models.py`). Before it, from
+/// `SUDO_FLAG`, an argument that is no bool is a user, which `sudo()` switches to.
+const SUDO_USER: Series = Series { major: 15, minor: 3 };
+
+/// The first series whose `with_user()` of no user returns its receiver (13.0
+/// `odoo/models.py:5196-5197`, from commit 20d2659ec29e, which saas~12.5 lacks).
+const WITH_USER_SELF: Series = Series { major: 13, minor: 0 };
+
+/// What a call does to superuser mode.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Effect {
+    /// Returns its receiver, as `with_user(False)` does: the call adds no segment to a path.
+    Same,
+    /// Clears `su` but keeps the user, so uid 1 stays superuser.
+    LeaveSu,
+    /// Switches to another user, which leaves superuser mode for uid 1 too.
+    LeaveUser,
+    /// Returns other records or an environment in the receiver's superuser mode, such as
+    /// `with_context()`, or enters it, such as `sudo()`: the call adds its own segment.
+    Keep,
+}
+
+/// Drops from `path` the superuser mode a call leaves: a switch to another user, when `user`,
+/// drops each `sudo()` and `UID_1`, and clearing `su` each `sudo()` but those of uid 1. Either
+/// drops each `sudo(flag)`, whose flag no longer counts.
 fn leave(path: &mut Vec<String>, user: bool) {
     let mut after_root = false;
     path.retain(|p| {
@@ -3685,7 +3794,7 @@ fn leave(path: &mut Vec<String>, user: bool) {
         match p.as_str() {
             "sudo()" => !user && root,
             UID_1 => !user,
-            _ => true,
+            p => !p.ends_with(FLAG),
         }
     });
 }
@@ -3711,7 +3820,7 @@ fn superuser_call(records: &Expr) -> String {
         Expr::Call(c) if is_root(c) || superuser::switch(c).is_some() => {
             return format!("{}()", tail_name(&c.func).unwrap_or("sudo"));
         }
-        Expr::Call(c) if tail_name(&c.func) == Some("sudo") && call_suffix(c) == "()" => None,
+        Expr::Call(c) if tail_name(&c.func) == Some("sudo") && sudo_argument(c).is_none_or(is_true) => None,
         Expr::Call(c) => Some(&*c.func),
         Expr::Attribute(a) => Some(&*a.value),
         Expr::Subscript(s) => Some(&*s.value),
@@ -4656,6 +4765,8 @@ mod tests {
             ("self", RunsAs::AsCaller),
             ("self.with_context(a=1)", RunsAs::AsCaller),
             ("self.with_user(1)", RunsAs::Superuser),
+            ("self.with_user(False)", RunsAs::AsCaller),
+            ("request.env['x.y'].sudo().with_user(None)", RunsAs::Superuser),
             ("self.with_user(request.env.user)", RunsAs::User),
             ("self.sudo(False)", RunsAs::User),
             ("request.env['x.y'].with_user(1).sudo(False)", RunsAs::Superuser),
@@ -5796,6 +5907,14 @@ mod tests {
             "    api.Environment(request.cr, SUPERUSER_ID, {})['x.y'].sudo(False)",
             "    R = self.env['x.y'].with_user(SUPERUSER_ID)\n    R.sudo(False)",
             "    R = self.env['x.y'].with_user(1).sudo(False)\n    R.sudo(False)",
+            "    self.env['x.y'].sudo().with_user(False)",
+            "    self.env['x.y'].sudo().with_user(None)",
+            "    self.env['x.y'].sudo().with_user(user=False)",
+            "    request.env(su=True)(context={})['x.y']",
+            "    request.env(su=True)(user=None)['x.y']",
+            "    request.env(user=SUPERUSER_ID)(su=False)['x.y']",
+            "    self.env['x.y'].sudo().env(user=SUPERUSER_ID)['x.y']",
+            "    env = request.env(su=True)\n    env(context={})['x.y']",
         ] {
             assert_eq!(write(body), ["OD704"], "{body}");
         }
@@ -5819,6 +5938,15 @@ mod tests {
             "    self.env['x.y'].with_user(1).sudo(False).with_user(request.env.user)",
             "    R = self.env['x.y'].with_user(1)\n    R.with_user(request.env.user)",
             "    R = request.env(su=True)['x.y']\n    R.sudo(False)",
+            "    request.env(su=True)(user=request.env.user)['x.y']",
+            "    request.env(su=True)(None, request.env.user)['x.y']",
+            "    request.env(su=True)(su=False)['x.y']",
+            "    self.env['x.y'].with_user(SUPERUSER_ID).env(user=request.env.user)['x.y']",
+            "    self.env['x.y'].sudo().env(user=request.env.user)['x.y']",
+            "    self.env['x.y'].sudo().env(su=False)['x.y']",
+            "    env = request.env(su=True)\n    env(user=request.env.user)['x.y']",
+            "    env = request.env(su=True)\n    env(su=False)['x.y']",
+            "    E = request.env(su=True)\n    E(user=request.env.user)['x.y']",
         ] {
             assert!(write(body).is_empty(), "{body}");
         }
@@ -5863,6 +5991,70 @@ mod tests {
                 assert!(found(Some(series), body).is_empty(), "{body} on {series}");
             }
         }
+    }
+
+    #[test]
+    fn sudo_of_a_value_switches_to_it_from_saas_12_5_to_saas_15_2() {
+        let found = |series: Option<&str>, body: &str| {
+            let src = format!("def f(self, order_id, u, **post):\n{body}\n");
+            route_codes_in(series, &src)
+        };
+        for (body, code) in [
+            (
+                "    request.env['x.y'].with_user(SUPERUSER_ID).sudo(request.env.user).write(post)",
+                "OD704",
+            ),
+            (
+                "    return request.env['sale.order'].browse(order_id).sudo(SUPERUSER_ID).sudo(u)",
+                "OD716",
+            ),
+        ] {
+            for series in ["saas~12.5", "14.0", "saas~15.2", "12.0"] {
+                assert!(found(Some(series), body).is_empty(), "{body} on {series}");
+            }
+            for series in [Some("saas~15.3"), Some("18.0"), None] {
+                assert_eq!(found(series, body), [code], "{body} on {series:?}");
+            }
+        }
+        // A bool, which the code may compute, clears `su` and keeps uid 1 in the window too.
+        for flag in ["False", "u == 1", "not u"] {
+            let body = format!("    request.env['x.y'].with_user(SUPERUSER_ID).sudo({flag}).write(post)");
+            assert_eq!(found(Some("14.0"), &body), ["OD704"], "{body}");
+        }
+        // The check runs with the rights of the user `sudo(u)` switches to, until it takes a flag.
+        let checked = "    order = request.env['sale.order'].sudo().browse(int(order_id))\n    order.sudo(request.uid).check_access_rule('read')\n    return request.render('t', {'order': order})";
+        for series in ["12.0", "14.0"] {
+            assert!(found(Some(series), checked).is_empty(), "on {series}");
+        }
+        for series in ["saas~15.3", "18.0"] {
+            assert_eq!(found(Some(series), checked), ["OD716"], "on {series}");
+        }
+    }
+
+    #[test]
+    fn with_user_of_no_user_returns_its_receiver_from_13_0() {
+        let found = |series: &str, call: &str| {
+            let src = format!("def f(self, **post):\n    request.env['x.y'].{call}.write(post)\n");
+            route_codes_in(Some(series), &src)
+        };
+        // saas~12.5 builds `env(user=u, su=False)`: uid 0 for `False`, the same user for `None`.
+        for (call, saas_12_5) in [
+            ("sudo().with_user(False)", false),
+            ("sudo().with_user(None)", false),
+            ("sudo().sudo(None)", false),
+            ("with_user(SUPERUSER_ID).with_user(False)", false),
+            ("with_user(SUPERUSER_ID).with_user(None)", true),
+            ("with_user(SUPERUSER_ID).sudo(None)", true),
+        ] {
+            let codes: &[&str] = if saas_12_5 { &["OD704"] } else { &[] };
+            assert_eq!(found("saas~12.5", call), codes, "{call}");
+            for series in ["13.0", "14.0", "saas~15.2"] {
+                assert_eq!(found(series, call), ["OD704"], "{call} on {series}");
+            }
+        }
+        // Before saas~12.5, `sudo(None)` calls `env(user=None)`, which keeps the user.
+        assert_eq!(found("12.0", "sudo().sudo(None)"), ["OD704"]);
+        assert_eq!(found("18.0", "sudo().with_user(None)"), ["OD704"]);
     }
 
     #[test]
@@ -5969,6 +6161,8 @@ mod tests {
             "    order = O.browse(order_id)\n    if not token or not consteq(order.access_token, token):\n        return request.render('t', {'order': order})",
             "    order = O.browse(order_id)\n    if not (token and consteq(order.access_token, token)):\n        return order",
             "    order = O.browse(order_id)\n    if token and consteq(order.access_token, token):\n        return order.name\n    return order",
+            "    order = O.browse(order_id)\n    order.sudo(flag).check_access('read')\n    return order",
+            "    return O.browse(order_id).with_user(False)",
         ] {
             assert_eq!(returned(Params::Route(&[]), body), ["OD716"], "{body}");
         }
@@ -6038,6 +6232,7 @@ mod tests {
             "    order = request.env['sale.order'].browse(order_id)\n    if not order.has_access('read') and not consteq(order.sudo().access_token, token):\n        raise NotFound()\n    return request.render('t', {'order': order.sudo()})",
             "    order = request.env['sale.order'].browse(order_id).exists()\n    if not order or (not order.has_access('read') and not order._owned(token)):\n        raise NotFound()\n    return order.sudo()",
             "    order = O.browse(order_id)\n    if consteq(order.access_token, token) or token == 'demo':\n        return order",
+            "    order = O.browse(order_id)\n    order.sudo(flag).with_user(request.env.user).check_access('read')\n    return order",
         ] {
             assert!(returned(Params::Route(&[]), body).is_empty(), "{body}");
         }

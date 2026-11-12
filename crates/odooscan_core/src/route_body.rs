@@ -236,7 +236,7 @@ fn user_call(call: &ast::ExprCall) -> bool {
 /// The user an environment is called with, which keeps the user of the environment it is called on
 /// when left out or `None` (18.0 `odoo/api.py:646`, 20.0 `odoo/orm/environments.py:144`). The
 /// callee may be any name bound to an environment, so `superuser::user_arg` cannot tell its kind.
-fn env_user(call: &ast::ExprCall) -> Option<&Expr> {
+pub(crate) fn env_user(call: &ast::ExprCall) -> Option<&Expr> {
     call.arguments.find_argument_value("user", 1)
 }
 

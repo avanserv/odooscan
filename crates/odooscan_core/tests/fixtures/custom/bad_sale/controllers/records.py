@@ -86,3 +86,17 @@ class Records(http.Controller):
         if not consteq(order.access_token or "", access_token):
             return request.render("bad_sale.denied", {"order": order})
         return request.render("bad_sale.order", {"order": order})
+
+    @http.route("/bad/records/flagged", auth="user")
+    def flagged(self, order_id):
+        staff = request.env.user.has_group("base.group_user")
+        order = request.env["bad.order"].sudo().browse(int(order_id))
+        order.sudo(staff).check_access("read")
+        return order.name
+
+    @http.route("/bad/records/flagged_user", auth="user")
+    def flagged_user(self, order_id):
+        staff = request.env.user.has_group("base.group_user")
+        order = request.env["bad.order"].sudo().browse(int(order_id))
+        order.sudo(staff).with_user(request.env.user).check_access("read")
+        return order.name
