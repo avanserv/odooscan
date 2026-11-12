@@ -66,3 +66,12 @@ class Session(http.Controller):
         if token != order.access_token:
             return "denied"
         return "ok"
+
+    def write(self, vals):
+        order = request.env["bad.order"].search([], limit=1)
+        return vals.get("access_token") == order.access_token
+
+    @http.route("/bad/session/same_signer", auth="user", methods=["POST"])
+    def same_signer(self):
+        orders = request.env["bad.order"].search([], limit=2)
+        return orders[:1]._get_signature() == orders[1:]._get_signature()
