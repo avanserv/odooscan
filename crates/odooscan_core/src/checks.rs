@@ -366,11 +366,21 @@ fn callable_attr(name: &str, series: Option<Series>) -> bool {
     name == "env" || (name == "pool" && series.is_none_or(|s| s < REGISTRY_UNCALLABLE))
 }
 
-/// What OD402 says of a row, if it writes for public or portal users.
-fn public_write_message(row: &AccessRow) -> Option<String> {
+/// What OD402 says of a row of `module`, if it writes for public or portal users.
+fn public_write_message(row: &AccessRow, module: &str, series: Option<Series>) -> Option<String> {
     if let Some(group) = &row.public_write {
         return Some(format!(
             "{group} gets write, create or unlink on {}; public and portal access should be read-only and go through controllers",
+            row.model
+        ));
+    }
+    let everyone = row.group.as_ref().is_some_and(|g| {
+        let group = full_id(module, g);
+        group == grants::EVERYONE && grants::public_group(&group, series)
+    });
+    if everyone && row.grants.writes() {
+        return Some(format!(
+            "base.group_everyone, public and portal users included, gets write, create or unlink on {}; public and portal access should be read-only and go through controllers",
             row.model
         ));
     }
@@ -403,7 +413,7 @@ fn public_writes<'m>(index: &Index<'m>, mi: usize, series: Option<Series>, out: 
         let rows = file.facts.access.iter().filter(|r| !(replaced && r.model_access));
         let rows = rows.filter(|r| !(r.global_write && r.id.as_ref().is_some_and(rewritten)));
         for row in rows.filter(|r| !ignores_access(kind(r), series)) {
-            if let Some(message) = public_write_message(row) {
+            if let Some(message) = public_write_message(row, &module.name, series) {
                 out.push(&file.path, "OD402", row.pos, message);
             }
         }
@@ -5865,11 +5875,50 @@ mod tests {
 
     use super::{
         MagicEra, applies, cache_global, callable_attr, csv_label, derived_label, fetches_own_view, field_name,
-        has_last_update, magic_era, no_access_message, reads_model_access, shadowed_member, stores_parent_path,
-        tuple_checked, tuple_listed, warns_on_labels,
+        has_last_update, magic_era, no_access_message, public_write_message, reads_model_access, shadowed_member,
+        stores_parent_path, tuple_checked, tuple_listed, warns_on_labels,
     };
-    use crate::facts::DefinitionSource;
+    use crate::facts::{AccessRow, DefinitionSource, Perms, Pos};
     use crate::series::Series;
+
+    fn everyone_row(group: &str, grants: Perms) -> AccessRow {
+        AccessRow {
+            id: Some("access_desk_everyone".to_owned()),
+            model: "model_desk".to_owned(),
+            by_name: false,
+            pos: Pos { line: 2, col: 1 },
+            group: Some(group.to_owned()),
+            grants,
+            global_write: false,
+            public_write: None,
+            model_access: true,
+        }
+    }
+
+    #[test]
+    fn everyone_writes_report_from_saas_19_1_and_on_an_unknown_series() {
+        let write = Perms {
+            read: true,
+            write: true,
+            ..Perms::default()
+        };
+        let read = Perms {
+            read: true,
+            ..Perms::default()
+        };
+        let qualified = everyone_row("base.group_everyone", write);
+        let message =
+            |row: &AccessRow, module: &str, series: &str| public_write_message(row, module, Series::parse(series));
+        assert!(message(&qualified, "desk", "20.0").is_some());
+        assert!(message(&qualified, "desk", "saas~19.1").is_some());
+        assert!(public_write_message(&qualified, "desk", None).is_some());
+        assert!(message(&qualified, "desk", "18.0").is_none());
+        assert!(message(&qualified, "desk", "19.0").is_none());
+        assert!(message(&everyone_row("base.group_everyone", read), "desk", "20.0").is_none());
+        let unqualified = everyone_row("group_everyone", write);
+        assert!(message(&unqualified, "desk", "20.0").is_none());
+        assert!(message(&unqualified, "base", "20.0").is_some());
+    }
 
     #[test]
     fn language_suffix_is_cut_from_saas_18_2_and_on_an_unknown_series() {
