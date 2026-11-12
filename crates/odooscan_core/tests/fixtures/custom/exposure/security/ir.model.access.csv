@@ -8,3 +8,4 @@ access_exposure_closed_portal,closed portal,model_exposure_closed,base.group_por
 access_exposure_open_all,open all,model_exposure_open,,1,0,0,0
 access_exposure_everyone,everyone,model_exposure_everyone,base.group_everyone,1,0,0,0
 access_exposure_everyone_write,everyone write,model_exposure_everyone,base.group_everyone,1,1,0,0
+access_exposure_notice_public,notice public,model_exposure_notice,base.group_public,1,0,0,0

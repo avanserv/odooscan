@@ -1074,7 +1074,9 @@ pub struct RuleFact {
     /// What it gives `model_id`: an `ir.model` XML id, or a model name when `by_name`.
     pub model: ActionValue,
     pub by_name: bool,
-    /// An empty or false value is an empty literal, which `ir.rule` reads as no domain.
+    /// An empty field or CSV cell, or an `eval` of `False`, `None` or `''`, is an empty literal,
+    /// which `ir.rule` reads as no domain. The text `False` stays `Literal("False")` and a blank
+    /// text is `Opaque`, as Odoo stores both as written and its domain check refuses them.
     pub domain: ActionValue,
     /// The field paths `domain` names, which a domain only a run can read leaves empty.
     pub fields: Vec<Spanned<String>>,

@@ -5788,8 +5788,9 @@ const OPERATIONS: [(&str, grants::Kind); 4] = [
 /// OD405 and OD406, on what the records of `ir.rule` and `ir.access` hold.
 impl<'m> Ctx<'_, 'm> {
     /// OD405 on the last write of this module to a rule for public or portal users whose domain
-    /// holds every record. A later write of the module may narrow it, and one of a module that
-    /// depends on it is not this module's to report.
+    /// holds every record, naming the first of its public groups that reaches an operation. A later
+    /// write of the module may narrow it, and one of a module that depends on it is not this
+    /// module's to report.
     fn public_rule(&self, out: &mut Out<'m>, path: &'m Path, rule: &'m RuleFact) {
         let read = if rule.access {
             self.series.is_none_or(|s| s >= IR_ACCESS)
@@ -5807,13 +5808,17 @@ impl<'m> Ctx<'_, 'm> {
         let Some(why) = state.every_record(rule.access) else {
             return;
         };
-        let group = state.groups.iter().find(|g| grants::public_group(g, self.series));
-        let Some((group, ops)) = group.map(|g| (g, self.reached_operations(&state, model, g, rule.access))) else {
+        let reached = state
+            .groups
+            .iter()
+            .filter(|g| grants::public_group(g, self.series))
+            .find_map(|g| {
+                let ops = self.reached_operations(&state, model, g, rule.access);
+                (!ops.is_empty()).then_some((g, ops))
+            });
+        let Some((group, ops)) = reached else {
             return;
         };
-        if ops.is_empty() {
-            return;
-        }
         let what = if rule.access { "ir.access record" } else { "rule" };
         let message = format!(
             "this {what} gives {group} {} on every record of {model}, as its domain {why}; narrow the domain to the records those users own",
