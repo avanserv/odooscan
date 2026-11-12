@@ -1103,6 +1103,7 @@ pub fn function(
         held_join: None,
         held: FxHashMap::default(),
         quiet: false,
+        testing: false,
     };
     let names = flows.params(&func.parameters, params);
     flows.body(&func.body);
@@ -1141,6 +1142,9 @@ struct Flows<'a> {
     held: FxHashMap<Pos, Held>,
     /// The expression being read copies a held path or tests its start, so it uses no join.
     quiet: bool,
+    /// The expression being read is the test of an `if` or an `assert`, whose boolean checks
+    /// vouch only where they pass, as `Flows::tested` reads them.
+    testing: bool,
 }
 
 /// A join `Flows::reach` holds.
@@ -1273,7 +1277,7 @@ impl Flows<'_> {
             Stmt::With(w) => self.with_stmt(w),
             Stmt::Try(t) => self.try_stmt(t),
             Stmt::Assert(a) => {
-                self.expr(&a.test);
+                self.test(&a.test);
                 self.guard(&a.test, CmpOp::In);
             }
             _ => {}
@@ -1319,7 +1323,7 @@ impl Flows<'_> {
             self.holds(failed, CmpOp::NotIn);
         }
         if let Some(test) = test {
-            self.expr(test);
+            self.test(test);
             self.vouch(self.tested(test, CmpOp::In));
             self.confine(test, CmpOp::In);
             self.holds(test, CmpOp::In);
@@ -1329,6 +1333,13 @@ impl Flows<'_> {
             let after = std::mem::take(&mut self.state);
             merge_into(joined, after);
         }
+    }
+
+    /// Reads the test of an `if` or an `assert`.
+    fn test(&mut self, test: &Expr) {
+        let testing = std::mem::replace(&mut self.testing, true);
+        self.expr(test);
+        self.testing = testing;
     }
 
     /// Applies a check that holds from here on: `x in allowed` leaves `x` harmless, and a test
@@ -2304,7 +2315,7 @@ impl Flows<'_> {
         });
         self.picks(call, expr);
         self.publishes(call, expr);
-        self.vouch(self.checked_by(call));
+        self.checks(call);
         match row {
             Some((pattern, Role::Source(kind))) => self.source(format!("{pattern}()"), expr, kind),
             Some((_, Role::Sanitizer)) => None,
@@ -2344,6 +2355,14 @@ impl Flows<'_> {
             self.sink(Sink::Field, format!("{}[...]", superuser_call(&s.value)), key, expr);
         }
         item_of(self.expr(&s.value), str_lit(&s.slice))
+    }
+
+    /// Vouches for what a call checks, but for a boolean check in the test of an `if` or an
+    /// `assert`, which vouches only where it passes.
+    fn checks(&mut self, call: &ast::ExprCall) {
+        if !(self.testing && is_boolean_check(call)) {
+            self.vouch(self.checked_by(call));
+        }
     }
 
     /// Reports a method the user names that the call runs, as `getattr(records, t)()`, and a data
@@ -2673,16 +2692,25 @@ impl Flows<'_> {
 
     /// Vouches for the records that the locals `names` hold or pick. Drops the held records that
     /// name one of them, or one of the names of the records they hold, and marks all those names
-    /// checked, so that a later id naming only checked locals picks nothing for the user.
+    /// checked, so that a later id naming only checked locals picks nothing for the user. A local
+    /// of records that also holds records the check does not reach, as a mapping of two records
+    /// does, stays out of those names: the check vouches for one of its members only.
     fn vouch(&mut self, mut names: Vec<String>) {
         if names.is_empty() {
             return;
         }
         let browsed = &self.state.browsed;
+        let reached = |key: &String, b: &Browsed| names.contains(key) || b.names.iter().any(|n| names.contains(n));
+        let unreached: Vec<&String> = browsed
+            .iter()
+            .filter(|(key, b)| !reached(key, b))
+            .flat_map(|(_, b)| &b.names)
+            .collect();
+        let holder = |n: &String| browsed.contains_key(n) && unreached.contains(&n);
         let named: Vec<String> = names
             .iter()
             .filter_map(|n| browsed.get(n))
-            .flat_map(|b| b.names.clone())
+            .flat_map(|b| b.names.iter().filter(|n| !holder(n)).cloned())
             .collect();
         names.extend(named);
         let checked = |n: &String| names.contains(n);
@@ -2751,8 +2779,9 @@ impl Flows<'_> {
         root.as_name_expr().is_some_and(|n| !held(n.id.as_str()))
     }
 
-    /// The locals a test vouches for where it holds: those of a check it calls, of records whose
-    /// field it reads or that it compares, and `x` for `x <op> allowed` or `int(x) <op> allowed`.
+    /// The locals a test vouches for where it holds: those of a check it calls, of a boolean
+    /// check that passes there, of records whose field it reads or that it compares, and `x` for
+    /// `x <op> allowed` or `int(x) <op> allowed`.
     fn tested(&self, test: &Expr, op: CmpOp) -> Vec<String> {
         let mut tests = Tests {
             flows: self,
@@ -2760,6 +2789,8 @@ impl Flows<'_> {
             names: vec![],
         };
         tests.visit_expr(test);
+        let passed = passing(test, op).into_iter().flat_map(|c| self.checked_by(c));
+        tests.names.extend(passed);
         tests.names
     }
 
@@ -3023,6 +3054,32 @@ fn holding(test: &Expr, op: CmpOp) -> Vec<&Expr> {
     operands(test, each)
 }
 
+/// The boolean checks that pass wherever `test` holds for `op`: a conjunct of `holding` that calls
+/// one, for `in`, and one under `not` where its operand fails. A conjunct `holding` leaves an `or`
+/// or an `and` is a choice of options, any of which may be the one that let the code through, as
+/// `has_access() or consteq()` does: a check passing where its option holds counts.
+fn passing(test: &Expr, op: CmpOp) -> Vec<&ast::ExprCall> {
+    holding(test, op)
+        .into_iter()
+        .flat_map(|t| match t {
+            Expr::Call(c) if op == CmpOp::In && is_boolean_check(c) => vec![c],
+            Expr::UnaryOp(u) if u.op == ast::UnaryOp::Not => passing(&u.operand, op.negate()),
+            Expr::BoolOp(b) => b.values.iter().flat_map(|v| passing(v, op)).collect(),
+            _ => vec![],
+        })
+        .collect()
+}
+
+/// Whether `call` returns whether a check passes rather than raising when it fails: `consteq()`
+/// and `compare_digest()` (18.0 `odoo/tools/misc.py:1675`), `has_access()` (18.0
+/// `odoo/models.py:4459`) and `check_access_token()` (18.0 `addons/payment/utils.py:32-43`).
+fn is_boolean_check(call: &ast::ExprCall) -> bool {
+    matches!(
+        tail_name(&call.func),
+        Some("consteq" | "compare_digest" | "has_access" | "check_access_token")
+    )
+}
+
 /// The operands of `test` under `op`, nested ones included, or `test` itself.
 fn operands(test: &Expr, op: ast::BoolOp) -> Vec<&Expr> {
     match test {
@@ -3215,8 +3272,11 @@ impl Tests<'_, '_> {
 }
 
 impl<'a> Visitor<'a> for Tests<'_, '_> {
+    /// A boolean check vouches only as `passing` reads it.
     fn visit_expr(&mut self, expr: &'a Expr) {
-        if let Expr::Call(c) = expr {
+        if let Expr::Call(c) = expr
+            && !is_boolean_check(c)
+        {
             self.names.extend(self.flows.checked_by(c));
         }
         if let Some((operands, op)) = comparison(expr) {
@@ -5763,11 +5823,34 @@ mod tests {
             "    order = O.browse(order_id)\n    order.with_user(1).sudo(False).check_access('read')\n    return order",
             "    return request.env['sale.order'].browse(order_id).with_user(SUPERUSER_ID).sudo(False)",
             "    return request.env['sale.order'].with_user(1).browse(order_id).sudo(False)",
+            "    order = O.browse(order_id)\n    if not consteq(order.access_token, token):\n        return request.render('t', {'order': order})",
+            "    order = O.browse(order_id)\n    if not token:\n        raise NotFound()\n    elif not consteq(order.access_token, token):\n        return order.name",
+            "    order = O.browse(order_id)\n    if consteq(order.access_token, token):\n        return order.name\n    return order",
+            "    order = O.browse(order_id)\n    if consteq(order.access_token, token):\n        pass\n    else:\n        return order",
+            "    order = O.browse(order_id)\n    if consteq(order.access_token, token) == True:\n        return order",
+            "    order = O.browse(order_id)\n    if not order.sudo(False).has_access('read'):\n        return order.name",
+            "    order = O.browse(order_id)\n    assert not consteq(order.access_token, token)\n    return order",
+            "    order = O.browse(order_id)\n    if not token or not consteq(order.access_token, token):\n        return request.render('t', {'order': order})",
+            "    order = O.browse(order_id)\n    if not (token and consteq(order.access_token, token)):\n        return order",
+            "    order = O.browse(order_id)\n    if token and consteq(order.access_token, token):\n        return order.name\n    return order",
         ] {
             assert_eq!(returned(Params::Route(&[]), body), ["OD716"], "{body}");
         }
         let token_in_kw = "def f(self, order_id, **kw):\n    self._document_check_access('sale.order', order_id, kw.get('access_token'))\n    return request.env['res.partner'].sudo().browse(int(kw['partner_id']))\n";
         assert_eq!(route_codes(token_in_kw), ["OD716"]);
+        // The check of one member of a holder vouches for that member only.
+        let holder = |holds: &str| {
+            format!(
+                "def f(self, order_id, partner_id, token):\n    O = request.env['sale.order'].sudo()\n    order = O.browse(order_id)\n    partner = O.browse(int(partner_id))\n    {holds}\n    if not consteq(order.access_token, token):\n        raise NotFound()\n    return partner.name\n"
+            )
+        };
+        assert_eq!(
+            route_codes(&holder("values = {'order': order, 'partner': partner}")),
+            ["OD716"]
+        );
+        assert_eq!(route_codes(&holder("both = [order, partner]")), ["OD716"]);
+        let whole = holder("values = {'order': order, 'partner': partner}\n    self._check_values(values)");
+        assert!(route_codes(&whole).is_empty());
         let compared_to_kw = "def f(self, order_id, **kw):\n    order = request.env['sale.order'].sudo().browse(order_id)\n    if not consteq(order.access_token, kw['token']):\n        raise NotFound()\n    return request.env['res.partner'].sudo().browse(int(kw['partner_id']))\n";
         assert_eq!(route_codes(compared_to_kw), ["OD716"]);
         let found = scan(
@@ -5807,6 +5890,18 @@ mod tests {
             "    order_id = int(order_id)\n    if order_id not in allowed:\n        raise NotFound()\n    return O.browse(order_id)",
             "    order = O.browse(order_id)\n    if not order.sudo(False).has_access('read'):\n        raise NotFound()\n    return order",
             "    order_sudo = O.browse(int(order_id))\n    order = order_sudo.with_user(request.env.user)\n    order.check_access('read')\n    return request.render('t', {'order': order_sudo})",
+            "    order = O.browse(order_id)\n    if consteq(order.access_token, token):\n        return order",
+            "    order = O.browse(order_id)\n    if token and consteq(order.access_token, token):\n        return order",
+            "    order = O.browse(order_id)\n    if not (token and consteq(order.access_token, token)):\n        raise NotFound()\n    return order",
+            "    order = O.browse(order_id)\n    values = {'order': order}\n    if not consteq(order.access_token, token):\n        raise NotFound()\n    return request.render('t', values)",
+            "    order = O.browse(order_id)\n    mine = order\n    if not consteq(order.access_token, token):\n        raise NotFound()\n    return mine",
+            "    order = O.browse(order_id)\n    if not consteq(order.access_token, token):\n        raise NotFound()\n    return O.browse(order_id)",
+            "    order = O.browse(order_id)\n    ok = consteq(order.access_token, token)\n    if not ok:\n        raise NotFound()\n    return order",
+            "    order = O.browse(order_id)\n    assert consteq(order.access_token, token)\n    return order",
+            "    order = O.browse(order_id)\n    if not token or not consteq(order.access_token, token):\n        raise NotFound()\n    return order",
+            "    order = request.env['sale.order'].browse(order_id)\n    if not order.has_access('read') and not consteq(order.sudo().access_token, token):\n        raise NotFound()\n    return request.render('t', {'order': order.sudo()})",
+            "    order = request.env['sale.order'].browse(order_id).exists()\n    if not order or (not order.has_access('read') and not order._owned(token)):\n        raise NotFound()\n    return order.sudo()",
+            "    order = O.browse(order_id)\n    if consteq(order.access_token, token) or token == 'demo':\n        return order",
         ] {
             assert!(returned(Params::Route(&[]), body).is_empty(), "{body}");
         }

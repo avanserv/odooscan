@@ -70,3 +70,19 @@ class Records(http.Controller):
         order = order_sudo.with_user(request.env.user)
         order.check_access("read")
         return order_sudo.name
+
+    @http.route("/bad/records/shared", auth="user", website=True)
+    def shared(self, order_id, partner_id, access_token):
+        order = request.env["bad.order"].sudo().browse(int(order_id))
+        partner = request.env["res.partner"].sudo().browse(int(partner_id))
+        values = {"order": order, "partner": partner}
+        if not consteq(order.access_token or "", access_token):
+            raise AccessError("Wrong token")
+        return partner.name
+
+    @http.route("/bad/records/denied", auth="user", website=True)
+    def denied(self, order_id, access_token):
+        order = request.env["bad.order"].sudo().browse(int(order_id))
+        if not consteq(order.access_token or "", access_token):
+            return request.render("bad_sale.denied", {"order": order})
+        return request.render("bad_sale.order", {"order": order})
