@@ -36,6 +36,7 @@ custom/bad_sale/controllers/attachments.py:41:9: OD717 route parameter 'post' re
 custom/bad_sale/controllers/attachments.py:45:9: OD717 route parameter 'data' reaches the content of sudo().create(), which public=True lets anyone download; keep it private and share it with generate_access_token()
 custom/bad_sale/controllers/callers.py:18:9: OD701 route parameter 'term' reaches the query of cr.execute() through 'self.term'; pass it as a query parameter or build the query with odoo.tools.SQL
 custom/bad_sale/controllers/callers.py:23:16: OD703 route parameter 'note' reaches Markup() through '_note_html()', '_note_paragraph()' unescaped; escape it, or pass it as an argument of Markup's % or format()
+custom/bad_sale/controllers/callers.py:27:16: OD703 request.params reaches Markup() through 'label()', '_label_suffix()' unescaped; escape it, or pass it as an argument of Markup's % or format()
 custom/bad_sale/controllers/configured.py:11:9: OD701 route parameter 'term' reaches the query of lib.run_query(); pass it as a query parameter or build the query with odoo.tools.SQL
 custom/bad_sale/controllers/configured.py:15:16: OD702 lib.read_form() reaches safe_eval() through 'form', which runs it as code
 custom/bad_sale/controllers/flows.py:14:9: OD701 route parameter 'term' reaches the query of cr.execute() through 'where', 'query'; pass it as a query parameter or build the query with odoo.tools.SQL
@@ -107,15 +108,15 @@ custom/bad_sale/data/orphan.xml:1:1: OD502 'data/orphan.xml' is not in the manif
 custom/bad_sale/models/callers.py:8:9: OD704 route parameter 'post' reaches self.write() through '_apply_values()', so the user picks the fields it sets as superuser; copy only the fields the user may set
 custom/bad_sale/models/domains.py:7:64: OD210 'is_company': res.partner has no field 'is_company'
 custom/bad_sale/models/domains.py:12:55: OD210 'nmae': res.partner has no field 'nmae'
-custom/bad_sale/models/flows.py:9:9: OD122 UPDATE on bad_order bypasses the ORM, so records this transaction already read keep stale values; call flush_model() before the query and invalidate_model() after it (flush() and invalidate_cache() before 16.0)
-custom/bad_sale/models/flows.py:9:9: OD701 RPC argument 'name' reaches the query of cr.execute(); pass it as a query parameter or build the query with odoo.tools.SQL
-custom/bad_sale/models/flows.py:10:9: OD704 RPC argument 'vals' reaches sudo().write(), so the user picks the fields it sets as superuser; copy only the fields the user may set
-custom/bad_sale/models/flows.py:13:9: OD101 query built by string formatting; pass parameters separately or build it with odoo.tools.SQL
-custom/bad_sale/models/flows.py:13:9: OD122 UPDATE on bad_order bypasses the ORM, so records this transaction already read keep stale values; call flush_model() before the query and invalidate_model() after it (flush() and invalidate_cache() before 16.0)
-custom/bad_sale/models/flows.py:17:9: OD101 query built by string formatting; pass parameters separately or build it with odoo.tools.SQL
-custom/bad_sale/models/flows.py:17:9: OD122 UPDATE on bad_order bypasses the ORM, so records this transaction already read keep stale values; call flush_model() before the query and invalidate_model() after it (flush() and invalidate_cache() before 16.0)
-custom/bad_sale/models/flows.py:30:16: OD707 request.httprequest.files reaches the path of open() through 'upload', '_store_upload()', so the user picks the file the server opens; pass the name through secure_filename() or os.path.basename()
-custom/bad_sale/models/flows.py:38:9: OD701 route parameter 'term' reaches the query of cr.execute() through '_search_by()', 'query'; pass it as a query parameter or build the query with odoo.tools.SQL
+custom/bad_sale/models/flows.py:10:9: OD122 UPDATE on bad_order bypasses the ORM, so records this transaction already read keep stale values; call flush_model() before the query and invalidate_model() after it (flush() and invalidate_cache() before 16.0)
+custom/bad_sale/models/flows.py:10:9: OD701 RPC argument 'name' reaches the query of cr.execute(); pass it as a query parameter or build the query with odoo.tools.SQL
+custom/bad_sale/models/flows.py:11:9: OD704 RPC argument 'vals' reaches sudo().write(), so the user picks the fields it sets as superuser; copy only the fields the user may set
+custom/bad_sale/models/flows.py:14:9: OD101 query built by string formatting; pass parameters separately or build it with odoo.tools.SQL
+custom/bad_sale/models/flows.py:14:9: OD122 UPDATE on bad_order bypasses the ORM, so records this transaction already read keep stale values; call flush_model() before the query and invalidate_model() after it (flush() and invalidate_cache() before 16.0)
+custom/bad_sale/models/flows.py:18:9: OD101 query built by string formatting; pass parameters separately or build it with odoo.tools.SQL
+custom/bad_sale/models/flows.py:18:9: OD122 UPDATE on bad_order bypasses the ORM, so records this transaction already read keep stale values; call flush_model() before the query and invalidate_model() after it (flush() and invalidate_cache() before 16.0)
+custom/bad_sale/models/flows.py:31:16: OD707 request.httprequest.files reaches the path of open() through 'upload', '_store_upload()', so the user picks the file the server opens; pass the name through secure_filename() or os.path.basename()
+custom/bad_sale/models/flows.py:39:9: OD701 route parameter 'term' reaches the query of cr.execute() through '_search_by()', 'query'; pass it as a query parameter or build the query with odoo.tools.SQL
 custom/bad_sale/models/ir_http.py:9:9: OD130 _auth_method_kiosk() decides which user every route with auth='kiosk' runs as; check that it sets only a user the request has proven to be
 custom/bad_sale/models/models.py:6:17: OD202 model 'mail.thread' comes from module mail; add it to depends
 custom/bad_sale/models/models.py:6:32: OD201 no indexed module defines model 'res.nothing'

@@ -1,4 +1,5 @@
 from odoo import api, models
+from odoo.http import request
 from odoo.tools.safe_eval import safe_eval
 
 
@@ -37,3 +38,13 @@ class SaleOrderSearch(models.Model):
         query = "SELECT id FROM bad_order WHERE name = '%s'" % term
         self.env.cr.execute(query)
         return super()._search_by(term)
+
+
+class SaleOrderLabel(models.Model):
+    _inherit = "bad.order"
+
+    def label(self, prefix):
+        return prefix + self._label_suffix()
+
+    def _label_suffix(self):
+        return request.params.get("suffix", "")

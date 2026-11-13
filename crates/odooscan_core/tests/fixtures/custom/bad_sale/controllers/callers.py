@@ -21,3 +21,7 @@ class Callers(http.Controller):
     @http.route("/bad/note", auth="user")
     def note(self, note):
         return Markup(request.env["bad.order"]._note_html(note))
+
+    @http.route("/bad/label", auth="user")
+    def label(self):
+        return Markup(request.env["bad.order"].label("Order "))
