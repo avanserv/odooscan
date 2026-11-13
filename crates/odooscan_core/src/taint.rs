@@ -1194,6 +1194,7 @@ pub fn function(
         edges: vec![],
         diags: vec![],
         held_join: None,
+        opened_join: None,
         held: FxHashMap::default(),
         continued: None,
         quiet: false,
@@ -1233,6 +1234,9 @@ struct Flows<'a> {
     diags: Vec<RawDiag>,
     /// The `os.path.join()` the assignment being read binds to one local, held rather than reported.
     held_join: Option<Pos>,
+    /// The `os.path.join()` that the `file_open()` being read takes as its path, which confines it
+    /// to the addons paths, so it is no sink.
+    opened_join: Option<Pos>,
     /// The joins held until a read of their local uses them unchecked.
     held: FxHashMap<Pos, Held>,
     /// What the arms ending in `continue` leave in the innermost loop's pass being read, which
@@ -2260,6 +2264,34 @@ impl Flows<'_> {
         }
     }
 
+    /// The path a call of the built-in `file_open()` takes, which it keeps under the addons paths
+    /// from 9.0 on (18.0 `odoo/tools/misc.py:218-224`).
+    fn opened_path<'e>(&self, call: &'e ast::ExprCall) -> Option<&'e Expr> {
+        let row = self.table.lookup(&self.path(&call.func));
+        matches!(row, Some(("file_open", Role::Sanitizer)))
+            .then(|| arg_expr(Arg::At(0, &["name"]), call))
+            .flatten()
+    }
+
+    /// The taint of the path `file_open()` takes: a join in it, or held for a local it reads, is
+    /// harmless there, so only another read of that local reports the held join.
+    fn open_path(&mut self, path: &Expr) -> Option<Taint> {
+        let sites = self.sites_of(path);
+        for pos in sites.iter().flat_map(|s| &s.at) {
+            if let Some(held) = self.held.get_mut(pos) {
+                held.checked = true;
+            }
+        }
+        let quiet = self.quiet || sites.is_some();
+        let quiet = std::mem::replace(&mut self.quiet, quiet);
+        let join = self.join_site(path);
+        let opened = std::mem::replace(&mut self.opened_join, join);
+        let t = self.expr(path);
+        self.opened_join = opened;
+        self.quiet = quiet;
+        t
+    }
+
     fn bind_path(&mut self, name: &str, value: Option<&Expr>) {
         match value.and_then(|v| self.sites_of(v)) {
             Some(sites) => self.state.paths.insert(name.to_owned(), sites),
@@ -2267,9 +2299,13 @@ impl Flows<'_> {
         };
     }
 
-    /// Reports a sink, but holds the join `Flows::assigned` holds.
+    /// Reports a sink, but holds the join `Flows::assigned` holds and drops the one
+    /// `Flows::open_path` reads.
     fn reach(&mut self, sink: Sink, callee: String, t: Option<Taint>, expr: &Expr) {
         let pos = self.loc.at(expr);
+        if self.opened_join == Some(pos) {
+            return;
+        }
         if self.held_join != Some(pos) {
             return self.sink_pos(sink, callee, t, pos);
         }
@@ -2283,7 +2319,8 @@ impl Flows<'_> {
         self.held.insert(pos, Held { taint, callee, checked });
     }
 
-    /// Reports the held joins a read of the local `name` uses where no check confines them.
+    /// Reports the held joins a read of the local `name` uses where no check confines them, unless
+    /// `Flows::open_path` reads it, whose joins any other read still reports.
     fn read(&mut self, name: &str) {
         let Some(sites) = self.state.paths.get(name).filter(|s| !s.confined && !self.quiet) else {
             return;
@@ -2583,10 +2620,12 @@ impl Flows<'_> {
 
     /// The taints of a call's positional arguments. The list `expression.AND()`, `Domain.OR()` or
     /// an `AND()` or `OR()` imported from `odoo.osv.expression` takes holds domains, and a list
-    /// `field_names()` returns holds names: neither is ever one condition.
+    /// `field_names()` returns holds names: neither is ever one condition. The path `file_open()`
+    /// takes is read as `Flows::open_path` reads it.
     fn args(&mut self, call: &ast::ExprCall) -> Vec<Option<Taint>> {
         let joins = is_domain_join(&call.func, self.domain_joins, &self.locals);
         let fields = field_names(call);
+        let opened = self.opened_path(call);
         let args = call.arguments.args.iter();
         args.map(|a| match a {
             Expr::List(ast::ExprList { elts, .. }) | Expr::Tuple(ast::ExprTuple { elts, .. })
@@ -2594,15 +2633,17 @@ impl Flows<'_> {
             {
                 self.all(elts.iter())
             }
+            a if opened.is_some_and(|o| std::ptr::eq(o, a)) => self.open_path(a),
             a => self.expr(a),
         })
         .collect()
     }
 
     /// The taints of a call's keyword arguments, the name lists of a search read or a read group item
-    /// by item.
+    /// by item, and the path `file_open()` takes as `Flows::open_path` reads it.
     fn keywords(&mut self, call: &ast::ExprCall) -> Vec<Option<Taint>> {
         let fields = field_names(call);
+        let opened = self.opened_path(call);
         let keywords = call.arguments.keywords.iter();
         keywords
             .map(|k| match &k.value {
@@ -2611,6 +2652,7 @@ impl Flows<'_> {
                 {
                     self.all(elts.iter())
                 }
+                v if opened.is_some_and(|o| std::ptr::eq(o, v)) => self.open_path(v),
                 v => self.expr(v),
             })
             .collect()
@@ -7005,6 +7047,30 @@ mod tests {
             ),
         ] {
             assert_eq!(opened(&body), [unchecked[0].clone(), unchecked[0].clone()], "{body}");
+        }
+    }
+
+    #[test]
+    fn a_join_only_file_open_opens_is_not_reported() {
+        let p = "    p = os.path.join(ROOT, t)\n";
+        for body in [
+            "    file_open(os.path.join(ROOT, t))".to_owned(),
+            "    tools.file_open(os.path.normpath(os.path.join(ROOT, t)), 'rb')".to_owned(),
+            "    file_open(name=os.path.join(ROOT, t))".to_owned(),
+            format!("{p}    with file_open(p, 'rb') as f:\n        return f.read()"),
+            format!("{p}    q = p\n    file_open(os.path.normpath(q))"),
+        ] {
+            assert!(opened(&body).is_empty(), "{body}");
+        }
+        let unchecked = opened("    os.path.join(ROOT, t)");
+        for body in [
+            format!("{p}    file_open(p)\n    open(p)"),
+            format!("{p}    open(p)\n    file_open(p)"),
+            format!("{p}    file_open(p)\n    shutil.copy(p, DEST)"),
+            // The join is only part of the path, which the scanner does not follow through `+`.
+            "    file_open(os.path.join(ROOT, t) + '.xml')".to_owned(),
+        ] {
+            assert_eq!(opened(&body), unchecked, "{body}");
         }
     }
 

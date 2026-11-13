@@ -264,12 +264,12 @@ parameter, a record's field, a list of a model's fields or what another method o
 such as `sudo()` or `filtered()`.
 A test that `x` is in `env`, `registry`, `pool` or `_fields` proves only that the model or the
 field exists, so it ends every flow but those of OD712, OD714 and OD715. Some steps make a value
-harmless for some rules only: `os.path.basename()`, `io.BytesIO()`, `io.StringIO()` and a normalized
-`os.path.join()` kept under a prefix the code picks for OD707, `shlex.quote()` and `shlex.join()`
-for OD708, a start the code picks for OD705 and OD706, a name built with text of the code's for
-OD713, and a condition whose field and operator the code picks for OD715, as their pages say. An id
-stays the user's for OD716 through `int()` and `float()`, and ends at the access checks its page
-lists.
+harmless for some rules only: `os.path.basename()`, `io.BytesIO()`, `io.StringIO()`, a normalized
+`os.path.join()` kept under a prefix the code picks and an `os.path.join()` only `file_open()` opens
+for OD707, `shlex.quote()` and `shlex.join()` for OD708, a start the code picks for OD705 and OD706,
+a name built with text of the code's for OD713, and a condition whose field and operator the code
+picks for OD715, as their pages say. An id stays the user's for OD716 through `int()` and
+`float()`, and ends at the access checks its page lists.
 
 A project adds its own sources, sinks and sanitizers in the
 [`[taint]` table of its configuration](../configuration.md#taint-table).
