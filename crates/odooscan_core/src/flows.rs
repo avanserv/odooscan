@@ -476,13 +476,25 @@ mod tests {
         format!("{}:{} {} {message}", path.display(), d.pos.line, d.code)
     }
 
-    /// The cross-method findings of `module(route, methods)`.
-    fn scan_messages(route: &str, methods: &str) -> Vec<String> {
+    /// Each cross-method finding of `module(route, methods)`, mapped by `each`.
+    fn scanned<T>(route: &str, methods: &str, each: impl Fn(&(&Path, RawDiag)) -> T) -> Vec<T> {
         let modules = [module(route, methods)];
         let index = Index::build(&modules, None);
         let mut out = Out { diags: vec![] };
         check(&index, 0, &index.scope(0), &mut out);
-        out.diags.iter().map(shown).collect()
+        out.diags.iter().map(each).collect()
+    }
+
+    /// The cross-method findings of `module(route, methods)`.
+    fn scan_messages(route: &str, methods: &str) -> Vec<String> {
+        scanned(route, methods, shown)
+    }
+
+    /// The flow step labels of each cross-method finding of `module(route, methods)`.
+    fn flows(route: &str, methods: &str) -> Vec<Vec<String>> {
+        scanned(route, methods, |(_, d)| {
+            d.flow.iter().map(|s| s.label.clone()).collect()
+        })
     }
 
     #[test]
@@ -656,17 +668,8 @@ mod tests {
 
     #[test]
     fn the_flow_through_methods_calling_each_other_leaves_out_the_loop() {
-        let modules = [module(CALLS_A, MUTUAL)];
-        let index = Index::build(&modules, None);
-        let mut out = Out { diags: vec![] };
-        check(&index, 0, &index.scope(0), &mut out);
-        let flows: Vec<Vec<&str>> = out
-            .diags
-            .iter()
-            .map(|(_, d)| d.flow.iter().map(|s| s.label.as_str()).collect())
-            .collect();
         assert_eq!(
-            flows,
+            flows(CALLS_A, MUTUAL),
             [["route parameter 't'", "_a()", "parameter 'v'", "requests.get()"]]
         );
     }
@@ -687,16 +690,10 @@ mod tests {
 
     #[test]
     fn the_flow_through_methods_returning_each_other_leaves_out_the_loop() {
-        let modules = [module(RETURNS_A, MUTUAL_RETURN)];
-        let index = Index::build(&modules, None);
-        let mut out = Out { diags: vec![] };
-        check(&index, 0, &index.scope(0), &mut out);
-        let flows: Vec<Vec<&str>> = out
-            .diags
-            .iter()
-            .map(|(_, d)| d.flow.iter().map(|s| s.label.as_str()).collect())
-            .collect();
-        assert_eq!(flows, [["request.params", "_a()", "Markup()"]]);
+        assert_eq!(
+            flows(RETURNS_A, MUTUAL_RETURN),
+            [["request.params", "_a()", "Markup()"]]
+        );
     }
 
     #[test]
@@ -717,6 +714,16 @@ mod tests {
         assert_eq!(
             scan_messages("    def r(self, t):\n        request.env['x.y']._a(t, 1)\n", methods),
             ["model.py:6 OD706 route parameter 't' reaches the URL of requests.get() through '_a()', '_b()', '_a()'"]
+        );
+    }
+
+    #[test]
+    fn a_method_returning_what_it_is_called_back_with_in_another_parameter_is_followed() {
+        let methods = "    def _a(self, p, q):\n        if p:\n            return self._b(q)\n        return p\n\n    def _b(self, v):\n        return self._a(v, 1)\n";
+        let route = "    def r(self):\n        return Markup(request.env['x.y']._a(1, request.params.get('x')))\n";
+        assert_eq!(
+            scan_messages(route, methods),
+            ["route.py:4 OD703 request.params reaches Markup() through '_a()', '_b()', '_a()' unescaped"]
         );
     }
 
