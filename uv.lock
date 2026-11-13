@@ -8,8 +8,8 @@ resolution-markers = [
 
 [[package]]
 name = "avanserv-zensical-theme"
-version = "0.1.0"
-source = { git = "https://github.com/avanserv/zensical-theme?rev=v0.1.0#7430155684b03a3a861d1d2705664115c14c51ee" }
+version = "0.2.0"
+source = { git = "https://github.com/avanserv/zensical-theme?rev=v0.2.0#5eae68dab93ad08870a740d57bb0b25f44916cd0" }
 dependencies = [
     { name = "zensical" },
 ]
@@ -225,7 +225,7 @@ docs = [
 
 [package.metadata.requires-dev]
 docs = [
-    { name = "avanserv-zensical-theme", marker = "python_full_version >= '3.11'", git = "https://github.com/avanserv/zensical-theme?rev=v0.1.0" },
+    { name = "avanserv-zensical-theme", marker = "python_full_version >= '3.11'", git = "https://github.com/avanserv/zensical-theme?rev=v0.2.0" },
     { name = "zensical", marker = "python_full_version >= '3.11'", specifier = ">=0.0.68" },
 ]
 

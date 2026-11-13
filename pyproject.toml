@@ -33,7 +33,7 @@ Documentation = "https://avanserv.github.io/odooscan/"
 # later, while the wheel installs on 3.7, hence the marker.
 [dependency-groups]
 docs = [
-    "avanserv-zensical-theme @ git+https://github.com/avanserv/zensical-theme@v0.1.0 ; python_version >= '3.11'",
+    "avanserv-zensical-theme @ git+https://github.com/avanserv/zensical-theme@v0.2.0 ; python_version >= '3.11'",
     "zensical>=0.0.68; python_version >= '3.11'",
 ]
 
