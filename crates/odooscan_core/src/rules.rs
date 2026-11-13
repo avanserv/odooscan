@@ -298,7 +298,7 @@ rules! {
     "OD714" "sudo-field-injection" Security Error None, false, "Data a user controls picks the field read as superuser.";
     "OD715" "sudo-domain-injection" Security Error None, false, "Data a user controls picks the fields of a domain or a grouping searched as superuser.";
     "OD716" "sudo-record-exposure" Security Warning None, false, "A route returns records read as superuser by an id a user controls.";
-    "OD717" "sudo-public-attachment" Security Warning None, false, "Data a user controls is stored as superuser in an attachment anyone may download.";
+    "OD717" "sudo-public-attachment" Security Warning None, false, "Data a user controls is stored in an attachment anyone may download.";
 }
 
 pub fn rule(code: &str) -> &'static Rule {

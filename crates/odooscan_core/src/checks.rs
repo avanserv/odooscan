@@ -252,14 +252,21 @@ pub fn check_module<'m>(index: &Index<'m>, mi: usize, series: Option<Series>) ->
         }
         private_rpc(&mut out, file);
     }
-    flows::check(index, mi, &index.scope(mi), &mut out);
-    if index.has_base {
-        let scope = index.scope(mi);
+    let scope = index.scope(mi);
+    // Odoo's own rows are needed to tell that none grants, so without `base` nothing does.
+    let grants = index
+        .has_base
+        .then(|| Grants::of(index, &scope, series, reads_model_access(series)));
+    let granted = grants
+        .as_ref()
+        .is_some_and(|g| g.public("ir.attachment", grants::creates).next().is_some());
+    granted_attachments(module, granted, &mut out);
+    flows::check(index, mi, &scope, granted, &mut out);
+    if let Some(grants) = grants {
         let setup = index.setup_scope(mi);
         let installs = index.install_scope(mi, series);
         let loaded = index.loaded_scope(mi, &scope, &installs);
         let built = BuiltModels::of(module);
-        let grants = Grants::of(index, &scope, series, reads_model_access(series));
         let ctx = Ctx {
             index,
             mi,
@@ -790,6 +797,17 @@ fn legacy_hook_rollbacks<'m>(module: &'m Module, series: Option<Series>, out: &m
     if series.is_some_and(|s| s >= Series { major: 16, minor: 0 }) {
         for file in &module.python {
             let found = file.facts.legacy_hook_rollbacks.iter().cloned();
+            out.diags.extend(found.map(|d| (file.path.as_path(), d)));
+        }
+    }
+}
+
+/// OD717 on the public attachments a user creates with their own rights, where `granted` says
+/// the scanned modules let portal or public users create one.
+fn granted_attachments<'m>(module: &'m Module, granted: bool, out: &mut Out<'m>) {
+    if granted {
+        for file in &module.python {
+            let found = file.facts.granted_attachments.iter().cloned();
             out.diags.extend(found.map(|d| (file.path.as_path(), d)));
         }
     }

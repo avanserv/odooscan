@@ -856,6 +856,13 @@ custom/project_fork/data/projects.xml:7:9: OD309 field 'allow_timesheets' of pro
 custom/project_fork/models/task.py:4:7: OD209 module project already defines model 'project.task', and this class replaces it; extend it with _inherit = 'project.task'
 custom/public193/controllers/main.py:12:9: OD717 route parameter 'upload' reaches the content of sudo().create(), which public=True lets anyone download; keep it private and share it with generate_access_token()
 custom/public193/controllers/main.py:16:16: OD717 route parameter 'upload' reaches the content of sudo()._upload_file(), which public=True lets anyone download; keep it private and share it with generate_access_token()
+custom/public_grant/controllers/main.py:8:9: OD717 route parameter 'upload' reaches the content of create(), which public=True lets anyone download; keep it private and share it with generate_access_token()
+custom/public_grant/controllers/main.py:12:16: OD717 route parameter 'upload' reaches the content of _upload_file(), which public=True lets anyone download; keep it private and share it with generate_access_token()
+custom/public_grant/controllers/main.py:16:9: OD717 route parameter 'upload' reaches the content of sudo().create(), which public=True lets anyone download; keep it private and share it with generate_access_token()
+custom/public_grant/security/ir.access.csv:2:1: OD402 base.group_portal gets write, create or unlink on ir.attachment; public and portal access should be read-only and go through controllers
+custom/public_grant18/security/ir.model.access.csv:2:1: OD402 base.group_portal gets write, create or unlink on base.model_ir_attachment; public and portal access should be read-only and go through controllers
+custom/public_grant19/controllers/main.py:8:9: OD717 route parameter 'upload' reaches the content of create(), which public=True lets anyone download; keep it private and share it with generate_access_token()
+custom/public_grant19/security/ir.model.access.csv:2:1: OD402 base.group_portal gets write, create or unlink on base.model_ir_attachment; public and portal access should be read-only and go through controllers
 custom/qweb_calls/data/pages.xml:1:1: OD502 'data/pages.xml' is not in the manifest's data or demo, so Odoo never loads it
 custom/qweb_calls/static/src/panel.xml:6:20: OD605 no indexed bundle defines template 'qweb_calls.Absent'
 custom/qweb_calls/static/src/panel.xml:7:20: OD605 template 'qweb_outside.Panel' comes from module qweb_outside, which is not in depends

@@ -50,6 +50,10 @@ enum Sink {
     /// `Flows::publishes` finds it, from the values a create passes, so no row of `TABLE` or of a
     /// configuration names it.
     Attachment,
+    /// Content stored in such an attachment with the rights of the user who sent it, which takes
+    /// a grant of create to portal or public users that only the index tells, so its findings wait
+    /// for `checks.rs` to find one.
+    UserAttachment,
 }
 
 /// The arguments of a call that a sink checks.
@@ -388,6 +392,7 @@ const SINKS: &[(Sink, &str)] = &[
     (Sink::Domain, "OD715"),
     (Sink::Record, "OD716"),
     (Sink::Attachment, "OD717"),
+    (Sink::UserAttachment, "OD717"),
 ];
 
 /// Keywords that carry the argument a sink checks when it is not passed by position.
@@ -436,7 +441,7 @@ impl TaintTable {
         let code = crate::rules::find(rule).map(|r| r.code);
         let mut called = SINKS
             .iter()
-            .filter(|(s, _)| !matches!(s, Sink::Record | Sink::Attachment));
+            .filter(|(s, _)| !matches!(s, Sink::Record | Sink::Attachment | Sink::UserAttachment));
         let Some((kind, _)) = called.clone().find(|(_, c)| Some(*c) == code) else {
             let (first, last) = (SINKS[0].1, called.next_back().map_or("", |(_, c)| *c));
             return Err(format!(
@@ -1056,6 +1061,21 @@ fn join_vals(a: Option<Vals>, b: Option<Vals>) -> Option<Vals> {
 /// only (`odoo/addons/base/models/ir_attachment.py:540-542`).
 const NO_DATAS: Series = Series { major: 19, minor: 3 };
 
+/// The first series whose `ir.attachment` refuses a create to any user but an internal one,
+/// whatever the access rows: `create()` calls `check()`, which raises for them (saas~13.1
+/// `odoo/addons/base/models/ir_attachment.py:352-353`, 18.0 `:472-473`, `:677`).
+const INTERNAL_CREATES: Series = Series { major: 13, minor: 1 };
+
+/// The first series whose `ir.attachment` lets the access rows and the linked records decide a
+/// create again (19.0 `odoo/addons/base/models/ir_attachment.py:780-818`).
+const ROW_CREATES: Series = Series { major: 19, minor: 0 };
+
+/// Whether a portal or public user may create an attachment in `series` once a row grants it, an
+/// unknown series read as the newest.
+fn user_creates(series: Option<Series>) -> bool {
+    series.is_none_or(|s| s < INTERNAL_CREATES || s >= ROW_CREATES)
+}
+
 /// The methods of `ir.attachment` that create attachments, the argument of their values, and the
 /// argument of a file whose content they store too.
 const CREATES: &[(&str, Arg, Option<Arg>)] = &[
@@ -1167,9 +1187,18 @@ pub fn domain_joins<'a>(odoo_names: &[(&'a str, String)]) -> Vec<&'a str> {
         .collect()
 }
 
-/// The flows of one function: findings for those that start in it, and its summary when data
-/// may cross into or out of the methods it calls. `owner` is what `self` is, and `series` that of
-/// the module, an unknown one read as the newest.
+/// What `function` finds in one function.
+pub struct Found {
+    pub diags: Vec<RawDiag>,
+    /// The findings that hold only where the scanned modules grant portal or public users create
+    /// on `ir.attachment`.
+    pub granted: Vec<RawDiag>,
+    /// Present when data may cross into or out of the methods it calls.
+    pub summary: Option<FlowSummary>,
+}
+
+/// The flows of one function: findings for those that start in it, and its summary. `owner` is
+/// what `self` is, and `series` that of the module, an unknown one read as the newest.
 pub fn function(
     func: &ast::StmtFunctionDef,
     params: Params,
@@ -1178,7 +1207,7 @@ pub fn function(
     names: &FileNames,
     loc: &Locator,
     table: &TaintTable,
-) -> (Vec<RawDiag>, Option<FlowSummary>) {
+) -> Found {
     let mut flows = Flows {
         loc,
         table,
@@ -1193,6 +1222,7 @@ pub fn function(
         calls: vec![],
         edges: vec![],
         diags: vec![],
+        granted: vec![],
         held_join: None,
         opened_join: None,
         held: FxHashMap::default(),
@@ -1206,6 +1236,8 @@ pub fn function(
     flows.report_held();
     let mut seen = FxHashSet::default();
     flows.diags.retain(|d| seen.insert((d.code, d.pos)));
+    let mut seen = FxHashSet::default();
+    flows.granted.retain(|d| seen.insert(d.pos));
     let summary = (!flows.edges.is_empty()).then(|| FlowSummary {
         owner: flows.owner,
         method: func.name.to_string(),
@@ -1213,7 +1245,11 @@ pub fn function(
         calls: flows.calls,
         edges: flows.edges,
     });
-    (flows.diags, summary)
+    Found {
+        diags: flows.diags,
+        granted: flows.granted,
+        summary,
+    }
 }
 
 struct Flows<'a> {
@@ -1232,6 +1268,8 @@ struct Flows<'a> {
     calls: Vec<CallSite>,
     edges: Vec<FlowEdge>,
     diags: Vec<RawDiag>,
+    /// What `Found::granted` holds.
+    granted: Vec<RawDiag>,
     /// The `os.path.join()` the assignment being read binds to one local, held rather than reported.
     held_join: Option<Pos>,
     /// The `os.path.join()` that the `file_open()` being read takes as its path, which confines it
@@ -2126,7 +2164,8 @@ impl Flows<'_> {
             e.own &= t.own;
             // A held join reaches its sink after the sinks below it, though it runs first.
             let sink_at = |steps: &[Spanned<String>]| steps.last().map(|s| s.pos);
-            let earlier = matches!(target, FlowTarget::Sink(_)) && sink_at(&t.steps) < sink_at(&e.steps);
+            let earlier =
+                matches!(target, FlowTarget::Sink(_) | FlowTarget::Granted(_)) && sink_at(&t.steps) < sink_at(&e.steps);
             if (e.named && !t.named) || (e.named == t.named && earlier) {
                 e.named = t.named;
                 e.steps = t.steps;
@@ -2755,26 +2794,28 @@ impl Flows<'_> {
         }
     }
 
-    /// Reports content the user sets that a create of `ir.attachment` stores as superuser, in an
-    /// attachment whose values set `public` to `True`, which anyone may then download.
+    /// Reports content the user sets that a create of `ir.attachment` stores in an attachment
+    /// whose values set `public` to `True`, which anyone may then download. Without superuser mode
+    /// the user needs a grant of create, so the finding waits for one where Odoo lets rows decide.
     fn publishes(&mut self, call: &ast::ExprCall, expr: &Expr) {
         let Expr::Attribute(a) = &*call.func else { return };
         let Some((method, values, file)) = CREATES.iter().find(|(m, ..)| *m == a.attr.as_str()) else {
             return;
         };
         let attachment = matches!(self.receiver(&a.value), Some(Receiver::Model(m)) if m == "ir.attachment");
-        if !attachment || runs_as(&self.path(&a.value)) != RunsAs::Superuser {
+        let superuser = runs_as(&self.path(&a.value)) == RunsAs::Superuser;
+        if !attachment || !(superuser || user_creates(self.series)) {
             return;
         }
         let vals = arg_expr(*values, call).and_then(|v| self.vals_of(v));
         let Some(vals) = vals.filter(|v| v.public) else { return };
         let file = file.and_then(|f| arg_expr(f, call)).and_then(|f| self.expr(f));
-        self.sink(
-            Sink::Attachment,
-            format!("{}.{method}()", superuser_call(&a.value)),
-            join(vals.content(), file),
-            expr,
-        );
+        let (sink, callee) = if superuser {
+            (Sink::Attachment, format!("{}.{method}()", superuser_call(&a.value)))
+        } else {
+            (Sink::UserAttachment, format!("{method}()"))
+        };
+        self.sink(sink, callee, join(vals.content(), file), expr);
     }
 
     /// The taint of the model's name when `expr` is the records of a model the user picks:
@@ -3351,40 +3392,56 @@ impl Flows<'_> {
 
     /// A value the user sets on entry is a finding, which names it alone. Any other value keeps an
     /// edge for each of its origins the sink may report, but for OD716, whose records only a route
-    /// returns.
+    /// returns. A sink that waits for a grant holds a route's finding apart, and keeps an edge for
+    /// an RPC argument: a client that may create the attachment may as well call `create()` itself.
     fn sink_pos(&mut self, sink: Sink, callee: String, t: Option<Taint>, pos: Pos) {
         let code = code(sink);
         let reported = |t: &Taint| !t.safe.has(code) && (sink != Sink::SudoWrite || t.kind == Kind::Keys);
         let Some(t) = t.filter(reported) else {
             return;
         };
-        if t.origin.is_user() {
-            return self.report(code, callee, &t, pos);
-        }
-        if sink == Sink::Record {
+        if self.found_on_entry(sink, &callee, &t, pos) || sink == Sink::Record {
             return;
         }
+        let target = match sink {
+            Sink::UserAttachment => FlowTarget::Granted(code),
+            _ => FlowTarget::Sink(code),
+        };
         for mut t in t.split().into_iter().filter(reported) {
             t.steps.push(Spanned {
                 value: callee.clone(),
                 pos,
             });
-            self.edge(t, FlowTarget::Sink(code));
+            self.edge(t, target.clone());
         }
     }
 
-    fn report(&mut self, code: &'static str, callee: String, t: &Taint, pos: Pos) {
-        let origin = &t.steps[0].value;
-        let names: Vec<&str> = t.steps[1..].iter().map(|s| s.value.as_str()).collect();
-        let message = message(code, &callee, origin, &names);
-        let mut flow: Vec<Step> = t.steps.iter().map(step).collect();
-        flow.push(Step {
-            path: None,
-            pos,
-            label: callee,
-        });
-        self.diags.push(RawDiag::new(code, pos, message).with_flow(flow));
+    /// Reports `t` at `sink` when the user sets it on entry, and tells whether it did. A sink that
+    /// waits for a grant takes a route's value alone, into `granted`.
+    fn found_on_entry(&mut self, sink: Sink, callee: &str, t: &Taint, pos: Pos) -> bool {
+        let found = match (sink, t.origin) {
+            (Sink::UserAttachment, FlowOrigin::Source) => &mut self.granted,
+            (Sink::UserAttachment, _) => return false,
+            (_, origin) if origin.is_user() => &mut self.diags,
+            _ => return false,
+        };
+        found.push(diag(code(sink), callee.to_owned(), t, pos));
+        true
     }
+}
+
+/// The finding of a value from a source at the call `callee`.
+fn diag(code: &'static str, callee: String, t: &Taint, pos: Pos) -> RawDiag {
+    let origin = &t.steps[0].value;
+    let names: Vec<&str> = t.steps[1..].iter().map(|s| s.value.as_str()).collect();
+    let message = message(code, &callee, origin, &names);
+    let mut flow: Vec<Step> = t.steps.iter().map(step).collect();
+    flow.push(Step {
+        path: None,
+        pos,
+        label: callee,
+    });
+    RawDiag::new(code, pos, message).with_flow(flow)
 }
 
 /// What an lxml parser does with entities, from the safest.
@@ -4591,6 +4648,17 @@ mod tests {
     /// The findings of the first function in `src`, in a module of `series`, after the imports
     /// before it.
     fn scan_in(table: &TaintTable, series: Option<&str>, params: Params, src: &str) -> Vec<String> {
+        let found = found_in(table, series, params, src);
+        found.diags.into_iter().map(shown).collect()
+    }
+
+    /// A finding as `code message` up to the advice.
+    fn shown(d: RawDiag) -> String {
+        format!("{} {}", d.code, d.message.split(';').next().unwrap_or_default())
+    }
+
+    /// What `function` finds in the first function of `src`, as `scan_in` reads it.
+    fn found_in(table: &TaintTable, series: Option<&str>, params: Params, src: &str) -> Found {
         let series = series.and_then(Series::parse);
         let parsed = parse_module(src).expect("valid Python");
         let body = &parsed.syntax().body;
@@ -4609,10 +4677,6 @@ mod tests {
         };
         let loc = Locator::new(src);
         function(func, params, None, series, &names, &loc, table)
-            .0
-            .into_iter()
-            .map(|d| format!("{} {}", d.code, d.message.split(';').next().unwrap_or_default()))
-            .collect()
     }
 
     /// The codes of `found`, findings as `scan` writes them.
@@ -4637,7 +4701,7 @@ mod tests {
         let Some(Stmt::FunctionDef(func)) = parsed.syntax().body.first() else {
             panic!()
         };
-        let (diags, _) = function(
+        let diags = function(
             func,
             Params::None,
             None,
@@ -4645,7 +4709,8 @@ mod tests {
             &NAMES,
             &Locator::new(src),
             &TaintTable::default(),
-        );
+        )
+        .diags;
         let flow: Vec<_> = diags[0].flow.iter().map(|s| (s.pos.line, s.label.as_str())).collect();
         assert_eq!(flow, [(2, "request.get_json_data()"), (2, "data"), (3, "safe_eval()")]);
     }
@@ -4743,7 +4808,7 @@ mod tests {
             panic!("no function");
         };
         let owner = Some(Receiver::Model("x.y".to_owned()));
-        function(
+        let found = function(
             func,
             params,
             owner,
@@ -4751,7 +4816,8 @@ mod tests {
             &NAMES,
             &Locator::new(src),
             &TaintTable::default(),
-        )
+        );
+        (found.diags, found.summary)
     }
 
     fn summary(params: Params, src: &str) -> FlowSummary {
@@ -5001,7 +5067,7 @@ mod tests {
             &Locator::new(src),
             &TaintTable::default(),
         )
-        .1;
+        .summary;
         summary.is_some_and(|s| s.edges.iter().any(|e| e.target == FlowTarget::SelfWrite))
     }
 
@@ -5511,7 +5577,7 @@ mod tests {
                 panic!("no function");
             };
             let loc = Locator::new(&src);
-            let (diags, _) = function(
+            let diags = function(
                 func,
                 Params::Route(&[]),
                 None,
@@ -5519,7 +5585,8 @@ mod tests {
                 &NAMES,
                 &loc,
                 &TaintTable::default(),
-            );
+            )
+            .diags;
             diags.into_iter().map(|d| d.message).collect::<Vec<_>>().join("\n")
         };
         assert_eq!(
@@ -6792,6 +6859,70 @@ mod tests {
         }
     }
 
+    /// The findings of a route of a module of `series`, where `upload` is its parameter, that wait
+    /// for a grant of create on `ir.attachment`, and those that do not.
+    fn granted(series: Option<&str>, body: &str) -> (Vec<String>, Vec<String>) {
+        let src = format!("def f(self, upload):\n    A = request.env['ir.attachment']\n{body}\n");
+        let found = found_in(&TaintTable::default(), series, Params::Route(&[]), &src);
+        let shown = |diags: Vec<RawDiag>| diags.into_iter().map(shown).collect::<Vec<_>>();
+        (shown(found.granted), shown(found.diags))
+    }
+
+    #[test]
+    fn a_public_attachment_a_user_creates_waits_for_a_grant() {
+        for (body, callee) in [
+            ("    A.create({'raw': upload, 'public': True})", "create()"),
+            (
+                "    A.with_user(request.env.user).create({'raw': upload, 'public': True})",
+                "create()",
+            ),
+            ("    A._upload_file(upload, {'public': True})", "_upload_file()"),
+        ] {
+            let message = format!(
+                "OD717 route parameter 'upload' reaches the content of {callee}, which public=True lets anyone download"
+            );
+            for series in [Some("20.0"), Some("19.0"), Some("12.0"), Some("saas~12.5"), None] {
+                assert_eq!(
+                    granted(series, body),
+                    (vec![message.clone()], vec![]),
+                    "{body} on {series:?}"
+                );
+            }
+            // Odoo refuses the create to any user but an internal one, whatever the rows.
+            for series in ["saas~13.1", "18.0", "saas~18.4"] {
+                assert_eq!(granted(Some(series), body), (vec![], vec![]), "{body} on {series}");
+            }
+        }
+        for series in [Some("20.0"), Some("18.0")] {
+            let (waiting, found) = granted(series, "    A.sudo().create({'raw': upload, 'public': True})");
+            assert!(waiting.is_empty(), "{series:?}");
+            assert_eq!(codes_from(&found), ["OD717"], "{series:?}");
+        }
+        assert_eq!(granted(None, "    A.create({'raw': upload})"), (vec![], vec![]));
+    }
+
+    #[test]
+    fn a_public_attachment_a_user_creates_keeps_a_granted_edge() {
+        let create = "self.env['ir.attachment'].create({'raw': data, 'public': True})";
+        let helper = summary(Params::None, &format!("def _store(self, data):\n    {create}\n"));
+        let granted = |e: &FlowEdge| e.target == FlowTarget::Granted("OD717");
+        let origins: Vec<_> = helper.edges.iter().filter(|e| granted(e)).map(|e| e.origin).collect();
+        assert_eq!(origins, [FlowOrigin::Param(0)]);
+        // An RPC client that may create the attachment may as well call create() itself, so the
+        // argument reports nothing, but keeps the edge for the Python callers.
+        let (found, rpc) = model_method(Params::Rpc, &format!("def store(self, data):\n    {create}\n"));
+        assert!(found.is_empty(), "{found:?}");
+        let edges = rpc.expect("a summary").edges;
+        let origins: Vec<_> = edges.iter().filter(|e| granted(e)).map(|e| e.origin).collect();
+        assert_eq!(origins, [FlowOrigin::Rpc(0)]);
+        let returned = summary(
+            Params::None,
+            &format!("def _store(self):\n    data = self._read()\n    {create}\n"),
+        );
+        let origins: Vec<_> = returned.edges.iter().filter(|e| granted(e)).map(|e| e.origin).collect();
+        assert_eq!(origins, [FlowOrigin::Return(0)]);
+    }
+
     #[test]
     fn datas_holds_the_content_before_saas_19_3() {
         let datas = "    A.create({'datas': upload, 'public': True})";
@@ -6990,7 +7121,7 @@ mod tests {
             &loc,
             &TaintTable::default(),
         )
-        .0;
+        .diags;
         let message = |d: RawDiag| format!("{} {}", d.code, d.message.split(';').next().unwrap_or_default());
         found.into_iter().map(message).collect()
     }

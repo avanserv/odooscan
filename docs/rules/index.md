@@ -221,9 +221,11 @@ OD712, which follows the records of `env[t]` or `env.get(t)` through locals, `su
 `exists()` and `filtered()`, and OD716, which follows the records `browse()` reads by an id the user
 picks into what a route returns, until a check of them. OD717 follows the `public` flag and the
 content of the values for `ir.attachment` through dict literals, `dict()`, lists, locals and their
-items. Both branches of an `if` are followed and a loop body is read twice, its `for` target bound
-again from the iterable before each reading. A branch that returns or raises adds nothing after it,
-and one ending in `continue` adds its state only to the next pass and the code after the loop.
+items, and reports a create without superuser mode only where the scanned modules grant portal or
+public users create on `ir.attachment`. Both branches of an `if` are followed and a loop body is
+read twice, its `for` target bound again from the iterable before each reading. A branch that
+returns or raises adds nothing after it, and one ending in `continue` adds its state only to the
+next pass and the code after the loop.
 
 A value passed to a method of `self`, of `env["x"]` or of a local bound to one is followed into
 every definition of that method the module's dependencies hold, overrides included, up to four calls
@@ -292,4 +294,4 @@ A project adds its own sources, sinks and sanitizers in the
 | [OD714](OD714.md) | `sudo-field-injection` | Data a user controls picks the field read as superuser. |
 | [OD715](OD715.md) | `sudo-domain-injection` | Data a user controls picks the fields of a domain or a grouping searched as superuser. |
 | [OD716](OD716.md) | `sudo-record-exposure` | A route returns records read as superuser by an id a user controls. |
-| [OD717](OD717.md) | `sudo-public-attachment` | Data a user controls is stored as superuser in an attachment anyone may download. |
+| [OD717](OD717.md) | `sudo-public-attachment` | Data a user controls is stored in an attachment anyone may download. |
