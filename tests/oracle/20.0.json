@@ -241,6 +241,12 @@
       "count": 1
     },
     {
+      "path": "addons/bus/controllers/websocket.py",
+      "code": "OD128",
+      "message": "cors='*' lets a script on any site call this route and read its response; name the origin that needs it",
+      "count": 4
+    },
+    {
       "path": "addons/bus/models/bus.py",
       "code": "OD401",
       "message": "model 'bus.bus' has no ir.access rule with a group, so only the superuser can use it",
@@ -289,6 +295,12 @@
       "count": 1
     },
     {
+      "path": "addons/cloud_storage/controllers/rtc.py",
+      "code": "OD128",
+      "message": "cors='*' lets a script on any site call this route and read its response; name the origin that needs it",
+      "count": 1
+    },
+    {
       "path": "addons/cloud_storage_migration/models/ir_attachment.py",
       "code": "OD122",
       "message": "UPDATE on ir_config_parameter bypasses the ORM, so records this transaction already read keep stale values; call flush_model() before the query and invalidate_model() after it (flush() and invalidate_cache() before 16.0)",
@@ -316,6 +328,12 @@
       "path": "addons/crm_iap_mine/models/crm_iap_lead_helpers.py",
       "code": "OD401",
       "message": "model 'crm.iap.lead.helpers' has no ir.access rule with a group, so only the superuser can use it",
+      "count": 1
+    },
+    {
+      "path": "addons/crm_mail_plugin/controllers/mail_plugin.py",
+      "code": "OD128",
+      "message": "cors='*' lets a script on any site call this route and read its response; name the origin that needs it",
       "count": 1
     },
     {
@@ -499,10 +517,76 @@
       "count": 1
     },
     {
+      "path": "addons/im_livechat/controllers/cors/attachment.py",
+      "code": "OD128",
+      "message": "cors='*' lets a script on any site call this route and read its response; name the origin that needs it",
+      "count": 2
+    },
+    {
+      "path": "addons/im_livechat/controllers/cors/channel.py",
+      "code": "OD128",
+      "message": "cors='*' lets a script on any site call this route and read its response; name the origin that needs it",
+      "count": 2
+    },
+    {
+      "path": "addons/im_livechat/controllers/cors/chatbot.py",
+      "code": "OD128",
+      "message": "cors='*' lets a script on any site call this route and read its response; name the origin that needs it",
+      "count": 4
+    },
+    {
+      "path": "addons/im_livechat/controllers/cors/google_translate.py",
+      "code": "OD128",
+      "message": "cors='*' lets a script on any site call this route and read its response; name the origin that needs it",
+      "count": 1
+    },
+    {
+      "path": "addons/im_livechat/controllers/cors/link_preview.py",
+      "code": "OD128",
+      "message": "cors='*' lets a script on any site call this route and read its response; name the origin that needs it",
+      "count": 2
+    },
+    {
+      "path": "addons/im_livechat/controllers/cors/main.py",
+      "code": "OD128",
+      "message": "cors='*' lets a script on any site call this route and read its response; name the origin that needs it",
+      "count": 6
+    },
+    {
+      "path": "addons/im_livechat/controllers/cors/message_reaction.py",
+      "code": "OD128",
+      "message": "cors='*' lets a script on any site call this route and read its response; name the origin that needs it",
+      "count": 1
+    },
+    {
+      "path": "addons/im_livechat/controllers/cors/rtc.py",
+      "code": "OD128",
+      "message": "cors='*' lets a script on any site call this route and read its response; name the origin that needs it",
+      "count": 5
+    },
+    {
+      "path": "addons/im_livechat/controllers/cors/thread.py",
+      "code": "OD128",
+      "message": "cors='*' lets a script on any site call this route and read its response; name the origin that needs it",
+      "count": 2
+    },
+    {
+      "path": "addons/im_livechat/controllers/cors/webclient.py",
+      "code": "OD128",
+      "message": "cors='*' lets a script on any site call this route and read its response; name the origin that needs it",
+      "count": 1
+    },
+    {
       "path": "addons/im_livechat/controllers/main.py",
       "code": "OD111",
       "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
       "count": 4
+    },
+    {
+      "path": "addons/im_livechat/controllers/main.py",
+      "code": "OD128",
+      "message": "cors='*' lets a script on any site call this route and read its response; name the origin that needs it",
+      "count": 5
     },
     {
       "path": "addons/im_livechat/controllers/main.py",
@@ -1405,6 +1489,12 @@
       "count": 1
     },
     {
+      "path": "addons/mail/controllers/discuss/rtc.py",
+      "code": "OD128",
+      "message": "cors='*' lets a script on any site call this route and read its response; name the origin that needs it",
+      "count": 1
+    },
+    {
       "path": "addons/mail/controllers/mail.py",
       "code": "OD111",
       "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
@@ -1420,6 +1510,12 @@
       "path": "addons/mail/controllers/thread.py",
       "code": "OD122",
       "message": "UPDATE on mail_canned_response bypasses the ORM, so records this transaction already read keep stale values; call flush_model() before the query and invalidate_model() after it (flush() and invalidate_cache() before 16.0)",
+      "count": 1
+    },
+    {
+      "path": "addons/mail/controllers/websocket.py",
+      "code": "OD128",
+      "message": "cors='*' lets a script on any site call this route and read its response; name the origin that needs it",
       "count": 1
     },
     {
@@ -1502,9 +1598,21 @@
     },
     {
       "path": "addons/mail_plugin/controllers/authenticate.py",
+      "code": "OD128",
+      "message": "cors='*' lets a script on any site call this route and read its response; name the origin that needs it",
+      "count": 2
+    },
+    {
+      "path": "addons/mail_plugin/controllers/authenticate.py",
       "code": "OD705",
       "message": "route parameter 'redirect' reaches the URL of request.redirect() through 'parsed_redirect', 'updated_redirect', so the user picks the site the browser goes to; start the URL with a path the code picks",
       "count": 1
+    },
+    {
+      "path": "addons/mail_plugin/controllers/mail_plugin.py",
+      "code": "OD128",
+      "message": "cors='*' lets a script on any site call this route and read its response; name the origin that needs it",
+      "count": 5
     },
     {
       "path": "addons/mail_plugin/controllers/mail_plugin.py",
@@ -1553,6 +1661,12 @@
       "code": "OD111",
       "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
       "count": 3
+    },
+    {
+      "path": "addons/mass_mailing_sms/controllers/main.py",
+      "code": "OD127",
+      "message": "route accepts GET, on which Odoo checks no CSRF token, and calls write(); restrict it with methods=['POST'] or check a token",
+      "count": 1
     },
     {
       "path": "addons/mass_mailing_sms/static/src/components/sms_widget/fields_sms_widget.js",
@@ -2113,6 +2227,12 @@
       "count": 1
     },
     {
+      "path": "addons/pos_viva_com/controllers/main.py",
+      "code": "OD127",
+      "message": "route accepts GET, on which Odoo checks no CSRF token, and calls write(); restrict it with methods=['POST'] or check a token",
+      "count": 1
+    },
+    {
       "path": "addons/product/models/product_product.py",
       "code": "OD105",
       "message": "copy() override never calls super(), so other modules' overrides and the ORM itself are skipped",
@@ -2165,6 +2285,12 @@
       "code": "OD502",
       "message": "'populate/populate_demo.xml' is not in the manifest's data or demo, so Odoo never loads it",
       "count": 1
+    },
+    {
+      "path": "addons/project_mail_plugin/controllers/mail_plugin.py",
+      "code": "OD128",
+      "message": "cors='*' lets a script on any site call this route and read its response; name the origin that needs it",
+      "count": 2
     },
     {
       "path": "addons/project_todo/static/src/core/web/activity_menu_patch.js",
@@ -2443,6 +2569,12 @@
       "count": 3
     },
     {
+      "path": "addons/survey/controllers/main.py",
+      "code": "OD127",
+      "message": "route accepts GET, on which Odoo checks no CSRF token, and calls unlink(); restrict it with methods=['POST'] or check a token",
+      "count": 1
+    },
+    {
       "path": "addons/survey/data/survey_demo_certification.xml",
       "code": "OD303",
       "message": "XML id 'vendor_certification_page_2_question_2_choice_5' is already defined earlier in this file",
@@ -2510,6 +2642,12 @@
     },
     {
       "path": "addons/web/controllers/binary.py",
+      "code": "OD128",
+      "message": "cors='*' lets a script on any site call this route and read its response; name the origin that needs it",
+      "count": 1
+    },
+    {
+      "path": "addons/web/controllers/binary.py",
       "code": "OD707",
       "message": "request.httprequest.files reaches the path of open() through 'files', 'ufile', '_upload_file()', 'src_path', so the user picks the file the server opens; pass the name through secure_filename() or os.path.basename()",
       "count": 1
@@ -2545,6 +2683,12 @@
       "count": 1
     },
     {
+      "path": "addons/web/controllers/webclient.py",
+      "code": "OD128",
+      "message": "cors='*' lets a script on any site call this route and read its response; name the origin that needs it",
+      "count": 1
+    },
+    {
       "path": "addons/web/static/src/views/kanban/kanban_record.js",
       "code": "OD601",
       "message": "'@web/views/card/card_renderer' does not export 'getImageSrcFromRecordInfo'",
@@ -2567,6 +2711,12 @@
       "code": "OD111",
       "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
       "count": 8
+    },
+    {
+      "path": "addons/website/controllers/main.py",
+      "code": "OD127",
+      "message": "route accepts GET, on which Odoo checks no CSRF token, and calls create(); restrict it with methods=['POST'] or check a token",
+      "count": 1
     },
     {
       "path": "addons/website/controllers/main.py",
@@ -2764,6 +2914,12 @@
       "path": "addons/website_hr_recruitment/controllers/main.py",
       "code": "OD716",
       "message": "route parameter 'department_id' reaches the id of browse() through 'department', whose records the route returns read as superuser; check them with _document_check_access(), consteq(), check_access() from 18.0 or check_access_rule() before 18.0",
+      "count": 1
+    },
+    {
+      "path": "addons/website_livechat/controllers/chatbot.py",
+      "code": "OD127",
+      "message": "route accepts GET, on which Odoo checks no CSRF token, and calls create(); restrict it with methods=['POST'] or check a token",
       "count": 1
     },
     {
@@ -3137,6 +3293,12 @@
       "code": "OD112",
       "message": "csrf=False lets other sites submit this form on the user's behalf",
       "count": 4
+    },
+    {
+      "path": "odoo/addons/test_http/controllers.py",
+      "code": "OD128",
+      "message": "cors='*' lets a script on any site call this route and read its response; name the origin that needs it",
+      "count": 5
     },
     {
       "path": "odoo/addons/test_inherit/models/mother_base.py",

@@ -64,6 +64,9 @@ Python code checked on its own: security, deprecated APIs and ORM mistakes visib
 | [OD124](OD124.md) | `module-level-cache` | A module-level dict, list or set filled at runtime is shared by every database. |
 | [OD125](OD125.md) | `python-api-deprecated` | The module uses a Python API its series deprecates or ignores. |
 | [OD126](OD126.md) | `python-api-removed` | The module uses a Python API its series removed. |
+| [OD127](OD127.md) | `get-route-writes` | An HTTP route that accepts GET writes records, which Odoo checks no CSRF token for. |
+| [OD128](OD128.md) | `cors-any-origin` | A route sets cors='*', so a script on any site can read its responses. |
+| [OD129](OD129.md) | `auth-none-user` | An auth='none' route reads the user or writes records, but runs with no user. |
 
 ## OD2: models and fields
 
