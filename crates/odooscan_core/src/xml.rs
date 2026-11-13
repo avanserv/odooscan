@@ -476,7 +476,7 @@ impl Walker<'_> {
             let groups = last_field_of(node, "groups").map(rule_groups);
             (
                 groups,
-                PERM_FIELDS.map(|name| last_field_of(node, name).map_or(Flag::Unset, flag)),
+                PERM_FIELDS.map(|name| last_field_of(node, name).map_or(Flag::Unset, |f| flag(f, self.series))),
             )
         };
         self.facts.rules.push(RuleFact {
@@ -487,7 +487,7 @@ impl Walker<'_> {
             by_name,
             fields: domain::written_fields(&domain),
             domain,
-            active: field_of(node, "active").map(rule_active),
+            active: field_of(node, "active").map(|f| rule_active(f, self.series)),
             groups: groups.unwrap_or_default(),
             perms,
         });
@@ -1146,6 +1146,14 @@ fn writes_no_domain(field: Node) -> bool {
 /// The fields of an `ir.rule` that say which operations it applies to, in the order of `Perms`.
 pub const PERM_FIELDS: [&str; 4] = ["perm_read", "perm_write", "perm_create", "perm_unlink"];
 
+/// The first series that converts the string a boolean field gets from a data file
+/// (`odoo/tools/convert.py:197-198,704-705` on 10.0). 9.0 stores the string's truth.
+const BOOL_TEXT_CONVERTED: Series = Series { major: 10, minor: 0 };
+
+/// The first series that reads an empty field as the empty string (`pycompat.to_text`,
+/// `odoo/tools/convert.py:152` on 11.0). Before, it gives `None`, which no conversion takes.
+const EMPTY_TEXT_AS_STRING: Series = Series { major: 11, minor: 0 };
+
 /// The operations an `ir.access` spells as letters of `operation`, in the order of `Perms`.
 pub fn operation_perms(operation: &str) -> [Flag; 4] {
     ['r', 'u', 'c', 'd'].map(|letter| Flag::Set(operation.contains(letter)))
@@ -1212,25 +1220,39 @@ fn server_parent(node: Node, lines: &Lines) -> ActionValue {
 }
 
 /// An `eval` that is no constant counts as false.
-fn rule_active(field: Node) -> bool {
-    flag(field) == Flag::Set(true)
+fn rule_active(field: Node, series: Option<Series>) -> bool {
+    flag(field, series) == Flag::Set(true)
 }
 
-/// What `field` gives a boolean. Odoo tests the text untrimmed, so anything but these three
-/// spellings, an empty field too, is true.
-fn flag(field: Node) -> Flag {
+/// What `field` gives a boolean. A string, from the text or a string literal `eval`, reads as
+/// `stored_bool` says; a string `eval` is tested before `is_false`, which takes `''` for false.
+fn flag(field: Node, series: Option<Series>) -> Flag {
     if INDIRECT_VALUE.iter().any(|a| field.has_attribute(*a)) {
         return Flag::Opaque;
     }
     match field.attribute("eval") {
         Some(eval) if matches!(eval.trim(), "True" | "1") => Flag::Set(true),
-        Some(eval) if record_eval::is_false(eval) => Flag::Set(false),
-        Some(_) => Flag::Opaque,
-        None => {
-            let text = field.text().unwrap_or_default().to_lowercase();
-            Flag::Set(!matches!(text.as_str(), "0" | "false" | "off"))
-        }
+        Some(eval) => match record_eval::literal_string(eval) {
+            Some(text) => Flag::Set(stored_bool(&text, series)),
+            None if record_eval::is_false(eval) => Flag::Set(false),
+            None => Flag::Opaque,
+        },
+        None => match field.text().filter(|text| !text.is_empty()) {
+            Some(text) => Flag::Set(stored_bool(text, series)),
+            None => Flag::Set(series.is_none_or(|series| series >= EMPTY_TEXT_AS_STRING)),
+        },
     }
+}
+
+/// The boolean Odoo stores for a string. From `BOOL_TEXT_CONVERTED` it tests the string untrimmed
+/// against three spellings in any case, so an empty one is true; before, the field stores the
+/// string's truth (`openerp/osv/fields.py:241` on 9.0). An unknown series reads as the newer one.
+/// An empty field is no string before `EMPTY_TEXT_AS_STRING`, and `flag` reads it apart.
+fn stored_bool(text: &str, series: Option<Series>) -> bool {
+    if series.is_some_and(|series| series < BOOL_TEXT_CONVERTED) {
+        return !text.is_empty();
+    }
+    !matches!(text.to_lowercase().as_str(), "0" | "false" | "off")
 }
 
 /// The value of a field of an action that is present: a blank one holds no literal.
@@ -3033,6 +3055,65 @@ mod tests {
         assert_eq!(perm(">off</field>"), Flag::Set(false));
         assert_eq!(perm("> False </field>"), Flag::Set(true));
         assert_eq!(perm("/>"), Flag::Set(true));
+    }
+
+    #[test]
+    fn reads_a_string_eval_as_the_loader_converts_it() {
+        let perm = |eval: &str, series: &str| {
+            let record = format!(
+                r#"<odoo><record id="r" model="ir.rule"><field name="perm_read" eval="{eval}"/></record></odoo>"#
+            );
+            super::analyze(&record, Series::parse(series)).rules.remove(0).perms[0]
+        };
+        for series in ["10.0", "18.0", "none"] {
+            for eval in ["''", "'yes'", "' 0'", "'False '"] {
+                assert_eq!(perm(eval, series), Flag::Set(true), "{eval} {series}");
+            }
+            for eval in ["'0'", "'False'", "'OFF'", "&quot;false&quot;"] {
+                assert_eq!(perm(eval, series), Flag::Set(false), "{eval} {series}");
+            }
+        }
+        for eval in ["'0'", "'False'", "'off'", "' '"] {
+            assert_eq!(perm(eval, "9.0"), Flag::Set(true), "{eval}");
+        }
+        assert_eq!(perm("''", "9.0"), Flag::Set(false));
+        assert_eq!(perm("False", "9.0"), Flag::Set(false));
+        assert_eq!(perm("x", "9.0"), Flag::Opaque);
+    }
+
+    #[test]
+    fn reads_text_before_10_0_as_the_string_stored() {
+        let rule = |fields: &str| {
+            let record = format!(r#"<odoo><record id="r" model="ir.rule">{fields}</record></odoo>"#);
+            super::analyze(&record, Series::parse("9.0")).rules.remove(0)
+        };
+        for text in ["0", "false", "OFF", " "] {
+            let fields = format!(r#"<field name="perm_read">{text}</field><field name="active">{text}</field>"#);
+            let read = rule(&fields);
+            assert_eq!(read.perms[0], Flag::Set(true), "{text:?}");
+            assert_eq!(read.active, Some(true), "{text:?}");
+        }
+        let empty = rule(r#"<field name="perm_read"/><field name="active"></field>"#);
+        assert_eq!(empty.perms[0], Flag::Set(false));
+        assert_eq!(empty.active, Some(false));
+    }
+
+    #[test]
+    fn reads_empty_text_as_none_on_10_0_and_as_a_string_from_11_0() {
+        let rule = |series: &str| {
+            let fields =
+                r#"<field name="perm_read"/><field name="active"></field><field name="perm_write" eval="''"/>"#;
+            let record = format!(r#"<odoo><record id="r" model="ir.rule">{fields}</record></odoo>"#);
+            super::analyze(&record, Series::parse(series)).rules.remove(0)
+        };
+        let ten = rule("10.0");
+        assert_eq!((ten.perms[0], ten.active), (Flag::Set(false), Some(false)));
+        assert_eq!(ten.perms[1], Flag::Set(true));
+        for series in ["11.0", "18.0", "none"] {
+            let read = rule(series);
+            assert_eq!((read.perms[0], read.active), (Flag::Set(true), Some(true)), "{series}");
+            assert_eq!(read.perms[1], Flag::Set(true), "{series}");
+        }
     }
 
     #[test]

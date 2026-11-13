@@ -33,6 +33,11 @@ pub fn is_false(eval: &str) -> bool {
     parse_expression(eval.trim()).is_ok_and(|p| falsy(p.expr()))
 }
 
+/// The text of an `eval` that is a string literal, an empty one included.
+pub fn literal_string(eval: &str) -> Option<String> {
+    string(parse_expression(eval.trim()).ok()?.expr())
+}
+
 fn falsy(expr: &Expr) -> bool {
     Truthiness::from_expr(expr, |_| false).into_bool() == Some(false)
 }
@@ -506,6 +511,16 @@ mod tests {
         }
         for eval in ["True", "1", "'a'", "ref('a')", "x", "bool(0)", "ref("] {
             assert!(!is_false(eval), "{eval}");
+        }
+    }
+
+    #[test]
+    fn reads_the_text_of_a_string_literal_only() {
+        assert_eq!(literal_string(" '' "), Some(String::new()));
+        assert_eq!(literal_string("\"Off\""), Some("Off".to_owned()));
+        assert_eq!(literal_string("'a' 'b'"), Some("ab".to_owned()));
+        for eval in ["False", "0", "f'a'", "b'a'", "x", "'a", ""] {
+            assert_eq!(literal_string(eval), None, "{eval}");
         }
     }
 

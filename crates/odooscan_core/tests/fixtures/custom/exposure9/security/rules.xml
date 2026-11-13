@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<openerp>
+    <data>
+        <record id="rule_pinboard_read_text" model="ir.rule">
+            <field name="name">the text 0 is a true string here</field>
+            <field name="model_id" ref="model_exposure9_pinboard"/>
+            <field name="domain_force">[(1, '=', 1)]</field>
+            <field name="groups" eval="[(4, ref('base.group_portal'))]"/>
+            <field name="perm_read">0</field>
+        </record>
+        <record id="rule_pinboard_active_text" model="ir.rule">
+            <field name="name">the text False keeps the rule active here</field>
+            <field name="model_id" ref="model_exposure9_pinboard"/>
+            <field name="domain_force">[]</field>
+            <field name="groups" eval="[(4, ref('base.group_portal'))]"/>
+            <field name="active">False</field>
+        </record>
+        <record id="rule_pinboard_false_texts" model="ir.rule">
+            <field name="name">false spellings stay true strings here</field>
+            <field name="model_id" ref="model_exposure9_pinboard"/>
+            <field name="domain_force">[('name', '!=', False)]</field>
+            <field name="groups" eval="[(4, ref('base.group_user'))]"/>
+            <field name="perm_read">0</field>
+            <field name="perm_write">false</field>
+            <field name="perm_create">off</field>
+            <field name="perm_unlink">False</field>
+        </record>
+        <record id="rule_pinboard_empty" model="ir.rule">
+            <field name="name">empty strings store false here</field>
+            <field name="model_id" ref="model_exposure9_pinboard"/>
+            <field name="domain_force">[('name', '!=', False)]</field>
+            <field name="groups" eval="[(4, ref('base.group_user'))]"/>
+            <field name="perm_read" eval="''"/>
+            <field name="perm_write" eval="''"/>
+            <field name="perm_create"></field>
+            <field name="perm_unlink"/>
+        </record>
+    </data>
+</openerp>

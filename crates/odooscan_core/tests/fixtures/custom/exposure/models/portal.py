@@ -96,3 +96,10 @@ class ExposureEveryone(models.Model):
     _description = "Model whose row names a group 18.0 lacks"
 
     api_token = fields.Char()
+
+
+class ExposureNotice(models.Model):
+    _name = "exposure.notice"
+    _description = "Notice the public group reads"
+
+    name = fields.Char()
