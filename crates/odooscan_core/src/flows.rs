@@ -10,6 +10,7 @@ use crate::facts::{
     ArgSlot, CallSite, FlowEdge, FlowOrigin, FlowSummary, FlowTarget, Pos, RawDiag, Receiver, RunsAs, Safe, Spanned,
     Step,
 };
+use crate::grants::AttachmentGrant;
 use crate::index::{FlowRef, Index, Scope};
 use crate::taint;
 
@@ -45,6 +46,8 @@ struct Hit<'m> {
     via: Vec<HitState>,
     /// The path from an RPC entry crosses the RPC argument of a public method that is its own entry.
     relayed: bool,
+    /// The sink is a `FlowTarget::Granted` one, which the entry's own users must be granted.
+    granted: bool,
 }
 
 /// What a return of a method carries: a source's value, or a parameter of the method.
@@ -62,11 +65,11 @@ struct Ret {
     via: Vec<RetState>,
 }
 
-/// `granted` holds when the scanned modules grant portal or public users create on
+/// `grant` tells which of portal and public users the scanned modules let create on
 /// `ir.attachment`, which a `FlowTarget::Granted` sink needs.
-pub fn check<'m>(index: &Index<'m>, mi: usize, scope: &Scope, granted: bool, out: &mut Out<'m>) {
+pub fn check<'m>(index: &Index<'m>, mi: usize, scope: &Scope, grant: AttachmentGrant, out: &mut Out<'m>) {
     let module = &index.modules[mi];
-    let mut solver = Solver::new(index, scope, granted);
+    let mut solver = Solver::new(index, scope, grant);
     let mut found = vec![];
     for file in &module.python {
         for summary in &file.facts.flows {
@@ -92,8 +95,8 @@ pub fn check<'m>(index: &Index<'m>, mi: usize, scope: &Scope, granted: bool, out
 struct Solver<'a, 'm> {
     index: &'a Index<'m>,
     scope: &'a Scope,
-    /// Whether a `FlowTarget::Granted` sink is one, as `check` takes it.
-    granted: bool,
+    /// Whom a `FlowTarget::Granted` sink waits for, as `check` takes it.
+    grant: AttachmentGrant,
     /// By summary, parameter, whether the method runs as superuser, whether the entry is an RPC
     /// argument, and depth: a result found with fewer calls left would hide a deeper sink from a
     /// caller that has more.
@@ -103,11 +106,11 @@ struct Solver<'a, 'm> {
 }
 
 impl<'a, 'm> Solver<'a, 'm> {
-    fn new(index: &'a Index<'m>, scope: &'a Scope, granted: bool) -> Self {
+    fn new(index: &'a Index<'m>, scope: &'a Scope, grant: AttachmentGrant) -> Self {
         Solver {
             index,
             scope,
-            granted,
+            grant,
             memo: FxHashMap::default(),
             returns: FxHashMap::default(),
         }
@@ -120,18 +123,12 @@ impl<'a, 'm> Solver<'a, 'm> {
         let mut found = vec![];
         for edge in &at.summary.edges {
             match (edge.origin, &edge.target) {
-                (origin, FlowTarget::Arg(c, _)) if origin.is_user() => {
-                    let rpc = matches!(origin, FlowOrigin::Rpc(_));
-                    for hit in self.passed(at, edge, 0, false, rpc) {
-                        let relayed = hit.relayed;
-                        found.extend(self.reported(at, edge, *c, hit).map(|f| (relayed, f)));
-                    }
-                }
+                (origin, FlowTarget::Arg(c, _)) if origin.is_user() => found.extend(self.passed_findings(at, edge, *c)),
                 (FlowOrigin::Return(c), FlowTarget::Sink(code)) => {
                     let returned = self.returned(at, edge, c, code, false);
                     found.extend(returned.into_iter().map(|f| (false, f)));
                 }
-                (FlowOrigin::Return(c), FlowTarget::Granted(code)) if self.granted => {
+                (FlowOrigin::Return(c), FlowTarget::Granted(code)) if self.grant.reaches(at.summary.signed_in) => {
                     let returned = self.returned(at, edge, c, code, true);
                     found.extend(returned.into_iter().map(|f| (false, f)));
                 }
@@ -139,6 +136,22 @@ impl<'a, 'm> Solver<'a, 'm> {
             }
         }
         found
+    }
+
+    /// The findings of what `edge` passes to the call `c`, each with whether it is relayed. A
+    /// granted sink counts only when the grant reaches the users of `at`.
+    fn passed_findings(&mut self, at: FlowRef<'m>, edge: &FlowEdge, c: usize) -> Vec<(bool, (&'m Path, RawDiag))> {
+        let rpc = matches!(edge.origin, FlowOrigin::Rpc(_));
+        let reaches = self.grant.reaches(at.summary.signed_in);
+        let hits = self
+            .passed(at, edge, 0, false, rpc)
+            .into_iter()
+            .filter(|h| reaches || !h.granted);
+        hits.filter_map(|hit| {
+            let relayed = hit.relayed;
+            self.reported(at, edge, c, hit).map(|f| (relayed, f))
+        })
+        .collect()
     }
 
     /// A finding at the sink when the checked module holds it, otherwise at the call that leaves
@@ -233,8 +246,8 @@ impl<'a, 'm> Solver<'a, 'm> {
         hits.retain_mut(|h| enter(&mut h.via, state));
         // A relayed path must not displace one that is not, which `check` prefers.
         let same = |a: &Hit, b: &Hit| {
-            (a.code, a.path, a.pos, a.keys, a.safe, a.named, a.relayed)
-                == (b.code, b.path, b.pos, b.keys, b.safe, b.named, b.relayed)
+            (a.code, a.path, a.pos, a.keys, a.safe, a.named, a.relayed, a.granted)
+                == (b.code, b.path, b.pos, b.keys, b.safe, b.named, b.relayed, b.granted)
         };
         let hits = distinct(hits, same, |h| h.via.len());
         self.memo.insert(key, hits.clone());
@@ -247,7 +260,12 @@ impl<'a, 'm> Solver<'a, 'm> {
             FlowTarget::Sink(code) => vec![sink_hit(at, edge, code)],
             FlowTarget::SelfWrite if sudo => vec![sink_hit(at, edge, "OD704")],
             // A client may create the granted attachment itself, so only a route's value counts.
-            FlowTarget::Granted(code) if self.granted && !rpc => vec![sink_hit(at, edge, code)],
+            // Whom the grant reaches depends on the entry, which `passed_findings` and `findings`
+            // check.
+            FlowTarget::Granted(code) if self.grant.any() && !rpc => vec![Hit {
+                granted: true,
+                ..sink_hit(at, edge, code)
+            }],
             FlowTarget::Arg(..) if depth < DEPTH => self.passed(at, edge, depth, sudo, rpc),
             _ => vec![],
         }
@@ -440,6 +458,7 @@ fn sink_hit<'m>(at: FlowRef<'m>, edge: &FlowEdge, code: &'static str) -> Hit<'m>
         names: edge.steps[1..last].iter().map(|s| s.value.clone()).collect(),
         via: vec![],
         relayed: false,
+        granted: false,
     }
 }
 
@@ -473,6 +492,7 @@ mod tests {
     use super::{Solver, check};
     use crate::checks::Out;
     use crate::facts::{PyFacts, RawDiag};
+    use crate::grants::AttachmentGrant;
     use crate::index::{FlowRef, Index};
     use crate::mentions::Mentions;
     use crate::project::{Module, SourceFile};
@@ -480,7 +500,12 @@ mod tests {
 
     /// A checked module holding the route `route` and the model `x.y` with the methods `methods`.
     fn module(route: &str, methods: &str) -> Module {
-        let route = format!("class C(http.Controller):\n    @http.route('/r')\n{route}");
+        routed("", route, methods)
+    }
+
+    /// `module`, whose route gives the keywords `keywords` after its URL.
+    fn routed(keywords: &str, route: &str, methods: &str) -> Module {
+        let route = format!("class C(http.Controller):\n    @http.route('/r'{keywords})\n{route}");
         let model = format!("class X(models.Model):\n    _name = 'x.y'\n\n{methods}");
         let file = |name: &str, src: &str| SourceFile {
             path: PathBuf::from(name),
@@ -508,12 +533,27 @@ mod tests {
         scanned_granted(false, route, methods, each)
     }
 
-    /// `scanned`, where `granted` tells whether portal or public users may create attachments.
+    /// `scanned`, where `granted` tells whether portal and public users may create attachments.
     fn scanned_granted<T>(granted: bool, route: &str, methods: &str, each: impl Fn(&(&Path, RawDiag)) -> T) -> Vec<T> {
-        let modules = [module(route, methods)];
+        let grant = AttachmentGrant {
+            portal: granted,
+            public: granted,
+        };
+        scanned_as(grant, "", route, methods, each)
+    }
+
+    /// `scanned` with `grant`, on a route that gives the keywords `keywords`.
+    fn scanned_as<T>(
+        grant: AttachmentGrant,
+        keywords: &str,
+        route: &str,
+        methods: &str,
+        each: impl Fn(&(&Path, RawDiag)) -> T,
+    ) -> Vec<T> {
+        let modules = [routed(keywords, route, methods)];
         let index = Index::build(&modules, None);
         let mut out = Out { diags: vec![] };
-        check(&index, 0, &index.scope(0), granted, &mut out);
+        check(&index, 0, &index.scope(0), grant, &mut out);
         out.diags.iter().map(each).collect()
     }
 
@@ -533,7 +573,7 @@ mod tests {
         (0..modules.len())
             .map(|mi| {
                 let mut out = Out { diags: vec![] };
-                check(&index, mi, &index.scope(mi), false, &mut out);
+                check(&index, mi, &index.scope(mi), AttachmentGrant::default(), &mut out);
                 out.diags.iter().map(|d| origin(&shown(d))).collect()
             })
             .collect()
@@ -694,9 +734,9 @@ mod tests {
                         .map(|(relayed, f)| (*relayed, shown(f)))
                         .collect::<Vec<_>>()
                 };
-                let mut shared = Solver::new(&index, &scope, false);
+                let mut shared = Solver::new(&index, &scope, AttachmentGrant::default());
                 for name in order.into_iter().chain(last) {
-                    let fresh = Solver::new(&index, &scope, false).findings(entry(name));
+                    let fresh = Solver::new(&index, &scope, AttachmentGrant::default()).findings(entry(name));
                     let found = shared.findings(entry(name));
                     assert_eq!(pairs(found), pairs(fresh), "{order:?} {last:?} {name}");
                 }
@@ -906,7 +946,7 @@ mod tests {
             file,
             summary: file.facts.flows.iter().find(|s| s.method == "_m1").unwrap(),
         };
-        let mut solver = Solver::new(&index, &scope, false);
+        let mut solver = Solver::new(&index, &scope, AttachmentGrant::default());
         let rets = solver.returns(m1, 1).into_iter().map(|r| r.label).collect();
         let hits = solver
             .hits(m1, 0, 1, false, false)
@@ -979,6 +1019,36 @@ mod tests {
             ]
         );
         assert!(found(false, route, methods).is_empty());
+    }
+
+    #[test]
+    fn a_public_only_grant_reaches_no_route_for_signed_in_users() {
+        let create = "self.env['ir.attachment'].create({'raw': data, 'public': True})";
+        let public = AttachmentGrant {
+            portal: false,
+            public: true,
+        };
+        let portal = AttachmentGrant {
+            portal: true,
+            public: false,
+        };
+        let helper = (
+            "    def r(self, upload):\n        request.env['x.y']._store(upload.read())\n".to_owned(),
+            format!("    def _store(self, data):\n        {create}\n"),
+        );
+        let returned = (
+            "    def r(self):\n        data = request.env['x.y']._read()\n        request.env['ir.attachment'].create({'raw': data, 'public': True})\n"
+                .to_owned(),
+            "    def _read(self):\n        return request.params.get('data')\n".to_owned(),
+        );
+        for (route, methods) in [helper, returned] {
+            let found = |grant, keywords| scanned_as(grant, keywords, &route, &methods, shown).len();
+            assert_eq!(found(public, ""), 0, "{route}");
+            assert_eq!(found(public, ", auth='user'"), 0, "{route}");
+            assert_eq!(found(portal, ""), 1, "{route}");
+            assert_eq!(found(public, ", auth='public'"), 1, "{route}");
+            assert_eq!(found(public, ", auth='none'"), 1, "{route}");
+        }
     }
 
     #[test]

@@ -213,7 +213,17 @@ fn access_row(facts: &mut DataFacts, row: &csv::StringRecord, columns: &[(&str, 
         global_write: no_group && write_like,
         public_write: (write_like && public_cell(group)).then(|| group.to_owned()),
         model_access: model == "ir.model.access",
+        domain: access_domain(row, columns, model),
     });
+}
+
+/// The domain of an `ir.access` row, which limits its grant to the records it holds.
+fn access_domain(row: &csv::StringRecord, columns: &[(&str, bool)], model: &str) -> Option<String> {
+    if model != "ir.access" {
+        return None;
+    }
+    let text = cell(row, columns, rule_domain_field(model)?).trim();
+    (!text.is_empty()).then(|| text.to_owned())
 }
 
 /// What a row gives `model_id`. An `ir.access` CSV names the model, where any other column of a name
@@ -379,6 +389,26 @@ mod tests {
         };
         assert_eq!(on_access("0"), None);
         assert_eq!(on_access("1").as_deref(), Some("base.group_portal"));
+    }
+
+    #[test]
+    fn an_access_row_keeps_its_trimmed_domain() {
+        let domain = |header: &str, row: &str| {
+            let text = format!("{header}\n{row}\n");
+            analyze(&text, "ir.access").access[0].domain.clone()
+        };
+        let header = "id,model_id,group_id/id,operation,domain";
+        assert_eq!(
+            domain(header, "a,x.y,base.group_portal,c,\" [('public', '=', False)] \"").as_deref(),
+            Some("[('public', '=', False)]")
+        );
+        assert_eq!(domain(header, "a,x.y,base.group_portal,c,\"  \""), None);
+        assert_eq!(domain(header, "a,x.y,base.group_portal,c,"), None);
+        assert_eq!(
+            domain("id,model_id,group_id/id,operation", "a,x.y,base.group_portal,c"),
+            None
+        );
+        assert_eq!(access(PERMS, "a,m,base.group_portal,1,1,1,1").access[0].domain, None);
     }
 
     #[test]

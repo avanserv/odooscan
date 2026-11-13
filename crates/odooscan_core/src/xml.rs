@@ -670,6 +670,7 @@ impl Walker<'_> {
                 global_write: false,
                 public_write: None,
                 model_access: model == "ir.model.access",
+                domain: None,
             });
         }
     }

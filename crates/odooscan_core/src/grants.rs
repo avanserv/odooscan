@@ -4,6 +4,7 @@ use std::path::Path;
 
 use rustc_hash::FxHashMap;
 
+use crate::domain;
 use crate::facts::{AccessRow, Perms};
 use crate::index::{Index, Scope, full_id, loaded_data};
 use crate::series::Series;
@@ -108,6 +109,49 @@ impl<'m> Grants<'m> {
     }
 }
 
+/// Which of portal and public users the scanned rows let create an attachment they may make
+/// `public`. A 20.0 `ir.access` row grants only the records its domain holds, so one refusing
+/// `public=True` grants none (`odoo/addons/base/models/ir_access.py:523-529`).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct AttachmentGrant {
+    pub portal: bool,
+    pub public: bool,
+}
+
+impl AttachmentGrant {
+    /// The portal and public create rows on `ir.attachment`, less those whose domain refuses
+    /// `public=True`.
+    pub fn of(grants: &Grants) -> Self {
+        let mut grant = Self::default();
+        let rows = grants.public("ir.attachment", creates);
+        for g in rows.filter(|g| {
+            !g.row
+                .domain
+                .as_deref()
+                .is_some_and(|d| domain::refuses(d, "public", true))
+        }) {
+            match g.group.as_deref() {
+                None | Some(EVERYONE) => (grant.portal, grant.public) = (true, true),
+                Some("base.group_portal") => grant.portal = true,
+                Some("base.group_public") => grant.public = true,
+                Some(_) => {}
+            }
+        }
+        grant
+    }
+
+    /// Whether any portal or public user may create an attachment.
+    pub fn any(self) -> bool {
+        self.portal || self.public
+    }
+
+    /// Whether the grant reaches the user of a request. An `auth="user"` route refuses the public
+    /// user (18.0 `odoo/addons/base/models/ir_http.py:246-248`), so only a portal grant reaches it.
+    pub fn reaches(self, signed_in: bool) -> bool {
+        self.portal || (!signed_in && self.public)
+    }
+}
+
 /// Public and portal users may read.
 pub fn reads(perms: Perms) -> bool {
     perms.read
@@ -121,4 +165,29 @@ pub fn stores(perms: Perms) -> bool {
 /// Public and portal users may create a record.
 pub fn creates(perms: Perms) -> bool {
     perms.create
+}
+
+#[cfg(test)]
+mod tests {
+    use super::AttachmentGrant;
+
+    #[test]
+    fn a_public_grant_reaches_no_signed_in_user() {
+        let grant = |portal, public| AttachmentGrant { portal, public };
+        for (portal, public, signed_in, reaches) in [
+            (true, false, true, true),
+            (true, false, false, true),
+            (false, true, true, false),
+            (false, true, false, true),
+            (true, true, true, true),
+            (false, false, false, false),
+            (false, false, true, false),
+        ] {
+            assert_eq!(
+                grant(portal, public).reaches(signed_in),
+                reaches,
+                "{portal} {public} {signed_in}"
+            );
+        }
+    }
 }

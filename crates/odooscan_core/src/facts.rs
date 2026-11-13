@@ -587,6 +587,9 @@ pub struct FlowSummary {
     pub params: Vec<String>,
     pub calls: Vec<CallSite>,
     pub edges: Vec<FlowEdge>,
+    /// The function is a route whose every `@route` asks for `auth="user"`, so the public user
+    /// never runs it.
+    pub signed_in: bool,
 }
 
 /// An attribute an import-time statement sets on what the file imports from `odoo`.
@@ -728,8 +731,9 @@ pub struct PyFacts {
     /// only before 16.0, which the series of the module decides.
     pub legacy_hook_rollbacks: Vec<RawDiag>,
     /// OD717 on a public attachment created with the rights of a user who sent its content, which
-    /// `checks.rs` keeps when the scanned modules grant portal or public users create on it.
-    pub granted_attachments: Vec<RawDiag>,
+    /// `checks.rs` keeps when the scanned modules grant portal or public users create on it, each
+    /// with whether the function is a route only signed-in users reach.
+    pub granted_attachments: Vec<(bool, RawDiag)>,
     /// OD120 on each name an `ormcache` key reads that the method does not bind, keyed by the name:
     /// `checks.rs` drops those that Odoo's cache module defines in the module's series.
     pub cache_key_names: Vec<(String, RawDiag)>,
@@ -979,6 +983,9 @@ pub struct AccessRow {
     pub public_write: Option<String>,
     /// A row of `ir.model.access`, not of `ir.access`.
     pub model_access: bool,
+    /// The trimmed domain of an `ir.access` CSV row, None when the cell is absent or blank: Odoo
+    /// grants the operation only on the records it holds.
+    pub domain: Option<String>,
 }
 
 /// A `<function>` of a data file, which Odoo calls when it loads the file.
