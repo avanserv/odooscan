@@ -193,8 +193,9 @@ fills holds records, whose ids alone the user picks, and is no source.
 
 A value stays tainted through assignments, attributes of `self` set in the same method, formatting,
 concatenation, f-strings, string methods, items, attributes, collections, comprehensions and module
-functions such as `json.loads()`. Records do not carry it: what a recordset method such as
-`browse()` or `search()` returns is not tainted. Both branches of an `if` are followed, a branch
+functions such as `json.loads()`. What a recordset method such as `browse()` or `search()` returns
+is not tainted, but for OD712, which follows the records of `env[t]` or `env.get(t)` through locals,
+`sudo()`, `browse()`, `exists()` and `filtered()`. Both branches of an `if` are followed, a branch
 that returns or raises adds nothing after it, and a loop body is read twice.
 
 A value passed to a method of `self`, of `env["x"]` or of a local bound to one is followed into
@@ -204,13 +205,17 @@ sink when the module holds it, otherwise at the call that leaves the module. A m
 `sudo()` runs as superuser, and so do the methods it calls on `self`, until `with_user()`: what it
 writes on `self`, or on the records of a call on `self`, is a superuser write.
 
-The flow ends at a sanitizer: `int()`, `float()`, `bool()`, `len()`, `SQL.identifier()`,
-`escape()`, `html_escape()`, `html_sanitize()`, `plaintext2html()`, `urlencode()`, `url_encode()`,
+The flow ends at a sanitizer: `int()`, `float()`, `bool()`, `len()`, `SQL.identifier()`, `escape()`,
+`html_escape()`, `html_sanitize()`, `plaintext2html()`, `urlencode()`, `url_encode()`,
 `secure_filename()`, `content_disposition()` and `file_open()`; at `assert x in (...)` or
-`if x not in allowed: raise`; and at an intersection with values the code chose, such as
-`set(vals) & allowed`. Some steps make a value harmless for one rule only: `os.path.basename()`,
-`io.BytesIO()` and `io.StringIO()` for OD707, `shlex.quote()` and `shlex.join()` for OD708, and a
-start the code picks for OD705 and OD706, as their pages say.
+`if x not in allowed: raise`, and inside a comprehension at its `if x in allowed`; and at an
+intersection with values the code chose, such as `set(vals) & allowed`. A test that `x` is in `env`,
+`registry`, `pool` or `_fields` proves only that the model or the field exists, so it ends every
+flow but those of OD712, OD714 and OD715. Some steps make a value harmless for one rule only:
+`os.path.basename()`, `io.BytesIO()` and `io.StringIO()` for OD707, `shlex.quote()` and
+`shlex.join()` for OD708, a start the code picks for OD705 and OD706, a name built with text of the
+code's for OD713, and a condition whose field and operator the code picks for OD715, as their pages
+say.
 
 A project adds its own sources, sinks and sanitizers in the
 [`[taint]` table of its configuration](../configuration.md#taint-table).
@@ -228,3 +233,7 @@ A project adds its own sources, sinks and sanitizers in the
 | [OD709](OD709.md) | `unsafe-deserialization-flow` | Data a user controls is loaded by pickle, marshal or an unsafe YAML loader. |
 | [OD710](OD710.md) | `xml-entity-flow` | Data a user controls is parsed as XML by a parser that resolves entities. |
 | [OD711](OD711.md) | `header-injection-flow` | Data a user controls reaches the headers of a response. |
+| [OD712](OD712.md) | `sudo-model-injection` | Data a user controls picks the model of records read or written as superuser. |
+| [OD713](OD713.md) | `method-injection-flow` | Data a user controls names the method that getattr() looks up and the code calls. |
+| [OD714](OD714.md) | `sudo-field-injection` | Data a user controls picks the field read as superuser. |
+| [OD715](OD715.md) | `sudo-domain-injection` | Data a user controls picks the fields of a domain or a grouping searched as superuser. |
