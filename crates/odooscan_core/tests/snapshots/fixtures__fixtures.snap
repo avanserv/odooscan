@@ -346,6 +346,7 @@ custom/domain_bases/views/domains.xml:43:17: OD210 'no_filter_group': domain.who
 custom/domain_bases/views/domains.xml:56:25: OD304 'whole_id.no_view_past_base': domain.whole has no field 'no_view_past_base'
 custom/domain_bases/views/domains.xml:85:17: OD304 'no_chained': domain.chained has no field 'no_chained'
 custom/domain_bases/views/domains.xml:94:17: OD304 'no_fieldless_view': domain.fieldless has no field 'no_fieldless_view'
+custom/domains20/controllers/main.py:11:20: OD715 route parameter 'filters' reaches the domain or the fields of sudo().search_count(), so the user searches or groups by any field as superuser; build each condition with a field and an operator the code picks
 custom/dynamic_models/views/large.xml:39:17: OD304 'scale': bad.generated.user has no field 'scale'
 custom/dynamic_models_opaque/views/holder.xml:7:17: OD304 'no_holder_field': opaque.holder has no field 'no_holder_field'
 custom/dynamic_models_outside/models/built.py:14:32: OD202 model 'bad.generated.large' comes from module dynamic_models_side; add it to depends
