@@ -967,7 +967,7 @@ struct Key {
 
 impl Vals {
     /// The values of either of two paths. A key one path leaves unset may keep what it held.
-    fn and(mut self, other: Vals) -> Vals {
+    fn joined(mut self, other: Vals) -> Vals {
         for key in &mut self.keys {
             key.sure &= other.keys.iter().any(|k| k.name == key.name);
         }
@@ -1035,8 +1035,8 @@ impl Vals {
 /// of the other unset, so they replace nothing.
 fn join_vals(a: Option<Vals>, b: Option<Vals>) -> Option<Vals> {
     match (a, b) {
-        (Some(a), Some(b)) => Some(a.and(b)),
-        (Some(v), None) | (None, Some(v)) => Some(v.and(Vals::default())),
+        (Some(a), Some(b)) => Some(a.joined(b)),
+        (Some(v), None) | (None, Some(v)) => Some(v.joined(Vals::default())),
         (None, None) => None,
     }
 }
@@ -1687,7 +1687,7 @@ impl Flows<'_> {
     fn list_vals(&mut self, elts: &[Expr]) -> Option<Vals> {
         let all: Vec<Vals> = elts.iter().filter_map(|e| self.vals_of(e)).collect();
         let public = all.iter().any(|v| v.public);
-        all.into_iter().filter(|v| v.public || !public).reduce(Vals::and)
+        all.into_iter().filter(|v| v.public || !public).reduce(Vals::joined)
     }
 
     /// The values a dict literal sets, a later key over an earlier one.
@@ -6171,7 +6171,7 @@ mod tests {
     }
 
     #[test]
-    fn a_private_attachment_or_one_created_with_a_user_rights_is_not_reported() {
+    fn a_private_attachment_or_one_created_with_user_rights_is_not_reported() {
         for body in [
             "    request.env['ir.attachment'].create({'raw': upload, 'public': True})",
             "    A.with_user(request.env.user).create({'raw': upload, 'public': True})",

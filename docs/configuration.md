@@ -61,6 +61,6 @@ A source's value is read as a mapping whose keys the user picks too, so it can r
 as the other rules. Each key of `sinks` is one of the OD7 rules, by code or name, but OD716, which
 reads what a route returns, and OD717, which reads the values of an attachment. A sink checks its
 first positional argument, or without one the keyword `query`, `code`, `expr`, `vals` or
-`vals_list`. An OD704 sink reports only a mapping whose keys the
-user picks, and `%` on what an OD703 sink returns escapes nothing, unlike `%` on `Markup()`. `oscn`
-exits with status 2 on a pattern or a rule it cannot read.
+`vals_list`. An OD704 sink reports only a mapping whose keys the user picks, and `%` on what an
+OD703 sink returns escapes nothing, unlike `%` on `Markup()`. `oscn` exits with status 2 on a
+pattern or a rule it cannot read.
