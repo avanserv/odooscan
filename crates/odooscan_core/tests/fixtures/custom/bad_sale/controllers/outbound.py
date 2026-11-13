@@ -70,3 +70,10 @@ class Outbound(http.Controller):
     def legacy(self, name):
         io.open(os.path.join(DOCS, os.path.basename(name)), "rb")
         return io.open(DOCS + "/" + name, "rb")
+
+    @http.route("/bad/outbound/catalog", auth="user", type="json")
+    def catalog(self, token):
+        # The session sends the header to the catalog, never back to the user.
+        catalog = requests.Session()
+        catalog.headers["Authorization"] = token
+        return catalog.get("https://catalog.example.com/stock", timeout=10).json()

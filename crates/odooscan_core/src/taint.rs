@@ -10,6 +10,7 @@ use crate::facts::{
     Step,
 };
 use crate::method_body::arguments;
+use crate::module_state::dotted;
 use crate::python::{Locator, SAME_MODEL, exits, str_lit, tail_name};
 use crate::python2;
 use crate::series::Series;
@@ -900,6 +901,8 @@ struct State {
     vals: FxHashMap<String, Vals>,
     /// Locals bound to a path that an `os.path.join()` of `Flows::held` built.
     paths: FxHashMap<String, Sites>,
+    /// Locals and attributes of `self` bound to an outgoing client of `CLIENTS`.
+    clients: FxHashSet<String>,
 }
 
 /// The `os.path.join()` calls a path may come from, and whether a normalizer resolved its `..` on
@@ -1035,6 +1038,8 @@ impl State {
         // A check on one path only still vouches for the records: as at 18.0
         // payment/controllers/portal.py:76-78, the path without it browses no id.
         self.checked.extend(other.checked);
+        // A client suppresses a sink, so it holds only where every path bound one.
+        self.clients.retain(|key| other.clients.contains(key));
     }
 }
 
@@ -1231,15 +1236,7 @@ impl Flows<'_> {
                 self.repeat(&w.body, |_| {});
                 self.body(&w.orelse);
             }
-            Stmt::With(w) => {
-                for item in &w.items {
-                    let t = self.expr(&item.context_expr);
-                    if let Some(target) = &item.optional_vars {
-                        self.bind(target, t, None);
-                    }
-                }
-                self.body(&w.body);
-            }
+            Stmt::With(w) => self.with_stmt(w),
             Stmt::Try(t) => self.try_stmt(t),
             Stmt::Assert(a) => {
                 self.expr(&a.test);
@@ -1320,6 +1317,20 @@ impl Flows<'_> {
         self.body(&f.orelse);
     }
 
+    fn with_stmt(&mut self, w: &ast::StmtWith) {
+        for item in &w.items {
+            let t = self.expr(&item.context_expr);
+            if let Some(target) = &item.optional_vars {
+                self.bind(target, t, None);
+                // A client's `__enter__` returns the client itself.
+                if let Some(key) = var_key(target) {
+                    self.bind_client(&key, Some(&item.context_expr));
+                }
+            }
+        }
+        self.body(&w.body);
+    }
+
     fn try_stmt(&mut self, t: &ast::StmtTry) {
         self.body(&t.body);
         for handler in &t.handlers {
@@ -1334,6 +1345,7 @@ impl Flows<'_> {
     /// or attribute set on either adds the value to it.
     fn bind(&mut self, target: &Expr, t: Option<Taint>, value: Option<&Expr>) {
         if let Some(key) = self_attr(target) {
+            self.bind_client(&key, value);
             return self.set(key, target, t);
         }
         match target {
@@ -1345,7 +1357,9 @@ impl Flows<'_> {
             }
             Expr::Starred(s) => self.bind(&s.value, t, None),
             // `response.headers[name] = t` sets a header, as `headers.set(name, t)` does.
-            Expr::Subscript(ast::ExprSubscript { value: base, slice, .. }) if is_headers(base) => {
+            Expr::Subscript(ast::ExprSubscript { value: base, slice, .. })
+                if headers_of(base).is_some_and(|owner| !self.is_client(owner)) =>
+            {
                 let label = header_label(str_lit(slice), &self.path(base).join("."));
                 self.sink(Sink::Header, label, t, target);
             }
@@ -1535,7 +1549,19 @@ impl Flows<'_> {
         };
         self.bind_vals(name, target, value);
         self.bind_path(name, value);
+        self.bind_client(name, value);
         self.set(name.to_owned(), target, t);
+    }
+
+    fn bind_client(&mut self, key: &str, value: Option<&Expr>) {
+        toggle(&mut self.state.clients, key, value.is_some_and(client_call));
+    }
+
+    /// Whether `expr` is an outgoing client, whose headers go out with the requests it sends: a
+    /// call of `CLIENTS`, a local or attribute of `self` bound to one, or a name with `session` in
+    /// it, which stands for a session bound in another method, as `__init__`.
+    fn is_client(&self, expr: &Expr) -> bool {
+        client_call(expr) || var_key(expr).is_some_and(|k| self.state.clients.contains(&k)) || is_session(expr)
     }
 
     /// The last name of what `expr` refers to, through a local bound to it and `getattr()` with a
@@ -2544,12 +2570,12 @@ impl Flows<'_> {
 
     /// Whether a call of `path` that `row` matches is the sink: its guard is met, it calls no
     /// module an import from `odoo` binds when the row names the standard library's, and it sets
-    /// no header of a session.
+    /// no header of an outgoing client.
     fn is_sink(&self, row: SinkRow, path: &[String], call: &ast::ExprCall) -> bool {
         let odoo = row.stdlib && path.first().is_some_and(|p| self.odoo.contains(&p.as_str()));
-        let session = matches!(&*call.func, Expr::Attribute(a) if matches!(&*a.value,
-            Expr::Attribute(h) if h.attr.as_str() == "headers" && is_session(&h.value)));
-        !odoo && !session && row.guard.is_none_or(|g| self.met(g, call))
+        let client = matches!(&*call.func, Expr::Attribute(a)
+            if headers_of(&a.value).is_some_and(|owner| self.is_client(owner)));
+        !odoo && !client && row.guard.is_none_or(|g| self.met(g, call))
     }
 
     /// Whether the argument a guard reads passes its test, or the module's series predates the
@@ -3203,10 +3229,25 @@ fn is_env(expr: &Expr) -> bool {
     }
 }
 
-/// Whether `expr` is the `headers` of a response. Those of a session, as `requests.Session`
-/// has, go out with the requests it sends.
-fn is_headers(expr: &Expr) -> bool {
-    matches!(expr, Expr::Attribute(a) if a.attr.as_str() == "headers" && !is_session(&a.value))
+/// What `expr` is the `headers` of: a response, or an outgoing client as `Flows::is_client`
+/// tells them apart.
+fn headers_of(expr: &Expr) -> Option<&Expr> {
+    match expr {
+        Expr::Attribute(a) if a.attr.as_str() == "headers" => Some(&a.value),
+        _ => None,
+    }
+}
+
+/// The constructors of an outgoing HTTP client.
+const CLIENTS: &[&str] = &[
+    "requests.Session",
+    "requests.session",
+    "httpx.Client",
+    "httpx.AsyncClient",
+];
+
+fn client_call(expr: &Expr) -> bool {
+    matches!(expr, Expr::Call(c) if CLIENTS.contains(&dotted(&c.func).as_str()))
 }
 
 fn is_session(expr: &Expr) -> bool {
@@ -3277,6 +3318,11 @@ fn self_attr(expr: &Expr) -> Option<String> {
         }
         _ => None,
     }
+}
+
+/// The key a local or an attribute of `self` keeps a value under.
+fn var_key(expr: &Expr) -> Option<String> {
+    self_attr(expr).or_else(|| expr.as_name_expr().map(|n| n.id.to_string()))
 }
 
 /// Whether every prefix `startswith()` takes, one or a tuple, is `fixed`.
@@ -4293,6 +4339,40 @@ mod tests {
             ("base.headers.add('X-Name', t)", "OD711"),
             ("base.headers.set('X-Name', t)", "OD711"),
             ("base.headers['X-Name'] = t", "OD711"),
+            ("resp = request.make_response(base)\n    resp.headers['X'] = t", "OD711"),
+            (
+                "res = request.make_response(base)\n    res.headers.set('X', t)",
+                "OD711",
+            ),
+            ("client.headers['X'] = t", "OD711"),
+            (
+                "s = requests.Session()\n    s = request.make_response(base)\n    s.headers['X'] = t",
+                "OD711",
+            ),
+            (
+                "self.client = httpx.Client()\n    self.client = request.make_response(base)\n    self.client.headers['X'] = t",
+                "OD711",
+            ),
+            (
+                "client = request.make_response(base)\n    client.headers['X'] = t",
+                "OD711",
+            ),
+            (
+                "r = request.make_response(base)\n    if base:\n        r = requests.Session()\n    r.headers['X'] = t",
+                "OD711",
+            ),
+            (
+                "if base:\n        r = requests.Session()\n    else:\n        r = request.make_response(base)\n    r.headers['X'] = t",
+                "OD711",
+            ),
+            (
+                "try:\n        r = requests.Session()\n    except Exception:\n        r = request.make_response(base)\n    r.headers['X'] = t",
+                "OD711",
+            ),
+            (
+                "r = request.make_response(base)\n    for x in base:\n        r = requests.Session()\n    r.headers['X'] = t",
+                "OD711",
+            ),
         ] {
             assert_eq!(codes(call), [code], "{call}");
         }
@@ -4309,6 +4389,13 @@ mod tests {
             "requests.Session().headers['Authorization'] = t",
             "session.headers.update({'Authorization': t})",
             "self._session.headers.set('Authorization', t)",
+            "s = requests.Session()\n    s.headers['Authorization'] = t",
+            "sess = requests.session()\n    sess.headers.set('Authorization', t)",
+            "self.client = httpx.Client()\n    self.client.headers['Authorization'] = t",
+            "c = httpx.AsyncClient()\n    c.headers.add('X', t)",
+            "httpx.Client().headers['X'] = t",
+            "with requests.Session() as s:\n        s.headers['X'] = t",
+            "if base:\n        r = requests.Session()\n    else:\n        r = httpx.Client()\n    r.headers['X'] = t",
         ] {
             assert!(codes(call).is_empty(), "{call}");
         }
