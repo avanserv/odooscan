@@ -202,7 +202,7 @@ fn is_env(expr: &Expr) -> bool {
 }
 
 /// `request` or `http.request`, the request a route serves.
-fn is_request(expr: &Expr) -> bool {
+pub(crate) fn is_request(expr: &Expr) -> bool {
     match expr {
         Expr::Name(n) => n.id.as_str() == "request",
         Expr::Attribute(a) => {
