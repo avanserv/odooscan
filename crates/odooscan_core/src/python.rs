@@ -1595,8 +1595,8 @@ pub fn analyze(src: &str, series: Option<Series>) -> PyFacts {
     analyze_with(src, series, &FieldClasses::default(), &TaintTable::default())
 }
 
-/// As `analyze`, reading a call of a class of `known` as a field and following data by the rows
-/// of `taint` too.
+/// The facts of a Python file of a module of `series`, reading a call of a class of `known` as a
+/// field and following data by the rows of `taint` as well as the built-in ones.
 pub fn analyze_with(src: &str, series: Option<Series>, known: &FieldClasses, taint: &TaintTable) -> PyFacts {
     let loc = Locator::new(src);
     let module = match async_names::parse(src, series) {
