@@ -427,7 +427,11 @@ mod tests {
             ["model.py:5 OD704 route parameter 'post' reaches self.write() through '_apply()'"]
         );
         assert!(call("request.env['x.y']").is_empty());
-        assert!(call("request.env['x.y'].sudo().with_user(1)").is_empty());
+        assert!(call("request.env['x.y'].sudo().with_user(request.env.user)").is_empty());
+        assert_eq!(
+            call("request.env['x.y'].sudo().with_user(SUPERUSER_ID)"),
+            ["model.py:5 OD704 route parameter 'post' reaches self.write() through '_apply()'"]
+        );
     }
 
     #[test]
@@ -444,7 +448,11 @@ mod tests {
             call("self._store(vals)"),
             ["model.py:8 OD704 route parameter 'post' reaches self.write() through '_apply()', '_store()'"]
         );
-        assert!(call("self.with_user(1)._store(vals)").is_empty());
+        assert!(call("self.with_user(self.env.user)._store(vals)").is_empty());
+        assert_eq!(
+            call("self.with_user(SUPERUSER_ID)._store(vals)"),
+            ["model.py:8 OD704 route parameter 'post' reaches self.write() through '_apply()', '_store()'"]
+        );
     }
 
     /// Methods `_m1` to `_m<n>` of `x.y`, each returning the next and the last `last`.

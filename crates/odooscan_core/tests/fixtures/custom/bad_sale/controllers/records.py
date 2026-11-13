@@ -63,3 +63,10 @@ class Records(http.Controller):
         if int(order_id) not in request.env.user.partner_id.order_ids.ids:
             raise AccessError("Not your order")
         return request.env["bad.order"].sudo().browse(int(order_id)).name
+
+    @http.route("/bad/records/user", auth="user")
+    def user(self, order_id):
+        order_sudo = request.env["bad.order"].sudo().browse(int(order_id))
+        order = order_sudo.with_user(request.env.user)
+        order.check_access("read")
+        return order_sudo.name
