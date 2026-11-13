@@ -1,12 +1,15 @@
+use std::collections::BTreeMap;
 use std::path::{Component, Path, PathBuf};
 
 use ignore::gitignore::{Gitignore, GitignoreBuilder};
+use odooscan_core::TaintTable;
 use serde::Deserialize;
 
 const CONFIG_FILE: &str = "odooscan.toml";
 const PYPROJECT: &str = "pyproject.toml";
 
-/// The `[tool.odooscan]` table, or the whole of `odooscan.toml`. Keys mirror the `check` flags.
+/// The `[tool.odooscan]` table, or the whole of `odooscan.toml`. Keys mirror the `check` flags,
+/// but for `taint`, which no flag sets.
 #[derive(Default, Deserialize)]
 #[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
 pub struct Config {
@@ -16,6 +19,35 @@ pub struct Config {
     pub ignore: Vec<String>,
     pub exclude: Vec<String>,
     pub baseline: Option<PathBuf>,
+    pub taint: TaintConfig,
+}
+
+/// Rows the OD7 rules follow besides their own, as dotted patterns. `sinks` maps a rule, by code or
+/// name, to its patterns.
+#[derive(Default, Deserialize)]
+#[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
+pub struct TaintConfig {
+    pub sources: Vec<String>,
+    pub sanitizers: Vec<String>,
+    pub sinks: BTreeMap<String, Vec<String>>,
+}
+
+impl TaintConfig {
+    pub fn table(&self) -> Result<TaintTable, String> {
+        let mut table = TaintTable::default();
+        for pattern in &self.sources {
+            table.source(pattern)?;
+        }
+        for pattern in &self.sanitizers {
+            table.sanitizer(pattern)?;
+        }
+        for (rule, patterns) in &self.sinks {
+            for pattern in patterns {
+                table.sink(rule, pattern)?;
+            }
+        }
+        Ok(table)
+    }
 }
 
 #[derive(Deserialize)]

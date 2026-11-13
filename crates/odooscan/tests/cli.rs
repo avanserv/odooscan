@@ -96,6 +96,47 @@ fn check_expands_a_tilde_from_the_file() {
     assert_eq!(out.status.code(), Some(0), "{}", String::from_utf8_lossy(&out.stderr));
 }
 
+const RUNS_CODE: &str = "from odoo import http\n\n\nclass C(http.Controller):\n    @http.route('/run', auth='user')\n    def run(self, code):\n        return sandbox.run(code)\n";
+
+#[test]
+fn check_follows_a_sink_from_the_file() {
+    let dir = scratch("taint_sink");
+    module(&dir, "runs", "18.0", &[("run.py", RUNS_CODE.as_bytes())]);
+    fs::write(dir.join("odooscan.toml"), "[taint.sinks]\nOD702 = [\"sandbox.run\"]\n").unwrap();
+    let (code, stdout, stderr) = run(check_in(&dir, &["mods"]));
+    assert_eq!(code, Some(1), "{stderr}");
+    assert!(
+        stdout.contains("OD702 route parameter 'code' reaches sandbox.run(), which runs it as code"),
+        "{stdout}"
+    );
+}
+
+const READS_FORM: &str = "from odoo import http\n\n\nclass C(http.Controller):\n    @http.route('/run', auth='user')\n    def run(self):\n        form = forms.read()\n        sandbox.run(forms.clean(form['a']))\n        return sandbox.run(form['b'])\n";
+
+#[test]
+fn check_follows_a_source_and_a_sanitizer_from_the_file() {
+    let dir = scratch("taint_source");
+    module(&dir, "runs", "18.0", &[("run.py", READS_FORM.as_bytes())]);
+    let config = "[taint]\nsources = [\"forms.read\"]\nsanitizers = [\"forms.clean\"]\n\n[taint.sinks]\nOD702 = [\"sandbox.run\"]\n";
+    fs::write(dir.join("odooscan.toml"), config).unwrap();
+    let (code, stdout, stderr) = run(check_in(&dir, &["mods"]));
+    assert_eq!(code, Some(1), "{stderr}");
+    let found: Vec<&str> = stdout.lines().filter(|l| l.contains("OD702")).collect();
+    assert_eq!(found.len(), 1, "{stdout}");
+    assert!(found[0].contains("run.py:9:"), "{stdout}");
+    assert!(found[0].contains("forms.read() reaches sandbox.run()"), "{stdout}");
+}
+
+#[test]
+fn check_rejects_a_sink_of_a_rule_that_follows_no_flow() {
+    let dir = scratch("taint_sink_rule");
+    module(&dir, "runs", "18.0", &[("run.py", RUNS_CODE.as_bytes())]);
+    fs::write(dir.join("odooscan.toml"), "[taint.sinks]\nOD101 = [\"sandbox.run\"]\n").unwrap();
+    let (code, _, stderr) = run(check_in(&dir, &["mods"]));
+    assert_eq!(code, Some(2));
+    assert!(stderr.contains("'OD101'"), "{stderr}");
+}
+
 /// The OD203 findings of a scan of `cycles/<module>`. A stack overflow aborts the process and would
 /// take a test binary with it, so the scan is spawned: a signal gives no exit code.
 fn cycle_paths(module: &str) -> Vec<String> {
