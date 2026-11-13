@@ -1623,6 +1623,12 @@
     {
       "path": "addons/mail/security/ir.access.csv",
       "code": "OD402",
+      "message": "base.group_everyone, public and portal users included, gets write, create or unlink on discuss.channel.member; public and portal access should be read-only and go through controllers",
+      "count": 5
+    },
+    {
+      "path": "addons/mail/security/ir.access.csv",
+      "code": "OD402",
       "message": "base.group_portal gets write, create or unlink on mail.message; public and portal access should be read-only and go through controllers",
       "count": 3
     },
@@ -2703,6 +2709,12 @@
     {
       "path": "addons/test_mail/security/ir.access.csv",
       "code": "OD402",
+      "message": "base.group_everyone, public and portal users included, gets write, create or unlink on mail.test.access.public; public and portal access should be read-only and go through controllers",
+      "count": 1
+    },
+    {
+      "path": "addons/test_mail/security/ir.access.csv",
+      "code": "OD402",
       "message": "base.group_portal gets write, create or unlink on mail.test.access; public and portal access should be read-only and go through controllers",
       "count": 1
     },
@@ -3034,6 +3046,12 @@
       "path": "addons/website_forum/controllers/website_mail.py",
       "code": "OD712",
       "message": "route parameter 'records' reaches the model of sudo().search() through 'ids', 'forum_records', 'model', so the user picks the model the superuser reads or writes; pick the model from those the code allows",
+      "count": 1
+    },
+    {
+      "path": "addons/website_forum/security/ir.access.csv",
+      "code": "OD402",
+      "message": "base.group_everyone, public and portal users included, gets write, create or unlink on forum.tag; public and portal access should be read-only and go through controllers",
       "count": 1
     },
     {
@@ -3375,6 +3393,12 @@
     {
       "path": "odoo/addons/base/security/ir.access.csv",
       "code": "OD402",
+      "message": "base.group_everyone, public and portal users included, gets write, create or unlink on ir.filters; public and portal access should be read-only and go through controllers",
+      "count": 1
+    },
+    {
+      "path": "odoo/addons/base/security/ir.access.csv",
+      "code": "OD402",
       "message": "base.group_portal gets write, create or unlink on res.users.apikeys.description; public and portal access should be read-only and go through controllers",
       "count": 1
     },
@@ -3454,6 +3478,30 @@
       "path": "odoo/addons/test_base/models/test_orm.py",
       "code": "OD401",
       "message": "model 'test_orm.req_m2o_transient' has no ir.access rule with a group, so only the superuser can use it",
+      "count": 1
+    },
+    {
+      "path": "odoo/addons/test_base/security/ir.access.csv",
+      "code": "OD402",
+      "message": "base.group_everyone, public and portal users included, gets write, create or unlink on test_access_right.child; public and portal access should be read-only and go through controllers",
+      "count": 1
+    },
+    {
+      "path": "odoo/addons/test_base/security/ir.access.csv",
+      "code": "OD402",
+      "message": "base.group_everyone, public and portal users included, gets write, create or unlink on test_access_right.container; public and portal access should be read-only and go through controllers",
+      "count": 1
+    },
+    {
+      "path": "odoo/addons/test_base/security/ir.access.csv",
+      "code": "OD402",
+      "message": "base.group_everyone, public and portal users included, gets write, create or unlink on test_access_right.inherits; public and portal access should be read-only and go through controllers",
+      "count": 1
+    },
+    {
+      "path": "odoo/addons/test_base/security/ir.access.csv",
+      "code": "OD402",
+      "message": "base.group_everyone, public and portal users included, gets write, create or unlink on test_access_right.some_obj; public and portal access should be read-only and go through controllers",
       "count": 1
     },
     {
