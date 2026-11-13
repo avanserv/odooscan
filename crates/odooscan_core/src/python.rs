@@ -1801,6 +1801,59 @@ fn dotted(class_name: &str) -> String {
     out.to_lowercase()
 }
 
+/// The parameters a `model` or `models` converter fills with records in every URL of a function's
+/// routes that names them (18.0 `odoo/addons/base/models/ir_http.py:58-88`): the user picks their
+/// ids, not their values.
+fn record_params(func: &ast::StmtFunctionDef) -> Vec<&str> {
+    let mut records = vec![];
+    let mut others = vec![];
+    for url in route_urls(func) {
+        for (converter, name) in url_converters(url) {
+            if matches!(converter, "model" | "models") {
+                records.push(name);
+            } else {
+                others.push(name);
+            }
+        }
+    }
+    records.retain(|name| !others.contains(name));
+    records
+}
+
+/// The URL literals of a function's `@route` decorators, one or a list each.
+fn route_urls(func: &ast::StmtFunctionDef) -> Vec<&str> {
+    let mut urls = vec![];
+    for decorator in &func.decorator_list {
+        let Expr::Call(call) = &decorator.expression else {
+            continue;
+        };
+        if tail_name(&call.func) != Some("route") {
+            continue;
+        }
+        let Some(arg) = call.arguments.args.first().or_else(|| keyword(call, "route")) else {
+            continue;
+        };
+        match arg {
+            Expr::List(ast::ExprList { elts, .. }) | Expr::Tuple(ast::ExprTuple { elts, .. }) => {
+                urls.extend(elts.iter().filter_map(str_lit));
+            }
+            e => urls.extend(str_lit(e)),
+        }
+    }
+    urls
+}
+
+/// The converter and the name of each `<converter(arguments):name>` part of a URL, `<name>` taking
+/// werkzeug's `default`.
+fn url_converters(url: &str) -> impl Iterator<Item = (&str, &str)> {
+    url.split('<').skip(1).filter_map(|part| {
+        let (inner, _) = part.split_once('>')?;
+        let (converter, name) = inner.rsplit_once(':').unwrap_or(("default", inner));
+        let converter = converter.split('(').next().unwrap_or_default();
+        Some((converter.trim(), name.trim()))
+    })
+}
+
 struct PyVisitor<'a, 'ast> {
     loc: &'a Locator<'a>,
     series: Option<Series>,
@@ -2646,8 +2699,9 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
                 e => tail_name(e) == Some(name),
             })
         };
+        let records = record_params(func);
         let params = if decorated("route") {
-            Params::Route
+            Params::Route(&records)
         } else if matches!(self.owners.last(), Some(Some(Receiver::Model(_))))
             && !func.name.starts_with('_')
             && !decorated("private")
@@ -2657,7 +2711,8 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
             Params::None
         };
         let owner = self.owners.last().cloned().flatten();
-        let (diags, summary) = taint::function(func, params, owner, self.series, self.loc, self.taint);
+        let (diags, summary) =
+            taint::function(func, params, owner, self.series, &self.odoo_names, self.loc, self.taint);
         self.facts.diags.extend(diags);
         self.facts.flows.extend(summary);
     }
@@ -5392,6 +5447,25 @@ mod tests {
 
     fn codes(src: &str, series: Option<Series>) -> Vec<&'static str> {
         analyze(src, series).diags.iter().map(|d| d.code).collect()
+    }
+
+    #[test]
+    fn a_route_parameter_a_model_converter_fills_holds_records() {
+        let route = |urls: &str| {
+            let src = format!(
+                "class C(http.Controller):\n    @http.route({urls})\n    def f(self, partner, id):\n        request.make_response('', [('X-Name', partner.name)])\n        request.make_response('', [('X-Id', id)])\n"
+            );
+            let diags = analyze(&src, None).diags;
+            diags.into_iter().map(|d| d.message).collect::<Vec<_>>().join("\n")
+        };
+        let one = route("'/p/<model(\"res.partner\"):partner>/<int:id>'");
+        assert!(one.contains("'id'") && !one.contains("'partner'"), "{one}");
+        let list = route("['/p/<models(\"res.partner\", \"[]\"):partner>', '/q/<int:id>']");
+        assert!(list.contains("'id'") && !list.contains("'partner'"), "{list}");
+        let other = route("['/p/<model(\"res.partner\"):partner>', '/q/<partner>']");
+        assert!(other.contains("'partner'"), "{other}");
+        let both = route("route='/p/<int:partner>'");
+        assert!(both.contains("'partner'") && both.contains("'id'"), "{both}");
     }
 
     #[test]

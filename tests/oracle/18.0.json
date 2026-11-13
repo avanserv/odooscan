@@ -2461,6 +2461,12 @@
       "count": 1
     },
     {
+      "path": "odoo/addons/base/models/ir_ui_view.py",
+      "code": "OD710",
+      "message": "RPC argument 'vals_list' reaches etree.fromstring() through 'values', whose parser resolves entities, so the user can read the server's files; pass etree.XMLParser(resolve_entities=False)",
+      "count": 1
+    },
+    {
       "path": "odoo/addons/base/models/res_bank.py",
       "code": "OD105",
       "message": "unlink() override never calls super(), so other modules' overrides and the ORM itself are skipped",

@@ -277,6 +277,10 @@ rules! {
     "OD705" "open-redirect-flow" Security Warning None, false, "Data a user controls picks the site a redirect sends the browser to.";
     "OD706" "server-request-forgery-flow" Security Error None, false, "Data a user controls picks the URL the server sends a request to.";
     "OD707" "path-traversal-flow" Security Error None, false, "Data a user controls picks the path of a file the server opens.";
+    "OD708" "command-injection-flow" Security Error None, false, "Data a user controls reaches a command the server runs through the shell.";
+    "OD709" "unsafe-deserialization-flow" Security Error None, false, "Data a user controls is loaded by pickle, marshal or an unsafe YAML loader.";
+    "OD710" "xml-entity-flow" Security Warning None, false, "Data a user controls is parsed as XML by a parser that resolves entities.";
+    "OD711" "header-injection-flow" Security Warning None, false, "Data a user controls reaches the headers of a response.";
 }
 
 pub fn rule(code: &str) -> &'static Rule {
