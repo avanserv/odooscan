@@ -525,6 +525,9 @@ pub enum FlowTarget {
     /// `write()` or `create()` on the records of a model method, which run as superuser when the
     /// caller called the method under `sudo()`.
     SelfWrite,
+    /// A call a rule reports, by the rule's code, only when the scanned modules grant public or
+    /// portal users the right it needs, as a public attachment created with the user's rights.
+    Granted(&'static str),
 }
 
 /// The OD7 codes a tainted value is harmless for, as bits by the number after `OD7`.
@@ -724,6 +727,9 @@ pub struct PyFacts {
     /// OD121 on the rollbacks of `ir.http._handle_exception()`, Odoo's hook for a failed request
     /// only before 16.0, which the series of the module decides.
     pub legacy_hook_rollbacks: Vec<RawDiag>,
+    /// OD717 on a public attachment created with the rights of a user who sent its content, which
+    /// `checks.rs` keeps when the scanned modules grant portal or public users create on it.
+    pub granted_attachments: Vec<RawDiag>,
     /// OD120 on each name an `ormcache` key reads that the method does not bind, keyed by the name:
     /// `checks.rs` drops those that Odoo's cache module defines in the module's series.
     pub cache_key_names: Vec<(String, RawDiag)>,

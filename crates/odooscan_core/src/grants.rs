@@ -117,3 +117,8 @@ pub fn reads(perms: Perms) -> bool {
 pub fn stores(perms: Perms) -> bool {
     perms.write || perms.create
 }
+
+/// Public and portal users may create a record.
+pub fn creates(perms: Perms) -> bool {
+    perms.create
+}

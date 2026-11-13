@@ -2954,9 +2954,10 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
             collections: &self.collections,
             domain_joins: &self.domain_joins,
         };
-        let (diags, summary) = taint::function(func, params, owner, self.series, &names, self.loc, self.taint);
-        self.facts.diags.extend(diags);
-        self.facts.flows.extend(summary);
+        let found = taint::function(func, params, owner, self.series, &names, self.loc, self.taint);
+        self.facts.diags.extend(found.diags);
+        self.facts.granted_attachments.extend(found.granted);
+        self.facts.flows.extend(found.summary);
     }
 
     /// The routing Odoo merges for a method of a class at the top of the file.
