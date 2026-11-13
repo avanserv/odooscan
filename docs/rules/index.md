@@ -210,7 +210,8 @@ is not tainted, but for OD712, which follows the records of `env[t]` or `env.get
 reads by an id the user picks into what a route returns, until a check of them. OD717 follows the
 `public` flag and the content of the values for `ir.attachment` through dict literals, `dict()`,
 lists, locals and their items. Both branches of an `if` are followed, a branch that returns or
-raises adds nothing after it, and a loop body is read twice.
+raises adds nothing after it, and a loop body is read twice, its `for` target bound again from the
+iterable before each reading.
 
 A value passed to a method of `self`, of `env["x"]` or of a local bound to one is followed into
 every definition of that method the module's dependencies hold, overrides included, up to four calls
