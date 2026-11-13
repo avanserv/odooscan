@@ -164,8 +164,8 @@ to public and portal users, and record rules Odoo refuses to load.
 
 ## OD5: manifest and module graph
 
-The manifest and the dependency graph: its keys, listed files, unlisted files, assets and
-dependencies.
+The manifest and the dependency graph: its keys, listed files, unlisted files, assets,
+dependencies and migration scripts.
 
 | Code | Name | Reports |
 | --- | --- | --- |
@@ -182,6 +182,8 @@ dependencies.
 | [OD511](OD511.md) | `auto-install-not-depended` | auto_install names a module missing from depends, so Odoo fails to read the manifest. |
 | [OD512](OD512.md) | `data-file-repeated` | A file is listed twice under data or demo, so Odoo loads it twice. |
 | [OD513](OD513.md) | `asset-path-unmatched` | An assets path or glob of the module matches no file Odoo serves. |
+| [OD514](OD514.md) | `migration-folder-skipped` | Odoo never runs the scripts of a migration folder of this name. |
+| [OD515](OD515.md) | `migration-script-refused` | A migration script lacks the migrate(cr, version) Odoo calls, so the update fails. |
 
 ## OD6: JavaScript and Owl
 

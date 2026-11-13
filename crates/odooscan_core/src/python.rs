@@ -99,6 +99,10 @@ impl<'a> Locator<'a> {
         self.pos(node.start())
     }
 
+    pub(crate) fn text(&self, node: &impl Ranged) -> &'a str {
+        &self.src[node.range()]
+    }
+
     /// The fix that writes `replacement` over the text of `range`.
     fn replace(&self, range: TextRange, replacement: &str) -> Fix {
         Fix::single(Edit {
@@ -1726,6 +1730,7 @@ pub fn analyze_with(
     let (patches, diags) = module_state::check(body, &loc);
     v.facts.import_patches = patches;
     v.facts.diags.extend(diags);
+    v.facts.migrate = module_state::migrate(body, &loc);
     v.facts
 }
 

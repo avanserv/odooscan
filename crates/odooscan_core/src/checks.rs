@@ -9,8 +9,9 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use crate::facts::{
     AccessRow, ActionFact, ActionValue, ActionViewId, Annotation, ArchElement, ArchModifier, ArchSubview, ClassFact,
     DataFacts, DefinitionSource, DomainFact, FieldFact, FieldWrite, Flag, FunctionCall, GuardedRef, JsFacts, JsName,
-    MethodDef, ModelKind, OptionValue, OrmCall, Pos, RawDiag, RecordFact, RecordWrite, Refusal, ReportFact, RuleFact,
-    ServerFact, Signature, Spanned, SqlColumn, SqlView, Subject, UNREAD_TYPE, ViewFact, WrittenValue, XmlDef, XmlRef,
+    MethodDef, Migrate, ModelKind, OptionValue, OrmCall, Pos, PyFacts, RawDiag, RecordFact, RecordWrite, Refusal,
+    ReportFact, RuleFact, ServerFact, Signature, Spanned, SqlColumn, SqlView, Subject, UNREAD_TYPE, ViewFact,
+    WrittenValue, XmlDef, XmlRef,
 };
 use crate::grants::{self, AttachmentGrant, Grant, Grants};
 use crate::index::{
@@ -234,6 +235,8 @@ pub fn check_module<'m>(index: &Index<'m>, mi: usize, series: Option<Series>) ->
     let mut out = Out { diags: vec![] };
     manifest_files(module, &mut out);
     manifest_keys(index, module, &mut out);
+    upgrade_folders(index, module, &mut out);
+    upgrade_scripts(module, &mut out);
     unmatched_assets(module, series, &mut out);
     unread_template_lists(module, series, &mut out);
     bundle_templates(module, &mut out);
@@ -895,6 +898,67 @@ fn manifest_keys<'m>(index: &Index<'m>, module: &'m Module, out: &mut Out<'m>) {
     for dep in module.manifest.depends.iter().filter(|d| d.value == module.name) {
         let message = format!("module {} depends on itself, so Odoo never loads it", module.name);
         out.push(path, "OD510", dep.pos, message);
+    }
+}
+
+/// The scripts Odoo runs from the upgrade folders of `module`, each with its folder as
+/// `(dir, name)`: the `pre-`, `post-` and `end-` `.py` files of a folder under `UPGRADE_DIRS` but
+/// `tests` (18.0 `odoo/modules/migration.py:108-140`, `:184-191`).
+fn stage_scripts(module: &Module) -> impl Iterator<Item = ((&str, &str), &SourceFile<PyFacts>)> {
+    module.python.iter().filter_map(|file| {
+        let mut parts = file.rel.split('/');
+        let (dir, folder, name) = (parts.next()?, parts.next()?, parts.next()?);
+        let staged = ["pre-", "post-", "end-"].iter().any(|s| name.starts_with(s)) && name.ends_with(".py");
+        (parts.next().is_none() && UPGRADE_DIRS.contains(&dir) && folder != "tests" && staged)
+            .then_some(((dir, folder), file))
+    })
+}
+
+/// OD514 on an upgrade folder whose scripts the Odoo of the scan's series never runs, once, at its
+/// first script by name. The scan's series is the one `--target-series` or `--odoo-version` names,
+/// else the module's own, and a version that series refuses is OD509's alone.
+fn upgrade_folders<'m>(index: &Index<'m>, module: &'m Module, out: &mut Out<'m>) {
+    let Some(series) = index.default_series.or(module.series) else {
+        return;
+    };
+    let Some(version) = module
+        .manifest
+        .version
+        .as_ref()
+        .filter(|v| manifest::version_refusal(&v.value, Some(series)).is_none())
+    else {
+        return;
+    };
+    let mut firsts: FxHashMap<(&str, &str), &'m SourceFile<PyFacts>> = FxHashMap::default();
+    for (folder, file) in stage_scripts(module) {
+        let first = firsts.entry(folder).or_insert(file);
+        if file.rel < first.rel {
+            *first = file;
+        }
+    }
+    for ((_, name), file) in firsts {
+        if let Some(message) = manifest::upgrade_folder_refusal(name, &version.value, series) {
+            out.push(&file.path, "OD514", Pos { line: 1, col: 1 }, message);
+        }
+    }
+}
+
+/// OD515 on an upgrade script without the `migrate(cr, version)` Odoo calls, whose error fails the
+/// update (18.0 `odoo/modules/migration.py:241-255`, `odoo/modules/loading.py:182`).
+fn upgrade_scripts<'m>(module: &'m Module, out: &mut Out<'m>) {
+    for (_, file) in stage_scripts(module) {
+        let (pos, message) = match &file.facts.migrate {
+            Migrate::Unread => continue,
+            Migrate::Missing => (
+                Pos { line: 1, col: 1 },
+                "the script defines no migrate(cr, version), so Odoo raises and the update fails".to_owned(),
+            ),
+            Migrate::Refused { pos, params } => (
+                *pos,
+                format!("migrate{params} is not migrate(cr, version), so Odoo raises and the update fails"),
+            ),
+        };
+        out.push(&file.path, "OD515", pos, message);
     }
 }
 

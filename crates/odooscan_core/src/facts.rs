@@ -740,6 +740,22 @@ pub struct PyFacts {
     /// What OD123 reports, whose advice depends on whether the index knows the object as a model
     /// class.
     pub import_patches: Vec<ImportPatch>,
+    /// What the file binds to `migrate`, which `checks.rs` judges in an upgrade script.
+    pub migrate: Migrate,
+}
+
+/// What a Python file binds to `migrate` at import, which Odoo requires of an upgrade script and
+/// calls with the cursor and the installed version (18.0 `odoo/modules/migration.py:221-255`).
+#[derive(Debug, Default, PartialEq, Eq)]
+pub enum Migrate {
+    /// The file does not parse, or binds `migrate` as Odoo takes it or in a way the scan does not
+    /// judge.
+    #[default]
+    Unread,
+    /// Nothing binds `migrate`.
+    Missing,
+    /// A `def` whose parameters Odoo refuses, at its start, with the parameters as written.
+    Refused { pos: Pos, params: String },
 }
 
 #[derive(Debug)]

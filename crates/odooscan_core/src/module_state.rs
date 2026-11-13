@@ -1,12 +1,12 @@
 //! State a Python file sets up at import, which Odoo shares between every database the process
 //! serves: patches on what it imports from `odoo` (OD123), and containers that functions fill at
-//! runtime (OD124).
+//! runtime (OD124). Also what it binds to `migrate`, which an upgrade script must define (OD515).
 
 use ruff_python_ast::helpers::any_over_expr;
 use ruff_python_ast::visitor::{self, Visitor};
 use ruff_python_ast::{self as ast, Expr, Stmt};
 
-use crate::facts::{ImportPatch, RawDiag};
+use crate::facts::{ImportPatch, Migrate, RawDiag};
 use crate::python::{Locator, str_lit, tail_name};
 
 /// Calls that build a dict, a list or a set.
@@ -446,6 +446,142 @@ impl<'a> Visitor<'a> for NameUses<'_> {
     }
 }
 
+/// The names Odoo takes for the two parameters of `migrate` (18.0
+/// `odoo/modules/migration.py:221-224`).
+const MIGRATE_PARAMS: [[&str; 2]; 2] = [["cr", "_cr"], ["version", "_version"]];
+
+/// Calls through which code may bind any name of the module unseen.
+const NAME_WRITERS: &[&str] = &["globals", "locals", "exec"];
+
+/// What the file binds to `migrate` at import. A star import, a module `__getattr__` or code that
+/// writes the module's names may bind it unseen, and a decorator may change the signature Odoo
+/// reads, so only a lone undecorated `def` of the module body is judged.
+pub(crate) fn migrate(body: &[Stmt], loc: &Locator) -> Migrate {
+    let top = top_level(body);
+    let mut bindings = top.iter().copied().filter(|s| binds(s, "migrate"));
+    let (first, more) = (bindings.next(), bindings.next().is_some());
+    if more || top.iter().any(|s| binds(s, "*") || binds(s, "__getattr__")) {
+        return Migrate::Unread;
+    }
+    let judged = match first {
+        None => Migrate::Missing,
+        Some(Stmt::FunctionDef(def))
+            if def.decorator_list.is_empty()
+                && body.iter().any(|s| std::ptr::eq(s, first.unwrap()))
+                && !odoo_takes(&def.parameters) =>
+        {
+            let params = loc
+                .text(&*def.parameters)
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" ");
+            Migrate::Refused {
+                pos: loc.at(def),
+                params: params.replace("( ", "(").replace(" )", ")"),
+            }
+        }
+        Some(_) => return Migrate::Unread,
+    };
+    // Only a file judged so far is worth the walk of its whole tree.
+    if writes_names(body, "migrate") {
+        Migrate::Unread
+    } else {
+        judged
+    }
+}
+
+/// Whether `params` are two positional parameters of the names Odoo takes, defaults or not.
+fn odoo_takes(params: &ast::Parameters) -> bool {
+    let names: Vec<&str> = params
+        .posonlyargs
+        .iter()
+        .chain(&params.args)
+        .map(|p| p.parameter.name.as_str())
+        .collect();
+    params.vararg.is_none()
+        && params.kwonlyargs.is_empty()
+        && params.kwarg.is_none()
+        && names.len() == 2
+        && MIGRATE_PARAMS
+            .iter()
+            .zip(&names)
+            .all(|(taken, name)| taken.contains(name))
+}
+
+/// Whether `stmt` binds or unbinds `name` in the scope it runs in, `*` for a star import.
+fn binds(stmt: &Stmt, name: &str) -> bool {
+    match stmt {
+        Stmt::FunctionDef(f) => f.name.as_str() == name,
+        Stmt::ClassDef(c) => c.name.as_str() == name,
+        Stmt::Import(i) => i.names.iter().any(|a| match &a.asname {
+            Some(alias) => alias.as_str() == name,
+            None => a.name.split('.').next() == Some(name),
+        }),
+        Stmt::ImportFrom(i) => i
+            .names
+            .iter()
+            .any(|a| a.asname.as_ref().unwrap_or(&a.name).as_str() == name),
+        _ => targets(stmt).into_iter().any(|t| target_binds(t, name)),
+    }
+}
+
+/// The targets `stmt` assigns or deletes.
+fn targets(stmt: &Stmt) -> Vec<&Expr> {
+    match stmt {
+        Stmt::Assign(a) => a.targets.iter().collect(),
+        Stmt::AnnAssign(a) if a.value.is_some() => vec![&*a.target],
+        Stmt::AugAssign(a) => vec![&*a.target],
+        Stmt::TypeAlias(a) => vec![&*a.name],
+        Stmt::For(f) => vec![&*f.target],
+        Stmt::With(w) => w.items.iter().filter_map(|i| i.optional_vars.as_deref()).collect(),
+        Stmt::Delete(d) => d.targets.iter().collect(),
+        _ => vec![],
+    }
+}
+
+/// Whether the assignment target `target` binds `name`, alone or unpacked.
+fn target_binds(target: &Expr, name: &str) -> bool {
+    match target {
+        Expr::Tuple(ast::ExprTuple { elts, .. }) | Expr::List(ast::ExprList { elts, .. }) => {
+            elts.iter().any(|e| target_binds(e, name))
+        }
+        Expr::Starred(s) => target_binds(&s.value, name),
+        e => is_named(e, name),
+    }
+}
+
+fn is_named(expr: &Expr, name: &str) -> bool {
+    expr.as_name_expr().is_some_and(|n| n.id.as_str() == name)
+}
+
+/// Whether the file may bind `name` in the module where no statement shows it: through a
+/// `NAME_WRITERS` call, `sys.modules`, a `global` declaration or an assignment expression.
+fn writes_names(body: &[Stmt], name: &str) -> bool {
+    struct Writes<'n> {
+        name: &'n str,
+        found: bool,
+    }
+    impl<'a> Visitor<'a> for Writes<'_> {
+        fn visit_stmt(&mut self, stmt: &'a Stmt) {
+            self.found |= matches!(stmt, Stmt::Global(g) if g.names.iter().any(|n| n.as_str() == self.name));
+            visitor::walk_stmt(self, stmt);
+        }
+
+        fn visit_expr(&mut self, expr: &'a Expr) {
+            self.found |= match expr {
+                Expr::Name(n) => NAME_WRITERS.contains(&n.id.as_str()),
+                Expr::Attribute(a) => a.attr.as_str() == "modules",
+                Expr::Named(n) => is_named(&n.target, self.name),
+                _ => false,
+            };
+            visitor::walk_expr(self, expr);
+        }
+    }
+    let mut writes = Writes { name, found: false };
+    writes.visit_body(body);
+    writes.found
+}
+
 #[cfg(test)]
 mod tests {
     use ruff_python_parser::parse_module;
@@ -587,5 +723,98 @@ mod tests {
                    def e(env):\n    Z[(env.cr.dbname, 1)] = 1\n    Z[f'{env.registry.db_name}-1'] = 1\n";
         assert_eq!(codes(src), [("OD124", 1)]);
         assert_eq!(codes("Z = {}\ndef e(cr):\n    Z[(cr.name, 1)] = 1\n"), [("OD124", 1)]);
+    }
+
+    fn migrate_of(src: &str) -> Migrate {
+        let parsed = parse_module(src).expect("valid Python");
+        migrate(&parsed.syntax().body, &Locator::new(src))
+    }
+
+    #[test]
+    fn judges_a_lone_undecorated_migrate_of_the_module_body() {
+        for (src, params) in [
+            (
+                "import logging\n\ndef migrate(env, version):\n    pass\n",
+                "(env, version)",
+            ),
+            (
+                "def migrate(cr, installed_version):\n    pass\n",
+                "(cr, installed_version)",
+            ),
+            (
+                "def migrate(cr, version, extra=None):\n    pass\n",
+                "(cr, version, extra=None)",
+            ),
+            (
+                "def migrate(\n    cr,\n    version,\n    *args,\n):\n    pass\n",
+                "(cr, version, *args,)",
+            ),
+            ("def migrate(cr, *, version):\n    pass\n", "(cr, *, version)"),
+            ("def migrate(cr):\n    pass\n", "(cr)"),
+        ] {
+            let Migrate::Refused { pos, params: written } = migrate_of(src) else {
+                panic!("{src}");
+            };
+            assert_eq!(
+                (pos.line, pos.col, written.as_str()),
+                (
+                    src.lines().position(|l| l.starts_with("def")).unwrap() as u32 + 1,
+                    1,
+                    params
+                )
+            );
+        }
+        for src in [
+            "def migrate(cr, version):\n    pass\n",
+            "def migrate(_cr, _version):\n    pass\n",
+            "def migrate(cr, version=None, /):\n    pass\n",
+            "def migrate(cr, version):\n    if (n := 1):\n        setattr(cr, 'x', n)\n",
+        ] {
+            assert_eq!(migrate_of(src), Migrate::Unread, "{src}");
+        }
+        assert_eq!(
+            migrate_of("import logging\n\ndef helper(cr):\n    pass\n"),
+            Migrate::Missing
+        );
+        assert_eq!(migrate_of("migrate: int\n"), Migrate::Missing);
+    }
+
+    #[test]
+    fn leaves_a_migrate_bound_any_other_way_unjudged() {
+        for src in [
+            "@decorate\ndef migrate(env, version):\n    pass\n",
+            "if True:\n    def migrate(env, version):\n        pass\n",
+            "def migrate(env):\n    pass\nmigrate = wrap(migrate)\n",
+            "from .helpers import migrate\n",
+            "from .helpers import run as migrate\n",
+            "import migrate\n",
+            "from .helpers import *\n",
+            "from .helpers import *\ndef migrate(env, version):\n    pass\n",
+            "migrate = build()\n",
+            "migrate, other = build()\n",
+            "class migrate:\n    pass\n",
+            "with build() as migrate:\n    pass\n",
+            "for migrate in ():\n    pass\n",
+            "def __getattr__(name):\n    pass\n",
+            "globals()['migrate'] = build()\n",
+            "sys.modules[__name__].migrate = build()\n",
+            "def bind():\n    global migrate\n    migrate = build()\nbind()\n",
+            "if (migrate := build()):\n    pass\n",
+        ] {
+            assert_eq!(migrate_of(src), Migrate::Unread, "{src}");
+        }
+    }
+
+    #[test]
+    fn leaves_a_file_that_does_not_parse_unjudged() {
+        let eighteen = crate::series::Series::parse("18.0");
+        assert_eq!(
+            crate::python::analyze("def helper(:\n", eighteen).migrate,
+            Migrate::Unread
+        );
+        assert_eq!(
+            crate::python::analyze("def helper():\n    pass\n", eighteen).migrate,
+            Migrate::Missing
+        );
     }
 }
