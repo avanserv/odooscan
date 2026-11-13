@@ -1,3 +1,4 @@
+use ruff_python_ast::comparable::ComparableArguments;
 use ruff_python_ast::token::{Token, TokenKind};
 use ruff_python_ast::visitor::{self, Visitor};
 use ruff_python_ast::{self as ast, BoolOp, CmpOp, Expr, Operator, Stmt, UnaryOp};
@@ -210,16 +211,56 @@ fn switches_user(user: &Expr) -> bool {
     !user.is_none_literal_expr() && !is_session_uid(user)
 }
 
-/// `write()`, or an onchange by its decorator or its `_onchange_` name.
-fn checks_change(func: &ast::StmtFunctionDef) -> bool {
-    let onchange = |d: &ast::Decorator| matches!(&d.expression, Expr::Call(c) if is_api(&c.func, "onchange"));
-    func.name.as_str() == "write" || func.name.starts_with("_onchange_") || func.decorator_list.iter().any(onchange)
+/// A method that compares a field with the value it is set to.
+struct ChangeCheck<'a> {
+    /// The values to set: the parameter named `vals` or `values`, else the second positional one,
+    /// which an old-API `write(self, cr, uid, ids, vals)` names. Filled for an onchange too: Odoo
+    /// passes one no values, but a helper named `_onchange_*` may take them.
+    vals: Option<&'a str>,
+    onchange: bool,
+    /// The target of each enclosing `for` loop, and whether it loops over `self`.
+    loops: Vec<(&'a str, bool)>,
 }
 
-/// Whether `expr` names a token, a secret or a signature: the last word of its name, attribute,
-/// literal key, `.get()` key or called method, as `access_token`, `kw['token']`,
+/// `write()`, or an onchange by its decorator or its `_onchange_` name.
+fn checks_change(func: &ast::StmtFunctionDef) -> Option<ChangeCheck<'_>> {
+    let decorated = |d: &ast::Decorator| matches!(&d.expression, Expr::Call(c) if is_api(&c.func, "onchange"));
+    let onchange = func.name.starts_with("_onchange_") || func.decorator_list.iter().any(decorated);
+    if !onchange && func.name.as_str() != "write" {
+        return None;
+    }
+    let params = &func.parameters;
+    let mut positional = params
+        .posonlyargs
+        .iter()
+        .chain(&params.args)
+        .map(|p| p.parameter.name.as_str());
+    let named = params
+        .iter_non_variadic_params()
+        .map(|p| p.parameter.name.as_str())
+        .find(|n| matches!(*n, "vals" | "values"));
+    Some(ChangeCheck {
+        vals: named.or_else(|| positional.nth(1)),
+        onchange,
+        loops: vec![],
+    })
+}
+
+impl ChangeCheck<'_> {
+    /// Whether `expr` is `self`, or a loop target the innermost loop binding it takes from `self`.
+    fn holds_form(&self, expr: &Expr) -> bool {
+        is_self(expr)
+            || expr.as_name_expr().is_some_and(|n| {
+                let target = self.loops.iter().rev().find(|(t, _)| *t == n.id.as_str());
+                target.is_some_and(|&(_, over_self)| over_self)
+            })
+    }
+}
+
+/// The word that makes `expr` a token, a secret or a signature: the last word of its name,
+/// attribute, literal key, `.get()` key or called method, as `access_token`, `kw['token']`,
 /// `kw.get('signature')` or `self._get_secret()`.
-fn names_secret(expr: &Expr) -> bool {
+fn secret_word(expr: &Expr) -> Option<&'static str> {
     let name = match expr {
         Expr::Subscript(s) => str_lit(&s.slice),
         Expr::Call(c) => match &*c.func {
@@ -228,11 +269,46 @@ fn names_secret(expr: &Expr) -> bool {
         },
         _ => tail_name(expr),
     };
-    name.and_then(last_word).is_some_and(|w| {
-        ["token", "secret", "signature"]
-            .iter()
-            .any(|s| w.eq_ignore_ascii_case(s))
-    })
+    let word = name.and_then(last_word)?;
+    ["token", "secret", "signature"]
+        .into_iter()
+        .find(|s| word.eq_ignore_ascii_case(s))
+}
+
+/// Whether `a` and `b` read one field of two records, call one function on two of them, or call
+/// one method other than `get()` with the same arguments on two, as `a.signature == b.signature`,
+/// `get_signature(a) == get_signature(b)` or `a._get_signature() == b._get_signature()`.
+fn same_source(a: &Expr, b: &Expr) -> bool {
+    match (a, b) {
+        (Expr::Attribute(x), Expr::Attribute(y)) => x.attr.as_str() == y.attr.as_str(),
+        (Expr::Call(x), Expr::Call(y)) => match (&*x.func, &*y.func) {
+            (Expr::Name(f), Expr::Name(g)) => f.id.as_str() == g.id.as_str(),
+            // A method gets its record as receiver, so other arguments differing, as in
+            // `_get_signature(kw)`, may hand it what the caller sent.
+            (Expr::Attribute(f), Expr::Attribute(g)) => {
+                f.attr.as_str() == g.attr.as_str()
+                    && f.attr.as_str() != "get"
+                    && ComparableArguments::from(&x.arguments) == ComparableArguments::from(&y.arguments)
+            }
+            _ => false,
+        },
+        _ => false,
+    }
+}
+
+/// `vals[key]` or `vals.get(key)`.
+fn vals_key<'a>(expr: &'a Expr, vals: &str) -> Option<&'a str> {
+    let is_vals = |e: &Expr| matches!(e, Expr::Name(n) if n.id.as_str() == vals);
+    match expr {
+        Expr::Subscript(s) if is_vals(&s.value) => str_lit(&s.slice),
+        Expr::Call(c) => match &*c.func {
+            Expr::Attribute(a) if a.attr.as_str() == "get" && is_vals(&a.value) => {
+                c.arguments.args.first().and_then(str_lit)
+            }
+            _ => None,
+        },
+        _ => None,
+    }
 }
 
 /// The last word of a snake-case name, as `token` of `access_token_`.
@@ -2035,9 +2111,8 @@ struct PyVisitor<'a, 'ast> {
     /// Whether the code is in an `_auth_method_*()`, which sets the user of a request by design, or
     /// in an override of `update_env()`, which passes on the user its caller gives.
     in_user_setter: bool,
-    /// Whether the code is in a `write()` or an onchange, which compare a stored value with the
-    /// one it is set to.
-    in_change_check: bool,
+    /// The `write()` or onchange of a model the code is directly in.
+    change_check: Option<ChangeCheck<'ast>>,
     /// How many enclosing `try` bodies have a handler that catches a failed import.
     import_shims: usize,
     /// The names the file's imports from `odoo` bind at import.
@@ -2084,7 +2159,7 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
             cursor_uses: vec![],
             in_view_maker: false,
             in_user_setter: false,
-            in_change_check: false,
+            change_check: None,
             import_shims: 0,
             odoo_names: odoo_imports.iter().map(|(local, _)| *local).collect(),
             domain_joins: taint::domain_joins(&odoo_imports),
@@ -3054,12 +3129,19 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
 
     /// OD130 on `request.session.uid = ...`, the `uid` key of the session (18.0
     /// `odoo/http.py:1058-1062`), which later requests of the browser run as, and on `request.uid =
-    /// ...`, which runs the rest of the request as that user before `REQUEST_UID_END`.
-    fn session_uid(&mut self, assign: &ast::StmtAssign) {
+    /// ...`, which runs the rest of the request as that user before `REQUEST_UID_END` (15.0
+    /// `odoo/http.py:223-226,241-244`). Putting back a `request.uid` the body saved switches to no
+    /// other user, as the web login does after a failed one (15.0
+    /// `addons/web/controllers/main.py:870,876`).
+    fn session_uid(&mut self, assign: &'ast ast::StmtAssign) {
         if self.in_user_setter || !switches_user(&assign.value) {
             return;
         }
-        let request_uid = self.series.is_none_or(|s| s < superuser::REQUEST_UID_END);
+        let restores = self
+            .query_vars
+            .as_ref()
+            .is_some_and(|vars| superuser::is_request_uid(vars.value(&assign.value)));
+        let request_uid = !restores && self.series.is_none_or(|s| s < superuser::REQUEST_UID_END);
         for target in &assign.targets {
             let message = if is_session_uid(target) {
                 "assigning the session's uid switches the user the browser's requests run as; check that the caller has proven to be that user"
@@ -3090,16 +3172,11 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
     }
 
     /// OD131 on `==` or `!=` between two secrets, which takes longer the more of the secret a guess
-    /// gets right. In `write()` or an onchange it tells whether a stored value changes, which only a
-    /// user who may set it sees.
-    fn secret_compare(&mut self, compare: &ast::ExprCompare) {
-        if self.in_change_check {
-            return;
-        }
+    /// gets right.
+    fn secret_compare(&mut self, compare: &'ast ast::ExprCompare) {
         let mut pairs = compare.ops.iter().zip(compare.operands.windows(2));
-        let found = pairs.find(|(op, pair)| {
-            matches!(op, CmpOp::Eq | CmpOp::NotEq) && names_secret(&pair[0]) && names_secret(&pair[1])
-        });
+        let found =
+            pairs.find(|(op, pair)| matches!(op, CmpOp::Eq | CmpOp::NotEq) && self.leaks_secret(&pair[0], &pair[1]));
         if let Some((op, _)) = found {
             self.diag(
                 "OD131",
@@ -3107,6 +3184,46 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
                 format!("{op} between secrets takes longer the more of the secret a guess gets right, which lets a caller find it a character at a time; compare them with consteq() or hmac.compare_digest()"),
             );
         }
+    }
+
+    /// Whether `a` and `b` are two secrets a caller may time the compare of. A field against the
+    /// value a change sets it to tells only whether it changes, which a user who may set it knows.
+    /// The signatures of two records hold nothing a caller sends.
+    fn leaks_secret(&self, a: &'ast Expr, b: &'ast Expr) -> bool {
+        let (Some(x), Some(y)) = (secret_word(a), secret_word(b)) else {
+            return false;
+        };
+        let changed = self
+            .change_check
+            .as_ref()
+            .is_some_and(|check| self.changes_field(check, a, b));
+        !changed && !(x == "signature" && y == "signature" && same_source(a, b))
+    }
+
+    /// Whether `a` and `b`, directly or through a local bound once, tell only whether a field `f`
+    /// changes: `f` read twice, as before and after `super().write()` or on a record and on its
+    /// `_origin`, the stored record behind an onchange's new one of the form's values (18.0
+    /// `addons/web/models/models.py:982-989`); `f` against `vals['f']` or `vals.get('f')`; or in an
+    /// onchange, `f` of `self` or of a record of it a loop takes against a local named `f`.
+    fn changes_field(&self, check: &ChangeCheck, a: &'ast Expr, b: &'ast Expr) -> bool {
+        let value = |e: &'ast Expr| self.query_vars.as_ref().map_or(e, |vars| vars.value(e));
+        let field = |e: &'ast Expr| value(e).as_attribute_expr();
+        if let (Some(x), Some(y)) = (field(a), field(b))
+            && x.attr.as_str() == y.attr.as_str()
+        {
+            return true;
+        }
+        let sets = |stored: &'ast Expr, set: &'ast Expr| {
+            let Some(stored) = field(stored) else {
+                return false;
+            };
+            let f = stored.attr.as_str();
+            check.vals.is_some_and(|vals| vals_key(value(set), vals) == Some(f))
+                || check.onchange
+                    && check.holds_form(&stored.value)
+                    && matches!(set, Expr::Name(n) if n.id.as_str() == f)
+        };
+        sets(a, b) || sets(b, a)
     }
 
     /// The calls `api_table` has a row for, but those of a method the class defines itself, and
@@ -3583,8 +3700,8 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
         self.auth_method_override(func);
         let in_user_setter = self.in_user_setter;
         self.in_user_setter |= func.name.starts_with("_auth_method_") || func.name.as_str() == "update_env";
-        let in_change_check = self.in_change_check;
-        self.in_change_check |= in_class && checks_change(func);
+        let model = matches!(self.owners.last(), Some(Some(Receiver::Model(_))));
+        let change_check = std::mem::replace(&mut self.change_check, checks_change(func).filter(|_| model));
         self.owners.push(None);
         self.cursor_uses.push(uses);
         visitor::walk_stmt(self, stmt);
@@ -3592,7 +3709,7 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
         self.owners.pop();
         self.in_view_maker = in_view_maker;
         self.in_user_setter = in_user_setter;
-        self.in_change_check = in_change_check;
+        self.change_check = change_check;
         self.holders.names = names;
         if outermost {
             self.query_vars = None;
@@ -3610,6 +3727,25 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
             Stmt::Expr(e) => ensures_installed(&e.value).map(|m| Some(vec![Subject::Module(m.to_owned())])),
             _ => None,
         }
+    }
+
+    /// A change check knows the records of `self` a loop takes, which hold the form's values in an
+    /// onchange as `self` does.
+    fn visit_for(&mut self, f: &'ast ast::StmtFor, stmt: &'ast Stmt) {
+        self.holders.unbind(&f.target);
+        let target = f.target.as_name_expr().map(|n| (n.id.as_str(), is_self(&f.iter)));
+        let looped = match (&mut self.change_check, target) {
+            (Some(check), Some(target)) => {
+                check.loops.push(target);
+                true
+            }
+            _ => false,
+        };
+        visitor::walk_stmt(self, stmt);
+        if looped && let Some(check) = &mut self.change_check {
+            check.loops.pop();
+        }
+        self.holders.rebind(stmt);
     }
 
     /// The handlers run once the lookup has failed, and `finally` runs either way.
@@ -3677,7 +3813,7 @@ impl<'ast> Visitor<'ast> for PyVisitor<'_, 'ast> {
                 );
             }
             Stmt::Try(t) => return self.visit_try(t),
-            Stmt::For(f) => self.holders.unbind(&f.target),
+            Stmt::For(f) => return self.visit_for(f, stmt),
             Stmt::Assign(a) => self.session_uid(a),
             Stmt::Import(_) | Stmt::ImportFrom(_) => self.api_imports(stmt),
             _ => {}
@@ -6006,6 +6142,19 @@ mod tests {
         let at = |series| codes(src, Series::parse(series));
         assert_eq!(at("15.0"), ["OD130"]);
         assert_eq!(at("16.0"), [""; 0]);
+        let restore = |body: &str| {
+            let src = format!(
+                "class C(http.Controller):\n    @http.route('/a', methods=['POST'])\n    def f(self, uid):\n        old_uid = request.uid\n        {body}\n"
+            );
+            codes(&src, Series::parse("15.0"))
+        };
+        assert_eq!(restore("request.uid = old_uid"), [""; 0]);
+        let failed =
+            "try:\n            request.uid = uid\n        except Exception:\n            request.uid = old_uid";
+        // Only the switch in the `try` is reported, not the restore in its handler.
+        assert_eq!(restore(failed), ["OD130"]);
+        assert_eq!(restore("request.uid = uid"), ["OD130"]);
+        assert_eq!(restore("old_uid = uid\n        request.uid = old_uid"), ["OD130"]);
         let forward = "class R(Request):\n    def update_env(self, user=None, context=None, su=None):\n        Request.update_env(self, user, context, su)\n";
         assert_eq!(codes(forward, None), [""; 0]);
         let http = |base: &str| {
@@ -6050,19 +6199,95 @@ mod tests {
             message,
             "!= between secrets takes longer the more of the secret a guess gets right, which lets a caller find it a character at a time; compare them with consteq() or hmac.compare_digest()"
         );
-        let model = |head: &str| {
-            let src = format!(
-                "class M(models.Model):\n    _inherit = 'x'\n\n    {head}\n        if vals.get('webhook_secret') != self.webhook_secret:\n            pass\n"
-            );
-            codes(&src, None)
+    }
+
+    #[test]
+    fn a_change_check_compares_a_secret_field_with_only_the_value_it_is_set_to() {
+        let model = |head: &str, body: &str| {
+            let src = format!("class M(models.Model):\n    _inherit = 'x'\n\n    {head}\n        {body}\n");
+            codes(&src, None).contains(&"OD131")
         };
-        assert_eq!(model("def check(self, vals):"), ["OD131"]);
-        for head in [
-            "def write(self, vals):",
-            "def _onchange_secret(self, vals):",
-            "@api.onchange('webhook_secret')\n    def _check(self, vals):",
+        let write = |body: &str| model("def write(self, vals):", body);
+        for body in [
+            "if vals.get('webhook_secret') != self.webhook_secret:\n            pass",
+            "if self.webhook_secret != vals['webhook_secret']:\n            pass",
+            "new = vals.get('webhook_secret')\n        if record.webhook_secret != new:\n            pass",
+            "old_secret = self.webhook_secret\n        super().write(vals)\n        return old_secret != self.webhook_secret",
         ] {
-            assert!(!model(head).contains(&"OD131"), "{head}");
+            assert!(!write(body), "{body}");
+        }
+        let change = "return vals.get('webhook_secret') == self.webhook_secret";
+        for (head, vals) in [
+            ("def write(self, values):", "values"),
+            ("def write(self, changes):", "changes"),
+            ("def write(self, cr, uid, ids, vals, context=None):", "vals"),
+        ] {
+            let body = format!("return {vals}.get('webhook_secret') == self.webhook_secret");
+            assert!(!model(head, &body), "{head}");
+        }
+        for body in [
+            "return self.env.context.get('access_token') == self.access_token",
+            "return vals.get('webhook_secret') == self.access_token",
+            "def inner(vals):\n            return vals.get('webhook_secret') == self.webhook_secret",
+        ] {
+            assert!(write(body), "{body}");
+        }
+        assert!(model("def check(self, vals):", change));
+        let controller = format!("class C(http.Controller):\n    def write(self, vals):\n        {change}\n");
+        assert_eq!(codes(&controller, None), ["OD131"]);
+        for head in [
+            "def _onchange_secret(self):",
+            "@api.onchange('webhook_secret')\n    def _check(self):",
+        ] {
+            for (body, reported) in [
+                ("return self.webhook_secret != self._origin.webhook_secret", false),
+                (
+                    "for rec in self:\n            if rec.webhook_secret != rec._origin.webhook_secret:\n                pass",
+                    false,
+                ),
+                (
+                    "origin = self._origin\n        return self.webhook_secret != origin.webhook_secret",
+                    false,
+                ),
+                (
+                    "webhook_secret = 'x'\n        return self.webhook_secret != webhook_secret",
+                    false,
+                ),
+                (
+                    "webhook_secret = 'x'\n        for rec in self:\n            if rec.webhook_secret != webhook_secret:\n                pass",
+                    false,
+                ),
+                (
+                    "webhook_secret = 'x'\n        for rec in self.search([]):\n            if rec.webhook_secret != webhook_secret:\n                pass",
+                    true,
+                ),
+                ("return self.webhook_secret != self._origin.access_token", true),
+            ] {
+                assert_eq!(model(head, body), reported, "{head} {body}");
+            }
+        }
+    }
+
+    #[test]
+    fn the_signatures_of_two_records_compare_with_eq_and_other_secrets_do_not() {
+        let compare = |test: &str| codes(&format!("if {test}:\n    pass\n"), None);
+        for test in [
+            "get_signature(a) == get_signature(b)",
+            "a._get_signature() != b._get_signature()",
+            "a.signature == b.signature",
+            "a._get_signature(kind='sale') == b._get_signature(kind='sale')",
+        ] {
+            assert_eq!(compare(test), [""; 0], "{test}");
+        }
+        for test in [
+            "get_signature(a) == kw['signature']",
+            "self._get_signature(kw) == order._get_signature()",
+            "kw.get('signature') == other.get('signature')",
+            "a.access_token == b.access_token",
+            "get_token(a) == get_token(b)",
+            "a.signature == b.user_signature_hash_token",
+        ] {
+            assert_eq!(compare(test), ["OD131"], "{test}");
         }
     }
 

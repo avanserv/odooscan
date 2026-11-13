@@ -63,3 +63,15 @@ class ResPartner(models.Model):
 
     name = fields.Text()
     message_ids = fields.One2many("res.partner", "parent_id")
+
+
+class SaleOrderSecret(models.Model):
+    _inherit = "bad.order"
+
+    def write(self, vals):
+        trusted = self.env.context.get("order_token") == self.secret
+        rotated = vals.get("secret") != self.secret
+        res = super().write(vals)
+        if rotated and not trusted:
+            self.line_ids.unlink()
+        return res
