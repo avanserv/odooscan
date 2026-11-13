@@ -524,6 +524,12 @@
     },
     {
       "path": "addons/html_editor/controllers/main.py",
+      "code": "OD518",
+      "message": "'odoo.addons.mail.tools' comes from module mail, which is not in depends; add it there",
+      "count": 1
+    },
+    {
+      "path": "addons/html_editor/controllers/main.py",
       "code": "OD706",
       "message": "route parameter 'image_url' reaches the URL of requests.get(), so the user picks the host the server connects to; start the URL with a host the code picks",
       "count": 1
@@ -1781,6 +1787,12 @@
       "code": "OD103",
       "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
       "count": 2
+    },
+    {
+      "path": "addons/microsoft_outlook/models/microsoft_outlook_mixin.py",
+      "code": "OD518",
+      "message": "'odoo.addons.google_gmail.tools' comes from module google_gmail, which is not in depends; add it there",
+      "count": 1
     },
     {
       "path": "addons/mrp/data/mrp_demo.xml",

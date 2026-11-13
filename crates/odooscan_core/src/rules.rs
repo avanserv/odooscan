@@ -49,7 +49,7 @@ impl Kind {
 const UPSTREAM: &[&str] = &[
     "OD201", "OD202", "OD203", "OD204", "OD205", "OD206", "OD207", "OD210", "OD211", "OD212", "OD224", "OD227",
     "OD229", "OD230", "OD301", "OD302", "OD304", "OD309", "OD310", "OD311", "OD312", "OD314", "OD316", "OD320",
-    "OD322", "OD324", "OD503", "OD601", "OD602", "OD603", "OD604", "OD605", "OD606",
+    "OD322", "OD324", "OD503", "OD518", "OD519", "OD601", "OD602", "OD603", "OD604", "OD605", "OD606",
 ];
 
 /// Info-level security rules are hotspots: code to review, not a confirmed flaw.
@@ -310,6 +310,11 @@ rules! {
     // Odoo runs the submodules `tests` binds under a `test_` name (18.0 `odoo/tests/loader.py:57-67`,
     // 20.0 `:56-66`, 9.0 `openerp/modules/module.py:387-408`).
     "OD517" "test-file-not-imported" Quality Warning None, false, "A test file is never imported by the tests package, so Odoo never runs its tests.";
+    // Every addon joins `odoo.addons.__path__` (18.0 `odoo/modules/module.py:121-140`), so the
+    // import works wherever the target is on the addons path, but its classes count only once it
+    // is installed and loaded first (18.0 `odoo/modules/registry.py:290`): hence a warning.
+    "OD518" "python-import-not-in-depends" Correctness Warning None, true, "A Python import names a module outside depends, which may be missing or load later.";
+    "OD519" "unresolved-python-import" Correctness Error None, true, "A Python import names a module or a name the target module does not have.";
     "OD601" "unresolved-js-import" Correctness Error None, true, "A JS import names a module or an export no indexed module provides.";
     "OD602" "orphan-patch-super" Correctness Error Some(">=17.0"), true, "A patch calls a super method the class it patches does not have.";
     "OD603" "unknown-rpc-model" Correctness Error None, true, "An ORM call from JS names a model no indexed module defines.";

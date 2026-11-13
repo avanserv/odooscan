@@ -167,7 +167,7 @@ to public and portal users, and record rules Odoo refuses to load.
 ## OD5: manifest and module graph
 
 The manifest and the dependency graph: its keys, listed files, unlisted files, assets,
-dependencies and migration scripts.
+dependencies, migration scripts and the Python imports between modules.
 
 | Code | Name | Reports |
 | --- | --- | --- |
@@ -188,6 +188,8 @@ dependencies and migration scripts.
 | [OD515](OD515.md) | `migration-script-refused` | A migration script lacks the migrate(cr, version) Odoo calls, so the update fails. |
 | [OD516](OD516.md) | `python-file-not-imported` | A file of models or controllers is never imported, so Odoo never loads them. |
 | [OD517](OD517.md) | `test-file-not-imported` | A test file is never imported by the tests package, so Odoo never runs its tests. |
+| [OD518](OD518.md) | `python-import-not-in-depends` | A Python import names a module outside depends, which may be missing or load later. |
+| [OD519](OD519.md) | `unresolved-python-import` | A Python import names a module or a name the target module does not have. |
 
 ## OD6: JavaScript and Owl
 
