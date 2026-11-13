@@ -43,7 +43,7 @@ Configured rows match before the built-in ones, so the sanitizer `sandbox.safe_e
 first, then sanitizers, then sinks.
 
 A source's value is read as a mapping whose keys the user picks too, so it can reach OD704 as well
-as the other three. Each key of `sinks` is a rule from OD701 to OD704, by code or name. A sink
+as the other rules. Each key of `sinks` is a rule from OD701 to OD707, by code or name. A sink
 checks its first positional argument, or without one the keyword `query`, `code`, `expr`, `vals` or
 `vals_list`. An OD704 sink reports only a mapping whose keys the user picks, and `%` on what an
 OD703 sink returns escapes nothing, unlike `%` on `Markup()`. `oscn` exits with status 2 on a

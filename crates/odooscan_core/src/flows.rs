@@ -7,7 +7,8 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::checks::Out;
 use crate::facts::{
-    ArgSlot, CallSite, FlowEdge, FlowOrigin, FlowSummary, FlowTarget, Pos, RawDiag, Receiver, RunsAs, Spanned, Step,
+    ArgSlot, CallSite, FlowEdge, FlowOrigin, FlowSummary, FlowTarget, Pos, RawDiag, Receiver, RunsAs, Safe, Spanned,
+    Step,
 };
 use crate::index::{FlowRef, Index, Scope};
 use crate::taint;
@@ -20,6 +21,8 @@ const DEPTH: u8 = 4;
 struct Hit<'m> {
     code: &'static str,
     keys: bool,
+    /// The codes the value is harmless for at some step, so harmless at the sink.
+    safe: Safe,
     path: &'m Path,
     pos: Pos,
     /// The call that receives the value.
@@ -35,6 +38,7 @@ struct Hit<'m> {
 struct Ret {
     origin: FlowOrigin,
     keys: bool,
+    safe: Safe,
     /// The source or parameter, as the message names it.
     label: String,
     /// From the origin, through the methods whose return it returns, to the return.
@@ -83,7 +87,7 @@ impl<'m> Solver<'_, 'm> {
         let mut found = vec![];
         for edge in &at.summary.edges {
             match (edge.origin, &edge.target) {
-                (FlowOrigin::Source, FlowTarget::Arg(c, slot)) => {
+                (origin, FlowTarget::Arg(c, slot)) if origin.is_user() => {
                     for hit in self.passed(at, edge, *c, slot, 0, false) {
                         found.extend(self.reported(at, edge, *c, hit));
                     }
@@ -98,7 +102,7 @@ impl<'m> Solver<'_, 'm> {
     /// A finding at the sink when the checked module holds it, otherwise at the call that leaves
     /// the module, where its author can act.
     fn reported(&self, at: FlowRef<'m>, edge: &FlowEdge, c: usize, hit: Hit<'m>) -> Option<(&'m Path, RawDiag)> {
-        if hit.code == "OD704" && !hit.keys {
+        if (hit.code == "OD704" && !hit.keys) || hit.safe.has(hit.code) {
             return None;
         }
         let names: Vec<&str> = hit.names.iter().map(String::as_str).collect();
@@ -192,7 +196,7 @@ impl<'m> Solver<'_, 'm> {
         for callee in self.callees(at, &at.summary.calls[c]) {
             for ret in self.returns(callee, 1) {
                 for arg in entries(at.summary, c, callee.summary, &ret) {
-                    if arg.is_none_or(|a| a.origin == FlowOrigin::Source) {
+                    if arg.is_none_or(|a| a.origin.is_user()) {
                         found.extend(return_finding(at, arg, &ret, edge, code));
                     }
                 }
@@ -218,6 +222,7 @@ impl<'m> Solver<'_, 'm> {
                 origin => rets.push(Ret {
                     origin,
                     keys: edge.keys,
+                    safe: edge.safe,
                     label: edge.steps[0].value.clone(),
                     steps: path_steps(at, &edge.steps),
                     names: edge.steps[1..].iter().map(|s| s.value.clone()).collect(),
@@ -244,8 +249,9 @@ impl<'m> Solver<'_, 'm> {
 
 /// How the value `ret` carries enters the call `c` of `at`: from a source of the callee (`None`),
 /// or by each edge of `at` that passes a source's value or a parameter to the callee's parameter.
+/// A public method's parameter is one here too: a Python call, not a client, sets it.
 fn entries<'s>(caller: &'s FlowSummary, c: usize, callee: &FlowSummary, ret: &Ret) -> Vec<Option<&'s FlowEdge>> {
-    let FlowOrigin::Param(k) = ret.origin else {
+    let Some(k) = ret.origin.param() else {
         return vec![None];
     };
     let passed = caller.edges.iter().filter(|a| {
@@ -269,6 +275,7 @@ fn through(at: FlowRef<'_>, arg: Option<&FlowEdge>, ret: &Ret, edge: &FlowEdge) 
     Ret {
         origin: arg.map_or(ret.origin, |a| a.origin),
         keys: arg.is_none_or(|a| a.keys) && ret.keys && edge.keys,
+        safe: arg.map_or(ret.safe, |a| a.safe.union(ret.safe)).union(edge.safe),
         label: arg.map_or_else(|| ret.label.clone(), |a| a.steps[0].value.clone()),
         steps,
         names,
@@ -285,7 +292,7 @@ fn return_finding<'m>(
     code: &'static str,
 ) -> Option<(&'m Path, RawDiag)> {
     let mut flow = through(at, arg, ret, edge);
-    if code == "OD704" && !flow.keys {
+    if (code == "OD704" && !flow.keys) || flow.safe.has(code) {
         return None;
     }
     let sink = edge.steps.last()?;
@@ -321,6 +328,7 @@ fn sink_hit<'m>(at: FlowRef<'m>, edge: &FlowEdge, code: &'static str) -> Hit<'m>
     Hit {
         code,
         keys: edge.keys,
+        safe: edge.safe,
         path: &at.file.path,
         pos: edge.steps[last].pos,
         callee: edge.steps[last].value.clone(),
@@ -343,6 +351,7 @@ fn prepend<'m>(at: FlowRef<'m>, edge: &FlowEdge, call: &CallSite, mut hit: Hit<'
     names.append(&mut hit.names);
     Hit {
         keys: hit.keys && edge.keys,
+        safe: hit.safe.union(edge.safe),
         steps,
         names,
         ..hit
@@ -463,6 +472,60 @@ mod tests {
             findings(route, &chain(2, "'<p>%s</p>' % v")),
             ["route.py:4 OD703 route parameter 'term' reaches Markup() through '_m1()', '_m2()' unescaped"]
         );
+    }
+
+    #[test]
+    fn a_url_whose_start_the_caller_picks_reaches_no_host() {
+        let call = |arg: &str| {
+            findings(
+                &format!(
+                    "    def r(self, t):\n        return self._get({arg})\n\n    def _get(self, url):\n        return requests.get(url, timeout=5)\n"
+                ),
+                "",
+            )
+        };
+        assert!(call("f\"https://x/{t}\"").is_empty());
+        assert_eq!(
+            call("t"),
+            ["route.py:7 OD706 route parameter 't' reaches the URL of requests.get() through '_get()'"]
+        );
+    }
+
+    #[test]
+    fn a_returned_value_harmless_for_the_sink_is_not_reported() {
+        let route = "    def r(self, t):\n        return open(request.env['x.y']._m1(t))\n";
+        assert!(findings(route, &chain(1, "os.path.basename(v)")).is_empty());
+        assert_eq!(findings(route, &chain(1, "v")).len(), 1);
+    }
+
+    #[test]
+    fn a_public_method_called_from_python_returns_what_its_caller_passes() {
+        let methods = "    def get(self, key, default=False):\n        return self._find(key) or default\n";
+        let call = |args: &str| {
+            findings(
+                &format!("    def r(self, t):\n        return requests.get(request.env['x.y'].get({args}))\n"),
+                methods,
+            )
+        };
+        assert!(call("'k'").is_empty());
+        assert!(call("'k', 'https://x/'").is_empty());
+        assert_eq!(
+            call("'k', t"),
+            ["route.py:4 OD706 route parameter 't' reaches the URL of requests.get() through 'get()'"]
+        );
+    }
+
+    #[test]
+    fn a_source_joined_to_a_public_method_parameter_is_returned_whatever_the_caller_passes() {
+        let route = "    def r(self):\n        return Markup(request.env['x.y'].label('a'))\n";
+        for body in [
+            "prefix + request.params.get('n')",
+            "f\"{prefix}{request.params.get('n')}\"",
+            "prefix or request.params.get('n')",
+        ] {
+            let methods = format!("    def label(self, prefix):\n        return {body}\n");
+            assert_eq!(findings(route, &methods).len(), 1, "{body}");
+        }
     }
 
     #[test]
