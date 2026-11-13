@@ -4023,6 +4023,11 @@ mod tests {
             .collect()
     }
 
+    /// The codes of `found`, findings as `scan` writes them.
+    fn codes_from(found: &[String]) -> Vec<String> {
+        found.iter().map(|f| f[..5].to_owned()).collect()
+    }
+
     #[test]
     fn follows_assignments_to_the_sink() {
         let src = "def f(self, term):\n    where = \"name = '%s'\" % term\n    q = 'SELECT 1 WHERE ' + where\n    self.env.cr.execute(q)\n";
@@ -4138,7 +4143,9 @@ mod tests {
         );
     }
 
-    fn summary(params: Params, src: &str) -> FlowSummary {
+    /// The findings and the summary of the first function of `src`, a method of `x.y` in a module
+    /// of no series.
+    fn model_method(params: Params, src: &str) -> (Vec<RawDiag>, Option<FlowSummary>) {
         let parsed = parse_module(src).expect("valid Python");
         let Some(Stmt::FunctionDef(func)) = parsed.syntax().body.first() else {
             panic!("no function");
@@ -4153,8 +4160,10 @@ mod tests {
             &Locator::new(src),
             &TaintTable::default(),
         )
-        .1
-        .expect("a summary")
+    }
+
+    fn summary(params: Params, src: &str) -> FlowSummary {
+        model_method(params, src).1.expect("a summary")
     }
 
     #[test]
@@ -4299,7 +4308,7 @@ mod tests {
             "with_user(SUPERUSER_ID).sudo(False).run",
             "sudo().with_user(SUPERUSER_ID).launch",
         ] {
-            assert_eq!(code_list(&run(call)), ["OD702"], "{call}");
+            assert_eq!(codes_from(&run(call)), ["OD702"], "{call}");
         }
         for call in [
             "run",
@@ -4471,8 +4480,7 @@ mod tests {
     /// a value the user does not control.
     fn codes_in(series: Option<&str>, call: &str) -> Vec<String> {
         let src = format!("def f(self, t):\n    base = self.get_base_url()\n    {call}\n");
-        let found = scan_in(&TaintTable::default(), series, Params::Route(&[]), &src);
-        found.iter().map(|f| f[..5].to_owned()).collect()
+        route_codes_in(series, &src)
     }
 
     fn codes(call: &str) -> Vec<String> {
@@ -5070,9 +5078,9 @@ mod tests {
 
     /// The codes of `codes_of(body)` in a module whose `imports` come before the function.
     fn codes_after(imports: &str, body: &str) -> Vec<String> {
-        let src = format!("{imports}\ndef f(self, t):\n    P = self.env['res.partner']\n{body}\n");
-        let found = scan(Params::Route(&[]), &src);
-        found.iter().map(|f| f[..5].to_owned()).collect()
+        route_codes(&format!(
+            "{imports}\ndef f(self, t):\n    P = self.env['res.partner']\n{body}\n"
+        ))
     }
 
     #[test]
@@ -5096,6 +5104,8 @@ mod tests {
             ("P.sudo().search([(t, '=', 1)])", "OD715"),
             ("P.sudo().search([('a', t, 1)])", "OD715"),
             ("P.sudo().search([('child_ids', 'any', t)])", "OD715"),
+            ("P.sudo().search([('child_ids', 'not any', t)])", "OD715"),
+            ("P.sudo().search(Domain('child_ids', 'any!', t))", "OD715"),
             ("P.sudo().search(Domain(t, '=', 1))", "OD715"),
             ("P.sudo().search([('a', '=', 1), [t, '=', 1]])", "OD715"),
             ("request.env(su=True)[t].search([])", "OD712"),
@@ -5246,9 +5256,7 @@ mod tests {
 
     /// `codes_of` in a file that binds `ALLOWED` to a tuple of field names.
     fn allowed_codes(body: &str) -> Vec<String> {
-        let src = format!("ALLOWED = ('name', 'ref')\n\n\ndef f(self, t):\n    P = self.env['res.partner']\n{body}\n");
-        let found = scan(Params::Route(&[]), &src);
-        found.iter().map(|f| f[..5].to_owned()).collect()
+        codes_after("ALLOWED = ('name', 'ref')\n", body)
     }
 
     #[test]
@@ -5353,7 +5361,7 @@ mod tests {
         );
         let text =
             "ALLOWED = 'name,ref'\n\n\ndef f(self, t):\n    if t in ALLOWED:\n        self.env['x.y'].sudo()[t]\n";
-        assert_eq!(code_list(&scan(Params::Route(&[]), text)), ["OD714"]);
+        assert_eq!(route_codes(text), ["OD714"]);
         let after = "    if t in ('all', 'name'):\n        P.sudo().search([(t, '=', 1)])\n    P.sudo().search_count([(t, '=', 1)])";
         let src = format!("def f(self, t):\n    P = self.env['x.y']\n{after}\n");
         let found = scan(Params::Route(&[]), &src);
@@ -5408,25 +5416,9 @@ mod tests {
 
     #[test]
     fn a_domain_a_call_returns_keeps_the_conditions_of_the_user_harmless() {
-        let codes = |body: &str| -> Vec<&'static str> {
+        let codes = |body: &str| {
             let src = format!("def f(self, t):\n    d = self._base()\n{body}\n    self.sudo().search(d)\n");
-            let parsed = parse_module(&src).expect("valid Python");
-            let Some(Stmt::FunctionDef(func)) = parsed.syntax().body.first() else {
-                panic!("no function");
-            };
-            let owner = Some(Receiver::Model("x.y".to_owned()));
-            let loc = Locator::new(&src);
-            let found = function(
-                func,
-                Params::Route(&[]),
-                owner,
-                None,
-                &NAMES,
-                &loc,
-                &TaintTable::default(),
-            )
-            .0;
-            found.iter().map(|d| d.code).collect()
+            flows_of(Params::Route(&[]), &src).0
         };
         assert!(codes("    d += [('name', 'ilike', t)]").is_empty());
         assert_eq!(codes("    d += [(t, 'ilike', 'a')]"), ["OD715"]);
@@ -5475,10 +5467,6 @@ mod tests {
         );
     }
 
-    fn code_list(found: &[String]) -> Vec<&str> {
-        found.iter().map(|f| &f[..5]).collect()
-    }
-
     #[test]
     fn three_conditions_domains_or_fields_are_no_condition() {
         for call in [
@@ -5512,20 +5500,10 @@ mod tests {
 
     #[test]
     fn a_returned_value_still_reports_what_the_kept_one_is_harmless_for() {
-        let in_model = |params: Params, src: &str| -> Vec<&'static str> {
-            let parsed = parse_module(src).expect("valid Python");
-            let Some(Stmt::FunctionDef(func)) = parsed.syntax().body.first() else {
-                panic!("no function");
-            };
-            let owner = Some(Receiver::Model("x.y".to_owned()));
-            let loc = Locator::new(src);
-            let found = function(func, params, owner, None, &NAMES, &loc, &TaintTable::default()).0;
-            found.iter().map(|d| d.code).collect()
-        };
         let src = "def f(self, field, domain):\n    if field not in self._fields:\n        raise ValueError()\n    self.env.cr.execute('SELECT %s FROM t WHERE %s' % (field, self._where(domain)))\n";
-        assert_eq!(in_model(Params::Rpc, src), ["OD701"]);
+        assert_eq!(flows_of(Params::Rpc, src).0, ["OD701"]);
         let src = "def f(self, name, ext):\n    open(os.path.basename(name) + self._suffix(ext))\n";
-        assert_eq!(in_model(Params::Route(&[]), src), ["OD707"]);
+        assert_eq!(flows_of(Params::Route(&[]), src).0, ["OD707"]);
     }
 
     #[test]
@@ -5595,10 +5573,7 @@ mod tests {
     fn sudo_false_writes_with_the_rights_of_the_user() {
         let write = |body: &str| {
             let src = format!("def f(self, flag, **post):\n{body}.write(post)\n");
-            code_list(&scan(Params::Route(&[]), &src))
-                .into_iter()
-                .map(str::to_owned)
-                .collect::<Vec<_>>()
+            route_codes(&src)
         };
         for body in [
             "    self.env['x.y'].sudo()",
@@ -5657,8 +5632,7 @@ mod tests {
     fn sudo_false_keeps_uid_1_superuser_from_saas_12_5() {
         let found = |series: Option<&str>, body: &str| {
             let src = format!("def f(self, order_id, **post):\n{body}\n");
-            let found = scan_in(&TaintTable::default(), series, Params::Route(&[]), &src);
-            code_list(&found).into_iter().map(str::to_owned).collect::<Vec<_>>()
+            route_codes_in(series, &src)
         };
         for (body, code) in [
             (
@@ -5704,7 +5678,7 @@ mod tests {
             let src = format!(
                 "def f(self, c, **post):\n    if c:\n        R = {first}\n    else:\n        R = {second}\n    R.sudo(False).write(post)\n"
             );
-            assert_eq!(code_list(&scan(Params::Route(&[]), &src)), ["OD704"], "{first}");
+            assert_eq!(route_codes(&src), ["OD704"], "{first}");
         }
     }
 
@@ -5753,7 +5727,7 @@ mod tests {
     /// orders read as superuser.
     fn returned(params: Params, body: &str) -> Vec<String> {
         let src = format!("def f(self, order_id, token):\n    O = request.env['sale.order'].sudo()\n{body}\n");
-        code_list(&scan(params, &src)).into_iter().map(str::to_owned).collect()
+        codes_from(&scan(params, &src))
     }
 
     #[test]
@@ -5793,9 +5767,9 @@ mod tests {
             assert_eq!(returned(Params::Route(&[]), body), ["OD716"], "{body}");
         }
         let token_in_kw = "def f(self, order_id, **kw):\n    self._document_check_access('sale.order', order_id, kw.get('access_token'))\n    return request.env['res.partner'].sudo().browse(int(kw['partner_id']))\n";
-        assert_eq!(code_list(&scan(Params::Route(&[]), token_in_kw)), ["OD716"]);
+        assert_eq!(route_codes(token_in_kw), ["OD716"]);
         let compared_to_kw = "def f(self, order_id, **kw):\n    order = request.env['sale.order'].sudo().browse(order_id)\n    if not consteq(order.access_token, kw['token']):\n        raise NotFound()\n    return request.env['res.partner'].sudo().browse(int(kw['partner_id']))\n";
-        assert_eq!(code_list(&scan(Params::Route(&[]), compared_to_kw)), ["OD716"]);
+        assert_eq!(route_codes(compared_to_kw), ["OD716"]);
         let found = scan(
             Params::Route(&[]),
             "def f(self, order_id):\n    order = request.env['sale.order'].sudo().browse(order_id)\n    return order.name\n",
@@ -5898,7 +5872,7 @@ mod tests {
         assert_eq!(codes_of(arm), ["OD703"]);
         let update =
             "def f(self, **post):\n    vals = {}\n    vals.update(post)\n    self.env['x.y'].sudo().create(vals)\n";
-        assert_eq!(code_list(&scan(Params::Route(&[]), update)), ["OD704"]);
+        assert_eq!(route_codes(update), ["OD704"]);
         assert_eq!(
             codes_of(
                 "    r = P.sudo().browse(t)\n    response = request.make_response('')\n    response.headers['X-A'] = t"
@@ -5911,8 +5885,7 @@ mod tests {
     /// and `A` the attachments under `sudo()`.
     fn stored(series: Option<&str>, body: &str) -> Vec<String> {
         let src = format!("def f(self, upload, **post):\n    A = request.env['ir.attachment'].sudo()\n{body}\n");
-        let found = scan_in(&TaintTable::default(), series, Params::Route(&[]), &src);
-        code_list(&found).into_iter().map(str::to_owned).collect()
+        route_codes_in(series, &src)
     }
 
     #[test]
@@ -6054,10 +6027,12 @@ mod tests {
 
     /// The codes of `src`, a route whose parameters are all user data.
     fn route_codes(src: &str) -> Vec<String> {
-        code_list(&scan(Params::Route(&[]), src))
-            .into_iter()
-            .map(str::to_owned)
-            .collect()
+        codes_from(&scan(Params::Route(&[]), src))
+    }
+
+    /// The codes of `route_codes(src)` in a module of `series`.
+    fn route_codes_in(series: Option<&str>, src: &str) -> Vec<String> {
+        codes_from(&scan_in(&TaintTable::default(), series, Params::Route(&[]), src))
     }
 
     #[test]
@@ -6187,13 +6162,7 @@ mod tests {
     /// The findings and the summary of the first function of `src`, a method of `x.y`, as codes
     /// and as the origins of the edges to each target.
     fn flows_of(params: Params, src: &str) -> (Vec<&'static str>, Vec<(FlowTarget, FlowOrigin)>) {
-        let parsed = parse_module(src).expect("valid Python");
-        let Some(Stmt::FunctionDef(func)) = parsed.syntax().body.first() else {
-            panic!("no function");
-        };
-        let owner = Some(Receiver::Model("x.y".to_owned()));
-        let loc = Locator::new(src);
-        let (diags, summary) = function(func, params, owner, None, &NAMES, &loc, &TaintTable::default());
+        let (diags, summary) = model_method(params, src);
         let edges = summary.map_or_else(Vec::new, |s| {
             s.edges.iter().map(|e| (e.target.clone(), e.origin)).collect()
         });
