@@ -46,3 +46,9 @@ class Picks(http.Controller):
         if field in self._FIELDS:
             partners.search_count([(field, "ilike", term)])
         return partners.search_read([(field, "=", term)], ["name"])
+
+    @http.route("/bad/picks/ref", auth="user", type="json")
+    def ref(self, ref, compare):
+        partners = request.env["res.partner"].sudo()
+        partners.search_count([("ref", "<>", ref)])
+        return partners.search_count([("ref", compare, ref)])
