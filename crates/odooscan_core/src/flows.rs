@@ -118,8 +118,8 @@ impl<'a, 'm> Solver<'a, 'm> {
                 (origin, FlowTarget::Arg(c, _)) if origin.is_user() => {
                     let rpc = matches!(origin, FlowOrigin::Rpc(_));
                     for hit in self.passed(at, edge, 0, false, rpc) {
-                        let low = hit.relayed;
-                        found.extend(self.reported(at, edge, *c, hit).map(|f| (low, f)));
+                        let relayed = hit.relayed;
+                        found.extend(self.reported(at, edge, *c, hit).map(|f| (relayed, f)));
                     }
                 }
                 (FlowOrigin::Return(c), FlowTarget::Sink(code)) => {
@@ -203,7 +203,9 @@ impl<'a, 'm> Solver<'a, 'm> {
 
     /// The sinks parameter `param` of a method reaches, in it or in the methods it passes it to.
     /// What the method writes on its own records is one only when it runs as superuser. A public
-    /// method's parameter is followed too, for the Python callers that fill it.
+    /// method's parameter is followed too, for the Python callers that fill it. `rpc` holds when
+    /// the value entered as an RPC argument, and then a hit through a public method's own
+    /// parameter is `relayed`.
     fn hits(&mut self, at: FlowRef<'m>, param: usize, depth: u8, sudo: bool, rpc: bool) -> Vec<Hit<'m>> {
         let state = (std::ptr::from_ref(at.summary) as usize, param, sudo);
         let key = (state.0, param, sudo, rpc, depth);
@@ -445,7 +447,7 @@ mod tests {
 
     use super::{Solver, check};
     use crate::checks::Out;
-    use crate::facts::RawDiag;
+    use crate::facts::{PyFacts, RawDiag};
     use crate::index::{FlowRef, Index};
     use crate::mentions::Mentions;
     use crate::project::{Module, SourceFile};
@@ -488,6 +490,23 @@ mod tests {
     /// The cross-method findings of `module(route, methods)`.
     fn scan_messages(route: &str, methods: &str) -> Vec<String> {
         scanned(route, methods, shown)
+    }
+
+    /// The findings of `main` and of a module `dep` it depends on, which holds only `dep_file`, each
+    /// module's as `file:line code origin`.
+    fn scan_with_dep(mut main: Module, dep_file: SourceFile<PyFacts>) -> Vec<Vec<String>> {
+        let mut dep = crate::project::module("dep", "{'version': '18.0.1.0'}");
+        dep.python = vec![dep_file];
+        main.manifest = crate::manifest::parse("{'version': '18.0.1.0', 'depends': ['dep']}").unwrap();
+        let modules = [main, dep];
+        let index = Index::build(&modules, None);
+        (0..modules.len())
+            .map(|mi| {
+                let mut out = Out { diags: vec![] };
+                check(&index, mi, &index.scope(mi), &mut out);
+                out.diags.iter().map(|d| origin(&shown(d))).collect()
+            })
+            .collect()
     }
 
     /// The flow step labels of each cross-method finding of `module(route, methods)`.
@@ -612,27 +631,45 @@ mod tests {
     }
 
     #[test]
-    fn one_solver_finds_for_each_route_what_a_fresh_one_does() {
-        let methods = pass_chain(5, "requests.get(v, timeout=5)");
+    fn one_solver_finds_for_each_entry_what_a_fresh_one_does() {
+        let sink = "requests.get(v, timeout=5)";
+        let methods = format!(
+            "{}\n    def outer(self, m):\n        self.relay(m)\n\n{}",
+            pass_chain(5, sink),
+            relay(sink, "v")
+        );
+        // Route `c` and the RPC entry `outer` reach `relay` in the same state but for `rpc`, so
+        // only whether a hit is relayed tells their memo entries apart.
+        let c = "\n    @http.route('/c')\n    def c(self, c):\n        request.env['x.y'].relay(c)\n";
         for order in [["a", "b"], ["b", "a"]] {
-            let modules = [module(&routes(order, passing), &methods)];
-            let index = Index::build(&modules, None);
-            let scope = index.scope(0);
-            let file = &modules[0].python[0];
-            let route = |name: &str| FlowRef {
-                module: 0,
-                file,
-                summary: file.facts.flows.iter().find(|s| s.method == name).unwrap(),
-            };
-            let mut shared = Solver::new(&index, &scope);
-            for name in order {
-                let fresh = Solver::new(&index, &scope).findings(route(name));
-                let found = shared.findings(route(name));
-                assert_eq!(
-                    found.iter().map(|(_, f)| shown(f)).collect::<Vec<_>>(),
-                    fresh.iter().map(|(_, f)| shown(f)).collect::<Vec<_>>(),
-                    "{order:?} {name}"
-                );
+            for last in [["c", "outer"], ["outer", "c"]] {
+                let modules = [module(&(routes(order, passing) + c), &methods)];
+                let index = Index::build(&modules, None);
+                let scope = index.scope(0);
+                let entry = |name: &str| {
+                    let (file, summary) = modules[0]
+                        .python
+                        .iter()
+                        .find_map(|file| Some((file, file.facts.flows.iter().find(|s| s.method == name)?)))
+                        .unwrap();
+                    FlowRef {
+                        module: 0,
+                        file,
+                        summary,
+                    }
+                };
+                let pairs = |found: Vec<(bool, (&Path, RawDiag))>| {
+                    found
+                        .iter()
+                        .map(|(relayed, f)| (*relayed, shown(f)))
+                        .collect::<Vec<_>>()
+                };
+                let mut shared = Solver::new(&index, &scope);
+                for name in order.into_iter().chain(last) {
+                    let fresh = Solver::new(&index, &scope).findings(entry(name));
+                    let found = shared.findings(entry(name));
+                    assert_eq!(pairs(found), pairs(fresh), "{order:?} {last:?} {name}");
+                }
             }
         }
     }
@@ -1079,20 +1116,9 @@ mod tests {
         let route = "    def r(self, t):\n        request.env['x.y'].relay(t)\n";
         for (code, sink) in METHOD_SINK_OF {
             let mut main = module(route, &relay(sink, "v"));
-            let mut dep = crate::project::module("dep", "{'version': '18.0.1.0'}");
-            dep.python = vec![main.python.remove(1)];
-            main.manifest = crate::manifest::parse("{'version': '18.0.1.0', 'depends': ['dep']}").unwrap();
-            let modules = [main, dep];
-            let index = Index::build(&modules, None);
-            let found: Vec<Vec<String>> = (0..2)
-                .map(|mi| {
-                    let mut out = Out { diags: vec![] };
-                    check(&index, mi, &index.scope(mi), &mut out);
-                    out.diags.iter().map(|d| origin(&shown(d))).collect()
-                })
-                .collect();
+            let model = main.python.remove(1);
             assert_eq!(
-                found,
+                scan_with_dep(main, model),
                 [
                     [format!("route.py:4 {code} route parameter 't'")],
                     [format!("model.py:8 {code} RPC argument 'v'")]
@@ -1111,7 +1137,12 @@ mod tests {
                 [format!("model.py:11 {code} RPC argument 'v'")],
                 "{code}"
             );
-            // The longer path stays the entry's own, so its message names the entry's argument.
+        }
+    }
+
+    #[test]
+    fn an_rpc_entry_names_its_own_longer_path_over_one_through_another() {
+        for (code, sink) in METHOD_SINK_OF {
             let methods = format!(
                 "    def outer(self, m):\n        self._x(m)\n\n    def _x(self, v):\n        self.relay(v)\n        self._b(v)\n\n    def _b(self, v):\n        self._c(v)\n\n    def _c(self, v):\n        self._a(v)\n\n{}",
                 relay(sink, "v")
@@ -1151,22 +1182,12 @@ mod tests {
         );
         let outer = "    def outer(self, m):\n        self.relay(m)\n";
         for (code, sink) in METHOD_SINK_OF {
-            let mut main = module("    def r(self):\n        pass\n", outer);
-            let mut dep = crate::project::module("dep", "{'version': '18.0.1.0'}");
-            dep.python = vec![module("", &relay(sink, "v")).python.remove(1)];
-            dep.python[0].path = PathBuf::from("dep.py");
-            main.manifest = crate::manifest::parse("{'version': '18.0.1.0', 'depends': ['dep']}").unwrap();
-            let modules = [main, dep];
-            let index = Index::build(&modules, None);
-            let found: Vec<Vec<String>> = (0..2)
-                .map(|mi| {
-                    let mut out = Out { diags: vec![] };
-                    check(&index, mi, &index.scope(mi), &mut out);
-                    out.diags.iter().map(|d| origin(&shown(d))).collect()
-                })
-                .collect();
+            let main = module("    def r(self):\n        pass\n", outer);
+            let mut dep_file = module("", &relay(sink, "v")).python.remove(1);
+            dep_file.path = PathBuf::from("dep.py");
+            dep_file.rel = "dep.py".to_owned();
             assert_eq!(
-                found,
+                scan_with_dep(main, dep_file),
                 [
                     [format!("model.py:5 {code} RPC argument 'm'")],
                     [format!("dep.py:8 {code} RPC argument 'v'")]
