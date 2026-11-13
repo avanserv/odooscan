@@ -947,22 +947,97 @@ const NORMALIZERS: &[&str] = &["os.path.normpath", "os.path.realpath", "os.path.
 #[derive(Clone, Debug, Default)]
 struct Vals {
     public: bool,
-    content: Option<Taint>,
+    /// Every path sets `public`, so that these values replace the `public` of those they are set
+    /// over.
+    sets_public: bool,
+    /// Each key of the content as last set, a clean value too, so that it replaces.
+    keys: Vec<Key>,
+    /// The taint of what may set any key of the content: a mapping spread in whose keys are
+    /// unknown, or the user's own mapping an item set or `|=` adds values to.
+    any: Option<Taint>,
+}
+
+#[derive(Clone, Debug)]
+struct Key {
+    name: String,
+    taint: Option<Taint>,
+    /// Every path sets it, so that it replaces the key of values it is set over.
+    sure: bool,
 }
 
 impl Vals {
-    fn and(self, other: Vals) -> Vals {
-        Vals {
-            public: self.public || other.public,
-            content: join(self.content, other.content),
+    /// The values of either of two paths. A key one path leaves unset may keep what it held.
+    fn and(mut self, other: Vals) -> Vals {
+        for key in &mut self.keys {
+            key.sure &= other.keys.iter().any(|k| k.name == key.name);
+        }
+        for key in other.keys {
+            match self.keys.iter_mut().find(|k| k.name == key.name) {
+                Some(mine) => {
+                    mine.taint = join(mine.taint.take(), key.taint);
+                    mine.sure &= key.sure;
+                }
+                None => self.keys.push(Key { sure: false, ..key }),
+            }
+        }
+        self.public |= other.public;
+        self.sets_public &= other.sets_public;
+        self.any = join(self.any, other.any);
+        self
+    }
+
+    /// These values with `later` set over them, as `{**self, **later}`: a key `later` sets on every
+    /// path replaces this one's, and one it may leave unset joins it.
+    fn over(mut self, later: Vals) -> Vals {
+        for key in later.keys {
+            match self.keys.iter_mut().find(|k| k.name == key.name) {
+                Some(mine) if !key.sure => mine.taint = join(mine.taint.take(), key.taint),
+                _ => self.set(key.name, key.taint, key.sure),
+            }
+        }
+        if later.sets_public {
+            self.public = later.public;
+            self.sets_public = true;
+        } else {
+            self.public |= later.public;
+        }
+        self.any = join(self.any, later.any);
+        self
+    }
+
+    fn set(&mut self, name: String, taint: Option<Taint>, sure: bool) {
+        match self.keys.iter_mut().find(|k| k.name == name) {
+            Some(mine) => *mine = Key { name, taint, sure },
+            None => self.keys.push(Key { name, taint, sure }),
+        }
+    }
+
+    fn set_public(&mut self, public: bool) {
+        self.public = public;
+        self.sets_public = true;
+    }
+
+    fn content(&self) -> Option<Taint> {
+        self.keys
+            .iter()
+            .fold(self.any.clone(), |acc, k| join(acc, k.taint.clone()))
+    }
+
+    fn step(&mut self, step: &Spanned<String>) {
+        let keys = self.keys.iter_mut().filter_map(|k| k.taint.as_mut());
+        for t in keys.chain(self.any.as_mut()) {
+            t.step(step);
         }
     }
 }
 
+/// The values of a local on either of two paths. A path where it holds none may leave the keys
+/// of the other unset, so they replace nothing.
 fn join_vals(a: Option<Vals>, b: Option<Vals>) -> Option<Vals> {
     match (a, b) {
         (Some(a), Some(b)) => Some(a.and(b)),
-        (a, b) => a.or(b),
+        (Some(v), None) | (None, Some(v)) => Some(v.and(Vals::default())),
+        (None, None) => None,
     }
 }
 
@@ -1043,6 +1118,11 @@ impl State {
         join_into(&mut self.picked, other.picked, join);
         join_into(&mut self.browsed, other.browsed, join_browsed);
         join_into(&mut self.ids, other.ids, join);
+        for (name, vals) in &mut self.vals {
+            if !other.vals.contains_key(name) {
+                *vals = join_vals(Some(std::mem::take(vals)), None).unwrap_or_default();
+            }
+        }
         join_into(&mut self.vals, other.vals, join_vals);
         join_into(&mut self.paths, other.paths, join_sites);
         // A check on one path only still vouches for the records: as at 18.0
@@ -1249,8 +1329,12 @@ impl Flows<'_> {
                 self.bind(target, t, Some(value));
             }
             Stmt::AugAssign(a) => {
+                let merged = self.merged_vals(a);
                 let t = join(self.expr(&a.target), self.expr(&a.value));
                 self.bind(&a.target, values(t), None);
+                if let Some((name, vals)) = merged {
+                    self.state.vals.insert(name, vals);
+                }
             }
             Stmt::Expr(e) => {
                 self.expr(&e.value);
@@ -1493,13 +1577,51 @@ impl Flows<'_> {
             self.state.vals.remove(name);
             return;
         };
-        if let Some(t) = &mut vals.content {
-            t.step(&Spanned {
-                value: name.to_owned(),
-                pos: self.loc.at(target),
-            });
-        }
+        vals.step(&Spanned {
+            value: name.to_owned(),
+            pos: self.loc.at(target),
+        });
         self.state.vals.insert(name.to_owned(), vals);
+    }
+
+    /// The attachment values a local holds after `name |= right`, a mapping on the right: those it
+    /// held, or else those `seed` gives it, with what `right` sets over them. `None` for any other
+    /// augmented assignment, which drops them.
+    fn merged_vals(&mut self, a: &ast::StmtAugAssign) -> Option<(String, Vals)> {
+        let Expr::Name(n) = &*a.target else { return None };
+        if a.op != Operator::BitOr || matches!(&*a.value, Expr::List(_) | Expr::Tuple(_)) {
+            return None;
+        }
+        let name = n.id.as_str();
+        let held = self.state.vals.get(name).cloned();
+        let mut right = match held {
+            Some(_) => self.spread(&a.value),
+            None => self.vals_of(&a.value)?,
+        };
+        right.step(&Spanned {
+            value: name.to_owned(),
+            pos: self.loc.at(&*a.target),
+        });
+        let left = held.unwrap_or_else(|| self.seed(name));
+        Some((name.to_owned(), left.over(right)))
+    }
+
+    /// The values of a local without them that an item set or `|=` adds to: any key of the content
+    /// when it holds a mapping the user sends, as `**post` or `request.params` and their copies.
+    /// A helper's parameter is left out, as its caller picks the keys, and so is a value derived
+    /// from a mapping, which holds the code's keys.
+    fn seed(&self, name: &str) -> Vals {
+        let any = self
+            .state
+            .vars
+            .get(name)
+            .filter(|t| t.kind == Kind::Keys && t.origin.is_user())
+            .map(|t| {
+                let mut t = t.clone();
+                t.origins.retain(|o| o.origin.is_user());
+                t
+            });
+        Vals { any, ..Vals::default() }
     }
 
     /// Records `vals[key] = value`, of taint `t`, on the attachment values the local `base` holds.
@@ -1512,9 +1634,17 @@ impl Flows<'_> {
             return;
         }
         let pos = self.loc.at(base);
-        let vals = self.state.vals.entry(n.id.to_string()).or_default();
+        let name = n.id.as_str();
+        // `bind` calls this before `add_to`, so the seed reads the local's own taint.
+        if !self.state.vals.contains_key(name) {
+            let seed = self.seed(name);
+            self.state.vals.insert(name.to_owned(), seed);
+        }
+        let Some(vals) = self.state.vals.get_mut(name) else {
+            return;
+        };
         if !content {
-            vals.public = value.is_some_and(is_true);
+            vals.set_public(value.is_some_and(is_true));
             return;
         }
         let t = t.map(|mut t| {
@@ -1524,7 +1654,7 @@ impl Flows<'_> {
             });
             t
         });
-        vals.content = join(vals.content.take(), t);
+        vals.set(key.to_owned(), t, true);
     }
 
     /// Whether the key of `ir.attachment` values holds the content an attachment stores. `datas`
@@ -1538,20 +1668,26 @@ impl Flows<'_> {
     }
 
     /// The attachment values `expr` holds: a dict literal, `dict(...)`, a list or a tuple of them,
-    /// or a local bound to them.
+    /// or a local bound to them or its `copy()`. Each element of a list is its own attachment, so
+    /// only the public ones count when one is.
     fn vals_of(&mut self, expr: &Expr) -> Option<Vals> {
         match expr {
             Expr::Name(n) => self.state.vals.get(n.id.as_str()).cloned(),
             Expr::Dict(d) => Some(self.dict_vals(d)),
-            Expr::Call(c) if matches!(&*c.func, Expr::Name(n) if n.id.as_str() == "dict") => Some(self.call_vals(c)),
-            Expr::List(ast::ExprList { elts, .. }) | Expr::Tuple(ast::ExprTuple { elts, .. }) => {
-                elts.iter().fold(None, |acc, e| {
-                    let vals = self.vals_of(e);
-                    join_vals(acc, vals)
-                })
-            }
+            Expr::Call(c) => match &*c.func {
+                Expr::Name(n) if n.id.as_str() == "dict" => Some(self.call_vals(c)),
+                Expr::Attribute(a) if a.attr.as_str() == "copy" && c.arguments.is_empty() => self.vals_of(&a.value),
+                _ => None,
+            },
+            Expr::List(ast::ExprList { elts, .. }) | Expr::Tuple(ast::ExprTuple { elts, .. }) => self.list_vals(elts),
             _ => None,
         }
+    }
+
+    fn list_vals(&mut self, elts: &[Expr]) -> Option<Vals> {
+        let all: Vec<Vals> = elts.iter().filter_map(|e| self.vals_of(e)).collect();
+        let public = all.iter().any(|v| v.public);
+        all.into_iter().filter(|v| v.public || !public).reduce(Vals::and)
     }
 
     /// The values a dict literal sets, a later key over an earlier one.
@@ -1560,7 +1696,7 @@ impl Flows<'_> {
         for item in &d.items {
             match &item.key {
                 Some(key) => self.entry(&mut vals, str_lit(key), &item.value),
-                None => vals = vals.and(self.spread(&item.value)),
+                None => vals = vals.over(self.spread(&item.value)),
             }
         }
         vals
@@ -1573,7 +1709,7 @@ impl Flows<'_> {
         for k in &c.arguments.keywords {
             match &k.arg {
                 Some(key) => self.entry(&mut vals, Some(key.as_str()), &k.value),
-                None => vals = vals.and(self.spread(&k.value)),
+                None => vals = vals.over(self.spread(&k.value)),
             }
         }
         vals
@@ -1583,10 +1719,10 @@ impl Flows<'_> {
     /// the content to the taint of its value.
     fn entry(&mut self, vals: &mut Vals, key: Option<&str>, value: &Expr) {
         match key {
-            Some("public") => vals.public = is_true(value),
+            Some("public") => vals.set_public(is_true(value)),
             Some(key) if self.is_content(key) => {
                 let t = self.expr(value);
-                vals.content = join(vals.content.take(), t);
+                vals.set(key.to_owned(), t, true);
             }
             _ => {}
         }
@@ -1598,8 +1734,8 @@ impl Flows<'_> {
         match self.vals_of(x) {
             Some(vals) => vals,
             None => Vals {
-                public: false,
-                content: self.expr(x),
+                any: self.expr(x),
+                ..Vals::default()
             },
         }
     }
@@ -2402,7 +2538,7 @@ impl Flows<'_> {
         self.sink(
             Sink::Attachment,
             format!("{}.{method}()", superuser_call(&a.value)),
-            join(vals.content, file),
+            join(vals.content(), file),
             expr,
         );
     }
@@ -6005,6 +6141,18 @@ mod tests {
             "    request.env(su=True)['ir.attachment'].create({'raw': upload, 'public': True})",
             "    request.env['ir.attachment'].with_user(1).sudo(False).create({'raw': upload, 'public': True})",
             "    B = request.env['ir.attachment'].with_user(1)\n    B.sudo(False).create({'raw': upload, 'public': True})",
+            "    vals = {'raw': upload}\n    vals |= {'public': True}\n    A.create(vals)",
+            "    A.create([{'raw': b'x', 'public': True}, {'raw': upload, 'public': True}])",
+            "    vals = {'raw': upload, 'db_datas': b'x'}\n    vals['db_datas'] = b'y'\n    vals['public'] = True\n    A.create(vals)",
+            "    extra = {'public': True}\n    if post.get('logo'):\n        extra['raw'] = b'logo'\n    A.create({'raw': upload.read(), **extra})",
+            "    extra = {'public': True}\n    for _ in range(2):\n        extra['raw'] = b'logo'\n    A.create({'raw': upload.read(), **extra})",
+            "    vals = {'raw': upload}\n    extra = {'public': True}\n    if post.get('logo'):\n        extra['raw'] = b'logo'\n    vals |= extra\n    A.create(vals)",
+            "    vals = {'raw': upload, 'public': True}\n    extra = self._defaults()\n    vals |= extra\n    A.create(vals)",
+            "    vals = {'raw': upload}\n    data = vals.copy()\n    data['public'] = True\n    A.create(data)",
+            "    extra = self._defaults()\n    if post.get('logo'):\n        extra['raw'] = b'logo'\n    A.create({'raw': upload.read(), **extra, 'public': True})",
+            "    extra = self._defaults()\n    if post.get('private'):\n        extra['public'] = False\n    A.create({'raw': upload.read(), 'public': True, **extra})",
+            "    extra = {'raw': b'logo'}\n    if post.get('custom'):\n        extra = self._custom()\n    A.create({'raw': upload.read(), **extra, 'public': True})",
+            "    vals = {'raw': upload.read(), 'public': True}\n    extra = self._defaults()\n    if post.get('logo'):\n        extra['raw'] = b'logo'\n    vals |= extra\n    A.create(vals)",
         ] {
             assert_eq!(stored(Some("18.0"), body), ["OD717"], "{body}");
         }
@@ -6044,6 +6192,15 @@ mod tests {
             "    A.create({'name': upload, 'mimetype': upload, 'public': True})",
             "    A._upload_file(upload, {'name': 'a'})",
             "    A.write({'raw': upload, 'public': True})",
+            "    A.create([{'raw': b'logo', 'public': True}, {'raw': upload}])",
+            "    A.create([{'raw': upload}, {'raw': b'logo', 'public': True}])",
+            "    vals = {'raw': upload, 'public': True}\n    vals['raw'] = b'x'\n    A.create(vals)",
+            "    A.create(dict({'raw': upload}, raw=b'x', public=True))",
+            "    A.create({'raw': upload, **{'raw': b'x'}, 'public': True})",
+            "    vals = {'raw': upload}\n    vals |= {'raw': b'x', 'public': True}\n    A.create(vals)",
+            "    vals = {'raw': upload, 'public': True}\n    vals |= {'public': post.get('public')}\n    A.create(vals)",
+            "    vals = {'name': post.get('name'), 'raw': b'pdf'}\n    data = vals.copy()\n    data['public'] = True\n    A.create(data)",
+            "    name = post.get('name')\n    name['public'] = True\n    A.create(name)",
         ] {
             assert!(stored(Some("18.0"), body).is_empty(), "{body}");
         }
@@ -6080,6 +6237,31 @@ mod tests {
             stored(None, "    A.create(dict(post, public=True))"),
             ["OD717", "OD704"]
         );
+        assert_eq!(
+            stored(
+                None,
+                "    data = post.copy()\n    data['public'] = True\n    A.create(data)"
+            ),
+            ["OD717", "OD704"]
+        );
+        assert_eq!(
+            stored(None, "    post['public'] = True\n    A.create(post)"),
+            ["OD717", "OD704"]
+        );
+        assert_eq!(
+            stored(None, "    A.create({**post, 'raw': b'x', 'public': True})"),
+            ["OD717", "OD704"]
+        );
+        assert_eq!(
+            stored(
+                None,
+                "    data = request.params\n    data['public'] = True\n    A.create(data)"
+            ),
+            ["OD717", "OD704"]
+        );
+        // An augmented assignment binds `post` as a value, which drops OD704.
+        let merged = stored(None, "    post |= {'public': True}\n    A.create(post)");
+        assert!(merged.iter().any(|c| c == "OD717"), "{merged:?}");
     }
 
     #[test]
@@ -6090,6 +6272,19 @@ mod tests {
         );
         let targets: Vec<_> = helper.edges.iter().map(|e| (e.origin, e.target.clone())).collect();
         assert_eq!(targets, [(FlowOrigin::Param(0), FlowTarget::Sink("OD717"))]);
+        // Its caller picks the keys, which may set the content to the code's own.
+        for publish in ["vals['public'] = True", "vals |= {'public': True}"] {
+            let src =
+                format!("def _store(self, vals):\n    {publish}\n    self.env['ir.attachment'].sudo().create(vals)\n");
+            let edges = model_method(Params::None, &src).1.map(|s| s.edges).unwrap_or_default();
+            assert!(
+                !edges.iter().any(|e| e.target == FlowTarget::Sink("OD717")),
+                "{publish}"
+            );
+            // A public method's own RPC argument is the user's mapping, so it reports there.
+            let (found, _) = model_method(Params::Rpc, &src.replace("_store", "store"));
+            assert!(found.iter().any(|d| d.code == "OD717"), "RPC {publish}");
+        }
     }
 
     /// A sink of each rule but OD704, which needs a mapping, receiving `#`.

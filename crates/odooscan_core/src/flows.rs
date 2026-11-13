@@ -876,6 +876,22 @@ mod tests {
         assert!(call("b'logo'").is_empty());
     }
 
+    #[test]
+    fn a_helper_publishing_values_its_caller_names_is_not_reported() {
+        for publish in ["vals['public'] = True", "vals |= {'public': True}"] {
+            let store = format!(
+                "    def _store(self, vals):\n        {publish}\n        return self.env['ir.attachment'].sudo().create(vals)\n"
+            );
+            let route =
+                "    def r(self, **kw):\n        request.env['x.y']._store({'name': kw.get('name'), 'raw': b'pdf'})\n";
+            assert!(scan_messages(route, &store).is_empty(), "{publish}");
+            // A public method reports what an RPC sends it, not what a Python caller picks.
+            let store = store.replace("_store", "store");
+            let route = route.replace("_store", "store");
+            assert!(scan_messages(&route, &store).is_empty(), "public {publish}");
+        }
+    }
+
     /// A sink of each rule but OD704, which needs a mapping, and OD716, which a route reaches,
     /// receiving `#` in a method of `x.y`.
     const METHOD_SINK_OF: &[(&str, &str)] = &[
