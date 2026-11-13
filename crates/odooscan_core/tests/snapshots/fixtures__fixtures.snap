@@ -40,6 +40,7 @@ custom/bad_sale/controllers/attachments.py:83:9: OD717 route parameter 'form' re
 custom/bad_sale/controllers/callers.py:18:9: OD701 route parameter 'term' reaches the query of cr.execute() through 'self.term'; pass it as a query parameter or build the query with odoo.tools.SQL
 custom/bad_sale/controllers/callers.py:23:16: OD703 route parameter 'note' reaches Markup() through '_note_html()', '_note_paragraph()' unescaped; escape it, or pass it as an argument of Markup's % or format()
 custom/bad_sale/controllers/callers.py:27:16: OD703 request.params reaches Markup() through 'label()', '_label_suffix()' unescaped; escape it, or pass it as an argument of Markup's % or format()
+custom/bad_sale/controllers/callers.py:36:16: OD703 route parameter 'note' reaches Markup() through '_note_card()', 'card.body_html' unescaped; escape it, or pass it as an argument of Markup's % or format()
 custom/bad_sale/controllers/configured.py:11:9: OD701 route parameter 'term' reaches the query of lib.run_query(); pass it as a query parameter or build the query with odoo.tools.SQL
 custom/bad_sale/controllers/configured.py:15:16: OD702 lib.read_form() reaches safe_eval() through 'form', which runs it as code
 custom/bad_sale/controllers/flows.py:14:9: OD701 route parameter 'term' reaches the query of cr.execute() through 'where', 'query'; pass it as a query parameter or build the query with odoo.tools.SQL

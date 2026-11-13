@@ -205,15 +205,24 @@ user picks, and is no source. A URL that leaves it out lets the query string giv
 
 A value stays tainted through assignments, attributes of `self` set in the same method, formatting,
 concatenation, f-strings, string methods, items, attributes, collections, comprehensions and module
-functions such as `json.loads()`. `getattr()` keeps its object and its default but not the name it
-reads, and `match()` and `fullmatch()` on an untainted pattern keep the string they match. What a
-recordset method such as `browse()` or `search()` returns is not tainted, but for OD712, which
-follows the records of `env[t]` or `env.get(t)` through locals, `sudo()`, `browse()`, `exists()` and
-`filtered()`, and OD716, which follows the records `browse()` reads by an id the user picks into
-what a route returns, until a check of them. OD717 follows the `public` flag and the content of the
-values for `ir.attachment` through dict literals, `dict()`, lists, locals and their items. Both
-branches of an `if` are followed, a branch that returns or raises adds nothing after it, and a loop
-body is read twice, its `for` target bound again from the iterable before each reading.
+functions such as `json.loads()`. A value set on an attribute reaches the whole object: a read of
+the object or of any of its attributes carries it. The exception is a parameter's or a call's value
+set on a local or an attribute of `self` bound to another such value and holding no user value: it
+reaches only reads of that attribute, as `stream.etag` does not reach `open(stream.path)`, and a
+read of the whole object, as `return stream`, `self._z(stream)`, `getattr()`, `vars()` and
+`__dict__` do, misses it. A read through `sudo()`, `with_context()` and the other methods that
+change only the environment, as `m.sudo().body_html`, or through the target of a `for` loop over the
+object, is a read of that attribute. A user value set on any object reaches the whole object.
+Binding that local or attribute again drops what its attributes kept, unless it is bound to the same
+records in another environment, as `x = x.sudo()` does. `getattr()` keeps its object and its default
+but not the name it reads, and `match()` and `fullmatch()` on an untainted pattern keep the string
+they match. What a recordset method such as `browse()` or `search()` returns is not tainted, but for
+OD712, which follows the records of `env[t]` or `env.get(t)` through locals, `sudo()`, `browse()`,
+`exists()` and `filtered()`, and OD716, which follows the records `browse()` reads by an id the user
+picks into what a route returns, until a check of them. OD717 follows the `public` flag and the
+content of the values for `ir.attachment` through dict literals, `dict()`, lists, locals and their
+items. Both branches of an `if` are followed, a branch that returns or raises adds nothing after it,
+and a loop body is read twice, its `for` target bound again from the iterable before each reading.
 
 A value passed to a method of `self`, of `env["x"]` or of a local bound to one is followed into
 every definition of that method the module's dependencies hold, overrides included, up to four calls
