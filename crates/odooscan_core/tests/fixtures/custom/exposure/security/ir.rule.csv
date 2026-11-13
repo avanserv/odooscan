@@ -1,0 +1,3 @@
+id,name,model_id:id,groups:id,domain_force,perm_read,perm_write,perm_create,perm_unlink
+rule_ticket_csv_blank,blank domain,model_exposure_ticket,base.group_portal,,1,0,0,0
+rule_ticket_csv_none,no permission,model_exposure_ticket,base.group_user,"[('partner_id', '=', user.partner_id.id)]",0,0,0,0

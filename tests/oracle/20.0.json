@@ -2869,6 +2869,12 @@
       "count": 1
     },
     {
+      "path": "addons/website/models/website.py",
+      "code": "OD404",
+      "message": "'google_maps_api_key' of website holds a secret and has no groups, and base.group_everyone can read website, so they can read it over RPC; give the field groups, such as base.group_system",
+      "count": 1
+    },
+    {
       "path": "addons/website/models/website_form.py",
       "code": "OD122",
       "message": "UPDATE on ir_model_fields bypasses the ORM, so records this transaction already read keep stale values; call flush_model() before the query and invalidate_model() after it (flush() and invalidate_cache() before 16.0)",

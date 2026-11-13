@@ -75,6 +75,26 @@ pub(crate) fn values<'a>(expr: &'a Expr, field: &str) -> Option<Vec<&'a str>> {
     }
 }
 
+/// The terms of a literal domain that holds every record: `TRUE_LEAF`, `(1, '=', 1)`, joined by
+/// `&` alone. None for any other domain, Some of none for an empty one.
+pub fn always_true(text: &str) -> Option<usize> {
+    let parsed = parse_expression(text.trim()).ok()?;
+    let mut leaves = 0;
+    for term in items(parsed.expr())? {
+        match term {
+            Expr::StringLiteral(s) if s.value.to_str() == "&" => {}
+            _ if true_leaf(term) => leaves += 1,
+            _ => return None,
+        }
+    }
+    Some(leaves)
+}
+
+fn true_leaf(term: &Expr) -> bool {
+    let one = |e: &Expr| matches!(e, Expr::NumberLiteral(n) if matches!(&n.value, ast::Number::Int(i) if i.as_u64() == Some(1)));
+    matches!(items(term), Some([left, Expr::StringLiteral(op), right]) if one(left) && op.value.to_str() == "=" && one(right))
+}
+
 /// The field paths of a domain written as text, as XML and string field attributes hold it.
 pub fn parse(text: &str) -> Option<Vec<String>> {
     let parsed = parse_expression(text.trim()).ok()?;
@@ -168,6 +188,28 @@ mod tests {
             "[(x.y, '=', 1)]",
         ] {
             assert_eq!(parse(text), None, "{text}");
+        }
+    }
+
+    #[test]
+    fn tells_a_domain_that_holds_every_record() {
+        assert_eq!(always_true("[]"), Some(0));
+        assert_eq!(always_true(" [(1, '=', 1)] "), Some(1));
+        assert_eq!(always_true("['&', (1, '=', 1), [1, '=', 1]]"), Some(2));
+        assert_eq!(always_true("((1, '=', 1),)"), Some(1));
+        for text in [
+            "",
+            "False",
+            "[(1, '=', 0)]",
+            "[(0, '=', 0)]",
+            "[(1, '!=', 1)]",
+            "['|', (1, '=', 1), ('a', '=', 1)]",
+            "['!', (1, '=', 1)]",
+            "[(1, '=', 1), ('a', '=', 1)]",
+            "[(1, '=', 1)] + extra",
+            "[('id', '!=', False)]",
+        ] {
+            assert_eq!(always_true(text), None, "{text}");
         }
     }
 

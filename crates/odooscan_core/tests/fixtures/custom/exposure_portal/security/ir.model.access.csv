@@ -1,0 +1,3 @@
+id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
+access_exposure_internal_portal,internal portal,exposure.model_exposure_internal,base.group_portal,1,1,0,0
+access_exposure_board_portal_write,board portal write,exposure.model_exposure_board,base.group_portal,1,1,0,0

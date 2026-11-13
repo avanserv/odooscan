@@ -138,6 +138,68 @@ fn keeps_rows(item: &Expr) -> bool {
     }
 }
 
+/// What an `eval` of a many2many links: the ids it adds, and whether the rows written before stay.
+#[derive(Debug, PartialEq)]
+pub struct Linked {
+    pub ids: Vec<String>,
+    pub keeps: bool,
+}
+
+/// What an `eval` of x2many commands links. A false `eval` other than a list clears the field, and
+/// an empty list of commands changes nothing (18.0 `odoo/fields.py:4577-4590`). None when an item
+/// is no command, names an id only a run tells, or removes a row, which may be one linked before.
+pub fn linked(eval: &str) -> Option<Linked> {
+    let parsed = parse_expression(eval.trim()).ok()?;
+    let mut linked = Linked {
+        ids: vec![],
+        keeps: true,
+    };
+    let expr = parsed.expr();
+    if !matches!(expr, Expr::List(_)) && falsy(expr) {
+        linked.keeps = false;
+        return Some(linked);
+    }
+    let Expr::List(list) = expr else { return None };
+    for item in &list.elts {
+        let (code, rest) = command(item)?;
+        link(&mut linked, code, rest)?;
+    }
+    Some(linked)
+}
+
+/// The code of a command, a tuple or a `Command` call, and the items after it.
+fn command(item: &Expr) -> Option<(u64, &[Expr])> {
+    match item {
+        Expr::Tuple(t) => Some((command_code(&t.elts)?, t.elts.get(1..).unwrap_or_default())),
+        Expr::Call(c) => Some((named_code(command_name(c)?)?, &c.arguments.args)),
+        _ => None,
+    }
+}
+
+/// The code of the tuple a `Command` method builds.
+fn named_code(name: &str) -> Option<u64> {
+    let codes = ["create", "update", "delete", "unlink", "link", "clear", "set"];
+    codes.iter().position(|c| *c == name).map(|at| at as u64)
+}
+
+/// Applies one command, given the items after its code: a tuple and a `Command` call both hold the
+/// id of a link first and the ids of a set last.
+fn link(linked: &mut Linked, code: u64, rest: &[Expr]) -> Option<()> {
+    match code {
+        0 | 1 => Some(()),
+        4 => push_ref(rest.first()?, &mut linked.ids),
+        5 | 6 => {
+            linked.ids.clear();
+            linked.keeps = false;
+            if code == 6 {
+                push_refs(rest.last()?, &mut linked.ids)?;
+            }
+            Some(())
+        }
+        _ => None,
+    }
+}
+
 /// The items of a tuple or a list, each none unless it is a string literal.
 pub fn strings(eval: &str) -> Vec<Option<String>> {
     let Ok(parsed) = parse_expression(eval.trim()) else {
@@ -444,6 +506,44 @@ mod tests {
         }
         for eval in ["True", "1", "'a'", "ref('a')", "x", "bool(0)", "ref("] {
             assert!(!is_false(eval), "{eval}");
+        }
+    }
+
+    #[test]
+    fn reads_what_commands_link() {
+        let expect = |ids: &[&str], keeps| {
+            Some(Linked {
+                ids: ids.iter().map(|i| (*i).to_owned()).collect(),
+                keeps,
+            })
+        };
+        assert_eq!(
+            linked("[(4, ref('a')), Command.link(ref('b'))]"),
+            expect(&["a", "b"], true)
+        );
+        assert_eq!(linked("[(4, ref('a')), (6, 0, [ref('b')])]"), expect(&["b"], false));
+        assert_eq!(
+            linked("[Command.set([ref('a'), ref('b')])]"),
+            expect(&["a", "b"], false)
+        );
+        assert_eq!(linked("[(5, 0, 0), (4, ref('a'))]"), expect(&["a"], false));
+        assert_eq!(linked("[Command.clear()]"), expect(&[], false));
+        assert_eq!(linked("[(0, 0, {'name': 'g'}), (1, ref('a'), {})]"), expect(&[], true));
+        assert_eq!(linked("False"), expect(&[], false));
+        assert_eq!(linked("[]"), expect(&[], true));
+        assert_eq!(linked("None"), expect(&[], false));
+        for eval in [
+            "[(3, ref('a'))]",
+            "[(2, ref('a'))]",
+            "[Command.unlink(ref('a'))]",
+            "[Command.delete(ref('a'))]",
+            "[(4, group_id)]",
+            "[(6, 0, ids)]",
+            "groups",
+            "[ref('a')]",
+            "[(4,",
+        ] {
+            assert_eq!(linked(eval), None, "{eval}");
         }
     }
 }

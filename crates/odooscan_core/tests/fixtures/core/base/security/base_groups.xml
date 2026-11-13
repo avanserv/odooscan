@@ -2,4 +2,5 @@
     <record id="group_user" model="res.groups"><field name="name">User</field></record>
     <record id="group_portal" model="res.groups"><field name="name">Portal</field></record>
     <record id="group_public" model="res.groups"><field name="name">Public</field></record>
+    <record id="group_everyone" model="res.groups"><field name="name">Everyone</field></record>
 </odoo>

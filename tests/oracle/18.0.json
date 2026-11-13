@@ -2258,6 +2258,12 @@
     },
     {
       "path": "addons/website/models/website.py",
+      "code": "OD404",
+      "message": "'google_maps_api_key' of website holds a secret and has no groups, and base.group_public can read website, so they can read it over RPC; give the field groups, such as base.group_system",
+      "count": 1
+    },
+    {
+      "path": "addons/website/models/website.py",
       "code": "OD706",
       "message": "RPC argument 'kwargs' reaches the URL of requests.get() through 'theme_name', '_website_api_rpc()', '_api_rpc()', 'custom_resources', 'images', 'image_src', so the user picks the host the server connects to; start the URL with a host the code picks",
       "count": 1
