@@ -7,11 +7,11 @@ use globset::{GlobBuilder, GlobSet};
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::facts::{
-    AccessRow, ActionFact, ActionValue, ActionViewId, Annotation, ArchElement, ArchModifier, ArchSubview, ClassFact,
-    DataFacts, DefinitionSource, DomainFact, FieldFact, FieldWrite, Flag, FunctionCall, GuardedRef, JsFacts, JsName,
-    MethodDef, Migrate, ModelKind, OptionValue, OrmCall, Pos, PyFacts, RawDiag, RecordFact, RecordWrite, Refusal,
-    ReportFact, RouteDef, RouteKey, RuleFact, ServerFact, Signature, Spanned, SqlColumn, SqlView, Subject, UNREAD_TYPE,
-    ViewFact, WrittenValue, XmlDef, XmlRef,
+    AccessRow, ActionFact, ActionValue, ActionViewId, Annotation, ArchElement, ArchModifier, ArchSubview, ClassBase,
+    ClassFact, DataFacts, DefinitionSource, DomainFact, FieldFact, FieldWrite, Flag, FunctionCall, GuardedRef, JsFacts,
+    JsName, MethodDef, Migrate, ModelKind, OptionValue, OrmCall, Pos, PyFacts, RawDiag, RecordFact, RecordWrite,
+    Refusal, ReportFact, RouteDef, RouteKey, RuleFact, ServerFact, Signature, Spanned, SqlColumn, SqlView, Subject,
+    UNREAD_TYPE, ViewFact, WrittenValue, XmlDef, XmlRef,
 };
 use crate::grants::{self, AttachmentGrant, Grant, Grants};
 use crate::index::{
@@ -28,6 +28,11 @@ use crate::{domain, flows, manifest, modifier, module_state, python, routing};
 
 /// Directories of upgrade scripts, which name XML ids of past versions.
 const UPGRADE_DIRS: &[&str] = &["migrations", "upgrades"];
+
+/// The directory of IoT box drivers and interfaces. The `iot` module zips `iot_handlers/*/*` of
+/// every installed module (18.0 enterprise `iot/controllers/main.py:61-65`) and the box loads each
+/// file by its path (18.0 `hw_drivers/tools/helpers.py:532-547`), so no import reaches them.
+const IOT_DIR: &str = "iot_handlers";
 
 /// The first series that serves a route method whose override drops `@route()`, decorating the
 /// override itself and logging a warning (347a3ccf763c, 18.0 `odoo/http.py:843-845`). Before it
@@ -247,6 +252,7 @@ pub fn check_module<'m>(index: &Index<'m>, mi: usize, series: Option<Series>) ->
     unread_template_lists(module, series, &mut out);
     bundle_templates(module, &mut out);
     unloaded_files(module, series, &mut out);
+    unimported_files(index, module, &mut out);
     ids_repeated_in_a_file(module, series, &mut out);
     ids_repeated_across_files(module, series, &mut out);
     same_module_xmlids(index, mi, series, &mut out);
@@ -1213,6 +1219,71 @@ fn unloaded_files<'m>(module: &'m Module, series: Option<Series>, out: &mut Out<
             );
         }
     }
+}
+
+/// OD516 on a file of models or controllers, and OD517 on a test file, that no import reaches from
+/// the module's root, from `tests/__init__.py` for a test, or from another module. Silent when the
+/// scan cannot tell what Odoo runs: without a root `__init__.py`, with a file it cannot decode, or
+/// past a file that does not parse or imports by a computed name.
+fn unimported_files<'m>(index: &Index<'m>, module: &'m Module, out: &mut Out<'m>) {
+    if module.lost_text || !module.python.iter().any(|f| f.rel == "__init__.py") {
+        return;
+    }
+    let (graph, name) = (&index.imports, module.name.as_str());
+    let mut starts: Vec<&str> = graph.elsewhere(name).collect();
+    starts.push("__init__.py");
+    let code = graph.reached(name, &starts);
+    starts.push("tests/__init__.py");
+    let tests = graph.reached(name, &starts);
+    for file in &module.python {
+        let finding = match file.rel.strip_prefix("tests/") {
+            Some(test) => unrun_test(test, &file.rel, tests.as_ref()),
+            None => unloaded_code(module, file, code.as_ref()),
+        };
+        if let Some((rule, message)) = finding {
+            out.push(&file.path, rule, Pos { line: 1, col: 1 }, message);
+        }
+    }
+}
+
+/// OD517 on a file directly under `tests/`, named `test_*`, that `reached` lacks.
+fn unrun_test(test: &str, rel: &str, reached: Option<&FxHashSet<String>>) -> Option<(&'static str, String)> {
+    let direct = test.starts_with("test_") && !test.contains('/');
+    let unreached = reached.is_some_and(|r| !r.contains(rel));
+    (direct && unreached).then(|| {
+        let message = "no import from tests/__init__.py reaches this file, so Odoo never runs its tests";
+        ("OD517", message.to_owned())
+    })
+}
+
+/// OD516 on a file of models or controllers that `reached` lacks, upgrade scripts, IoT handlers and
+/// the manifest aside.
+fn unloaded_code(
+    module: &Module,
+    file: &SourceFile<PyFacts>,
+    reached: Option<&FxHashSet<String>>,
+) -> Option<(&'static str, String)> {
+    let dir = file.rel.split_once('/').map(|(dir, _)| dir);
+    if dir.is_some_and(|d| UPGRADE_DIRS.contains(&d) || d == IOT_DIR)
+        || file.path == module.manifest_path
+        || reached.is_none_or(|r| r.contains(&file.rel))
+    {
+        return None;
+    }
+    let what = loaded_class(&file.facts)?;
+    let message = format!("no import from the module's __init__.py reaches this file, so Odoo never loads {what}");
+    Some(("OD516", message))
+}
+
+/// The first model or controller a file defines, as OD516 names it. A class extending a controller
+/// of the file is one too, but the class it extends comes first.
+fn loaded_class(facts: &PyFacts) -> Option<String> {
+    if let Some(class) = facts.classes.first() {
+        return Some(format!("model '{}'", class.model));
+    }
+    let mut controllers = facts.controllers.iter();
+    let class = controllers.find(|c| !c.routes.is_empty() || c.bases.contains(&ClassBase::Root))?;
+    Some(format!("controller '{}'", class.name))
 }
 
 /// OD502's message for a data file Odoo never loads, listed under `ignored` or under no key.

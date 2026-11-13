@@ -186,6 +186,8 @@ dependencies and migration scripts.
 | [OD513](OD513.md) | `asset-path-unmatched` | An assets path or glob of the module matches no file Odoo serves. |
 | [OD514](OD514.md) | `migration-folder-skipped` | Odoo never runs the scripts of a migration folder of this name. |
 | [OD515](OD515.md) | `migration-script-refused` | A migration script lacks the migrate(cr, version) Odoo calls, so the update fails. |
+| [OD516](OD516.md) | `python-file-not-imported` | A file of models or controllers is never imported, so Odoo never loads them. |
+| [OD517](OD517.md) | `test-file-not-imported` | A test file is never imported by the tests package, so Odoo never runs its tests. |
 
 ## OD6: JavaScript and Owl
 

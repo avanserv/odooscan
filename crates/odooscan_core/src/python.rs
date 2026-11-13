@@ -23,7 +23,7 @@ use crate::sql::{
 };
 use crate::superuser::{self, Escalation};
 use crate::taint::{self, Params, TaintTable};
-use crate::{async_names, domain, method_body, module_state, python2};
+use crate::{async_names, domain, imports, method_body, module_state, python2};
 
 const FIELD_TYPES: &[&str] = &[
     "Boolean",
@@ -1731,6 +1731,7 @@ pub fn analyze_with(
     v.facts.import_patches = patches;
     v.facts.diags.extend(diags);
     v.facts.migrate = module_state::migrate(body, &loc);
+    v.facts.imports = Some(imports::file_imports(body, &loc));
     v.facts
 }
 
