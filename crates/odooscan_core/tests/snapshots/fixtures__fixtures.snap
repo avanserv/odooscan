@@ -1141,10 +1141,13 @@ custom/report_tag161/data/reports.xml:22:46: OD319 Odoo refuses this expression 
 custom/report_tag161/data/reports.xml:28:35: OD311 no indexed module defines template 'report_tag161.absent_record'
 custom/report_tag161/data/reports.xml:29:46: OD319 Odoo refuses this expression when it prints the report: Unexpected token at the end of an expression
 custom/report_tag161/data/updates.xml:2:5: OD323 XML id 'tag_replaces' is already defined in data/reports.xml, and this definition overwrites the fields both name; remove the copy when the two say the same thing, or rename one when both are meant to exist
+custom/route_overrides/controllers/rebound.py:18:9: OD127 route accepts GET, on which Odoo checks no CSRF token, and calls create(); restrict it with methods=['POST'] or check a token
 custom/route_overrides/controllers/routes.py:8:9: OD127 route accepts GET, on which Odoo checks no CSRF token, and calls write(); restrict it with methods=['POST'] or check a token
 custom/route_overrides/controllers/routes.py:13:9: OD127 route accepts GET, on which Odoo checks no CSRF token, and calls unlink(); restrict it with methods=['POST'] or check a token
 custom/route_overrides/controllers/routes.py:18:9: OD111 route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check
 custom/route_overrides/controllers/routes.py:22:9: OD129 route with auth='none' reads request.env.user, which is empty as the route runs with no user; use auth='public' or set the user with request.update_env()
+custom/route_overrides/controllers/twins.py:7:9: OD111 route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check
+custom/route_overrides/controllers/twins.py:21:9: OD111 route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check
 custom/saas124/views/actions.xml:5:33: OD318 saas124.plain has no field activity_ids, which the activity view searches; inherit mail.activity.mixin
 custom/saas124/views/actions.xml:11:33: OD318 saas124.tracked has no primary activity view, and nothing generates one
 custom/saas125/models/res_partner.py:7:68: OD222 'home_country_id' has check_company=True, but res.country has no company_id field to check; remove check_company

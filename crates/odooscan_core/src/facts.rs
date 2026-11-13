@@ -2,6 +2,8 @@
 
 use std::path::PathBuf;
 
+use ruff_text_size::TextSize;
+
 use crate::fix::Fix;
 
 /// The type of a field the scan cannot tell: an `ir.model.fields` record gives no `ttype` it can
@@ -645,7 +647,8 @@ pub struct RouteDef {
 /// A base of a class that is no model, as the file's imports name it.
 #[derive(Clone, Debug, PartialEq)]
 pub enum ClassBase {
-    /// `odoo.http.Controller` or `object`, which give no route.
+    /// `odoo.http.Controller`, from 20.0 `odoo.http.routing_map.Controller`, or `object`, which give
+    /// no route.
     Root,
     /// The dotted path of a class an import from `odoo.addons` names.
     Addon(String),
@@ -660,6 +663,8 @@ pub enum ClassBase {
 #[derive(Clone, Debug)]
 pub struct ControllerFact {
     pub name: String,
+    /// Where the class starts, which tells apart two classes of one name: Odoo registers both.
+    pub start: TextSize,
     pub bases: Vec<ClassBase>,
     pub routes: Vec<RouteDef>,
 }
