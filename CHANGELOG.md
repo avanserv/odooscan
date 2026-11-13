@@ -1,5 +1,55 @@
 # Changelog
 
+## [0.11.0](https://github.com/avanserv/odooscan/compare/v0.10.0...v0.11.0) (2026-11-13)
+
+
+### Features
+
+* **checks:** Report unsanitized Html, secrets and open portal rules ([#251](https://github.com/avanserv/odooscan/issues/251)) ([c808fed](https://github.com/avanserv/odooscan/commit/c808fed033c29ad8a85c54f42d0ec1b67d475501))
+* **python:** Report GET-route writes, open CORS and userless auth=none ([#249](https://github.com/avanserv/odooscan/issues/249)) ([aac10b1](https://github.com/avanserv/odooscan/commit/aac10b1f48305ef2c8364371343d04289ffc6ee4))
+* **python:** Report superuser routes, session switches, secret == ([#250](https://github.com/avanserv/odooscan/issues/250)) ([b4bf247](https://github.com/avanserv/odooscan/commit/b4bf247de7f8d71e76a4cb6c84c71d9a4fe2c443))
+* **taint:** Add sources, sinks and sanitizers from odooscan.toml ([#242](https://github.com/avanserv/odooscan/issues/242)) ([3c74f01](https://github.com/avanserv/odooscan/commit/3c74f0105fed1a781af364be2d11df9e6f55e2a9))
+* **taint:** Follow sudo callers, deeper returns and self attributes ([#243](https://github.com/avanserv/odooscan/issues/243)) ([6bd4f2a](https://github.com/avanserv/odooscan/commit/6bd4f2ab3ddfc1bf44da2def954ab1a64d0f9cee))
+* **taint:** Report a public attachment created as a user granted create ([#291](https://github.com/avanserv/odooscan/issues/291)) ([3fa7c52](https://github.com/avanserv/odooscan/commit/3fa7c52b440959e9fba314ced59ba16be87fda44))
+* **taint:** Report command, deserialization, XML entity and header flows ([#245](https://github.com/avanserv/odooscan/issues/245)) ([5f9bc13](https://github.com/avanserv/odooscan/commit/5f9bc130d745d5a8a51166ded3c2e91d957cc6f7))
+* **taint:** Report records a route returns by a user's id under sudo() ([#247](https://github.com/avanserv/odooscan/issues/247)) ([c300601](https://github.com/avanserv/odooscan/commit/c300601caec9f0d44d4d6ed3d76950bf6a51d3ac))
+* **taint:** Report user content stored as a public attachment under sudo() ([#248](https://github.com/avanserv/odooscan/issues/248)) ([a0c9dd4](https://github.com/avanserv/odooscan/commit/a0c9dd45a919dfb182fbd6a209c022e899b8d56d))
+* **taint:** Report user-picked models, methods, fields and domains ([#246](https://github.com/avanserv/odooscan/issues/246)) ([5d214f5](https://github.com/avanserv/odooscan/commit/5d214f52f769eb8b0e7ff106c99363a12e9aca30))
+
+
+### Bug Fixes
+
+* **checks:** Count base.group_everyone as public in OD402 ([#275](https://github.com/avanserv/odooscan/issues/275)) ([2a1fc96](https://github.com/avanserv/odooscan/commit/2a1fc96b7d9c92b63d363602caa2a8162df8b652))
+* **checks:** Read OD405 and OD406 rules by public groups and booleans ([#276](https://github.com/avanserv/odooscan/issues/276)) ([95cb1e1](https://github.com/avanserv/odooscan/commit/95cb1e1a1efe73b7892d7985871a74872e304e67))
+* **flows:** Follow a public method's parameter from a Python caller ([#258](https://github.com/avanserv/odooscan/issues/258)) ([0fae733](https://github.com/avanserv/odooscan/commit/0fae73368439ef7d4ad8735fa0fee5bc82119578))
+* **flows:** Key the solver's memos by depth ([#254](https://github.com/avanserv/odooscan/issues/254)) ([a622925](https://github.com/avanserv/odooscan/commit/a6229257481941a1b7bdb5594f92aefe2e0672a7))
+* **python:** Narrow OD131 change checks and skip OD130 uid restores ([#274](https://github.com/avanserv/odooscan/issues/274)) ([af0331f](https://github.com/avanserv/odooscan/commit/af0331ff94f78332cb2f35501c0f350a38692aac))
+* **python:** Read None users and env locals in OD127 and OD129 ([#273](https://github.com/avanserv/odooscan/issues/273)) ([68fc1f5](https://github.com/avanserv/odooscan/commit/68fc1f5c56fd3cbb38a5e94661ac816f851171d4))
+* **python:** Read route params per URL and inherited routing ([#261](https://github.com/avanserv/odooscan/issues/261)) ([e1c8594](https://github.com/avanserv/odooscan/commit/e1c8594c7dcbcc21eb09f94903a7a72f1c2aed72))
+* **routing:** Find a route's class by position, bind bases by name ([#284](https://github.com/avanserv/odooscan/issues/284)) ([c706d05](https://github.com/avanserv/odooscan/commit/c706d050892eafe289598b9159b262403efceeb0))
+* **taint:** Bind a for loop's target again before each pass of its body ([#259](https://github.com/avanserv/odooscan/issues/259)) ([e4cc1b2](https://github.com/avanserv/odooscan/commit/e4cc1b27d86e7152a33d56b52d961dfbe7b798ee))
+* **taint:** Carry a continue arm's writes to the next loop pass ([#283](https://github.com/avanserv/odooscan/issues/283)) ([bed4ce3](https://github.com/avanserv/odooscan/commit/bed4ce3d177493fbaec7595cbc38004b85f3f7aa))
+* **taint:** Confine a value inside an if x in allowed branch ([#266](https://github.com/avanserv/odooscan/issues/266)) ([c55daec](https://github.com/avanserv/odooscan/commit/c55daec256efa9e485a6a5748f0a5da99117e9ae))
+* **taint:** Follow a value set on an attribute into its reads ([#281](https://github.com/avanserv/odooscan/issues/281)) ([e1fde24](https://github.com/avanserv/odooscan/commit/e1fde24445bd324af2a304d83a338b71b38b4e7b))
+* **taint:** Keep every origin of a joined value in the summary edges ([#257](https://github.com/avanserv/odooscan/issues/257)) ([68986ff](https://github.com/avanserv/odooscan/commit/68986ffd4c4f840dd856ff60759720c1217cf847))
+* **taint:** Keep OD707 silent on a joined path only file_open() opens ([#290](https://github.com/avanserv/odooscan/issues/290)) ([9e480f7](https://github.com/avanserv/odooscan/commit/9e480f7de79313a5d158355ea1cd6edc00743f95))
+* **taint:** Keep the user side of a Domain joined with & ([#267](https://github.com/avanserv/odooscan/issues/267)) ([a162493](https://github.com/avanserv/odooscan/commit/a16249326124322241a2c78bcce357c7158fb56a))
+* **taint:** Match the OD717 grant to route auth and ir.access domain ([#293](https://github.com/avanserv/odooscan/issues/293)) ([e09cf38](https://github.com/avanserv/odooscan/commit/e09cf3863cef0372ca94984e18cbeaa6d5c9ffd5))
+* **taint:** Name the header a bound list sets in OD711 ([#265](https://github.com/avanserv/odooscan/issues/265)) ([f9b6b93](https://github.com/avanserv/odooscan/commit/f9b6b93d78a7d9291d3edb51b9df4c1fec7956f8))
+* **taint:** Read &lt;&gt;, == and access as value operators in OD715 ([#285](https://github.com/avanserv/odooscan/issues/285)) ([9b66356](https://github.com/avanserv/odooscan/commit/9b66356933f281d5dfd7dc0aa7b57c82c44c1260))
+* **taint:** Read env calls and with_user(False) in the sudo state ([#277](https://github.com/avanserv/odooscan/issues/277)) ([d9a8bf2](https://github.com/avanserv/odooscan/commit/d9a8bf25633f45c63e47e3b69bdd4b5d83be8255))
+* **taint:** Read OD717 auth as unknown under an unread base ([#294](https://github.com/avanserv/odooscan/issues/294)) ([1d8d05c](https://github.com/avanserv/odooscan/commit/1d8d05c9d26648131b6b104d764fbb25c9d4c815))
+* **taint:** Read superuser environments and the calls that leave sudo() ([#253](https://github.com/avanserv/odooscan/issues/253)) ([88f7f70](https://github.com/avanserv/odooscan/commit/88f7f70db3762581e65eb979a878ff5145ea226f))
+* **taint:** Report a file_open() join a nested def or match reads ([#292](https://github.com/avanserv/odooscan/issues/292)) ([bf4e562](https://github.com/avanserv/odooscan/commit/bf4e5627ba7f80af22240ecb577b88e0cd3cb106))
+* **taint:** Report io.open() in OD707 and say what the rows match ([#260](https://github.com/avanserv/odooscan/issues/260)) ([2e91749](https://github.com/avanserv/odooscan/commit/2e91749ba0666c203de98e0c514f66671e2aff50))
+* **taint:** Report request.redirect(t) on 15.0, whose local keeps a backslash ([#289](https://github.com/avanserv/odooscan/issues/289)) ([3224686](https://github.com/avanserv/odooscan/commit/32246860bf5a349234a8087feced0d7a1fdf4674))
+* **taint:** Say what a configured pattern ending in an item matches ([#252](https://github.com/avanserv/odooscan/issues/252)) ([e8c0b84](https://github.com/avanserv/odooscan/commit/e8c0b848286b762e34df36463f05ae45cde8f5fa))
+* **taint:** Skip OD711 for headers of a bound requests or httpx client ([#264](https://github.com/avanserv/odooscan/issues/264)) ([7759100](https://github.com/avanserv/odooscan/commit/7759100c912e990ac6825058103ac0393835759c))
+* **taint:** Stay silent in OD707 on upload names and checked paths ([#256](https://github.com/avanserv/odooscan/issues/256)) ([cee3e0b](https://github.com/avanserv/odooscan/commit/cee3e0b24b48184b2229f248b31113ead4ce44ad))
+* **taint:** Track OD717 values per element and per key ([#271](https://github.com/avanserv/odooscan/issues/271)) ([372ff85](https://github.com/avanserv/odooscan/commit/372ff85ca67a160a8cbed1e4d2f04cdebcc584a0))
+* **taint:** Trust only private _get_ methods as chosen in an if-in arm ([#286](https://github.com/avanserv/odooscan/issues/286)) ([4ef0deb](https://github.com/avanserv/odooscan/commit/4ef0deb73acf547e35a9238ac4dd3be8c7e185bf))
+* **taint:** Vouch in OD716 only for checked records that passed ([#270](https://github.com/avanserv/odooscan/issues/270)) ([16b8a0c](https://github.com/avanserv/odooscan/commit/16b8a0cf9c4b14a3bc71e5eb13f4dca1b19e29f0))
+
 ## [0.10.0](https://github.com/avanserv/odooscan/compare/v0.9.0...v0.10.0) (2026-11-04)
 
 
