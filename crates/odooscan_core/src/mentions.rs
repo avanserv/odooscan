@@ -1,6 +1,7 @@
-//! The hook method names a file's text mentions. Odoo runs a compute, inverse, search or onchange
-//! method only by the name something gives it, and a file can give it from Python, a data file, a
-//! script or a template alike, so the scan reads every word rather than the parsed facts.
+//! The hook method names a file's text mentions, and the words of a module's text. Odoo runs a
+//! compute, inverse, search or onchange method only by the name something gives it, and a module
+//! uses another from Python, a data file, a script or a template alike, so the scan reads every
+//! word rather than the parsed facts.
 
 use std::sync::LazyLock;
 
@@ -15,6 +16,54 @@ static HOOK_WORD: LazyLock<Regex> = LazyLock::new(|| {
     let prefixes = HOOK_PREFIXES.join("|");
     Regex::new(&format!(r"(?-u:\b)(?:{prefixes})[A-Za-z0-9_]*")).unwrap()
 });
+
+/// An identifier, or identifiers joined by `.` or `/`, as a model, an XML id, a Python module path,
+/// a JS specifier or an asset path spells one. A `/` that starts the word, as in a URL path, stays
+/// on it, and `./` or `../` steps join as `/` does, since `@x/../lib/y` loads from `x`. ASCII, as
+/// `HOOK_WORD`.
+static WORD: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?:(?-u:\B)/)?(?-u:\b)[A-Za-z_][A-Za-z0-9_]*(?:(?:/(?:\.\.?/)*|\.)[A-Za-z0-9_]+)*").unwrap()
+});
+
+/// The words of some text, sorted and without repeats. They sit in one buffer, one per line, since
+/// a module holds tens of thousands and the index keeps those of every checked module.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct Words {
+    lines: String,
+}
+
+impl Words {
+    /// Every word of `text`, comments included.
+    pub fn scan(text: &str) -> Self {
+        Self::of(WORD.find_iter(text).map(|m| m.as_str()))
+    }
+
+    /// The words of all of `parts`.
+    pub fn merge<'w>(parts: impl IntoIterator<Item = &'w Words>) -> Self {
+        Self::of(parts.into_iter().flat_map(Words::iter))
+    }
+
+    fn of<'w>(words: impl Iterator<Item = &'w str>) -> Self {
+        let mut words: Vec<&str> = words.collect();
+        words.sort_unstable();
+        words.dedup();
+        Self {
+            lines: words.join("\n"),
+        }
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = &str> {
+        self.lines.split('\n').filter(|w| !w.is_empty())
+    }
+
+    /// The parts a word joins with `.` or `/`, none for a word that joins nothing. A leading `/`
+    /// joins nothing, so a one-step URL path names no module.
+    pub fn segments(word: &str) -> impl Iterator<Item = &str> {
+        let word = word.strip_prefix('/').unwrap_or(word);
+        let joined = word.contains(['.', '/']);
+        word.split(['.', '/']).filter(move |s| joined && !s.is_empty())
+    }
+}
 
 /// The hook names of a file, sorted and without repeats.
 #[derive(Debug, Default, PartialEq, Eq)]
@@ -67,6 +116,60 @@ mod tests {
 
     fn names(text: &str) -> Vec<String> {
         Mentions::scan(text).names
+    }
+
+    fn words(text: &str) -> Vec<String> {
+        Words::scan(text).iter().map(str::to_owned).collect()
+    }
+
+    #[test]
+    fn a_word_joins_identifiers_with_dots_and_slashes() {
+        let text = r#"self.env['sale.order'] # odoo.addons.sale.x
+import { a } from "@sale/js/a"; <t t-call="web.layout"/> 'v': '18.0.1.0' x9 9x"#;
+        assert_eq!(
+            words(text),
+            [
+                "a",
+                "call",
+                "from",
+                "import",
+                "odoo.addons.sale.x",
+                "sale.order",
+                "sale/js/a",
+                "self.env",
+                "t",
+                "v",
+                "web.layout",
+                "x9"
+            ]
+        );
+        assert_eq!(words("sale.order. Done"), ["Done", "sale.order"]);
+        assert_eq!(words("wait...sale"), ["sale", "wait"]);
+    }
+
+    #[test]
+    fn a_word_keeps_a_leading_slash_and_steps_through_dot_dirs() {
+        let text = r#"<iframe src="/map?z=2"/> from "@auth/../lib/x"; a/./b x/y"#;
+        assert_eq!(
+            words(text),
+            ["/map", "a/./b", "auth/../lib/x", "from", "iframe", "src", "x/y", "z"]
+        );
+    }
+
+    #[test]
+    fn words_merge_without_repeats() {
+        let merged = Words::merge([&Words::scan("b a"), &Words::scan("c a")]);
+        assert_eq!(merged.iter().collect::<Vec<_>>(), ["a", "b", "c"]);
+        assert_eq!(Words::default().iter().count(), 0);
+    }
+
+    #[test]
+    fn only_a_joined_word_has_segments() {
+        assert_eq!(Words::segments("sale/js/a").collect::<Vec<_>>(), ["sale", "js", "a"]);
+        assert_eq!(Words::segments("sale").count(), 0);
+        assert_eq!(Words::segments("/map").count(), 0);
+        assert_eq!(Words::segments("/web/image").collect::<Vec<_>>(), ["web", "image"]);
+        assert_eq!(Words::segments("auth/../lib").collect::<Vec<_>>(), ["auth", "lib"]);
     }
 
     #[test]

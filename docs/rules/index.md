@@ -191,6 +191,7 @@ dependencies, migration scripts and the Python imports between modules.
 | [OD518](OD518.md) | `python-import-not-in-depends` | A Python import names a module outside depends, which may be missing or load later. |
 | [OD519](OD519.md) | `unresolved-python-import` | A Python import names a module or a name the target module does not have. |
 | [OD520](OD520.md) | `implied-dependency` | A module in depends already comes with another one in depends. |
+| [OD521](OD521.md) | `unused-dependency` | The module uses nothing of a module in depends, nor of what only that one brings. |
 
 ## OD6: JavaScript and Owl
 

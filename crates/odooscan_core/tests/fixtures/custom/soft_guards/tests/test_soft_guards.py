@@ -157,7 +157,7 @@ class TestSoftGuards(TransactionCase):
         self.assertTrue(self.env.ref("soft_guards_side.after_the_helper"))
 
     def test_ref_of_another_module_after_ensure_installed(self):
-        self.ensure_installed("sale")
+        self.ensure_installed("ghost_sale")
         self.assertTrue(self.env.ref("soft_guards_side.after_another_helper"))
 
     def test_lookups_after_ensure_installed(self):

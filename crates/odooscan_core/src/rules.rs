@@ -319,6 +319,9 @@ rules! {
     // `odoo/modules/module_graph.py:174-199`), and auto-install reads trigger states shared down a
     // chain (18.0 `odoo/addons/base/models/ir_module.py:425-429`), so an implied entry changes nothing.
     "OD520" "implied-dependency" Quality Info None, true, "A module in depends already comes with another one in depends.";
+    // A dependency installs its own (18.0 `odoo/addons/base/models/ir_module.py:377-400`) and loads
+    // first (18.0 `odoo/modules/graph.py:30-40`), which a module that uses nothing of it does not need.
+    "OD521" "unused-dependency" Quality Info None, true, "The module uses nothing of a module in depends, nor of what only that one brings.";
     "OD601" "unresolved-js-import" Correctness Error None, true, "A JS import names a module or an export no indexed module provides.";
     "OD602" "orphan-patch-super" Correctness Error Some(">=17.0"), true, "A patch calls a super method the class it patches does not have.";
     "OD603" "unknown-rpc-model" Correctness Error None, true, "An ORM call from JS names a model no indexed module defines.";

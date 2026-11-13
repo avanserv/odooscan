@@ -169,6 +169,12 @@
       "count": 1
     },
     {
+      "path": "addons/attachment_indexation/__manifest__.py",
+      "code": "OD521",
+      "message": "nothing of module 'web' is used, nor of what only it brings",
+      "count": 1
+    },
+    {
       "path": "addons/attachment_indexation/models/ir_attachment.py",
       "code": "OD124",
       "message": "index_content_cache is filled at runtime but lives in the Python process, so every database the server runs shares it and each worker fills its own copy; cache on a model method with tools.ormcache, which Odoo keeps per database and clears in every worker",
@@ -220,6 +226,12 @@
       "path": "addons/auth_passkey/__manifest__.py",
       "code": "OD520",
       "message": "module 'web' already comes with 'base_setup', also in depends",
+      "count": 1
+    },
+    {
+      "path": "addons/auth_passkey/__manifest__.py",
+      "code": "OD521",
+      "message": "nothing of module 'base_setup' is used, nor of what only it brings",
       "count": 1
     },
     {
@@ -643,6 +655,12 @@
       "count": 1
     },
     {
+      "path": "addons/google_account/__manifest__.py",
+      "code": "OD521",
+      "message": "nothing of module 'base_setup' is used, nor of what only it brings",
+      "count": 1
+    },
+    {
       "path": "addons/google_calendar/models/res_users.py",
       "code": "OD103",
       "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
@@ -760,6 +778,12 @@
       "path": "addons/hr_recruitment/__manifest__.py",
       "code": "OD520",
       "message": "module 'web_tour' already comes with 'hr', also in depends",
+      "count": 1
+    },
+    {
+      "path": "addons/hr_recruitment/__manifest__.py",
+      "code": "OD521",
+      "message": "nothing of module 'attachment_indexation' is used, nor of what only it brings",
       "count": 1
     },
     {
@@ -1405,6 +1429,12 @@
       "count": 1
     },
     {
+      "path": "addons/l10n_my_edi/__manifest__.py",
+      "code": "OD521",
+      "message": "nothing of module 'l10n_my' is used, nor of what only it brings",
+      "count": 1
+    },
+    {
       "path": "addons/l10n_my_edi/models/account_move.py",
       "code": "OD103",
       "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
@@ -1519,6 +1549,12 @@
       "count": 1
     },
     {
+      "path": "addons/l10n_sa_edi/__manifest__.py",
+      "code": "OD521",
+      "message": "nothing of module 'base_vat' is used, nor of what only it brings",
+      "count": 1
+    },
+    {
       "path": "addons/l10n_sa_edi/models/account_edi_document.py",
       "code": "OD516",
       "message": "no import from the module's __init__.py reaches this file, so Odoo never loads model 'account.edi.document'",
@@ -1552,6 +1588,18 @@
       "path": "addons/l10n_tr_nilvera_einvoice/models/account_move_send.py",
       "code": "OD103",
       "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_tw_edi_ecpay/__manifest__.py",
+      "code": "OD521",
+      "message": "nothing of module 'base_vat' is used, nor of what only it brings",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_tw_edi_ecpay/__manifest__.py",
+      "code": "OD521",
+      "message": "nothing of module 'l10n_tw' is used, nor of what only it brings",
       "count": 1
     },
     {
@@ -1978,6 +2026,12 @@
       "path": "addons/mass_mailing_sms/controllers/main.py",
       "code": "OD127",
       "message": "route accepts GET, on which Odoo checks no CSRF token, and calls write(); restrict it with methods=['POST'] or check a token",
+      "count": 1
+    },
+    {
+      "path": "addons/microsoft_account/__manifest__.py",
+      "code": "OD521",
+      "message": "nothing of module 'base_setup' is used, nor of what only it brings",
       "count": 1
     },
     {
@@ -2599,6 +2653,12 @@
       "count": 1
     },
     {
+      "path": "addons/repair/__manifest__.py",
+      "code": "OD521",
+      "message": "nothing of module 'sale_management' is used, nor of what only it brings",
+      "count": 1
+    },
+    {
       "path": "addons/repair/models/mail_compose_message.py",
       "code": "OD516",
       "message": "no import from the module's __init__.py reaches this file, so Odoo never loads model 'mail.compose.message'",
@@ -2959,6 +3019,24 @@
       "count": 1
     },
     {
+      "path": "addons/test_event_full/__manifest__.py",
+      "code": "OD521",
+      "message": "nothing of module 'payment_demo' is used, nor of what only it brings",
+      "count": 1
+    },
+    {
+      "path": "addons/test_event_full/__manifest__.py",
+      "code": "OD521",
+      "message": "nothing of module 'website_event_sale' is used, nor of what only it brings",
+      "count": 1
+    },
+    {
+      "path": "addons/test_event_full/__manifest__.py",
+      "code": "OD521",
+      "message": "nothing of module 'website_event_track_live' is used, nor of what only it brings",
+      "count": 1
+    },
+    {
       "path": "addons/test_event_full/data/event_type_data.xml",
       "code": "OD502",
       "message": "'data/event_type_data.xml' is not in the manifest's data or demo, so Odoo never loads it",
@@ -2968,6 +3046,12 @@
       "path": "addons/test_import_export/__manifest__.py",
       "code": "OD520",
       "message": "module 'web' already comes with 'base_import', also in depends",
+      "count": 1
+    },
+    {
+      "path": "addons/test_import_export/__manifest__.py",
+      "code": "OD521",
+      "message": "nothing of module 'base_import' is used, nor of what only it brings",
       "count": 1
     },
     {
@@ -3037,6 +3121,12 @@
       "count": 1
     },
     {
+      "path": "addons/test_mail_full/__manifest__.py",
+      "code": "OD521",
+      "message": "nothing of module 'mail_bot' is used, nor of what only it brings",
+      "count": 1
+    },
+    {
       "path": "addons/test_mail_sms/__manifest__.py",
       "code": "OD520",
       "message": "module 'mail' already comes with 'sms_twilio', also in depends",
@@ -3046,6 +3136,12 @@
       "path": "addons/test_mail_sms/__manifest__.py",
       "code": "OD520",
       "message": "module 'sms' already comes with 'sms_twilio', also in depends",
+      "count": 1
+    },
+    {
+      "path": "addons/test_mail_sms/__manifest__.py",
+      "code": "OD521",
+      "message": "nothing of module 'test_performance' is used, nor of what only it brings",
       "count": 1
     },
     {
@@ -3061,6 +3157,12 @@
       "count": 1
     },
     {
+      "path": "addons/test_mass_mailing/__manifest__.py",
+      "code": "OD521",
+      "message": "nothing of module 'test_mail_sms' is used, nor of what only it brings",
+      "count": 1
+    },
+    {
       "path": "addons/test_sale_product_configurators/__manifest__.py",
       "code": "OD520",
       "message": "module 'sale_management' already comes with 'event_sale', also in depends",
@@ -3070,6 +3172,12 @@
       "path": "addons/test_website/__manifest__.py",
       "code": "OD520",
       "message": "module 'website' already comes with 'theme_default', also in depends",
+      "count": 1
+    },
+    {
+      "path": "addons/test_website/__manifest__.py",
+      "code": "OD521",
+      "message": "nothing of module 'web_unsplash' is used, nor of what only it brings",
       "count": 1
     },
     {
@@ -3325,6 +3433,12 @@
       "count": 1
     },
     {
+      "path": "addons/website_blog/__manifest__.py",
+      "code": "OD521",
+      "message": "nothing of module 'website_partner' is used, nor of what only it brings",
+      "count": 1
+    },
+    {
       "path": "addons/website_blog/data/ir_asset.xml",
       "code": "OD502",
       "message": "'data/ir_asset.xml' is not in the manifest's data or demo, so Odoo never loads it",
@@ -3406,6 +3520,12 @@
       "path": "addons/website_event/__manifest__.py",
       "code": "OD520",
       "message": "module 'website' already comes with 'website_partner', also in depends",
+      "count": 1
+    },
+    {
+      "path": "addons/website_event/__manifest__.py",
+      "code": "OD521",
+      "message": "nothing of module 'website_mail' is used, nor of what only it brings",
       "count": 1
     },
     {
@@ -3493,6 +3613,12 @@
       "count": 1
     },
     {
+      "path": "addons/website_forum/__manifest__.py",
+      "code": "OD521",
+      "message": "nothing of module 'website_mail' is used, nor of what only it brings",
+      "count": 1
+    },
+    {
       "path": "addons/website_forum/controllers/website_forum.py",
       "code": "OD111",
       "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
@@ -3526,6 +3652,12 @@
       "path": "addons/website_forum/security/ir.model.access.csv",
       "code": "OD402",
       "message": "base.group_public gets write, create or unlink on model_forum_tag; public and portal access should be read-only and go through controllers",
+      "count": 1
+    },
+    {
+      "path": "addons/website_google_map/__manifest__.py",
+      "code": "OD521",
+      "message": "nothing of module 'base_geolocalize' is used, nor of what only it brings",
       "count": 1
     },
     {
@@ -3691,6 +3823,12 @@
       "count": 1
     },
     {
+      "path": "addons/website_sale/__manifest__.py",
+      "code": "OD521",
+      "message": "nothing of module 'website_mail' is used, nor of what only it brings",
+      "count": 1
+    },
+    {
       "path": "addons/website_sale/controllers/combo_configurator.py",
       "code": "OD111",
       "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
@@ -3820,6 +3958,12 @@
       "path": "addons/website_slides/__manifest__.py",
       "code": "OD520",
       "message": "module 'website' already comes with 'website_mail', also in depends",
+      "count": 1
+    },
+    {
+      "path": "addons/website_slides/__manifest__.py",
+      "code": "OD521",
+      "message": "nothing of module 'website_mail' is used, nor of what only it brings",
       "count": 1
     },
     {
@@ -4156,6 +4300,18 @@
       "path": "odoo/addons/test_rpc/__manifest__.py",
       "code": "OD520",
       "message": "module 'base' already comes with 'web', also in depends",
+      "count": 1
+    },
+    {
+      "path": "odoo/addons/test_rpc/__manifest__.py",
+      "code": "OD521",
+      "message": "nothing of module 'web' is used, nor of what only it brings",
+      "count": 1
+    },
+    {
+      "path": "odoo/addons/test_search_panel/__manifest__.py",
+      "code": "OD521",
+      "message": "nothing of module 'web' is used, nor of what only it brings",
       "count": 1
     },
     {
