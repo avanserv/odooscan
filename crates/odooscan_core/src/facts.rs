@@ -467,7 +467,7 @@ pub enum RunsAs {
     /// no later call that leaves superuser mode.
     Superuser,
     /// On `self` or the records of calls on it, which keep the caller's environment, as
-    /// `with_user()` and `sudo(False)` do not.
+    /// `with_user()` for a user and `sudo(False)` do not.
     AsCaller,
     User,
 }

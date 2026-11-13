@@ -64,3 +64,8 @@ class Flows(http.Controller):
         request.env["bad.order"].sudo().sudo(False).write(post)
         request.env["bad.order"].with_user(SUPERUSER_ID).write(post)
         request.env(su=True)["bad.order"].create(post)
+
+    @http.route("/bad/environment", auth="user", methods=["POST"])
+    def environment(self, **post):
+        request.env["bad.order"].sudo().with_user(False).write(post)
+        request.env(su=True)(user=request.env.user)["bad.order"].write(post)
