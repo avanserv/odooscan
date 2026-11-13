@@ -951,6 +951,25 @@ mod tests {
     }
 
     #[test]
+    fn a_checked_manifest_of_pairs_is_read() {
+        let dir = scratch("manifest-pairs");
+        let module = written(
+            &dir,
+            "paired",
+            "[('name', 'x'), ('version', '18.0.1.0.0'), ('depends', ['base'])]",
+        );
+        let discovery = load(&[module], &[], None, None, &TaintTable::default());
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(discovery.broken.is_empty() && discovery.notices.is_empty());
+        let [module] = &discovery.modules[..] else {
+            panic!("{} modules", discovery.modules.len());
+        };
+        assert_eq!(module.series, Series::parse("18.0"));
+        let depends: Vec<_> = module.manifest.depends.iter().map(|d| d.value.as_str()).collect();
+        assert_eq!(depends, ["base"]);
+    }
+
+    #[test]
     fn an_indexed_manifest_that_does_not_parse_gets_a_notice() {
         let dir = scratch("manifest-indexed");
         let checked = written(&dir.join("checked"), "main", "{'depends': ['open']}");
