@@ -32,6 +32,8 @@ struct Hit<'m> {
     keys: bool,
     /// The codes the value is harmless for at some step, so harmless at the sink.
     safe: Safe,
+    /// The value at the sink is the `name` of the parameter's own value.
+    named: bool,
     path: &'m Path,
     pos: Pos,
     /// The call that receives the value.
@@ -176,9 +178,10 @@ impl<'a, 'm> Solver<'a, 'm> {
             let Some(param) = param_index(callee.summary, slot) else {
                 continue;
             };
-            for hit in self.hits(callee, param, depth + 1, sudo) {
-                hits.push(prepend(at, edge, call, hit));
-            }
+            // The `name` of a file picked by its field is that field, which the code wrote.
+            let hits_of = self.hits(callee, param, depth + 1, sudo);
+            let kept = hits_of.into_iter().filter(|h| !(edge.upload && h.named));
+            hits.extend(kept.map(|hit| prepend(at, edge, call, hit)));
         }
         hits
     }
@@ -358,6 +361,7 @@ fn sink_hit<'m>(at: FlowRef<'m>, edge: &FlowEdge, code: &'static str) -> Hit<'m>
         code,
         keys: edge.keys,
         safe: edge.safe,
+        named: edge.named,
         path: &at.file.path,
         pos: edge.steps[last].pos,
         callee: edge.steps[last].value.clone(),
@@ -382,6 +386,8 @@ fn prepend<'m>(at: FlowRef<'m>, edge: &FlowEdge, call: &CallSite, mut hit: Hit<'
     Hit {
         keys: hit.keys && edge.keys,
         safe: hit.safe.union(edge.safe),
+        // Only the parameter's own value, passed on, makes the callee's `name` that of the caller's.
+        named: edge.named || (hit.named && edge.own),
         steps,
         names,
         ..hit
@@ -765,5 +771,84 @@ mod tests {
             ]
         );
         assert!(call("b'logo'").is_empty());
+    }
+
+    /// A sink of each rule but OD704, which needs a mapping, and OD716, which a route reaches,
+    /// receiving `#` in a method of `x.y`.
+    const METHOD_SINK_OF: &[(&str, &str)] = &[
+        ("OD701", "self.env.cr.execute(#)"),
+        ("OD702", "safe_eval(#)"),
+        ("OD703", "Markup(#)"),
+        ("OD705", "request.redirect(#, local=False)"),
+        ("OD706", "requests.get(#, timeout=5)"),
+        ("OD707", "open(#)"),
+        ("OD708", "os.system(#)"),
+        ("OD709", "pickle.loads(#)"),
+        ("OD710", "etree.fromstring(#, etree.XMLParser(resolve_entities=True))"),
+        ("OD711", "request.make_response('', [('X-Name', #)])"),
+        ("OD712", "self.env[#].sudo().search([])"),
+        ("OD713", "getattr(self, #)()"),
+        ("OD714", "self.sudo()[#]"),
+        ("OD715", "self.sudo().search(#)"),
+        (
+            "OD717",
+            "self.env['ir.attachment'].sudo().create({'raw': #, 'public': True})",
+        ),
+    ];
+
+    #[test]
+    fn a_callee_reading_the_name_of_a_file_picked_by_its_field_reads_no_user_data() {
+        let route = "    def r(self):\n        for f in request.httprequest.files.getlist('ufile'):\n            request.env['x.y']._a(f)\n";
+        let codes = |methods: &str| {
+            let found = scan_messages(route, methods);
+            found
+                .iter()
+                .map(|f| f.split(' ').nth(1).unwrap_or_default().to_owned())
+                .collect::<Vec<_>>()
+        };
+        for (code, sink) in METHOD_SINK_OF {
+            let direct = |value: &str| format!("    def _a(self, file):\n        {}\n", sink.replace('#', value));
+            let deeper = |value: &str| {
+                format!(
+                    "    def _a(self, file):\n        self._b(file)\n\n    def _b(self, file):\n        {}\n",
+                    sink.replace('#', value)
+                )
+            };
+            let passed = format!(
+                "    def _a(self, file):\n        self._b(getattr(file, 'name', None))\n\n    def _b(self, v):\n        {}\n",
+                sink.replace('#', "v")
+            );
+            for methods in [direct("getattr(file, 'name', None)"), deeper("file.name"), passed] {
+                assert!(codes(&methods).is_empty(), "{code}: {methods}");
+            }
+            for methods in [
+                direct("file.filename"),
+                direct("file.stream.name"),
+                direct("getattr(file, 'name', None) or file.filename"),
+                deeper("getattr(file, 'filename')"),
+            ] {
+                assert_eq!(codes(&methods), [*code], "{code}: {methods}");
+            }
+        }
+        let both = "    def _a(self, file):\n        open(getattr(file, 'name', None))\n        open(file.filename)\n";
+        assert_eq!(
+            scan_messages(route, both),
+            ["model.py:6 OD707 request.httprequest.files reaches the path of open() through 'f', '_a()'"]
+        );
+        let archive = "    def r(self):\n        request.env['x.y']._a(request.httprequest.files.get('archive'))\n";
+        let members = "    def _a(self, file):\n        tar = tarfile.open(fileobj=file)\n        for m in tar.getmembers():\n            open(os.path.join(DEST, m.name), 'wb')\n";
+        assert_eq!(
+            scan_messages(archive, members),
+            [
+                "model.py:7 OD707 request.httprequest.files reaches the path of os.path.join() through '_a()', 'tar', 'm'"
+            ]
+        );
+        let deeper = "    def _a(self, file):\n        for m in tarfile.open(fileobj=file).getmembers():\n            self._b(m)\n\n    def _b(self, member):\n        open(os.path.join(DEST, member.name), 'wb')\n";
+        assert_eq!(
+            scan_messages(archive, deeper),
+            [
+                "model.py:9 OD707 request.httprequest.files reaches the path of os.path.join() through '_a()', 'm', '_b()'"
+            ]
+        );
     }
 }
