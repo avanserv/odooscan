@@ -7,4 +7,5 @@
     "other_files": ["data/other_pages.xml"],
     "post_init_hook": "x_load_code_pages",
     "assets": {"web.assets_backend": ["qweb_calls/static/src/**/*"]},
+    "license": "LGPL-3",
 }

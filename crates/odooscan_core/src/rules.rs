@@ -70,7 +70,13 @@ pub struct Rule {
 /// Rules that say less than another rule reporting at the same position, as (code, by).
 /// A flow from a known source is the finding a pattern match on the same call only suspects.
 /// An id missing from `web` because it became a bundle is missing for the reason OD328 gives.
-pub const SUPERSEDED: &[(&str, &str)] = &[("OD101", "OD701"), ("OD301", "OD328"), ("OD302", "OD328")];
+/// A module that depends on itself is the shortest cycle, which OD510 names as such.
+pub const SUPERSEDED: &[(&str, &str)] = &[
+    ("OD101", "OD701"),
+    ("OD301", "OD328"),
+    ("OD302", "OD328"),
+    ("OD504", "OD510"),
+];
 
 /// Severities that replace a rule's own from some series on, as (code, series range, severity).
 /// From saas~19.4, `odoo/addons/base/__manifest__.py:81` loads `ir.access.csv` where saas~19.3
@@ -275,6 +281,17 @@ rules! {
     "OD505" "qweb-key-ignored" Deprecation Warning Some(">=saas~14.3"), false, "The manifest lists templates under qweb, which Odoo ignores.";
     // saas~15.4 fetches `web.assets_qweb` (`addons/web/models/ir_http.py:121`), 16.0 never.
     "OD506" "assets-qweb-unloaded" Deprecation Warning Some(">=16.0"), false, "The manifest adds files to web.assets_qweb, which Odoo no longer loads.";
+    "OD507" "license-missing" Quality Warning None, false, "The manifest names no license, which Odoo reads as LGPL-3.";
+    "OD508" "license-unknown" Correctness Error None, false, "The manifest names a license Odoo does not know, which fails the module list update.";
+    "OD509" "version-refused" Correctness Error None, false, "The manifest version has a form Odoo refuses, or names another series.";
+    "OD510" "depends-on-itself" Correctness Error None, false, "The module lists itself in depends, so Odoo never loads it.";
+    // saas~12.4 takes a list of the depends that trigger the install and asserts each is one
+    // (`index.rs` `LISTED_TRIGGERS`); before, it reads only whether the value is truthy.
+    "OD511" "auto-install-not-depended" Correctness Error Some(">=saas~12.4"), false, "auto_install names a module missing from depends, so Odoo fails to read the manifest.";
+    "OD512" "data-file-repeated" Correctness Warning None, false, "A file is listed twice under data or demo, so Odoo loads it twice.";
+    // saas~14.3 adds the `assets` key and `ir.asset` (`odoo/addons/base/models/ir_asset.py`), which
+    // saas~14.2 lacks.
+    "OD513" "asset-path-unmatched" Correctness Warning Some(">=saas~14.3"), false, "An assets path or glob of the module matches no file Odoo serves.";
     "OD601" "unresolved-js-import" Correctness Error None, true, "A JS import names a module or an export no indexed module provides.";
     "OD602" "orphan-patch-super" Correctness Error Some(">=17.0"), true, "A patch calls a super method the class it patches does not have.";
     "OD603" "unknown-rpc-model" Correctness Error None, true, "An ORM call from JS names a model no indexed module defines.";
@@ -427,7 +444,7 @@ mod tests {
 
     #[test]
     fn series_gates_follow_source() {
-        let gates: [(&str, &[&str], &[&str]); 18] = [
+        let gates: [(&str, &[&str], &[&str]); 20] = [
             ("OD117", &["saas~15.1", "saas~18.2"], &["saas~15.2", "saas~18.1"]),
             ("OD118", &["saas~18.1"], &["saas~18.2"]),
             ("OD125", &["saas~12.4"], &["saas~12.5", "20.0"]),
@@ -446,6 +463,8 @@ mod tests {
             ("OD328", &["saas~14.2"], &["saas~14.3", "20.0"]),
             ("OD505", &["saas~14.2"], &["saas~14.3", "20.0"]),
             ("OD506", &["saas~15.4"], &["16.0", "20.0"]),
+            ("OD511", &["saas~12.3"], &["saas~12.4", "20.0"]),
+            ("OD513", &["14.0", "saas~14.2"], &["saas~14.3", "15.0", "20.0"]),
         ];
         for (code, silent, reported) in gates {
             let r = rule(code);

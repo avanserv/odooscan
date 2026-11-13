@@ -18,6 +18,9 @@ const MANIFESTS: &[&str] = &["__manifest__.py", "__openerp__.py"];
 
 const ACCESS_MODELS: &[&str] = &["ir.model.access", "ir.access"];
 
+/// The extensions of the files a bundle takes (18.0 `odoo/tools/constants.py:4-7`).
+pub const ASSET_EXTENSIONS: [&str; 6] = ["js", "css", "scss", "sass", "less", "xml"];
+
 /// Module subdirectories that hold neither models nor data loaded from the manifest.
 const SKIPPED_DIRS: &[&str] = &["static", "node_modules", "__pycache__"];
 
@@ -66,6 +69,9 @@ pub struct Module {
     pub templates: Vec<SourceFile<TemplateFacts>>,
     /// The views the SQL files the manifest loads in the module's series create.
     pub sql_views: Vec<String>,
+    /// The files under `static/` Odoo may serve as assets, as `<module>/<path>`, for a checked
+    /// module whose manifest has `assets`.
+    pub static_assets: Vec<String>,
     /// A file whose text may name a method could not be read: Python, XML or CSV that does not
     /// decode, or a script or template under `static/src` that is not UTF-8.
     pub lost_text: bool,
@@ -114,6 +120,7 @@ pub(crate) fn module(name: &str, manifest: &str) -> Module {
         js: vec![],
         templates: vec![],
         sql_views: vec![],
+        static_assets: vec![],
         lost_text: false,
     }
 }
@@ -253,6 +260,33 @@ fn static_files(dir: &Path, extension: &str) -> Vec<PathBuf> {
         .filter(|e| e.file_type().is_some_and(|t| t.is_file()))
         .map(|e| e.into_path())
         .filter(|p| p.extension().is_some_and(|e| e == extension))
+        .collect()
+}
+
+/// The files under `dir/static` whose extension Odoo serves as an asset, as `name/<path>`. Odoo
+/// globs the disk, so files an ignore file names or hidden ones count, and links are followed.
+fn static_assets(dir: &Path, name: &str) -> Vec<String> {
+    let root = dir.join("static");
+    if !root.is_dir() {
+        return vec![];
+    }
+    let served = |p: &Path| {
+        p.extension()
+            .and_then(|e| e.to_str())
+            .is_some_and(|e| ASSET_EXTENSIONS.contains(&e))
+    };
+    WalkBuilder::new(root)
+        .standard_filters(false)
+        .follow_links(true)
+        .build()
+        .filter_map(Result::ok)
+        .filter(|e| e.file_type().is_some_and(|t| t.is_file()) && served(e.path()))
+        .filter_map(|e| {
+            Some(format!(
+                "{name}/{}",
+                normalize(&e.path().strip_prefix(dir).ok()?.to_string_lossy())
+            ))
+        })
         .collect()
 }
 
@@ -476,6 +510,7 @@ fn read_module(
             js: vec![],
             templates: vec![],
             sql_views: vec![],
+            static_assets: vec![],
             lost_text: false,
         })
     })
@@ -653,6 +688,9 @@ fn parse_module_files(module: &mut Module, default_series: Option<Series>, taint
     module.templates = templates;
     module.lost_text |= lost_js || lost_templates;
     module.sql_views = sql_views(module, series);
+    if checked && !module.manifest.bundles.is_empty() {
+        module.static_assets = static_assets(&module.dir, &module.name);
+    }
 }
 
 /// The views the SQL files that a module's manifest loads in `series` create by name.

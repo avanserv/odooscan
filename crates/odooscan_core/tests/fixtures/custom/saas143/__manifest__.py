@@ -4,4 +4,5 @@
     "depends": ["base"],
     "data": ["views/assets.xml"],
     "qweb": ["static/src/xml/badge.xml"],
+    "license": "LGPL-3",
 }

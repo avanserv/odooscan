@@ -12,4 +12,5 @@
         "security/rules.xml",
     ],
     "demo": ["demo/views.xml", "demo/fields.xml"],
+    "license": "LGPL-3",
 }

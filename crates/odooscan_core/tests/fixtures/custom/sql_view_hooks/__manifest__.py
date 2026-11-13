@@ -4,4 +4,5 @@
     "depends": ["base"],
     "data": ["security/ir.model.access.csv"],
     "post_init_hook": "x_create_report_views",
+    "license": "LGPL-3",
 }

@@ -1157,7 +1157,7 @@ fn triggers(module: &Module, series: Option<Series>) -> Option<Vec<&str>> {
         AutoInstall::Depends => Some(depends),
         AutoInstall::Listed(names) if module.series.or(series).is_none_or(|s| s >= LISTED_TRIGGERS) => names
             .iter()
-            .map(String::as_str)
+            .map(|n| n.value.as_str())
             .map(|n| depends.contains(&n).then_some(n))
             .collect(),
         AutoInstall::Listed(names) => (!names.is_empty()).then_some(depends),
@@ -1546,6 +1546,8 @@ pub struct Index<'m> {
     pub models_with_access: FxHashSet<String>,
     model_by_xmlid: FxHashMap<String, &'m str>,
     pub has_base: bool,
+    /// The series `--target-series` or `--odoo-version` names, for a module whose own is unknown.
+    pub default_series: Option<Series>,
     js_paths: FxHashMap<String, JsTarget>,
     js_loaded: Loaded,
     templates_loaded: Loaded,
@@ -1600,6 +1602,7 @@ impl<'m> Index<'m> {
         let mut index = Self {
             modules,
             has_base: base.is_some(),
+            default_series,
             xmlids,
             views: Inheritance::new(views),
             view_types: FxHashSet::default(),

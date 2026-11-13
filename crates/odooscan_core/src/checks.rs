@@ -3,7 +3,7 @@
 use std::path::Path;
 use std::rc::Rc;
 
-use globset::GlobSet;
+use globset::{GlobBuilder, GlobSet};
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::facts::{
@@ -18,7 +18,7 @@ use crate::index::{
     ViewTree, asset_glob_set, base_private_method, full_id, js_module_path, loaded_data, located,
 };
 use crate::mentions::HOOK_PREFIXES;
-use crate::project::{Module, SourceFile, code_loaded};
+use crate::project::{ASSET_EXTENSIONS, Module, SourceFile, code_loaded};
 use crate::rules::rule;
 use crate::series::{self, Series};
 use crate::xml::{LOCATOR, QWEB, UNKNOWN_CONTEXT};
@@ -191,6 +191,9 @@ const TUPLE_CHECKED: Series = Series { major: 19, minor: 3 };
 /// which 15.0 fetches apart (`addons/web/models/ir_http.py:72`).
 const XML_IN_BUNDLES: Series = Series { major: 16, minor: 0 };
 
+/// The first series that serves assets from `static/` alone (`saas~16.3`).
+const STATIC_ASSETS: Series = Series { major: 16, minor: 3 };
+
 /// The bundles that are templates up to saas~14.2 (`addons/web/views/webclient_templates.xml:56`),
 /// and from saas~14.3 only the manifest's `assets` declares (`addons/web/__manifest__.py:61`).
 const BUNDLE_TEMPLATES: [&str; 3] = ["web.assets_backend", "web.assets_common", "web.assets_frontend"];
@@ -230,6 +233,8 @@ pub fn check_module<'m>(index: &Index<'m>, mi: usize, series: Option<Series>) ->
     let module = &index.modules[mi];
     let mut out = Out { diags: vec![] };
     manifest_files(module, &mut out);
+    manifest_keys(index, module, &mut out);
+    unmatched_assets(module, series, &mut out);
     unread_template_lists(module, series, &mut out);
     bundle_templates(module, &mut out);
     unloaded_files(module, series, &mut out);
@@ -872,6 +877,86 @@ fn manifest_files<'m>(module: &'m Module, out: &mut Out<'m>) {
             );
         }
     }
+}
+
+/// The manifest's own findings, OD509 on a version the Odoo of the scan's series will not install,
+/// and OD510 on a module in its own `depends`, which Odoo never loads since a module loads once all
+/// of its depends have (18.0 `odoo/modules/graph.py:85-104`). The scan's series is the one
+/// `--target-series` or `--odoo-version` names, else the module's own.
+fn manifest_keys<'m>(index: &Index<'m>, module: &'m Module, out: &mut Out<'m>) {
+    let path = module.manifest_path.as_path();
+    out.diags
+        .extend(module.manifest.diags.iter().map(|d| (path, d.clone())));
+    if let Some(version) = &module.manifest.version
+        && let Some(message) = manifest::version_refusal(&version.value, index.default_series.or(module.series))
+    {
+        out.push(path, "OD509", version.pos, message);
+    }
+    for dep in module.manifest.depends.iter().filter(|d| d.value == module.name) {
+        let message = format!("module {} depends on itself, so Odoo never loads it", module.name);
+        out.push(path, "OD510", dep.pos, message);
+    }
+}
+
+/// OD513 on an `assets` path of the module's own that resolves to no file, which Odoo drops with a
+/// warning when it is a glob and keeps as a URL that fails to load otherwise (18.0
+/// `odoo/addons/base/models/ir_asset.py:330-374`). From saas~16.3 Odoo serves only files under
+/// `static/`; before, a script or a style may sit anywhere in the module, so a path outside
+/// `static/` stays silent there.
+fn unmatched_assets<'m>(module: &'m Module, series: Option<Series>, out: &mut Out<'m>) {
+    let static_only = series.is_none_or(|s| s >= STATIC_ASSETS);
+    for path in module.manifest.bundles.iter().flat_map(|b| &b.paths) {
+        if let Some(message) = unmatched_asset(module, &path.value, static_only) {
+            out.push(&module.manifest_path, "OD513", path.pos, message);
+        }
+    }
+}
+
+/// Why `path` of an `assets` bundle resolves to no file of `module`, none when it names another
+/// module or a file Odoo serves. Odoo takes the module from the first part, then normalizes the
+/// path, so `..` may lead out of `static/`.
+fn unmatched_asset(module: &Module, path: &str, static_only: bool) -> Option<String> {
+    let name = module.name.as_str();
+    if path.split('/').find(|p| !p.is_empty()) != Some(name) {
+        return None;
+    }
+    let parts = normal_parts(path);
+    if !(parts.len() > 2 && parts[0] == name && parts[1] == "static") {
+        return static_only
+            .then(|| format!("'{path}' is outside {name}/static/, the only files Odoo serves as assets"));
+    }
+    let rel = parts.join("/");
+    if path.contains(['*', '?', '[', ']']) {
+        // Odoo globs with `glob.glob(recursive=True)`; a glob globset cannot read stays silent.
+        let glob = GlobBuilder::new(&rel)
+            .literal_separator(true)
+            .build()
+            .ok()?
+            .compile_matcher();
+        let matched = module.static_assets.iter().any(|f| glob.is_match(f));
+        return (!matched).then(|| {
+            format!(
+                "'{path}' matches no js, css, scss, sass, less or xml file under {name}/static/, so Odoo adds nothing"
+            )
+        });
+    }
+    let extension = rel.rsplit('.').next().unwrap_or_default();
+    (ASSET_EXTENSIONS.contains(&extension) && !module.static_assets.contains(&rel))
+        .then(|| format!("'{path}' does not exist, so the bundle fails to load it"))
+}
+
+/// The parts of `path` as `os.path.normpath` leaves them: without empty ones or `.`, and with each
+/// `..` taking the part before it away.
+fn normal_parts(path: &str) -> Vec<&str> {
+    let mut parts = vec![];
+    for part in path.split('/').filter(|p| !p.is_empty() && *p != ".") {
+        if part == ".." {
+            parts.pop();
+        } else {
+            parts.push(part);
+        }
+    }
+    parts
 }
 
 /// OD505 on a `qweb` key, which from saas~14.3 nothing reads (`addons/web/controllers/main.py:557`),
@@ -5899,7 +5984,7 @@ mod tests {
     use super::{
         MagicEra, applies, cache_global, callable_attr, csv_label, derived_label, fetches_own_view, field_name,
         has_last_update, magic_era, no_access_message, public_write_message, reads_model_access, shadowed_member,
-        stores_parent_path, tuple_checked, tuple_listed, warns_on_labels,
+        stores_parent_path, tuple_checked, tuple_listed, unmatched_asset, warns_on_labels,
     };
     use crate::facts::{AccessRow, DefinitionSource, Perms, Pos};
     use crate::series::Series;
@@ -6110,6 +6195,42 @@ mod tests {
             Some("attribute _table_query")
         );
         assert_eq!(shadowed_member("copy", eighteen).as_deref(), Some("method copy()"));
+    }
+
+    #[test]
+    fn an_asset_path_of_the_module_must_resolve_to_a_file_it_serves() {
+        let mut module = crate::project::module("loan", r#"{"name": "x"}"#);
+        module.static_assets = vec![
+            "loan/static/src/js/a.js".to_owned(),
+            "loan/static/lib/b.scss".to_owned(),
+        ];
+        let unmatched = |path: &str, static_only: bool| unmatched_asset(&module, path, static_only).is_some();
+        for path in [
+            "loan/static/src/**/*",
+            "/loan/static/src/js/*.js",
+            "loan/static/lib/b.scss",
+            "loan/./static/src/js/a.js",
+            "loan/static/src/js/../../src/js/a.js",
+            "loan/static/fonts/c.woff2",
+            "loan/static/src/js",
+            "other/static/src/missing.js",
+            "web/static/src/**/*",
+        ] {
+            assert!(!unmatched(path, true), "{path}");
+        }
+        for path in [
+            "loan/static/src/jss/**/*",
+            "loan/static/src/js/*.css",
+            "loan/static/src/js/missing.js",
+            "loan/static/src/xml/missing.xml",
+            "loan/views/assets.xml",
+            "loan/**/*.js",
+            "loan/static/../models/a.js",
+        ] {
+            assert!(unmatched(path, true), "{path}");
+        }
+        assert!(!unmatched("loan/views/assets.xml", false) && !unmatched("loan/**/*.js", false));
+        assert!(unmatched("loan/static/src/jss/**/*", false));
     }
 
     #[test]

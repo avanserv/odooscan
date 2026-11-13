@@ -9,4 +9,5 @@
         "views/actions.xml",
     ],
     "assets": {"web.assets_backend": ["legacy10/static/src/**/*"]},
+    "license": "LGPL-3",
 }

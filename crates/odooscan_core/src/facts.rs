@@ -16,7 +16,7 @@ pub struct Pos {
     pub col: u32,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Spanned<T> {
     pub value: T,
     pub pos: Pos,

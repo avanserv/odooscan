@@ -3,4 +3,5 @@
     "version": "18.0.1.0.0",
     "depends": ["base"],
     "post_load": "_widen_labels",
+    "license": "LGPL-3",
 }

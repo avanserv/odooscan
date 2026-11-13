@@ -247,11 +247,12 @@ fn port(args: &[&str]) -> Output {
     check_in(&fixtures(), &all).output().unwrap()
 }
 
+/// port17 names 17.0 in its manifest version, which is the second finding of the other kind.
 const PORT_SUMMARY: &str = "Findings by kind, checked as 18.0:
      1  removed API
      1  deprecated API
      1  missing upstream
-     1  other
+     2  other
 ";
 
 #[test]
@@ -283,7 +284,7 @@ fn statistics_with_a_target_series_print_only_the_summary() {
 fn a_target_series_summary_goes_to_stderr_beside_json() {
     let out = port(&["--format", "json"]);
     let findings: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
-    assert_eq!(findings.as_array().map(Vec::len), Some(4));
+    assert_eq!(findings.as_array().map(Vec::len), Some(5));
     assert!(String::from_utf8(out.stderr).unwrap().contains(PORT_SUMMARY));
 }
 
@@ -715,7 +716,9 @@ fn a_diff_writes_nothing_and_a_second_fix_changes_nothing() {
 fn module(dir: &Path, name: &str, series: &str, files: &[(&str, &[u8])]) -> PathBuf {
     let root = dir.join("mods").join(name);
     fs::create_dir_all(root.join("models")).unwrap();
-    let manifest = format!("{{\"name\": \"{name}\", \"version\": \"{series}.1.0.0\", \"depends\": [\"base\"]}}\n");
+    let manifest = format!(
+        "{{\"name\": \"{name}\", \"version\": \"{series}.1.0.0\", \"depends\": [\"base\"], \"license\": \"LGPL-3\"}}\n"
+    );
     fs::write(root.join("__manifest__.py"), manifest).unwrap();
     for (file, bytes) in files {
         fs::write(root.join("models").join(file), bytes).unwrap();
@@ -832,11 +835,14 @@ fn a_finding_of_the_target_series_only_is_fixed_under_it() {
         (Some(0), AVERAGED.to_owned()),
         "{stderr}"
     );
-    let (code, _, stderr) = run(check_in(
+    let (code, stdout, stderr) = run(check_in(
         &dir,
         &["mods", "--addons-path", core, "--target-series", "18.0", "--fix"],
     ));
-    assert_eq!(code, Some(0), "{stderr}");
+    // The manifest version still names 17.0, which 18.0 will not install and no fix rewrites.
+    assert_eq!(code, Some(1), "{stderr}");
+    let left: Vec<&str> = stdout.lines().filter(|l| l.contains(": OD")).collect();
+    assert!(left.len() == 1 && left[0].contains(": OD509 "), "{stdout}");
     assert_eq!(
         fs::read_to_string(models.join("x.py")).unwrap(),
         AVERAGED.replace("group_operator", "aggregator")

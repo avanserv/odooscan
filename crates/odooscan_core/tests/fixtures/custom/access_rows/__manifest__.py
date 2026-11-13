@@ -11,4 +11,5 @@
         "security/access.xml",
     ],
     "post_init_hook": "x_load_portal_access",
+    "license": "LGPL-3",
 }

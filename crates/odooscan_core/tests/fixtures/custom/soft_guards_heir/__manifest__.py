@@ -4,4 +4,5 @@
     "depends": ["soft_guards", "soft_guards_side"],
     "auto_install": True,
     "data": ["data/soft_thing.xml"],
+    "license": "LGPL-3",
 }

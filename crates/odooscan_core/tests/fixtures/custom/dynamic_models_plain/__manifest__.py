@@ -4,4 +4,5 @@
     "depends": ["base"],
     "data": ["security/ir.model.access.csv", "views/large.xml"],
     "assets": {"web.assets_backend": ["dynamic_models_plain/static/src/large.js"]},
+    "license": "LGPL-3",
 }

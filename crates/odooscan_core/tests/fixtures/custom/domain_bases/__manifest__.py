@@ -8,4 +8,5 @@
         "security/rules.xml",
         "views/domains.xml",
     ],
+    "license": "LGPL-3",
 }

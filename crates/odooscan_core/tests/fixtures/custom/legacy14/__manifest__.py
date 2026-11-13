@@ -6,4 +6,5 @@
     "update_xml": ["data/legacy_digest_view.sql", "views/ledger_views.xml"],
     "data": ["security/ir.model.access.csv", "views/ledger_reports.xml", "views/ledger_updates.xml", "security/rules.xml", "security/second_writes.xml", "data/calls.xml", "data/demo_writes.xml"],
     "demo": ["demo/rewrites.xml"],
+    "license": "LGPL-3",
 }

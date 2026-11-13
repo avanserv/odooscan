@@ -1,1 +1,1 @@
-{"name": "SaaS 15.3", "version": "15.3.1.0.0", "depends": ["base"]}
+{"name": "SaaS 15.3", "version": "15.3.1.0.0", "depends": ["base"], "license": "LGPL-3"}

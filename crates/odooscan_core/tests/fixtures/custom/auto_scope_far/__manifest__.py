@@ -4,4 +4,5 @@
     "depends": ["auto_scope_left", "auto_scope_lone"],
     "auto_install": ["auto_scope_lone"],
     "data": ["pages.xml"],
+    "license": "LGPL-3",
 }

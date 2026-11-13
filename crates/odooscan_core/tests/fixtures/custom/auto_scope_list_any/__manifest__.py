@@ -3,4 +3,5 @@
     "version": "1.0",
     "depends": ["auto_scope_left", "auto_scope_list_side"],
     "auto_install": ["auto_scope_left"],
+    "license": "LGPL-3",
 }

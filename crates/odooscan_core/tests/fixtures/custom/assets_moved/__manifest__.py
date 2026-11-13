@@ -7,4 +7,5 @@
         "web.assets_backend": ["assets_moved/static/src/**/*"],
         "web.assets_qweb": ["assets_moved/static/src/xml/note.xml"],
     },
+    "license": "LGPL-3",
 }

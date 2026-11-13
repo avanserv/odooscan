@@ -4,4 +4,5 @@
     "depends": ["auto_scope_left"],
     "auto_install": True,
     "countries": ["be"],
+    "license": "LGPL-3",
 }

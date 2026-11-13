@@ -9,4 +9,5 @@
         "data/translated.xml",
         "data/res.partner-translated.csv",
     ],
+    "license": "LGPL-3",
 }

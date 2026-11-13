@@ -16,4 +16,5 @@
         "views/partner_ported_views.xml",
     ],
     "other_files": ["data/partner_badges.xml", "views/partner_ported_views.xml"],
+    "license": "LGPL-3",
 }

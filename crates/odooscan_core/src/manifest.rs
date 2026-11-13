@@ -3,9 +3,10 @@ use std::borrow::Cow;
 use ruff_python_ast::{self as ast, Expr, Number, Operator, Stmt, UnaryOp};
 use ruff_python_parser::parse_module;
 use ruff_text_size::{Ranged, TextSize};
+use rustc_hash::FxHashSet;
 
 use crate::decode;
-use crate::facts::{Pos, Spanned};
+use crate::facts::{Pos, RawDiag, Spanned};
 use crate::module_state;
 use crate::python::{Locator, str_lit};
 use crate::python2;
@@ -42,6 +43,29 @@ fn reads(key: &str, series: Option<Series>) -> bool {
     }
 }
 
+/// The first series that refuses a module version of a form other than two or three numbers,
+/// maybe behind the series (`saas~16.3`).
+const VERSION_FORM: Series = Series { major: 16, minor: 3 };
+
+/// The values of `ir.module.module`'s `license` selection, which every series from 10.0 shares
+/// (18.0 `odoo/addons/base/models/ir_module.py:320-330`). 9.0 lacks `OPL-1`
+/// (`openerp/addons/base/module/module.py:284-294`).
+const LICENSES: [&str; 10] = [
+    "GPL-2",
+    "GPL-2 or any later version",
+    "GPL-3",
+    "GPL-3 or any later version",
+    "AGPL-3",
+    "LGPL-3",
+    "Other OSI approved licence",
+    "OEEL-1",
+    "OPL-1",
+    "Other proprietary",
+];
+
+/// The first series whose license selection has `OPL-1` (`10.0`).
+const OPL: Series = Series { major: 10, minor: 0 };
+
 /// The keys Odoo loads a module's files from in `series`, in its load order.
 pub fn loaded_keys(series: Option<Series>) -> impl Iterator<Item = &'static str> {
     DATA_KEYS.into_iter().chain(DEMO_KEYS).filter(move |k| reads(k, series))
@@ -54,12 +78,12 @@ pub enum AutoInstall {
     #[default]
     Off,
     Depends,
-    Listed(Vec<String>),
+    Listed(Vec<Spanned<String>>),
 }
 
 impl AutoInstall {
     /// A collection with an entry that is not a string literal names unknown triggers, so it reads as `Off`.
-    fn read(value: &Expr) -> Self {
+    fn read(loc: &Source, value: &Expr) -> Self {
         let entries = match value {
             Expr::BooleanLiteral(b) if b.value => return Self::Depends,
             Expr::List(l) => &l.elts[..],
@@ -67,8 +91,10 @@ impl AutoInstall {
             Expr::Set(s) => &s.elts[..],
             _ => return Self::Off,
         };
-        let names: Option<Vec<String>> = entries.iter().map(|e| str_lit(e).map(str::to_owned)).collect();
-        names.map_or(Self::Off, Self::Listed)
+        if entries.iter().any(|e| str_lit(e).is_none()) {
+            return Self::Off;
+        }
+        Self::Listed(list(loc, value))
     }
 }
 
@@ -78,12 +104,25 @@ pub struct Bundle {
     pub name: Spanned<String>,
     /// What `asset_globs` reads from its list.
     pub globs: Vec<String>,
+    /// The path or glob of each entry but an `include`, as written, at the string.
+    pub paths: Vec<Spanned<String>>,
+}
+
+/// The `license` key's value, at the value.
+#[derive(Debug)]
+enum License {
+    /// A value Odoo replaces with `LGPL-3`: an empty string, `False` or `None`.
+    Empty,
+    Named(String),
+    /// Any other literal, which this scan does not judge.
+    Other,
 }
 
 /// The manifest keys odooscan reads, evaluated as literals; the file is never executed.
 #[derive(Debug, Default)]
 pub struct Manifest {
-    pub version: Option<String>,
+    pub version: Option<Spanned<String>>,
+    license: Option<Spanned<License>>,
     pub depends: Vec<Spanned<String>>,
     pub data: Vec<Spanned<String>>,
     pub init_xml: Vec<String>,
@@ -103,11 +142,15 @@ pub struct Manifest {
     pub qweb: Option<Spanned<Vec<String>>>,
     /// Entries of the list keys Odoo loads nothing from, such as `other_files`, normalized.
     pub unread: Vec<String>,
+    /// The findings the manifest alone gives: OD507, OD508, OD511 and OD512.
+    pub diags: Vec<RawDiag>,
 }
 
 impl Manifest {
     pub fn series(&self) -> Option<Series> {
-        self.version.as_deref().and_then(Series::from_module_version)
+        self.version
+            .as_ref()
+            .and_then(|v| Series::from_module_version(&v.value))
     }
 
     /// The files Odoo loads for the module in `series`, in its load order: those of the data keys
@@ -138,6 +181,55 @@ impl Manifest {
         keys.filter(|k| !reads(k, series)).find(|k| lists(k))
     }
 
+    /// OD507 and OD508 on the license, OD511 on an `auto_install` trigger outside `depends`, and
+    /// OD512 on a file listed again under `data` or `demo`. `at` is where the dict opens.
+    fn findings(&self, at: Pos, series: Option<Series>) -> Vec<RawDiag> {
+        let mut diags = vec![];
+        match &self.license {
+            None => diags.push(RawDiag::new("OD507", at, NO_LICENSE)),
+            Some(Spanned {
+                value: License::Empty,
+                pos,
+            }) => diags.push(RawDiag::new("OD507", *pos, NO_LICENSE)),
+            Some(Spanned {
+                value: License::Named(name),
+                pos,
+            }) if !known_license(name, series) => diags.push(RawDiag::new(
+                "OD508",
+                *pos,
+                format!("Odoo knows no license '{name}', so updating the module list fails"),
+            )),
+            Some(_) => {}
+        }
+        diags.extend(self.foreign_triggers());
+        diags.extend(repeated(&self.data, "data"));
+        diags.extend(repeated(&self.demo, "demo"));
+        diags
+    }
+
+    /// The `auto_install` entries `depends` lacks, which fail an assertion as Odoo reads the
+    /// manifest (18.0 `odoo/modules/module.py:331-338`). With no `depends`, 20.0 depends on `base`
+    /// first (`odoo/modules/module.py:471-475`) where 18.0 does not, so that case stays silent.
+    fn foreign_triggers(&self) -> Vec<RawDiag> {
+        let AutoInstall::Listed(names) = &self.auto_install else {
+            return vec![];
+        };
+        if self.depends.is_empty() {
+            return vec![];
+        }
+        names
+            .iter()
+            .filter(|n| !self.depends.iter().any(|d| d.value == n.value))
+            .map(|n| {
+                let message = format!(
+                    "auto_install names '{}', which is not in depends, so Odoo fails to read the manifest",
+                    n.value
+                );
+                RawDiag::new("OD511", n.pos, message)
+            })
+            .collect()
+    }
+
     fn read_files(&self, keys: &'static [&'static str], series: Option<Series>) -> impl Iterator<Item = &str> {
         keys.iter()
             .filter(move |k| reads(k, series))
@@ -161,7 +253,8 @@ impl Manifest {
 
     fn set(&mut self, loc: &Source, key: &str, at: Pos, value: &Expr) {
         match key {
-            "version" | "category" | "installable" => self.set_scalar(key, value),
+            "version" | "category" | "installable" => self.set_scalar(loc, key, value),
+            "license" => self.set_license(loc, value),
             "depends" | "data" | "demo" | "init_xml" | "update_xml" | "demo_xml" => self.set_files(loc, key, value),
             "assets" => self.set_assets(loc, value),
             "qweb" => self.set_qweb(loc, at, value),
@@ -170,13 +263,35 @@ impl Manifest {
         }
     }
 
-    fn set_scalar(&mut self, key: &str, value: &Expr) {
+    fn set_scalar(&mut self, loc: &Source, key: &str, value: &Expr) {
         match key {
-            "version" => self.version = str_lit(value).map(str::to_owned),
+            "version" => {
+                self.version = str_lit(value).map(|v| Spanned {
+                    value: v.to_owned(),
+                    pos: loc.at(value),
+                });
+            }
             "category" => self.category = str_lit(value).map(str::to_owned),
             "installable" => self.installable = !matches!(value, Expr::BooleanLiteral(b) if !b.value),
             _ => {}
         }
+    }
+
+    /// Odoo takes `LGPL-3` for a value that is not truthy (18.0 `odoo/modules/module.py:322-324`).
+    fn set_license(&mut self, loc: &Source, value: &Expr) {
+        let license = match value {
+            Expr::BooleanLiteral(b) if !b.value => License::Empty,
+            Expr::NoneLiteral(_) => License::Empty,
+            e => match str_lit(e) {
+                Some("") => License::Empty,
+                Some(name) => License::Named(name.to_owned()),
+                None => License::Other,
+            },
+        };
+        self.license = Some(Spanned {
+            value: license,
+            pos: loc.at(value),
+        });
     }
 
     fn set_files(&mut self, loc: &Source, key: &str, value: &Expr) {
@@ -209,7 +324,8 @@ impl Manifest {
                     value: name.to_owned(),
                     pos: loc.at(key),
                 };
-                self.bundles.push(Bundle { name, globs });
+                let paths = asset_paths(loc, &list.elts);
+                self.bundles.push(Bundle { name, globs, paths });
             }
         }
     }
@@ -223,11 +339,89 @@ impl Manifest {
 
     fn set_install(&mut self, loc: &Source, key: &str, value: &Expr) {
         match key {
-            "auto_install" => self.auto_install = AutoInstall::read(value),
+            "auto_install" => self.auto_install = AutoInstall::read(loc, value),
             "countries" => self.countries = !list(loc, value).is_empty(),
             _ => {}
         }
     }
+}
+
+/// Why the Odoo of `series` will not install a module of `version`, none when it does or when the
+/// series disagree. From saas~16.3 a version is two or three numbers, maybe behind the series (18.0
+/// `odoo/modules/module.py:454-466`); 20.0 also takes `S.x` but makes a module whose version has
+/// four or five parts not behind the series uninstallable (`odoo/modules/module.py:579-608`). `S`
+/// and `S.x` stay silent, since 18.0 takes only the first and 20.0 only the second. On an unknown
+/// series, only the forms every series from saas~16.3 refuses count.
+pub fn version_refusal(version: &str, series: Option<Series>) -> Option<String> {
+    if series.is_some_and(|s| s < VERSION_FORM) {
+        return None;
+    }
+    let number = |p: &str| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit());
+    let behind = series.and_then(|s| prefixes(s).into_iter().find(|p| version.starts_with(&format!("{p}."))));
+    let taken = match behind {
+        Some(prefix) => {
+            let rest: Vec<&str> = version[prefix.len() + 1..].split('.').collect();
+            rest.len() <= 3 && rest.iter().all(|p| number(p))
+        }
+        None => {
+            // A saas series writes its own as `saas~M.m`, which a version of unknown series may carry.
+            let bare = if series.is_none() {
+                version.trim_start_matches("saas~")
+            } else {
+                version
+            };
+            let parts: Vec<&str> = bare.split('.').collect();
+            let most = if series.is_some() { 3 } else { 5 };
+            parts.iter().all(|p| number(p)) && (2..=most).contains(&parts.len())
+        }
+    };
+    if taken {
+        return None;
+    }
+    Some(match series {
+        Some(s) => {
+            let own = prefixes(s).swap_remove(0);
+            format!(
+                "version '{version}' is not of the form x.y, x.y.z, {own}.x.y or {own}.x.y.z, so Odoo {own} will not install the module"
+            )
+        }
+        None => format!(
+            "version '{version}' is not of the form x.y or x.y.z, behind the series or not, so Odoo will not install the module"
+        ),
+    })
+}
+
+/// How a version starts with `series` behind it: Odoo's own name of the series first, then the
+/// `major.minor` a saas series is read from too.
+fn prefixes(series: Series) -> Vec<String> {
+    let plain = format!("{}.{}", series.major, series.minor);
+    if series.minor == 0 {
+        vec![plain]
+    } else {
+        vec![format!("saas~{plain}"), plain]
+    }
+}
+
+const NO_LICENSE: &str = "the manifest names no license, which Odoo reads as LGPL-3";
+
+/// Whether `ir.module.module` of `series` takes `name` for its license; one of unknown series may
+/// run on any series from 10.0.
+fn known_license(name: &str, series: Option<Series>) -> bool {
+    LICENSES.contains(&name) && (name != "OPL-1" || series.is_none_or(|s| s >= OPL))
+}
+
+/// OD512 on each entry of `files` naming a file an earlier entry names, which Odoo loads again
+/// (18.0 `odoo/modules/loading.py:41-53`).
+fn repeated(files: &[Spanned<String>], key: &str) -> Vec<RawDiag> {
+    let mut seen = FxHashSet::default();
+    files
+        .iter()
+        .filter(|f| !seen.insert(normalize(&f.value)))
+        .map(|f| {
+            let message = format!("'{}' is listed again under {key}, so Odoo loads it twice", f.value);
+            RawDiag::new("OD512", f.pos, message)
+        })
+        .collect()
 }
 
 /// Positions in the manifest as written, of the nodes parsed from it without its leading blanks.
@@ -284,8 +478,11 @@ pub fn read(bytes: &[u8], series: impl FnOnce(Option<Series>) -> Option<Series>)
         Err(e) => Err((error(loc.pos(e.location.start()), e.error.to_string()), true)),
     };
     let dict = top.as_ref().ok().and_then(|top| top.as_dict_expr());
-    let manifest = dict.map(|d| entries(&loc, d));
+    let mut manifest = dict.map(|d| entries(&loc, d));
     let series = series(manifest.as_ref().and_then(Manifest::series));
+    if let (Some(m), Some(d)) = (manifest.as_mut(), dict) {
+        m.diags = m.findings(loc.at(d), series);
+    }
     let refuse = |(error, odoo)| Refusal { error, series, odoo };
     if let Some(pos) = not_utf8.filter(|_| !python2::runs_on(series)) {
         return Err(refuse((error(pos, "the manifest is not UTF-8"), OdooReads::No)));
@@ -464,6 +661,30 @@ fn list(loc: &Source, e: &Expr) -> Vec<Spanned<String>> {
         .collect()
 }
 
+/// The path of each entry of a bundle's list but an `include`, which names a bundle: a plain entry,
+/// or the last item of an `(op, ..., path)` one. A URL is left out.
+fn asset_paths(loc: &Source, entries: &[Expr]) -> Vec<Spanned<String>> {
+    entries
+        .iter()
+        .filter_map(|entry| {
+            let path = match entry {
+                Expr::Tuple(t) if t.elts.len() >= 2 => {
+                    if t.elts.first().and_then(str_lit)? == "include" {
+                        return None;
+                    }
+                    t.elts.last()?
+                }
+                e => e,
+            };
+            let value = str_lit(path).filter(|p| !p.contains("://"))?;
+            Some(Spanned {
+                value: value.to_owned(),
+                pos: loc.at(path),
+            })
+        })
+        .collect()
+}
+
 /// The globs of a bundle's list, whether a plain entry or the last item of an `(op, ..., glob)` one.
 /// `include` names a bundle and `remove` takes files out, so neither adds anything.
 fn asset_globs(entries: &[Expr]) -> Vec<String> {
@@ -533,19 +754,141 @@ mod tests {
     #[test]
     fn reads_auto_install_forms() {
         let read = |src: &str| parse(src).unwrap().auto_install;
+        let web = |col| {
+            AutoInstall::Listed(vec![Spanned {
+                value: "web".to_owned(),
+                pos: Pos { line: 1, col },
+            }])
+        };
         assert_eq!(read(r#"{"auto_install": True}"#), AutoInstall::Depends);
-        assert_eq!(
-            read(r#"{"auto_install": ["web"]}"#),
-            AutoInstall::Listed(vec!["web".to_owned()])
-        );
+        assert_eq!(read(r#"{"auto_install": ["web"]}"#), web(19));
         assert_eq!(read(r#"{"auto_install": []}"#), AutoInstall::Listed(vec![]));
-        assert_eq!(
-            read(r#"{"auto_install": {"web"}}"#),
-            AutoInstall::Listed(vec!["web".to_owned()])
-        );
+        assert_eq!(read(r#"{"auto_install": {"web"}}"#), web(19));
         assert_eq!(read(r#"{"auto_install": ["web", 1]}"#), AutoInstall::Off);
         assert_eq!(read(r#"{"auto_install": False}"#), AutoInstall::Off);
         assert_eq!(read(r#"{"name": "x"}"#), AutoInstall::Off);
+    }
+
+    /// The findings of the manifest `src` read as `series`, as `(code, line, col)`.
+    fn findings(src: &str, series: Option<&str>) -> Vec<(&'static str, u32, u32)> {
+        let m = read(src.as_bytes(), |_| series.and_then(Series::parse)).unwrap();
+        m.diags.iter().map(|d| (d.code, d.pos.line, d.pos.col)).collect()
+    }
+
+    const LICENSED: &str = r#""license": "LGPL-3""#;
+
+    #[test]
+    fn reports_a_missing_or_empty_license() {
+        assert_eq!(findings(r#"{"name": "x"}"#, None), [("OD507", 1, 1)]);
+        assert_eq!(findings("\n{'name': 'x'}", None), [("OD507", 2, 1)]);
+        assert_eq!(findings("  {'name': 'x'}", None), [("OD507", 1, 3)]);
+        for value in ["''", "False", "None"] {
+            assert_eq!(
+                findings(&format!("{{'license': {value}}}"), None),
+                [("OD507", 1, 13)],
+                "{value}"
+            );
+        }
+        assert!(findings(&format!("{{{LICENSED}}}"), None).is_empty());
+    }
+
+    #[test]
+    fn reports_a_license_the_series_does_not_know() {
+        assert_eq!(findings(r#"{"license": "MIT"}"#, None), [("OD508", 1, 13)]);
+        assert_eq!(findings(r#"{"license": "lgpl-3"}"#, None), [("OD508", 1, 13)]);
+        for license in LICENSES {
+            assert!(findings(&format!("{{'license': '{license}'}}"), Some("18.0")).is_empty());
+        }
+        assert!(findings(r#"{"license": "OPL-1"}"#, None).is_empty());
+        assert!(findings(r#"{"license": "OPL-1"}"#, Some("10.0")).is_empty());
+        assert_eq!(findings(r#"{"license": "OPL-1"}"#, Some("9.0")), [("OD508", 1, 13)]);
+        assert!(findings(r#"{"license": ["LGPL-3"]}"#, None).is_empty());
+    }
+
+    #[test]
+    fn reports_a_trigger_outside_depends() {
+        let src = |rest: &str| format!("{{{LICENSED}, {rest}}}");
+        let outside = src(r#""depends": ["sale"], "auto_install": ["sale", "stock"]"#);
+        assert_eq!(findings(&outside, None), [("OD511", 1, 69)]);
+        assert!(findings(&src(r#""depends": ["sale"], "auto_install": ["sale"]"#), None).is_empty());
+        assert!(findings(&src(r#""depends": ["sale"], "auto_install": True"#), None).is_empty());
+        assert!(findings(&src(r#""depends": [], "auto_install": ["sale"]"#), None).is_empty());
+        assert!(findings(&src(r#""auto_install": ["sale"]"#), None).is_empty());
+    }
+
+    #[test]
+    fn reports_a_file_listed_again_at_the_later_entry() {
+        let src = format!(
+            r#"{{{LICENSED},
+                "data": ["views/a.xml", "data/b.xml", "./views/a.xml", "views/a.xml"],
+                "demo": ["views/a.xml", "demo/c.xml"]}}"#
+        );
+        assert_eq!(findings(&src, None), [("OD512", 2, 55), ("OD512", 2, 72)]);
+    }
+
+    #[test]
+    fn refuses_versions_from_saas_16_3() {
+        let refused =
+            |version: &str, series: Option<&str>| version_refusal(version, series.and_then(Series::parse)).is_some();
+        for version in ["1.0", "1.2.3", "18.0", "18.0.1", "18.0.1.0", "18.0.1.0.0"] {
+            assert!(!refused(version, Some("18.0")), "{version}");
+        }
+        for version in [
+            "1",
+            "1.0-beta",
+            "1.0.0rc1",
+            "1..0",
+            "1.2.3.4",
+            "17.0.1.0.0",
+            "18.0.1.2.3.4",
+            "18.0.x",
+        ] {
+            assert!(refused(version, Some("18.0")), "{version}");
+        }
+        assert!(!refused("20.0.1.0.0", Some("20.0")) && refused("18.0.1.0.0", Some("20.0")));
+        assert!(!refused("saas~18.1.1.0.0", Some("saas~18.1")) && !refused("18.1.1.0.0", Some("saas~18.1")));
+        assert!(refused("18.0.1.0.0", Some("saas~18.1")));
+        assert!(!refused("1.0-beta", Some("saas~16.2")) && !refused("17.0.1.0.0", Some("16.0")));
+        assert!(refused("1.0-beta", Some("saas~16.3")));
+        assert!(refused("1.0-beta", None) && refused("1", None) && refused("1.2.3.4.5.6", None));
+        assert!(!refused("1.2.3.4", None) && !refused("saas~18.1.1.0.0", None));
+    }
+
+    #[test]
+    fn names_the_series_a_refused_version_must_start_with() {
+        let message = |version: &str, series: &str| version_refusal(version, Series::parse(series)).unwrap();
+        assert_eq!(
+            message("17.0.1.0.0", "18.0"),
+            "version '17.0.1.0.0' is not of the form x.y, x.y.z, 18.0.x.y or 18.0.x.y.z, so Odoo 18.0 will not install the module"
+        );
+        assert!(message("1", "saas~18.1").contains("saas~18.1.x.y"));
+    }
+
+    #[test]
+    fn reads_the_path_of_every_entry_but_an_include() {
+        let m = parse(
+            r#"{"assets": {"web.assets_backend": [
+                "x/static/src/**/*",
+                ("include", "web._assets_core"),
+                ("remove", "x/static/src/old.js"),
+                ("after", "web/static/src/a.js", "/x/static/src/b.js"),
+                "https://cdn.example.com/lib.js",
+            ]}}"#,
+        )
+        .unwrap();
+        let paths: Vec<_> = m.bundles[0]
+            .paths
+            .iter()
+            .map(|p| (p.value.as_str(), p.pos.line))
+            .collect();
+        assert_eq!(
+            paths,
+            [
+                ("x/static/src/**/*", 2),
+                ("x/static/src/old.js", 4),
+                ("/x/static/src/b.js", 5)
+            ]
+        );
     }
 
     #[test]

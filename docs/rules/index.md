@@ -164,7 +164,8 @@ to public and portal users, and record rules Odoo refuses to load.
 
 ## OD5: manifest and module graph
 
-The manifest and the dependency graph: listed files, unlisted files and dependencies.
+The manifest and the dependency graph: its keys, listed files, unlisted files, assets and
+dependencies.
 
 | Code | Name | Reports |
 | --- | --- | --- |
@@ -174,6 +175,13 @@ The manifest and the dependency graph: listed files, unlisted files and dependen
 | [OD504](OD504.md) | `circular-dependency` | A module in depends depends back on this module. |
 | [OD505](OD505.md) | `qweb-key-ignored` | The manifest lists templates under qweb, which Odoo ignores. |
 | [OD506](OD506.md) | `assets-qweb-unloaded` | The manifest adds files to web.assets_qweb, which Odoo no longer loads. |
+| [OD507](OD507.md) | `license-missing` | The manifest names no license, which Odoo reads as LGPL-3. |
+| [OD508](OD508.md) | `license-unknown` | The manifest names a license Odoo does not know, which fails the module list update. |
+| [OD509](OD509.md) | `version-refused` | The manifest version has a form Odoo refuses, or names another series. |
+| [OD510](OD510.md) | `depends-on-itself` | The module lists itself in depends, so Odoo never loads it. |
+| [OD511](OD511.md) | `auto-install-not-depended` | auto_install names a module missing from depends, so Odoo fails to read the manifest. |
+| [OD512](OD512.md) | `data-file-repeated` | A file is listed twice under data or demo, so Odoo loads it twice. |
+| [OD513](OD513.md) | `asset-path-unmatched` | An assets path or glob of the module matches no file Odoo serves. |
 
 ## OD6: JavaScript and Owl
 

@@ -5,4 +5,5 @@
     "auto_install": True,
     "countries": ["be"],
     "data": ["pages.xml"],
+    "license": "LGPL-3",
 }

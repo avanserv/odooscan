@@ -1,1 +1,1 @@
-{"name": "report_unversioned", "depends": ["web"], "data": ["data/reports.xml", "data/updates.xml"]}
+{"name": "report_unversioned", "depends": ["web"], "data": ["data/reports.xml", "data/updates.xml"], "license": "LGPL-3"}

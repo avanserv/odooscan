@@ -3,4 +3,5 @@
     "version": "9.0.1.0.0",
     "depends": ["base"],
     "update_xml": ["security/ir.model.access.csv"],
+    "license": "LGPL-3",
 }
