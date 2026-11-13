@@ -1199,3 +1199,19 @@ fn a_fix_keeps_what_a_child_view_finds_or_sets_by_the_old_name() {
     }
     assert_eq!((read(&rows, "list.xml"), read(&rows, "named.xml")), (list, named));
 }
+
+#[test]
+fn a_manifest_that_does_not_parse_fails_the_check() {
+    let out = check_in(&fixtures(), &["custom/manifest_unclosed"]).output().unwrap();
+    let stdout = String::from_utf8(out.stdout).unwrap();
+    assert_eq!(
+        out.status.code(),
+        Some(1),
+        "{stdout}{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        stdout.contains("manifest_unclosed/__manifest__.py:5:1: OD000 "),
+        "{stdout}"
+    );
+}

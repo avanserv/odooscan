@@ -688,6 +688,9 @@ custom/legacy9/views/aliases.xml:23:33: OD318 legacy9.ledger has no primary lega
 custom/legacy9/views/aliases.xml:23:33: OD318 legacy9.ledger has no primary gantt view, and nothing generates one
 custom/legacy9/views/aliases.xml:29:33: OD318 legacy9.gauge has no primary calendar view, and no date field to generate one from
 custom/legacy9/views/columns.xml:8:17: OD304 'ghost': legacy9.columns has no field 'ghost'
+custom/manifest_latin1/__manifest__.py:4:19: OD000 the manifest is not UTF-8
+custom/manifest_unclosed/__manifest__.py:5:1: OD000 unexpected EOF while parsing
+custom/manifest_unliteral/__manifest__.py:4:16: OD000 not a literal: Odoo reads the manifest with ast.literal_eval
 custom/method_aliases/data/calls.xml:20:34: OD320 method.ticket has no method 'action_dnoe'
 custom/method_aliases/views/tickets.xml:21:45: OD312 method.ticket has no method 'action_dnoe'
 custom/method_aliases/views/tickets.xml:22:45: OD312 method.ticket has no method 'limit'

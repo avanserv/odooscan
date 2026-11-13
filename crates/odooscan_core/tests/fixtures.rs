@@ -107,6 +107,23 @@ fn python_2_files_of_checked_modules_get_a_notice() {
 }
 
 #[test]
+fn an_indexed_manifest_that_does_not_parse_gets_a_notice() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+    let report = scan(&ScanOptions {
+        paths: vec![root.join("custom/cycle_a")],
+        addons_paths: vec![root.join("custom"), root.join("core")],
+        ..Default::default()
+    });
+    let manifest = root.join("custom/manifest_unclosed/__manifest__.py");
+    let notice = format!(
+        "{}:5:1: the manifest does not parse, so module manifest_unclosed is not indexed: unexpected EOF while parsing",
+        manifest.display()
+    );
+    assert!(report.notices.contains(&notice), "{:#?}", report.notices);
+    assert!(!report.diagnostics.iter().any(|d| d.code == "OD000"));
+}
+
+#[test]
 fn default_series_reads_a_seriesless_auto_install_list() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
     // Before saas~12.4 the list waits on every depend, and web_sticker also depends on web_glue.
