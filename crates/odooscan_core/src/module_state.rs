@@ -13,7 +13,7 @@ use crate::python::{Locator, str_lit, tail_name};
 const CONTAINER_CALLS: &[&str] = &["dict", "list", "set", "defaultdict", "OrderedDict"];
 
 /// Methods that change a dict, a list or a set in place.
-const MUTATORS: &[&str] = &[
+pub(crate) const MUTATORS: &[&str] = &[
     "add",
     "append",
     "clear",
@@ -80,6 +80,58 @@ pub(crate) fn top_level(body: &[Stmt]) -> Vec<&Stmt> {
 /// what it names.
 pub(crate) fn odoo_names<'a>(top: &[&'a Stmt]) -> Vec<(&'a str, String)> {
     imported_names(top, "odoo")
+}
+
+/// The names the file binds at import to a list, tuple, set or dict literal of literals, and
+/// binds to nothing else there.
+pub(crate) fn collections<'a>(top: &[&'a Stmt]) -> Vec<&'a str> {
+    let mut names = vec![];
+    for stmt in top {
+        let (targets, value): (Vec<&Expr>, _) = match stmt {
+            Stmt::Assign(a) => (a.targets.iter().collect(), Some(&*a.value)),
+            Stmt::AnnAssign(a) => (vec![&*a.target], a.value.as_deref()),
+            _ => continue,
+        };
+        let literal = value.is_some_and(literals);
+        for name in targets.into_iter().filter_map(Expr::as_name_expr) {
+            names.retain(|n| *n != name.id.as_str());
+            if literal {
+                names.push(name.id.as_str());
+            }
+        }
+    }
+    names
+}
+
+/// Whether `expr` is a list, tuple, set or dict literal whose items are each a `scalar` or such
+/// a literal.
+fn literals(expr: &Expr) -> bool {
+    items(expr).is_some_and(|items| items.into_iter().all(|i| i.is_some_and(|i| scalar(i) || literals(i))))
+}
+
+/// The items of a list, tuple or set literal, or the keys of a dict literal with `None` for a
+/// `**` entry; `None` for any other expression.
+pub(crate) fn items(expr: &Expr) -> Option<Vec<Option<&Expr>>> {
+    match expr {
+        Expr::List(ast::ExprList { elts, .. })
+        | Expr::Tuple(ast::ExprTuple { elts, .. })
+        | Expr::Set(ast::ExprSet { elts, .. }) => Some(elts.iter().map(Some).collect()),
+        Expr::Dict(d) => Some(d.items.iter().map(|i| i.key.as_ref()).collect()),
+        _ => None,
+    }
+}
+
+/// Whether `expr` is a literal that holds no other value: a string but an f-string, bytes, a
+/// number, a boolean or `None`.
+pub(crate) fn scalar(expr: &Expr) -> bool {
+    matches!(
+        expr,
+        Expr::StringLiteral(_)
+            | Expr::BytesLiteral(_)
+            | Expr::NumberLiteral(_)
+            | Expr::BooleanLiteral(_)
+            | Expr::NoneLiteral(_)
+    )
 }
 
 /// The names an import of `package`, or of a module under it, binds, each with the dotted path of

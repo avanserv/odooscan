@@ -499,12 +499,6 @@
       "count": 1
     },
     {
-      "path": "addons/hr_timesheet/controllers/portal.py",
-      "code": "OD715",
-      "message": "route parameter 'search_in' reaches the domain or the fields of sudo().search_count() through '_get_search_domain()', 'domain', so the user searches or groups by any field as superuser; build each condition with a field and an operator the code picks",
-      "count": 1
-    },
-    {
       "path": "addons/hr_work_entry/static/src/components/domain_count_field/domain_count_field.js",
       "code": "OD602",
       "message": "neither ListRenderer nor its parents have 'getCellTitle', so super.getCellTitle() fails",

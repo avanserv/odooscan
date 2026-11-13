@@ -234,8 +234,17 @@ The flow ends at a sanitizer: `int()`, `float()`, `bool()`, `len()`, `SQL.identi
 `secure_filename()`, `content_disposition()`, `file_open()` and `Manifest.for_addon()`; at the
 `name` of a file read from `request.httprequest.files` by a field the code names with `get()`,
 `getlist()` or an item, which werkzeug sets to that field, in the method or a method it is passed
-to; at `assert x in (...)` or `if x not in allowed: raise`, and inside a comprehension at its
-`if x in allowed`; and at an intersection with values the code chose, such as `set(vals) & allowed`.
+to; and at an intersection with values the code chose, such as `set(vals) & allowed`.
+It ends too after `assert x in allowed` or `if x not in allowed: raise`, and in a comprehension at
+its `if x in allowed`, whatever `allowed` holds. In the arm of `if x in allowed`, the `else` and
+`elif` after `if x not in allowed` and after `if x not in allowed: x = default`, it ends only where
+the code chose `allowed`: a list, tuple, set or dict literal whose items the code chose too, or a
+list or set comprehension over a container the code chose; a module constant bound to such a
+literal; `self._x` or `cls._x`, but `_fields`, `_context`, `_ids` and the other attributes the ORM
+sets; what a method of `self` returns for arguments the code chose too, but one that reads records
+or `fields_get()`; or a local bound to any of these that no rebinding, item set or call such as
+`append()` changed since. Anything else confines nothing there, such as a string, a parameter, a
+record's field or a list of a model's fields.
 A test that `x` is in `env`, `registry`, `pool` or `_fields` proves only that the model or the
 field exists, so it ends every flow but those of OD712, OD714 and OD715. Some steps make a value
 harmless for some rules only: `os.path.basename()`, `io.BytesIO()`, `io.StringIO()` and a normalized
