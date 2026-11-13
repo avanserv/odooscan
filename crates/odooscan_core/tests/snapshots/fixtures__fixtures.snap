@@ -864,7 +864,8 @@ custom/public_grant18/security/ir.model.access.csv:2:1: OD402 base.group_portal 
 custom/public_grant19/controllers/main.py:8:9: OD717 route parameter 'upload' reaches the content of create(), which public=True lets anyone download; keep it private and share it with generate_access_token()
 custom/public_grant19/security/ir.model.access.csv:2:1: OD402 base.group_portal gets write, create or unlink on base.model_ir_attachment; public and portal access should be read-only and go through controllers
 custom/public_grant_domain/security/ir.access.csv:2:1: OD402 base.group_portal gets write, create or unlink on ir.attachment; public and portal access should be read-only and go through controllers
-custom/public_grant_public/controllers/main.py:12:9: OD717 route parameter 'upload' reaches the content of create(), which public=True lets anyone download; keep it private and share it with generate_access_token()
+custom/public_grant_public/controllers/main.py:14:9: OD717 route parameter 'upload' reaches the content of create(), which public=True lets anyone download; keep it private and share it with generate_access_token()
+custom/public_grant_public/controllers/main.py:20:9: OD717 route parameter 'upload' reaches the content of create(), which public=True lets anyone download; keep it private and share it with generate_access_token()
 custom/public_grant_public/security/ir.access.csv:2:1: OD402 base.group_public gets write, create or unlink on ir.attachment; public and portal access should be read-only and go through controllers
 custom/qweb_calls/data/pages.xml:1:1: OD502 'data/pages.xml' is not in the manifest's data or demo, so Odoo never loads it
 custom/qweb_calls/static/src/panel.xml:6:20: OD605 no indexed bundle defines template 'qweb_calls.Absent'
