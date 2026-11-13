@@ -204,14 +204,15 @@ fills holds records, whose ids alone the user picks, and is no source.
 
 A value stays tainted through assignments, attributes of `self` set in the same method, formatting,
 concatenation, f-strings, string methods, items, attributes, collections, comprehensions and module
-functions such as `json.loads()`. What a recordset method such as `browse()` or `search()` returns
-is not tainted, but for OD712, which follows the records of `env[t]` or `env.get(t)` through locals,
-`sudo()`, `browse()`, `exists()` and `filtered()`, and OD716, which follows the records `browse()`
-reads by an id the user picks into what a route returns, until a check of them. OD717 follows the
-`public` flag and the content of the values for `ir.attachment` through dict literals, `dict()`,
-lists, locals and their items. Both branches of an `if` are followed, a branch that returns or
-raises adds nothing after it, and a loop body is read twice, its `for` target bound again from the
-iterable before each reading.
+functions such as `json.loads()`. `getattr()` keeps its object and its default but not the name it
+reads, and `match()` and `fullmatch()` on an untainted pattern keep the string they match. What a
+recordset method such as `browse()` or `search()` returns is not tainted, but for OD712, which
+follows the records of `env[t]` or `env.get(t)` through locals, `sudo()`, `browse()`, `exists()` and
+`filtered()`, and OD716, which follows the records `browse()` reads by an id the user picks into
+what a route returns, until a check of them. OD717 follows the `public` flag and the content of the
+values for `ir.attachment` through dict literals, `dict()`, lists, locals and their items. Both
+branches of an `if` are followed, a branch that returns or raises adds nothing after it, and a loop
+body is read twice, its `for` target bound again from the iterable before each reading.
 
 A value passed to a method of `self`, of `env["x"]` or of a local bound to one is followed into
 every definition of that method the module's dependencies hold, overrides included, up to four calls
@@ -236,7 +237,7 @@ to; at `assert x in (...)` or `if x not in allowed: raise`, and inside a compreh
 `if x in allowed`; and at an intersection with values the code chose, such as `set(vals) & allowed`.
 A test that `x` is in `env`, `registry`, `pool` or `_fields` proves only that the model or the
 field exists, so it ends every flow but those of OD712, OD714 and OD715. Some steps make a value
-harmless for one rule only: `os.path.basename()`, `io.BytesIO()`, `io.StringIO()` and a normalized
+harmless for some rules only: `os.path.basename()`, `io.BytesIO()`, `io.StringIO()` and a normalized
 `os.path.join()` kept under a prefix the code picks for OD707, `shlex.quote()` and `shlex.join()`
 for OD708, a start the code picks for OD705 and OD706, a name built with text of the code's for
 OD713, and a condition whose field and operator the code picks for OD715, as their pages say. An id
