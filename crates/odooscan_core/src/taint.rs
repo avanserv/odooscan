@@ -41,6 +41,10 @@ enum Sink {
     /// it, at a `return`, so no row of `TABLE` or of a configuration names it, and only from an
     /// id the route itself reads from the user, so no summary edge keeps it.
     Record,
+    /// Content stored as superuser in an attachment whose values set `public` to `True`. Only
+    /// `Flows::publishes` finds it, from the values a create passes, so no row of `TABLE` or of a
+    /// configuration names it.
+    Attachment,
 }
 
 /// The arguments of a call that a sink checks.
@@ -355,6 +359,7 @@ const SINKS: &[(Sink, &str)] = &[
     (Sink::Field, "OD714"),
     (Sink::Domain, "OD715"),
     (Sink::Record, "OD716"),
+    (Sink::Attachment, "OD717"),
 ];
 
 /// Keywords that carry the argument a sink checks when it is not passed by position.
@@ -388,7 +393,9 @@ impl TaintTable {
     /// A sink reported as `rule`, the code or name of a rule of `SINKS` that a call reports.
     pub fn sink(&mut self, rule: &str, pattern: &str) -> Result<(), String> {
         let code = crate::rules::find(rule).map(|r| r.code);
-        let mut called = SINKS.iter().filter(|(s, _)| *s != Sink::Record);
+        let mut called = SINKS
+            .iter()
+            .filter(|(s, _)| !matches!(s, Sink::Record | Sink::Attachment));
         let Some((kind, _)) = called.clone().find(|(_, c)| Some(*c) == code) else {
             let (first, last) = (SINKS[0].1, called.next_back().map_or("", |(_, c)| *c));
             return Err(format!(
@@ -731,7 +738,48 @@ struct State {
     checked: FxHashSet<String>,
     /// Locals bound to `int()` or `float()` of a value the user sets, which still pick records.
     ids: FxHashMap<String, Taint>,
+    /// Locals bound to values a create of `ir.attachment` may take.
+    vals: FxHashMap<String, Vals>,
 }
+
+/// What values for `ir.attachment` set: `public` to a literal `True`, and the taint of the content
+/// they store.
+#[derive(Clone, Debug, Default)]
+struct Vals {
+    public: bool,
+    content: Option<Taint>,
+}
+
+impl Vals {
+    fn and(self, other: Vals) -> Vals {
+        Vals {
+            public: self.public || other.public,
+            content: join(self.content, other.content),
+        }
+    }
+}
+
+fn join_vals(a: Option<Vals>, b: Option<Vals>) -> Option<Vals> {
+    match (a, b) {
+        (Some(a), Some(b)) => Some(a.and(b)),
+        (a, b) => a.or(b),
+    }
+}
+
+/// From saas~19.3 `ir.attachment` has no `datas`: 20.0 reads the content from `raw` and `db_datas`
+/// only (`odoo/addons/base/models/ir_attachment.py:540-542`).
+const NO_DATAS: Series = Series { major: 19, minor: 3 };
+
+/// The methods of `ir.attachment` that create attachments, the argument of their values, and the
+/// argument of a file whose content they store too.
+const CREATES: &[(&str, Arg, Option<Arg>)] = &[
+    ("create", Arg::At(0, &["vals_list", "vals"]), None),
+    (
+        "_upload_file",
+        Arg::At(1, &["create_vals"]),
+        Some(Arg::At(0, &["file"])),
+    ),
+];
 
 /// Records browsed by an id the user picks.
 #[derive(Clone, Debug)]
@@ -784,6 +832,7 @@ impl State {
         join_into(&mut self.picked, other.picked, join);
         join_into(&mut self.browsed, other.browsed, join_browsed);
         join_into(&mut self.ids, other.ids, join);
+        join_into(&mut self.vals, other.vals, join_vals);
         // A check on one path only still vouches for the records: as at 18.0
         // payment/controllers/portal.py:76-78, the path without it browses no id.
         self.checked.extend(other.checked);
@@ -1070,12 +1119,134 @@ impl Flows<'_> {
                 let label = header_label(str_lit(slice), &self.path(base).join("."));
                 self.sink(Sink::Header, label, t, target);
             }
-            Expr::Subscript(ast::ExprSubscript { value: base, .. })
-            | Expr::Attribute(ast::ExprAttribute { value: base, .. }) => {
+            Expr::Subscript(ast::ExprSubscript { value: base, slice, .. }) => {
+                self.set_item(base, str_lit(slice), t.clone(), value);
+                self.hold(base, value);
+                self.add_to(base, values(t));
+            }
+            Expr::Attribute(ast::ExprAttribute { value: base, .. }) => {
                 self.hold(base, value);
                 self.add_to(base, values(t));
             }
             _ => {}
+        }
+    }
+
+    /// Binds the attachment values a local's value holds, the flow of their content going through
+    /// the local.
+    fn bind_vals(&mut self, name: &str, target: &Expr, value: Option<&Expr>) {
+        let Some(mut vals) = value.and_then(|v| self.vals_of(v)) else {
+            self.state.vals.remove(name);
+            return;
+        };
+        if let Some(t) = &mut vals.content {
+            t.steps.push(Spanned {
+                value: name.to_owned(),
+                pos: self.loc.at(target),
+            });
+        }
+        self.state.vals.insert(name.to_owned(), vals);
+    }
+
+    /// Records `vals[key] = value`, of taint `t`, on the attachment values the local `base` holds.
+    fn set_item(&mut self, base: &Expr, key: Option<&str>, t: Option<Taint>, value: Option<&Expr>) {
+        let (Expr::Name(n), Some(key)) = (base, key) else {
+            return;
+        };
+        let content = self.is_content(key);
+        if key != "public" && !content {
+            return;
+        }
+        let pos = self.loc.at(base);
+        let vals = self.state.vals.entry(n.id.to_string()).or_default();
+        if !content {
+            vals.public = value.is_some_and(is_true);
+            return;
+        }
+        let t = t.map(|mut t| {
+            t.steps.push(Spanned {
+                value: n.id.to_string(),
+                pos,
+            });
+            t
+        });
+        vals.content = join(vals.content.take(), t);
+    }
+
+    /// Whether the key of `ir.attachment` values holds the content an attachment stores. `datas`
+    /// counts when the series is unknown, as most modules without one predate saas~19.3.
+    fn is_content(&self, key: &str) -> bool {
+        match key {
+            "raw" | "db_datas" => true,
+            "datas" => self.series.is_none_or(|s| s < NO_DATAS),
+            _ => false,
+        }
+    }
+
+    /// The attachment values `expr` holds: a dict literal, `dict(...)`, a list or a tuple of them,
+    /// or a local bound to them.
+    fn vals_of(&mut self, expr: &Expr) -> Option<Vals> {
+        match expr {
+            Expr::Name(n) => self.state.vals.get(n.id.as_str()).cloned(),
+            Expr::Dict(d) => Some(self.dict_vals(d)),
+            Expr::Call(c) if matches!(&*c.func, Expr::Name(n) if n.id.as_str() == "dict") => Some(self.call_vals(c)),
+            Expr::List(ast::ExprList { elts, .. }) | Expr::Tuple(ast::ExprTuple { elts, .. }) => {
+                elts.iter().fold(None, |acc, e| {
+                    let vals = self.vals_of(e);
+                    join_vals(acc, vals)
+                })
+            }
+            _ => None,
+        }
+    }
+
+    /// The values a dict literal sets, a later key over an earlier one.
+    fn dict_vals(&mut self, d: &ast::ExprDict) -> Vals {
+        let mut vals = Vals::default();
+        for item in &d.items {
+            match &item.key {
+                Some(key) => self.entry(&mut vals, str_lit(key), &item.value),
+                None => vals = vals.and(self.spread(&item.value)),
+            }
+        }
+        vals
+    }
+
+    /// The values `dict(x, key=value)` sets.
+    fn call_vals(&mut self, c: &ast::ExprCall) -> Vals {
+        let first = c.arguments.args.first();
+        let mut vals = first.map_or_else(Vals::default, |x| self.spread(x));
+        for k in &c.arguments.keywords {
+            match &k.arg {
+                Some(key) => self.entry(&mut vals, Some(key.as_str()), &k.value),
+                None => vals = vals.and(self.spread(&k.value)),
+            }
+        }
+        vals
+    }
+
+    /// Sets one key of attachment values: `public` to whether it is literally `True`, and a key of
+    /// the content to the taint of its value.
+    fn entry(&mut self, vals: &mut Vals, key: Option<&str>, value: &Expr) {
+        match key {
+            Some("public") => vals.public = is_true(value),
+            Some(key) if self.is_content(key) => {
+                let t = self.expr(value);
+                vals.content = join(vals.content.take(), t);
+            }
+            _ => {}
+        }
+    }
+
+    /// What `**x` or `dict(x)` sets: the values `x` holds, or else any key of the content with the
+    /// taint of `x`.
+    fn spread(&mut self, x: &Expr) -> Vals {
+        match self.vals_of(x) {
+            Some(vals) => vals,
+            None => Vals {
+                public: false,
+                content: self.expr(x),
+            },
         }
     }
 
@@ -1104,6 +1275,7 @@ impl Flows<'_> {
             Some(model) => self.state.picked.insert(name.to_owned(), model),
             None => self.state.picked.remove(name),
         };
+        self.bind_vals(name, target, value);
         self.set(name.to_owned(), target, t);
     }
 
@@ -1521,6 +1693,7 @@ impl Flows<'_> {
             _ => true,
         });
         self.picks(call, expr);
+        self.publishes(call, expr);
         self.vouch(self.checked_by(call));
         match row {
             Some((pattern, Role::Source(kind))) => self.source(format!("{pattern}()"), expr, kind),
@@ -1577,6 +1750,28 @@ impl Flows<'_> {
             }
             _ => {}
         }
+    }
+
+    /// Reports content the user sets that a create of `ir.attachment` stores as superuser, in an
+    /// attachment whose values set `public` to `True`, which anyone may then download.
+    fn publishes(&mut self, call: &ast::ExprCall, expr: &Expr) {
+        let Expr::Attribute(a) = &*call.func else { return };
+        let Some((method, values, file)) = CREATES.iter().find(|(m, ..)| *m == a.attr.as_str()) else {
+            return;
+        };
+        let attachment = matches!(self.receiver(&a.value), Some(Receiver::Model(m)) if m == "ir.attachment");
+        if !attachment || runs_as(&self.path(&a.value)) != RunsAs::Superuser {
+            return;
+        }
+        let vals = arg_expr(*values, call).and_then(|v| self.vals_of(v));
+        let Some(vals) = vals.filter(|v| v.public) else { return };
+        let file = file.and_then(|f| arg_expr(f, call)).and_then(|f| self.expr(f));
+        self.sink(
+            Sink::Attachment,
+            format!("sudo().{method}()"),
+            join(vals.content, file),
+            expr,
+        );
     }
 
     /// The taint of the model's name when `expr` is the records of a model the user picks:
@@ -2253,6 +2448,10 @@ fn call_suffix(c: &ast::ExprCall) -> &'static str {
     }
 }
 
+fn is_true(expr: &Expr) -> bool {
+    matches!(expr, Expr::BooleanLiteral(b) if b.value)
+}
+
 fn toggle(set: &mut FxHashSet<String>, name: &str, on: bool) {
     if on {
         set.insert(name.to_owned());
@@ -2748,6 +2947,11 @@ const MESSAGES: &[(&str, &str, &str)] = &[
         "the id of ",
         ", whose records the route returns read as superuser; check them with _document_check_access(), consteq(), check_access() from 18.0 or check_access_rule() before 18.0",
     ),
+    (
+        "OD717",
+        "the content of ",
+        ", which public=True lets anyone download; keep it private and share it with generate_access_token()",
+    ),
 ];
 
 const DISPOSITION: &str =
@@ -3034,6 +3238,8 @@ mod tests {
         assert!(table.sink("od704", "lib.run").is_ok());
         let error = table.sink("sudo-record-exposure", "lib.show").unwrap_err();
         assert!(error.contains("OD701 to OD715"), "{error}");
+        assert!(table.sink("OD717", "lib.store").is_err());
+        assert!(table.sink("sudo-public-attachment", "lib.store").is_err());
     }
 
     #[test]
@@ -3943,5 +4149,113 @@ mod tests {
             ),
             ["OD711"]
         );
+    }
+
+    /// The codes of a route of a module of `series`, where `upload` and `post` are its parameters
+    /// and `A` the attachments under `sudo()`.
+    fn stored(series: Option<&str>, body: &str) -> Vec<String> {
+        let src = format!("def f(self, upload, **post):\n    A = request.env['ir.attachment'].sudo()\n{body}\n");
+        let found = scan_in(&TaintTable::default(), series, Params::Route(&[]), &src);
+        code_list(&found).into_iter().map(str::to_owned).collect()
+    }
+
+    #[test]
+    fn user_content_in_a_public_attachment_under_sudo_is_reported() {
+        for body in [
+            "    A.create({'raw': upload.read(), 'public': True})",
+            "    request.env['ir.attachment'].sudo().create(vals_list={'db_datas': upload, 'public': True})",
+            "    vals = {'name': 'a', 'raw': upload}\n    vals['public'] = True\n    A.create(vals)",
+            "    vals = {'name': 'a', 'public': True}\n    vals['raw'] = upload\n    A.create(vals)",
+            "    A.create(dict(raw=upload, public=True))",
+            "    A.create(dict({'raw': upload}, public=True))",
+            "    A.create([{'raw': upload, 'public': True}])",
+            "    A.create(({'name': 'a'}, {'raw': upload, 'public': True}))",
+            "    A.create({**{'raw': upload}, 'public': True})",
+            "    A.create({'datas': base64.b64encode(upload.read()), 'public': True})",
+            "    A._upload_file(upload, {'public': True})",
+            "    A._upload_file(file=upload, create_vals={'name': 'a', 'public': True})",
+            "    vals = {'raw': upload}\n    if post:\n        vals = {'raw': upload, 'public': True}\n    A.create(vals)",
+            "    public = {'raw': upload, 'public': True}\n    vals = public\n    A.create(vals)",
+        ] {
+            assert_eq!(stored(Some("18.0"), body), ["OD717"], "{body}");
+        }
+        let found = scan_in(
+            &TaintTable::default(),
+            None,
+            Params::Route(&[]),
+            "def f(self, upload):\n    vals = {'raw': upload, 'public': True}\n    request.env['ir.attachment'].sudo().create(vals)\n",
+        );
+        assert_eq!(
+            found,
+            [
+                "OD717 route parameter 'upload' reaches the content of sudo().create() through 'vals', which public=True lets anyone download"
+            ]
+        );
+    }
+
+    #[test]
+    fn a_private_attachment_or_one_created_with_a_user_rights_is_not_reported() {
+        for body in [
+            "    request.env['ir.attachment'].create({'raw': upload, 'public': True})",
+            "    A.with_user(request.env.user).create({'raw': upload, 'public': True})",
+            "    request.env['ir.attachment'].sudo().with_user(1).create({'raw': upload, 'public': True})",
+            "    request.env['ir.attachment'].sudo(False).create({'raw': upload, 'public': True})",
+            "    request.env['res.partner'].sudo().create({'raw': upload, 'public': True})",
+            "    A.create({'raw': upload})",
+            "    A.create({'raw': upload, 'public': bool(post)})",
+            "    A.create({'raw': upload, 'public': post.get('public')})",
+            "    A.create({'raw': upload, 'public': False})",
+            "    vals = {'raw': upload, 'public': True}\n    vals['public'] = post.get('public')\n    A.create(vals)",
+            "    vals = {'raw': upload, 'public': True}\n    vals = self._prepare(upload)\n    A.create(vals)",
+            "    A.create({'name': upload.filename, 'res_id': int(post['id']), 'raw': b'x', 'public': True})",
+            "    A.create({'name': upload, 'mimetype': upload, 'public': True})",
+            "    A._upload_file(upload, {'name': 'a'})",
+            "    A.write({'raw': upload, 'public': True})",
+        ] {
+            assert!(stored(Some("18.0"), body).is_empty(), "{body}");
+        }
+    }
+
+    #[test]
+    fn datas_holds_the_content_before_saas_19_3() {
+        let datas = "    A.create({'datas': upload, 'public': True})";
+        for series in [Some("16.0"), Some("18.0"), Some("saas~19.2"), None] {
+            assert_eq!(stored(series, datas), ["OD717"], "{series:?}");
+        }
+        for series in ["saas~19.3", "20.0"] {
+            assert!(stored(Some(series), datas).is_empty(), "{series}");
+            assert_eq!(
+                stored(Some(series), "    A.create({'raw': upload, 'public': True})"),
+                ["OD717"],
+                "{series}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_public_attachment_leaves_the_mass_assignment_rule_as_it_was() {
+        assert_eq!(
+            stored(None, "    A.create({**post, 'public': True})"),
+            ["OD717", "OD704"]
+        );
+        assert_eq!(stored(None, "    A.create(post)"), ["OD704"]);
+        assert_eq!(
+            stored(None, "    A.create({'raw': post['data'], 'public': True})"),
+            ["OD717"]
+        );
+        assert_eq!(
+            stored(None, "    A.create(dict(post, public=True))"),
+            ["OD717", "OD704"]
+        );
+    }
+
+    #[test]
+    fn a_helper_storing_its_parameter_publicly_keeps_the_edge_for_its_callers() {
+        let helper = summary(
+            Params::None,
+            "def _store(self, data):\n    self.env['ir.attachment'].sudo().create({'raw': data, 'public': True})\n",
+        );
+        let targets: Vec<_> = helper.edges.iter().map(|e| (e.origin, e.target.clone())).collect();
+        assert_eq!(targets, [(FlowOrigin::Param(0), FlowTarget::Sink("OD717"))]);
     }
 }

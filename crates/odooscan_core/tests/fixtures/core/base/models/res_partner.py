@@ -211,3 +211,15 @@ class IrHttp(models.AbstractModel):
     @classmethod
     def _handle_error(cls, exception):
         return exception
+
+
+class IrAttachment(models.Model):
+    _name = "ir.attachment"
+
+    name = fields.Char()
+    res_model = fields.Char()
+    res_id = fields.Integer()
+    public = fields.Boolean()
+    raw = fields.Binary()
+    datas = fields.Binary()
+    db_datas = fields.Binary()
