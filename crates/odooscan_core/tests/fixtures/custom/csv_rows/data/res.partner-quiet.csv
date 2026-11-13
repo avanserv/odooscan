@@ -1,0 +1,4 @@
+id,name,parent_id:id,short_name
+csv_rows_long,Long,,Long,extra
+csv_rows_plain,Plain,
+csv_rows_quoted,"Twolines",csv_rows_long,Quoted

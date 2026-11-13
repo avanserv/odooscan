@@ -1,0 +1,5 @@
+<odoo>
+    <record id="memo_first" model="encoded.memo">
+        <field name="title">First</field>
+    </record>
+</odoo>

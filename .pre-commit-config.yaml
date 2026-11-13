@@ -13,6 +13,7 @@ repos:
         name: all      | fix trailing whitespaces
       - id: end-of-file-fixer
         name: all      | fix end of files
+        exclude: ^crates/odooscan_core/tests/fixtures/custom/encoded_declared/data/utf16\.xml$
       - id: check-yaml
         name: all      | check yaml
       - id: check-toml

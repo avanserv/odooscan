@@ -6,7 +6,7 @@ use rayon::iter::Either;
 use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use crate::facts::{DataFacts, JsFacts, PyFacts, Spanned, TemplateFacts};
+use crate::facts::{DataFacts, JsFacts, Pos, PyFacts, Spanned, TemplateFacts};
 use crate::manifest::{self, Manifest, OdooReads, Refusal, normalize};
 use crate::mentions::Mentions;
 use crate::series::Series;
@@ -494,6 +494,7 @@ fn ranks(manifest: &Manifest, series: Option<Series>) -> FxHashMap<String, usize
 /// What reading a file of a module takes, besides the file.
 struct ModuleContext<'a> {
     dir: &'a Path,
+    manifest: &'a Path,
     ranks: FxHashMap<String, usize>,
     data_entries: usize,
     series: Option<Series>,
@@ -505,31 +506,72 @@ struct ModuleContext<'a> {
 type ParsedFile = Result<SourceFile<PyFacts>, SourceFile<DataFacts>>;
 
 impl ModuleContext<'_> {
-    /// Reads `path`, none when it cannot be read or is Python that does not decode, and whether its
-    /// text is lost. A data file that does not decode stays, since what it may define matters to
-    /// the rules; one that decodes but does not parse keeps its text.
+    /// Reads `path`, none when it cannot be read or is Python that does not decode and that Odoo does
+    /// not refuse, and whether its text is lost. A data file that does not decode stays, since what
+    /// it may define matters to the rules; one that decodes but does not parse keeps its text.
     fn file(&self, path: PathBuf) -> (Option<ParsedFile>, bool) {
         let Ok(bytes) = std::fs::read(&path) else {
             return (None, true);
         };
-        let text = decoded(&path, &bytes, self.series);
-        let text = text.as_deref();
-        (self.parsed(path, text, &bytes), text.is_none())
+        let Some(text) = decoded(&path, &bytes, self.series) else {
+            return (self.undecoded(path, &bytes), true);
+        };
+        (self.parsed(path, &text, &bytes), false)
     }
 
-    fn parsed(&self, path: PathBuf, text: Option<&str>, bytes: &[u8]) -> Option<ParsedFile> {
-        if path.extension().is_some_and(|e| e == "py") {
+    fn parsed(&self, path: PathBuf, text: &str, bytes: &[u8]) -> Option<ParsedFile> {
+        let source = self.source(path, Some(text))?;
+        if is_python(&source.path) {
             let unread = python::FieldClasses::default();
-            let facts = python::analyze_with(text?, self.series, &unread, self.taint, routing::Scope::default());
-            return Some(Ok(self.source(path, text)?.with(facts)));
+            let facts = python::analyze_with(text, self.series, &unread, self.taint, routing::Scope::default());
+            return Some(Ok(source.with(facts)));
         }
-        let facts = self.data_facts(&path, text, bytes);
-        Some(Err(self.source(path, text)?.with(facts)))
+        let facts = self.data_facts(&source, text, bytes);
+        Some(Err(source.with(facts)))
+    }
+
+    /// A file that does not decode. One Odoo refuses gets OD000 where it stops, and is read for the
+    /// suppressions of its text with each byte that is not UTF-8 replaced.
+    fn undecoded(&self, path: PathBuf, bytes: &[u8]) -> Option<ParsedFile> {
+        let Some(pos) = self.refused(&path, bytes) else {
+            if is_python(&path) {
+                return None;
+            }
+            let unreadable = DataFacts {
+                unreadable: true,
+                ..DataFacts::default()
+            };
+            return Some(Err(self.source(path, None)?.with(unreadable)));
+        };
+        let lossy = String::from_utf8_lossy(bytes);
+        let source = self.source(path, Some(&lossy))?;
+        Some(match source.path.extension().and_then(|e| e.to_str()) {
+            Some("py") => Ok(source.with(python::undecoded(&lossy, pos, self.series, self.taint))),
+            Some("xml") => Err(source.with(xml::undecoded(pos))),
+            _ => Err(source.with(csvdata::undecoded(pos))),
+        })
+    }
+
+    /// Where Odoo stops decoding `bytes`: Python but the manifest, and a data file the manifest
+    /// loads.
+    fn refused(&self, path: &Path, bytes: &[u8]) -> Option<Pos> {
+        let loaded = || self.rel(path).is_some_and(|rel| self.ranks.contains_key(&rel));
+        match path.extension().and_then(|e| e.to_str())? {
+            "py" if path != self.manifest => decode::python_refused(bytes),
+            "xml" if loaded() => decode::xml_refused(bytes),
+            "csv" if loaded() && decode::csv_strict(self.series) => decode::invalid_utf8(bytes),
+            _ => None,
+        }
+    }
+
+    /// `path` relative to the module, as the manifest writes it.
+    fn rel(&self, path: &Path) -> Option<String> {
+        Some(normalize(&path.strip_prefix(self.dir).ok()?.to_string_lossy()))
     }
 
     /// `path` as a file of the module, its facts to come.
     fn source(&self, path: PathBuf, text: Option<&str>) -> Option<SourceFile<()>> {
-        let rel = normalize(&path.strip_prefix(self.dir).ok()?.to_string_lossy());
+        let rel = self.rel(&path)?;
         let rank = self.ranks.get(&rel).copied();
         let suppressions = text.filter(|_| self.checked).map(Suppressions::parse);
         Some(SourceFile {
@@ -543,13 +585,10 @@ impl ModuleContext<'_> {
         })
     }
 
-    fn data_facts(&self, path: &Path, text: Option<&str>, bytes: &[u8]) -> DataFacts {
-        let Some(text) = text else {
-            return DataFacts {
-                unreadable: true,
-                ..DataFacts::default()
-            };
-        };
+    /// The facts of a data file that decodes. A CSV the manifest loads is read as Odoo's import
+    /// reads it from 11.0, which refuses what the series before leave to the reader.
+    fn data_facts(&self, source: &SourceFile<()>, text: &str, bytes: &[u8]) -> DataFacts {
+        let path = &source.path;
         if path.extension().is_some_and(|e| e == "xml") {
             let mut facts = xml::analyze(text, self.series);
             if text.as_bytes() != bytes {
@@ -557,8 +596,14 @@ impl ModuleContext<'_> {
             }
             return facts;
         }
-        csvdata::analyze(text, &loads_into(path))
+        let strict = source.rank.is_some() && decode::csv_strict(self.series);
+        let lines = strict.then(|| csvdata::Lines::of(self.series));
+        csvdata::analyze(text, &loads_into(path), lines)
     }
+}
+
+fn is_python(path: &Path) -> bool {
+    path.extension().is_some_and(|e| e == "py")
 }
 
 /// The model a CSV at `path` loads into: `model-suffix.csv` loads into model, so one model can have
@@ -582,6 +627,7 @@ fn parse_module_files(module: &mut Module, default_series: Option<Series>, taint
     let checked = module.checked;
     let context = ModuleContext {
         dir: &module.dir,
+        manifest: &module.manifest_path,
         ranks: ranks(&module.manifest, series),
         data_entries: module.manifest.data_entries(series),
         series,
@@ -856,6 +902,90 @@ mod tests {
             panic!("{} broken", ten.broken.len());
         };
         assert!(broken.path.ends_with("called/__manifest__.py"));
+    }
+
+    /// The OD000 of each file of module `name`, as `rel:line`, with `files` written into it.
+    fn refusals(name: &str, version: &str, data: &str, files: &[(&str, &[u8])]) -> Vec<String> {
+        let dir = scratch(name);
+        let manifest = format!("{{'version': '{version}', 'data': [{data}]}}");
+        let module = written(&dir, name, &manifest);
+        for (rel, bytes) in files {
+            let path = module.join(rel);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, bytes).unwrap();
+        }
+        let modules = load(&[module], &[], None, None, &TaintTable::default()).modules;
+        let _ = std::fs::remove_dir_all(&dir);
+        let module = &modules[0];
+        let python = module.python.iter().map(|f| (&f.rel, &f.facts.diags));
+        let data = module.data.iter().map(|f| (&f.rel, &f.facts.diags));
+        let mut found: Vec<String> = python
+            .chain(data)
+            .flat_map(|(rel, diags)| {
+                diags
+                    .iter()
+                    .filter(|d| d.code == "OD000")
+                    .map(move |d| format!("{rel}:{}", d.pos.line))
+            })
+            .collect();
+        found.sort();
+        found
+    }
+
+    #[test]
+    fn a_loaded_file_odoo_cannot_decode_is_refused() {
+        let files: &[(&str, &[u8])] = &[
+            ("models/latin1.py", b"class A:\n    _name = 'x.a'\n    s = '\xE9'\n"),
+            ("models/coded.py", b"# coding: latin-1\ns = '\xE9'\n"),
+            ("data/a.xml", b"<odoo>\n\xE9</odoo>"),
+            (
+                "data/b.xml",
+                b"<?xml version='1.0' encoding='windows-1252'?>\n<odoo>\xE9</odoo>",
+            ),
+            ("data/stray.xml", b"<odoo>\n\xE9</odoo>"),
+            ("data/res.partner.csv", b"id,name\nr,\xE9\n"),
+        ];
+        let data = "'data/a.xml', 'data/b.xml', 'data/res.partner.csv'";
+        assert_eq!(
+            refusals("refused18", "18.0.1.0.0", data, files),
+            ["data/a.xml:2", "data/res.partner.csv:2", "models/latin1.py:3"]
+        );
+        assert_eq!(
+            refusals("refused10", "10.0.1.0.0", data, files),
+            ["data/a.xml:2", "models/latin1.py:3"]
+        );
+    }
+
+    #[test]
+    fn a_refused_python_file_still_names_its_model() {
+        let dir = scratch("refused-model");
+        let module = written(&dir, "refused_model", "{'version': '18.0.1.0.0'}");
+        std::fs::create_dir_all(module.join("models")).unwrap();
+        let source = b"class A(models.Model):\n    _name = 'x.a'\n    # odooscan: ignore[OD000]\n    s = '\xE9'\n";
+        std::fs::write(module.join("models/a.py"), source).unwrap();
+        let modules = load(&[module], &[], None, None, &TaintTable::default()).modules;
+        let _ = std::fs::remove_dir_all(&dir);
+        let file = modules[0].python.iter().find(|f| f.rel == "models/a.py").unwrap();
+        assert!(modules[0].lost_text);
+        assert_eq!(file.facts.diags[0].pos.line, 4);
+        assert!(file.facts.classes[0].model == "x.a" && file.facts.classes[0].unread);
+        assert!(!file.suppressions.allows(4, "OD000"));
+    }
+
+    #[test]
+    fn a_manifest_odoo_reads_is_not_refused_as_python() {
+        let dir = scratch("refused-manifest");
+        let module = dir.join("legacy");
+        std::fs::create_dir_all(&module).unwrap();
+        std::fs::write(
+            module.join("__manifest__.py"),
+            b"{'version': '10.0.1.0.0', 'author': 'Ren\xE9'}",
+        )
+        .unwrap();
+        let modules = load(&[module], &[], None, None, &TaintTable::default()).modules;
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(modules.len(), 1);
+        assert!(modules[0].python.is_empty());
     }
 
     fn checkout(name: &str, release: &str) -> PathBuf {

@@ -105,6 +105,17 @@ const KEYED_MODELS: &[&str] = &[
     "website.controller.page",
 ];
 
+/// The facts of a data XML libxml2 stops reading at `pos`, as it is not UTF-8 and names no other
+/// encoding.
+pub fn undecoded(pos: Pos) -> DataFacts {
+    let message = "the file is not UTF-8, and its declaration names no other encoding";
+    DataFacts {
+        diags: vec![RawDiag::new("OD000", pos, message)],
+        unreadable: true,
+        ..DataFacts::default()
+    }
+}
+
 pub fn analyze(text: &str, series: Option<Series>) -> DataFacts {
     let lines = Lines::new(text);
     let mut facts = DataFacts::default();

@@ -7,12 +7,17 @@
 //! `odoo/tools/convert.py:882` with `odoo/loglevels.py:28`. From 11.0 it is strict UTF-8: 11.0
 //! `odoo/tools/convert.py:810` with `odoo/tools/pycompat.py:46-48,89-94`, 17.0 `:700`, 18.0 `:683`,
 //! 20.0 `:741`.
+//!
+//! Where a file Odoo loads stops decoding, as Python or libxml2 refuses it, is OD000's.
 
 use std::borrow::Cow;
 use std::sync::LazyLock;
 
 use regex::bytes::Regex;
+use ruff_text_size::TextSize;
 
+use crate::facts::Pos;
+use crate::python::Locator;
 use crate::series::Series;
 
 /// The first series that reads a data CSV as strict UTF-8 (`11.0`).
@@ -23,6 +28,78 @@ const CSV_UTF8: Series = Series { major: 11, minor: 0 };
 static DECLARED_ENCODING: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r#"(?-u)^<\?xml\s+(?:version\s*=\s*(?:"[^"]*"|'[^']*')\s+)?encoding\s*=\s*["']([^"']*)["']"#).unwrap()
 });
+
+/// A coding comment as CPython reads one on either of the first two lines (`check_coding_spec` in
+/// `Parser/tokenizer.c`, 2.7 to 3.14).
+static CODING_SPEC: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?-u)^[ \t\x0C]*#.*?coding[:=][ \t]*([-\w.]+)").unwrap());
+
+/// Where `bytes` stop being UTF-8, none when they all are.
+pub fn invalid_utf8(bytes: &[u8]) -> Option<Pos> {
+    let error = std::str::from_utf8(bytes).err()?;
+    let valid = std::str::from_utf8(&bytes[..error.valid_up_to()]).unwrap_or_default();
+    Some(Locator::new(valid).pos(TextSize::of(valid)))
+}
+
+/// Where Python stops reading a source file that is not UTF-8, none when it decodes or a coding
+/// comment names another encoding, which Python reads it in instead. A UTF-8 BOM keeps it UTF-8
+/// whatever the comment says.
+pub fn python_refused(bytes: &[u8]) -> Option<Pos> {
+    let pos = invalid_utf8(bytes)?;
+    let declared = coding_label(bytes).filter(|_| !bytes.starts_with(b"\xEF\xBB\xBF"));
+    declared.is_none_or(utf8_codec).then_some(pos)
+}
+
+/// The encoding a coding comment names on the first line, or on the second under a first that holds
+/// a comment or nothing.
+fn coding_label(bytes: &[u8]) -> Option<&[u8]> {
+    let mut lines = bytes.split_inclusive(|&b| b == b'\n');
+    let first = lines.next()?;
+    if let Some(label) = coding_spec(first) {
+        return Some(label);
+    }
+    let code = first.iter().copied().find(|b| !matches!(b, b' ' | b'\t' | b'\x0C'));
+    matches!(code, None | Some(b'#' | b'\n' | b'\r'))
+        .then(|| coding_spec(lines.next()?))
+        .flatten()
+}
+
+fn coding_spec(line: &[u8]) -> Option<&[u8]> {
+    CODING_SPEC.captures(line)?.get(1).map(|m| m.as_bytes())
+}
+
+/// Whether Python reads `label` as UTF-8: its codec's name and aliases once `codecs.lookup` folds
+/// case and punctuation, and any `utf-8-` name the tokenizer cuts back to `utf-8`.
+fn utf8_codec(label: &[u8]) -> bool {
+    let mut name = String::new();
+    for byte in label.to_ascii_lowercase() {
+        if byte.is_ascii_alphanumeric() || byte == b'.' {
+            name.push(char::from(byte));
+        } else if !name.ends_with('_') {
+            name.push('_');
+        }
+    }
+    let aliases = ["utf_8", "utf8", "u8", "utf", "utf8_ucs2", "utf8_ucs4", "cp65001"];
+    aliases.contains(&name.as_str()) || name.starts_with("utf_8_")
+}
+
+/// Where libxml2 stops reading an XML file that is not UTF-8, none when it decodes or libxml2 reads
+/// it in another encoding: one a UTF-16 or UTF-32 BOM names, one a NUL among the first four bytes
+/// stands for, or one the declaration names other than UTF-8.
+pub fn xml_refused(bytes: &[u8]) -> Option<Pos> {
+    let pos = invalid_utf8(bytes)?;
+    let wide =
+        bytes.starts_with(b"\xFE\xFF") || bytes.starts_with(b"\xFF\xFE") || bytes.iter().take(4).any(|&b| b == 0);
+    let declared = DECLARED_ENCODING.captures(bytes).map(|c| c[1].to_ascii_uppercase());
+    let utf8 = declared.is_none_or(|label| label == b"UTF-8" || label == b"UTF8");
+    (!wide && utf8).then_some(pos)
+}
+
+/// Whether the Odoo of `series` reads a data CSV as strict UTF-8, an unknown series, which a
+/// `10.saas~N` version parses to, taken as one that does.
+pub fn csv_strict(series: Option<Series>) -> bool {
+    series.is_none_or(|s| s >= CSV_UTF8)
+}
 
 fn latin1(byte: u8) -> char {
     char::from(byte)
@@ -64,14 +141,13 @@ pub fn xml_text(bytes: &[u8]) -> Option<Cow<'_, str>> {
     }
 }
 
-/// The text of a data CSV as `series` reads it, or none when it does not decode. An unknown series,
-/// which a `10.saas~N` version parses to, stays strict: an unread file keeps the rules silent.
+/// The text of a data CSV as `series` reads it, or none when it does not decode: an unread file
+/// keeps the rules silent.
 pub fn csv_text(bytes: &[u8], series: Option<Series>) -> Option<Cow<'_, str>> {
     if let Ok(text) = std::str::from_utf8(bytes) {
         return Some(Cow::Borrowed(text));
     }
-    let lenient = series.is_some_and(|s| s < CSV_UTF8);
-    lenient.then(|| Cow::Owned(csv_cells(bytes).map(csv_cell).collect()))
+    (!csv_strict(series)).then(|| Cow::Owned(csv_cells(bytes).map(csv_cell).collect()))
 }
 
 /// The cells of a CSV, each with the separator that ends it, so that they join back into the file
@@ -257,5 +333,64 @@ mod tests {
     #[test]
     fn a_line_end_closes_a_csv_cell() {
         assert_eq!(csv_text(b"\xC3\xA9\r\n\xE9\n", series("9.0")).unwrap(), "é\r\né\n");
+    }
+
+    fn at(line: u32, col: u32) -> Option<Pos> {
+        Some(Pos { line, col })
+    }
+
+    #[test]
+    fn invalid_utf8_points_at_the_first_bad_byte() {
+        assert_eq!(invalid_utf8("a\né".as_bytes()), None);
+        assert_eq!(invalid_utf8(b"ab\nc\xC3\xA9d\xE9"), at(2, 4));
+        assert_eq!(invalid_utf8(b"\xE9"), at(1, 1));
+    }
+
+    #[test]
+    fn python_refuses_what_no_other_coding_comment_covers() {
+        let body = b"x = '\xE9'\n";
+        let with = |head: &str| [head.as_bytes(), body].concat();
+        assert_eq!(python_refused(body), at(1, 6));
+        assert_eq!(python_refused(&with("# -*- coding: utf-8 -*-\n")), at(2, 6));
+        assert_eq!(python_refused(&with("# vim: set fileencoding=UTF_8 :\n")), at(2, 6));
+        assert_eq!(python_refused(&with("# coding: utf-8-sig\n")), at(2, 6));
+        assert_eq!(python_refused(&with("# coding=utf8\n")), at(2, 6));
+        assert_eq!(python_refused(&with("import os\n# coding: latin-1\n")), at(3, 6));
+        assert_eq!(python_refused(&with("\u{FEFF}# coding: latin-1\n")), at(2, 6));
+        assert_eq!(python_refused(&with("#coding : latin-1\n")), at(2, 6));
+        for head in [
+            "# -*- coding: latin-1 -*-\n",
+            "\t# coding=iso-8859-15\n",
+            "#!/usr/bin/env python\n# coding: cp1252\n",
+            "\n# coding: latin-1\n",
+        ] {
+            assert_eq!(python_refused(&with(head)), None, "{head:?}");
+        }
+        assert_eq!(python_refused("x = 'é'\n".as_bytes()), None);
+    }
+
+    #[test]
+    fn xml_refuses_only_what_it_reads_as_utf8() {
+        assert_eq!(xml_refused(b"<odoo>\n<a>\xE9</a></odoo>"), at(2, 4));
+        assert_eq!(xml_refused(&declared("UTF-8", b"\xE9")), at(1, 39));
+        assert_eq!(xml_refused(&declared("utf8", b"\xE9")), at(1, 38));
+        assert_eq!(xml_refused(b"<?xml version=\"1.0\"?><odoo>\xE9</odoo>"), at(1, 28));
+        assert_eq!(
+            xml_refused(b"\xEF\xBB\xBF<?xml version=\"1.0\" encoding=\"latin1\"?>\xE9"),
+            at(1, 40)
+        );
+        assert_eq!(xml_refused(&declared("windows-1252", b"\xE9")), None);
+        assert_eq!(xml_refused(&declared("ISO-8859-1", b"\xE9")), None);
+        assert_eq!(xml_refused(b"\xFF\xFE<\x00o\x00"), None);
+        assert_eq!(xml_refused(b"\xFE\xFF\x00<\x00o"), None);
+        assert_eq!(xml_refused(b"<\x00?\x00\xE9\x00"), None);
+        assert_eq!(xml_refused("<odoo>é</odoo>".as_bytes()), None);
+    }
+
+    #[test]
+    fn a_csv_is_strict_from_11_and_on_an_unknown_series() {
+        assert!(!csv_strict(series("10.0")));
+        assert!(csv_strict(series("11.0")));
+        assert!(csv_strict(None));
     }
 }
