@@ -7,7 +7,8 @@ use ruff_python_ast::visitor::{self, Visitor};
 use ruff_python_ast::{self as ast, BoolOp, CmpOp, Expr, Stmt};
 use rustc_hash::FxHashSet;
 
-use crate::python::{SAME_MODEL, keyword_arg, tail_name};
+use crate::python::{SAME_MODEL, tail_name};
+use crate::superuser;
 
 /// The methods that change records in the database.
 const WRITES: &[&str] = &["write", "create", "unlink"];
@@ -18,7 +19,9 @@ const RECORD_METHODS: &[&str] = &["browse", "search", "filtered", "exists", "map
 /// Calls that compare a secret the request carries with the one the server holds.
 const TOKEN_CHECKS: &[&str] = &["validate_csrf", "consteq", "compare_digest", "check_access_token"];
 
-/// Calls whose result runs as the user they name, whatever the environment they start from.
+/// Calls whose result runs as the user they name, whatever the environment they start from, unless
+/// it is `None`: `with_user(None)` returns its records unchanged (18.0 `odoo/models.py:6341-6342`,
+/// 20.0 `odoo/orm/models.py:5472-5473`), and `Environment(cr, None, ...)` has no user.
 const USER_ENVS: &[&str] = &["with_user", "Environment"];
 
 /// The methods Odoo checks no CSRF token on (18.0 `odoo/http.py:219`, 20.0
@@ -42,6 +45,7 @@ impl<'a> RouteBody<'a> {
         let mut walk = Walk {
             names: records.iter().copied().collect(),
             users: FxHashSet::default(),
+            envs: FxHashSet::default(),
             guards: 0,
             body: Self::default(),
         };
@@ -55,6 +59,8 @@ struct Walk<'a> {
     names: FxHashSet<&'a str>,
     /// The names bound to an environment or records that run as a user they were given.
     users: FxHashSet<&'a str>,
+    /// The names bound to an environment, besides `env`.
+    envs: FxHashSet<&'a str>,
     /// How many tests that the request method is one Odoo checks CSRF on enclose the walk.
     guards: u32,
     body: RouteBody<'a>,
@@ -64,8 +70,8 @@ impl<'a> Walk<'a> {
     fn is_records(&self, expr: &Expr) -> bool {
         match expr {
             Expr::Name(n) => self.names.contains(n.id.as_str()),
-            Expr::Subscript(s) => is_env(&s.value) || self.is_records(&s.value),
-            Expr::Attribute(a) => (a.attr.as_str() == "user" && is_env(&a.value)) || self.is_records(&a.value),
+            Expr::Subscript(s) => self.is_env(&s.value) || self.is_records(&s.value),
+            Expr::Attribute(a) => (a.attr.as_str() == "user" && self.is_env(&a.value)) || self.is_records(&a.value),
             Expr::Call(c) => self.records_call(c),
             _ => false,
         }
@@ -76,19 +82,32 @@ impl<'a> Walk<'a> {
         let Expr::Attribute(a) = &*call.func else { return false };
         let method = a.attr.as_str();
         match method {
-            "ref" => is_env(&a.value),
+            "ref" => self.is_env(&a.value),
             _ if SAME_MODEL.contains(&method) => true,
             _ => RECORD_METHODS.contains(&method) && self.is_records(&a.value),
         }
     }
 
-    /// Whether `expr` is an environment, or records, built for a user it names: `with_user()`,
-    /// `api.Environment(cr, uid, ...)` or `env(user=...)`, so that a write on it has one.
+    /// `env`, a name bound to an environment, `request.env` and the like, or a call of `Environment`
+    /// or of an environment, which builds another.
+    fn is_env(&self, expr: &Expr) -> bool {
+        match expr {
+            Expr::Name(n) => n.id.as_str() == "env" || self.envs.contains(n.id.as_str()),
+            Expr::Attribute(a) => a.attr.as_str() == "env",
+            Expr::Call(c) => tail_name(&c.func) == Some("Environment") || self.is_env(&c.func),
+            _ => false,
+        }
+    }
+
+    /// Whether `expr` is an environment, or records, built for a user it names (`with_user()`,
+    /// `api.Environment(cr, uid, ...)`, `env(user=...)`) or called on an environment that carries
+    /// one, so that a write on it has one.
     fn carries_user(&self, expr: &Expr) -> bool {
         match expr {
             Expr::Name(n) => self.users.contains(n.id.as_str()),
             Expr::Subscript(s) => self.carries_user(&s.value),
             Expr::Attribute(a) => self.carries_user(&a.value),
+            Expr::Call(c) if self.is_env(&c.func) => names_user(env_user(c)) || self.carries_user(&c.func),
             Expr::Call(c) => user_call(c) || matches!(&*c.func, Expr::Attribute(a) if self.carries_user(&a.value)),
             _ => false,
         }
@@ -96,15 +115,16 @@ impl<'a> Walk<'a> {
 
     fn bind(&mut self, target: &'a Expr, value: &Expr) {
         let Expr::Name(n) = target else { return };
-        let (records, user) = (self.is_records(value), self.carries_user(value));
+        let (records, user, env) = (self.is_records(value), self.carries_user(value), self.is_env(value));
         toggle(&mut self.names, n.id.as_str(), records);
         toggle(&mut self.users, n.id.as_str(), user);
+        toggle(&mut self.envs, n.id.as_str(), env);
     }
 
     fn call(&mut self, call: &'a ast::ExprCall) {
         let name = tail_name(&call.func).unwrap_or_default();
         self.body.checks_token |= TOKEN_CHECKS.contains(&name);
-        self.body.sets_user |= name == "update_env" || name.starts_with("_auth_method_") || is_login(call);
+        self.body.sets_user |= sets_user(call, name) || is_login(call);
         if let Expr::Attribute(a) = &*call.func
             && WRITES.contains(&name)
             && self.is_records(&a.value)
@@ -197,10 +217,6 @@ fn toggle<'a>(names: &mut FxHashSet<&'a str>, name: &'a str, on: bool) {
     }
 }
 
-fn is_env(expr: &Expr) -> bool {
-    tail_name(expr) == Some("env")
-}
-
 /// `request` or `http.request`, the request a route serves.
 pub(crate) fn is_request(expr: &Expr) -> bool {
     match expr {
@@ -213,8 +229,30 @@ pub(crate) fn is_request(expr: &Expr) -> bool {
 }
 
 fn user_call(call: &ast::ExprCall) -> bool {
-    let name = tail_name(&call.func);
-    name.is_some_and(|name| USER_ENVS.contains(&name)) || (is_env(&call.func) && keyword_arg(call, "user").is_some())
+    tail_name(&call.func).is_some_and(|name| USER_ENVS.contains(&name))
+        && !superuser::user_arg(call).is_some_and(Expr::is_none_literal_expr)
+}
+
+/// The user an environment is called with, which keeps the user of the environment it is called on
+/// when left out or `None` (18.0 `odoo/api.py:646`, 20.0 `odoo/orm/environments.py:144`). The
+/// callee may be any name bound to an environment, so `superuser::user_arg` cannot tell its kind.
+fn env_user(call: &ast::ExprCall) -> Option<&Expr> {
+    call.arguments.find_argument_value("user", 1)
+}
+
+/// `update_env()` passes its user to `env()` (18.0 `odoo/http.py:1779-1788`, 20.0
+/// `odoo/http/requestlib.py:142-151`), and `_auth_method_none()` clears the user (18.0
+/// `odoo/addons/base/models/ir_http.py:251-252`, 20.0 `:369-370`).
+fn sets_user(call: &ast::ExprCall, name: &str) -> bool {
+    match name {
+        "update_env" => names_user(superuser::user_arg(call)),
+        "_auth_method_none" => false,
+        _ => name.starts_with("_auth_method_"),
+    }
+}
+
+fn names_user(user: Option<&Expr>) -> bool {
+    user.is_some_and(|u| !u.is_none_literal_expr())
 }
 
 /// `request.session.authenticate()` (18.0 `odoo/http.py:1109`) or `authenticate(request.session,
@@ -368,12 +406,58 @@ mod tests {
             "env = api.Environment(cr, SUPERUSER_ID, {}); env['x'].create({})",
             "env = request.env(user=SUPERUSER_ID); env['x'].browse(1).write({})",
             "env = request.env(user=1); env.user.write({})",
+            "env = request.env(cr, uid); env['x'].create({})",
         ] {
             assert_eq!(writes(line).0, None, "{line}");
             assert!(writes(line).1.is_some(), "{line}");
         }
         let rebound = "env = request.env(user=1); env = request.env; env['x'].create({})";
         assert_eq!(writes(rebound).0, Some("create".into()));
+        assert_eq!(writes("request.env(user=uid)['x'].create({})").0, None);
+    }
+
+    #[test]
+    fn records_built_for_no_user_or_a_none_one_carry_none() {
+        for line in [
+            "lines = request.env['x'].with_user(None); lines.create({})",
+            "env = api.Environment(cr, None, {}); env['x'].create({})",
+            "new_env = request.env(user=None); new_env['x'].create({})",
+            "new_env = request.env(None, None); new_env['x'].create({})",
+            "request.env(context={})['x'].create({})",
+        ] {
+            assert_eq!(writes(line), (Some("create".into()), Some("create".into())), "{line}");
+        }
+    }
+
+    #[test]
+    fn an_environment_called_without_a_user_keeps_the_one_it_is_called_on() {
+        for line in [
+            "env = request.env(user=uid); env(context={'lang': 'fr'})['x'].create({})",
+            "base = request.env; base(user=uid)['x'].create({})",
+            "env = api.Environment(cr, uid, {}); env(user=None)['x'].create({})",
+            "new_env = request.env(user=uid); new_env(su=False).ref('x.y').write({})",
+        ] {
+            assert_eq!(writes(line).0, None, "{line}");
+            assert!(writes(line).1.is_some(), "{line}");
+        }
+        let unset = "base = request.env; base(user=None)['x'].create({})";
+        assert_eq!(writes(unset).0, Some("create".into()));
+    }
+
+    #[test]
+    fn calls_of_an_environment_and_names_bound_to_one_give_records() {
+        for line in [
+            "request.env(user=1)['x'].create({})",
+            "request.env(context={})['x'].create({})",
+            "api.Environment(cr, uid, {})['x'].create({})",
+            "new_env = request.env(user=1); new_env['x'].create({})",
+            "admin_env = request.env; admin_env.ref('x.y').write({})",
+            "new_env = request.env(user=1); new_env.user.write({})",
+        ] {
+            assert!(writes(line).1.is_some(), "{line}");
+        }
+        let rebound = "new_env = request.env(user=1); new_env = buffer; new_env['x'].create({})";
+        assert_eq!(writes(rebound), (None, None));
     }
 
     #[test]
@@ -393,6 +477,8 @@ mod tests {
             "request.env = request.env(user=uid)",
             "request.env = api.Environment(request.cr, uid, {})",
             "authenticate(request.session, request.env, credential)",
+            "request.update_env(uid)",
+            "request.update_env(user=request.session.uid)",
         ] {
             body_of(&format!("def f():\n    {line}\n"), &[], |b| {
                 assert!(b.sets_user, "{line}")
@@ -403,6 +489,14 @@ mod tests {
             "authenticate(session, request.env, credential)",
             "request.env = request.env(context={})",
             "self.request.uid = 1",
+            "request.update_env(user=None)",
+            "request.update_env(None)",
+            "request.update_env()",
+            "request.update_env(context={})",
+            "request.update_env(su=True)",
+            "request.env['ir.http']._auth_method_none()",
+            "request.env = request.env(user=None)",
+            "request.env = api.Environment(request.cr, None, {})",
         ] {
             body_of(&format!("def f():\n    {line}\n"), &[], |b| {
                 assert!(!b.sets_user, "{line}")

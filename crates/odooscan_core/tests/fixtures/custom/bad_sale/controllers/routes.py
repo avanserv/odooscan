@@ -99,3 +99,20 @@ class Routes(http.Controller):
         env = api.Environment(request.env.cr, SUPERUSER_ID, {})
         env["bad.order"].create({"name": "Root"})
         return "ok"
+
+    @http.route("/bad/routes/anonymous", auth="none")
+    def anonymous(self):
+        request.update_env(user=None)
+        return "Hello %s" % request.env.user.name
+
+    @http.route("/bad/routes/stamp", auth="user")
+    def stamp(self):
+        new_env = request.env(user=request.session.uid)
+        new_env["bad.order"].create({"name": "Stamp"})
+        return request.redirect("/my")
+
+    @http.route("/bad/routes/signed", auth="none", methods=["POST"])
+    def signed(self):
+        new_env = request.env(user=request.session.uid)
+        new_env["bad.order"].create({"name": "Signed"})
+        return "ok"
