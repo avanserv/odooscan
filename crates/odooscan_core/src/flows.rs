@@ -1015,6 +1015,18 @@ mod tests {
         );
     }
 
+    #[test]
+    fn a_join_a_method_only_passes_to_file_open_is_not_reported() {
+        let route = "    def r(self, **kw):\n        request.env['x.y']._a(kw['name'])\n";
+        let opened = "    def _a(self, name):\n        path = os.path.join(DEST, 'static', name)\n        with file_open(path, 'rb') as f:\n            f.read()\n";
+        assert!(scan_messages(route, opened).is_empty());
+        let both = format!("{opened}        open(path, 'rb')\n");
+        assert_eq!(
+            scan_messages(route, &both),
+            ["model.py:5 OD707 route parameter 'kw' reaches the path of os.path.join() through '_a()'"]
+        );
+    }
+
     /// A route taking `**post` whose body is `call`.
     fn applying(call: &str) -> String {
         format!("    def r(self, **post):\n        {call}\n")

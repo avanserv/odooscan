@@ -77,3 +77,14 @@ class Outbound(http.Controller):
         catalog = requests.Session()
         catalog.headers["Authorization"] = token
         return catalog.get("https://catalog.example.com/stock", timeout=10).json()
+
+    @http.route("/bad/outbound/font", auth="user")
+    def font(self, **kw):
+        # file_open() keeps its path under the addons paths; only open() climbs out of them.
+        with file_open(os.path.join("bad_sale/static/fonts", kw["font"]), "rb") as stream:
+            stream.read()
+        sheet = os.path.join("bad_sale/static/fonts", kw["sheet"])
+        file_open(sheet, "rb")
+        shared = os.path.join("bad_sale/static/fonts", kw["shared"])
+        file_open(shared, "rb")
+        return open(shared, "rb")
