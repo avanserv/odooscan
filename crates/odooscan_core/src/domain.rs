@@ -90,6 +90,56 @@ pub fn always_true(text: &str) -> Option<usize> {
     Some(leaves)
 }
 
+/// Whether a literal domain of terms joined by `&` alone has a term on `field` that a record holding
+/// `value` fails, so the domain holds none such. False for any other domain, or one Python cannot
+/// parse, since its terms might hold such a record.
+pub fn refuses(text: &str, field: &str, value: bool) -> bool {
+    let Ok(parsed) = parse_expression(text.trim()) else {
+        return false;
+    };
+    let Some(terms) = items(parsed.expr()) else {
+        return false;
+    };
+    let joined = |t: &Expr| matches!(t, Expr::StringLiteral(s) if s.value.to_str() == "&") || items(t).is_some();
+    terms.iter().all(joined) && terms.iter().any(|t| fails(t, field, value))
+}
+
+/// Whether `term` is on `field` and a record holding `value` fails it.
+fn fails(term: &Expr, field: &str, value: bool) -> bool {
+    let Some([Expr::StringLiteral(name), Expr::StringLiteral(op), right]) = items(term) else {
+        return false;
+    };
+    if name.value.to_str() != field {
+        return false;
+    }
+    let listed = || items(right).unwrap_or_default().iter().map(truth);
+    match op.value.to_str() {
+        "=" | "==" => truth(right).is_some_and(|b| b != value),
+        "!=" | "<>" => truth(right) == Some(value),
+        // A value the scan cannot read might be `value`.
+        "in" => items(right).is_some() && listed().all(|b| b.is_some_and(|b| b != value)),
+        "not in" => listed().any(|b| b == Some(value)),
+        _ => false,
+    }
+}
+
+/// The boolean a literal stands for in a domain: `True`, `False`, or the `1` and `0` Python
+/// compares equal to them.
+fn truth(expr: &Expr) -> Option<bool> {
+    match expr {
+        Expr::BooleanLiteral(b) => Some(b.value),
+        Expr::NumberLiteral(n) => match &n.value {
+            ast::Number::Int(i) => match i.as_u64() {
+                Some(0) => Some(false),
+                Some(1) => Some(true),
+                _ => None,
+            },
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
 fn true_leaf(term: &Expr) -> bool {
     let one = |e: &Expr| matches!(e, Expr::NumberLiteral(n) if matches!(&n.value, ast::Number::Int(i) if i.as_u64() == Some(1)));
     matches!(items(term), Some([left, Expr::StringLiteral(op), right]) if one(left) && op.value.to_str() == "=" && one(right))
@@ -210,6 +260,39 @@ mod tests {
             "[('id', '!=', False)]",
         ] {
             assert_eq!(always_true(text), None, "{text}");
+        }
+    }
+
+    #[test]
+    fn tells_a_domain_that_refuses_a_value() {
+        for text in [
+            "[('public', '=', False)]",
+            "[('public', '==', 0)]",
+            "[('public', '!=', True)]",
+            "[('public', '<>', 1)]",
+            "[('public', 'in', [False])]",
+            "[('public', 'in', [])]",
+            "[('public', 'not in', (True, x))]",
+            "['&', ('res_model', '=', 'x.y'), ('public', '=', False)]",
+            "[('res_model', '=', 'x.y'), ('public', '=', False)]",
+        ] {
+            assert!(refuses(text, "public", true), "{text}");
+        }
+        for text in [
+            "[]",
+            "[('public', '=', True)]",
+            "[('public', '!=', False)]",
+            "[('public', 'in', [False, x])]",
+            "[('public', 'in', flags)]",
+            "[('public', 'not in', [False])]",
+            "[('public', '=', x)]",
+            "[('name', '=', False)]",
+            "['|', ('public', '=', False), ('res_model', '=', 'x.y')]",
+            "['!', ('public', '=', True)]",
+            "[('public', '=', False)] + extra",
+            "[('public', '=', False)",
+        ] {
+            assert!(!refuses(text, "public", true), "{text}");
         }
     }
 

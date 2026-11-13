@@ -9,8 +9,9 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::api_table::{self, Kind};
 use crate::facts::{
-    ClassFact, DefinitionSource, DomainFact, FieldClass, FieldFact, GuardedRef, MethodDef, ModelKind, OptionValue,
-    Param, Pos, PyFacts, RawDiag, Receiver, Signature, Spanned, SqlColumn, SqlView, Subject, UNREAD_TYPE, XmlRef,
+    ClassFact, DefinitionSource, DomainFact, FieldClass, FieldFact, FlowSummary, GuardedRef, MethodDef, ModelKind,
+    OptionValue, Param, Pos, PyFacts, RawDiag, Receiver, Signature, Spanned, SqlColumn, SqlView, Subject, UNREAD_TYPE,
+    XmlRef,
 };
 use crate::fix::{self, Edit, Fix};
 use crate::route_body::{self, RouteBody};
@@ -2044,6 +2045,23 @@ fn merged_auth<'r>(call: &'r ast::ExprCall, routing: Option<&'r Routing>) -> &'r
     }
 }
 
+/// Whether `func` is a route whose every `@route` call gives `auth="user"`, as a literal or by the
+/// routes it overrides. Odoo refuses the public user there, so a public-only grant does not reach it.
+fn signed_in(func: &ast::StmtFunctionDef, routing: Option<&Routing>) -> bool {
+    let routes: Vec<&ast::ExprCall> = func
+        .decorator_list
+        .iter()
+        .filter_map(|d| d.expression.as_call_expr())
+        .filter(|call| tail_name(&call.func) == Some("route"))
+        .collect();
+    // `merged_auth` reads a computed auth as the default, which may be any other.
+    let literal = |call: &ast::ExprCall| match routing {
+        Some(r) => r.auth.is_some(),
+        None => keyword(call, "auth").is_none_or(|e| str_lit(e).is_some()),
+    };
+    !routes.is_empty() && routes.iter().all(|c| literal(c) && merged_auth(c, routing) == "user")
+}
+
 /// The type of a route, the one of the route it overrides whatever it says, none when the type
 /// is no literal.
 fn merged_type<'r>(call: &'r ast::ExprCall, routing: Option<&'r Routing>) -> Option<&'r str> {
@@ -2955,9 +2973,13 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
             domain_joins: &self.domain_joins,
         };
         let found = taint::function(func, params, owner, self.series, &names, self.loc, self.taint);
+        let signed_in = signed_in(func, routing);
         self.facts.diags.extend(found.diags);
-        self.facts.granted_attachments.extend(found.granted);
-        self.facts.flows.extend(found.summary);
+        let granted = found.granted.into_iter().map(|d| (signed_in, d));
+        self.facts.granted_attachments.extend(granted);
+        self.facts
+            .flows
+            .extend(found.summary.map(|s| FlowSummary { signed_in, ..s }));
     }
 
     /// The routing Odoo merges for a method of a class at the top of the file.
@@ -3852,6 +3874,38 @@ impl<'ast> Visitor<'ast> for PyVisitor<'_, 'ast> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Whether the granted OD717 of `func`, and its flow summary, are of a route only signed-in
+    /// users reach, where `func` follows `class C(http.Controller)` and a model method follows
+    /// `class X(models.Model)`.
+    fn reached_signed_in(class: &str, func: &str) -> (Vec<bool>, Vec<bool>) {
+        let body = "    def r(self):\n        d = request.params.get('d')\n        self.env['x.y']._m(d)\n        \
+                    self.env['ir.attachment'].create({'raw': d, 'public': True})\n";
+        let facts = analyze(&format!("class C({class}):\n{func}{body}"), None);
+        let granted = facts.granted_attachments.iter().map(|(s, _)| *s).collect();
+        (granted, facts.flows.iter().map(|f| f.signed_in).collect())
+    }
+
+    #[test]
+    fn a_route_tells_whether_only_signed_in_users_reach_it() {
+        let route = |decorators: &str| reached_signed_in("http.Controller", decorators);
+        for (decorators, signed) in [
+            ("    @http.route('/a')\n", true),
+            ("    @http.route('/a', auth='user')\n", true),
+            ("    @route('/a', auth=\"user\")\n    @route('/b')\n", true),
+            ("    @http.route('/a', auth='public')\n", false),
+            ("    @http.route('/a', auth='none')\n", false),
+            ("    @http.route('/a', auth=AUTH)\n", false),
+            (
+                "    @http.route('/a', auth='user')\n    @http.route('/b', auth='public')\n",
+                false,
+            ),
+            ("", false),
+        ] {
+            assert_eq!(route(decorators), (vec![signed], vec![signed]), "{decorators}");
+        }
+        assert_eq!(reached_signed_in("models.Model", ""), (vec![false], vec![false]));
+    }
 
     fn field(src: &str) -> FieldFact {
         let src = format!("class X(models.Model):\n    _name = 'x'\n    f = {src}\n");

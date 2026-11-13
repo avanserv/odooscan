@@ -12,7 +12,7 @@ use crate::facts::{
     MethodDef, ModelKind, OptionValue, OrmCall, Pos, RawDiag, RecordFact, RecordWrite, Refusal, ReportFact, RuleFact,
     ServerFact, Signature, Spanned, SqlColumn, SqlView, Subject, UNREAD_TYPE, ViewFact, WrittenValue, XmlDef, XmlRef,
 };
-use crate::grants::{self, Grant, Grants};
+use crate::grants::{self, AttachmentGrant, Grant, Grants};
 use crate::index::{
     BASE_MODEL_METHODS, Export, FieldDef, FieldInfo, Index, JsSpec, PathError, Placed, RELATIONAL_TYPES, Scope, Status,
     ViewTree, asset_glob_set, base_private_method, full_id, js_module_path, loaded_data, located,
@@ -257,11 +257,9 @@ pub fn check_module<'m>(index: &Index<'m>, mi: usize, series: Option<Series>) ->
     let grants = index
         .has_base
         .then(|| Grants::of(index, &scope, series, reads_model_access(series)));
-    let granted = grants
-        .as_ref()
-        .is_some_and(|g| g.public("ir.attachment", grants::creates).next().is_some());
-    granted_attachments(module, granted, &mut out);
-    flows::check(index, mi, &scope, granted, &mut out);
+    let grant = grants.as_ref().map(AttachmentGrant::of).unwrap_or_default();
+    granted_attachments(module, grant, &mut out);
+    flows::check(index, mi, &scope, grant, &mut out);
     if let Some(grants) = grants {
         let setup = index.setup_scope(mi);
         let installs = index.install_scope(mi, series);
@@ -802,14 +800,16 @@ fn legacy_hook_rollbacks<'m>(module: &'m Module, series: Option<Series>, out: &m
     }
 }
 
-/// OD717 on the public attachments a user creates with their own rights, where `granted` says
-/// the scanned modules let portal or public users create one.
-fn granted_attachments<'m>(module: &'m Module, granted: bool, out: &mut Out<'m>) {
-    if granted {
-        for file in &module.python {
-            let found = file.facts.granted_attachments.iter().cloned();
-            out.diags.extend(found.map(|d| (file.path.as_path(), d)));
-        }
+/// OD717 on the public attachments a user creates with their own rights, where `grant` says
+/// whether the scanned modules let the portal or public users who reach each function create one.
+fn granted_attachments<'m>(module: &'m Module, grant: AttachmentGrant, out: &mut Out<'m>) {
+    for file in &module.python {
+        let found = file
+            .facts
+            .granted_attachments
+            .iter()
+            .filter(|(signed_in, _)| grant.reaches(*signed_in));
+        out.diags.extend(found.map(|(_, d)| (file.path.as_path(), d.clone())));
     }
 }
 
@@ -5915,6 +5915,7 @@ mod tests {
             global_write: false,
             public_write: None,
             model_access: true,
+            domain: None,
         }
     }
 

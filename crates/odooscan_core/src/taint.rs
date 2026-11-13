@@ -1244,6 +1244,7 @@ pub fn function(
         params: names,
         calls: flows.calls,
         edges: flows.edges,
+        signed_in: false,
     });
     Found {
         diags: flows.diags,
