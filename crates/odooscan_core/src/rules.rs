@@ -315,6 +315,10 @@ rules! {
     // is installed and loaded first (18.0 `odoo/modules/registry.py:290`): hence a warning.
     "OD518" "python-import-not-in-depends" Correctness Warning None, true, "A Python import names a module outside depends, which may be missing or load later.";
     "OD519" "unresolved-python-import" Correctness Error None, true, "A Python import names a module or a name the target module does not have.";
+    // Odoo places a module by its deepest dependency (18.0 `odoo/modules/graph.py:30-40`, 20.0
+    // `odoo/modules/module_graph.py:174-199`), and auto-install reads trigger states shared down a
+    // chain (18.0 `odoo/addons/base/models/ir_module.py:425-429`), so an implied entry changes nothing.
+    "OD520" "implied-dependency" Quality Info None, true, "A module in depends already comes with another one in depends.";
     "OD601" "unresolved-js-import" Correctness Error None, true, "A JS import names a module or an export no indexed module provides.";
     "OD602" "orphan-patch-super" Correctness Error Some(">=17.0"), true, "A patch calls a super method the class it patches does not have.";
     "OD603" "unknown-rpc-model" Correctness Error None, true, "An ORM call from JS names a model no indexed module defines.";

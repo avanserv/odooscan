@@ -1,6 +1,18 @@
 {
   "findings": [
     {
+      "path": "addons/account/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'base_setup' already comes with 'product', also in depends",
+      "count": 1
+    },
+    {
+      "path": "addons/account/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'portal' already comes with 'digest', also in depends",
+      "count": 1
+    },
+    {
       "path": "addons/account/controllers/terms.py",
       "code": "OD111",
       "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
@@ -139,15 +151,51 @@
       "count": 1
     },
     {
+      "path": "addons/account_qr_code_sepa/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'account' already comes with 'base_iban', also in depends",
+      "count": 1
+    },
+    {
       "path": "addons/account_test/report/report_account_test.py",
       "code": "OD210",
       "message": "'reconciled': account.move has no field 'reconciled'",
       "count": 1
     },
     {
+      "path": "addons/analytic/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'base' already comes with 'mail', also in depends",
+      "count": 1
+    },
+    {
       "path": "addons/attachment_indexation/models/ir_attachment.py",
       "code": "OD124",
       "message": "index_content_cache is filled at runtime but lives in the Python process, so every database the server runs shares it and each worker fills its own copy; cache on a model method with tools.ormcache, which Odoo keeps per database and clears in every worker",
+      "count": 1
+    },
+    {
+      "path": "addons/auth_ldap/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'base' already comes with 'base_setup', also in depends",
+      "count": 1
+    },
+    {
+      "path": "addons/auth_oauth/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'base' already comes with 'auth_signup', also in depends",
+      "count": 1
+    },
+    {
+      "path": "addons/auth_oauth/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'base_setup' already comes with 'auth_signup', also in depends",
+      "count": 1
+    },
+    {
+      "path": "addons/auth_oauth/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'web' already comes with 'auth_signup', also in depends",
       "count": 1
     },
     {
@@ -169,9 +217,33 @@
       "count": 1
     },
     {
+      "path": "addons/auth_passkey/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'web' already comes with 'base_setup', also in depends",
+      "count": 1
+    },
+    {
       "path": "addons/auth_passkey/models/auth_passkey_key.py",
       "code": "OD122",
       "message": "UPDATE on auth_passkey_key bypasses the ORM, so records this transaction already read keep stale values; call flush_model() before the query and invalidate_model() after it (flush() and invalidate_cache() before 16.0)",
+      "count": 1
+    },
+    {
+      "path": "addons/auth_password_policy/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'web' already comes with 'base_setup', also in depends",
+      "count": 1
+    },
+    {
+      "path": "addons/auth_signup/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'base_setup' already comes with 'mail', also in depends",
+      "count": 1
+    },
+    {
+      "path": "addons/auth_signup/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'web' already comes with 'mail', also in depends",
       "count": 1
     },
     {
@@ -205,6 +277,30 @@
       "count": 1
     },
     {
+      "path": "addons/base_address_extended/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'base' already comes with 'contacts', also in depends",
+      "count": 1
+    },
+    {
+      "path": "addons/base_automation/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'base' already comes with 'digest', also in depends",
+      "count": 1
+    },
+    {
+      "path": "addons/base_automation/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'mail' already comes with 'digest', also in depends",
+      "count": 1
+    },
+    {
+      "path": "addons/base_automation/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'resource' already comes with 'digest', also in depends",
+      "count": 1
+    },
+    {
       "path": "addons/base_automation/controllers/main.py",
       "code": "OD111",
       "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
@@ -223,9 +319,21 @@
       "count": 1
     },
     {
+      "path": "addons/base_iban/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'web' already comes with 'account', also in depends",
+      "count": 1
+    },
+    {
       "path": "addons/base_import_module/controllers/main.py",
       "code": "OD112",
       "message": "csrf=False lets other sites submit this form on the user's behalf",
+      "count": 1
+    },
+    {
+      "path": "addons/base_setup/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'base' already comes with 'web', also in depends",
       "count": 1
     },
     {
@@ -259,6 +367,12 @@
       "count": 1
     },
     {
+      "path": "addons/bus/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'base' already comes with 'web', also in depends",
+      "count": 1
+    },
+    {
       "path": "addons/bus/controllers/main.py",
       "code": "OD111",
       "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
@@ -286,6 +400,12 @@
       "path": "addons/bus/security/ir.model.access.csv",
       "code": "OD402",
       "message": "base.group_portal gets write, create or unlink on model_bus_presence; public and portal access should be read-only and go through controllers",
+      "count": 1
+    },
+    {
+      "path": "addons/calendar/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'base' already comes with 'mail', also in depends",
       "count": 1
     },
     {
@@ -337,6 +457,36 @@
       "count": 1
     },
     {
+      "path": "addons/contacts/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'base' already comes with 'mail', also in depends",
+      "count": 1
+    },
+    {
+      "path": "addons/crm/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'base_setup' already comes with 'sales_team', also in depends",
+      "count": 1
+    },
+    {
+      "path": "addons/crm/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'mail' already comes with 'sales_team', also in depends",
+      "count": 1
+    },
+    {
+      "path": "addons/crm/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'resource' already comes with 'digest', also in depends",
+      "count": 1
+    },
+    {
+      "path": "addons/crm/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'web_tour' already comes with 'sales_team', also in depends",
+      "count": 1
+    },
+    {
       "path": "addons/crm/models/crm_lead.py",
       "code": "OD103",
       "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
@@ -355,9 +505,21 @@
       "count": 1
     },
     {
+      "path": "addons/crm_iap_enrich/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'iap_mail' already comes with 'iap_crm', also in depends",
+      "count": 1
+    },
+    {
       "path": "addons/crm_iap_enrich/models/crm_lead.py",
       "code": "OD103",
       "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
+      "count": 1
+    },
+    {
+      "path": "addons/crm_iap_mine/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'iap_mail' already comes with 'iap_crm', also in depends",
       "count": 1
     },
     {
@@ -371,6 +533,12 @@
       "code": "OD103",
       "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
       "count": 2
+    },
+    {
+      "path": "addons/digest/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'mail' already comes with 'portal', also in depends",
+      "count": 1
     },
     {
       "path": "addons/digest/controllers/portal.py",
@@ -388,6 +556,18 @@
       "path": "addons/digest/controllers/portal.py",
       "code": "OD716",
       "message": "route parameter 'digest_id' reaches the id of browse() through 'digest_sudo', whose records the route returns read as superuser; check them with _document_check_access(), consteq(), check_access() from 18.0 or check_access_rule() before 18.0",
+      "count": 1
+    },
+    {
+      "path": "addons/event/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'base_setup' already comes with 'phone_validation', also in depends",
+      "count": 1
+    },
+    {
+      "path": "addons/event/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'mail' already comes with 'phone_validation', also in depends",
       "count": 1
     },
     {
@@ -412,6 +592,18 @@
       "path": "addons/event_crm/models/event_lead_request.py",
       "code": "OD103",
       "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
+      "count": 1
+    },
+    {
+      "path": "addons/event_product/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'product' already comes with 'account', also in depends",
+      "count": 1
+    },
+    {
+      "path": "addons/fleet/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'base' already comes with 'mail', also in depends",
       "count": 1
     },
     {
@@ -460,6 +652,18 @@
       "path": "addons/google_calendar/models/res_users_settings.py",
       "code": "OD103",
       "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
+      "count": 1
+    },
+    {
+      "path": "addons/hr/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'base_setup' already comes with 'digest', also in depends",
+      "count": 1
+    },
+    {
+      "path": "addons/hr/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'web' already comes with 'digest', also in depends",
       "count": 1
     },
     {
@@ -517,6 +721,18 @@
       "count": 1
     },
     {
+      "path": "addons/hr_expense/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'web_tour' already comes with 'account', also in depends",
+      "count": 1
+    },
+    {
+      "path": "addons/hr_holidays/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'resource' already comes with 'hr', also in depends",
+      "count": 1
+    },
+    {
       "path": "addons/hr_holidays/models/res_users.py",
       "code": "OD101",
       "message": "query built by string formatting; pass parameters separately or build it with odoo.tools.SQL",
@@ -526,6 +742,24 @@
       "path": "addons/hr_holidays/static/src/views/calendar/calendar_controller.js",
       "code": "OD601",
       "message": "'@web/core/dropdown/dropdown' does not export 'DropdownItem'",
+      "count": 1
+    },
+    {
+      "path": "addons/hr_presence/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'hr' already comes with 'hr_holidays', also in depends",
+      "count": 1
+    },
+    {
+      "path": "addons/hr_recruitment/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'digest' already comes with 'hr', also in depends",
+      "count": 1
+    },
+    {
+      "path": "addons/hr_recruitment/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'web_tour' already comes with 'hr', also in depends",
       "count": 1
     },
     {
@@ -544,6 +778,42 @@
       "path": "addons/hr_skills/models/hr_employee_skill_log.py",
       "code": "OD204",
       "message": "hr.employee.skill.log has no method '_compute_skill_level_id'",
+      "count": 1
+    },
+    {
+      "path": "addons/hr_timesheet/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'analytic' already comes with 'project', also in depends",
+      "count": 1
+    },
+    {
+      "path": "addons/hr_timesheet/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'hr' already comes with 'hr_hourly_cost', also in depends",
+      "count": 1
+    },
+    {
+      "path": "addons/hr_timesheet/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'uom' already comes with 'project', also in depends",
+      "count": 1
+    },
+    {
+      "path": "addons/hr_work_entry_holidays/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'hr_holidays' already comes with 'hr_holidays_contract', also in depends",
+      "count": 1
+    },
+    {
+      "path": "addons/html_editor/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'base' already comes with 'bus', also in depends",
+      "count": 1
+    },
+    {
+      "path": "addons/html_editor/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'web' already comes with 'bus', also in depends",
       "count": 1
     },
     {
@@ -580,6 +850,18 @@
       "path": "addons/http_routing/controllers/main.py",
       "code": "OD111",
       "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
+      "count": 1
+    },
+    {
+      "path": "addons/iap/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'web' already comes with 'base_setup', also in depends",
+      "count": 1
+    },
+    {
+      "path": "addons/im_livechat/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'mail' already comes with 'rating', also in depends",
       "count": 1
     },
     {
@@ -697,6 +979,36 @@
       "count": 1
     },
     {
+      "path": "addons/l10n_ae/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'base' already comes with 'account', also in depends",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_cl/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'base_vat' already comes with 'l10n_latam_base', also in depends",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_cl/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'contacts' already comes with 'l10n_latam_base', also in depends",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_cl/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'uom' already comes with 'l10n_latam_base', also in depends",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_cn/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'base' already comes with 'account', also in depends",
+      "count": 1
+    },
+    {
       "path": "addons/l10n_dk_nemhandel/controllers/webhooks.py",
       "code": "OD111",
       "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
@@ -736,6 +1048,18 @@
       "path": "addons/l10n_dk_oioubl/models/account_move.py",
       "code": "OD516",
       "message": "no import from the module's __init__.py reaches this file, so Odoo never loads model 'account.move'",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_ec/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'account_debit_note' already comes with 'l10n_latam_invoice_document', also in depends",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_ec/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'base' already comes with 'base_iban', also in depends",
       "count": 1
     },
     {
@@ -835,6 +1159,12 @@
       "count": 1
     },
     {
+      "path": "addons/l10n_fr_facturx_chorus_pro/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'account' already comes with 'account_edi_ubl_cii', also in depends",
+      "count": 1
+    },
+    {
       "path": "addons/l10n_fr_pdp/controllers/routes.py",
       "code": "OD111",
       "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
@@ -889,9 +1219,33 @@
       "count": 1
     },
     {
+      "path": "addons/l10n_gr_edi_e_invoo_bridge/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'l10n_gr_edi' already comes with 'l10n_gr_edi_e_invoo', also in depends",
+      "count": 1
+    },
+    {
       "path": "addons/l10n_gr_edi_e_invoo_bridge/models/account_move.py",
       "code": "OD103",
       "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_gt/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'base' already comes with 'account', also in depends",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_hn/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'base' already comes with 'account', also in depends",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_hr_edi/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'account_edi_ubl_cii' already comes with 'account_peppol', also in depends",
       "count": 1
     },
     {
@@ -931,6 +1285,12 @@
       "count": 1
     },
     {
+      "path": "addons/l10n_id_efaktur_coretax/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'l10n_id' already comes with 'l10n_id_efaktur', also in depends",
+      "count": 1
+    },
+    {
       "path": "addons/l10n_id_efaktur_coretax/controllers/download_efaktur.py",
       "code": "OD125",
       "message": "check_access_rights() is deprecated from 18.0; use check_access()",
@@ -967,6 +1327,12 @@
       "count": 1
     },
     {
+      "path": "addons/l10n_in_stock/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'stock' already comes with 'stock_account', also in depends",
+      "count": 1
+    },
+    {
       "path": "addons/l10n_it/migrations/0.7/post-map_carryover_to_new_report.py",
       "code": "OD101",
       "message": "query built by string formatting; pass parameters separately or build it with odoo.tools.SQL",
@@ -977,6 +1343,12 @@
       "code": "OD103",
       "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
       "count": 3
+    },
+    {
+      "path": "addons/l10n_it_stock_ddt/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'stock_account' already comes with 'stock_delivery', also in depends",
+      "count": 1
     },
     {
       "path": "addons/l10n_jo_edi/models/account_move_send.py",
@@ -991,15 +1363,39 @@
       "count": 1
     },
     {
+      "path": "addons/l10n_latam_check/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'account' already comes with 'base_vat', also in depends",
+      "count": 1
+    },
+    {
       "path": "addons/l10n_latam_check/models/account_journal.py",
       "code": "OD211",
       "message": "no parent class of account.journal defines '_get_reusable_payment_methods', so this super() call fails",
       "count": 1
     },
     {
+      "path": "addons/l10n_latam_invoice_document/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'account' already comes with 'account_debit_note', also in depends",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_ma/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'base' already comes with 'account', also in depends",
+      "count": 1
+    },
+    {
       "path": "addons/l10n_mn/data/vat_report.xml",
       "code": "OD303",
       "message": "XML id 'vat_report_line64_balance' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_mr/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'account' already comes with 'base_vat', also in depends",
       "count": 1
     },
     {
@@ -1033,6 +1429,24 @@
       "count": 5
     },
     {
+      "path": "addons/l10n_mz/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'base' already comes with 'account', also in depends",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_pe/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'account_debit_note' already comes with 'l10n_latam_invoice_document', also in depends",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_pe/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'base_vat' already comes with 'l10n_latam_base', also in depends",
+      "count": 1
+    },
+    {
       "path": "addons/l10n_pe_website_sale/controllers/main.py",
       "code": "OD111",
       "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
@@ -1048,6 +1462,18 @@
       "path": "addons/l10n_pl_edi/models/account_move_send.py",
       "code": "OD103",
       "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_pl_edi_jst/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'l10n_pl' already comes with 'l10n_pl_edi', also in depends",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_pt/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'base' already comes with 'base_vat', also in depends",
       "count": 1
     },
     {
@@ -1105,6 +1531,18 @@
       "count": 1
     },
     {
+      "path": "addons/l10n_tr_nilvera_edispatch/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'stock' already comes with 'stock_account', also in depends",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_tr_nilvera_einvoice/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'account_edi_ubl_cii' already comes with 'l10n_tr_nilvera', also in depends",
+      "count": 1
+    },
+    {
       "path": "addons/l10n_tr_nilvera_einvoice/models/account_move.py",
       "code": "OD103",
       "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
@@ -1153,9 +1591,33 @@
       "count": 1
     },
     {
+      "path": "addons/loyalty/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'portal' already comes with 'account', also in depends",
+      "count": 1
+    },
+    {
+      "path": "addons/loyalty/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'product' already comes with 'account', also in depends",
+      "count": 1
+    },
+    {
       "path": "addons/lunch/data/lunch_demo.xml",
       "code": "OD303",
       "message": "XML id 'product_chicken_curry' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/mail/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'base' already comes with 'base_setup', also in depends",
+      "count": 1
+    },
+    {
+      "path": "addons/mail/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'bus' already comes with 'html_editor', also in depends",
       "count": 1
     },
     {
@@ -1315,6 +1777,12 @@
       "count": 1
     },
     {
+      "path": "addons/mail_group/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'mail' already comes with 'portal', also in depends",
+      "count": 1
+    },
+    {
       "path": "addons/mail_group/controllers/portal.py",
       "code": "OD111",
       "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
@@ -1342,6 +1810,12 @@
       "path": "addons/mail_group/models/mail_group.py",
       "code": "OD703",
       "message": "RPC argument 'body' reaches Markup() through '_clean_email_body()', 'tree' unescaped; escape it, or pass it as an argument of Markup's % or format()",
+      "count": 1
+    },
+    {
+      "path": "addons/mail_plugin/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'web' already comes with 'contacts', also in depends",
       "count": 1
     },
     {
@@ -1387,6 +1861,12 @@
       "count": 1
     },
     {
+      "path": "addons/marketing_card/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'link_tracker' already comes with 'mass_mailing', also in depends",
+      "count": 1
+    },
+    {
       "path": "addons/marketing_card/controllers/marketing_card.py",
       "code": "OD111",
       "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
@@ -1402,6 +1882,30 @@
       "path": "addons/marketing_card/models/card_campaign.py",
       "code": "OD103",
       "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
+      "count": 1
+    },
+    {
+      "path": "addons/mass_mailing/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'mail' already comes with 'contacts', also in depends",
+      "count": 1
+    },
+    {
+      "path": "addons/mass_mailing/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'utm' already comes with 'link_tracker', also in depends",
+      "count": 1
+    },
+    {
+      "path": "addons/mass_mailing/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'web_editor' already comes with 'digest', also in depends",
+      "count": 1
+    },
+    {
+      "path": "addons/mass_mailing/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'web_tour' already comes with 'contacts', also in depends",
       "count": 1
     },
     {
@@ -1429,6 +1933,42 @@
       "count": 1
     },
     {
+      "path": "addons/mass_mailing_event_sms/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'event' already comes with 'mass_mailing_event', also in depends",
+      "count": 1
+    },
+    {
+      "path": "addons/mass_mailing_event_sms/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'mass_mailing' already comes with 'mass_mailing_event', also in depends",
+      "count": 1
+    },
+    {
+      "path": "addons/mass_mailing_event_sms/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'sms' already comes with 'mass_mailing_sms', also in depends",
+      "count": 1
+    },
+    {
+      "path": "addons/mass_mailing_event_track_sms/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'mass_mailing' already comes with 'mass_mailing_sms', also in depends",
+      "count": 1
+    },
+    {
+      "path": "addons/mass_mailing_event_track_sms/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'sms' already comes with 'mass_mailing_sms', also in depends",
+      "count": 1
+    },
+    {
+      "path": "addons/mass_mailing_sms/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'portal' already comes with 'mass_mailing', also in depends",
+      "count": 1
+    },
+    {
       "path": "addons/mass_mailing_sms/controllers/main.py",
       "code": "OD111",
       "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
@@ -1450,6 +1990,18 @@
       "path": "addons/microsoft_calendar/wizard/reset_account.py",
       "code": "OD103",
       "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
+      "count": 1
+    },
+    {
+      "path": "addons/mrp/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'product' already comes with 'stock', also in depends",
+      "count": 1
+    },
+    {
+      "path": "addons/mrp/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'resource' already comes with 'stock', also in depends",
       "count": 1
     },
     {
@@ -1747,6 +2299,30 @@
       "count": 1
     },
     {
+      "path": "addons/phone_validation/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'base' already comes with 'mail', also in depends",
+      "count": 1
+    },
+    {
+      "path": "addons/point_of_sale/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'barcodes' already comes with 'stock_account', also in depends",
+      "count": 1
+    },
+    {
+      "path": "addons/point_of_sale/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'digest' already comes with 'stock_account', also in depends",
+      "count": 1
+    },
+    {
+      "path": "addons/point_of_sale/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'web_editor' already comes with 'stock_account', also in depends",
+      "count": 1
+    },
+    {
       "path": "addons/point_of_sale/controllers/customer_display.py",
       "code": "OD111",
       "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
@@ -1786,6 +2362,18 @@
       "path": "addons/point_of_sale/views/account_move_views.xml",
       "code": "OD323",
       "message": "XML id 'view_account_journal_pos_user_form' is already defined in views/account_statement_view.xml, and this definition overwrites the fields both name; remove the copy when the two say the same thing, or rename one when both are meant to exist",
+      "count": 1
+    },
+    {
+      "path": "addons/portal/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'mail' already comes with 'auth_signup', also in depends",
+      "count": 1
+    },
+    {
+      "path": "addons/portal/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'web' already comes with 'web_editor', also in depends",
       "count": 1
     },
     {
@@ -1855,9 +2443,21 @@
       "count": 1
     },
     {
+      "path": "addons/pos_restaurant_stripe/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'payment_stripe' already comes with 'pos_stripe', also in depends",
+      "count": 1
+    },
+    {
       "path": "addons/pos_sale/models/pos_order.py",
       "code": "OD211",
       "message": "no parent class of pos.order defines '_prepare_order_line', so this super() call fails",
+      "count": 1
+    },
+    {
+      "path": "addons/pos_self_order/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'http_routing' already comes with 'pos_restaurant', also in depends",
       "count": 1
     },
     {
@@ -1891,6 +2491,12 @@
       "count": 1
     },
     {
+      "path": "addons/product/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'base' already comes with 'mail', also in depends",
+      "count": 1
+    },
+    {
       "path": "addons/product/models/product_product.py",
       "code": "OD105",
       "message": "copy() override never calls super(), so other modules' overrides and the ORM itself are skipped",
@@ -1907,6 +2513,42 @@
       "code": "OD103",
       "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
       "count": 2
+    },
+    {
+      "path": "addons/project/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'base_setup' already comes with 'analytic', also in depends",
+      "count": 1
+    },
+    {
+      "path": "addons/project/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'mail' already comes with 'analytic', also in depends",
+      "count": 1
+    },
+    {
+      "path": "addons/project/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'portal' already comes with 'digest', also in depends",
+      "count": 1
+    },
+    {
+      "path": "addons/project/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'resource' already comes with 'digest', also in depends",
+      "count": 1
+    },
+    {
+      "path": "addons/project/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'web' already comes with 'analytic', also in depends",
+      "count": 1
+    },
+    {
+      "path": "addons/project/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'web_tour' already comes with 'analytic', also in depends",
+      "count": 1
     },
     {
       "path": "addons/project/controllers/portal.py",
@@ -1960,6 +2602,12 @@
       "path": "addons/repair/models/mail_compose_message.py",
       "code": "OD516",
       "message": "no import from the module's __init__.py reaches this file, so Odoo never loads model 'mail.compose.message'",
+      "count": 1
+    },
+    {
+      "path": "addons/resource/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'base' already comes with 'web', also in depends",
       "count": 1
     },
     {
@@ -2035,6 +2683,12 @@
       "count": 1
     },
     {
+      "path": "addons/sale_management/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'digest' already comes with 'sale', also in depends",
+      "count": 1
+    },
+    {
       "path": "addons/sale_management/controllers/portal.py",
       "code": "OD111",
       "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
@@ -2071,6 +2725,24 @@
       "count": 1
     },
     {
+      "path": "addons/sales_team/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'base' already comes with 'mail', also in depends",
+      "count": 1
+    },
+    {
+      "path": "addons/sms/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'base' already comes with 'iap_mail', also in depends",
+      "count": 1
+    },
+    {
+      "path": "addons/sms/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'mail' already comes with 'iap_mail', also in depends",
+      "count": 1
+    },
+    {
       "path": "addons/sms/controllers/main.py",
       "code": "OD111",
       "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
@@ -2095,10 +2767,28 @@
       "count": 1
     },
     {
+      "path": "addons/snailmail/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'mail' already comes with 'iap_mail', also in depends",
+      "count": 1
+    },
+    {
       "path": "addons/snailmail/models/snailmail_letter.py",
       "code": "OD103",
       "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
       "count": 2
+    },
+    {
+      "path": "addons/spreadsheet/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'bus' already comes with 'portal', also in depends",
+      "count": 1
+    },
+    {
+      "path": "addons/spreadsheet/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'web' already comes with 'portal', also in depends",
+      "count": 1
     },
     {
       "path": "addons/spreadsheet_dashboard/controllers/share.py",
@@ -2149,6 +2839,24 @@
       "count": 1
     },
     {
+      "path": "addons/stock_landed_costs/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'stock_account' already comes with 'purchase_stock', also in depends",
+      "count": 1
+    },
+    {
+      "path": "addons/survey/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'mail' already comes with 'auth_signup', also in depends",
+      "count": 1
+    },
+    {
+      "path": "addons/survey/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'web_tour' already comes with 'auth_signup', also in depends",
+      "count": 1
+    },
+    {
       "path": "addons/survey/controllers/main.py",
       "code": "OD111",
       "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
@@ -2173,9 +2881,93 @@
       "count": 1
     },
     {
+      "path": "addons/test_crm_full/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'crm' already comes with 'crm_iap_enrich', also in depends",
+      "count": 1
+    },
+    {
+      "path": "addons/test_crm_full/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'crm_iap_mine' already comes with 'website_crm_iap_reveal', also in depends",
+      "count": 1
+    },
+    {
+      "path": "addons/test_crm_full/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'website_crm' already comes with 'website_crm_iap_reveal', also in depends",
+      "count": 1
+    },
+    {
+      "path": "addons/test_discuss_full/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'calendar' already comes with 'crm_livechat', also in depends",
+      "count": 1
+    },
+    {
+      "path": "addons/test_discuss_full/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'crm' already comes with 'crm_livechat', also in depends",
+      "count": 1
+    },
+    {
+      "path": "addons/test_discuss_full/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'im_livechat' already comes with 'crm_livechat', also in depends",
+      "count": 1
+    },
+    {
+      "path": "addons/test_discuss_full/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'mail' already comes with 'crm_livechat', also in depends",
+      "count": 1
+    },
+    {
+      "path": "addons/test_event_full/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'event' already comes with 'event_crm_sale', also in depends",
+      "count": 1
+    },
+    {
+      "path": "addons/test_event_full/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'event_booth' already comes with 'website_event_booth_sale_exhibitor', also in depends",
+      "count": 1
+    },
+    {
+      "path": "addons/test_event_full/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'event_crm' already comes with 'event_crm_sale', also in depends",
+      "count": 1
+    },
+    {
+      "path": "addons/test_event_full/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'event_sale' already comes with 'event_crm_sale', also in depends",
+      "count": 1
+    },
+    {
+      "path": "addons/test_event_full/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'website_event_exhibitor' already comes with 'website_event_booth_sale_exhibitor', also in depends",
+      "count": 1
+    },
+    {
+      "path": "addons/test_event_full/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'website_event_track' already comes with 'website_event_track_live', also in depends",
+      "count": 1
+    },
+    {
       "path": "addons/test_event_full/data/event_type_data.xml",
       "code": "OD502",
       "message": "'data/event_type_data.xml' is not in the manifest's data or demo, so Odoo never loads it",
+      "count": 1
+    },
+    {
+      "path": "addons/test_import_export/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'web' already comes with 'base_import', also in depends",
       "count": 1
     },
     {
@@ -2197,6 +2989,90 @@
       "count": 1
     },
     {
+      "path": "addons/test_mail_full/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'mail' already comes with 'mail_bot', also in depends",
+      "count": 1
+    },
+    {
+      "path": "addons/test_mail_full/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'mass_mailing' already comes with 'test_mass_mailing', also in depends",
+      "count": 1
+    },
+    {
+      "path": "addons/test_mail_full/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'mass_mailing_sms' already comes with 'test_mass_mailing', also in depends",
+      "count": 1
+    },
+    {
+      "path": "addons/test_mail_full/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'phone_validation' already comes with 'test_mass_mailing', also in depends",
+      "count": 1
+    },
+    {
+      "path": "addons/test_mail_full/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'portal' already comes with 'test_mass_mailing', also in depends",
+      "count": 1
+    },
+    {
+      "path": "addons/test_mail_full/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'sms' already comes with 'test_mass_mailing', also in depends",
+      "count": 1
+    },
+    {
+      "path": "addons/test_mail_full/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'test_mail' already comes with 'test_mass_mailing', also in depends",
+      "count": 1
+    },
+    {
+      "path": "addons/test_mail_full/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'test_mail_sms' already comes with 'test_mass_mailing', also in depends",
+      "count": 1
+    },
+    {
+      "path": "addons/test_mail_sms/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'mail' already comes with 'sms_twilio', also in depends",
+      "count": 1
+    },
+    {
+      "path": "addons/test_mail_sms/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'sms' already comes with 'sms_twilio', also in depends",
+      "count": 1
+    },
+    {
+      "path": "addons/test_mass_mailing/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'mass_mailing' already comes with 'mass_mailing_sms', also in depends",
+      "count": 1
+    },
+    {
+      "path": "addons/test_mass_mailing/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'sms_twilio' already comes with 'test_mail_sms', also in depends",
+      "count": 1
+    },
+    {
+      "path": "addons/test_sale_product_configurators/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'sale_management' already comes with 'event_sale', also in depends",
+      "count": 1
+    },
+    {
+      "path": "addons/test_website/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'website' already comes with 'theme_default', also in depends",
+      "count": 1
+    },
+    {
       "path": "addons/test_website/controllers/main.py",
       "code": "OD111",
       "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
@@ -2206,6 +3082,24 @@
       "path": "addons/test_website/controllers/main.py",
       "code": "OD716",
       "message": "route parameter 'record_id' reaches the id of browse() through 'values', whose records the route returns read as superuser; check them with _document_check_access(), consteq(), check_access() from 18.0 or check_access_rule() before 18.0",
+      "count": 1
+    },
+    {
+      "path": "addons/test_website_modules/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'website' already comes with 'theme_default', also in depends",
+      "count": 1
+    },
+    {
+      "path": "addons/transifex/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'base' already comes with 'web', also in depends",
+      "count": 1
+    },
+    {
+      "path": "addons/utm/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'base' already comes with 'web', also in depends",
       "count": 1
     },
     {
@@ -2269,15 +3163,75 @@
       "count": 1
     },
     {
+      "path": "addons/web_editor/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'bus' already comes with 'html_editor', also in depends",
+      "count": 1
+    },
+    {
+      "path": "addons/web_editor/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'web' already comes with 'html_editor', also in depends",
+      "count": 1
+    },
+    {
       "path": "addons/web_editor/models/ir_qweb_fields.py",
       "code": "OD706",
       "message": "RPC argument 'url' reaches the URL of requests.get(), so the user picks the host the server connects to; start the URL with a host the code picks",
       "count": 1
     },
     {
+      "path": "addons/web_unsplash/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'html_editor' already comes with 'web_editor', also in depends",
+      "count": 1
+    },
+    {
       "path": "addons/web_unsplash/controllers/main.py",
       "code": "OD111",
       "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
+      "count": 1
+    },
+    {
+      "path": "addons/website/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'auth_signup' already comes with 'digest', also in depends",
+      "count": 1
+    },
+    {
+      "path": "addons/website/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'html_editor' already comes with 'digest', also in depends",
+      "count": 1
+    },
+    {
+      "path": "addons/website/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'http_routing' already comes with 'digest', also in depends",
+      "count": 1
+    },
+    {
+      "path": "addons/website/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'mail' already comes with 'digest', also in depends",
+      "count": 1
+    },
+    {
+      "path": "addons/website/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'portal' already comes with 'digest', also in depends",
+      "count": 1
+    },
+    {
+      "path": "addons/website/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'web' already comes with 'digest', also in depends",
+      "count": 1
+    },
+    {
+      "path": "addons/website/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'web_editor' already comes with 'digest', also in depends",
       "count": 1
     },
     {
@@ -2383,9 +3337,39 @@
       "count": 1
     },
     {
+      "path": "addons/website_crm_iap_reveal/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'iap_crm' already comes with 'crm_iap_mine', also in depends",
+      "count": 1
+    },
+    {
+      "path": "addons/website_crm_iap_reveal/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'iap_mail' already comes with 'crm_iap_mine', also in depends",
+      "count": 1
+    },
+    {
       "path": "addons/website_crm_iap_reveal/models/crm_reveal_rule.py",
       "code": "OD103",
       "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
+      "count": 1
+    },
+    {
+      "path": "addons/website_crm_partner_assign/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'base_geolocalize' already comes with 'website_google_map', also in depends",
+      "count": 1
+    },
+    {
+      "path": "addons/website_crm_partner_assign/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'portal' already comes with 'crm', also in depends",
+      "count": 1
+    },
+    {
+      "path": "addons/website_crm_partner_assign/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'website_partner' already comes with 'website_google_map', also in depends",
       "count": 1
     },
     {
@@ -2393,6 +3377,18 @@
       "code": "OD111",
       "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
       "count": 2
+    },
+    {
+      "path": "addons/website_customer/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'website_google_map' already comes with 'website_crm_partner_assign', also in depends",
+      "count": 1
+    },
+    {
+      "path": "addons/website_customer/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'website_partner' already comes with 'website_crm_partner_assign', also in depends",
+      "count": 1
     },
     {
       "path": "addons/website_customer/controllers/main.py",
@@ -2404,6 +3400,12 @@
       "path": "addons/website_customer/data/res_partner_demo.xml",
       "code": "OD303",
       "message": "XML id 'base.res_partner_3' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/website_event/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'website' already comes with 'website_partner', also in depends",
       "count": 1
     },
     {
@@ -2485,6 +3487,12 @@
       "count": 2
     },
     {
+      "path": "addons/website_forum/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'auth_signup' already comes with 'website_mail', also in depends",
+      "count": 1
+    },
+    {
       "path": "addons/website_forum/controllers/website_forum.py",
       "code": "OD111",
       "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
@@ -2557,6 +3565,12 @@
       "count": 1
     },
     {
+      "path": "addons/website_mail/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'mail' already comes with 'website', also in depends",
+      "count": 1
+    },
+    {
       "path": "addons/website_mail/controllers/main.py",
       "code": "OD111",
       "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
@@ -2575,9 +3589,21 @@
       "count": 1
     },
     {
+      "path": "addons/website_mass_mailing/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'google_recaptcha' already comes with 'website', also in depends",
+      "count": 1
+    },
+    {
       "path": "addons/website_mass_mailing/controllers/main.py",
       "code": "OD111",
       "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
+      "count": 1
+    },
+    {
+      "path": "addons/website_membership/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'website_partner' already comes with 'website_google_map', also in depends",
       "count": 1
     },
     {
@@ -2629,6 +3655,12 @@
       "count": 1
     },
     {
+      "path": "addons/website_payment/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'portal' already comes with 'website', also in depends",
+      "count": 1
+    },
+    {
       "path": "addons/website_profile/controllers/main.py",
       "code": "OD111",
       "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
@@ -2638,6 +3670,24 @@
       "path": "addons/website_profile/models/res_users.py",
       "code": "OD131",
       "message": "== between secrets takes longer the more of the secret a guess gets right, which lets a caller find it a character at a time; compare them with consteq() or hmac.compare_digest()",
+      "count": 1
+    },
+    {
+      "path": "addons/website_sale/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'digest' already comes with 'website_payment', also in depends",
+      "count": 1
+    },
+    {
+      "path": "addons/website_sale/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'sale' already comes with 'delivery', also in depends",
+      "count": 1
+    },
+    {
+      "path": "addons/website_sale/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'website' already comes with 'website_payment', also in depends",
       "count": 1
     },
     {
@@ -2737,6 +3787,12 @@
       "count": 1
     },
     {
+      "path": "addons/website_sale_stock/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'sale_stock' already comes with 'stock_delivery', also in depends",
+      "count": 1
+    },
+    {
       "path": "addons/website_sale_stock/controllers/main.py",
       "code": "OD111",
       "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
@@ -2758,6 +3814,12 @@
       "path": "addons/website_sale_wishlist/security/ir.model.access.csv",
       "code": "OD402",
       "message": "base.group_portal gets write, create or unlink on model_product_wishlist; public and portal access should be read-only and go through controllers",
+      "count": 1
+    },
+    {
+      "path": "addons/website_slides/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'website' already comes with 'website_mail', also in depends",
       "count": 1
     },
     {
@@ -3013,6 +4075,24 @@
       "count": 1
     },
     {
+      "path": "odoo/addons/test_http/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'base' already comes with 'mail', also in depends",
+      "count": 1
+    },
+    {
+      "path": "odoo/addons/test_http/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'web' already comes with 'mail', also in depends",
+      "count": 1
+    },
+    {
+      "path": "odoo/addons/test_http/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'web_tour' already comes with 'mail', also in depends",
+      "count": 1
+    },
+    {
       "path": "odoo/addons/test_http/controllers.py",
       "code": "OD112",
       "message": "csrf=False lets other sites submit this form on the user's behalf",
@@ -3025,6 +4105,42 @@
       "count": 3
     },
     {
+      "path": "odoo/addons/test_inherit/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'base' already comes with 'test_new_api', also in depends",
+      "count": 1
+    },
+    {
+      "path": "odoo/addons/test_inherit_depends/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'test_new_api' already comes with 'test_inherit', also in depends",
+      "count": 1
+    },
+    {
+      "path": "odoo/addons/test_main_flows/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'account' already comes with 'sale_timesheet', also in depends",
+      "count": 1
+    },
+    {
+      "path": "odoo/addons/test_main_flows/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'web_tour' already comes with 'crm', also in depends",
+      "count": 1
+    },
+    {
+      "path": "odoo/addons/test_new_api/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'base' already comes with 'web_tour', also in depends",
+      "count": 1
+    },
+    {
+      "path": "odoo/addons/test_new_api/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'web' already comes with 'web_tour', also in depends",
+      "count": 1
+    },
+    {
       "path": "odoo/addons/test_new_api/models/test_new_api.py",
       "code": "OD223",
       "message": "_compute_bar() can leave 'bar' unassigned on a record, so reading it raises ValueError; assign it on every path through the loop, False when there is no value",
@@ -3034,6 +4150,18 @@
       "path": "odoo/addons/test_read_group/models.py",
       "code": "OD201",
       "message": "no indexed module defines model 'bar_name'",
+      "count": 1
+    },
+    {
+      "path": "odoo/addons/test_rpc/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'base' already comes with 'web', also in depends",
+      "count": 1
+    },
+    {
+      "path": "odoo/addons/test_testing_utilities/__manifest__.py",
+      "code": "OD520",
+      "message": "module 'base' already comes with 'web', also in depends",
       "count": 1
     },
     {

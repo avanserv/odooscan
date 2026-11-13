@@ -1708,6 +1708,19 @@ impl<'m> Ctx<'_, 'm> {
                 Some(_) => {}
             }
         }
+        self.implied_dependencies(out);
+    }
+
+    /// OD520 on a `depends` entry another entry already brings, naming the top of the chain.
+    fn implied_dependencies(&self, out: &mut Out<'m>) {
+        let depends = &self.module.manifest.depends;
+        for (d, e) in self.index.implied_depends(self.mi) {
+            let message = format!(
+                "module '{}' already comes with '{}', also in depends",
+                depends[d].value, depends[e].value
+            );
+            out.push(&self.module.manifest_path, "OD520", depends[d].pos, message);
+        }
     }
 
     /// OD518 on an import of a module outside `depends` that runs as the module loads, and OD519

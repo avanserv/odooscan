@@ -398,6 +398,7 @@ custom/encoded_csv11/data/res.country.csv:2:17: OD000 the file is not UTF-8
 custom/encoded_csv9/data/refs.xml:8:9: OD301 module encoded_csv9 defines no XML id 'encoded_csv9.country_gone'
 custom/encoded_csv9/data/res.country.csv:1:1: OD309 res.country has no field 'no_such_field'
 custom/encoded_csv9/data/stray.csv:1:1: OD502 'data/stray.csv' is not in the manifest's init_xml, update_xml, data, demo_xml or demo, so Odoo never loads it
+custom/encoded_lost/__manifest__.py:4:17: OD520 module 'base' already comes with 'web', also in depends
 custom/encoded_lost/data/legacy.xml:3:31: OD000 the file is not UTF-8, and its declaration names no other encoding
 custom/encoded_lost/data/refs.xml:14:5: OD202 model 'encoded.visit' comes from module encoded_lost_stranger; add it to depends
 custom/encoded_lost/models/ledger.py:19:18: OD203 'x_lost': encoded.ledger has no field 'x_lost'
@@ -474,6 +475,7 @@ custom/field_classes/models/lens.py:51:30: OD210 'opaque': x.lens has no field '
 custom/field_classes/views/lens_views.xml:7:45: OD312 x.lens has no method 'embedding'
 custom/field_ids_after/data/refs.xml:9:9: OD301 module field_ids_broken defines no XML id 'field_ids_broken.field_field_ids_gone_name'
 custom/field_ids_after/models/bin.py:18:22: OD301 module field_ids_broken defines no XML id 'field_ids_broken.field_field_ids_gone_name'
+custom/field_ids_away/__manifest__.py:4:17: OD520 module 'base' already comes with 'field_ids_old', also in depends
 custom/field_ids_away/__manifest__.py:4:42: OD503 module 'ghost_racks' is not on the addons path
 custom/field_ids_away/data/refs.xml:12:9: OD308 'field_rack_table_custom' is defined in data/ids.xml, which loads after this reference
 custom/field_ids_away/data/refs.xml:16:9: OD301 module field_ids_away defines no XML id 'field_ids_away.field_rack_table_tally'
@@ -486,6 +488,7 @@ custom/field_ids_away12/__manifest__.py:4:25: OD503 module 'ghost_racks' is not 
 custom/field_ids_away12/models/rack.py:11:22: OD301 module field_ids_away12 defines no XML id 'field_ids_away12.field_rack_table_stock'
 custom/field_ids_bare/data/refs.xml:6:9: OD301 module field_ids_old defines no XML id 'field_ids_old.field_field_ids_old__name'
 custom/field_ids_bare/data/refs.xml:21:9: OD301 module field_ids_broken defines no XML id 'field_ids_broken.field_field_ids_broken__name'
+custom/field_ids_blind/__manifest__.py:4:17: OD520 module 'base' already comes with 'field_ids_old', also in depends
 custom/field_ids_blind/__manifest__.py:4:42: OD503 module 'ghost_racks' is not on the addons path
 custom/field_ids_later/data/refs.xml:6:9: OD301 module field_ids_old defines no XML id 'field_ids_old.field_field_ids_stock_name'
 custom/field_ids_new/data/refs.xml:9:9: OD301 module field_ids_new defines no XML id 'field_ids_new.field_field_ids_shelf_name'
@@ -495,13 +498,16 @@ custom/field_ids_old/data/refs.xml:24:9: OD301 module field_ids_old defines no X
 custom/field_ids_old/data/refs.xml:28:9: OD301 module field_ids_old defines no XML id 'field_ids_old.field_field_ids_old_name'
 custom/field_ids_old/data/refs.xml:32:9: OD302 'field_ids_broken.field_field_ids_bin_name' belongs to module field_ids_broken; add it to depends
 custom/field_ids_old/data/refs.xml:36:9: OD301 module base defines no XML id 'base.field_res_partner__name'
+custom/field_ids_stray/__manifest__.py:4:17: OD520 module 'base' already comes with 'field_ids_old', also in depends
 custom/field_ids_stray/data/ids.xml:5:5: OD324 field.ids.old.code is required and has no default, so creating this record fails if the column is NOT NULL; give the field a value
 custom/field_ids_stray/data/refs.xml:4:9: OD301 module field_ids_stray defines no XML id 'field_ids_stray.field_rack_table_stock'
 custom/field_ids_stray/data/refs.xml:8:9: OD308 'field_rack_table_shelf' is defined in data/ids.xml, which loads after this reference
 custom/field_ids_stray/models/rack.py:5:16: OD202 model 'ghost.rack' comes from module field_ids_away; add it to depends
+custom/field_ids_veiled/__manifest__.py:4:17: OD520 module 'base' already comes with 'field_ids_old', also in depends
 custom/field_ids_veiled/__manifest__.py:4:42: OD503 module 'ghost_racks' is not on the addons path
 custom/field_ids_veiled/models/bay.py:5:16: OD201 no indexed module defines model 'ghost.bay'
 custom/field_ids_veiled/models/bay.py:8:32: OD201 no indexed module defines model 'ghost.frame'
+custom/field_options/__manifest__.py:4:17: OD520 module 'base' already comes with 'mail', also in depends
 custom/field_options/models/bench.py:9:19: OD220 'partner_ids' has the label 'Partner' of field 'partner_id' of greenhouse.bench, so Odoo logs a warning and users cannot tell them apart; give it another string
 custom/field_options/models/bench.py:10:34: OD220 'planted_on' has the label 'Created on' of field 'create_date' of greenhouse.bench, so Odoo logs a warning and users cannot tell them apart; give it another string
 custom/field_options/models/bench.py:44:38: OD220 'common_name' has the label 'Name' of field 'name' of res.partner, so Odoo logs a warning and users cannot tell them apart; give it another string
@@ -660,6 +666,7 @@ custom/legacy154/models/upgrade.py:10:33: OD125 recompute() is deprecated from s
 custom/legacy154/models/upgrade.py:11:14: OD125 invalidate_cache() is deprecated from saas~15.4; use invalidate_model(), invalidate_recordset() or self.env.invalidate_all()
 custom/legacy154/models/upgrade.py:12:14: OD125 refresh() is deprecated from saas~15.2; use self.env.invalidate_all()
 custom/legacy154/models/upgrade.py:19:16: OD126 request.jsonrequest no longer works from saas~15.3; use request.get_json_data()
+custom/legacy16/__manifest__.py:4:17: OD520 module 'base' already comes with 'web', also in depends
 custom/legacy16/__manifest__.py:7:5: OD505 Odoo ignores the qweb key, so the templates it lists that no bundle loads are missing; list them under web.assets_backend in assets
 custom/legacy16/__manifest__.py:10:9: OD506 Odoo no longer loads web.assets_qweb, so the templates it lists that no other bundle loads are missing; list them under web.assets_backend
 custom/legacy16/models/gauge.py:7:5: OD226 _auto = False leaves legacy.gauge without a table, and nothing creates the view legacy_gauge; create it in init(), or drop _auto = False
@@ -715,6 +722,8 @@ custom/manifest_assets_unmatched/__manifest__.py:10:24: OD513 'manifest_assets_u
 custom/manifest_assets_unmatched/__manifest__.py:11:13: OD513 'manifest_assets_unmatched/views/*.js' is outside manifest_assets_unmatched/static/, the only files Odoo serves as assets
 custom/manifest_auto_install_extra/__manifest__.py:5:30: OD511 auto_install names 'web', which is not in depends, so Odoo fails to read the manifest
 custom/manifest_data_repeated/__manifest__.py:7:34: OD512 './data/shelves.xml' is listed again under data, so Odoo loads it twice
+custom/manifest_depends_implied/__manifest__.py:4:17: OD520 module 'base' already comes with 'mail_digest', also in depends
+custom/manifest_depends_implied/__manifest__.py:4:25: OD520 module 'mail' already comes with 'mail_digest', also in depends
 custom/manifest_depends_self/__manifest__.py:4:25: OD510 module manifest_depends_self depends on itself, so Odoo never loads it
 custom/manifest_latin1/__manifest__.py:4:19: OD000 the manifest is not UTF-8
 custom/manifest_license_missing/__manifest__.py:1:1: OD507 the manifest names no license, which Odoo reads as LGPL-3

@@ -2078,6 +2078,50 @@ impl<'m> Index<'m> {
         false
     }
 
+    /// The `depends` entries of `module` that another entry already brings, as (entry, implier),
+    /// both positions in `depends`. The implier is the first entry no other one brings, so the
+    /// top of a chain. An entry a list `auto_install` names stays, since the list must stay inside
+    /// `depends`, and an entry in a cycle with the module is OD504's, so it implies nothing.
+    pub fn implied_depends(&self, module: usize) -> Vec<(usize, usize)> {
+        let manifest = &self.modules[module].manifest;
+        let closures: Vec<Option<(usize, Vec<bool>)>> = manifest
+            .depends
+            .iter()
+            .map(|d| self.candidate_closure(module, &d.value))
+            .collect();
+        let implies = |e: usize, d: usize| match (&closures[e], &closures[d]) {
+            (Some((em, ec)), Some((dm, dc))) => ec[*dm] && !dc[*em],
+            _ => false,
+        };
+        let entries = 0..closures.len();
+        let implied: Vec<bool> = entries
+            .clone()
+            .map(|d| entries.clone().any(|e| implies(e, d)))
+            .collect();
+        let triggers = match &manifest.auto_install {
+            AutoInstall::Listed(names) => names.iter().map(|n| n.value.as_str()).collect(),
+            _ => vec![],
+        };
+        let implier = |d: usize| {
+            let mut impliers = entries.clone().filter(|&e| implies(e, d));
+            let first = impliers.clone().next();
+            impliers.find(|&e| !implied[e]).or(first)
+        };
+        entries
+            .clone()
+            .filter(|&d| !triggers.contains(&manifest.depends[d].value.as_str()))
+            .filter_map(|d| implier(d).map(|e| (d, e)))
+            .collect()
+    }
+
+    /// The index and the `depends` closure of the dependency `name` of `module`, when it is
+    /// indexed, is another module, and does not lead back to `module`.
+    fn candidate_closure(&self, module: usize, name: &str) -> Option<(usize, Vec<bool>)> {
+        let &mi = self.by_name.get(name).filter(|&&mi| mi != module)?;
+        let (closure, _) = depends_closure(self.modules, &self.by_name, [mi]);
+        (!closure[module]).then_some((mi, closure))
+    }
+
     /// Whether a module in `scope` depends on a module that is not indexed.
     pub fn partial_scope(&self, scope: &Scope) -> bool {
         self.modules
@@ -3395,6 +3439,31 @@ mod tests {
         assert_eq!(sees(&index.guard_scope(1, [], series)), ["base", "main"]);
         assert_eq!(sees(&index.guard_scope(1, [3], series)), ["base", "main", "far"]);
         assert_eq!(sees(&index.install_scope(1, series)), ["base", "main", "own"]);
+    }
+
+    #[test]
+    fn a_dependency_another_one_brings_is_implied_by_the_top_of_its_chain() {
+        let manifest = |depends: &str, extra: &str| format!("{{'depends': [{depends}]{extra}}}");
+        let modules = [
+            module("base", &manifest("", "")),
+            module("mail", &manifest("'base'", "")),
+            module("digest", &manifest("'mail'", "")),
+            module("back", &manifest("'base', 'loop'", "")),
+            module("chain", &manifest("'base', 'mail'", "")),
+            module("top", &manifest("'base', 'mail', 'digest'", "")),
+            module("loop", &manifest("'base', 'back'", "")),
+            module("trigger", &manifest("'base', 'mail'", ", 'auto_install': ['base']")),
+            module("unindexed", &manifest("'base', 'ghost'", "")),
+            module("twice", &manifest("'base', 'base'", "")),
+        ];
+        let index = Index::build(&modules, None);
+        let implied = |name: &str| index.implied_depends(index.by_name[name]);
+        assert_eq!(implied("chain"), [(0, 1)]);
+        assert_eq!(implied("top"), [(0, 2), (1, 2)]);
+        assert_eq!(implied("loop"), []);
+        assert_eq!(implied("trigger"), []);
+        assert_eq!(implied("unindexed"), []);
+        assert_eq!(implied("twice"), []);
     }
 
     #[test]
