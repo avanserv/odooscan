@@ -1724,7 +1724,7 @@ pub fn analyze_with(
     };
     let body = &module.body;
     let mut v = PyVisitor::new(&loc, series, known, taint, scope, body);
-    v.facts.controllers = routing::controllers(body);
+    v.facts.controllers = routing::controllers(body, &loc);
     v.facts.inherits_routes = routing::inherits_routes(&v.facts.controllers);
     v.visit_body(body);
     let (patches, diags) = module_state::check(body, &loc);
@@ -3015,7 +3015,11 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
             return false;
         };
         let class = self.facts.controllers.iter().find(|c| c.start == start);
-        class.is_some_and(|c| c.bases.iter().any(|b| *b != ClassBase::Root))
+        class.is_some_and(|c| {
+            c.bases
+                .iter()
+                .any(|b| !matches!(b, ClassBase::Root | ClassBase::Object))
+        })
     }
 
     fn route_checks(&mut self, func: &ast::StmtFunctionDef, routing: Option<&Routing>) {

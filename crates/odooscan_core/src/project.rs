@@ -341,10 +341,7 @@ pub fn load(
         .par_iter_mut()
         .for_each(|module| parse_module_files(module, default_series, taint));
     let known = python::field_classes(modules.iter().flat_map(|m| &m.python).map(|f| &f.facts));
-    let files = modules
-        .iter()
-        .flat_map(|m| m.python.iter().map(|f| (m.name.as_str(), f.rel.as_str(), &f.facts)));
-    let routes = routing::Table::of(files);
+    let routes = routing::Table::of_modules(&modules);
     modules
         .par_iter_mut()
         .for_each(|module| read_again(module, default_series, &known, &routes, taint));

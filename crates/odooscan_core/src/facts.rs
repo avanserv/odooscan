@@ -642,6 +642,8 @@ pub enum RouteKey<T> {
 #[derive(Clone, Debug, Default)]
 pub struct RouteDef {
     pub method: String,
+    /// The `def`'s name.
+    pub pos: Pos,
     pub urls: RouteKey<Vec<String>>,
     /// The literal methods listed, none for `methods=None`, which lets every method through.
     pub methods: RouteKey<Option<Vec<String>>>,
@@ -653,9 +655,11 @@ pub struct RouteDef {
 /// A base of a class that is no model, as the file's imports name it.
 #[derive(Clone, Debug, PartialEq)]
 pub enum ClassBase {
-    /// `odoo.http.Controller`, from 20.0 `odoo.http.routing_map.Controller`, or `object`, which give
-    /// no route.
+    /// `odoo.http.Controller`, from 20.0 `odoo.http.routing_map.Controller`, which makes the class a
+    /// controller of its own and gives no route.
     Root,
+    /// `object`, which gives no route and makes no controller.
+    Object,
     /// The dotted path of a class an import from `odoo.addons` names.
     Addon(String),
     /// The class the file defines above that the name is bound to, by its place among the
@@ -673,6 +677,8 @@ pub struct ControllerFact {
     pub start: TextSize,
     pub bases: Vec<ClassBase>,
     pub routes: Vec<RouteDef>,
+    /// The methods the class keeps with no decorator, at their `def`'s name.
+    pub plain: Vec<Spanned<String>>,
 }
 
 #[derive(Debug, Default)]

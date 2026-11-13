@@ -8,6 +8,7 @@ use crate::facts::{
 };
 use crate::manifest::AutoInstall;
 use crate::project::{Module, SourceFile, code_loaded};
+use crate::routing;
 use crate::series::{self, Series};
 
 /// Fields every model has without declaring them.
@@ -1543,6 +1544,8 @@ pub struct Index<'m> {
     ir_defaults: IrDefaults<'m>,
     view_keys: ViewKeys<'m>,
     pub templates: Inheritance<'m>,
+    /// The controllers of every module.
+    pub routes: routing::Table,
     pub models_with_access: FxHashSet<String>,
     model_by_xmlid: FxHashMap<String, &'m str>,
     pub has_base: bool,
@@ -1617,6 +1620,7 @@ impl<'m> Index<'m> {
             ir_defaults: ir_defaults(modules),
             view_keys,
             templates: Inheritance::new(template_nodes(modules, &templates_loaded)),
+            routes: routing::Table::of_modules(modules),
             models_with_access,
             model_by_xmlid,
             js_paths: js_paths(modules),
