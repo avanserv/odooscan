@@ -9,9 +9,9 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::api_table::{self, Kind};
 use crate::facts::{
-    ClassFact, DefinitionSource, DomainFact, FieldClass, FieldFact, FlowSummary, GuardedRef, MethodDef, ModelKind,
-    OptionValue, Param, Pos, PyFacts, RawDiag, Receiver, Signature, Spanned, SqlColumn, SqlView, Subject, UNREAD_TYPE,
-    XmlRef,
+    ClassBase, ClassFact, DefinitionSource, DomainFact, FieldClass, FieldFact, FlowSummary, GuardedRef, MethodDef,
+    ModelKind, OptionValue, Param, Pos, PyFacts, RawDiag, Receiver, Signature, Spanned, SqlColumn, SqlView, Subject,
+    UNREAD_TYPE, XmlRef,
 };
 use crate::fix::{self, Edit, Fix};
 use crate::route_body::{self, RouteBody};
@@ -2047,7 +2047,8 @@ fn merged_auth<'r>(call: &'r ast::ExprCall, routing: Option<&'r Routing>) -> &'r
 
 /// Whether `func` is a route whose every `@route` call gives `auth="user"`, as a literal or by the
 /// routes it overrides. Odoo refuses the public user there, so a public-only grant does not reach it.
-fn signed_in(func: &ast::StmtFunctionDef, routing: Option<&Routing>) -> bool {
+/// `inherits` tells whether its class has a base that may give a missing auth.
+fn signed_in(func: &ast::StmtFunctionDef, routing: Option<&Routing>, inherits: bool) -> bool {
     let routes: Vec<&ast::ExprCall> = func
         .decorator_list
         .iter()
@@ -2057,7 +2058,7 @@ fn signed_in(func: &ast::StmtFunctionDef, routing: Option<&Routing>) -> bool {
     // `merged_auth` reads a computed auth as the default, which may be any other.
     let literal = |call: &ast::ExprCall| match routing {
         Some(r) => r.auth.is_some(),
-        None => keyword(call, "auth").is_none_or(|e| str_lit(e).is_some()),
+        None => keyword(call, "auth").map_or(!inherits, |e| str_lit(e).is_some()),
     };
     !routes.is_empty() && routes.iter().all(|c| literal(c) && merged_auth(c, routing) == "user")
 }
@@ -2973,7 +2974,7 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
             domain_joins: &self.domain_joins,
         };
         let found = taint::function(func, params, owner, self.series, &names, self.loc, self.taint);
-        let signed_in = signed_in(func, routing);
+        let signed_in = signed_in(func, routing, self.inherits_auth());
         self.facts.diags.extend(found.diags);
         let granted = found.granted.into_iter().map(|d| (signed_in, d));
         self.facts.granted_attachments.extend(granted);
@@ -2988,6 +2989,16 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
             return None;
         };
         self.scope.routing(start, &func.name)
+    }
+
+    /// Whether a method of a class at the top of the file may take its auth from a base. It matters
+    /// only without routing, where the base is one the scan does not read, so its auth is unknown.
+    fn inherits_auth(&self) -> bool {
+        let ([Some(Receiver::Class(_))], Some(start)) = (self.owners.as_slice(), self.class_start) else {
+            return false;
+        };
+        let class = self.facts.controllers.iter().find(|c| c.start == start);
+        class.is_some_and(|c| c.bases.iter().any(|b| *b != ClassBase::Root))
     }
 
     fn route_checks(&mut self, func: &ast::StmtFunctionDef, routing: Option<&Routing>) {
@@ -3875,15 +3886,25 @@ impl<'ast> Visitor<'ast> for PyVisitor<'_, 'ast> {
 mod tests {
     use super::*;
 
-    /// Whether the granted OD717 of `func`, and its flow summary, are of a route only signed-in
-    /// users reach, where `func` follows `class C(http.Controller)` and a model method follows
-    /// `class X(models.Model)`.
-    fn reached_signed_in(class: &str, func: &str) -> (Vec<bool>, Vec<bool>) {
-        let body = "    def r(self):\n        d = request.params.get('d')\n        self.env['x.y']._m(d)\n        \
-                    self.env['ir.attachment'].create({'raw': d, 'public': True})\n";
-        let facts = analyze(&format!("class C({class}):\n{func}{body}"), None);
+    /// The body of a method `r` that creates a public attachment.
+    const PUBLIC_CREATE: &str = "    def r(self):\n        d = request.params.get('d')\n        self.env['x.y']._m(d)\n        \
+                                 self.env['ir.attachment'].create({'raw': d, 'public': True})\n";
+
+    /// Whether each granted OD717 and each flow summary of `facts` is of a route only signed-in
+    /// users reach.
+    fn signed_in_of(facts: &PyFacts) -> (Vec<bool>, Vec<bool>) {
         let granted = facts.granted_attachments.iter().map(|(s, _)| *s).collect();
         (granted, facts.flows.iter().map(|f| f.signed_in).collect())
+    }
+
+    /// Whether the granted OD717 of `func`, and its flow summary, are of a route only signed-in
+    /// users reach, where `func` follows `class C(<class>)` in a file importing `http` and `Base`.
+    fn reached_signed_in(class: &str, func: &str) -> (Vec<bool>, Vec<bool>) {
+        let header = "from odoo import http\nfrom .base import Base\n\n";
+        signed_in_of(&analyze(
+            &format!("{header}class C({class}):\n{func}{PUBLIC_CREATE}"),
+            None,
+        ))
     }
 
     #[test]
@@ -3905,6 +3926,57 @@ mod tests {
             assert_eq!(route(decorators), (vec![signed], vec![signed]), "{decorators}");
         }
         assert_eq!(reached_signed_in("models.Model", ""), (vec![false], vec![false]));
+        // `Base` comes from a file the scan does not read and `Mixin` from nowhere, so the route
+        // either overrides may give any auth.
+        for class in ["Base", "Mixin"] {
+            let base = |decorators: &str| reached_signed_in(class, decorators);
+            assert_eq!(base("    @http.route('/a')\n"), (vec![false], vec![false]), "{class}");
+            assert_eq!(
+                base("    @http.route('/a', auth='user')\n"),
+                (vec![true], vec![true]),
+                "{class}"
+            );
+        }
+    }
+
+    /// Whether the granted OD717 and the flow of `Ext(<bases>).r`, an override with `decorator`
+    /// of a route of `Shop` from another addon giving `auth`, are of a route only signed-in users
+    /// reach, read with the routes of both files.
+    fn override_signed_in(auth: &str, bases: &str, decorator: &str) -> (Vec<bool>, Vec<bool>) {
+        let shop = format!(
+            "from odoo import http\n\nclass Shop(http.Controller):\n    @http.route('/u', auth='{auth}')\n    def r(self):\n        pass\n"
+        );
+        let leaf = format!(
+            "from odoo import http\nfrom odoo.addons.shop.controllers.main import Shop\nfrom odoo.http import request\n\nclass Ext({bases}):\n    {decorator}\n{PUBLIC_CREATE}"
+        );
+        let files = [
+            ("shop", "controllers/main.py", shop.as_str()),
+            ("ext", "controllers/main.py", leaf.as_str()),
+        ];
+        let facts: Vec<PyFacts> = files.iter().map(|(_, _, src)| analyze(src, None)).collect();
+        let table = routing::Table::of(files.iter().zip(&facts).map(|((addon, rel, _), f)| (*addon, *rel, f)));
+        let scope = Scope {
+            table: &table,
+            addon: "ext",
+            rel: "controllers/main.py",
+        };
+        let taint = TaintTable::default();
+        signed_in_of(&analyze_with(&leaf, None, &FieldClasses::default(), &taint, scope))
+    }
+
+    #[test]
+    fn an_override_is_signed_in_by_the_auth_it_inherits() {
+        for (auth, bases, decorator, signed) in [
+            ("public", "Shop", "@http.route()", false),
+            ("user", "Shop", "@http.route()", true),
+            ("public", "Shop", "@http.route(auth='user')", true),
+            // Mixin comes after Shop in the merge, so the auth it may give stands.
+            ("user", "Mixin, Shop", "@http.route()", false),
+            ("user", "Shop, Mixin", "@http.route()", true),
+        ] {
+            let found = override_signed_in(auth, bases, decorator);
+            assert_eq!(found, (vec![signed], vec![signed]), "{auth} {bases} {decorator}");
+        }
     }
 
     fn field(src: &str) -> FieldFact {

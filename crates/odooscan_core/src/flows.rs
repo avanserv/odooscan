@@ -503,9 +503,11 @@ mod tests {
         routed("", route, methods)
     }
 
-    /// `module`, whose route gives the keywords `keywords` after its URL.
+    /// `module`, whose route gives the keywords `keywords` after its URL. Its file imports `http`, so
+    /// the controller's base reads as `http.Controller` rather than as a class the scan does not read.
     fn routed(keywords: &str, route: &str, methods: &str) -> Module {
-        let route = format!("class C(http.Controller):\n    @http.route('/r'{keywords})\n{route}");
+        let route =
+            format!("from odoo import http\nclass C(http.Controller):\n    @http.route('/r'{keywords})\n{route}");
         let model = format!("class X(models.Model):\n    _name = 'x.y'\n\n{methods}");
         let file = |name: &str, src: &str| SourceFile {
             path: PathBuf::from(name),
@@ -684,7 +686,7 @@ mod tests {
     #[test]
     fn a_return_reached_from_a_shallow_and_a_deep_call_is_found_in_either_order() {
         let methods = chain(5, "request.params.get('x')");
-        for (order, line) in [(["a", "b"], 8), (["b", "a"], 4)] {
+        for (order, line) in [(["a", "b"], 9), (["b", "a"], 5)] {
             assert_eq!(
                 scan_messages(
                     &routes(order, |name, m| format!(
@@ -755,7 +757,7 @@ mod tests {
         let route = "    def r(self):\n        return Markup(request.env['x.y']._m1(1))\n";
         assert_eq!(
             scan_messages(route, methods),
-            ["route.py:4 OD703 request.params reaches Markup() through '_m1()' unescaped"]
+            ["route.py:5 OD703 request.params reaches Markup() through '_m1()' unescaped"]
         );
     }
 
@@ -791,7 +793,7 @@ mod tests {
     fn methods_returning_each_other_are_reported_without_the_loop() {
         assert_eq!(
             scan_messages(RETURNS_A, MUTUAL_RETURN),
-            ["route.py:4 OD703 request.params reaches Markup() through '_a()' unescaped"]
+            ["route.py:5 OD703 request.params reaches Markup() through '_a()' unescaped"]
         );
     }
 
@@ -830,7 +832,7 @@ mod tests {
         let route = "    def r(self):\n        return Markup(request.env['x.y']._a(1, request.params.get('x')))\n";
         assert_eq!(
             scan_messages(route, methods),
-            ["route.py:4 OD703 request.params reaches Markup() through '_a()', '_b()', '_a()' unescaped"]
+            ["route.py:5 OD703 request.params reaches Markup() through '_a()', '_b()', '_a()' unescaped"]
         );
     }
 
@@ -839,7 +841,7 @@ mod tests {
         let route = "    def r(self):\n        return Markup(request.env['x.y']._m1(1))\n";
         assert_eq!(
             scan_messages(route, &chain(3, "request.params.get('x')")),
-            ["route.py:4 OD703 request.params reaches Markup() through '_m1()', '_m2()', '_m3()' unescaped"]
+            ["route.py:5 OD703 request.params reaches Markup() through '_m1()', '_m2()', '_m3()' unescaped"]
         );
     }
 
@@ -848,7 +850,7 @@ mod tests {
         let route = "    def r(self, term):\n        return Markup(request.env['x.y']._m1(term))\n";
         assert_eq!(
             scan_messages(route, &chain(2, "'<p>%s</p>' % v")),
-            ["route.py:4 OD703 route parameter 'term' reaches Markup() through '_m1()', '_m2()' unescaped"]
+            ["route.py:5 OD703 route parameter 'term' reaches Markup() through '_m1()', '_m2()' unescaped"]
         );
     }
 
@@ -865,7 +867,7 @@ mod tests {
         assert!(call("f\"https://x/{t}\"").is_empty());
         assert_eq!(
             call("t"),
-            ["route.py:7 OD706 route parameter 't' reaches the URL of requests.get() through '_get()'"]
+            ["route.py:8 OD706 route parameter 't' reaches the URL of requests.get() through '_get()'"]
         );
     }
 
@@ -889,7 +891,7 @@ mod tests {
         assert!(call("'k', 'https://x/'").is_empty());
         assert_eq!(
             call("'k', t"),
-            ["route.py:4 OD706 route parameter 't' reaches the URL of requests.get() through 'get()'"]
+            ["route.py:5 OD706 route parameter 't' reaches the URL of requests.get() through 'get()'"]
         );
     }
 
@@ -912,7 +914,7 @@ mod tests {
         let methods = "    def label(self, prefix):\n        return prefix + self._suffix()\n\n    def _suffix(self):\n        return request.params.get('n')\n";
         assert_eq!(
             scan_messages(route, methods),
-            ["route.py:4 OD703 request.params reaches Markup() through 'label()', '_suffix()' unescaped"]
+            ["route.py:5 OD703 request.params reaches Markup() through 'label()', '_suffix()' unescaped"]
         );
     }
 
@@ -922,7 +924,7 @@ mod tests {
         let methods = "    def label(self, a, b):\n        return a + b\n";
         assert_eq!(
             scan_messages(route, methods),
-            ["route.py:4 OD703 route parameter 't' reaches Markup() through 'label()' unescaped"]
+            ["route.py:5 OD703 route parameter 't' reaches Markup() through 'label()' unescaped"]
         );
     }
 
@@ -1015,7 +1017,7 @@ mod tests {
         assert_eq!(
             found(true, route, methods),
             [
-                "route.py:5 OD717 request.params reaches the content of create() through '_read()', 'data', which public=True lets anyone download"
+                "route.py:6 OD717 request.params reaches the content of create() through '_read()', 'data', which public=True lets anyone download"
             ]
         );
         assert!(found(false, route, methods).is_empty());
@@ -1276,7 +1278,7 @@ mod tests {
             assert_eq!(
                 scan_with_dep(main, model),
                 [
-                    [format!("route.py:4 {code} route parameter 't'")],
+                    [format!("route.py:5 {code} route parameter 't'")],
                     [format!("model.py:8 {code} RPC argument 'v'")]
                 ],
                 "{code}"
