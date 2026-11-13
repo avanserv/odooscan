@@ -1192,6 +1192,7 @@ pub fn function(
         diags: vec![],
         held_join: None,
         held: FxHashMap::default(),
+        continued: None,
         quiet: false,
         testing: false,
         built: false,
@@ -1231,6 +1232,9 @@ struct Flows<'a> {
     held_join: Option<Pos>,
     /// The joins held until a read of their local uses them unchecked.
     held: FxHashMap<Pos, Held>,
+    /// What the arms ending in `continue` leave in the innermost loop's pass being read, which
+    /// reaches the next pass and the code after the loop.
+    continued: Option<State>,
     /// The expression being read copies a held path or tests its start, so it uses no join.
     quiet: bool,
     /// The expression being read is the test of an `if` or an `assert`, whose boolean checks
@@ -1313,18 +1317,27 @@ impl Flows<'_> {
         self.state.merge(after);
     }
 
-    /// A loop body runs twice, so that a value tainted late in it reaches the code above. `enter`
-    /// runs before each pass, as a new iteration starts. The loop may stop after either pass, and
-    /// `enter` may drop what the first left on the target, so both reach the code after it.
+    /// A loop body runs twice, so that a value tainted late in it, or in an arm ending in
+    /// `continue`, reaches the code above. `enter` runs before each pass, as a new iteration
+    /// starts. The loop may stop after either pass, and `enter` may drop what the first left on
+    /// the target, so both reach the code after it.
     fn repeat(&mut self, body: &[Stmt], mut enter: impl FnMut(&mut Self)) {
         self.branch(|f| {
-            enter(f);
-            f.body(body);
-            f.branch(|g| {
-                enter(g);
-                g.body(body);
-            });
+            f.pass(body, &mut enter);
+            f.branch(|g| g.pass(body, &mut enter));
         });
+    }
+
+    /// Reads one pass of a loop body and joins what its arms ending in `continue` leave into the
+    /// state at its end. The outer loop's arms are set aside meanwhile, as a nested loop catches
+    /// its own `continue`.
+    fn pass(&mut self, body: &[Stmt], enter: &mut impl FnMut(&mut Self)) {
+        let outer = self.continued.take();
+        enter(self);
+        self.body(body);
+        if let Some(continued) = std::mem::replace(&mut self.continued, outer) {
+            self.state.merge(continued);
+        }
     }
 
     fn stmt(&mut self, stmt: &Stmt) {
@@ -1409,9 +1422,11 @@ impl Flows<'_> {
         self.state = joined.unwrap_or(before);
     }
 
-    /// Runs one branch of an `if` from the state before it, where each `earlier` test failed; a
-    /// branch that leaves the function or the loop adds nothing to the state after it. Only its
-    /// own test vouches, as a check on one path vouches on the merged one.
+    /// Runs one branch of an `if` from the state before it, where each `earlier` test failed. A
+    /// branch ending in `continue` adds its state to the loop's next pass and the code after the
+    /// loop, one ending in `return` or `raise` adds nothing, and any other, `break` included,
+    /// joins the state after the `if`. Only its own test vouches, as a check on one path vouches
+    /// on the merged one.
     fn arm(
         &mut self,
         test: Option<&Expr>,
@@ -1430,7 +1445,10 @@ impl Flows<'_> {
             self.holds(test, CmpOp::In);
         }
         self.body(body);
-        if !exits(body) {
+        if matches!(body.last(), Some(Stmt::Continue(_))) {
+            let after = std::mem::take(&mut self.state);
+            merge_into(&mut self.continued, after);
+        } else if !exits(body) {
             let after = std::mem::take(&mut self.state);
             merge_into(joined, after);
         }
@@ -5513,6 +5531,75 @@ mod tests {
         let vals = "vals = {'public': True}\n    <loop>\n        <sink>\n        vals['raw'] = <t>";
         let create = "self.env['ir.attachment'].sudo().create(#)";
         assert_eq!(looped(vals, create, "vals", "t"), ["OD717"]);
+    }
+
+    #[test]
+    fn an_arm_ending_in_continue_reaches_the_next_pass() {
+        for (code, sink, t) in loop_sinks() {
+            // As in `loops_carry_taint_around`, OD716 returns after the loop what it browses.
+            let (inside, after) = match sink.strip_prefix("return ") {
+                Some(call) => (format!("r = {call}"), "\n    return r"),
+                None => (sink.to_owned(), ""),
+            };
+            let arm = |test: &str, set: &str, leave: &str, indent: &str| {
+                format!("{indent}if {test}:\n{indent}    {set}\n{indent}    {leave}")
+            };
+            let tainted = |leave| arm("x.a", "v = <t>", leave, "        ");
+            // The outer arm's `continue` must skip the inner loop's passes, yet reach the outer's.
+            let inner = "        v = ''\n        for y in x.c:\n            pass";
+            let reported = [
+                format!(
+                    "v = ''\n    <loop>\n        <sink>\n{}\n{inner}{after}",
+                    tainted("continue")
+                ),
+                format!("v = ''\n    <loop>\n        <sink>\n{}{after}", tainted("continue")),
+                format!(
+                    "v = ''\n    while self:\n        <sink>\n{}{after}",
+                    arm("self.a", "v = <t>", "continue", "        ")
+                ),
+                format!(
+                    "v = ''\n    <loop>\n        for y in x.c:\n{}\n        <sink>{after}",
+                    arm("y.a", "v = <t>", "continue", "            ")
+                ),
+                format!("v = ''\n    <loop>\n        <sink>\n{}{after}", tainted("break")),
+            ];
+            for body in &reported {
+                assert_eq!(looped(body, &inside, "v", t), [code], "{code}: {body}");
+            }
+            let cleared = format!(
+                "v = ''\n    <loop>\n{}\n        v = ''\n    <sink>",
+                tainted("continue")
+            );
+            assert_eq!(looped(&cleared, sink, "v", t), [code], "{code}: {cleared}");
+            let (read, set) = read_and_set(code);
+            let silent = [
+                (
+                    format!(
+                        "v = ''\n    <loop>\n{}\n{inner}\n        <sink>{after}",
+                        tainted("continue")
+                    ),
+                    "v",
+                ),
+                (
+                    format!("v = ''\n    <loop>\n        <sink>\n{}{after}", tainted("return")),
+                    "v",
+                ),
+                (
+                    format!("<loop>\n        v = ''\n{}\n        <sink>{after}", tainted("continue")),
+                    "v",
+                ),
+                (
+                    format!(
+                        "<loop>\n        <sink>\n{}{after}",
+                        arm("x.c", set, "continue", "        ")
+                    ),
+                    read,
+                ),
+            ];
+            for (body, arg) in &silent {
+                assert!(looped(body, &inside, arg, t).is_empty(), "{code}: {body}");
+            }
+        }
     }
 
     /// OD704 is left out: an element or an attribute holds a value of the mapping, not its keys.
