@@ -1041,6 +1041,8 @@ custom/record_values_ext/data/extended.xml:14:33: OD322 rv.thing.new_state has n
 custom/record_values_ext/models/things.py:8:17: OD205 'fallen_id' is a Many2one field elsewhere and is redefined here as Char
 custom/record_values_partial/__manifest__.py:4:34: OD503 module 'ghost_enterprise' is not on the addons path
 custom/redirect14/controllers/main.py:8:16: OD705 route parameter 'kw' reaches the URL of request.redirect(), so the user picks the site the browser goes to; start the URL with a path the code picks
+custom/redirect15/controllers/main.py:8:16: OD705 route parameter 'kw' reaches the URL of request.redirect(), so the user picks the site the browser goes to; start the URL with a path the code picks
+custom/redirect15/controllers/main.py:12:16: OD705 route parameter 'kw' reaches the URL of request.redirect_query(), so the user picks the site the browser goes to; start the URL with a path the code picks
 custom/registry_fields/models/links.py:7:71: OD213 'owner_id' is required, so Odoo refuses ondelete='set null'; use 'restrict' or 'cascade'
 custom/registry_fields/models/links.py:11:19: OD214 'follower_ids' and 'watcher_ids' are Many2many fields of registry.invoice to the same comodel without relation, so Odoo gives both the same table; set relation on one
 custom/registry_fields/models/links.py:14:33: OD215 relation table 'registry_invoice_partners_notified_about_each_payment_reminder_rel' of 'notified_ids' is 66 characters long, and PostgreSQL allows 63; name a shorter one with relation=

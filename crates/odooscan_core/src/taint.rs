@@ -79,7 +79,8 @@ enum Test {
 }
 
 /// The argument at a keyword or position that tells whether a call is the sink. Before `since`
-/// the callee has no such parameter and always acts as the test asks.
+/// the call is the sink whatever the argument: the callee lacks the parameter, or the parameter
+/// does not yet act as the test asks.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct Guard {
     keyword: &'static str,
@@ -161,13 +162,16 @@ const FILE: Arg = Arg::At(0, &["file", "path_or_file", "filepath_or_fp"]);
 /// `file` of the `io.open()` that `from io import open` binds to the same bare name.
 const OPEN_PY2: Arg = Arg::At(0, &["name", "file"]);
 
-/// From 15.0 `request.redirect()` takes `local`, which drops the scheme and the host of the URL
-/// unless it is false (`odoo/http.py:303`); before, it redirects to any URL.
+/// `request.redirect()` takes `local` from 15.0, which drops the scheme and the host of the URL
+/// unless it is false. 15.0 then strips only leading slashes (`odoo/http.py:308`), so
+/// `/\evil.example` still names a host to a browser; 16.0 also strips backslashes
+/// (`odoo/http.py:1724`). Before 16.0 every URL is the sink. The bound is a choice: 16.0 strips them
+/// only from fix a1e710378077 (2024-10-28), and saas~16.1-16.4, saas~17.1 and saas~17.3 never do.
 const REDIRECT_LOCAL: Guard = Guard {
     keyword: "local",
     pos: 2,
     test: Test::Is(false),
-    since: Some(Series { major: 15, minor: 0 }),
+    since: Some(Series { major: 16, minor: 0 }),
 };
 
 /// The command of a `subprocess` call, which a shell runs only with `shell=True`, the ninth
@@ -263,7 +267,6 @@ const TABLE: &[(&str, Role)] = &[
             LOCATION,
             Guard {
                 pos: 3,
-                since: None,
                 ..REDIRECT_LOCAL
             },
         ),
@@ -5091,14 +5094,24 @@ mod tests {
     }
 
     #[test]
-    fn a_redirect_is_local_from_15_0_on() {
-        for series in ["12.0", "14.0"] {
+    fn a_redirect_is_local_from_16_0_on() {
+        for series in ["12.0", "14.0", "15.0", "saas~15.3"] {
             assert_eq!(codes_in(Some(series), "request.redirect(t)"), ["OD705"], "{series}");
         }
-        for series in [Some("15.0"), Some("18.0"), None] {
-            assert!(codes_in(series, "request.redirect(t)").is_empty(), "{series:?}");
+        for call in ["request.redirect(t, local=True)", "request.redirect_query(t, {})"] {
+            assert_eq!(codes_in(Some("15.0"), call), ["OD705"], "{call}");
+        }
+        for series in [Some("16.0"), Some("18.0"), None] {
+            for call in [
+                "request.redirect(t)",
+                "request.redirect(t, local=True)",
+                "request.redirect_query(t, {})",
+            ] {
+                assert!(codes_in(series, call).is_empty(), "{series:?} {call}");
+            }
         }
         assert_eq!(codes_in(Some("18.0"), "request.redirect(t, local=False)"), ["OD705"]);
+        assert!(codes_in(Some("15.0"), "request.redirect(f'/shop/{t}')").is_empty());
     }
 
     #[test]
