@@ -106,6 +106,7 @@ custom/bad_sale/controllers/session.py:48:9: OD130 assigning the session's uid s
 custom/bad_sale/controllers/session.py:66:12: OD131 != between secrets takes longer the more of the secret a guess gets right, which lets a caller find it a character at a time; compare them with consteq() or hmac.compare_digest()
 custom/bad_sale/data/orphan.xml:1:1: OD502 'data/orphan.xml' is not in the manifest's data or demo, so Odoo never loads it
 custom/bad_sale/models/callers.py:8:9: OD704 route parameter 'post' reaches self.write() through '_apply_values()', so the user picks the fields it sets as superuser; copy only the fields the user may set
+custom/bad_sale/models/callers.py:17:9: OD704 route parameter 'post' reaches self.write() through 'apply_values()', so the user picks the fields it sets as superuser; copy only the fields the user may set
 custom/bad_sale/models/domains.py:7:64: OD210 'is_company': res.partner has no field 'is_company'
 custom/bad_sale/models/domains.py:12:55: OD210 'nmae': res.partner has no field 'nmae'
 custom/bad_sale/models/flows.py:10:9: OD122 UPDATE on bad_order bypasses the ORM, so records this transaction already read keep stale values; call flush_model() before the query and invalidate_model() after it (flush() and invalidate_cache() before 16.0)
