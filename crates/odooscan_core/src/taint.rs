@@ -232,8 +232,8 @@ const TABLE: &[(&str, Role)] = &[
     ("request.get_http_params", Role::Source(Kind::Keys)),
     ("request.get_json_data", Role::Source(Kind::Keys)),
     ("request.jsonrequest", Role::Source(Kind::Keys)),
-    // Its form from saas~15.4 (16.0 addons/payment_adyen/controllers/main.py:274), which the
-    // contiguous match of a source does not read as the row above.
+    // The form of the row above from saas~15.3, whose Request keeps the body on its dispatcher
+    // (`odoo/http.py:1598`). It needs its own row, as a source matches a contiguous path only.
     ("request.dispatcher.jsonrequest", Role::Source(Kind::Keys)),
     ("request.httprequest.args", Role::Source(Kind::Keys)),
     ("request.httprequest.form", Role::Source(Kind::Keys)),
@@ -904,6 +904,9 @@ struct State {
     vals: FxHashMap<String, Vals>,
     /// Locals bound to a path that an `os.path.join()` of `Flows::held` built.
     paths: FxHashMap<String, Sites>,
+    /// Locals bound to a value `Flows::built` marks, which no check of a path's start may take as
+    /// its prefix.
+    built: FxHashSet<String>,
     /// Locals and attributes of `self` bound to an outgoing client of `CLIENTS`.
     clients: FxHashSet<String>,
     /// Locals bound to a header name or to a list or mapping of headers, by the header
@@ -1126,6 +1129,7 @@ impl State {
         }
         join_into(&mut self.vals, other.vals, join_vals);
         join_into(&mut self.paths, other.paths, join_sites);
+        self.built.extend(other.built);
         // A check on one path only still vouches for the records: as at 18.0
         // payment/controllers/portal.py:76-78, the path without it browses no id.
         self.checked.extend(other.checked);
@@ -1185,6 +1189,7 @@ pub fn function(
         held: FxHashMap::default(),
         quiet: false,
         testing: false,
+        built: false,
     };
     let names = flows.params(&func.parameters, params);
     flows.body(&func.body);
@@ -1226,6 +1231,9 @@ struct Flows<'a> {
     /// The expression being read is the test of an `if` or an `assert`, whose boolean checks
     /// vouch only where they pass, as `Flows::tested` reads them.
     testing: bool,
+    /// The expression being read has an `os.path.join()` of a value the user sets in it, or a local
+    /// bound to such a value, so a prefix it builds is not one the code picks.
+    built: bool,
 }
 
 /// A join `Flows::reach` holds.
@@ -1316,9 +1324,10 @@ impl Flows<'_> {
     fn stmt(&mut self, stmt: &Stmt) {
         match stmt {
             Stmt::Assign(a) => {
-                let t = self.assigned(&a.targets, &a.value);
+                let (t, built) = self.assigned(&a.targets, &a.value);
                 for target in &a.targets {
                     self.bind(target, t.clone(), Some(&a.value));
+                    self.bind_built(target, built);
                 }
             }
             Stmt::AnnAssign(ast::StmtAnnAssign {
@@ -1326,13 +1335,15 @@ impl Flows<'_> {
                 value: Some(value),
                 ..
             }) => {
-                let t = self.assigned(std::slice::from_ref(target), value);
+                let (t, built) = self.assigned(std::slice::from_ref(target), value);
                 self.bind(target, t, Some(value));
+                self.bind_built(target, built);
             }
             Stmt::AugAssign(a) => {
                 let merged = self.merged_vals(a);
-                let t = join(self.expr(&a.target), self.expr(&a.value));
+                let (t, built) = self.building(|s| join(s.expr(&a.target), s.expr(&a.value)));
                 self.bind(&a.target, values(t), None);
+                self.bind_built(&a.target, built);
                 if let Some((name, vals)) = merged {
                     self.state.vals.insert(name, vals);
                 }
@@ -1410,7 +1421,6 @@ impl Flows<'_> {
         if let Some(test) = test {
             self.test(test);
             self.vouch(self.tested(test, CmpOp::In));
-            self.confine(test, CmpOp::In);
             self.holds(test, CmpOp::In);
         }
         self.body(body);
@@ -1420,11 +1430,15 @@ impl Flows<'_> {
         }
     }
 
-    /// Reads the test of an `if` or an `assert`.
+    /// Reads the test of an `if` or an `assert`, confining on each operand of an `and` before the
+    /// next, which runs only where the operands before it hold.
     fn test(&mut self, test: &Expr) {
-        let testing = std::mem::replace(&mut self.testing, true);
-        self.expr(test);
-        self.testing = testing;
+        for operand in conjuncts(test) {
+            let testing = std::mem::replace(&mut self.testing, true);
+            self.expr(operand);
+            self.testing = testing;
+            self.confine(operand, CmpOp::In);
+        }
     }
 
     /// Applies a check that holds from here on: `x in allowed` leaves `x` harmless, and a test
@@ -1783,6 +1797,7 @@ impl Flows<'_> {
         };
         self.bind_vals(name, target, value);
         self.bind_path(name, value);
+        self.state.built.remove(name);
         self.bind_client(name, value);
         self.set(name.to_owned(), target, t);
     }
@@ -2115,17 +2130,32 @@ impl Flows<'_> {
         })
     }
 
-    /// The taint of a value assigned to `targets`, holding the `os.path.join()` that builds it when
-    /// it is bound to one local, bare or in normalizers, until a check of its start may confine it.
-    fn assigned(&mut self, targets: &[Expr], value: &Expr) -> Option<Taint> {
+    /// The taint of a value assigned to `targets`, and whether `Flows::built` marks it, holding the
+    /// `os.path.join()` that builds it when it is bound to one local, bare or in normalizers, until
+    /// a check of its start may confine it.
+    fn assigned(&mut self, targets: &[Expr], value: &Expr) -> (Option<Taint>, bool) {
         let local = matches!(targets, [Expr::Name(_)]);
         self.held_join = local.then(|| self.join_site(value)).flatten();
         let copy = local && self.held_join.is_none() && self.sites_of(value).is_some();
         let quiet = std::mem::replace(&mut self.quiet, copy);
-        let t = self.expr(value);
+        let t = self.building(|s| s.expr(value));
         self.quiet = quiet;
         self.held_join = None;
         t
+    }
+
+    /// What `f` returns, and whether `Flows::built` marks what it reads.
+    fn building<T>(&mut self, f: impl FnOnce(&mut Self) -> T) -> (T, bool) {
+        let outer = std::mem::replace(&mut self.built, false);
+        let t = f(self);
+        (t, std::mem::replace(&mut self.built, outer))
+    }
+
+    /// Marks a local assigned a value `Flows::built` marks, after `Flows::bind_name` cleared it.
+    fn bind_built(&mut self, target: &Expr, built: bool) {
+        if let Expr::Name(n) = target {
+            toggle(&mut self.state.built, n.id.as_str(), built);
+        }
     }
 
     /// The position of the built-in `os.path.join()` that `value` is, or that normalizers take.
@@ -2201,9 +2231,9 @@ impl Flows<'_> {
     }
 
     /// Confines a normalized local whose start `test` holds to prefixes the code picks, where
-    /// `test` holds for `op` as in `Flows::guard`: no `..` then leaves the prefix. Any prefix
-    /// past the root counts, though `/srv/docs` admits `/srv/docs2`. In an `if` the state is the arm's, so a
-    /// read after it, as after a test that raises on a prefix it denies, is still unchecked.
+    /// `test` holds for `op` as in `Flows::guard`: no `..` then leaves the prefix. Any prefix past
+    /// the root counts, though `/srv/docs` admits `/srv/docs2`. In an `if` the state is the arm's,
+    /// so a read after it, as after a test that raises on a prefix it denies, is still unchecked.
     fn confine(&mut self, test: &Expr, op: CmpOp) {
         for t in holding(test, op) {
             let Some((name, prefix)) = started(t, op) else {
@@ -2226,13 +2256,18 @@ impl Flows<'_> {
         }
     }
 
-    /// Whether the code picks a prefix that confines a path: the user sets none of it, no held
-    /// join built it, and it is more than the root, which every absolute path starts with.
+    /// Whether the code picks a prefix that confines a path: the user sets none of it, it names no
+    /// local bound to a held join, it uses no `os.path.join()` of a user value nor a local derived
+    /// from one, and it is more than the root, which every absolute path starts with. Like the test
+    /// of the start, it reads no file.
     fn picked_prefix(&mut self, prefix: &Expr) -> bool {
         let root =
             str_lit(prefix).is_some_and(|s| matches!(s, "" | "/" | "\\")) || matches_path("os.sep", &self.path(prefix));
         let siteless = self.names_in(prefix).iter().all(|n| !self.state.paths.contains_key(n));
-        !root && siteless && self.expr(prefix).is_none()
+        let quiet = std::mem::replace(&mut self.quiet, true);
+        let (t, built) = self.building(|s| s.expr(prefix));
+        self.quiet = quiet;
+        !root && siteless && t.is_none() && !built
     }
 
     /// Reports, at the call of each, the held joins no read reported and no check ever confined.
@@ -2246,10 +2281,7 @@ impl Flows<'_> {
 
     fn expr(&mut self, expr: &Expr) -> Option<Taint> {
         match expr {
-            Expr::Name(n) => {
-                self.read(n.id.as_str());
-                self.state.vars.get(n.id.as_str()).cloned()
-            }
+            Expr::Name(n) => self.name(n.id.as_str()),
             Expr::Attribute(a) => match self.table.lookup(&self.path(expr)) {
                 Some((pattern, Role::Source(kind))) => self.source(pattern.to_owned(), expr, kind),
                 _ => match self_attr(expr).and_then(|key| self.state.vars.get(&key)) {
@@ -2268,6 +2300,14 @@ impl Flows<'_> {
             }
             _ => self.collection(expr),
         }
+    }
+
+    /// A local's taint, reading the held joins it uses and marking `Flows::built` when it holds a
+    /// value that marked it.
+    fn name(&mut self, name: &str) -> Option<Taint> {
+        self.read(name);
+        self.built |= self.state.built.contains(name);
+        self.state.vars.get(name).cloned()
     }
 
     /// What a call returns; a test of a path's start reads no file, so it uses no held join.
@@ -2294,8 +2334,22 @@ impl Flows<'_> {
             | Expr::Generator(ast::ExprGenerator { elt, generators, .. }) => {
                 self.comprehension(generators, |s| values(s.expr(elt)))
             }
+            Expr::Yield(_) | Expr::YieldFrom(_) | Expr::Lambda(_) => self.deferred(expr),
             _ => self.operator(expr),
         }
+    }
+
+    /// Reads each local a `yield` or a `lambda` names, other than those a `lambda` or a
+    /// comprehension in it binds: code that runs later may open a held path among them. No flow
+    /// through it is followed.
+    fn deferred(&mut self, expr: &Expr) -> Option<Taint> {
+        let mut free = Free::default();
+        free.visit_expr(expr);
+        free.names.retain(|n| self.locals.contains(n));
+        for name in &free.names {
+            self.read(name);
+        }
+        None
     }
 
     fn operator(&mut self, expr: &Expr) -> Option<Taint> {
@@ -2522,6 +2576,7 @@ impl Flows<'_> {
                     ),
                     _ => sink_callee(pattern, call),
                 };
+                self.mark_join(pattern, row.sink, &args, &keywords);
                 self.reach(row.sink, callee, arg, expr);
                 // A parser, a loader or a command hands back the data in another form, and a
                 // search or a read stays a call of the model's method, so the flows that pass
@@ -2538,6 +2593,15 @@ impl Flows<'_> {
             Some((_, role)) => transformed(role, call, args, keywords),
             None => self.plain_call(call, expr, &path, receiver, args, keywords),
         }
+    }
+
+    /// Marks `Flows::built` for an `os.path.join()` of a value the user sets on entry, even one
+    /// harmless for OD707, as `basename(t)` is: the user still picks the part of a prefix it builds.
+    /// What a method returns or a caller passes is the code's here, as the store's directory is.
+    fn mark_join(&mut self, pattern: &str, sink: Sink, args: &[Option<Taint>], keywords: &[Option<Taint>]) {
+        let join = pattern == "os.path.join" && sink == Sink::Path;
+        let user = |t: &Taint| t.origin.is_user() || t.origins.iter().any(|o| o.origin.is_user());
+        self.built |= join && args.iter().chain(keywords).flatten().any(user);
     }
 
     /// An item's value, reporting a key the user picks on records under `sudo()`, which reads any
@@ -3385,6 +3449,73 @@ impl<'a> Visitor<'a> for Names {
             self.0.push(n.id.to_string());
         }
         visitor::walk_expr(self, expr);
+    }
+}
+
+/// The names an expression reads from its scope, less those a `lambda` or a comprehension in it
+/// binds over the scope's own.
+#[derive(Default)]
+struct Free {
+    names: Vec<String>,
+    bound: Vec<String>,
+}
+
+impl<'a> Visitor<'a> for Free {
+    fn visit_expr(&mut self, expr: &'a Expr) {
+        let outer = self.bound.len();
+        match expr {
+            Expr::Name(n) if n.ctx.is_load() => {
+                let name = n.id.as_str();
+                if !self.bound.iter().chain(&self.names).any(|m| m == name) {
+                    self.names.push(name.to_owned());
+                }
+            }
+            // The defaults are evaluated in the enclosing scope, before the parameters bind.
+            Expr::Lambda(l) => {
+                if let Some(params) = &l.parameters {
+                    for default in params.iter_non_variadic_params().filter_map(|p| p.default()) {
+                        self.visit_expr(default);
+                    }
+                    self.bound.extend(params.iter().map(|p| p.name().to_string()));
+                }
+                self.visit_expr(&l.body);
+            }
+            Expr::ListComp(ast::ExprListComp { elt, generators, .. })
+            | Expr::SetComp(ast::ExprSetComp { elt, generators, .. })
+            | Expr::Generator(ast::ExprGenerator { elt, generators, .. }) => self.comprehension(&[elt], generators),
+            Expr::DictComp(d) => {
+                let elts: Vec<&Expr> = d.key.as_deref().into_iter().chain([&*d.value]).collect();
+                self.comprehension(&elts, &d.generators);
+            }
+            _ => visitor::walk_expr(self, expr),
+        }
+        self.bound.truncate(outer);
+    }
+}
+
+impl Free {
+    /// Visits a comprehension, whose first iterable is evaluated in the enclosing scope, before
+    /// any of its targets bind.
+    fn comprehension<'a>(&mut self, elts: &[&'a Expr], generators: &'a [ast::Comprehension]) {
+        if let Some(first) = generators.first() {
+            self.visit_expr(&first.iter);
+        }
+        for g in generators {
+            let mut targets = Names::default();
+            targets.visit_expr(&g.target);
+            self.bound.extend(targets.0);
+        }
+        for (i, g) in generators.iter().enumerate() {
+            if i > 0 {
+                self.visit_expr(&g.iter);
+            }
+            for test in &g.ifs {
+                self.visit_expr(test);
+            }
+        }
+        for elt in elts {
+            self.visit_expr(elt);
+        }
     }
 }
 
@@ -6565,6 +6696,21 @@ mod tests {
         );
     }
 
+    #[test]
+    fn a_value_passed_again_as_one_derived_from_the_parameter_is_not_its_own() {
+        let helper = summary(
+            Params::None,
+            "def _f(self, file):\n    obj = file\n    while obj:\n        self._b(obj)\n        obj = obj.stream\n",
+        );
+        let passed: Vec<bool> = helper
+            .edges
+            .iter()
+            .filter(|e| matches!(e.target, FlowTarget::Arg(..)))
+            .map(|e| e.own)
+            .collect();
+        assert_eq!(passed, [false]);
+    }
+
     /// The findings of a controller's route of parameter `t` that runs `body`, where `ROOT` is a
     /// module's constant.
     fn opened(body: &str) -> Vec<String> {
@@ -6641,6 +6787,73 @@ mod tests {
             ),
         ] {
             assert_eq!(opened(&body), [unchecked[0].clone(), unchecked[0].clone()], "{body}");
+        }
+    }
+
+    #[test]
+    fn a_prefix_a_user_value_builds_confines_nothing() {
+        let joined = "    p = os.path.normpath(os.path.join(ROOT, t))\n";
+        let tested = "    if p.startswith(root):\n        open(p)";
+        let finding = opened("    os.path.join(ROOT, t)");
+        let twice = [finding[0].clone(), finding[0].clone()];
+        for body in [
+            format!("{joined}    if p.startswith(os.path.join(ROOT, t)):\n        open(p)"),
+            format!("    root = os.path.join(ROOT, t) + os.sep\n{joined}{tested}"),
+            format!("    root: str = os.path.join(ROOT, t) + os.sep\n{joined}{tested}"),
+            format!("    root = os.path.join(ROOT, t)\n    root += os.sep\n{joined}{tested}"),
+            format!("    held = os.path.join(ROOT, t)\n    root = held + os.sep\n{joined}{tested}"),
+            format!(
+                "    if t:\n        root = '/srv/x/'\n    else:\n        root = os.path.join(ROOT, t) + os.sep\n{joined}{tested}"
+            ),
+        ] {
+            assert_eq!(opened(&body), twice, "{body}");
+        }
+        let base = format!("    root = os.path.join(ROOT, os.path.basename(t)) + os.sep\n{joined}{tested}");
+        assert_eq!(opened(&base), finding);
+        for prefix in [
+            "os.path.join(ROOT, 'static')",
+            "os.path.join(request.env['ir.attachment']._filestore(), 'exports')",
+            "os.path.join(self.env['ir.config_parameter'].sudo().get_param('x.dir'), 'exports')",
+        ] {
+            let checked = "    if not p.startswith(root):\n        raise NotFound()\n    open(p)";
+            let body = format!("    root = {prefix} + os.sep\n{joined}{checked}");
+            assert!(opened(&body).is_empty(), "{body}");
+        }
+        let store = "    store = os.path.join(request.env['ir.attachment']._filestore(), 'exports')\n";
+        let checked = "    if not p.startswith(root):\n        raise NotFound()\n    open(p)";
+        let body = format!("{store}    root = store + os.sep\n{joined}{checked}");
+        assert!(opened(&body).is_empty(), "{body}");
+    }
+
+    #[test]
+    fn a_check_confines_the_operands_of_an_and_after_it() {
+        let joined = "    p = os.path.normpath(os.path.join(ROOT, t))\n";
+        for body in [
+            "    if p.startswith(ROOT) and os.path.isfile(p):\n        open(p)",
+            "    assert p.startswith(ROOT) and os.path.isfile(p)\n    open(p)",
+            "    if t and p.startswith(ROOT) and os.path.isfile(p):\n        open(p)",
+        ] {
+            assert!(opened(&format!("{joined}{body}")).is_empty(), "{body}");
+        }
+        let body = format!("{joined}    if os.path.isfile(p) and p.startswith(ROOT):\n        open(p)");
+        assert_eq!(opened(&body), opened("    os.path.join(ROOT, t)"));
+    }
+
+    #[test]
+    fn a_yield_or_a_lambda_uses_a_held_path() {
+        let checked = "    p = os.path.normpath(os.path.join(ROOT, t))\n    if p.startswith(ROOT):\n        pass\n";
+        let finding = opened("    os.path.join(ROOT, t)");
+        for used in [
+            "yield p",
+            "yield from p",
+            "return sorted(t, key=lambda n: open(p))",
+            "return sorted(t, key=lambda n, p=p: open(p))",
+            "yield [x for p in p]",
+        ] {
+            assert_eq!(opened(&format!("{checked}    {used}")), finding, "{used}");
+        }
+        for unused in ["return sorted(t, key=lambda p: p.name)", "yield [p.name for p in t]"] {
+            assert!(opened(&format!("{checked}    {unused}")).is_empty(), "{unused}");
         }
     }
 
