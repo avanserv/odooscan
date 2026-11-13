@@ -1297,6 +1297,11 @@ struct Held {
     /// A check of its local's start confined it on some path, so it is reported only when read
     /// where none holds.
     checked: bool,
+    /// `file_open()` reads its local, which confines the path to the addons paths there only.
+    opened: bool,
+    /// A nested function, class or `match` names its local, whose body the scanner does not
+    /// follow, so it may open the path where `file_open()` does not confine it.
+    nested: bool,
 }
 
 impl Flows<'_> {
@@ -1440,7 +1445,26 @@ impl Flows<'_> {
                 self.test(&a.test);
                 self.guard(&a.test, CmpOp::In);
             }
+            Stmt::FunctionDef(_) | Stmt::ClassDef(_) | Stmt::Match(_) => self.nested(stmt),
             _ => {}
+        }
+    }
+
+    /// Marks the held joins of each local named in a statement whose body the scan does not follow,
+    /// so that `file_open()` opening them elsewhere keeps them reported.
+    fn nested(&mut self, stmt: &Stmt) {
+        let mut free = Free::default();
+        free.visit_stmt(stmt);
+        free.names.retain(|n| self.locals.contains(n));
+        let at = free
+            .names
+            .iter()
+            .filter_map(|n| self.state.paths.get(n))
+            .flat_map(|s| s.at.clone());
+        for pos in at.collect::<Vec<_>>() {
+            if let Some(held) = self.held.get_mut(&pos) {
+                held.nested = true;
+            }
         }
     }
 
@@ -2313,12 +2337,13 @@ impl Flows<'_> {
     }
 
     /// The taint of the path `file_open()` takes: a join in it, or held for a local it reads, is
-    /// harmless there, so only another read of that local reports the held join.
+    /// harmless there, so only another read of that local, or a nested body naming it, reports the
+    /// held join.
     fn open_path(&mut self, path: &Expr) -> Option<Taint> {
         let sites = self.sites_of(path);
         for pos in sites.iter().flat_map(|s| &s.at) {
             if let Some(held) = self.held.get_mut(pos) {
-                held.checked = true;
+                held.opened = true;
             }
         }
         let quiet = self.quiet || sites.is_some();
@@ -2351,11 +2376,21 @@ impl Flows<'_> {
         let Some(t) = t.filter(|t| !t.safe.has(code(sink))) else {
             return;
         };
-        let (taint, checked) = match self.held.remove(&pos) {
-            Some(kept) => (joined(kept.taint, t), kept.checked),
-            None => (t, false),
+        let held = match self.held.remove(&pos) {
+            Some(kept) => Held {
+                taint: joined(kept.taint, t),
+                callee,
+                ..kept
+            },
+            None => Held {
+                taint: t,
+                callee,
+                checked: false,
+                opened: false,
+                nested: false,
+            },
         };
-        self.held.insert(pos, Held { taint, callee, checked });
+        self.held.insert(pos, held);
     }
 
     /// Reports the held joins a read of the local `name` uses where no check confines them, unless
@@ -2411,11 +2446,13 @@ impl Flows<'_> {
         !root && siteless && t.is_none() && !built
     }
 
-    /// Reports, at the call of each, the held joins no read reported and no check ever confined.
+    /// Reports, at the call of each, the held joins no read reported and no check ever confined,
+    /// but those only `file_open()` opens.
     fn report_held(&mut self) {
         let mut held: Vec<(Pos, Held)> = std::mem::take(&mut self.held).into_iter().collect();
         held.sort_by_key(|(pos, _)| *pos);
-        for (pos, held) in held.into_iter().filter(|(_, h)| !h.checked) {
+        let unconfined = |h: &Held| !h.checked && (!h.opened || h.nested);
+        for (pos, held) in held.into_iter().filter(|(_, h)| unconfined(h)) {
             self.sink_pos(Sink::Path, held.callee, Some(held.taint), pos);
         }
     }
@@ -3623,8 +3660,9 @@ impl<'a> Visitor<'a> for Names {
     }
 }
 
-/// The names an expression reads from its scope, less those a `lambda` or a comprehension in it
-/// binds over the scope's own.
+/// The names an expression or a statement reads from its scope, less those a `lambda`, a
+/// comprehension or a function in it binds over the scope's own. A name a nested function assigns
+/// still counts.
 #[derive(Default)]
 struct Free {
     names: Vec<String>,
@@ -3632,6 +3670,24 @@ struct Free {
 }
 
 impl<'a> Visitor<'a> for Free {
+    /// Visits the decorators and defaults of a function in the enclosing scope, then its body with
+    /// its parameters bound.
+    fn visit_stmt(&mut self, stmt: &'a Stmt) {
+        let Stmt::FunctionDef(f) = stmt else {
+            return visitor::walk_stmt(self, stmt);
+        };
+        for decorator in &f.decorator_list {
+            self.visit_expr(&decorator.expression);
+        }
+        for default in f.parameters.iter_non_variadic_params().filter_map(|p| p.default()) {
+            self.visit_expr(default);
+        }
+        let outer = self.bound.len();
+        self.bound.extend(f.parameters.iter().map(|p| p.name().to_string()));
+        self.visit_body(&f.body);
+        self.bound.truncate(outer);
+    }
+
     fn visit_expr(&mut self, expr: &'a Expr) {
         let outer = self.bound.len();
         match expr {
@@ -7202,6 +7258,28 @@ mod tests {
             "    file_open(os.path.join(ROOT, t) + '.xml')".to_owned(),
         ] {
             assert_eq!(opened(&body), unchecked, "{body}");
+        }
+    }
+
+    #[test]
+    fn a_join_file_open_opens_and_a_nested_body_names_is_reported() {
+        let p = "    p = os.path.join(ROOT, t)\n";
+        let unchecked = opened("    os.path.join(ROOT, t)");
+        for body in [
+            format!("{p}    file_open(p)\n    def inner():\n        return open(p)"),
+            format!("{p}    def inner():\n        return open(p)\n    file_open(p)"),
+            format!("{p}    file_open(p)\n    match t:\n        case 'x':\n            return open(p)"),
+            format!("{p}    file_open(p)\n    class Reader:\n        def read(self):\n            return open(p)"),
+            // The case body is not followed, so naming the local counts even where it is safe.
+            format!("{p}    file_open(p)\n    match t:\n        case _:\n            file_open(p)"),
+        ] {
+            assert_eq!(opened(&body), unchecked, "{body}");
+        }
+        for body in [
+            format!("{p}    file_open(p)\n    def inner(p):\n        return open(p)"),
+            format!("{p}    file_open(p)\n    def inner(q):\n        return q"),
+        ] {
+            assert!(opened(&body).is_empty(), "{body}");
         }
     }
 
