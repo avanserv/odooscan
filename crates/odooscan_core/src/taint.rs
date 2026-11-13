@@ -2926,10 +2926,10 @@ impl Flows<'_> {
     /// Whether the code chose the values of `container`, so that a membership test in it confines
     /// the value tested: a list, tuple, set or dict literal of `fixed` items, a list or set
     /// comprehension over any of these, a module constant bound to such a literal, `self._x` or `cls._x`
-    /// but `MODEL_ATTRS`, what a method of `self` returns for `fixed` arguments but one that reads
-    /// records or lists fields, or a local of `State::chosen` bound to any of these. Nothing else
-    /// is: a string holds every substring, and a parameter, a record's values or a model's fields
-    /// may be the user's.
+    /// but `MODEL_ATTRS`, what a private `_get_*` method of `self` whose name does not end in `fields`
+    /// returns for `fixed` arguments, or a local of `State::chosen` bound to any of these. Nothing
+    /// else is: a string holds every substring, and a parameter, a record's values, a model's fields
+    /// or a recordset, which tests membership against `_fields`, may be the user's.
     fn chosen(&self, container: &Expr) -> bool {
         match container {
             Expr::Name(n) if self.locals.contains(n.id.as_str()) => self.state.chosen.get(n.id.as_str()) == Some(&true),
@@ -2946,15 +2946,16 @@ impl Flows<'_> {
         }
     }
 
-    /// Whether `call` is of a method of `self` that neither reads records nor lists fields, with
-    /// `fixed` arguments.
+    /// Whether `call` is of a private `_get_*` method of `self` whose name does not end in `fields`,
+    /// with `fixed` arguments. Such a helper conventionally returns values the code wrote; any other
+    /// method, such as `sudo()`, `filtered()` or `_get_fields()`, may return records or fields.
     fn chosen_return(&self, call: &ast::ExprCall) -> bool {
         let Expr::Attribute(m) = &*call.func else { return false };
         let method = m.attr.as_str();
         let keywords = call.arguments.keywords.iter().map(|k| &k.value);
         of_self(&m.value)
-            && !is_data_method(method)
-            && method != "fields_get"
+            && method.starts_with("_get_")
+            && !method.ends_with("fields")
             && call.arguments.args.iter().chain(keywords).all(|a| self.fixed(a))
     }
 
@@ -5887,12 +5888,12 @@ mod tests {
             ("", "t in ('name', 'ref')"),
             ("", "t in {'name': 1, 'ref': 2}"),
             ("    allowed = ['name', 'ref']\n", "t in allowed"),
-            ("    allowed = self._inputs()\n", "t in allowed"),
+            ("    allowed = self._get_inputs()\n", "t in allowed"),
             ("", "t in ALLOWED"),
             ("", "t in self._ALLOWED"),
             ("", "t in cls._ALLOWED"),
-            ("", "t in self._inputs()"),
-            ("", "t in self._inputs('portal')"),
+            ("", "t in self._get_inputs()"),
+            ("", "t in self._get_inputs('portal')"),
             ("", "flag and t in ALLOWED"),
             (
                 "    allowed = [f for f in ALLOWED if f != 'password']\n",
@@ -5960,6 +5961,19 @@ mod tests {
             format!("    if t in self.fields_get().keys():\n        {sink}"),
             format!("    model_fields = P._fields\n    if t in model_fields:\n        {sink}"),
             format!("    all_fields = P.fields_get()\n    if t in all_fields:\n        {sink}"),
+            format!("    if t in self.sudo():\n        {sink}"),
+            format!("    if t in self.exists():\n        {sink}"),
+            format!("    if t in self.browse(1):\n        {sink}"),
+            format!("    if t in self.with_context(a=1):\n        {sink}"),
+            format!("    if t in self.filtered('active'):\n        {sink}"),
+            format!("    if t in self.check_field_access_rights('read', ['name']):\n        {sink}"),
+            format!("    if t in self.fields_get_keys():\n        {sink}"),
+            format!("    if t in self._get_fields():\n        {sink}"),
+            format!("    if t in self._get_inputs_fields():\n        {sink}"),
+            format!("    if t in self.get_inputs():\n        {sink}"),
+            format!("    if t in self._inputs():\n        {sink}"),
+            format!("    allowed = self.sudo()\n    if t in allowed:\n        {sink}"),
+            "    rec = self.sudo()\n    if t in rec:\n        rec[t]".to_owned(),
         ] {
             assert_eq!(allowed_codes(&body), ["OD714"], "{body}");
         }
