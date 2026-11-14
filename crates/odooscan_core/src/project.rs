@@ -592,7 +592,11 @@ impl ModuleContext<'_> {
         let source = self.source(path, Some(text))?;
         if is_python(&source.path) {
             let unread = python::FieldClasses::default();
-            let facts = python::analyze_with(text, self.series, &unread, self.taint, routing::Scope::default());
+            let scope = routing::Scope {
+                rel: &source.rel,
+                ..routing::Scope::default()
+            };
+            let facts = python::analyze_with(text, self.series, &unread, self.taint, scope);
             return Some(Ok(source.with(facts)));
         }
         let facts = self.data_facts(&source, text, bytes);

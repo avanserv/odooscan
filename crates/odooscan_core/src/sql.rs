@@ -8,7 +8,7 @@ use ruff_python_ast::{self as ast, BoolOp, Expr, Operator, Stmt};
 use ruff_text_size::TextSize;
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use crate::python::{SAME_MODEL, exits, is_cursor, str_lit, tail_name};
+use crate::python::{SAME_MODEL, capture, exits, is_cursor, str_lit, tail_name};
 
 /// ORM methods that drop cached values; from 16.0 the public ones flush pending writes first.
 const INVALIDATIONS: &[&str] = &[
@@ -793,13 +793,7 @@ impl<'a> Visitor<'a> for QueryVars<'a> {
     }
 
     fn visit_pattern(&mut self, pattern: &'a ast::Pattern) {
-        let name = match pattern {
-            ast::Pattern::MatchAs(p) => p.name.as_ref(),
-            ast::Pattern::MatchStar(p) => p.name.as_ref(),
-            ast::Pattern::MatchMapping(p) => p.rest.as_ref(),
-            _ => None,
-        };
-        if let Some(name) = name {
+        if let Some(name) = capture(pattern) {
             self.bind(name.as_str(), None);
         }
         visitor::walk_pattern(self, pattern);

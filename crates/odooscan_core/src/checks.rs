@@ -20,15 +20,13 @@ use crate::index::{
     ViewTree, asset_glob_set, base_private_method, full_id, js_module_path, loaded_data, located,
 };
 use crate::mentions::HOOK_PREFIXES;
+use crate::module_state::UPGRADE_DIRS;
 use crate::project::{ASSET_EXTENSIONS, Module, SourceFile, code_loaded};
 use crate::routing::{ClassAt, Lineage, Table};
 use crate::rules::rule;
 use crate::series::{self, Series};
 use crate::xml::{LOCATOR, QWEB, UNKNOWN_CONTEXT};
 use crate::{domain, flows, manifest, modifier, module_state, python, routing};
-
-/// Directories of upgrade scripts, which name XML ids of past versions.
-const UPGRADE_DIRS: &[&str] = &["migrations", "upgrades"];
 
 /// The directory of IoT box drivers and interfaces. The `iot` module zips `iot_handlers/*/*` of
 /// every installed module (18.0 enterprise `iot/controllers/main.py:61-65`) and the box loads each
@@ -1008,16 +1006,12 @@ fn manifest_keys<'m>(index: &Index<'m>, module: &'m Module, out: &mut Out<'m>) {
 }
 
 /// The scripts Odoo runs from the upgrade folders of `module`, each with its folder as
-/// `(dir, name)`: the `pre-`, `post-` and `end-` `.py` files of a folder under `UPGRADE_DIRS` but
-/// `tests` (18.0 `odoo/modules/migration.py:108-140`, `:184-191`).
+/// `(dir, folder)`.
 fn stage_scripts(module: &Module) -> impl Iterator<Item = ((&str, &str), &SourceFile<PyFacts>)> {
-    module.python.iter().filter_map(|file| {
-        let mut parts = file.rel.split('/');
-        let (dir, folder, name) = (parts.next()?, parts.next()?, parts.next()?);
-        let staged = ["pre-", "post-", "end-"].iter().any(|s| name.starts_with(s)) && name.ends_with(".py");
-        (parts.next().is_none() && UPGRADE_DIRS.contains(&dir) && folder != "tests" && staged)
-            .then_some(((dir, folder), file))
-    })
+    module
+        .python
+        .iter()
+        .filter_map(|file| Some((module_state::stage_script(&file.rel)?, file)))
 }
 
 /// OD514 on an upgrade folder whose scripts the Odoo of `series` never runs, once, at its first
@@ -1042,8 +1036,8 @@ fn upgrade_folders<'m>(module: &'m Module, series: Option<Series>, out: &mut Out
             *first = file;
         }
     }
-    for ((_, name), file) in firsts {
-        if let Some(message) = manifest::upgrade_folder_refusal(name, &version.value, series) {
+    for ((_, folder), file) in firsts {
+        if let Some(message) = manifest::upgrade_folder_refusal(folder, &version.value, series) {
             out.push(&file.path, "OD514", Pos { line: 1, col: 1 }, message);
         }
     }
@@ -1057,7 +1051,7 @@ fn upgrade_scripts<'m>(module: &'m Module, series: Option<Series>, out: &mut Out
     if !rule("OD515").applies_to(series) {
         return;
     }
-    let scripts = stage_scripts(module).filter(|((_, name), _)| manifest::upgrade_folder_named(name));
+    let scripts = stage_scripts(module).filter(|((_, folder), _)| manifest::upgrade_folder_named(folder));
     for (_, file) in scripts {
         let (pos, message) = match &file.facts.migrate {
             Migrate::Unread => continue,

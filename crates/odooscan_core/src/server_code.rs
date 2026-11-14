@@ -10,6 +10,7 @@ use ruff_text_size::{Ranged, TextRange};
 use rustc_hash::FxHashSet;
 
 use crate::async_names::names_async;
+use crate::python::capture;
 use crate::series::Series;
 
 /// The names the rule reads as holding records of `model_id`. Odoo sets them from 10.0: 9.0 sets
@@ -268,13 +269,7 @@ impl<'a> Visitor<'a> for Walk<'a> {
     }
 
     fn visit_pattern(&mut self, pattern: &'a Pattern) {
-        let name = match pattern {
-            Pattern::MatchAs(p) => p.name.as_ref(),
-            Pattern::MatchStar(p) => p.name.as_ref(),
-            Pattern::MatchMapping(p) => p.rest.as_ref(),
-            _ => None,
-        };
-        self.bound.extend(name.map(ast::Identifier::as_str));
+        self.bound.extend(capture(pattern).map(ast::Identifier::as_str));
         visitor::walk_pattern(self, pattern);
     }
 
