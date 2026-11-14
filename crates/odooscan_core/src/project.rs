@@ -324,6 +324,8 @@ pub struct Discovery {
     pub notices: Vec<String>,
     /// The checked modules whose manifest Odoo cannot read, by path.
     pub broken: Vec<Broken>,
+    /// The modules, checked or indexed, whose manifest `manifest::read` rejects, by name.
+    pub rejected: FxHashMap<String, OdooReads>,
 }
 
 /// The manifest of a checked module that Odoo cannot read, so the module is not loaded.
@@ -376,12 +378,14 @@ pub fn load(
         .par_iter_mut()
         .for_each(|module| read_again(module, default_series, &known, &routes, taint));
     notices.extend(python2_notices(&modules, default_series));
+    let odoo_reads = rejected.iter().map(|r| (r.name.clone(), r.rejection.odoo)).collect();
     let (broken, rejected_notices) = rejected_manifests(rejected);
     notices.extend(rejected_notices);
     Discovery {
         modules,
         notices,
         broken,
+        rejected: odoo_reads,
     }
 }
 
@@ -994,6 +998,8 @@ mod tests {
             "{:#?}",
             discovery.notices
         );
+        assert_eq!(discovery.rejected.len(), 1);
+        assert_eq!(discovery.rejected.get("open"), Some(&OdooReads::No));
     }
 
     #[test]
@@ -1047,6 +1053,9 @@ mod tests {
                 "legacy/__manifest__.py:1:14: Python 2 syntax, which 10.0 runs; this module is not indexed",
             ]
         );
+        assert_eq!(discovery.rejected.len(), 2);
+        assert_eq!(discovery.rejected.get("legacy"), Some(&OdooReads::AsPython2));
+        assert_eq!(discovery.rejected.get("latin"), Some(&OdooReads::No));
     }
 
     #[test]

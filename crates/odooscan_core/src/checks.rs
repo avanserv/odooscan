@@ -515,6 +515,19 @@ fn public_write_message(row: &AccessRow, module: &str, series: Option<Series>) -
     })
 }
 
+/// What OD503 says of `dep`, a module the scan does not index, given how the Odoo of its series
+/// reads its manifest when odooscan rejects it. A manifest that Odoo reads but odooscan does not
+/// gets its own wording, since its notice alone says why.
+fn unknown_dependency(dep: &str, rejected: Option<&manifest::OdooReads>) -> String {
+    match rejected {
+        Some(manifest::OdooReads::No) => format!("Odoo cannot read the manifest of module '{dep}'"),
+        Some(manifest::OdooReads::AsPython2 | manifest::OdooReads::AsExpression) => {
+            format!("odooscan cannot read the manifest of module '{dep}'")
+        }
+        None => format!("module '{dep}' is not on the addons path"),
+    }
+}
+
 /// OD402 on the rows that write for public or portal users, in the files Odoo loads. A row with no
 /// group of an id written twice may hold another value in the database. A plain `model_id` cell may
 /// also hold the model's description, which finds no kind, so that row reports.
@@ -1723,7 +1736,7 @@ impl<'m> Ctx<'_, 'm> {
                     manifest,
                     "OD503",
                     dep.pos,
-                    format!("module '{}' is not on the addons path", dep.value),
+                    unknown_dependency(&dep.value, self.index.rejected.get(dep.value.as_str())),
                 ),
                 Some(&d) if self.index.reaches(d, me) => out.push(
                     manifest,
@@ -6378,9 +6391,11 @@ mod tests {
     use super::{
         MagicEra, applies, cache_global, callable_attr, csv_label, derived_label, fetches_own_view, field_name,
         has_last_update, magic_era, no_access_message, public_write_message, reads_model_access, shadowed_member,
-        static_only, stores_parent_path, tuple_checked, tuple_listed, unmatched_asset, warns_on_labels,
+        static_only, stores_parent_path, tuple_checked, tuple_listed, unknown_dependency, unmatched_asset,
+        warns_on_labels,
     };
     use crate::facts::{AccessRow, DefinitionSource, Perms, Pos};
+    use crate::manifest::OdooReads;
     use crate::series::Series;
 
     fn everyone_row(group: &str, grants: Perms) -> AccessRow {
@@ -6476,6 +6491,22 @@ mod tests {
         for series in [Some("saas~19.4"), Some("20.0")] {
             assert_eq!(message(series), ir_access, "{series:?}");
         }
+    }
+
+    #[test]
+    fn the_unknown_dependency_message_says_whether_odoo_reads_the_manifest() {
+        assert_eq!(
+            unknown_dependency("x", Some(&OdooReads::No)),
+            "Odoo cannot read the manifest of module 'x'"
+        );
+        for reads in [OdooReads::AsPython2, OdooReads::AsExpression] {
+            assert_eq!(
+                unknown_dependency("x", Some(&reads)),
+                "odooscan cannot read the manifest of module 'x'",
+                "{reads:?}"
+            );
+        }
+        assert_eq!(unknown_dependency("x", None), "module 'x' is not on the addons path");
     }
 
     #[test]

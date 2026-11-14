@@ -118,6 +118,10 @@ fn an_indexed_manifest_that_does_not_parse_gets_a_notice() {
     assert!(report.notices.iter().any(|n| n == notice), "{:#?}", report.notices);
     let found: Vec<_> = report.diagnostics.iter().map(|d| (d.code, d.line, d.column)).collect();
     assert_eq!(found, [("OD503", 4, 25)]);
+    assert_eq!(
+        report.diagnostics[0].message,
+        "Odoo cannot read the manifest of module 'manifest_unclosed'"
+    );
 }
 
 #[test]

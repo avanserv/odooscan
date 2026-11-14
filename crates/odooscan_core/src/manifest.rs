@@ -569,7 +569,7 @@ impl Rejection {
 }
 
 /// Whether the Odoo of the series reads a manifest odooscan rejects.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OdooReads {
     No,
     /// It parses only as the Python 2 the series runs.

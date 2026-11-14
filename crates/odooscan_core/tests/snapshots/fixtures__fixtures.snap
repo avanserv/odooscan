@@ -749,7 +749,7 @@ custom/manifest_license_empty_14/__manifest__.py:5:16: OD507 the manifest's lice
 custom/manifest_license_missing/__manifest__.py:1:1: OD507 the manifest names no license, which Odoo reads as LGPL-3
 custom/manifest_license_unknown/__manifest__.py:6:16: OD508 Odoo knows no license 'MIT', so updating the module list fails
 custom/manifest_unclosed/__manifest__.py:5:1: OD000 unexpected EOF while parsing
-custom/manifest_unclosed_user/__manifest__.py:4:25: OD503 module 'manifest_unclosed' is not on the addons path
+custom/manifest_unclosed_user/__manifest__.py:4:25: OD503 Odoo cannot read the manifest of module 'manifest_unclosed'
 custom/manifest_unhashable/__manifest__.py:5:17: OD000 not hashable: Python hashes each item of a set
 custom/manifest_unliteral/__manifest__.py:4:16: OD000 not a literal: Odoo reads the manifest with ast.literal_eval
 custom/manifest_unpaired/__manifest__.py:1:40: OD000 not a key/value pair: Odoo updates a dict with each item of the manifest
