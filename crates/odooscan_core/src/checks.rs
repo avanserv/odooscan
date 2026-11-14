@@ -22,11 +22,11 @@ use crate::index::{
 use crate::mentions::HOOK_PREFIXES;
 use crate::module_state::UPGRADE_DIRS;
 use crate::project::{ASSET_EXTENSIONS, Module, SourceFile, code_loaded};
-use crate::routing::{ClassAt, Lineage, Table};
+use crate::routing::{ClassAt, Endpoint, Origin};
 use crate::rules::rule;
 use crate::series::{self, Series};
 use crate::xml::{LOCATOR, QWEB, UNKNOWN_CONTEXT};
-use crate::{domain, flows, manifest, modifier, module_state, python, routing};
+use crate::{domain, flows, manifest, modifier, module_state, python};
 
 /// The directory of IoT box drivers and interfaces. The `iot` module zips `iot_handlers/*/*` of
 /// every installed module (18.0 enterprise `iot/controllers/main.py:61-65`) and the box loads each
@@ -346,72 +346,78 @@ fn literal_urls(route: &RouteDef) -> &[String] {
     }
 }
 
-/// The literal paths the controllers a module sees declare, for OD231.
+/// The endpoints Odoo builds of the controllers a module sees, by each literal path, for OD231.
 struct Paths<'t> {
-    table: &'t Table,
-    declared: FxHashMap<&'t str, Vec<(ClassAt<'t>, &'t RouteDef)>>,
+    endpoints: Vec<Endpoint<'t>>,
+    by_url: FxHashMap<&'t str, Vec<usize>>,
 }
 
 impl<'t> Paths<'t> {
-    /// OD231 on each literal path of `class` that another class declares too, as its position and
-    /// its message. Of two classes of one module, the later one is reported, and of two modules,
-    /// the one that sees the other.
-    fn shadowed(&self, class: ClassAt<'t>) -> Vec<(Pos, String)> {
-        let Some(ours) = self.table.lineage(class) else {
-            return vec![];
-        };
+    fn of(endpoints: Vec<Endpoint<'t>>) -> Self {
+        let mut by_url: FxHashMap<&str, Vec<usize>> = FxHashMap::default();
+        for (i, endpoint) in endpoints.iter().enumerate() {
+            for url in endpoint.urls {
+                by_url.entry(url).or_default().push(i);
+            }
+        }
+        Self { endpoints, by_url }
+    }
+
+    /// OD231 on each path a route of `module` gives an endpoint that another endpoint serves too,
+    /// as the route and the message. Each clash is reported once, where `outranks` leaves it.
+    fn shadowed(&self, index: &Index, module: &str) -> Vec<(Origin<'t>, String)> {
         let mut found = vec![];
-        for route in &class.class.routes {
-            for url in literal_urls(route) {
-                let declared = self.declared.get(url.as_str()).into_iter().flatten();
-                if let Some((other, theirs)) = declared.copied().find(|o| self.clashes((class, route, &ours), *o)) {
-                    let message = format!(
-                        "path '{url}' is also routed by {}.{} in module {}, so one of the two hides the other",
-                        other.class.name, theirs.method, other.addon
-                    );
-                    found.push((route.pos, message));
+        let mut reported = FxHashSet::default();
+        for ours in &self.endpoints {
+            for &origin in ours.origins.iter().filter(|o| o.at.addon == module) {
+                for url in ours.urls {
+                    let mut others = self.by_url[url.as_str()].iter().map(|&i| &self.endpoints[i]);
+                    let Some(theirs) = others.find(|theirs| clashes(index, (ours, origin), theirs)) else {
+                        continue;
+                    };
+                    if reported.insert((std::ptr::from_ref(origin.route), url)) {
+                        let other = theirs.origins[0];
+                        let message = format!(
+                            "path '{url}' is also routed by {}.{} in module {}, so one of the two hides the other",
+                            other.at.class.name, other.route.method, other.at.addon
+                        );
+                        found.push((origin, message));
+                    }
                 }
             }
         }
         found
     }
+}
 
-    /// Whether Odoo serves two endpoints for the path both routes declare: the classes are built
-    /// into controllers apart, or they are one controller and the methods differ, and a request
-    /// method may reach either.
-    fn clashes(
-        &self,
-        (class, route, ours): (ClassAt<'t>, &RouteDef, &Lineage),
-        (other, theirs): (ClassAt<'t>, &RouteDef),
-    ) -> bool {
-        let earlier = (other.rel, other.class.start) < (class.rel, class.class.start);
-        if std::ptr::eq(other.class, class.class) || (other.addon == class.addon && !earlier) {
-            return false;
-        }
-        if !overlap(self.methods(class, route), self.methods(other, theirs)) {
-            return false;
-        }
-        let Some(lineage) = self.table.lineage(other) else {
-            return false;
-        };
-        let one_endpoint = route.method == theirs.method && ours.shares_top(&lineage);
-        !(ours.holds(other.class) || lineage.holds(class.class) || one_endpoint)
-    }
+/// Whether OD231 reports at `origin` of `ours` that `theirs` serves a path of it too: they share no
+/// route, a request method may reach either, and no route of `theirs` reports the clash instead.
+fn clashes(index: &Index, (ours, origin): (&Endpoint, Origin), theirs: &Endpoint) -> bool {
+    let shared = ours
+        .origins
+        .iter()
+        .any(|o| theirs.origins.iter().any(|t| std::ptr::eq(o.route, t.route)));
+    !shared
+        && overlap(ours.methods.as_ref(), theirs.methods.as_ref())
+        && !theirs.origins.iter().any(|&other| outranks(index, other, origin))
+}
 
-    /// The request methods Odoo merges for a route, none when the scan does not read them.
-    fn methods(&self, at: ClassAt<'t>, route: &RouteDef) -> Option<Option<Vec<String>>> {
-        let scope = routing::Scope {
-            table: self.table,
-            addon: at.addon,
-            rel: at.rel,
-        };
-        scope.routing(at.class.start, &route.method)?.methods
+/// Whether a clash between two routes is reported at `other` rather than at `origin`: of one
+/// module, the later route, and of two, the one that sees the other and loads after it, so the
+/// module that brings the clash in.
+fn outranks(index: &Index, other: Origin, origin: Origin) -> bool {
+    if other.at.addon == origin.at.addon {
+        return (other.at.rel, other.route.pos) > (origin.at.rel, origin.route.pos);
     }
+    let (Some(&theirs), Some(&ours)) = (index.by_name.get(other.at.addon), index.by_name.get(origin.at.addon)) else {
+        return false;
+    };
+    index.sees(theirs, ours) && index.loads_before(ours, theirs)
 }
 
 /// Whether a request may take either of two lists of methods, `None` inside letting every method
 /// through. Methods the scan does not read may be any, so they overlap none.
-fn overlap(a: Option<Option<Vec<String>>>, b: Option<Option<Vec<String>>>) -> bool {
+fn overlap(a: Option<&Option<Vec<String>>>, b: Option<&Option<Vec<String>>>) -> bool {
     match (a, b) {
         (Some(Some(a)), Some(Some(b))) => a.iter().any(|m| b.iter().any(|n| m.eq_ignore_ascii_case(n))),
         (Some(_), Some(_)) => true,
@@ -1882,27 +1888,23 @@ impl<'m> Ctx<'_, 'm> {
     fn routes(&self, out: &mut Out<'m>) {
         let table = &self.index.routes;
         let name = self.module.name.as_str();
-        let seen = |addon: &&str| self.index.by_name.get(addon).is_some_and(|&mi| self.scope.sees(mi));
-        let mut others: Vec<_> = table.addons().filter(seen).flat_map(|a| table.module(a)).collect();
-        others.retain(|c| served(c.rel));
-        others.sort_by_key(|c| (c.addon, c.rel, c.class.start));
-        let mut paths = Paths {
-            table,
-            declared: FxHashMap::default(),
-        };
-        for other in others {
-            for route in &other.class.routes {
-                for url in literal_urls(route) {
-                    paths.declared.entry(url).or_default().push((other, route));
-                }
-            }
-        }
-        for file in self.module.python.iter().filter(|f| served(&f.rel)) {
+        let files: Vec<_> = self.module.python.iter().filter(|f| served(&f.rel)).collect();
+        for file in &files {
             for class in table.module(name).filter(|c| c.rel == file.rel) {
                 self.undecorated_overrides(out, &file.path, class);
-                for (pos, message) in paths.shadowed(class) {
-                    out.push(&file.path, "OD231", pos, message);
-                }
+            }
+        }
+        let spells = |c: &ClassAt| served(c.rel) && c.class.routes.iter().any(|r| !literal_urls(r).is_empty());
+        if !table.module(name).any(|c| spells(&c)) {
+            return;
+        }
+        let seen = |addon: &&str| self.index.by_name.get(addon).is_some_and(|&mi| self.scope.sees(mi));
+        let mut classes: Vec<_> = table.addons().filter(seen).flat_map(|a| table.module(a)).collect();
+        classes.retain(|c| served(c.rel));
+        classes.sort_by_key(|c| (c.addon, c.rel, c.class.start));
+        for (origin, message) in Paths::of(table.endpoints(&classes)).shadowed(self.index, name) {
+            if let Some(file) = files.iter().find(|f| f.rel == origin.at.rel) {
+                out.push(&file.path, "OD231", origin.route.pos, message);
             }
         }
     }

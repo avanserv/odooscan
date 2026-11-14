@@ -2060,6 +2060,17 @@ impl<'m> Index<'m> {
         self.models.get(model).map(Vec::as_slice).unwrap_or_default()
     }
 
+    /// Whether `from` may use `to`, as `scope` of `from` holds it: Odoo loads `to` wherever `from`
+    /// is installed.
+    pub fn sees(&self, from: usize, to: usize) -> bool {
+        from == to || self.always_installed(to) || self.reaches(from, to)
+    }
+
+    /// Whether Odoo loads `a` ahead of `b` on a database that installs both.
+    pub fn loads_before(&self, a: usize, b: usize) -> bool {
+        self.load_rank[a] < self.load_rank[b]
+    }
+
     /// Whether `from` depends on `to`, directly or through other modules.
     pub fn reaches(&self, from: usize, to: usize) -> bool {
         let mut seen = vec![false; self.modules.len()];
@@ -3653,6 +3664,29 @@ mod tests {
         assert_eq!(sees(&index.guard_scope(1, [], series)), ["base", "main"]);
         assert_eq!(sees(&index.guard_scope(1, [3], series)), ["base", "main", "far"]);
         assert_eq!(sees(&index.install_scope(1, series)), ["base", "main", "own"]);
+    }
+
+    #[test]
+    fn a_module_sees_its_depends_and_the_always_installed_and_loads_by_depth_then_name() {
+        let manifest = |depends: &str, extra: &str| format!("{{'depends': [{depends}]{extra}}}");
+        let modules = [
+            module("base", &manifest("", "")),
+            module("web", &manifest("'base'", ", 'auto_install': True")),
+            module("main", &manifest("'base'", "")),
+            module("heir", &manifest("'main'", "")),
+            module("aside", &manifest("'web'", ", 'auto_install': True")),
+            module("side", &manifest("'base'", "")),
+        ];
+        let index = Index::build(&modules, None);
+        let sees = |from: &str, to: &str| index.sees(index.by_name[from], index.by_name[to]);
+        assert!(sees("heir", "main") && sees("heir", "base") && sees("main", "main"));
+        assert!(sees("main", "web") && sees("main", "aside") && sees("web", "aside"));
+        assert!(!sees("main", "heir") && !sees("main", "side") && !sees("aside", "main"));
+        let before = |a: &str, b: &str| index.loads_before(index.by_name[a], index.by_name[b]);
+        assert!(before("base", "web") && before("main", "heir") && before("web", "aside"));
+        // At one depth the name decides.
+        assert!(before("main", "side") && before("aside", "heir") && !before("side", "main"));
+        assert!(!before("main", "main"));
     }
 
     #[test]

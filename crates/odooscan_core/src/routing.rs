@@ -66,27 +66,6 @@ impl Table {
         Some(ClassAt { addon, rel, class })
     }
 
-    /// The classes `at` is made of, itself included, none when a base is one the table does not
-    /// hold, whose own bases may be anything, or when none is Odoo's `Controller`, so that Odoo
-    /// builds no controller of it.
-    pub fn lineage(&self, at: ClassAt<'_>) -> Option<Lineage> {
-        let mut lineage = Lineage::default();
-        let mut todo = vec![at];
-        while let Some(c) = todo.pop() {
-            if !lineage.classes.insert(std::ptr::from_ref(c.class)) {
-                continue;
-            }
-            for base in &c.class.bases {
-                match base {
-                    ClassBase::Root => _ = lineage.tops.insert(std::ptr::from_ref(c.class)),
-                    ClassBase::Object => {}
-                    base => todo.push(self.base(c, base)?),
-                }
-            }
-        }
-        (!lineage.tops.is_empty()).then_some(lineage)
-    }
-
     /// The nearest ancestor of `at` that routes `method`, when `at` is a controller: a held
     /// base reaches Odoo's `Controller`.
     pub fn routed_ancestor<'t>(&'t self, at: ClassAt<'t>, method: &str) -> Option<ClassAt<'t>> {
@@ -106,6 +85,128 @@ impl Table {
             todo.extend(c.class.bases.iter().rev().filter_map(|b| self.base(c, b)));
         }
         routed.filter(|_| rooted)
+    }
+
+    /// The endpoints Odoo builds of `classes`, the served controllers of one database, that serve
+    /// literal paths. Odoo builds one controller per class with `Controller` among its own bases,
+    /// of the leaves of its subclasses among `classes`, and per method keeps each key of the last
+    /// definition giving it (18.0 `odoo/http.py:778-789`, `:838-849`, 20.0
+    /// `odoo/http/routing_map.py:243-254`, `:303-314`). The scan cannot order the leaves, so a key
+    /// is read only where they agree once a definition another overrides is left out.
+    pub fn endpoints<'t>(&'t self, classes: &[ClassAt<'t>]) -> Vec<Endpoint<'t>> {
+        let held: FxHashSet<_> = classes.iter().map(|c| std::ptr::from_ref(c.class)).collect();
+        let mut children = Children::default();
+        for &c in classes {
+            for base in self.bases(c).filter(|b| held.contains(&std::ptr::from_ref(b.class))) {
+                children.entry(std::ptr::from_ref(base.class)).or_default().push(c);
+            }
+        }
+        let tops = classes.iter().filter(|c| c.class.bases.contains(&ClassBase::Root));
+        tops.flat_map(|&top| self.family_endpoints(&leaves(top, &children)))
+            .collect()
+    }
+
+    /// The endpoints of the controller Odoo builds of `leaves`, for a family that spells a literal
+    /// path in its classes or their ancestors.
+    fn family_endpoints<'t>(&'t self, leaves: &[ClassAt<'t>]) -> Vec<Endpoint<'t>> {
+        let routes = self.routes_above(leaves);
+        if !routes.iter().any(|r| matches!(r.urls, RouteKey::Given(_))) {
+            return vec![];
+        }
+        let mut methods: Vec<&str> = routes.iter().map(|r| r.method.as_str()).collect();
+        methods.sort_unstable();
+        methods.dedup();
+        methods.into_iter().filter_map(|m| self.endpoint(leaves, m)).collect()
+    }
+
+    /// The routes of `leaves` and of the classes they inherit.
+    fn routes_above<'t>(&'t self, leaves: &[ClassAt<'t>]) -> Vec<&'t RouteDef> {
+        let mut seen = FxHashSet::default();
+        let mut routes = vec![];
+        let mut todo = leaves.to_vec();
+        while let Some(c) = todo.pop() {
+            if seen.insert(std::ptr::from_ref(c.class)) {
+                routes.extend(&c.class.routes);
+                todo.extend(self.bases(c));
+            }
+        }
+        routes
+    }
+
+    /// The endpoint of `method` in the controller Odoo builds of `leaves`, none when the scan
+    /// cannot tell its paths or no definition gives any.
+    fn endpoint<'t>(&'t self, leaves: &[ClassAt<'t>], method: &str) -> Option<Endpoint<'t>> {
+        let walks: Vec<_> = leaves.iter().map(|&leaf| self.walk(leaf, method)).collect();
+        let (urls, origins) = self.decide(&walks, |r| &r.urls)?;
+        let methods = self.decide(&walks, |r| &r.methods).map(|(m, _)| m.cloned().flatten());
+        Some(Endpoint {
+            urls: urls?,
+            origins,
+            methods,
+        })
+    }
+
+    /// A key over the walks of the leaves, with the routes that give it: the last giving layer of
+    /// each, less one a subclass of another overrides. None when one is a base the scan does not
+    /// read or the rest disagree or are not literal, and no value when no route gives it.
+    fn decide<'t, T: PartialEq>(
+        &'t self,
+        walks: &[Vec<Option<Origin<'t>>>],
+        key: impl Fn(&RouteDef) -> &RouteKey<T>,
+    ) -> Option<(Option<&'t T>, Vec<Origin<'t>>)> {
+        let mut givers: Vec<Origin<'t>> = vec![];
+        for walk in walks {
+            match last_giver(walk, &key) {
+                None => {}
+                Some(None) => return None,
+                Some(Some(o)) if givers.iter().any(|g| std::ptr::eq(g.route, o.route)) => {}
+                Some(Some(o)) => givers.push(*o),
+            }
+        }
+        let overridden = |g: &&Origin<'t>| givers.iter().any(|o| self.inherits(o.at, g.at.class));
+        let kept: Vec<Origin<'t>> = givers.iter().filter(|g| !overridden(g)).copied().collect();
+        let Some(first) = kept.first() else {
+            return Some((None, kept));
+        };
+        let RouteKey::Given(value) = key(first.route) else {
+            return None;
+        };
+        let agree = kept
+            .iter()
+            .all(|g| matches!(key(g.route), RouteKey::Given(v) if v == value));
+        agree.then_some((Some(value), kept))
+    }
+
+    /// Whether `at` inherits `ancestor` through bases the table holds.
+    fn inherits(&self, at: ClassAt<'_>, ancestor: &ControllerFact) -> bool {
+        let mut seen = FxHashSet::default();
+        let mut todo: Vec<_> = self.bases(at).collect();
+        while let Some(c) = todo.pop() {
+            if std::ptr::eq(c.class, ancestor) {
+                return true;
+            }
+            if seen.insert(std::ptr::from_ref(c.class)) {
+                todo.extend(self.bases(c));
+            }
+        }
+        false
+    }
+
+    /// The definitions of `method` in `at` and its ancestors, as `Walk` lays them out.
+    fn walk<'t>(&'t self, at: ClassAt<'t>, method: &str) -> Vec<Option<Origin<'t>>> {
+        let mut walk = Walk {
+            table: self,
+            method,
+            seen: FxHashSet::default(),
+            layers: vec![],
+        };
+        walk.class(at);
+        walk.layers
+    }
+
+    /// The classes the bases of `at` name that the table holds.
+    fn bases<'t>(&'t self, at: ClassAt<'t>) -> impl Iterator<Item = ClassAt<'t>> {
+        at.class.bases.iter().filter_map(move |b| self.base(at, b))
     }
 
     /// The controllers of a file, with its path as the table holds it.
@@ -143,24 +244,42 @@ pub struct ClassAt<'t> {
     pub class: &'t ControllerFact,
 }
 
-/// The classes a controller class is made of, by address.
-#[derive(Debug, Default)]
-pub struct Lineage {
-    classes: FxHashSet<*const ControllerFact>,
-    /// Those with Odoo's `Controller` among their own bases, each of which Odoo builds one
-    /// controller of, merged with all of its subclasses.
-    tops: FxHashSet<*const ControllerFact>,
+/// The classes of a scope by each class they name as a base.
+type Children<'t> = FxHashMap<*const ControllerFact, Vec<ClassAt<'t>>>;
+
+/// The leaves of the family of `top`: it and its descendants in `children`, those none descends from.
+fn leaves<'t>(top: ClassAt<'t>, children: &Children<'t>) -> Vec<ClassAt<'t>> {
+    let mut seen = FxHashSet::default();
+    let mut leaves = vec![];
+    let mut todo = vec![top];
+    while let Some(c) = todo.pop() {
+        if !seen.insert(std::ptr::from_ref(c.class)) {
+            continue;
+        }
+        match children.get(&std::ptr::from_ref(c.class)) {
+            Some(below) => todo.extend(below),
+            None => leaves.push(c),
+        }
+    }
+    leaves
 }
 
-impl Lineage {
-    pub fn holds(&self, class: &ControllerFact) -> bool {
-        self.classes.contains(&std::ptr::from_ref(class))
-    }
+/// A route of a class of the table.
+#[derive(Clone, Copy, Debug)]
+pub struct Origin<'t> {
+    pub at: ClassAt<'t>,
+    pub route: &'t RouteDef,
+}
 
-    /// Whether Odoo merges both classes into one controller.
-    pub fn shares_top(&self, other: &Self) -> bool {
-        !self.tops.is_disjoint(&other.tops)
-    }
+/// A method of a controller Odoo builds, with the literal paths it serves.
+#[derive(Debug)]
+pub struct Endpoint<'t> {
+    pub urls: &'t [String],
+    /// The routes that give `urls`, several when the leaves of the controller agree on them.
+    pub origins: Vec<Origin<'t>>,
+    /// The literal request methods, none inside when every method passes, none when the scan
+    /// cannot tell them.
+    pub methods: Option<Option<Vec<String>>>,
 }
 
 /// Where the file a scan reads sits among the controllers of the scan. `rel` also decides whether
@@ -202,18 +321,12 @@ impl Scope<'_> {
         if !own.routes.iter().any(|r| r.method == method) {
             return None;
         }
-        let mut walk = Walk {
-            table: self.table,
-            method,
-            seen: FxHashSet::default(),
-            layers: vec![],
-        };
-        walk.class(ClassAt {
+        let at = ClassAt {
             addon: self.addon,
             rel,
             class: own,
-        });
-        let layers = &walk.layers;
+        };
+        let layers = &self.table.walk(at, method);
         Some(Routing {
             urls: last_given(layers, vec![], |r| &r.urls),
             methods: last_given(layers, None, |r| &r.methods),
@@ -231,7 +344,7 @@ struct Walk<'t, 'm> {
     method: &'m str,
     /// The classes walked, by address, since a file may define two classes of one name.
     seen: FxHashSet<*const ControllerFact>,
-    layers: Vec<Option<&'t RouteDef>>,
+    layers: Vec<Option<Origin<'t>>>,
 }
 
 impl<'t> Walk<'t, '_> {
@@ -244,7 +357,7 @@ impl<'t> Walk<'t, '_> {
             self.base(at, base);
         }
         let own = at.class.routes.iter().find(|r| r.method == self.method);
-        self.layers.extend(own.map(Some));
+        self.layers.extend(own.map(|route| Some(Origin { at, route })));
     }
 
     fn base(&mut self, at: ClassAt<'t>, base: &ClassBase) {
@@ -256,23 +369,35 @@ impl<'t> Walk<'t, '_> {
     }
 }
 
+/// The last layer that gives a key, none when no layer does. A base the scan does not read may
+/// give any key.
+fn last_giver<'l, 't, T>(
+    layers: &'l [Option<Origin<'t>>],
+    key: impl Fn(&RouteDef) -> &RouteKey<T>,
+) -> Option<&'l Option<Origin<'t>>> {
+    let absent = |layer: &Option<Origin<'t>>| layer.is_some_and(|o| matches!(key(o.route), RouteKey::Absent));
+    layers.iter().rev().find(|layer| !absent(layer))
+}
+
 /// A key the last definition that gives it decides, `default` when none does.
 fn last_given<T: Clone>(
-    layers: &[Option<&RouteDef>],
+    layers: &[Option<Origin<'_>>],
     default: T,
     key: impl Fn(&RouteDef) -> &RouteKey<T>,
 ) -> Option<T> {
-    let mut last = layers.iter().rev().map(|layer| layer.map(&key));
-    match last.find(|given| !matches!(given, Some(RouteKey::Absent))) {
+    match last_giver(layers, &key) {
         None => Some(default),
-        Some(Some(RouteKey::Given(value))) => Some(value.clone()),
-        Some(_) => None,
+        Some(Some(o)) => match key(o.route) {
+            RouteKey::Given(value) => Some(value.clone()),
+            RouteKey::Absent | RouteKey::Unknown => None,
+        },
+        Some(None) => None,
     }
 }
 
 /// The type of the first definition, `http` when it gives none.
-fn first_kind(layers: &[Option<&RouteDef>]) -> Option<String> {
-    match &layers.first()?.as_ref()?.kind {
+fn first_kind(layers: &[Option<Origin<'_>>]) -> Option<String> {
+    match &layers.first()?.as_ref()?.route.kind {
         RouteKey::Absent => Some("http".to_owned()),
         RouteKey::Given(kind) => Some(kind.clone()),
         RouteKey::Unknown => None,
@@ -697,30 +822,109 @@ mod tests {
     }
 
     #[test]
-    fn a_lineage_holds_the_ancestors_and_tells_merged_controllers() {
-        let ext = "from odoo import http\nfrom odoo.addons.shop.controllers.main import Shop\n\nclass Left(Shop):\n    pass\n\nclass Right(Shop):\n    pass\n\nclass Mixin(object):\n    pass\n\nclass Own(Mixin, http.Controller):\n    pass\n\nclass Other(Mixin, http.Controller):\n    pass\n";
+    fn a_family_serves_each_method_on_the_paths_its_leaves_agree_on() {
+        let ext = "from odoo import http\nfrom odoo.addons.shop.controllers.main import Shop\n\nclass Moved(Shop):\n    @http.route('/moved', methods=['GET'])\n    def a(self):\n        pass\n\nclass Aside(Shop):\n    @http.route('/c')\n    def c(self):\n        pass\n\n    @http.route('/a')\n    def renamed(self):\n        pass\n";
         let scan = table(&[SHOP, ("ext", "main.py", ext)]);
-        let at = |class| class_at(&scan, ("ext", "main.py"), (class, 0));
-        let shop = class_at(&scan, ("shop", "controllers/main.py"), ("Shop", 0));
-        let [left, right, own, other] = ["Left", "Right", "Own", "Other"].map(|c| scan.lineage(at(c)).unwrap());
-        assert!(left.holds(shop.class) && !left.holds(at("Right").class));
-        assert!(left.shares_top(&right));
-        // Each class with `Controller` among its own bases is a controller of its own.
-        assert!(own.holds(at("Mixin").class) && !own.shares_top(&other));
-        assert!(!left.shares_top(&own));
-        assert!(scan.lineage(at("Mixin")).is_none());
+        assert_eq!(
+            endpoints_of(&scan, |_| true),
+            [
+                ("a", vec!["/moved"], vec!["Moved"], only(&["GET"])),
+                ("c", vec!["/c"], vec!["Aside"], Some(None)),
+                ("renamed", vec!["/a"], vec!["Aside"], Some(None)),
+            ]
+        );
+        // A subclass the database does not serve moves nothing.
+        assert_eq!(
+            endpoints_of(&scan, |c| c.addon == "shop"),
+            [("a", vec!["/a", "/a/<int:x>"], vec!["Shop"], only(&["POST"]))]
+        );
     }
 
     #[test]
-    fn a_lineage_is_unknown_past_a_base_the_table_does_not_hold() {
-        let ext = "from odoo import http\nfrom odoo.addons.gone.controllers.main import Gone\nfrom .main import Near\n\nclass Lost(Gone):\n    pass\n\nclass Relative(Near, http.Controller):\n    pass\n\nclass Leaf(Lost):\n    pass\n";
-        let scan = table(&[("ext", "main.py", ext)]);
-        for class in ["Lost", "Relative", "Leaf"] {
-            assert!(
-                scan.lineage(class_at(&scan, ("ext", "main.py"), (class, 0))).is_none(),
-                "{class}"
-            );
-        }
+    fn siblings_that_disagree_or_sit_on_an_unread_base_leave_the_paths_unknown() {
+        let ext = |left: &str, right: &str, bases: &str| {
+            format!(
+                "from odoo import http\nfrom odoo.addons.shop.controllers.main import Shop\n\nclass Left(Shop):\n    @http.route({left})\n    def a(self):\n        pass\n\nclass Right({bases}):\n    @http.route({right})\n    def a(self):\n        pass\n"
+            )
+        };
+        let check = |src: &str, expected: &[Summary]| {
+            let scan = table(&[SHOP, ("ext", "main.py", src)]);
+            assert_eq!(endpoints_of(&scan, |_| true), expected, "{src}");
+        };
+        let both = vec!["Left", "Right"];
+        check(
+            &ext("'/b'", "'/b'", "Shop"),
+            &[("a", vec!["/b"], both.clone(), only(&["POST"]))],
+        );
+        check(&ext("'/b'", "'/c'", "Shop"), &[]);
+        check(&ext("'/b'", "PATH", "Shop"), &[]);
+        // Right gives no path, so Shop's comes through it, and Left overrides Shop.
+        let left = ("a", vec!["/b"], vec!["Left"], only(&["GET"]));
+        let unknown = ("a", vec!["/b"], vec!["Left"], None);
+        check(&ext("'/b', methods=['GET']", "methods=None", "Shop"), &[unknown]);
+        check(&ext("'/b'", "methods=['GET']", "Shop"), &[left]);
+        check(&ext("'/b'", "methods=['GET']", "Mixin, Shop"), &[]);
+        check(
+            &ext("'/b', methods=VERBS", "'/b'", "Shop"),
+            &[("a", vec!["/b"], both, None)],
+        );
+    }
+
+    #[test]
+    fn a_sibling_without_the_method_keeps_the_path_of_the_other() {
+        let ext = "from odoo import http\nfrom odoo.addons.shop.controllers.main import Shop\n\nclass Left(Shop):\n    @http.route('/b')\n    def a(self):\n        pass\n\nclass Right(Shop):\n    def other(self):\n        pass\n";
+        let scan = table(&[SHOP, ("ext", "main.py", ext)]);
+        assert_eq!(
+            endpoints_of(&scan, |_| true),
+            [("a", vec!["/b"], vec!["Left"], only(&["POST"]))]
+        );
+    }
+
+    #[test]
+    fn each_top_is_a_controller_and_a_mixin_routes_only_through_one() {
+        let src = "from odoo import http\n\nclass First(http.Controller):\n    @http.route('/t')\n    def t(self):\n        pass\n\nclass Second(http.Controller):\n    @http.route('/t')\n    def t(self):\n        pass\n\nclass Mixin(object):\n    @http.route('/m')\n    def m(self):\n        pass\n\nclass Plain(Mixin):\n    pass\n\nclass Served(Mixin, http.Controller):\n    pass\n";
+        let scan = table(&[("shop", "main.py", src)]);
+        assert_eq!(
+            endpoints_of(&scan, |_| true),
+            [
+                ("m", vec!["/m"], vec!["Mixin"], Some(None)),
+                ("t", vec!["/t"], vec!["First"], Some(None)),
+                ("t", vec!["/t"], vec!["Second"], Some(None)),
+            ]
+        );
+    }
+
+    /// An endpoint as its method, paths, origin classes and request methods.
+    type Summary<'t> = (&'t str, Vec<&'t str>, Vec<&'t str>, Option<Option<Vec<String>>>);
+
+    /// The request methods `verbs` alone.
+    fn only(verbs: &[&str]) -> Option<Option<Vec<String>>> {
+        Some(Some(verbs.iter().map(|&v| v.to_owned()).collect()))
+    }
+
+    /// The endpoints of the classes of `table` that `keep` keeps, sorted.
+    fn endpoints_of(table: &Table, keep: impl Fn(&ClassAt) -> bool) -> Vec<Summary<'_>> {
+        let classes: Vec<_> = table
+            .addons()
+            .flat_map(|a| table.module(a))
+            .filter(|c| keep(c))
+            .collect();
+        let mut summary: Vec<_> = table
+            .endpoints(&classes)
+            .into_iter()
+            .map(|e| {
+                let mut names: Vec<_> = e.origins.iter().map(|o| o.at.class.name.as_str()).collect();
+                names.sort_unstable();
+                (
+                    e.origins[0].route.method.as_str(),
+                    e.urls.iter().map(String::as_str).collect(),
+                    names,
+                    e.methods,
+                )
+            })
+            .collect();
+        summary.sort();
+        summary
     }
 
     #[test]

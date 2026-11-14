@@ -71,3 +71,18 @@ class Dynamic(http.Controller):
     @http.route(PATH, auth="user")
     def dynamic(self):
         return "ok"
+
+
+class RoutesRenamed(Routes):
+    @http.route("/bad/routes/rename/<int:order_id>")
+    def relabel(self, order_id):
+        return "relabel"
+
+
+VERBS = ["GET", "POST"]
+
+
+class Uploads(http.Controller):
+    @http.route("/bad/routes/hook", auth="user", methods=VERBS)
+    def upload(self):
+        return "upload"
