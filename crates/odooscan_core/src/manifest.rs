@@ -18,6 +18,15 @@ use crate::series::Series;
 /// `eval`.
 const LITERAL_EVAL: Series = Series { major: 10, minor: 0 };
 
+/// OD000's message on a node of the manifest `ast.literal_eval` refuses.
+const NOT_LITERAL: &str = "not a literal: Odoo reads the manifest with ast.literal_eval";
+
+/// OD000's message on an item of a set in the manifest that Python cannot hash.
+const NOT_HASHABLE_ITEM: &str = "not hashable: Python hashes each item of a set";
+
+/// OD000's message on a key of a dict in the manifest that Python cannot hash.
+const NOT_HASHABLE_KEY: &str = "not hashable: Python hashes each key of a dict";
+
 /// The first series that loads a module's data from `data` alone (`saas~15.2`).
 const DATA_ONLY: Series = Series { major: 15, minor: 2 };
 
@@ -619,7 +628,8 @@ fn text(bytes: &[u8]) -> (Cow<'_, str>, Option<Pos>) {
 }
 
 /// `manifest`, read from `top`, when the Odoo of `series` reads `top` as literals it can update a
-/// dict with. As in Odoo, `literal_eval` refuses a node before `dict.update` refuses an item.
+/// dict with. As in Odoo, `literal_eval` refuses a node, or Python a set item or dict key it
+/// cannot hash, before `dict.update` refuses an item.
 fn literal_manifest(
     loc: &Source,
     top: &Expr,
@@ -628,8 +638,11 @@ fn literal_manifest(
 ) -> Result<Manifest, (Spanned<String>, OdooReads)> {
     let literal = series.is_none_or(|s| s >= LITERAL_EVAL);
     let python2 = python2::runs_on(series).then_some(loc);
-    // Python 2's literal_eval, which 10.0 calls, knows no set.
-    let sets = python2.is_none();
+    let reading = if python2.is_none() {
+        Reading::Python3
+    } else {
+        Reading::Python2
+    };
     let odoo = if literal {
         OdooReads::No
     } else {
@@ -644,14 +657,8 @@ fn literal_manifest(
             odoo,
         ));
     };
-    if let Some(node) = unliteral(top, sets).filter(|_| literal) {
-        return Err((
-            error(
-                loc.at(node),
-                "not a literal: Odoo reads the manifest with ast.literal_eval",
-            ),
-            OdooReads::No,
-        ));
+    if let Some((node, why)) = unliteral(top, reading).filter(|_| literal) {
+        return Err((error(loc.at(node), why), OdooReads::No));
     }
     match refused_item(top, python2) {
         Some((item, why)) => Err((error(loc.at(item), why), odoo)),
@@ -660,12 +667,13 @@ fn literal_manifest(
 }
 
 /// The first item of a list, tuple or set `top` that Odoo cannot load, with why. Python builds a
-/// set before Odoo hands it to `dict.update`, so an item it cannot hash fails first. An item that
-/// is no literal, which 9.0 evaluates, is not judged. When `python2` holds the manifest's source,
-/// a string is judged as Python 2 takes it.
+/// set before Odoo hands it to `dict.update`, so an item it cannot hash fails first; only 9.0
+/// reaches that branch, as `unliteral` refuses such an item on every other series. An item that
+/// is no literal, which 9.0 evaluates, is not judged, nor is a set or dict inside an item. When
+/// `python2` holds the manifest's source, a string is judged as Python 2 takes it.
 fn refused_item<'a>(top: &'a Expr, python2: Option<&Source>) -> Option<(&'a Expr, &'static str)> {
     let mut items = sequence(top)?;
-    items.retain(|i| unliteral(i, true).is_none());
+    items.retain(|i| unliteral(i, Reading::Unhashed).is_none());
     let unhashable = items.iter().find(|i| top.is_set_expr() && value(i, python2).is_none());
     if let Some(item) = unhashable {
         return Some((item, "not hashable: Python puts each item of the manifest in a set"));
@@ -930,30 +938,53 @@ fn top_expression<'a>(loc: &Source, body: &'a [Stmt]) -> Result<&'a Expr, Spanne
     Ok(&e.value)
 }
 
-/// The first key or value of `dict` that `ast.literal_eval` refuses, a `**` entry at its value.
-fn unliteral_items(dict: &ast::ExprDict, sets: bool) -> Option<&Expr> {
+/// How `unliteral` reads a manifest.
+#[derive(Clone, Copy, PartialEq)]
+enum Reading {
+    /// As Python 2's `ast.literal_eval`, which 10.0 calls: it knows no set and hashes each dict key.
+    Python2,
+    /// As Python 3's, which hashes each set item and dict key.
+    Python3,
+    /// As Python 3's without hashing, to tell the literal items 9.0 judges from those it evaluates.
+    Unhashed,
+}
+
+/// The first key or value of `dict` that `unliteral` refuses, a `**` entry at its value. Python
+/// converts a key, then its value, then hashes the key before the next one.
+fn unliteral_items(dict: &ast::ExprDict, reading: Reading) -> Option<(&Expr, &'static str)> {
     dict.items.iter().find_map(|item| match &item.key {
-        Some(key) => unliteral(key, sets).or_else(|| unliteral(&item.value, sets)),
-        None => Some(&item.value),
+        Some(key) => unliteral(key, reading)
+            .or_else(|| unliteral(&item.value, reading))
+            .or_else(|| unhashable(key, reading, NOT_HASHABLE_KEY)),
+        None => Some((&item.value, NOT_LITERAL)),
     })
 }
 
-/// The first node of `expr` that `ast.literal_eval` refuses, `expr` itself when it is no literal.
-/// Without `sets`, as in Python 2, a set literal or `set()` is refused.
-fn unliteral(expr: &Expr, sets: bool) -> Option<&Expr> {
-    if !sets && (expr.is_set_expr() || empty_set(expr)) {
-        return Some(expr);
+/// The first node of `expr` that `ast.literal_eval` refuses, with why, `expr` itself when it is
+/// no literal. It converts in source order and, unless `reading` is `Unhashed`, hashes each set
+/// item and dict key when Python does, so the node is where Python raises first.
+fn unliteral(expr: &Expr, reading: Reading) -> Option<(&Expr, &'static str)> {
+    if reading == Reading::Python2 && (expr.is_set_expr() || empty_set(expr)) {
+        return Some((expr, NOT_LITERAL));
     }
     if leaf(expr) {
         return None;
     }
     if let Expr::Dict(dict) = expr {
-        return unliteral_items(dict, sets);
+        return unliteral_items(dict, reading);
     }
-    match module_state::items(expr) {
-        Some(items) => items.into_iter().flatten().find_map(|i| unliteral(i, sets)),
-        None => Some(expr),
-    }
+    let Some(items) = module_state::items(expr) else {
+        return Some((expr, NOT_LITERAL));
+    };
+    let set = expr.is_set_expr();
+    items.into_iter().flatten().find_map(|i| {
+        unliteral(i, reading).or_else(|| set.then(|| unhashable(i, reading, NOT_HASHABLE_ITEM)).flatten())
+    })
+}
+
+/// `item` with `why` when `reading` hashes and Python cannot hash `item`.
+fn unhashable<'a>(item: &'a Expr, reading: Reading, why: &'static str) -> Option<(&'a Expr, &'static str)> {
+    (reading != Reading::Unhashed && value(item, None).is_none()).then_some((item, why))
 }
 
 /// A literal that holds no other.
@@ -1503,7 +1534,7 @@ mod tests {
         assert_eq!(refused("[{0, -0.0, False, 0j}]"), (1, 2));
         assert_eq!(refused("[{(1, 'a'), (1.0, 'a')}]"), (1, 2));
         assert_eq!(refused("[{1 + 0j, 1.0}]"), (1, 2));
-        assert_eq!(refused("[{-1, 1}, {[1], 2}]"), (1, 11));
+        assert_eq!(refused("[{-1, 1}, {[1], 2}]"), (1, 12));
         assert!(parse("[{1, 1.5}, {'a': 1, b'a': 2}, {-1, 1}, {1 + 1j, 1}]").is_ok());
     }
 
@@ -1523,6 +1554,71 @@ mod tests {
         assert_eq!(refused("{('a', set())}"), (1, 2));
         let error = parse("{('a', {'b': 1})}").unwrap_err();
         assert!(error.value.starts_with("not hashable"), "{}", error.value);
+    }
+
+    #[test]
+    fn refuses_an_unhashable_item_of_a_nested_set() {
+        let why = |src: &str, series: &str| parse_bytes(src.as_bytes(), series).unwrap_err().value;
+        assert!(why("{'depends': {['base']}}", "18.0").starts_with("not hashable"));
+        assert!(why("{'depends': {['base']}}", "10.0").starts_with("not a literal"));
+        assert_eq!(refused("{'depends': {['base']}}"), (1, 14));
+        assert_eq!(refused("[('name', 'x'), ('depends', {['base']})]"), (1, 30));
+        assert_eq!(refused("{'a': {{'b': 1}}}"), (1, 8));
+        assert_eq!(refused("{'a': {{1}}}"), (1, 8));
+        assert_eq!(refused("{'a': {set()}}"), (1, 8));
+        assert_eq!(refused("{'a': {(['x'],)}}"), (1, 8));
+        assert_eq!(refused("{'a': [{1: [{[2]}]}]}"), (1, 14));
+        assert!(
+            parse("[{-1, 1}, {[1], 2}]")
+                .unwrap_err()
+                .value
+                .starts_with("not hashable")
+        );
+        for src in [
+            "{'depends': {('base',)}}",
+            "{'a': {(1, 'x'), None, ..., 1 + 2j, 18446744073709551616}}",
+            "[('depends', {('base',)})]",
+        ] {
+            assert!(parse(src).is_ok(), "{src}");
+            assert!(parse_bytes(src.as_bytes(), "18.0").is_ok(), "{src}");
+        }
+        // literal_eval raises at the first node it cannot convert or hash, in source order.
+        for (src, col, why) in [
+            ("{'a': {[1]}, 'b': NAME}", 8, "not hashable"),
+            ("{'a': NAME, 'b': {[1]}}", 7, "not a literal"),
+            ("{'a': {{1}, ({[2]},)}}", 8, "not hashable"),
+        ] {
+            let error = parse(src).unwrap_err();
+            assert_eq!((error.pos.col, error.value.starts_with(why)), (col, true), "{src}");
+        }
+    }
+
+    #[test]
+    fn refuses_an_unhashable_dict_key() {
+        for src in ["{'a': {[1]: 2}}", "{[1]: 2}", "{'a': {(1, [2]): 2}, 'b': NAME}"] {
+            let error = parse(src).unwrap_err();
+            assert_eq!(error.value, NOT_HASHABLE_KEY, "{src}");
+            assert_eq!(
+                parse_bytes(src.as_bytes(), "10.0").unwrap_err().value,
+                NOT_HASHABLE_KEY,
+                "{src}"
+            );
+        }
+        assert_eq!(refused("{'a': {[1]: 2}}"), (1, 8));
+        assert_eq!(refused("{[1]: 2}"), (1, 2));
+        assert_eq!(refused("{'a': {(1, [2]): 2}, 'b': NAME}"), (1, 8));
+        // Python converts the value before it hashes the key.
+        assert_eq!(parse("{[1]: NAME}").unwrap_err().value, NOT_LITERAL);
+        assert_eq!(refused("{[1]: NAME}"), (1, 7));
+        assert_eq!(parse("{[1]: {[2]}}").unwrap_err().value, NOT_HASHABLE_ITEM);
+        assert_eq!(refused("{[1]: {[2]}}"), (1, 8));
+        for src in ["{'a': {(1, 'x'): 2, None: 3, -1.5: 4}}", "[('a', {(1,): 2})]"] {
+            assert!(parse(src).is_ok(), "{src}");
+            assert!(parse_bytes(src.as_bytes(), "10.0").is_ok(), "{src}");
+        }
+        assert!(parse_bytes(b"{'a': {[1]: 2}}", "9.0").is_ok());
+        assert!(parse_bytes(b"[('a', {[1]: 2})]", "9.0").is_ok());
+        assert!(parse_bytes(b"{[1]: 2}", "9.0").is_ok());
     }
 
     #[test]
@@ -1597,6 +1693,8 @@ mod tests {
         assert!(parse_bytes(b"[('name', NAME)]", "9.0").is_ok());
         assert!(parse_bytes(b"{('name', NAME)}", "9.0").is_ok());
         assert!(parse_bytes(b"[{NAME, 1}]", "9.0").is_ok());
+        assert!(parse_bytes(b"{'depends': {['base']}}", "9.0").is_ok());
+        assert!(parse_bytes(b"[('depends', {['base']})]", "9.0").is_ok());
         assert_eq!(odoo_reads(b"{['name', 'x']}", "9.0"), Some(OdooReads::AsExpression));
         assert_eq!(odoo_reads(b"'doc'\n{}", "9.0"), Some(OdooReads::No));
         assert_eq!(odoo_reads(b"{'name': 'x',", "9.0"), Some(OdooReads::No));
