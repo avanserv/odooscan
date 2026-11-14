@@ -675,3 +675,42 @@ fn a_seriesless_indexed_module_takes_the_target() {
     assert!(!reported(Series::parse("18.0")));
     assert!(reported(Series::parse("12.0")));
 }
+
+/// The `(code, folder)` of each OD509, OD514 and OD515 finding on `custom/migration_folders`, the
+/// folder being the one holding the file the finding is on.
+fn migration_findings(default_series: Option<Series>, target_series: Option<Series>) -> Vec<(&'static str, String)> {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+    let report = scan(&ScanOptions {
+        paths: vec![root.join("custom/migration_folders")],
+        addons_paths: vec![root.join("core")],
+        default_series,
+        target_series,
+        ..Default::default()
+    });
+    let mut found: Vec<_> = report
+        .diagnostics
+        .iter()
+        .filter(|d| ["OD509", "OD514", "OD515"].contains(&d.code))
+        .map(|d| {
+            let folder = d.path.parent().and_then(|p| p.file_name()).unwrap_or_default();
+            (d.code, folder.to_string_lossy().into_owned())
+        })
+        .collect();
+    found.sort();
+    found
+}
+
+#[test]
+fn migration_folders_take_the_module_series() {
+    // `v1.1` takes `migrate(env, version)`, yet Odoo never imports it, so it is OD514's alone.
+    let own = ["1.3", "18.0.1.3.0", "19.0.1.0", "v1.1"].map(|f| ("OD514", f.to_owned()));
+    assert_eq!(migration_findings(None, None), own);
+    // The manifest names 18.0, so `--odoo-version 16.0` does not stand for its series.
+    assert_eq!(migration_findings(Series::parse("16.0"), None), own);
+}
+
+#[test]
+fn a_refused_version_leaves_folders_unread() {
+    let found = migration_findings(None, Series::parse("20.0"));
+    assert_eq!(found, [("OD509", "migration_folders".to_owned())]);
+}

@@ -249,8 +249,8 @@ pub fn check_module<'m>(index: &Index<'m>, mi: usize, series: Option<Series>) ->
     let mut out = Out { diags: vec![] };
     manifest_files(module, &mut out);
     manifest_keys(index, module, &mut out);
-    upgrade_folders(index, module, &mut out);
-    upgrade_scripts(module, &mut out);
+    upgrade_folders(module, series, &mut out);
+    upgrade_scripts(module, series, &mut out);
     unmatched_assets(module, series, &mut out);
     unread_template_lists(module, series, &mut out);
     bundle_templates(module, &mut out);
@@ -1020,11 +1020,11 @@ fn stage_scripts(module: &Module) -> impl Iterator<Item = ((&str, &str), &Source
     })
 }
 
-/// OD514 on an upgrade folder whose scripts the Odoo of the scan's series never runs, once, at its
-/// first script by name. The scan's series is the one `--target-series` or `--odoo-version` names,
-/// else the module's own, and a version that series refuses is OD509's alone.
-fn upgrade_folders<'m>(index: &Index<'m>, module: &'m Module, out: &mut Out<'m>) {
-    let Some(series) = index.default_series.or(module.series) else {
+/// OD514 on an upgrade folder whose scripts the Odoo of `series` never runs, once, at its first
+/// script by name. `series` is the one the rule is gated on: `--target-series`, else the module's
+/// own, else `--odoo-version`. A version that series refuses is OD509's alone.
+fn upgrade_folders<'m>(module: &'m Module, series: Option<Series>, out: &mut Out<'m>) {
+    let Some(series) = series.filter(|s| rule("OD514").applies_to(Some(*s))) else {
         return;
     };
     let Some(version) = module
@@ -1050,9 +1050,15 @@ fn upgrade_folders<'m>(index: &Index<'m>, module: &'m Module, out: &mut Out<'m>)
 }
 
 /// OD515 on an upgrade script without the `migrate(cr, version)` Odoo calls, whose error fails the
-/// update (18.0 `odoo/modules/migration.py:241-255`, `odoo/modules/loading.py:182`).
-fn upgrade_scripts<'m>(module: &'m Module, out: &mut Out<'m>) {
-    for (_, file) in stage_scripts(module) {
+/// update (18.0 `odoo/modules/migration.py:241-255`, `odoo/modules/loading.py:182`). Odoo never
+/// imports a script of a folder whose name is not a version, so such a folder is skipped; one
+/// above the module version is still judged, since Odoo runs it once the version rises.
+fn upgrade_scripts<'m>(module: &'m Module, series: Option<Series>, out: &mut Out<'m>) {
+    if !rule("OD515").applies_to(series) {
+        return;
+    }
+    let scripts = stage_scripts(module).filter(|((_, name), _)| manifest::upgrade_folder_named(name));
+    for (_, file) in scripts {
         let (pos, message) = match &file.facts.migrate {
             Migrate::Unread => continue,
             Migrate::Missing => (
