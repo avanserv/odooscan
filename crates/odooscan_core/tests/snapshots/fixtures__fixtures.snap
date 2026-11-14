@@ -1485,6 +1485,10 @@ custom/supers/models/supers.py:108:24: OD211 no parent class of bad.super define
 custom/tree_paths/views/partner.xml:8:21: OD306 the <tree> view is renamed <list>
 custom/tree_paths/views/partner.xml:29:13: OD306 the <tree> view is renamed <list>
 custom/tree_paths/views/partner.xml:48:13: OD306 the <tree> view is renamed <list>
+custom/unimported/controllers/main.py:1:1: OD516 no import from the module's __init__.py reaches this file, so Odoo never loads controller 'Main'
+custom/unimported/models/extra.py:1:1: OD516 no import from the module's __init__.py reaches this file, so Odoo never loads model 'res.partner'
+custom/unimported/models/mixins/unlisted.py:1:1: OD516 no import from the module's __init__.py reaches this file, so Odoo never loads model 'res.partner'
+custom/unimported/tests/test_missed.py:1:1: OD517 no import from tests/__init__.py reaches this file, so Odoo never runs its tests
 custom/unlisted_data/data/signs.xml:3:9: OD301 module unlisted_data defines no XML id 'unlisted_data.badge_hidden_unlisted_plate'
 custom/unlisted_data/data/signs.xml:11:5: OD324 unlisted.plate.code is required and has no default, so creating this record fails if the column is NOT NULL; give the field a value
 custom/unlisted_data/extra/access.xml:1:1: OD502 'extra/access.xml' is not in the manifest's data or demo, so Odoo never loads it

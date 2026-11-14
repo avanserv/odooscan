@@ -691,6 +691,12 @@
       "count": 3
     },
     {
+      "path": "addons/l10n_dk_nemhandel/controllers/webhooks.py",
+      "code": "OD516",
+      "message": "no import from the module's __init__.py reaches this file, so Odoo never loads controller 'NemhandelWebhookController'",
+      "count": 1
+    },
+    {
       "path": "addons/l10n_dk_nemhandel/models/account_edi_proxy_user.py",
       "code": "OD103",
       "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
@@ -706,6 +712,12 @@
       "path": "addons/l10n_dk_nemhandel/wizard/nemhandel_registration.py",
       "code": "OD103",
       "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_dk_oioubl/models/account_move.py",
+      "code": "OD516",
+      "message": "no import from the module's __init__.py reaches this file, so Odoo never loads model 'account.move'",
       "count": 1
     },
     {
@@ -931,6 +943,12 @@
       "count": 2
     },
     {
+      "path": "addons/l10n_in_purchase/models/account_move.py",
+      "code": "OD516",
+      "message": "no import from the module's __init__.py reaches this file, so Odoo never loads model 'account.move'",
+      "count": 1
+    },
+    {
       "path": "addons/l10n_it/migrations/0.7/post-map_carryover_to_new_report.py",
       "code": "OD101",
       "message": "query built by string formatting; pass parameters separately or build it with odoo.tools.SQL",
@@ -1057,6 +1075,12 @@
       "count": 1
     },
     {
+      "path": "addons/l10n_sa_edi/models/account_edi_document.py",
+      "code": "OD516",
+      "message": "no import from the module's __init__.py reaches this file, so Odoo never loads model 'account.edi.document'",
+      "count": 1
+    },
+    {
       "path": "addons/l10n_sa_edi/models/account_edi_format.py",
       "code": "OD211",
       "message": "no parent class of account.edi.format defines '_is_required_for_invoice', so this super() call fails",
@@ -1085,6 +1109,12 @@
       "code": "OD103",
       "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
       "count": 2
+    },
+    {
+      "path": "addons/l10n_uy_website_sale/models/website.py",
+      "code": "OD516",
+      "message": "no import from the module's __init__.py reaches this file, so Odoo never loads model 'website'",
+      "count": 1
     },
     {
       "path": "addons/l10n_vn_edi_viettel/models/account_move.py",
@@ -1900,6 +1930,12 @@
       "path": "addons/purchase_stock/report/vendor_delay_report.py",
       "code": "OD225",
       "message": "vendor.delay.report.on_time_rate is stored, but the view vendor_delay_report selects no column on_time_rate for it; select one AS on_time_rate in init()",
+      "count": 1
+    },
+    {
+      "path": "addons/repair/models/mail_compose_message.py",
+      "code": "OD516",
+      "message": "no import from the module's __init__.py reaches this file, so Odoo never loads model 'mail.compose.message'",
       "count": 1
     },
     {

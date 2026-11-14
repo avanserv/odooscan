@@ -681,6 +681,40 @@ pub struct ControllerFact {
     pub plain: Vec<Spanned<String>>,
 }
 
+/// The imports of a Python file, which decide the files Odoo runs once it imports the module.
+#[derive(Clone, Debug, Default)]
+pub struct FileImports {
+    /// Every import statement, those in a function or a class included, as any may run.
+    pub list: Vec<ImportFact>,
+    pub exports: Exports,
+    /// The file imports a module whose name it computes, or loads one by its path, so it may run
+    /// any file.
+    pub dynamic: bool,
+}
+
+/// An import statement, or a call of `import_module()` or `__import__()` on a literal.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ImportFact {
+    /// The number of leading dots, 0 for an absolute import.
+    pub level: u32,
+    /// The module after `from`, none for `from . import x` and for a plain `import`.
+    pub module: Option<String>,
+    /// The names after `import`: dotted modules for a plain `import`, `*` for a star import.
+    pub names: Vec<Spanned<String>>,
+    pub from: bool,
+}
+
+/// The `__all__` of a file, which decides the submodules a star import of its package runs.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub enum Exports {
+    #[default]
+    Absent,
+    /// A list or tuple of string literals.
+    Literal(Vec<String>),
+    /// Any other form, which may name any submodule.
+    Unread,
+}
+
 #[derive(Debug, Default)]
 pub struct PyFacts {
     pub classes: Vec<ClassFact>,
@@ -748,6 +782,8 @@ pub struct PyFacts {
     pub import_patches: Vec<ImportPatch>,
     /// What the file binds to `migrate`, which `checks.rs` judges in an upgrade script.
     pub migrate: Migrate,
+    /// None when the file does not parse.
+    pub imports: Option<FileImports>,
 }
 
 /// What a Python file binds to `migrate` at import, which Odoo requires of an upgrade script and

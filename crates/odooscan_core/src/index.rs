@@ -8,8 +8,8 @@ use crate::facts::{
 };
 use crate::manifest::AutoInstall;
 use crate::project::{Module, SourceFile, code_loaded};
-use crate::routing;
 use crate::series::{self, Series};
+use crate::{imports, routing};
 
 /// Fields every model has without declaring them.
 const MAGIC_FIELDS: &[&str] = &[
@@ -1546,6 +1546,8 @@ pub struct Index<'m> {
     pub templates: Inheritance<'m>,
     /// The controllers of every module.
     pub routes: routing::Table,
+    /// The imports of every module.
+    pub imports: imports::Graph,
     pub models_with_access: FxHashSet<String>,
     model_by_xmlid: FxHashMap<String, &'m str>,
     pub has_base: bool,
@@ -1621,6 +1623,7 @@ impl<'m> Index<'m> {
             view_keys,
             templates: Inheritance::new(template_nodes(modules, &templates_loaded)),
             routes: routing::Table::of_modules(modules),
+            imports: imports::Graph::of_modules(modules, default_series),
             models_with_access,
             model_by_xmlid,
             js_paths: js_paths(modules),

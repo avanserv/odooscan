@@ -304,6 +304,12 @@ rules! {
     // folder names or call `migrate` otherwise.
     "OD514" "migration-folder-skipped" Correctness Warning Some(">=18.0"), false, "Odoo never runs the scripts of a migration folder of this name.";
     "OD515" "migration-script-refused" Correctness Error Some(">=18.0"), false, "A migration script lacks the migrate(cr, version) Odoo calls, so the update fails.";
+    // Odoo imports `odoo.addons.<name>`, which runs the root `__init__.py` and what it imports (18.0
+    // `odoo/modules/module.py:370-384`, 20.0 `:536-541`, 9.0 `openerp/modules/module.py:316-331`).
+    "OD516" "python-file-not-imported" Correctness Warning None, false, "A file of models or controllers is never imported, so Odoo never loads them.";
+    // Odoo runs the submodules `tests` binds under a `test_` name (18.0 `odoo/tests/loader.py:57-67`,
+    // 20.0 `:56-66`, 9.0 `openerp/modules/module.py:387-408`).
+    "OD517" "test-file-not-imported" Quality Warning None, false, "A test file is never imported by the tests package, so Odoo never runs its tests.";
     "OD601" "unresolved-js-import" Correctness Error None, true, "A JS import names a module or an export no indexed module provides.";
     "OD602" "orphan-patch-super" Correctness Error Some(">=17.0"), true, "A patch calls a super method the class it patches does not have.";
     "OD603" "unknown-rpc-model" Correctness Error None, true, "An ORM call from JS names a model no indexed module defines.";
