@@ -35,12 +35,13 @@ pub enum Lines {
 }
 
 impl Lines {
-    /// The lines of `series`, an unknown one read as the newest.
-    pub fn of(series: Option<Series>) -> Self {
-        if series.is_none_or(|s| s >= STRING_IO) {
-            Lines::Lf
-        } else {
-            Lines::Universal
+    /// The lines of every series the module may target: an unknown one may load on either
+    /// reader, the newest first.
+    pub fn of(series: Option<Series>) -> &'static [Lines] {
+        match series {
+            None => &[Lines::Lf, Lines::Universal],
+            Some(s) if s >= STRING_IO => &[Lines::Lf],
+            Some(_) => &[Lines::Universal],
         }
     }
 }
@@ -56,13 +57,16 @@ pub fn undecoded(pos: Pos) -> DataFacts {
 }
 
 /// A data CSV is named after its model; its header names fields, with `:id` or `/id` for references.
-/// `strict` gives the lines of a file Odoo loads, whose import is checked as Odoo runs it.
-pub fn analyze(text: &str, model: &str, strict: Option<Lines>) -> DataFacts {
+/// `strict` gives the lines of each series a file Odoo loads may target, none for a file it does
+/// not load. The import fails only when every one refuses, so a module that may target a series
+/// that loads the file is not told it fails; the first gives the place and the reason.
+pub fn analyze(text: &str, model: &str, strict: &[Lines]) -> DataFacts {
     let mut facts = DataFacts {
         is_data: true,
         ..DataFacts::default()
     };
-    if let Some((pos, message)) = strict.and_then(|lines| refused(text, lines)) {
+    let refusals: Option<Vec<_>> = strict.iter().map(|&lines| refused(text, lines)).collect();
+    if let Some((pos, message)) = refusals.and_then(|r| r.into_iter().next()) {
         facts.diags.push(RawDiag::new("OD000", pos, message));
     }
     let mut reader = csv::ReaderBuilder::new().flexible(true).from_reader(text.as_bytes());
@@ -627,7 +631,7 @@ mod tests {
 
     /// Each field of the row as `name=value`, in the order of the columns.
     fn row(header: &str, row: &str) -> Vec<String> {
-        let facts = analyze(&format!("{header}\n{row}\n"), "m", None);
+        let facts = analyze(&format!("{header}\n{row}\n"), "m", &[]);
         let shown = |f: &FieldWrite| match &f.value {
             WrittenValue::Ids(ids) => {
                 let ids: Vec<&str> = ids.iter().map(|i| i.value.as_str()).collect();
@@ -658,13 +662,13 @@ mod tests {
 
     #[test]
     fn a_row_with_nothing_of_its_own_writes_nothing() {
-        assert!(analyze("id,name\n,\n", "m", None).writes.is_empty());
-        let facts = analyze("id,lines/name\nr,x\n,y\n", "m", None);
+        assert!(analyze("id,name\n,\n", "m", &[]).writes.is_empty());
+        let facts = analyze("id,lines/name\nr,x\n,y\n", "m", &[]);
         assert_eq!(facts.writes.len(), 1);
     }
 
     fn access(header: &str, row: &str) -> DataFacts {
-        analyze(&format!("{header}\n{row}\n"), "ir.model.access", None)
+        analyze(&format!("{header}\n{row}\n"), "ir.model.access", &[])
     }
 
     const PERMS: &str = "id,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink";
@@ -703,7 +707,7 @@ mod tests {
         );
         let on_access = |active: &str| {
             let text = format!("id,model_id,group_id/id,operation,active\na,x.y,base.group_portal,cu,{active}\n");
-            analyze(&text, "ir.access", None).access[0].public_write.clone()
+            analyze(&text, "ir.access", &[]).access[0].public_write.clone()
         };
         assert_eq!(on_access("0"), None);
         assert_eq!(on_access("1").as_deref(), Some("base.group_portal"));
@@ -713,7 +717,7 @@ mod tests {
     fn an_access_row_keeps_its_trimmed_domain() {
         let domain = |header: &str, row: &str| {
             let text = format!("{header}\n{row}\n");
-            analyze(&text, "ir.access", None).access[0].domain.clone()
+            analyze(&text, "ir.access", &[]).access[0].domain.clone()
         };
         let header = "id,model_id,group_id/id,operation,domain";
         assert_eq!(
@@ -747,7 +751,7 @@ mod tests {
         let facts = analyze(
             "id,model_id,group_id/id,operation\na,x.y,,cu\nb,x.y,base.group_user,r\n",
             "ir.access",
-            None,
+            &[],
         );
         assert_eq!(facts.access.len(), 1);
         assert_eq!(facts.access[0].id.as_deref(), Some("b"));
@@ -759,12 +763,12 @@ mod tests {
     #[test]
     fn a_plain_model_column_names_the_model_of_an_access_row() {
         let text = "id,model_id,group_id:id,perm_read,perm_write\na,x.y,base.group_portal,1,1\n";
-        assert!(analyze(text, "ir.model.access", None).access[0].by_name);
+        assert!(analyze(text, "ir.model.access", &[]).access[0].by_name);
         assert!(!access(PERMS, "a,m,,1,1,0,0").access[0].by_name);
     }
 
     fn rules(text: &str, model: &str) -> Vec<RuleFact> {
-        analyze(text, model, None).rules
+        analyze(text, model, &[]).rules
     }
 
     #[test]
@@ -825,7 +829,7 @@ mod tests {
         );
         let on_access = |operation: &str| {
             let text = format!("id,model_id,group_id/id,operation\na,x.y,base.group_portal,{operation}\n");
-            analyze(&text, "ir.access", None).access[0].grants
+            analyze(&text, "ir.access", &[]).access[0].grants
         };
         assert_eq!(on_access("r"), perms(true, false, false, false));
         assert_eq!(on_access("cud"), perms(false, true, true, true));
@@ -881,8 +885,8 @@ mod tests {
 
     /// Where and why the import of `text` fails on 18.0, as `(line, col, message)`.
     fn import(text: &str) -> Option<(u32, u32, String)> {
-        let lf = analyze(text, "res.partner", Some(Lines::Lf));
-        let universal = analyze(text, "res.partner", Some(Lines::Universal));
+        let lf = analyze(text, "res.partner", &[Lines::Lf]);
+        let universal = analyze(text, "res.partner", &[Lines::Universal]);
         let lf = lf.diags.into_iter().next().map(|d| (d.pos.line, d.pos.col, d.message));
         if !text.contains('\r') {
             assert_eq!(
@@ -942,28 +946,50 @@ mod tests {
     #[test]
     fn a_lone_cr_fails_from_18() {
         let text = "id,name\nr,a\rb\n";
-        let first = analyze(text, "m", Some(Lines::Lf)).diags.remove(0);
+        let first = analyze(text, "m", &[Lines::Lf]).diags.remove(0);
         assert_eq!((first.pos.line, first.pos.col), (2, 4));
         assert!(first.message.starts_with("a carriage return outside quotes"));
-        assert!(analyze(text, "m", Some(Lines::Universal)).diags.is_empty());
+        assert!(analyze(text, "m", &[Lines::Universal]).diags.is_empty());
+        assert!(analyze(text, "m", Lines::of(None)).diags.is_empty());
         for quiet in [
             "id,name\r\nr,a\r\n",
             "id,name\nr,\"a\rb\"\n",
             "id,name\nr,a\r\r\n",
             "id,name\nr,a\r",
         ] {
-            assert!(analyze(quiet, "m", Some(Lines::Lf)).diags.is_empty(), "{quiet:?}");
+            assert!(analyze(quiet, "m", &[Lines::Lf]).diags.is_empty(), "{quiet:?}");
         }
-        assert!(!analyze("id,name\nr,\"a\"\rb\n", "m", Some(Lines::Lf)).diags.is_empty());
+        assert!(!analyze("id,name\nr,\"a\"\rb\n", "m", &[Lines::Lf]).diags.is_empty());
     }
 
     #[test]
     fn universal_lines_split_a_row_where_lf_lines_do_not() {
         let text = "id,name,parent_id:id\nr,a\x0Cb,p\n";
-        assert_eq!(analyze(text, "m", Some(Lines::Lf)).diags.len(), 0);
-        let universal = analyze(text, "m", Some(Lines::Universal)).diags;
+        assert_eq!(analyze(text, "m", &[Lines::Lf]).diags.len(), 0);
+        let universal = analyze(text, "m", &[Lines::Universal]).diags;
         assert_eq!(universal.len(), 1);
         assert_eq!(universal[0].pos.line, 2);
+        assert!(analyze(text, "m", Lines::of(None)).diags.is_empty());
+    }
+
+    #[test]
+    fn an_unknown_series_reports_what_every_reader_refuses() {
+        let reported = |text: &str| {
+            let diags = analyze(text, "m", Lines::of(None)).diags;
+            diags
+                .into_iter()
+                .map(|d| (d.pos.line, d.pos.col, d.message))
+                .collect::<Vec<_>>()
+        };
+        let short = reported("id,name,parent_id:id\nr,a\n");
+        assert_eq!(short.len(), 1);
+        assert_eq!((short[0].0, short[0].1), (2, 1));
+        assert!(short[0].2.starts_with("the row ends before column 'parent_id:id'"));
+        // The 17.0 reader stops at the short row on line 2, the 18.0 one at the CR.
+        let cr = reported("id,parent_id:id\nr\ns,a\rb\n");
+        assert_eq!(cr.len(), 1);
+        assert_eq!((cr[0].0, cr[0].1), (3, 4));
+        assert!(cr[0].2.starts_with("a carriage return outside quotes"));
     }
 
     #[test]
@@ -990,15 +1016,15 @@ mod tests {
 
     #[test]
     fn a_file_not_loaded_is_not_read_as_the_import_does() {
-        assert!(analyze("", "m", None).diags.is_empty());
-        assert!(analyze("id,parent_id:id\nr\n", "m", None).diags.is_empty());
+        assert!(analyze("", "m", &[]).diags.is_empty());
+        assert!(analyze("id,parent_id:id\nr\n", "m", &[]).diags.is_empty());
     }
 
     #[test]
     fn lines_follow_the_reader_of_the_series() {
-        assert_eq!(Lines::of(Series::parse("17.0")), Lines::Universal);
-        assert_eq!(Lines::of(Series::parse("saas~17.4")), Lines::Universal);
-        assert_eq!(Lines::of(Series::parse("18.0")), Lines::Lf);
-        assert_eq!(Lines::of(None), Lines::Lf);
+        assert_eq!(Lines::of(Series::parse("17.0")), [Lines::Universal]);
+        assert_eq!(Lines::of(Series::parse("saas~17.4")), [Lines::Universal]);
+        assert_eq!(Lines::of(Series::parse("18.0")), [Lines::Lf]);
+        assert_eq!(Lines::of(None), [Lines::Lf, Lines::Universal]);
     }
 }

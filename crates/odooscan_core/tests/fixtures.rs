@@ -194,6 +194,37 @@ fn unassigned_compute_waits_for_a_known_series() {
 }
 
 #[test]
+fn a_lone_cr_waits_for_a_known_series() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+    let refused = |default_series| {
+        let report = scan(&ScanOptions {
+            paths: vec![root.join("custom")],
+            addons_paths: vec![root.join("core")],
+            default_series,
+            target_series: None,
+            ..Default::default()
+        });
+        let mut files: Vec<String> = report
+            .diagnostics
+            .iter()
+            .filter(|d| d.code == "OD000" && d.path.to_string_lossy().contains("/csv_rows_any/"))
+            .map(|d| d.path.file_name().unwrap().to_string_lossy().into_owned())
+            .collect();
+        files.sort();
+        files
+    };
+    assert_eq!(refused(None), ["res.partner-short.csv"]);
+    assert_eq!(
+        refused(Series::parse("16.0")),
+        ["res.partner-feed.csv", "res.partner-short.csv"]
+    );
+    assert_eq!(
+        refused(Series::parse("18.0")),
+        ["res.partner-cr.csv", "res.partner-short.csv"]
+    );
+}
+
+#[test]
 fn delegate_without_ondelete_waits_for_a_known_series() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
     let code = |default_series| {

@@ -255,6 +255,7 @@ custom/csv_rows/data/res.partner-cr.csv:2:21: OD000 a carriage return outside qu
 custom/csv_rows/data/res.partner-empty.csv:1:1: OD000 the file is empty, and Odoo's import reads its first row as the header
 custom/csv_rows/data/res.partner-quote.csv:3:18: OD000 this quote runs to the end of the file, so the row ends before column 'parent_id:id', where Odoo's import reads a relational field
 custom/csv_rows/security/ir.model.access.csv:3:1: OD000 the row ends before column 'group_id:id', where Odoo's import reads a relational field
+custom/csv_rows_any/data/res.partner-short.csv:2:1: OD000 the row ends before column 'parent_id:id', where Odoo's import reads a relational field
 custom/cursor_state/controllers/main.py:13:13: OD121 rolling back discards the whole transaction, the caller's work included, while the code carries on; raise an exception so that Odoo rolls back, or run the step that may fail under self.env.cr.savepoint()
 custom/cursor_state/controllers/main.py:19:9: OD122 UPDATE on res_partner bypasses the ORM, so records this transaction already read keep stale values; call flush_model() before the query and invalidate_model() after it (flush() and invalidate_cache() before 16.0)
 custom/cursor_state/models/caches.py:6:1: OD124 _label_by_partner is filled at runtime but lives in the Python process, so every database the server runs shares it and each worker fills its own copy; cache on a model method with tools.ormcache, which Odoo keeps per database and clears in every worker
