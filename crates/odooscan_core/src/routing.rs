@@ -163,7 +163,8 @@ impl Lineage {
     }
 }
 
-/// Where the file a scan reads sits among the controllers of the scan.
+/// Where the file a scan reads sits among the controllers of the scan. `rel` also decides whether
+/// the scan reads `migrate`, so a stage script read with the default scope never gives OD515.
 #[derive(Clone, Copy)]
 pub struct Scope<'t> {
     pub table: &'t Table,

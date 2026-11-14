@@ -135,6 +135,16 @@ pub(crate) fn tail_name(expr: &Expr) -> Option<&str> {
     }
 }
 
+/// The name a `match` pattern node itself captures, not those of the patterns it holds.
+pub(crate) fn capture(pattern: &ast::Pattern) -> Option<&ast::Identifier> {
+    match pattern {
+        ast::Pattern::MatchAs(p) => p.name.as_ref(),
+        ast::Pattern::MatchStar(p) => p.name.as_ref(),
+        ast::Pattern::MatchMapping(p) => p.rest.as_ref(),
+        _ => None,
+    }
+}
+
 pub(crate) fn keyword<'a>(call: &'a ast::ExprCall, name: &str) -> Option<&'a Expr> {
     keyword_arg(call, name).map(|k| &k.value)
 }
@@ -1697,7 +1707,8 @@ pub fn analyze(src: &str, series: Option<Series>) -> PyFacts {
 
 /// The facts of a Python file of a module of `series`, reading a call of a class of `known` as a
 /// field, following data by the rows of `taint` as well as the built-in ones, and reading a route
-/// with what it inherits from the controllers of `scope`.
+/// with what it inherits from the controllers of `scope`. Only a stage script at `scope.rel` gets
+/// its `migrate` read, as Odoo reads it of no other file.
 pub fn analyze_with(
     src: &str,
     series: Option<Series>,
@@ -1705,6 +1716,7 @@ pub fn analyze_with(
     taint: &TaintTable,
     scope: Scope,
 ) -> PyFacts {
+    let stage = module_state::stage_script(scope.rel).is_some();
     let loc = Locator::new(src);
     let module = match async_names::parse(src, series) {
         Ok(module) => module,
@@ -1730,9 +1742,33 @@ pub fn analyze_with(
     let (patches, diags) = module_state::check(body, &loc);
     v.facts.import_patches = patches;
     v.facts.diags.extend(diags);
-    v.facts.migrate = module_state::migrate(body, &loc);
+    if stage {
+        v.facts.migrate = module_state::migrate(body, &loc);
+    }
     v.facts.imports = Some(imports::file_imports(body, &loc));
     v.facts
+}
+
+/// The parameters of a `def`, its first positional one taken as bound unless `unbound`.
+pub(crate) fn signature(params: &ast::Parameters, loc: &Locator, unbound: bool) -> Signature {
+    let param = |p: &ast::ParameterWithDefault| Param {
+        name: p.parameter.name.to_string(),
+        default: p.default.as_ref().map(|d| loc.src[d.range()].to_owned()),
+    };
+    let mut positional: Vec<Param> = params.posonlyargs.iter().chain(&params.args).map(param).collect();
+    let mut positional_only = params.posonlyargs.len();
+    let bound = (!unbound && !positional.is_empty()).then(|| {
+        positional_only = positional_only.saturating_sub(1);
+        positional.remove(0).name
+    });
+    Signature {
+        bound,
+        positional,
+        positional_only,
+        var_positional: params.vararg.as_ref().map(|p| p.name.to_string()),
+        keyword_only: params.kwonlyargs.iter().map(param).collect(),
+        var_keyword: params.kwarg.as_ref().map(|p| p.name.to_string()),
+    }
 }
 
 /// The targets and the value of an assignment that gives one.
@@ -2405,24 +2441,7 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
     }
 
     fn signature(&self, params: &ast::Parameters, unbound: bool) -> Signature {
-        let param = |p: &ast::ParameterWithDefault| Param {
-            name: p.parameter.name.to_string(),
-            default: p.default.as_ref().map(|d| self.loc.src[d.range()].to_owned()),
-        };
-        let mut positional: Vec<Param> = params.posonlyargs.iter().chain(&params.args).map(param).collect();
-        let mut positional_only = params.posonlyargs.len();
-        let bound = (!unbound && !positional.is_empty()).then(|| {
-            positional_only = positional_only.saturating_sub(1);
-            positional.remove(0).name
-        });
-        Signature {
-            bound,
-            positional,
-            positional_only,
-            var_positional: params.vararg.as_ref().map(|p| p.name.to_string()),
-            keyword_only: params.kwonlyargs.iter().map(param).collect(),
-            var_keyword: params.kwarg.as_ref().map(|p| p.name.to_string()),
-        }
+        signature(params, self.loc, unbound)
     }
 
     fn class_attrs(&mut self, targets: &[Expr], value: &Expr, fact: &mut ClassFact, naming: &mut Naming) {

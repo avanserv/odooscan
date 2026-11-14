@@ -7,7 +7,7 @@ use ruff_python_ast::visitor::{self, Visitor};
 use ruff_python_ast::{self as ast, Expr, Stmt};
 
 use crate::facts::{ImportPatch, Migrate, RawDiag};
-use crate::python::{Locator, str_lit, tail_name};
+use crate::python::{self, Locator, str_lit, tail_name};
 
 /// Calls that build a dict, a list or a set.
 const CONTAINER_CALLS: &[&str] = &["dict", "list", "set", "defaultdict", "OrderedDict"];
@@ -40,6 +40,9 @@ const MODEL_PACKAGES: &[&str] = &["models", "wizard", "wizards", "report"];
 
 /// The model classes of the ORM itself, under `odoo.models` or, from 19.0, `odoo.orm`.
 const ORM_MODELS: &[&str] = &["BaseModel", "AbstractModel", "Model", "TransientModel", "CachedModel"];
+
+/// Directories of upgrade scripts, which name XML ids of past versions.
+pub(crate) const UPGRADE_DIRS: &[&str] = &["migrations", "upgrades"];
 
 /// The patches OD123 reports, which `checks.rs` words with the index's answer, and the OD124
 /// diagnostics.
@@ -446,18 +449,32 @@ impl<'a> Visitor<'a> for NameUses<'_> {
     }
 }
 
+/// The folder of a script Odoo runs at a stage of an upgrade, as `(dir, folder)`: a `pre-`, `post-`
+/// or `end-` `.py` file of a folder under `UPGRADE_DIRS` but `tests` (18.0
+/// `odoo/modules/migration.py:108-140`, `:184-191`). Odoo runs no other file of the module that way.
+pub(crate) fn stage_script(rel: &str) -> Option<(&str, &str)> {
+    let mut parts = rel.split('/');
+    let (dir, folder, name) = (parts.next()?, parts.next()?, parts.next()?);
+    let staged = ["pre-", "post-", "end-"].iter().any(|s| name.starts_with(s)) && name.ends_with(".py");
+    (parts.next().is_none() && UPGRADE_DIRS.contains(&dir) && folder != "tests" && staged).then_some((dir, folder))
+}
+
 /// The names Odoo takes for the two parameters of `migrate` (18.0
 /// `odoo/modules/migration.py:221-224`).
 const MIGRATE_PARAMS: [[&str; 2]; 2] = [["cr", "_cr"], ["version", "_version"]];
 
 /// Calls through which code may bind any name of the module unseen.
-const NAME_WRITERS: &[&str] = &["globals", "locals", "exec"];
+const NAME_WRITERS: &[&str] = &["globals", "locals", "exec", "eval", "vars"];
+
+/// Attributes that hold the names of a module: of `sys`, a frame and a function.
+const NAME_HOLDERS: &[&str] = &["modules", "f_globals", "f_locals", "__globals__"];
 
 /// What the file binds to `migrate` at import. A star import, a module `__getattr__` or code that
-/// writes the module's names may bind it unseen, and a decorator may change the signature Odoo
-/// reads, so only a lone undecorated `def` of the module body is judged.
+/// writes the module's names may bind it unseen, a `def` in any block (`if`, a loop, a `match`
+/// case, `try`, `with`) may run any number of times or none, and a decorator may change the
+/// signature Odoo reads, so only a lone undecorated `def` at module level is judged.
 pub(crate) fn migrate(body: &[Stmt], loc: &Locator) -> Migrate {
-    let top = top_level(body);
+    let top = bound(body);
     let mut bindings = top.iter().copied().filter(|s| binds(s, "migrate"));
     let (first, more) = (bindings.next(), bindings.next().is_some());
     if more || top.iter().any(|s| binds(s, "*") || binds(s, "__getattr__")) {
@@ -465,19 +482,14 @@ pub(crate) fn migrate(body: &[Stmt], loc: &Locator) -> Migrate {
     }
     let judged = match first {
         None => Migrate::Missing,
-        Some(Stmt::FunctionDef(def))
+        Some(stmt @ Stmt::FunctionDef(def))
             if def.decorator_list.is_empty()
-                && body.iter().any(|s| std::ptr::eq(s, first.unwrap()))
+                && body.iter().any(|s| std::ptr::eq(s, stmt))
                 && !odoo_takes(&def.parameters) =>
         {
-            let params = loc
-                .text(&*def.parameters)
-                .split_whitespace()
-                .collect::<Vec<_>>()
-                .join(" ");
             Migrate::Refused {
                 pos: loc.at(def),
-                params: params.replace("( ", "(").replace(" )", ")"),
+                params: python::signature(&def.parameters, loc, true).spelled(""),
             }
         }
         Some(_) => return Migrate::Unread,
@@ -521,8 +533,28 @@ fn binds(stmt: &Stmt, name: &str) -> bool {
             .names
             .iter()
             .any(|a| a.asname.as_ref().unwrap_or(&a.name).as_str() == name),
+        Stmt::Try(t) => t.handlers.iter().any(|h| {
+            let ast::ExceptHandler::ExceptHandler(h) = h;
+            h.name.as_ref().is_some_and(|n| n.as_str() == name)
+        }),
+        Stmt::Match(m) => m.cases.iter().any(|c| captures(&c.pattern).contains(&name)),
         _ => targets(stmt).into_iter().any(|t| target_binds(t, name)),
     }
+}
+
+/// The names a `match` pattern captures.
+fn captures(pattern: &ast::Pattern) -> Vec<&str> {
+    #[derive(Default)]
+    struct Captures<'a>(Vec<&'a str>);
+    impl<'a> Visitor<'a> for Captures<'a> {
+        fn visit_pattern(&mut self, pattern: &'a ast::Pattern) {
+            self.0.extend(python::capture(pattern).map(ast::Identifier::as_str));
+            visitor::walk_pattern(self, pattern);
+        }
+    }
+    let mut captures = Captures::default();
+    captures.visit_pattern(pattern);
+    captures.0
 }
 
 /// The targets `stmt` assigns or deletes.
@@ -554,37 +586,17 @@ fn is_named(expr: &Expr, name: &str) -> bool {
     expr.as_name_expr().is_some_and(|n| n.id.as_str() == name)
 }
 
-/// Whether the file may bind `name` in the module where no statement shows it: through a
-/// `NAME_WRITERS` call, `sys.modules`, a `global` declaration or an assignment expression.
+/// Whether the file may bind `name` in the module where no statement shows it: through a `global`
+/// declaration, an assignment expression or code that may write any name, as `Unseen` reads them.
 fn writes_names(body: &[Stmt], name: &str) -> bool {
-    struct Writes<'n> {
-        name: &'n str,
-        found: bool,
-    }
-    impl<'a> Visitor<'a> for Writes<'_> {
-        fn visit_stmt(&mut self, stmt: &'a Stmt) {
-            self.found |= matches!(stmt, Stmt::Global(g) if g.names.iter().any(|n| n.as_str() == self.name));
-            visitor::walk_stmt(self, stmt);
-        }
-
-        fn visit_expr(&mut self, expr: &'a Expr) {
-            self.found |= match expr {
-                Expr::Name(n) => NAME_WRITERS.contains(&n.id.as_str()),
-                Expr::Attribute(a) => a.attr.as_str() == "modules",
-                Expr::Named(n) => is_named(&n.target, self.name),
-                _ => false,
-            };
-            visitor::walk_expr(self, expr);
-        }
-    }
-    let mut writes = Writes { name, found: false };
-    writes.visit_body(body);
-    writes.found
+    let mut unseen = Unseen::default();
+    unseen.visit_body(body);
+    unseen.writes || unseen.names.iter().any(|n| n == name)
 }
 
 /// The names the file binds at import, in the module body or a block of it, or that a function or
 /// an assignment expression may bind in it. None when it may bind names no statement shows: through
-/// a star import, a module `__getattr__`, a `NAME_WRITERS` call or `sys.modules`.
+/// a star import, a module `__getattr__` or code that may write any name, as `Unseen` reads them.
 pub(crate) fn defined_names(body: &[Stmt]) -> Option<Vec<String>> {
     let mut names = vec![];
     for stmt in bound(body) {
@@ -650,7 +662,8 @@ fn target_names(target: &Expr, names: &mut Vec<String>) {
 }
 
 /// The names a `global` declaration or an assignment expression anywhere in the file may bind in the
-/// module, and whether a call or `sys.modules` may write any.
+/// module, and whether code may write any: a call of a `NAME_WRITERS` builtin, by its name, through
+/// `builtins` or imported from it, or a `NAME_HOLDERS` attribute, or `modules` imported from `sys`.
 #[derive(Default)]
 struct Unseen {
     names: Vec<String>,
@@ -659,8 +672,17 @@ struct Unseen {
 
 impl<'a> Visitor<'a> for Unseen {
     fn visit_stmt(&mut self, stmt: &'a Stmt) {
-        if let Stmt::Global(g) = stmt {
-            self.names.extend(g.names.iter().map(ToString::to_string));
+        match stmt {
+            Stmt::Global(g) => self.names.extend(g.names.iter().map(ToString::to_string)),
+            Stmt::ImportFrom(i) => {
+                let held = |writers: &[&str]| i.names.iter().any(|a| writers.contains(&a.name.as_str()));
+                self.writes |= match i.module.as_ref().map(ast::Identifier::as_str) {
+                    Some("sys") if i.level == 0 => held(&["modules"]),
+                    Some("builtins") if i.level == 0 => held(NAME_WRITERS),
+                    _ => false,
+                };
+            }
+            _ => {}
         }
         visitor::walk_stmt(self, stmt);
     }
@@ -668,7 +690,11 @@ impl<'a> Visitor<'a> for Unseen {
     fn visit_expr(&mut self, expr: &'a Expr) {
         match expr {
             Expr::Name(n) => self.writes |= NAME_WRITERS.contains(&n.id.as_str()),
-            Expr::Attribute(a) => self.writes |= a.attr.as_str() == "modules",
+            Expr::Attribute(a) => {
+                let attr = a.attr.as_str();
+                self.writes |=
+                    NAME_HOLDERS.contains(&attr) || (NAME_WRITERS.contains(&attr) && is_named(&a.value, "builtins"));
+            }
             Expr::Named(n) => target_names(&n.target, &mut self.names),
             _ => {}
         }
@@ -841,10 +867,23 @@ mod tests {
             ),
             (
                 "def migrate(\n    cr,\n    version,\n    *args,\n):\n    pass\n",
-                "(cr, version, *args,)",
+                "(cr, version, *args)",
             ),
             ("def migrate(cr, *, version):\n    pass\n", "(cr, *, version)"),
             ("def migrate(cr):\n    pass\n", "(cr)"),
+            (
+                "def migrate(env,  # cursor\n            version):\n    pass\n",
+                "(env, version)",
+            ),
+            (
+                "def migrate(cr: Cursor, version: str, extra=None):\n    pass\n",
+                "(cr, version, extra=None)",
+            ),
+            (
+                "def migrate(cr, /, version, extra):\n    pass\n",
+                "(cr, /, version, extra)",
+            ),
+            ("def migrate(cr, version, **kw):\n    pass\n", "(cr, version, **kw)"),
         ] {
             let Migrate::Refused { pos, params: written } = migrate_of(src) else {
                 panic!("{src}");
@@ -878,6 +917,8 @@ mod tests {
         for src in [
             "@decorate\ndef migrate(env, version):\n    pass\n",
             "if True:\n    def migrate(env, version):\n        pass\n",
+            "try:\n    def migrate(env, version):\n        pass\nexcept E:\n    pass\n",
+            "with build():\n    def migrate(env, version):\n        pass\n",
             "def migrate(env):\n    pass\nmigrate = wrap(migrate)\n",
             "from .helpers import migrate\n",
             "from .helpers import run as migrate\n",
@@ -894,10 +935,45 @@ mod tests {
             "sys.modules[__name__].migrate = build()\n",
             "def bind():\n    global migrate\n    migrate = build()\nbind()\n",
             "if (migrate := build()):\n    pass\n",
+            "try:\n    pass\nexcept E as migrate:\n    pass\n",
+            "match build():\n    case migrate:\n        pass\n",
+            "match build():\n    case [*migrate]:\n        pass\n",
+            "match build():\n    case {**migrate}:\n        pass\n",
         ] {
             assert_eq!(migrate_of(src), Migrate::Unread, "{src}");
         }
+        for params in ["(cr, version)", "(env, version)"] {
+            for block in ["for _ in ():\n", "for _ in ():\n    pass\nelse:\n", "while build():\n"] {
+                let src = format!("{block}    def migrate{params}:\n        pass\n");
+                assert_eq!(migrate_of(&src), Migrate::Unread, "{src}");
+            }
+            let src = format!("match build():\n    case 1:\n        def migrate{params}:\n            pass\n");
+            assert_eq!(migrate_of(&src), Migrate::Unread, "{src}");
+        }
+        let def = "def migrate(env, version):\n    pass\n";
+        for writer in WRITERS {
+            let src = format!("{def}{writer}");
+            assert_eq!(migrate_of(&src), Migrate::Unread, "{src}");
+        }
     }
+
+    /// A line of each form through which code may write any name of the module.
+    const WRITERS: &[&str] = &[
+        "globals()['migrate'] = build()\n",
+        "locals()['migrate'] = build()\n",
+        "vars()['migrate'] = build()\n",
+        "exec('migrate = build()')\n",
+        "eval('(migrate := build())')\n",
+        "import builtins\nbuiltins.exec('migrate = build()')\n",
+        "from builtins import exec as run\nrun('migrate = build()')\n",
+        "from builtins import vars\n",
+        "sys.modules[__name__].migrate = build()\n",
+        "from sys import modules\nmodules[__name__].migrate = build()\n",
+        "from sys import modules as loaded\nloaded[__name__].migrate = build()\n",
+        "sys._getframe().f_globals['migrate'] = build()\n",
+        "sys._getframe().f_locals['migrate'] = build()\n",
+        "def helper():\n    pass\nhelper.__globals__['migrate'] = build()\n",
+    ];
 
     fn defined(src: &str) -> Option<Vec<String>> {
         let parsed = parse_module(src).expect("valid Python");
@@ -928,21 +1004,43 @@ mod tests {
             "globals()['x'] = 1\n",
             "def f():\n    exec('x = 1')\n",
             "sys.modules[__name__].x = 1\n",
-        ] {
+        ]
+        .iter()
+        .chain(WRITERS)
+        {
             assert_eq!(defined(src), None, "{src}");
         }
     }
 
     #[test]
-    fn leaves_a_file_that_does_not_parse_unjudged() {
-        let eighteen = crate::series::Series::parse("18.0");
-        assert_eq!(
-            crate::python::analyze("def helper(:\n", eighteen).migrate,
-            Migrate::Unread
-        );
-        assert_eq!(
-            crate::python::analyze("def helper():\n    pass\n", eighteen).migrate,
-            Migrate::Missing
-        );
+    fn takes_the_stage_scripts_of_an_upgrade_folder() {
+        assert_eq!(stage_script("migrations/1.0/pre-x.py"), Some(("migrations", "1.0")));
+        assert_eq!(stage_script("upgrades/1.0/end-x.py"), Some(("upgrades", "1.0")));
+        for rel in [
+            "migrations/1.0/x.py",
+            "migrations/tests/post-x.py",
+            "migrations/1.0/a/post-x.py",
+            "migrations/post-x.py",
+            "models/1.0/post-x.py",
+            "migrations/1.0/post-x.txt",
+        ] {
+            assert_eq!(stage_script(rel), None, "{rel}");
+        }
+    }
+
+    #[test]
+    fn reads_migrate_only_of_a_stage_script_that_parses() {
+        let read = |src: &str, rel: &str| {
+            let scope = crate::routing::Scope {
+                rel,
+                ..crate::routing::Scope::default()
+            };
+            let (known, taint) = (Default::default(), Default::default());
+            crate::python::analyze_with(src, crate::series::Series::parse("18.0"), &known, &taint, scope).migrate
+        };
+        let helper = "def helper():\n    pass\n";
+        assert_eq!(read(helper, "models/x.py"), Migrate::Unread);
+        assert_eq!(read(helper, "migrations/1.0/post-x.py"), Migrate::Missing);
+        assert_eq!(read("def helper(:\n", "migrations/1.0/post-x.py"), Migrate::Unread);
     }
 }

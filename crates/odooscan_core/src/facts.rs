@@ -811,13 +811,14 @@ pub struct PyFacts {
 /// calls with the cursor and the installed version (18.0 `odoo/modules/migration.py:221-255`).
 #[derive(Debug, Default, PartialEq, Eq)]
 pub enum Migrate {
-    /// The file does not parse, or binds `migrate` as Odoo takes it or in a way the scan does not
-    /// judge.
+    /// The file is not a stage script, does not parse, or binds `migrate` as Odoo takes it or in
+    /// a way the scan does not judge.
     #[default]
     Unread,
     /// Nothing binds `migrate`.
     Missing,
-    /// A `def` whose parameters Odoo refuses, at its start, with the parameters as written.
+    /// A `def` whose parameters Odoo refuses, at its start, with the parameters as
+    /// `Signature::spelled` gives them: names and defaults, no annotations.
     Refused { pos: Pos, params: String },
 }
 
