@@ -11,3 +11,13 @@ with suppress(ImportError):
 
 if TYPE_CHECKING:
     from odoo.addons.project.models.project import Task
+
+    def shelf_type():
+        from odoo.addons.imports_lib.models import Gone
+
+        return Gone
+
+
+with suppress(KeyError):
+    from odoo.addons.imports_lib.tools import shelf_height
+    from odoo.addons.project.models.project import Project

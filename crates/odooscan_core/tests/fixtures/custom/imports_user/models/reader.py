@@ -3,7 +3,7 @@ from odoo.addons.base.maintenance.migrations import util
 from odoo.addons.imports_lib.models import PartnerShelf, PartnerShelves
 from odoo.addons.imports_lib.models import shelving
 from odoo.addons.imports_lib.open import format_shelf as open_format
-from odoo.addons.imports_lib.tools import SHELF_WIDTH, format_shelf
+from odoo.addons.imports_lib.tools import SHELF_WIDTH, format_shelf, shelf_depth
 from odoo.addons.imports_lib.wizard import shelf_wizard
 from odoo.addons.project.models.project import Task
 from odoo.addons.web.models import res_partner
