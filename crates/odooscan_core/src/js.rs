@@ -3,21 +3,24 @@ use std::ops::Range;
 use oxc_allocator::Allocator;
 use oxc_ast::ast::{
     Argument, ArrayExpressionElement, AssignmentExpression, AssignmentOperator, AssignmentTarget, BinaryOperator,
-    BindingPattern, CallExpression, Class, ClassElement, DebuggerStatement, Expression, Function, ObjectExpression,
-    ObjectPropertyKind, Program, Statement, StaticMemberExpression, StringLiteral, VariableDeclarator,
+    BindingPattern, CallExpression, Class, ClassElement, DebuggerStatement, Expression, Function, MemberExpression,
+    ObjectExpression, ObjectProperty, ObjectPropertyKind, Program, Statement, StaticMemberExpression, StringLiteral,
+    UnaryExpression, VariableDeclarator,
 };
 use oxc_ast_visit::Visit;
 use oxc_ast_visit::walk::{
-    walk_assignment_expression, walk_call_expression, walk_class, walk_static_member_expression,
+    walk_assignment_expression, walk_call_expression, walk_class, walk_static_member_expression, walk_unary_expression,
     walk_variable_declarator,
 };
 use oxc_parser::Parser;
 use oxc_span::{GetSpan, SourceType};
 use oxc_syntax::module_record::{ExportExportName, ExportImportName, ImportImportName, ModuleRecord};
+use oxc_syntax::operator::UnaryOperator;
 use oxc_syntax::scope::ScopeFlags;
 
 use crate::facts::{
-    Annotation, Heritage, JsAlias, JsClass, JsDefine, JsFacts, JsName, JsPatch, Lines, OrmCall, Pos, RawDiag, Spanned,
+    Annotation, ComponentItem, Heritage, JsAlias, JsClass, JsDefine, JsFacts, JsName, JsPatch, JsProps, Lines, OrmCall,
+    Pos, PropItem, RawDiag, Spanned, Static, StaticWrite,
 };
 use crate::series::Series;
 
@@ -67,11 +70,27 @@ pub fn analyze(text: &str) -> JsFacts {
         lines: &lines,
         facts: &mut facts,
         templates: vec![],
+        statics: vec![],
     };
     collector.visit_program(&parsed.program);
-    for (class, template) in collector.templates {
+    let (templates, statics) = (collector.templates, collector.statics);
+    for (class, template) in templates {
         if let Some(c) = facts.classes.iter_mut().find(|c| c.name == class) {
             c.template = Some(template);
+        }
+    }
+    for (binding, value) in statics {
+        let Some(c) = facts.classes.iter_mut().find(|c| c.name == binding) else {
+            facts.static_writes.push(StaticWrite {
+                binding,
+                member: value.kind(),
+                inner: false,
+            });
+            continue;
+        };
+        match value {
+            StaticValue::Props(props) => c.props = Some(props),
+            StaticValue::Components(components) => c.components = Some(components),
         }
     }
     let disabled = eslint_disabled(&parsed.program, text, &lines);
@@ -346,6 +365,29 @@ struct Collector<'f> {
     facts: &'f mut JsFacts,
     /// `Class.template = "..."` assignments, which may precede the class.
     templates: Vec<(String, Spanned<String>)>,
+    /// `X.props = ...` and `X.components = ...`, which set the class's own when the file declares it.
+    statics: Vec<(String, StaticValue)>,
+}
+
+enum StaticValue {
+    Props(JsProps),
+    Components(Vec<ComponentItem>),
+}
+
+impl StaticValue {
+    fn kind(&self) -> Static {
+        match self {
+            Self::Props(_) => Static::Props,
+            Self::Components(_) => Static::Components,
+        }
+    }
+
+    fn read(kind: Static, value: Option<&Expression>) -> Self {
+        match kind {
+            Static::Props => Self::Props(props(value)),
+            Static::Components => Self::Components(components(value)),
+        }
+    }
 }
 
 impl<'a> Visit<'a> for Collector<'_> {
@@ -376,6 +418,8 @@ impl<'a> Visit<'a> for Collector<'_> {
                     _ => None,
                 }),
                 triggers: class_triggers(class, self.lines),
+                props: static_member(class, "props").map(props),
+                components: static_member(class, "components").map(components),
             });
         }
         walk_class(self, class);
@@ -418,6 +462,16 @@ impl<'a> Visit<'a> for Collector<'_> {
         {
             self.templates.push((class.name.to_string(), template));
         }
+        if let Some(m) = assignment.left.as_member_expression() {
+            match (static_of(m), assignment.operator) {
+                (Some((binding, kind)), AssignmentOperator::Assign) if is_static(m) => {
+                    let value = StaticValue::read(kind, Some(&assignment.right));
+                    self.statics.push((binding, value));
+                }
+                (Some(_), _) => self.facts.static_writes.extend(static_write(m)),
+                (None, _) => {}
+            }
+        }
         self.facts.diags.extend(html_assignment(assignment, self.lines));
         walk_assignment_expression(self, assignment);
     }
@@ -426,6 +480,7 @@ impl<'a> Visit<'a> for Collector<'_> {
         if let Some(patch) = prototype_patch(call, self.lines) {
             self.facts.patches.push(patch);
         }
+        self.facts.static_writes.extend(static_calls(call));
         if let Some(orm) = orm_call(call, self.lines).or_else(|| legacy_rpc(call, self.lines)) {
             self.facts.orm_calls.push(orm);
         }
@@ -436,10 +491,209 @@ impl<'a> Visit<'a> for Collector<'_> {
         walk_call_expression(self, call);
     }
 
+    fn visit_unary_expression(&mut self, unary: &UnaryExpression<'a>) {
+        if unary.operator == UnaryOperator::Delete
+            && let Some(m) = unary.argument.as_member_expression()
+        {
+            self.facts.static_writes.extend(static_write(m));
+        }
+        walk_unary_expression(self, unary);
+    }
+
     fn visit_debugger_statement(&mut self, statement: &DebuggerStatement) {
         let message = "debugger pauses the script in every browser with the developer tools open; remove it";
         let pos = self.lines.pos(statement.span.start as usize);
         self.facts.diags.push(RawDiag::new("OD612", pos, message));
+    }
+}
+
+/// The value of the class's static member `name`, as `Some(None)` for one without a literal value,
+/// such as a getter.
+fn static_member<'c, 'a>(class: &'c Class<'a>, name: &str) -> Option<Option<&'c Expression<'a>>> {
+    let member = class
+        .body
+        .body
+        .iter()
+        .rfind(|e| e.r#static() && e.static_name().is_some_and(|n| n == name))?;
+    Some(match member {
+        ClassElement::PropertyDefinition(p) => p.value.as_ref(),
+        _ => None,
+    })
+}
+
+/// `static props` as Owl reads it (18.0 `addons/web/static/lib/owl/owl.js:2935-2937`, `:2959-2961`).
+fn props(value: Option<&Expression>) -> JsProps {
+    let open = || JsProps {
+        list: false,
+        items: vec![PropItem::Open],
+    };
+    match value {
+        Some(Expression::ArrayExpression(list)) => JsProps {
+            list: true,
+            items: list.elements.iter().map(listed_prop).collect(),
+        },
+        Some(Expression::ObjectExpression(object)) => JsProps {
+            list: false,
+            items: object.properties.iter().map(object_prop).collect(),
+        },
+        _ => open(),
+    }
+}
+
+fn listed_prop(element: &ArrayExpressionElement) -> PropItem {
+    match element {
+        ArrayExpressionElement::StringLiteral(s) => {
+            let Some(name) = s.value.as_str() else {
+                return PropItem::Open;
+            };
+            let optional = name.strip_suffix('?');
+            PropItem::Prop {
+                name: optional.unwrap_or(name).to_owned(),
+                required: optional.is_none(),
+            }
+        }
+        ArrayExpressionElement::SpreadElement(spread) => {
+            spread_of(&spread.argument, "props").map_or(PropItem::Open, PropItem::Spread)
+        }
+        _ => PropItem::Open,
+    }
+}
+
+fn object_prop(property: &ObjectPropertyKind) -> PropItem {
+    match property {
+        ObjectPropertyKind::ObjectProperty(p) => match key(p) {
+            Some(name) => PropItem::Prop {
+                name,
+                required: !optional(&p.value),
+            },
+            None => PropItem::Open,
+        },
+        ObjectPropertyKind::SpreadProperty(spread) => {
+            spread_of(&spread.argument, "props").map_or(PropItem::Open, PropItem::Spread)
+        }
+    }
+}
+
+fn key(property: &ObjectProperty) -> Option<String> {
+    Some(property.key.static_name()?.as_str()?.to_owned())
+}
+
+/// Whether a prop's description lets it be left out: an object whose `optional` is not a literal
+/// `false`, or one with a spread that may give it.
+fn optional(value: &Expression) -> bool {
+    let Expression::ObjectExpression(object) = value else {
+        return false;
+    };
+    object.properties.iter().any(|p| match p {
+        ObjectPropertyKind::ObjectProperty(p) => {
+            p.key.is_specific_static_name("optional") && !matches!(&p.value, Expression::BooleanLiteral(b) if !b.value)
+        }
+        ObjectPropertyKind::SpreadProperty(_) => true,
+    })
+}
+
+fn components(value: Option<&Expression>) -> Vec<ComponentItem> {
+    let Some(Expression::ObjectExpression(object)) = value else {
+        return vec![ComponentItem::Open];
+    };
+    let item = |property: &ObjectPropertyKind| match property {
+        ObjectPropertyKind::ObjectProperty(p) => match key(p) {
+            Some(key) => ComponentItem::Entry {
+                key,
+                binding: match &p.value {
+                    Expression::Identifier(i) => Some(i.name.to_string()),
+                    _ => None,
+                },
+            },
+            None => ComponentItem::Open,
+        },
+        ObjectPropertyKind::SpreadProperty(spread) => {
+            spread_of(&spread.argument, "components").map_or(ComponentItem::Open, ComponentItem::Spread)
+        }
+    };
+    object.properties.iter().map(item).collect()
+}
+
+/// `X.<member>` as `X`, or `super.<member>` as `super`.
+fn spread_of(e: &Expression, member: &str) -> Option<String> {
+    let Expression::StaticMemberExpression(m) = e else {
+        return None;
+    };
+    match &m.object {
+        _ if m.property.name != member => None,
+        Expression::Identifier(i) => Some(i.name.to_string()),
+        Expression::Super(_) => Some("super".to_owned()),
+        _ => None,
+    }
+}
+
+/// `X.props` or `X.components` itself.
+fn is_static(m: &MemberExpression) -> bool {
+    matches!(m, MemberExpression::StaticMemberExpression(s) if static_kind(&s.property.name).is_some())
+        && matches!(m.object(), Expression::Identifier(_))
+}
+
+fn static_kind(name: &str) -> Option<Static> {
+    match name {
+        "props" => Some(Static::Props),
+        "components" => Some(Static::Components),
+        _ => None,
+    }
+}
+
+/// The binding and member of `X.props` or `X.components` that `m` is or reaches into, as in
+/// `X.props.title.optional`.
+fn static_of(m: &MemberExpression) -> Option<(String, Static)> {
+    if let MemberExpression::StaticMemberExpression(s) = m
+        && let Expression::Identifier(i) = &s.object
+        && let Some(kind) = static_kind(&s.property.name)
+    {
+        return Some((i.name.to_string(), kind));
+    }
+    static_of(m.object().as_member_expression()?)
+}
+
+/// The write that assigning or deleting `m` makes when it is or reaches into `X.props` or
+/// `X.components`.
+fn static_write(m: &MemberExpression) -> Option<StaticWrite> {
+    let (binding, member) = static_of(m)?;
+    let inner = !is_static(m);
+    Some(StaticWrite { binding, member, inner })
+}
+
+/// What a call changes of a class's `props` or `components`: through a method of their own, as
+/// `X.props.push()`, `Object.assign` or `patch` given them, or `patch(X, { props })`.
+fn static_calls(call: &CallExpression) -> Vec<StaticWrite> {
+    let inner = |(binding, member)| StaticWrite {
+        binding,
+        member,
+        inner: true,
+    };
+    if let Some(callee) = call.callee.as_member_expression()
+        && let Some(written) = callee.object().as_member_expression().and_then(static_of)
+    {
+        return vec![inner(written)];
+    }
+    let changes = call.callee.is_specific_member_access("Object", "assign")
+        || matches!(&call.callee, Expression::Identifier(i) if i.name == "patch");
+    let Some(first) = call.arguments.first().filter(|_| changes) else {
+        return vec![];
+    };
+    if let Some(written) = first.as_member_expression().and_then(static_of) {
+        return vec![inner(written)];
+    }
+    match (first, call.arguments.get(1)) {
+        (Argument::Identifier(class), Some(Argument::ObjectExpression(extension))) => members(extension)
+            .iter()
+            .filter_map(|m| {
+                Some(StaticWrite {
+                    binding: class.name.to_string(),
+                    member: static_kind(m)?,
+                    inner: false,
+                })
+            })
+            .collect(),
+        _ => vec![],
     }
 }
 
@@ -1393,6 +1647,116 @@ const { hooks: h } = other;
                 "OD613@5:20",
                 "OD613@5:26",
                 "OD613@6:5"
+            ]
+        );
+    }
+
+    #[test]
+    fn reads_the_static_props_and_components_of_a_class() {
+        let facts = analyze(
+            r#"class A extends Component {
+    static props = { title: String, body: { type: String, optional: true }, kind: { optional: false },
+        size: { optional: flag }, extra: { ...base }, "some-prop": [String, Number], ...B.props,
+        ...super.props, ...other, [key]: String };
+    static components = { Card, Other: Panel, Inline: makeIt(), ...B.components, ...super.components,
+        ...registry };
+}
+class B extends Component {
+    static props = ["title", "body?", "*", ...A.props, ...rest];
+    static get components() { return {}; }
+}
+class C extends Component {
+    static props = standardProps;
+}
+class D extends Component {}
+D.props = ["x"];
+D.components = { Card };
+Imported.props = { x: String };
+"#,
+        );
+        let props = |c: &JsClass| -> Option<(bool, Vec<String>)> {
+            let p = c.props.as_ref()?;
+            let items = p.items.iter().map(|i| match i {
+                PropItem::Prop { name, required } => format!("{name}{}", if *required { "" } else { "?" }),
+                PropItem::Spread(s) => format!("...{s}"),
+                PropItem::Open => "open".to_owned(),
+            });
+            Some((p.list, items.collect()))
+        };
+        let components = |c: &JsClass| -> Option<Vec<String>> {
+            let items = c.components.as_ref()?.iter().map(|i| match i {
+                ComponentItem::Entry { key, binding } => format!("{key}={}", binding.as_deref().unwrap_or("?")),
+                ComponentItem::Spread(s) => format!("...{s}"),
+                ComponentItem::Open => "open".to_owned(),
+            });
+            Some(items.collect())
+        };
+        let c = &facts.classes;
+        let a = "title body? kind size? extra? some-prop ...B ...super open open".split(' ');
+        assert_eq!(props(&c[0]), Some((false, a.map(str::to_owned).collect())));
+        let a = "Card=Card Other=Panel Inline=? ...B ...super open".split(' ');
+        assert_eq!(components(&c[0]), Some(a.map(str::to_owned).collect()));
+        let b = "title body? * ...A open".split(' ');
+        assert_eq!(props(&c[1]), Some((true, b.map(str::to_owned).collect())));
+        assert_eq!(components(&c[1]), Some(vec!["open".to_owned()]));
+        assert_eq!(props(&c[2]), Some((false, vec!["open".to_owned()])));
+        assert_eq!(components(&c[2]), None);
+        assert_eq!(props(&c[3]), Some((true, vec!["x".to_owned()])));
+        assert_eq!(components(&c[3]), Some(vec!["Card=Card".to_owned()]));
+        let own = StaticWrite {
+            binding: "Imported".to_owned(),
+            member: Static::Props,
+            inner: false,
+        };
+        assert_eq!(facts.static_writes, [own]);
+    }
+
+    #[test]
+    fn reads_the_other_writes_of_props_and_components() {
+        let facts = analyze(
+            r#"A.props.title = { type: String, optional: true };
+B.components["Card"] = Card;
+C.props.title.optional = true;
+delete D.props.title;
+E.props.push("x");
+Object.assign(F.components, { Card });
+patch(G.props, { x: String });
+patch(H, { props: {}, components: {}, setup() {} });
+I.props ||= {};
+patch(J.prototype, { props: 1 });
+this.props.onChange();
+K.props.title;
+Object.keys(L.props);
+delete M.other.x;
+delete N.props;
+"#,
+        );
+        let writes: Vec<_> = facts
+            .static_writes
+            .iter()
+            .map(|w| {
+                let member = if w.member == Static::Props {
+                    "props"
+                } else {
+                    "components"
+                };
+                format!("{}.{member}{}", w.binding, if w.inner { " inner" } else { "" })
+            })
+            .collect();
+        assert_eq!(
+            writes,
+            [
+                "A.props inner",
+                "B.components inner",
+                "C.props inner",
+                "D.props inner",
+                "E.props inner",
+                "F.components inner",
+                "G.props inner",
+                "H.props",
+                "H.components",
+                "I.props",
+                "N.props"
             ]
         );
     }
