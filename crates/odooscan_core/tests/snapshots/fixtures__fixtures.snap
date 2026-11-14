@@ -1,5 +1,6 @@
 ---
 source: crates/odooscan_core/tests/fixtures.rs
+assertion_line: 36
 expression: "lines.join(\"\\n\")"
 ---
 custom/access_rows/security/ir.model.access-hook.csv:2:1: OD402 no group limits this row, so every user, public and portal included, gets write, create or unlink on model_access_desk; name a group
@@ -249,6 +250,10 @@ custom/button_private/views/desks.xml:7:45: OD313 method 'ensure_one' of button.
 custom/button_private/views/desks.xml:8:45: OD313 method 'init' of button.desk is private, so Odoo refuses to call it from a button
 custom/button_private/views/desks.xml:9:45: OD313 method 'with_context' of button.desk is private, so Odoo refuses to call it from a button
 custom/button_private15/views/kiosks.xml:7:45: OD313 method 'init' of button.kiosk is private, so Odoo refuses to call it from a button
+custom/csv_rows/data/res.partner-cr.csv:2:21: OD000 a carriage return outside quotes that ends no line, which Python's csv reader refuses
+custom/csv_rows/data/res.partner-empty.csv:1:1: OD000 the file is empty, and Odoo's import reads its first row as the header
+custom/csv_rows/data/res.partner-quote.csv:3:18: OD000 this quote runs to the end of the file, so the row ends before column 'parent_id:id', where Odoo's import reads a relational field
+custom/csv_rows/security/ir.model.access.csv:3:1: OD000 the row ends before column 'group_id:id', where Odoo's import reads a relational field
 custom/cursor_state/controllers/main.py:13:13: OD121 rolling back discards the whole transaction, the caller's work included, while the code carries on; raise an exception so that Odoo rolls back, or run the step that may fail under self.env.cr.savepoint()
 custom/cursor_state/controllers/main.py:19:9: OD122 UPDATE on res_partner bypasses the ORM, so records this transaction already read keep stale values; call flush_model() before the query and invalidate_model() after it (flush() and invalidate_cache() before 16.0)
 custom/cursor_state/models/caches.py:6:1: OD124 _label_by_partner is filled at runtime but lives in the Python process, so every database the server runs shares it and each worker fills its own copy; cache on a model method with tools.ormcache, which Odoo keeps per database and clears in every worker
@@ -387,12 +392,15 @@ custom/dynamic_models_unknown/models/partner.py:24:17: OD202 model 'side.order' 
 custom/encoded_broken/data/broken.xml:4:1: OD000 expected 'record' tag, not 'odoo' at 4:1
 custom/encoded_csv10/data/refs.xml:8:9: OD301 module encoded_csv10 defines no XML id 'encoded_csv10.country_gone'
 custom/encoded_csv10/data/res.country.csv:1:1: OD309 res.country has no field 'no_such_field'
+custom/encoded_csv11/data/res.country.csv:2:17: OD000 the file is not UTF-8
 custom/encoded_csv9/data/refs.xml:8:9: OD301 module encoded_csv9 defines no XML id 'encoded_csv9.country_gone'
 custom/encoded_csv9/data/res.country.csv:1:1: OD309 res.country has no field 'no_such_field'
 custom/encoded_csv9/data/stray.csv:1:1: OD502 'data/stray.csv' is not in the manifest's init_xml, update_xml, data, demo_xml or demo, so Odoo never loads it
+custom/encoded_lost/data/legacy.xml:3:31: OD000 the file is not UTF-8, and its declaration names no other encoding
 custom/encoded_lost/data/refs.xml:14:5: OD202 model 'encoded.visit' comes from module encoded_lost_stranger; add it to depends
 custom/encoded_lost/models/ledger.py:19:18: OD203 'x_lost': encoded.ledger has no field 'x_lost'
 custom/encoded_lost/models/ledger.py:29:18: OD203 'x_lost': res.partner has no field 'x_lost'
+custom/encoded_lost/security/ir.model.access.csv:2:18: OD000 the file is not UTF-8
 custom/encoded_lost_code/models/ledger.py:8:15: OD212 Monetary field 'balance' has no currency: encoded.ledger has no currency_id, and the field names no currency_field
 custom/encoded_lost_code/models/ledger.py:12:24: OD211 no parent class of encoded.ledger defines 'action_settle', so this super() call fails
 custom/encoded_lost_code/models/ledger.py:15:39: OD224 t.no_such_column: encoded_ledger has no such column, since encoded.ledger has no field no_such_column; name the column of a stored field of encoded.ledger
@@ -410,6 +418,8 @@ custom/encoded_lost_code/views/note.xml:22:49: OD312 encoded.ledger has no metho
 custom/encoded_lost_code/views/note.xml:23:49: OD313 method '_nope' of encoded.ledger is private, so Odoo refuses to call it from a button
 custom/encoded_lost_code/views/note.xml:31:33: OD318 encoded.note has no field activity_ids, which the activity view searches; inherit mail.activity.mixin
 custom/encoded_lost_code/views/note.xml:35:36: OD210 'no_note_rule': encoded.note has no field 'no_note_rule'
+custom/encoded_lost_csv/security/ir.model.access.csv:2:16: OD000 the file is not UTF-8
+custom/encoded_lost_partners/data/res.partner.csv:2:17: OD000 the file is not UTF-8
 custom/encoded_lost_side/data/refs.xml:9:38: OD321 'encoded_lost.ledger_blank' is a record of encoded.ledger, but res.partner.parent_id takes res.partner
 custom/encoded_lost_side/data/refs.xml:12:29: OD322 encoded.ledger.stage has no value 'nope'
 custom/encoded_lost_stranger/data/page.xml:3:20: OD311 template 'encoded_lost.page' comes from module encoded_lost, which is not in depends
@@ -417,6 +427,7 @@ custom/encoded_lost_stranger/data/page.xml:7:33: OD201 no indexed module defines
 custom/encoded_lost_stranger/models/visit.py:4:7: OD401 model 'encoded.visit' has no ir.model.access rule, so only the superuser can use it
 custom/encoded_ok/data/latin1.xml:5:9: OD309 res.country has no field 'no_such_field'
 custom/encoded_ok/data/refs.xml:12:9: OD301 module encoded_ok defines no XML id 'encoded_ok.country_gone'
+custom/encoded_python/models/memo.py:8:34: OD000 the file is not UTF-8, and no coding comment names another encoding
 custom/exposure/models/portal.py:19:33: OD403 Html field 'body' of exposure.ticket is not sanitized (sanitize=False) and base.group_portal can write exposure.ticket, so they can store script that runs for whoever opens the record; keep the sanitizer on, or give the field groups
 custom/exposure/models/portal.py:20:34: OD403 Html field 'reply' of exposure.ticket is not sanitized (sanitize='email_outgoing') and base.group_portal can write exposure.ticket, so they can store style, base and SVG markup that restyles the page or redirects its links for whoever opens the record; keep the sanitizer on, or give the field groups
 custom/exposure/models/portal.py:21:47: OD403 Html field 'summary' of exposure.ticket is not sanitized (sanitize_attributes=False) and base.group_portal can write exposure.ticket, so they can store attributes the sanitizer would strip (not event handlers) for whoever opens the record; keep the sanitizer on, or give the field groups

@@ -1667,6 +1667,18 @@ fn unread_facts(src: &str, visitor: PyVisitor<'_, '_>) -> PyFacts {
     file.into_facts()
 }
 
+/// The facts of a Python file Python stops reading at `pos`, as it is not UTF-8 and no coding
+/// comment names another encoding: what the tokens of `lossy`, its text with each byte that is not
+/// UTF-8 replaced, say of its models.
+pub fn undecoded(lossy: &str, pos: Pos, series: Option<Series>, taint: &TaintTable) -> PyFacts {
+    let loc = Locator::new(lossy);
+    let known = FieldClasses::default();
+    let mut visitor = PyVisitor::new(&loc, series, &known, taint, Scope::default(), &[]);
+    let message = "the file is not UTF-8, and no coding comment names another encoding";
+    visitor.facts.diags.push(RawDiag::new("OD000", pos, message));
+    unread_facts(lossy, visitor)
+}
+
 /// The facts of a Python file of a module of `series`, which names a class without `_name`.
 #[cfg(test)]
 pub fn analyze(src: &str, series: Option<Series>) -> PyFacts {

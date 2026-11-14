@@ -4,6 +4,7 @@ use ruff_python_ast::{self as ast, Expr, Number, Operator, Stmt, UnaryOp};
 use ruff_python_parser::parse_module;
 use ruff_text_size::{Ranged, TextSize};
 
+use crate::decode;
 use crate::facts::{Pos, Spanned};
 use crate::module_state;
 use crate::python::{Locator, str_lit};
@@ -299,13 +300,9 @@ pub fn read(bytes: &[u8], series: impl FnOnce(Option<Series>) -> Option<Series>)
 /// `bytes` as text, each byte one character when they are not UTF-8, with the position of the
 /// first byte that is not.
 fn decode(bytes: &[u8]) -> (Cow<'_, str>, Option<Pos>) {
-    match std::str::from_utf8(bytes) {
-        Ok(src) => (Cow::Borrowed(src), None),
-        Err(e) => {
-            let valid = std::str::from_utf8(&bytes[..e.valid_up_to()]).unwrap_or_default();
-            let pos = Locator::new(valid).pos(TextSize::of(valid));
-            (Cow::Owned(bytes.iter().copied().map(char::from).collect()), Some(pos))
-        }
+    match decode::invalid_utf8(bytes) {
+        None => (String::from_utf8_lossy(bytes), None),
+        Some(pos) => (Cow::Owned(bytes.iter().copied().map(char::from).collect()), Some(pos)),
     }
 }
 
