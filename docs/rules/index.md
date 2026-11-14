@@ -167,7 +167,8 @@ to public and portal users, and record rules Odoo refuses to load.
 ## OD5: manifest and module graph
 
 The manifest and the dependency graph: its keys, listed files, unlisted files, assets,
-dependencies, migration scripts and the Python imports between modules.
+dependencies, migration scripts, the Python imports between modules, and Python files and tests no
+import reaches.
 
 | Code | Name | Reports |
 | --- | --- | --- |
