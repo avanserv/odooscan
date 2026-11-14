@@ -81,6 +81,11 @@ pub struct Module {
 }
 
 impl Module {
+    /// Whether the scan lists `static_assets`, so that an empty list means no file.
+    pub fn reads_static_assets(&self) -> bool {
+        self.checked && !self.manifest.bundles.is_empty()
+    }
+
     /// Whether the manifest loads a data file the scan cannot read, so that the records of the
     /// module are not all known.
     pub fn lost_data(&self) -> bool {
@@ -752,7 +757,7 @@ fn parse_module_files(module: &mut Module, default_series: Option<Series>, taint
     }
     module.words = Words::merge(&words);
     module.sql_views = sql_views(module, series);
-    if checked && !module.manifest.bundles.is_empty() {
+    if module.reads_static_assets() {
         module.static_assets = static_assets(&module.dir, &module.name);
     }
 }

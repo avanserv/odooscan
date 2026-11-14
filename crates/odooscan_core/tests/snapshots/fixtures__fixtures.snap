@@ -221,6 +221,10 @@ custom/base_only/views/views.xml:94:9: OD302 'web_easel.easel' is defined by mod
 custom/base_only/views/views.xml:103:9: OD302 'web_sketch.sketch' is defined by module web_sketch; add it to depends
 custom/base_only/views/views.xml:112:9: OD302 'web_ribbon.ribbon' is defined by module web_ribbon; add it to depends
 custom/base_only/views/views.xml:123:13: OD310 no <div id="sidebar"> in view web.layout or the views that extend it
+custom/bundle_moves/static/src/appended.js:3:45: OD607 method '_bundle_appended' is private, so the server refuses to call it over RPC
+custom/bundle_moves/static/src/frontend.js:3:45: OD607 method '_bundle_frontend' is private, so the server refuses to call it over RPC
+custom/bundle_moves/static/src/panels/new_panel.js:3:45: OD607 method '_bundle_new_panel' is private, so the server refuses to call it over RPC
+custom/bundle_moves/static/src/shared/shared.js:3:45: OD607 method '_bundle_shared' is private, so the server refuses to call it over RPC
 custom/button_calls/views/buttons.xml:9:49: OD312 button.order has no method 'action_confrim'
 custom/button_calls/views/buttons.xml:13:49: OD313 method '_helper' of button.order is private, so Odoo refuses to call it from a button
 custom/button_calls/views/buttons.xml:14:49: OD313 method 'action_audit' of button.order is private, so Odoo refuses to call it from a button
