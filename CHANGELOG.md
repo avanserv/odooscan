@@ -1,5 +1,49 @@
 # Changelog
 
+## [0.12.0](https://github.com/avanserv/odooscan/compare/v0.11.0...v0.12.0) (2026-11-14)
+
+
+### Features
+
+* **checks:** Report addon imports outside depends or of missing names ([#303](https://github.com/avanserv/odooscan/issues/303)) ([383329b](https://github.com/avanserv/odooscan/commit/383329b5f189244edba27bdc2b2dba0b83c5200d))
+* **checks:** Report dependencies a module takes nothing from ([#305](https://github.com/avanserv/odooscan/issues/305)) ([320cc2a](https://github.com/avanserv/odooscan/commit/320cc2ae71ad6481d39036e76d3da720dfe9d084))
+* **checks:** Report dependencies another dependency already brings ([#304](https://github.com/avanserv/odooscan/issues/304)) ([fe17855](https://github.com/avanserv/odooscan/commit/fe17855fda861d23c3981ff0e82ff82cb5c569be))
+* **checks:** Report migration folders Odoo skips and scripts it refuses ([#299](https://github.com/avanserv/odooscan/issues/299)) ([5755f00](https://github.com/avanserv/odooscan/commit/5755f00468087de1222c8db39daf58e6ecea78f5))
+* **checks:** Report Python files and tests no __init__.py imports ([#301](https://github.com/avanserv/odooscan/issues/301)) ([1642c4d](https://github.com/avanserv/odooscan/commit/1642c4d2155ba31a53ef0a8ae34f4e07978ca618))
+* **checks:** Report shadowed route paths and undecorated overrides ([#300](https://github.com/avanserv/odooscan/issues/300)) ([fe0a4e6](https://github.com/avanserv/odooscan/commit/fe0a4e64a14735d2dc939f12d3f2f8c974e15dc0))
+* **manifest:** Check the license, version, depends, data and assets keys ([#298](https://github.com/avanserv/odooscan/issues/298)) ([6a8733f](https://github.com/avanserv/odooscan/commit/6a8733f0ece05c35489a5828bdedfb53978d86dc))
+
+
+### Bug Fixes
+
+* **checks:** Gate OD514 and OD515 by series and skip folders Odoo skips ([#315](https://github.com/avanserv/odooscan/issues/315)) ([36e8ee4](https://github.com/avanserv/odooscan/commit/36e8ee476d9d584df2a14fb70f9bf672bd35d845))
+* **checks:** Read __all__ grown inside loops in OD516 ([#330](https://github.com/avanserv/odooscan/issues/330)) ([c89c926](https://github.com/avanserv/odooscan/commit/c89c9262b8a242394a3019c1b135887118c1af5e))
+* **checks:** Read unread importers, grown __all__, extensions in OD516 ([#320](https://github.com/avanserv/odooscan/issues/320)) ([06b2406](https://github.com/avanserv/odooscan/commit/06b2406c6fe937e8899cdffd4d78cbf786e4f5ea))
+* **checks:** Report OD231 once per clash, on served paths ([#318](https://github.com/avanserv/odooscan/issues/318)) ([19856fe](https://github.com/avanserv/odooscan/commit/19856fee4901ed28dcb8bc71f7471ad433f7a7b9))
+* **checks:** Report XML assets outside static before saas~16.3 in OD513 ([#328](https://github.com/avanserv/odooscan/issues/328)) ([12f98c6](https://github.com/avanserv/odooscan/commit/12f98c626389809071d93933eff6d058392310d5))
+* **checks:** Say in OD503 that a dependency's manifest cannot be read ([#326](https://github.com/avanserv/odooscan/issues/326)) ([313efca](https://github.com/avanserv/odooscan/commit/313efca8c666dc85f0c49a11e0eff5f00513ff5f))
+* **checks:** Word OD518 like OD202, correct the OD518 and OD519 pages ([#323](https://github.com/avanserv/odooscan/issues/323)) ([fe998b2](https://github.com/avanserv/odooscan/commit/fe998b2a65bc6ddb6332c3443fdb4e70da00fe59))
+* **csvdata:** Read nothing more from a CSV that OD000 refuses ([#310](https://github.com/avanserv/odooscan/issues/310)) ([ef1f105](https://github.com/avanserv/odooscan/commit/ef1f1052ea80780ddb67da1867c5a30b699519e3))
+* **csvdata:** Report a CSV row or an undecodable file Odoo cannot load ([#297](https://github.com/avanserv/odooscan/issues/297)) ([1fca3a2](https://github.com/avanserv/odooscan/commit/1fca3a2cc8ae9d984815077210e5f4c139b2923b))
+* **imports:** Read suppress, type-only defs and match captures ([#322](https://github.com/avanserv/odooscan/issues/322)) ([a9548ae](https://github.com/avanserv/odooscan/commit/a9548aebb96dea5e3ad4956dc01ed4a4302516fe))
+* **index:** Keep OD521 silent on a rootless tree only for its model ([#333](https://github.com/avanserv/odooscan/issues/333)) ([e981707](https://github.com/avanserv/odooscan/commit/e9817079f93ca4a5ae2b14959859c0c83c565f0e))
+* **index:** Keep OD521 silent on a view tree the scan cannot read ([#324](https://github.com/avanserv/odooscan/issues/324)) ([44bad7e](https://github.com/avanserv/odooscan/commit/44bad7e503d983bd70352f705218cbe47a4975a1))
+* **index:** Keep OD521 silent on an unread branch below the root ([#332](https://github.com/avanserv/odooscan/issues/332)) ([47c310b](https://github.com/avanserv/odooscan/commit/47c310b220d1cda71260a2ba728fe80ff5d20e59))
+* **index:** Rank a module with no depends after base from saas~18.2 ([#334](https://github.com/avanserv/odooscan/issues/334)) ([a39de31](https://github.com/avanserv/odooscan/commit/a39de31c210a7f4a82eae8e7266197e51c83b50a))
+* **index:** Read an empty depends as base from saas~18.2 ([#327](https://github.com/avanserv/odooscan/issues/327)) ([ea4a05b](https://github.com/avanserv/odooscan/commit/ea4a05b13d94d4657c071b24f6ee821008fdb638))
+* **manifest:** Read a manifest written as a list of key/value pairs ([#306](https://github.com/avanserv/odooscan/issues/306)) ([e4dcda6](https://github.com/avanserv/odooscan/commit/e4dcda68b7579b7d87c7f9caecc29f40f5c7cea4))
+* **manifest:** Refuse an unhashable item of a nested set ([#325](https://github.com/avanserv/odooscan/issues/325)) ([fc5d0a9](https://github.com/avanserv/odooscan/commit/fc5d0a9d4f9c619d2c0bfbce46a59150d8f0babe))
+* **manifest:** Report a saas version behind the plain series in OD509 ([#336](https://github.com/avanserv/odooscan/issues/336)) ([c93ed8c](https://github.com/avanserv/odooscan/commit/c93ed8c82d980980e27794dc0a6d1bedb7a1ea9c))
+* **manifest:** Report OD511 on an empty depends and word OD507 by series ([#312](https://github.com/avanserv/odooscan/issues/312)) ([e80b78a](https://github.com/avanserv/odooscan/commit/e80b78a39d6f62aef6bbcc00ea373673911476d5))
+* **manifest:** Word manifest notices and judge Python 2 strings ([#308](https://github.com/avanserv/odooscan/issues/308)) ([08d8eae](https://github.com/avanserv/odooscan/commit/08d8eae07a121a23c417d4c338196560ecb693c4))
+* **project:** Report a checked manifest that does not parse ([#296](https://github.com/avanserv/odooscan/issues/296)) ([688f6e5](https://github.com/avanserv/odooscan/commit/688f6e509f592aa2790170db03394bfbc39708d2))
+* **python:** Leave loop-bound migrate unjudged, read stage scripts only ([#316](https://github.com/avanserv/odooscan/issues/316)) ([20dfca4](https://github.com/avanserv/odooscan/commit/20dfca4a9a1b7281ebdd7627222011a42e4c268b))
+
+
+### Performance Improvements
+
+* **checks:** Find OD516's unread dependents once per index ([#331](https://github.com/avanserv/odooscan/issues/331)) ([9ea6d53](https://github.com/avanserv/odooscan/commit/9ea6d53a0954789e48fa5e3a76017cad13f29796))
+
 ## [0.11.0](https://github.com/avanserv/odooscan/compare/v0.10.0...v0.11.0) (2026-11-13)
 
 
