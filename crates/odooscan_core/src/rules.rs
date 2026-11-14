@@ -345,6 +345,12 @@ rules! {
     "OD611" "console-log" Quality Info None, false, "A script a page loads calls console.log().";
     // Odoo's ESLint config makes it an error (18.0 `addons/web/tooling/_eslintrc.json:23`, 20.0 `:22`).
     "OD612" "debugger-statement" Quality Warning None, false, "A script a page loads has a debugger statement.";
+    // Owl 2 lands in saas~15.3 (commit `966abc39b573`, not in saas-15.2). 15.0
+    // `addons/web/static/lib/owl/owl.js:5587-5597` exports `QWeb`, `hooks` and `tags`, and its
+    // `Component` has `trigger` (`:4376`); 16.0 `owl.js:6343-6379` exports none, and its `Component`
+    // (`:2839-2847`; 18.0 `:2839`, 20.0 `:4050`) lacks `trigger`, which 16.0
+    // `addons/web/static/src/legacy/legacy_component.js:35`, `:72` adds back through saas-16.4.
+    "OD613" "owl1-api-removed" Deprecation Error Some(">=saas~15.3"), true, "A script uses an Owl 1 API that Owl 2 removed: hooks, tags, QWeb or a component's trigger().";
     "OD701" "sql-injection-flow" Security Error None, false, "Data a user controls reaches the text of an SQL query.";
     "OD702" "code-injection-flow" Security Error None, false, "Data a user controls reaches safe_eval(), eval() or exec().";
     "OD703" "markup-injection-flow" Security Warning None, false, "Data a user controls is wrapped in Markup() without escaping.";

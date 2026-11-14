@@ -5,9 +5,10 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::facts::{
     ActionFact, Annotation, ArchElement, ArchEmptied, ArchSubview, ArchValued, ClassFact, DataFacts, FieldFact,
-    FlowSummary, Heritage, JsClass, ModelKind, OptionValue, PyFacts, Receiver, RecordWrite, ReportFact, RouteKey,
-    RuleFact, ServerFact, Signature, UNREAD_TYPE, ViewFact, WrittenValue,
+    FlowSummary, Heritage, JsClass, JsName, ModelKind, OptionValue, PyFacts, Receiver, RecordWrite, ReportFact,
+    RouteKey, RuleFact, ServerFact, Signature, UNREAD_TYPE, ViewFact, WrittenValue,
 };
+use crate::js::OWL_MODULE;
 use crate::manifest::{AutoInstall, DEPENDS_BASE, OdooReads};
 use crate::mentions::{HOOK_PREFIXES, Words};
 use crate::project::{Module, SourceFile, code_loaded};
@@ -1064,8 +1065,53 @@ fn url_module_path(segments: &[&str]) -> Option<String> {
     js_module_path(module, &rel)
 }
 
-/// Instance members of Owl's `Component`, which odooscan does not index: Owl is a library.
+/// Instance members of Owl 2's `Component`, which odooscan does not index: Owl is a library.
 const OWL_COMPONENT: &[&str] = &["setup", "render"];
+
+/// The first series on Owl 2: saas~15.3 replaces Owl 1 (commit `966abc39b573`).
+const OWL2: Series = Series { major: 15, minor: 3 };
+
+/// Instance members of Owl 1's `Component`, read off 15.0 `addons/web/static/lib/owl/owl.js`,
+/// whose `patch()` reaches each as `_super` along the prototype chain.
+const OWL1_COMPONENT: &[&str] = &[
+    "el",
+    "setup",
+    "willStart",
+    "mounted",
+    "willUpdateProps",
+    "willPatch",
+    "patched",
+    "willUnmount",
+    "mount",
+    "unmount",
+    "render",
+    "destroy",
+    "shouldUpdate",
+    "trigger",
+    "__destroy",
+    "__callMounted",
+    "__callWillUnmount",
+    "__trigger",
+    "__updateProps",
+    "__patch",
+    "__prepare",
+    "__applyStyles",
+    "__getTemplate",
+    "__prepareAndRender",
+    "__render",
+    "__applyDefaultProps",
+];
+
+/// What a class extends, as far as the index follows it.
+enum Parent<'h> {
+    Root,
+    /// Owl's `Component` imported from `@odoo/owl`, a module only Owl 2 series ship.
+    Owl2,
+    /// Owl's `Component` read off the `owl` global, of the Owl `Index::owl_global` picks.
+    OwlGlobal,
+    /// The class the file binds to this name.
+    Name(&'h str),
+}
 
 /// A class by the file that declares it and its name there.
 type ClassKey = (usize, usize, String);
@@ -1997,18 +2043,57 @@ impl<'m> Index<'m> {
         self.js_class(t, &local, depth + 1)
     }
 
-    /// Whether the file `t` imports `local` as Owl's `Component`.
-    fn owl_component(&self, t: JsTarget, local: &str) -> bool {
-        self.modules[t.module].js[t.file]
-            .facts
+    /// How the file `t` binds `local` to Owl's `Component`: by an import or from the `owl` global.
+    fn owl_component(&self, t: JsTarget, local: &str) -> Option<Parent<'static>> {
+        let facts = &self.modules[t.module].js[t.file].facts;
+        let imported = |n: &JsName| n.specifier == OWL_MODULE && n.name.value == "Component";
+        if facts
             .names
             .iter()
-            .any(|n| n.local.as_deref() == Some(local) && n.specifier == "@odoo/owl" && n.name.value == "Component")
+            .any(|n| n.local.as_deref() == Some(local) && imported(n))
+        {
+            return Some(Parent::Owl2);
+        }
+        let global = facts
+            .owl_bindings
+            .iter()
+            .any(|(l, name)| l == local && name == "Component");
+        global.then_some(Parent::OwlGlobal)
     }
 
     /// The members of a class, its parents, and every prototype patch of them but `except`, or
-    /// None when a parent cannot be resolved.
-    pub fn js_members(&self, t: JsTarget, class: &'m JsClass, except: PatchId) -> Option<FxHashSet<&'m str>> {
+    /// None when a parent cannot be resolved. `reader` is the series of the module reading them.
+    pub fn js_members(
+        &self,
+        t: JsTarget,
+        class: &'m JsClass,
+        except: PatchId,
+        reader: Option<Series>,
+    ) -> Option<FxHashSet<&'m str>> {
+        self.class_chain(t, class, Some(except), reader)
+            .map(|(members, _)| members)
+    }
+
+    /// The members of a component, as `js_members` reads them with every patch: None for a class
+    /// whose chain does not end at Owl's `Component`, or when a parent cannot be resolved.
+    pub fn component_members(
+        &self,
+        t: JsTarget,
+        class: &'m JsClass,
+        reader: Option<Series>,
+    ) -> Option<FxHashSet<&'m str>> {
+        let (members, component) = self.class_chain(t, class, None, reader)?;
+        component.then_some(members)
+    }
+
+    /// The members of `js_members`, and whether the chain ends at Owl's `Component`.
+    fn class_chain(
+        &self,
+        t: JsTarget,
+        class: &'m JsClass,
+        except: Option<PatchId>,
+        reader: Option<Series>,
+    ) -> Option<(FxHashSet<&'m str>, bool)> {
         let mut members = FxHashSet::default();
         let (mut t, mut class) = (t, class);
         for _ in 0..32 {
@@ -2019,22 +2104,46 @@ impl<'m> Index<'m> {
                 .get(&key)
                 .into_iter()
                 .flatten()
-                .filter(|(p, _)| *p != except)
+                .filter(|(p, _)| Some(*p) != except)
             {
                 members.extend(added.iter().map(String::as_str));
             }
-            let parent = match &class.extends {
-                Heritage::None => return Some(members),
-                Heritage::Other => return None,
-                Heritage::Name(parent) => parent,
+            let parent = match self.js_parent(t, &class.extends)? {
+                Parent::Root => return Some((members, false)),
+                Parent::Owl2 => {
+                    members.extend(OWL_COMPONENT);
+                    return Some((members, true));
+                }
+                Parent::OwlGlobal => {
+                    members.extend(self.owl_global(t.module, reader));
+                    return Some((members, true));
+                }
+                Parent::Name(parent) => parent,
             };
-            if self.owl_component(t, parent) {
-                members.extend(OWL_COMPONENT);
-                return Some(members);
-            }
             (t, class) = self.js_class(t, parent, 0)?;
         }
         None
+    }
+
+    /// The members of the `Component` of the `owl` global in `module`, by its series or the
+    /// default one, else the one the reader runs on, as core's `web` gives none (`'version': '1.0'`). With neither known,
+    /// Owl 1's, a superset of Owl 2's, so neither reads a member as missing.
+    fn owl_global(&self, module: usize, reader: Option<Series>) -> &'static [&'static str] {
+        match self.modules[module].series.or(self.default_series).or(reader) {
+            Some(series) if series >= OWL2 => OWL_COMPONENT,
+            _ => OWL1_COMPONENT,
+        }
+    }
+
+    /// What a class of the file `t` extends, or None for a class beyond reach: an expression, or
+    /// an Owl class other than `Component`, whose members are not indexed.
+    fn js_parent<'h>(&self, t: JsTarget, heritage: &'h Heritage) -> Option<Parent<'h>> {
+        match heritage {
+            Heritage::None => Some(Parent::Root),
+            Heritage::Owl(name) if name == "Component" => Some(Parent::OwlGlobal),
+            Heritage::Owl(_) | Heritage::Other => None,
+            Heritage::Name(parent) => Some(self.owl_component(t, parent).unwrap_or(Parent::Name(parent))),
+        }
     }
 
     /// Whether Odoo installs `module` with `base`, as it does `web`, so any module may use it.
@@ -3543,14 +3652,17 @@ fn hook_mentions(modules: &[Module]) -> (FxHashSet<&str>, Vec<&str>) {
 mod tests {
     use std::path::PathBuf;
 
+    use rustc_hash::FxHashSet;
+
     use super::{
         BASE_MODEL_DUNDERS, BASE_MODEL_EXTRA, BASE_MODEL_METHODS, BASE_PRIVATE_METHODS, BASE_RPC_METHODS, Export,
-        FIELD_CLASSES, FieldHolder, FieldSpelling, Index, JsSpec, OLD_BASE_METHODS, PlacedWrite, Scope, XmlIdDef,
-        base_private_method, base_rpc_method, class_file, depends_closure, field_id_prefixes, fold_writes,
-        js_module_path, last_text, mangles_alike, old_base_method, triggers, unseen_table_id,
+        FIELD_CLASSES, FieldHolder, FieldSpelling, Index, JsSpec, OLD_BASE_METHODS, OWL_COMPONENT, OWL1_COMPONENT,
+        PlacedWrite, Scope, XmlIdDef, base_private_method, base_rpc_method, class_file, depends_closure,
+        field_id_prefixes, fold_writes, js_module_path, last_text, mangles_alike, old_base_method, triggers,
+        unseen_table_id,
     };
     use crate::mentions::{Mentions, Words};
-    use crate::project::{SourceFile, module};
+    use crate::project::{Module, SourceFile, module};
     use crate::python;
     use crate::series::Series;
     use crate::xml;
@@ -4570,6 +4682,107 @@ mod tests {
         assert!(export("@web/../tests/utils", "click") == Export::Found);
         assert!(export("@web/../tests/utils", "gone") == Export::Missing);
         assert!(export("web.views", "gone") == Export::Unknown);
+    }
+
+    /// The modules of an Owl test: `web` with three components, and `sale` with `order.js` reading
+    /// them.
+    fn owl_modules(web_version: &str, version: &str, order: &str) -> [Module; 2] {
+        let mut web = module("web", &format!("{{'version': '{web_version}'}}"));
+        web.js = vec![
+            script(
+                "static/src/legacy/legacy_component.js",
+                "export class LegacyComponent extends owl.Component { trigger() {} }",
+            ),
+            script(
+                "static/src/form.js",
+                "import { Component as C } from \"@odoo/owl\";\nexport class Form extends C {}",
+            ),
+            script("static/src/panel.js", "export class Panel extends owl.Component {}"),
+        ];
+        let mut sale = module("sale", &format!("{{'version': '{version}', 'depends': ['web']}}"));
+        sale.js = vec![script("static/src/order.js", order)];
+        [web, sale]
+    }
+
+    /// The sorted members `component_members` or `js_members` gives the class `name` of `order.js`.
+    fn members_of(index: &Index, modules: &[Module], name: &str, component: bool) -> Option<String> {
+        let class = modules[1].js[0].facts.classes.iter().find(|c| c.name == name).unwrap();
+        let here = index.js_target(1, 0);
+        let members = match component {
+            true => index.component_members(here, class, modules[1].series)?,
+            false => index.js_members(here, class, (9, 9, 9), modules[1].series)?,
+        };
+        let mut members: Vec<_> = members.into_iter().collect();
+        members.sort_unstable();
+        Some(members.join(","))
+    }
+
+    #[test]
+    fn a_component_is_a_class_whose_chain_ends_at_owl_component() {
+        let order = r#"import { LegacyComponent } from "@web/legacy/legacy_component";
+import { Form } from "@web/form";
+import { EventBus } from "@odoo/owl";
+const { Component, Store: S } = owl;
+class Bound extends Component {}
+class Global extends owl.Component {}
+class Legacy extends LegacyComponent {}
+class Sub extends Form { save() {} }
+class Patched extends Component {}
+patch(Patched.prototype, "sale.patched", { trigger() {} });
+class Plain {}
+class Bus extends EventBus {}
+class Owl1 extends owl.Store {}
+class Mixed extends mixin(Form) {}
+class Unbound extends S {}
+"#;
+        let modules = owl_modules("16.0.1.0.0", "16.0.1.0.0", order);
+        let index = Index::build(&modules, None);
+        let members = |name: &str| members_of(&index, &modules, name, true);
+        assert_eq!(members("Bound").as_deref(), Some("render,setup"));
+        assert_eq!(members("Global").as_deref(), Some("render,setup"));
+        assert_eq!(members("Legacy").as_deref(), Some("render,setup,trigger"));
+        assert_eq!(members("Sub").as_deref(), Some("render,save,setup"));
+        assert_eq!(members("Patched").as_deref(), Some("render,setup,trigger"));
+        for other in ["Plain", "Bus", "Owl1", "Mixed", "Unbound"] {
+            assert_eq!(members(other), None, "{other}");
+        }
+        assert_eq!(members_of(&index, &modules, "Plain", false).as_deref(), Some(""));
+    }
+
+    #[test]
+    fn owl_component_has_the_members_of_the_owl_of_the_series() {
+        let order = r#"import { Form } from "@web/form";
+import { Panel } from "@web/panel";
+const { Component } = owl;
+class Bound extends Component {}
+class Global extends owl.Component {}
+class Sub extends Form {}
+class Core extends Panel {}
+"#;
+        let owl1 = OWL1_COMPONENT.iter().copied().collect::<FxHashSet<_>>();
+        let owl2 = OWL_COMPONENT.iter().copied().collect::<FxHashSet<_>>();
+        // The globals of `sale`, then of `web` (`Core`), which a `'1.0'` `web` reads as of `sale`.
+        for (web, sale, default, global, core) in [
+            ("15.0.1.0.0", "15.0.1.0.0", None, &owl1, &owl1),
+            ("1.0", "1.0", None, &owl1, &owl1),
+            ("1.0", "1.0", Series::parse("saas~15.2"), &owl1, &owl1),
+            ("15.3.1.0.0", "15.3.1.0.0", None, &owl2, &owl2),
+            ("1.0", "1.0", Series::parse("16.0"), &owl2, &owl2),
+            ("1.0", "17.0.1.0.0", None, &owl2, &owl2),
+            ("1.0", "15.0.1.0.0", None, &owl1, &owl1),
+            ("15.0.1.0.0", "17.0.1.0.0", None, &owl2, &owl1),
+        ] {
+            let modules = owl_modules(web, sale, order);
+            let index = Index::build(&modules, default);
+            let here = index.js_target(1, 0);
+            let reader = modules[1].series.or(default);
+            for (name, expected) in [("Bound", global), ("Global", global), ("Sub", &owl2), ("Core", core)] {
+                let class = modules[1].js[0].facts.classes.iter().find(|c| c.name == name).unwrap();
+                let members = index.js_members(here, class, (9, 9, 9), reader);
+                assert_eq!(members.as_ref(), Some(expected), "{web} {sale} {default:?} {name}");
+                assert_eq!(index.component_members(here, class, reader).as_ref(), Some(expected));
+            }
+        }
     }
 
     #[test]

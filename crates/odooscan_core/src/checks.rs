@@ -2090,6 +2090,7 @@ impl<'m> Ctx<'_, 'm> {
             return;
         }
         self.js_patches(out, self.mi, fi, file);
+        self.owl_triggers(out, fi, file);
         for call in &file.facts.orm_calls {
             self.orm_call(out, &file.path, call);
         }
@@ -2127,6 +2128,7 @@ impl<'m> Ctx<'_, 'm> {
     fn legacy_script(&self, out: &mut Out<'m>, fi: usize, file: &'m SourceFile<JsFacts>) {
         self.legacy_requires(out, fi, file);
         if !file.in_tests() {
+            self.owl_triggers(out, fi, file);
             for call in &file.facts.orm_calls {
                 self.orm_call(out, &file.path, call);
             }
@@ -2228,7 +2230,7 @@ impl<'m> Ctx<'_, 'm> {
             let Some((t, class)) = self.index.js_class(here, &patch.target, 0) else {
                 continue;
             };
-            let Some(members) = self.index.js_members(t, class, (mi, fi, pi)) else {
+            let Some(members) = self.index.js_members(t, class, (mi, fi, pi), self.series) else {
                 continue;
             };
             for read in patch.supers.iter().filter(|s| !members.contains(s.value.as_str())) {
@@ -2242,6 +2244,31 @@ impl<'m> Ctx<'_, 'm> {
                     class.name, read.value
                 );
                 out.push(&file.path, "OD602", read.pos, message);
+            }
+        }
+    }
+
+    /// OD613 on `this.trigger()` in a component. A parent or a patch from a module outside the
+    /// index, such as an Enterprise one, may add `trigger`, as `LegacyComponent` does in 16.0.
+    fn owl_triggers(&self, out: &mut Out<'m>, fi: usize, file: &'m SourceFile<JsFacts>) {
+        if self.partial {
+            return;
+        }
+        let here = self.index.js_target(self.mi, fi);
+        for class in file.facts.classes.iter().filter(|c| !c.triggers.is_empty()) {
+            let Some(members) = self.index.component_members(here, class, self.series) else {
+                continue;
+            };
+            if members.contains("trigger") {
+                continue;
+            }
+            for &pos in &class.triggers {
+                let message = format!(
+                    "Owl 2's Component has no trigger(), so this.trigger() in {} throws; pass a callback in \
+                     props, or use the env bus",
+                    class.name
+                );
+                out.push(&file.path, "OD613", pos, message);
             }
         }
     }
