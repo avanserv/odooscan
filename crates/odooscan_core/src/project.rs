@@ -2,11 +2,12 @@ use std::borrow::Cow;
 use std::path::{Path, PathBuf};
 
 use ignore::WalkBuilder;
+use rayon::iter::Either;
 use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use crate::facts::{DataFacts, JsFacts, PyFacts, TemplateFacts};
-use crate::manifest::{self, Manifest, normalize};
+use crate::facts::{DataFacts, JsFacts, PyFacts, Spanned, TemplateFacts};
+use crate::manifest::{self, Manifest, OdooReads, Refusal, normalize};
 use crate::mentions::Mentions;
 use crate::series::Series;
 use crate::suppress::Suppressions;
@@ -258,6 +259,24 @@ fn static_files(dir: &Path, extension: &str) -> Vec<PathBuf> {
 pub struct Discovery {
     pub modules: Vec<Module>,
     pub notices: Vec<String>,
+    /// The checked modules whose manifest Odoo cannot read, by path.
+    pub broken: Vec<Broken>,
+}
+
+/// The manifest of a checked module that Odoo cannot read, so the module is not loaded.
+pub struct Broken {
+    pub path: PathBuf,
+    pub error: Spanned<String>,
+    pub suppressions: Suppressions,
+}
+
+/// A manifest `manifest::read` refuses, of the module `name`.
+struct Unread {
+    name: String,
+    path: PathBuf,
+    checked: bool,
+    bytes: Vec<u8>,
+    refusal: Refusal,
 }
 
 /// Reads the modules, `target` standing for the series of each checked one.
@@ -269,10 +288,13 @@ pub fn load(
     taint: &TaintTable,
 ) -> Discovery {
     let mut notices = target.map_or_else(Vec::new, |t| checkout_notices(addons_paths, t));
-    let mut modules: Vec<Module> = candidates(paths, addons_paths)
+    let (mut modules, unread): (Vec<Module>, Vec<Unread>) = candidates(paths, addons_paths)
         .into_par_iter()
-        .filter_map(|(name, dir, checked)| read_module(name, dir, checked, target))
-        .collect();
+        .filter_map(|(name, dir, checked)| read_module(name, dir, checked, target, default_series))
+        .partition_map(|read| match read {
+            Ok(module) => Either::Left(module),
+            Err(unread) => Either::Right(unread),
+        });
     for m in modules.iter().filter(|_| default_series.is_none()) {
         if m.checked && m.series.is_none() {
             notices.push(format!(
@@ -293,7 +315,49 @@ pub fn load(
         .par_iter_mut()
         .for_each(|module| read_again(module, default_series, &known, &routes, taint));
     notices.extend(python2_notices(&modules, default_series));
-    Discovery { modules, notices }
+    let (broken, unread_notices) = unread_manifests(unread);
+    notices.extend(unread_notices);
+    Discovery {
+        modules,
+        notices,
+        broken,
+    }
+}
+
+/// The checked manifests of `unread` that get OD000, by path, and a sorted notice for each other
+/// one: its module is not loaded, so the modules that depend on it get OD503. A manifest the Odoo
+/// of its series may read gets a notice alone, as a Python 2 file does.
+fn unread_manifests(unread: Vec<Unread>) -> (Vec<Broken>, Vec<String>) {
+    let mut broken = vec![];
+    let mut notices = vec![];
+    for u in unread {
+        let Refusal { error, series, odoo } = u.refusal;
+        let at = format!("{}:{}:{}", u.path.display(), error.pos.line, error.pos.col);
+        let state = if u.checked { "checked" } else { "indexed" };
+        let series = series.map(|s| s.to_string()).unwrap_or_default();
+        match odoo {
+            OdooReads::AsPython2 => notices.push(format!(
+                "{at}: Python 2 syntax, which {series} runs, so module {} is not {state}",
+                u.name
+            )),
+            OdooReads::AsExpression => notices.push(format!(
+                "{at}: {series} evaluates the manifest, which is not a dict literal, so module {} is not {state}",
+                u.name
+            )),
+            OdooReads::No if u.checked => broken.push(Broken {
+                suppressions: Suppressions::parse(&String::from_utf8_lossy(&u.bytes)),
+                path: u.path,
+                error,
+            }),
+            OdooReads::No => notices.push(format!(
+                "{at}: the manifest does not parse, so module {} is not indexed: {}",
+                u.name, error.value
+            )),
+        }
+    }
+    broken.sort_by(|a, b| a.path.cmp(&b.path));
+    notices.sort();
+    (broken, notices)
 }
 
 /// One notice per file of a checked module that only parses as the Python 2 its series runs, by
@@ -374,23 +438,46 @@ fn candidates(paths: &[PathBuf], addons_paths: &[PathBuf]) -> Vec<(String, PathB
     chosen
 }
 
-/// A checked module takes `target` for its series, an indexed one keeps its manifest's.
-fn read_module(name: String, dir: PathBuf, checked: bool, target: Option<Series>) -> Option<Module> {
+/// The module in `dir`, or its manifest when odooscan cannot read it; none when the manifest cannot
+/// be read at all or the module is not installable. A checked module takes `target` for its series,
+/// an indexed one keeps its manifest's, and either falls back to `default_series`.
+fn read_module(
+    name: String,
+    dir: PathBuf,
+    checked: bool,
+    target: Option<Series>,
+    default_series: Option<Series>,
+) -> Option<Result<Module, Unread>> {
     let manifest_path = manifest_in(&dir)?;
-    let manifest = manifest::parse(&std::fs::read_to_string(&manifest_path).ok()?)?;
-    manifest.installable.then(|| Module {
-        series: target.filter(|_| checked).or(manifest.series()),
-        name,
-        dir,
-        manifest_path,
-        manifest,
-        checked,
-        python: vec![],
-        data: vec![],
-        js: vec![],
-        templates: vec![],
-        sql_views: vec![],
-        lost_text: false,
+    let bytes = std::fs::read(&manifest_path).ok()?;
+    let series = |own: Option<Series>| target.filter(|_| checked).or(own).or(default_series);
+    let manifest = match manifest::read(&bytes, series) {
+        Ok(manifest) => manifest,
+        Err(refusal) => {
+            return Some(Err(Unread {
+                name,
+                path: manifest_path,
+                checked,
+                bytes,
+                refusal,
+            }));
+        }
+    };
+    manifest.installable.then(|| {
+        Ok(Module {
+            series: target.filter(|_| checked).or(manifest.series()),
+            name,
+            dir,
+            manifest_path,
+            manifest,
+            checked,
+            python: vec![],
+            data: vec![],
+            js: vec![],
+            templates: vec![],
+            sql_views: vec![],
+            lost_text: false,
+        })
     })
 }
 
@@ -665,6 +752,110 @@ mod tests {
             .facts;
         assert_eq!(facts.diags.iter().map(|d| d.code).collect::<Vec<_>>(), ["OD111"]);
         assert!(facts.group_refs.is_empty(), "{:?}", facts.group_refs);
+    }
+
+    /// A module `name` under a fresh `dir` whose manifest holds `manifest`.
+    fn written(dir: &Path, name: &str, manifest: &str) -> PathBuf {
+        let module = dir.join(name);
+        std::fs::create_dir_all(&module).unwrap();
+        std::fs::write(module.join("__manifest__.py"), manifest).unwrap();
+        module
+    }
+
+    fn scratch(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("odooscan-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        dir
+    }
+
+    #[test]
+    fn a_checked_manifest_that_does_not_parse_is_broken() {
+        let dir = scratch("manifest-checked");
+        let module = written(&dir, "open", "# odooscan: ignore[OD101]\n{'name': 'open',\n");
+        let discovery = load(&[module], &[], None, None, &TaintTable::default());
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(discovery.modules.is_empty() && discovery.notices.is_empty());
+        let [broken] = &discovery.broken[..] else {
+            panic!("{} broken", discovery.broken.len());
+        };
+        assert!(broken.path.ends_with("open/__manifest__.py"));
+        assert_eq!(broken.error.pos.line, 3);
+        assert!(!broken.suppressions.allows(2, "OD101"));
+    }
+
+    #[test]
+    fn an_indexed_manifest_that_does_not_parse_gets_a_notice() {
+        let dir = scratch("manifest-indexed");
+        let checked = written(&dir.join("checked"), "main", "{'depends': ['open']}");
+        written(&dir.join("addons"), "open", "{'name': OPEN}");
+        let discovery = load(&[checked], &[dir.join("addons")], None, None, &TaintTable::default());
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(discovery.broken.is_empty());
+        assert_eq!(discovery.modules.len(), 1);
+        let manifest = dir.join("addons/open/__manifest__.py");
+        let notice = format!(
+            "{}:1:10: the manifest does not parse, so module open is not indexed: not a literal: Odoo reads the manifest with ast.literal_eval",
+            manifest.display()
+        );
+        assert!(discovery.notices.contains(&notice), "{:#?}", discovery.notices);
+    }
+
+    #[test]
+    fn a_python_2_manifest_gets_a_notice_on_the_series_that_runs_it() {
+        let dir = scratch("manifest-python2");
+        let module = written(&dir, "legacy", "{'name': 'legacy', 'sequence': 0755}");
+        let read = |series: &str| {
+            load(
+                std::slice::from_ref(&module),
+                &[],
+                Series::parse(series),
+                None,
+                &TaintTable::default(),
+            )
+        };
+        let ten = read("10.0");
+        let eleven = read("11.0");
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(ten.broken.is_empty());
+        let notice = format!(
+            "{}:1:32: Python 2 syntax, which 10.0 runs, so module legacy is not checked",
+            module.join("__manifest__.py").display()
+        );
+        assert_eq!(ten.notices, [notice]);
+        assert_eq!(eleven.broken.len(), 1);
+        assert!(eleven.notices.is_empty(), "{:#?}", eleven.notices);
+    }
+
+    #[test]
+    fn a_manifest_python_2_odoo_reads_is_not_broken() {
+        let dir = scratch("manifest-python2-reads");
+        let latin1 = dir.join("latin1");
+        std::fs::create_dir_all(&latin1).unwrap();
+        std::fs::write(latin1.join("__manifest__.py"), b"{'category': 'r\xe9sum\xe9'}").unwrap();
+        let called = written(&dir, "called", "dict(name='called')");
+        let read = |series: &str| {
+            load(
+                &[latin1.clone(), called.clone()],
+                &[],
+                Series::parse(series),
+                Series::parse(series),
+                &TaintTable::default(),
+            )
+        };
+        let (nine, ten) = (read("9.0"), read("10.0"));
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(nine.broken.is_empty());
+        assert_eq!(nine.modules.len(), 1);
+        let notice = format!(
+            "{}:1:1: 9.0 evaluates the manifest, which is not a dict literal, so module called is not checked",
+            called.join("__manifest__.py").display()
+        );
+        assert_eq!(nine.notices, [notice]);
+        assert_eq!(ten.modules.len(), 1);
+        let [broken] = &ten.broken[..] else {
+            panic!("{} broken", ten.broken.len());
+        };
+        assert!(broken.path.ends_with("called/__manifest__.py"));
     }
 
     fn checkout(name: &str, release: &str) -> PathBuf {

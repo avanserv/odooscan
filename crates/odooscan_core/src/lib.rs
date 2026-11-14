@@ -147,6 +147,7 @@ pub fn scan(opts: &ScanOptions) -> Report {
     );
     let mut notices = discovery.notices;
     let modules = discovery.modules;
+    let broken = discovery.broken;
     let index = index::Index::build(&modules, default_series);
     if !index.has_base && modules.iter().any(|m| m.checked) {
         notices.push(
@@ -197,10 +198,19 @@ pub fn scan(opts: &ScanOptions) -> Report {
             diags
         })
         .collect();
+    // Odoo cannot read the manifest, so the module is not loaded and this is all it gets.
+    let unread = broken
+        .iter()
+        .filter(|b| b.suppressions.allows(b.error.pos.line, "OD000") && rule("OD000").applies_to(default_series))
+        .map(|b| {
+            let raw = RawDiag::new("OD000", b.error.pos, b.error.value.clone());
+            Diagnostic::new(b.path.clone(), raw, default_series)
+        });
+    diagnostics.extend(unread);
     diagnostics.sort_by(|a, b| (&a.path, a.line, a.column, a.code).cmp(&(&b.path, b.line, b.column, b.code)));
     Report {
         diagnostics,
-        modules_checked: modules.iter().filter(|m| m.checked).count(),
+        modules_checked: modules.iter().filter(|m| m.checked).count() + broken.len(),
         modules_indexed: modules.len(),
         files: modules
             .iter()
