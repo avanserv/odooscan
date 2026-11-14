@@ -2296,44 +2296,87 @@ impl<'m> Index<'m> {
         modules.any(|(mi, other)| set[mi] && other.lost_views())
     }
 
+    /// Whether a module of `set` loads a view of one of `models`, a view without one matching None.
+    /// Read from the data files the view index reads, so a view without an XML id counts.
+    fn has_view_of(&self, set: &[bool], models: &[Option<&str>]) -> bool {
+        let mut modules = self.modules.iter().enumerate().filter(|&(mi, _)| set[mi]);
+        modules.any(|(_, module)| {
+            let files = loaded_data(module, module.series.or(self.default_series));
+            let views = files.flat_map(|f| &f.facts.views);
+            let mut views = views.map(|v| v.model.as_ref().map(|m| m.value.as_str()));
+            views.any(|model| models.contains(&model))
+        })
+    }
+
     /// Whether a spec of a loaded view or template of `module` locates an element that, of the
-    /// modules of `scope`, only those of `set` add to the tree it extends. A spec on a tree whose
-    /// way up to the root the index does not hold counts, as it may locate one. So does one locating
-    /// what no readable view outside `set` adds, when `set` extends the tree with a view whose arch
+    /// modules of `scope`, only those of `set` add to the tree it extends. A spec locating what no
+    /// readable view outside `set` adds counts too, when `set` extends the tree with a view whose arch
     /// the scan did not read, or loads a data file it cannot read that may hold one: Odoo combines
-    /// every extension below the root.
+    /// every extension below the root. A spec on a tree whose way up to the root the index does not
+    /// hold counts, as it may locate what `set` adds, unless it is a view tree whose views the index
+    /// holds all the way up, each naming its parent in a form the scan reads, with an arch it did not
+    /// read on the way: that spec counts only when `set` loads a view of a model on the way, or a
+    /// data file it cannot read that may hold a view.
     pub fn locates_in(&self, module: usize, set: &[bool], scope: &Scope) -> bool {
         let m = &self.modules[module];
         let name = m.name.as_str();
         let lost_views = self.loses_views(set);
-        let sole = |tree: &Inheritance<'m>, lost: bool, parent: String, elements: Vec<ArchElement>| {
-            let Some(root) = tree.root(parent) else {
-                return true;
-            };
-            let unread = lost || tree.any(&root, |mi, fact| set[mi] && fact.arch_unread);
-            let all = tree.tree(root.clone(), self.modules, |mi| scope.sees(mi));
-            let without = tree.tree(root, self.modules, |mi| scope.sees(mi) && !set[mi]);
-            elements
-                .iter()
-                .any(|e| (unread || all.visible.contains(e)) && !without.visible.contains(e))
-        };
         let views = m.data.iter().filter(|f| f.rank.is_some()).flat_map(|f| &f.facts.views);
         let mut views = views.filter(|v| !v.locators.is_empty());
         let templates = m.templates.iter().enumerate();
         let templates = templates.filter(|&(fi, _)| self.template_loaded(module, fi));
         let mut templates = templates.flat_map(|(_, f)| &f.facts.templates);
-        views.any(|v| {
-            let Some(parent) = &v.inherit else { return false };
-            let elements = v.locators.iter().map(|l| located(&l.value, name)).collect();
-            sole(&self.views, lost_views, full_id(name, parent), elements)
-        }) || templates.any(|t| {
-            let Some(parent) = t.inherit.as_ref().filter(|_| !t.arch.locators.is_empty()) else {
-                return false;
-            };
-            let elements = t.arch.locators.iter().map(|l| l.value.clone()).collect();
-            // A template file that does not parse leaves no mark to tell an unread branch by.
-            sole(&self.templates, false, parent.value.clone(), elements)
-        })
+        views.any(|v| self.view_locates_in(v, name, set, scope, lost_views))
+            || templates.any(|t| {
+                let Some(parent) = t.inherit.as_ref().filter(|_| !t.arch.locators.is_empty()) else {
+                    return false;
+                };
+                let elements = t.arch.locators.iter().map(|l| l.value.clone()).collect();
+                // A template file that does not parse leaves no mark to tell an unread branch by,
+                // and a template has no model to tell the trees `set` may add to.
+                let sole = self.sole(&self.templates, set, scope, false, parent.value.clone(), elements);
+                sole.unwrap_or(true)
+            })
+    }
+
+    /// `locates_in` for the view `v` of the module `name`. On a tree whose arch the scan did not read
+    /// all the way up, `set` may add to it only with a view of a model on the way, or a data file it
+    /// cannot read that may hold one: Odoo combines only extensions whose model equals their
+    /// parent's. Above a view the index does not hold from its own module, or one whose parent the
+    /// scan does not read, any model may sit, so the spec counts.
+    fn view_locates_in(&self, v: &ViewFact, name: &str, set: &[bool], scope: &Scope, lost: bool) -> bool {
+        let Some(parent) = &v.inherit else { return false };
+        let parent = full_id(name, parent);
+        let elements = v.locators.iter().map(|l| located(&l.value, name)).collect();
+        self.sole(&self.views, set, scope, lost, parent.clone(), elements)
+            .unwrap_or_else(|| {
+                let Some(mut models) = self.views.models(parent, self.modules) else {
+                    return true;
+                };
+                models.push(v.model.as_ref().map(|m| m.value.as_str()));
+                lost || self.has_view_of(set, &models)
+            })
+    }
+
+    /// Whether one of `elements`, located below `parent` in `tree`, is one only `set` adds of the
+    /// modules of `scope`, or one no readable view outside `set` adds when `set` extends the tree
+    /// unread. `lost` says `set` may do so in a file the scan cannot read. None when the index does
+    /// not hold the way up to the tree's root.
+    fn sole(
+        &self,
+        tree: &Inheritance<'m>,
+        set: &[bool],
+        scope: &Scope,
+        lost: bool,
+        parent: String,
+        elements: Vec<ArchElement>,
+    ) -> Option<bool> {
+        let root = tree.root(parent)?;
+        let unread = lost || tree.any(&root, |mi, fact| set[mi] && fact.arch_unread);
+        let all = tree.tree(root.clone(), self.modules, |mi| scope.sees(mi));
+        let without = tree.tree(root, self.modules, |mi| scope.sees(mi) && !set[mi]);
+        let mut elements = elements.iter();
+        Some(elements.any(|e| (unread || all.visible.contains(e)) && !without.visible.contains(e)))
     }
 
     /// The index and the `depends` closure of the dependency `name` of `module`, when it is
@@ -3162,6 +3205,30 @@ impl<'m> Inheritance<'m> {
             stack.extend(self.children.get(id).into_iter().flatten().map(String::as_str));
         }
         nodes
+    }
+
+    /// The models of every node on the way up from `id`, None for a node that names no model. None
+    /// when the index does not hold an id on the way from the module the id names, or a node names
+    /// its parent in a form the scan does not read, so a model above is unknown.
+    pub fn models(&self, mut id: String, modules: &[Module]) -> Option<Vec<Option<&'m str>>> {
+        let mut models = vec![];
+        for _ in 0..32 {
+            let nodes = self.nodes.get(&id)?;
+            // Another module's record may update the view in place, naming no model or parent, so
+            // only one from the module the id names tells what the view is.
+            let owner = id.split_once('.').map(|(owner, _)| owner);
+            if !nodes.iter().any(|n| Some(modules[n.module].name.as_str()) == owner)
+                || nodes.iter().any(|n| n.fact.unread_parent)
+            {
+                return None;
+            }
+            models.extend(nodes.iter().map(|n| n.fact.model.as_ref().map(|m| m.value.as_str())));
+            match nodes.iter().find_map(|n| n.inherit.clone()) {
+                Some(parent) => id = parent,
+                None => return Some(models),
+            }
+        }
+        None
     }
 
     /// The top of `id`'s inheritance as far as the index holds it: the first id on the way whose
@@ -4038,6 +4105,110 @@ mod tests {
             "haze"
         ));
         assert!(locates(&adds("arch", "haze_other"), Some("views/lost.xml"), "haze"));
+    }
+
+    #[test]
+    fn a_spec_on_a_rootless_tree_locates_in_a_set_with_a_view_of_its_model() {
+        fn file(rel: &str, facts: crate::facts::DataFacts) -> SourceFile<crate::facts::DataFacts> {
+            SourceFile {
+                path: PathBuf::new(),
+                rel: rel.to_owned(),
+                rank: Some(0),
+                demo: false,
+                facts,
+                suppressions: Default::default(),
+                mentions: Mentions::default(),
+            }
+        }
+        let view = |records: &str| {
+            file(
+                "views/views.xml",
+                xml::analyze(&format!("<odoo>{records}</odoo>"), Series::parse("18.0")),
+            )
+        };
+        let record = |id: &str, model: &str, parent: &str, arch: &str| {
+            let model = format!(r#"<field name="model">{model}</field>"#);
+            let parent = format!(r#"<field name="inherit_id" ref="{parent}"/>"#);
+            format!(r#"<record id="{id}" model="ir.ui.view">{model}{parent}{arch}</record>"#)
+        };
+        let spec = r#"<xpath expr="//div[@id='prov_block']" position="inside"><span/></xpath>"#;
+        let arch = format!(r#"<field name="arch" type="xml">{spec}</field>"#);
+        let partner = record("view_prov", "res.partner", "base.view_other", &arch);
+        let country = record("view_prov_country", "res.country", "base.view_other", &arch);
+        let unread = format!(r#"<field name="arch_base" type="xml">{spec}</field>"#);
+        // Base holds the top of each tree, with an arch the scan does not read.
+        let base = format!(
+            r#"<record id="view_top" model="ir.ui.view"><field name="model">res.partner</field>{unread}</record>
+            <record id="page_top" model="ir.ui.view">{unread}</record>"#
+        );
+        let manifest = |depends: &str| format!("{{'version': '18.0.1.0', 'depends': [{depends}]}}");
+        // Whether main's spec, `main_records` holding it, locates in prov, which loads `prov_file`
+        // and a file at `lost` the scan cannot read.
+        let locates_from = |main_records: &str, prov_file: SourceFile<crate::facts::DataFacts>, lost: Option<&str>| {
+            let mut modules = [
+                module("base", &manifest("")),
+                module("prov", &manifest("'base'")),
+                module("main", &manifest("'prov'")),
+            ];
+            modules[0].data.push(view(&base));
+            modules[1].data.push(prov_file);
+            let unreadable = crate::facts::DataFacts {
+                unreadable: true,
+                ..Default::default()
+            };
+            modules[1].data.extend(lost.map(|rel| file(rel, unreadable)));
+            modules[2].data.push(view(main_records));
+            let index = Index::build(&modules, None);
+            let main = index.by_name["main"];
+            let set: Vec<bool> = modules.iter().map(|m| m.name == "prov").collect();
+            index.locates_in(main, &set, &index.scope(main))
+        };
+        let locates =
+            |main_records: &str, prov_records: &str, lost| locates_from(main_records, view(prov_records), lost);
+        let held = record("view_main", "res.partner", "base.view_top", &arch);
+        assert!(locates(&held, &partner, None));
+        assert!(!locates(&held, &country, None));
+        assert!(locates(&held, &country, Some("views/lost.xml")));
+        assert!(!locates(&held, &country, Some("data/res.partner.csv")));
+        // Odoo loads a file under `data/template/` though no manifest lists it.
+        let unlisted = SourceFile {
+            rel: "data/template/views.xml".to_owned(),
+            rank: None,
+            ..view(&partner)
+        };
+        assert!(locates_from(&held, unlisted, None));
+        // The tree's model comes from the views on the way up, which a model-less spec leaves to them.
+        let main = |mid: String| {
+            let main = r#"<record id="view_main" model="ir.ui.view"><field name="inherit_id" ref="view_mid"/>"#;
+            format!("{mid}{main}{arch}</record>")
+        };
+        let below = main(record("view_mid", "res.partner", "base.view_top", &unread));
+        assert!(locates(&below, &partner, None));
+        assert!(!locates(&below, &country, None));
+        // Above a view the index does not hold, or a parent it does not read, any model may sit, such
+        // as that of the view a primary view of another model extends.
+        let undefined = record("view_main", "res.partner", "base.view_missing", &arch);
+        assert!(locates(&undefined, &country, None));
+        let primary = format!(r#"<field name="mode">primary</field>{arch}"#);
+        let gap = main(record("view_mid", "res.country", "base.view_missing", &primary));
+        assert!(locates(&gap, &partner, None));
+        let opaque = record("view_mid", "res.partner", "base.view_top", &unread)
+            .replace(r#"ref="base.view_top""#, r#"eval="ref('base.view_top')""#);
+        assert!(locates(&main(opaque), &country, None));
+        // A record updating in place a view of a module the scan does not index names no model or
+        // parent, so the view may sit below one of any model.
+        let update =
+            r#"<record id="product.view_normal" model="ir.ui.view"><field name="active" eval="True"/></record>"#;
+        let updated = format!(
+            "{update}{}",
+            record("view_main", "res.partner", "product.view_normal", &arch)
+        );
+        assert!(locates(&updated, &country, None));
+        // A QWeb template has no model, so it takes only the extensions of views without one.
+        let template = format!(r#"<template id="main_page" inherit_id="base.page_top">{spec}</template>"#);
+        let page = format!(r#"<template id="prov_page" inherit_id="base.other_page">{spec}</template>"#);
+        assert!(locates(&template, &page, None));
+        assert!(!locates(&template, &partner, None));
     }
 
     #[test]

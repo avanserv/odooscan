@@ -1,0 +1,10 @@
+<odoo>
+    <record id="view_country_glen" model="ir.ui.view">
+        <field name="model">res.country</field>
+        <field name="arch" type="xml">
+            <form>
+                <field name="name"/>
+            </form>
+        </field>
+    </record>
+</odoo>
