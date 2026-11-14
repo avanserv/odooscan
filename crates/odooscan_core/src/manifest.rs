@@ -373,11 +373,12 @@ impl Manifest {
 /// Why the Odoo of `series` will not install a module of `version`, none when it does or when the
 /// series disagree. From saas~16.3 a version is two or three numbers, maybe behind the series (18.0
 /// `odoo/modules/module.py:454-466`), and from saas~18.2 also `S.x` (19.0
-/// `odoo/modules/module.py:550-566`). Each of these series but saas~18.1 refuses four or five
-/// numbers not behind the series; saas~18.1 parses only the last three, so takes them
-/// (`origin/saas-18.1:odoo/modules/module.py:450-463`). `S` and `S.x` stay silent, since 18.0
-/// takes only the first and saas~18.2 and later only the second. On an unknown series, only the
-/// forms every series from saas~16.3 refuses count.
+/// `odoo/modules/module.py:550-566`). Every series from saas~16.3 refuses four or five numbers
+/// not behind the series. saas~18.1 does it by prefixing them with the series, then failing on the
+/// six or seven parts it gets (`origin/saas-18.1:odoo/modules/module.py:450-476`). A version
+/// behind `18.1.` counts as behind saas~18.1 too, though Odoo wants `saas~18.1.`, as OD509's page
+/// says. `S` and `S.x` stay silent, since 18.0 takes only the first and saas~18.2 and later only
+/// the second. On an unknown series, only the forms every series from saas~16.3 refuses count.
 pub fn version_refusal(version: &str, series: Option<Series>) -> Option<String> {
     if series.is_some_and(|s| s < VERSION_FORM) {
         return None;
@@ -1266,7 +1267,13 @@ mod tests {
         }
         assert!(!refused("20.0.1.0.0", Some("20.0")) && refused("18.0.1.0.0", Some("20.0")));
         assert!(!refused("saas~18.1.1.0.0", Some("saas~18.1")) && !refused("18.1.1.0.0", Some("saas~18.1")));
-        assert!(refused("18.0.1.0.0", Some("saas~18.1")));
+        assert!(refused("18.0.1.0.0", Some("saas~18.1")) && refused("17.0.1.0.0", Some("saas~18.1")));
+        for series in ["saas~18.1", "18.0", "saas~18.2", "20.0"] {
+            for version in ["1.2.3.4", "1.2.3.4.5"] {
+                assert!(refused(version, Some(series)), "{version} on {series}");
+            }
+        }
+        assert!(!refused("saas~18.1.1.2.3", Some("saas~18.1")));
         assert!(!refused("1.0-beta", Some("saas~16.2")) && !refused("17.0.1.0.0", Some("16.0")));
         assert!(refused("1.0-beta", Some("saas~16.3")));
         assert!(refused("1.0-beta", None) && refused("1", None) && refused("1.2.3.4.5.6", None));
