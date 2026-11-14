@@ -522,7 +522,8 @@ pub enum OdooReads {
     No,
     /// It parses only as the Python 2 the series runs.
     AsPython2,
-    /// It is an expression but no dict literal, which 9.0 evaluates.
+    /// It is an expression 9.0 evaluates but odooscan refuses: no dict or iterable of pairs, or one
+    /// whose item is no pair or cannot be hashed.
     AsExpression,
 }
 
@@ -545,11 +546,11 @@ pub fn read(bytes: &[u8], series: impl FnOnce(Option<Series>) -> Option<Series>)
         Ok(p) => top_expression(&loc, &p.syntax().body).map_err(|e| (e, false)),
         Err(e) => Err((error(loc.pos(e.location.start()), e.error.to_string()), true)),
     };
-    let dict = top.as_ref().ok().and_then(|top| top.as_dict_expr());
-    let mut manifest = dict.map(|d| entries(&loc, d));
+    let expr = top.as_ref().ok().copied();
+    let mut manifest = expr.and_then(pairs).map(|p| entries(&loc, p));
     let series = series(manifest.as_ref().and_then(Manifest::series));
-    if let (Some(m), Some(d)) = (manifest.as_mut(), dict) {
-        m.diags = m.findings(loc.at(d), series);
+    if let (Some(m), Some(e)) = (manifest.as_mut(), expr) {
+        m.diags = m.findings(loc.at(e), series);
     }
     let refuse = |(error, odoo)| Refusal { error, series, odoo };
     if let Some(pos) = not_utf8.filter(|_| !python2::runs_on(series)) {
@@ -559,7 +560,7 @@ pub fn read(bytes: &[u8], series: impl FnOnce(Option<Series>) -> Option<Series>)
         let python2 = syntax && python2::runs_on(series) && python2::remaining_error(body, series).is_none();
         refuse((e, if python2 { OdooReads::AsPython2 } else { OdooReads::No }))
     })?;
-    literal_dict(&loc, top, manifest, series).map_err(refuse)
+    literal_manifest(&loc, top, manifest, series).map_err(refuse)
 }
 
 /// `bytes` as text, each byte one character when they are not UTF-8, with the position of the
@@ -571,32 +572,61 @@ fn decode(bytes: &[u8]) -> (Cow<'_, str>, Option<Pos>) {
     }
 }
 
-/// `manifest`, read from `top`, when the Odoo of `series` reads `top` as a dict of literals.
-fn literal_dict(
+/// `manifest`, read from `top`, when the Odoo of `series` reads `top` as literals it can update a
+/// dict with. As in Odoo, `literal_eval` refuses a node before `dict.update` refuses an item.
+fn literal_manifest(
     loc: &Source,
     top: &Expr,
     manifest: Option<Manifest>,
     series: Option<Series>,
 ) -> Result<Manifest, (Spanned<String>, OdooReads)> {
     let literal = series.is_none_or(|s| s >= LITERAL_EVAL);
-    let (Some(dict), Some(manifest)) = (top.as_dict_expr(), manifest) else {
-        let odoo = if literal {
-            OdooReads::No
-        } else {
-            OdooReads::AsExpression
-        };
-        return Err((error(loc.at(top), "not a dict literal"), odoo));
+    // Python 2's literal_eval, which 10.0 calls, knows no set.
+    let sets = !python2::runs_on(series);
+    let odoo = if literal {
+        OdooReads::No
+    } else {
+        OdooReads::AsExpression
     };
-    match unliteral_items(dict).filter(|_| literal) {
-        Some(node) => Err((
+    let Some(manifest) = manifest else {
+        return Err((
+            error(
+                loc.at(top),
+                "neither a dict literal nor a list, tuple or set of key/value pairs",
+            ),
+            odoo,
+        ));
+    };
+    if let Some(node) = unliteral(top, sets).filter(|_| literal) {
+        return Err((
             error(
                 loc.at(node),
                 "not a literal: Odoo reads the manifest with ast.literal_eval",
             ),
             OdooReads::No,
-        )),
+        ));
+    }
+    match refused_item(top) {
+        Some((item, why)) => Err((error(loc.at(item), why), odoo)),
         None => Ok(manifest),
     }
+}
+
+/// The first item of a list, tuple or set `top` that Odoo cannot load, with why. Python builds a
+/// set before Odoo hands it to `dict.update`, so an item it cannot hash fails first. An item that
+/// is no literal, which 9.0 evaluates, is not judged.
+fn refused_item(top: &Expr) -> Option<(&Expr, &'static str)> {
+    let mut items = sequence(top)?;
+    items.retain(|i| unliteral(i, true).is_none());
+    let unhashable = items.iter().find(|i| top.is_set_expr() && value(i).is_none());
+    if let Some(item) = unhashable {
+        return Some((item, "not hashable: Python puts each item of the manifest in a set"));
+    }
+    let item = items.into_iter().find(|i| !pair(i))?;
+    Some((
+        item,
+        "not a key/value pair: Odoo updates a dict with each item of the manifest",
+    ))
 }
 
 /// The manifest `src` holds as a series from 11.0 reads it, or the first place it refuses: one
@@ -606,19 +636,188 @@ pub fn parse(src: &str) -> Result<Manifest, Spanned<String>> {
     read(src.as_bytes(), |_| None).map_err(|r| r.error)
 }
 
-/// The manifest of the entries of `dict` it reads, skipping those that are no literal.
-fn entries(loc: &Source, dict: &ast::ExprDict) -> Manifest {
+/// The manifest of the `(key, value)` entries it reads, skipping those whose key is no string.
+/// A key given again replaces its value, as in a dict.
+fn entries<'a>(loc: &Source, pairs: impl IntoIterator<Item = (&'a Expr, &'a Expr)>) -> Manifest {
     let mut m = Manifest {
         installable: true,
         ..Manifest::default()
     };
-    for item in &dict.items {
-        let Some((key, at)) = item.key.as_ref().and_then(|k| Some((str_lit(k)?, loc.at(k)))) else {
-            continue;
-        };
-        m.set(loc, key, at, &item.value);
+    for (key, value) in pairs {
+        if let Some(name) = str_lit(key) {
+            m.set(loc, name, loc.at(key), value);
+        }
     }
     m
+}
+
+/// The `(key, value)` entries of a manifest `top`, none when it has neither shape Odoo loads: the
+/// items of a dict, or the list and tuple pairs of a list, tuple or set. Odoo hands the value to
+/// `dict.update` (18.0 `odoo/modules/module.py:313`), which takes any iterable of pairs.
+fn pairs(top: &Expr) -> Option<Vec<(&Expr, &Expr)>> {
+    if let Expr::Dict(dict) = top {
+        return Some(
+            dict.items
+                .iter()
+                .filter_map(|i| Some((i.key.as_ref()?, &i.value)))
+                .collect(),
+        );
+    }
+    Some(sequence(top)?.into_iter().filter_map(entry).collect())
+}
+
+/// The items of a list, tuple or set literal, or of `set()`.
+fn sequence(expr: &Expr) -> Option<Vec<&Expr>> {
+    if empty_set(expr) {
+        return Some(vec![]);
+    }
+    let items = module_state::items(expr).filter(|_| !expr.is_dict_expr())?;
+    Some(items.into_iter().flatten().collect())
+}
+
+/// The key and value of a list or tuple of two items. The other pairs `pair` takes, such as `'ab'`
+/// or a set of two, are skipped: no manifest names a key so.
+fn entry(item: &Expr) -> Option<(&Expr, &Expr)> {
+    let elts = match item {
+        Expr::List(l) => &l.elts[..],
+        Expr::Tuple(t) => &t.elts[..],
+        _ => return None,
+    };
+    match elts {
+        [key, value] => Some((key, value)),
+        _ => None,
+    }
+}
+
+/// Whether `dict.update` takes `item` for a key/value pair: two characters or bytes, a list or
+/// tuple of two items, or a set or dict of two distinct hashable values, as Python keeps one of
+/// equal ones.
+fn pair(item: &Expr) -> bool {
+    match item {
+        Expr::StringLiteral(s) => s.value.chars().count() == 2,
+        Expr::BytesLiteral(b) => b.value.len() == 2,
+        Expr::List(l) => l.elts.len() == 2,
+        Expr::Tuple(t) => t.elts.len() == 2,
+        Expr::Set(_) | Expr::Dict(_) => two_distinct(item),
+        _ => false,
+    }
+}
+
+/// Whether the items or keys of a set or dict literal are hashable and hold two distinct values.
+/// An unknown value may equal any other, so with one the count is taken as two when it can be.
+fn two_distinct(expr: &Expr) -> bool {
+    let values =
+        module_state::items(expr).and_then(|items| items.into_iter().map(|i| value(i?)).collect::<Option<Vec<_>>>());
+    let Some(values) = values else {
+        return false;
+    };
+    let (known, unknown): (Vec<_>, Vec<_>) = values.into_iter().partition(Value::known);
+    let count = known
+        .iter()
+        .enumerate()
+        .filter(|&(n, v)| !known[..n].contains(v))
+        .count();
+    if unknown.is_empty() {
+        count == 2
+    } else {
+        count <= 2 && count + unknown.len() >= 2
+    }
+}
+
+/// The value of a hashable literal, equal to another as in Python, where `1`, `1.0`, `1 + 0j`
+/// and `True` are one value: a number that equals an int is held as that int. An int past `u64`,
+/// and a number built on one, is `Unknown`: it is hashable but not compared.
+#[derive(PartialEq)]
+enum Value {
+    Int(i128),
+    Unknown,
+    Real(f64, f64),
+    Str(String),
+    Bytes(Vec<u8>),
+    None,
+    Ellipsis,
+    Tuple(Vec<Value>),
+}
+
+impl Value {
+    fn number(re: f64, im: f64) -> Value {
+        let int = re as i128;
+        if im == 0.0 && int as f64 == re {
+            Value::Int(int)
+        } else {
+            Value::Real(re, im)
+        }
+    }
+
+    fn negated(self) -> Value {
+        match self {
+            Value::Int(n) => Value::Int(-n),
+            Value::Real(re, im) => Value::Real(-re, -im),
+            v => v,
+        }
+    }
+
+    fn known(&self) -> bool {
+        match self {
+            Value::Unknown => false,
+            Value::Tuple(items) => items.iter().all(Value::known),
+            _ => true,
+        }
+    }
+
+    fn re(&self) -> Option<f64> {
+        match self {
+            Value::Int(n) => Some(*n as f64),
+            Value::Real(re, _) => Some(*re),
+            _ => None,
+        }
+    }
+}
+
+/// The value of `expr` when it is a hashable literal: a `leaf` but `set()`, or a tuple of them.
+fn value(expr: &Expr) -> Option<Value> {
+    Some(match expr {
+        Expr::StringLiteral(s) => Value::Str(s.value.to_str().to_owned()),
+        Expr::BytesLiteral(b) => Value::Bytes(b.value.bytes().collect()),
+        Expr::BooleanLiteral(b) => Value::Int(b.value.into()),
+        Expr::NoneLiteral(_) => Value::None,
+        Expr::EllipsisLiteral(_) => Value::Ellipsis,
+        Expr::Tuple(t) => Value::Tuple(t.elts.iter().map(value).collect::<Option<_>>()?),
+        e => numeric(e)?,
+    })
+}
+
+/// The value of a number, a signed number or a complex sum.
+fn numeric(expr: &Expr) -> Option<Value> {
+    match expr {
+        Expr::NumberLiteral(n) => Some(number_value(&n.value)),
+        Expr::UnaryOp(u) if signed(expr) => {
+            let v = number_value(number(&u.operand)?);
+            Some(if u.op == UnaryOp::USub { v.negated() } else { v })
+        }
+        Expr::BinOp(b) if complex(expr) => complex_value(b),
+        _ => None,
+    }
+}
+
+fn number_value(n: &Number) -> Value {
+    match n {
+        Number::Int(i) => i.as_u64().map_or(Value::Unknown, |n| Value::Int(n.into())),
+        Number::Float(f) => Value::number(*f, 0.0),
+        Number::Complex { real, imag } => Value::number(*real, *imag),
+    }
+}
+
+/// The value of a complex sum `real + imaginary` or `real - imaginary`.
+fn complex_value(sum: &ast::ExprBinOp) -> Option<Value> {
+    let Some(Number::Complex { imag, .. }) = number(&sum.right) else {
+        return None;
+    };
+    let im = if sum.op == Operator::Sub { -imag } else { *imag };
+    match numeric(&sum.left)? {
+        Value::Unknown => Some(Value::Unknown),
+        re => Some(Value::number(re.re()?, im)),
+    }
 }
 
 fn error(pos: Pos, message: impl Into<String>) -> Spanned<String> {
@@ -636,33 +835,37 @@ fn top_expression<'a>(loc: &Source, body: &'a [Stmt]) -> Result<&'a Expr, Spanne
     if let Some(second) = body.get(1) {
         return Err(error(
             loc.at(second),
-            "a second statement: the manifest is one dict literal",
+            "a second statement: the manifest is one expression",
         ));
     }
     let Stmt::Expr(e) = first else {
-        return Err(error(loc.at(first), "a statement: the manifest is one dict literal"));
+        return Err(error(loc.at(first), "a statement: the manifest is one expression"));
     };
     Ok(&e.value)
 }
 
 /// The first key or value of `dict` that `ast.literal_eval` refuses, a `**` entry at its value.
-fn unliteral_items(dict: &ast::ExprDict) -> Option<&Expr> {
+fn unliteral_items(dict: &ast::ExprDict, sets: bool) -> Option<&Expr> {
     dict.items.iter().find_map(|item| match &item.key {
-        Some(key) => unliteral(key).or_else(|| unliteral(&item.value)),
+        Some(key) => unliteral(key, sets).or_else(|| unliteral(&item.value, sets)),
         None => Some(&item.value),
     })
 }
 
 /// The first node of `expr` that `ast.literal_eval` refuses, `expr` itself when it is no literal.
-fn unliteral(expr: &Expr) -> Option<&Expr> {
+/// Without `sets`, as in Python 2, a set literal or `set()` is refused.
+fn unliteral(expr: &Expr, sets: bool) -> Option<&Expr> {
+    if !sets && (expr.is_set_expr() || empty_set(expr)) {
+        return Some(expr);
+    }
     if leaf(expr) {
         return None;
     }
     if let Expr::Dict(dict) = expr {
-        return unliteral_items(dict);
+        return unliteral_items(dict, sets);
     }
     match module_state::items(expr) {
-        Some(items) => items.into_iter().flatten().find_map(unliteral),
+        Some(items) => items.into_iter().flatten().find_map(|i| unliteral(i, sets)),
         None => Some(expr),
     }
 }
@@ -1128,8 +1331,86 @@ mod tests {
     }
 
     #[test]
-    fn refuses_a_top_expression_that_is_not_a_dict() {
-        assert_eq!(refused("[('name', 'x')]"), (1, 1));
+    fn reads_a_list_tuple_or_set_of_pairs() {
+        for src in [
+            "[('name', 'x'), ('depends', ['base'])]",
+            "(['name', 'x'], ['depends', ('base',)])",
+            "{('name', 'x'), ('depends', ('base',))}",
+            "{('name', 'x'), ('depends', ('base', -1, 1 + 2j, None, ...))}",
+        ] {
+            let depends: Vec<_> = parse(src).unwrap().depends.into_iter().map(|d| d.value).collect();
+            assert_eq!(depends, ["base"], "{src}");
+        }
+        assert_eq!(findings("[('name', 'x')]", None), [("OD507", 1, 1)]);
+    }
+
+    #[test]
+    fn reads_an_empty_list_tuple_or_set_as_an_empty_manifest() {
+        for src in ["[]", "()", "set()"] {
+            let m = parse(src).unwrap();
+            assert!(
+                m.depends.is_empty() && m.version.is_none() && m.unread.is_empty(),
+                "{src}"
+            );
+        }
+    }
+
+    #[test]
+    fn keeps_the_last_value_of_a_repeated_pair() {
+        let m = parse("[('depends', ['sale']), ('depends', ['base'])]").unwrap();
+        assert_eq!(m.depends.iter().map(|d| d.value.as_str()).collect::<Vec<_>>(), ["base"]);
+    }
+
+    #[test]
+    fn reads_a_pair_that_is_no_list_or_tuple_or_has_no_string_key_as_setting_nothing() {
+        let m = parse("['ab', b'cd', {1, 2}, {1: 2, 3: 4}, {(1, 2), 1.5}, (1, 'x')]").unwrap();
+        assert!(m.depends.is_empty() && m.version.is_none() && m.unread.is_empty());
+    }
+
+    #[test]
+    fn counts_the_distinct_values_of_a_set_or_dict_pair() {
+        assert_eq!(refused("[{1, 1}]"), (1, 2));
+        assert_eq!(refused("[{1: 2, 1: 3}]"), (1, 2));
+        assert_eq!(refused("[{1, True}]"), (1, 2));
+        assert_eq!(refused("[{0, -0.0, False, 0j}]"), (1, 2));
+        assert_eq!(refused("[{(1, 'a'), (1.0, 'a')}]"), (1, 2));
+        assert_eq!(refused("[{1 + 0j, 1.0}]"), (1, 2));
+        assert_eq!(refused("[{-1, 1}, {[1], 2}]"), (1, 11));
+        assert!(parse("[{1, 1.5}, {'a': 1, b'a': 2}, {-1, 1}, {1 + 1j, 1}]").is_ok());
+    }
+
+    #[test]
+    fn hashes_an_int_past_u64_without_comparing_it() {
+        assert!(parse("{('a', 18446744073709551616 + 1j)}").is_ok());
+        assert!(parse("[{18446744073709551616 + 1j, 1}, {18446744073709551616, 1.8446744073709552e19}]").is_ok());
+        assert!(parse("[{0x10000000000000000, 18446744073709551616}, {100000000000000000000, 1e20}]").is_ok());
+        assert_eq!(refused("[{18446744073709551616}]"), (1, 2));
+        assert_eq!(refused("[{18446744073709551616, 1, 2, 3}]"), (1, 2));
+    }
+
+    #[test]
+    fn refuses_a_set_item_that_is_not_hashable() {
+        assert_eq!(refused("{('name', 'x'), ('depends', ['base'])}"), (1, 17));
+        assert_eq!(refused("{['name', 'x']}"), (1, 2));
+        assert_eq!(refused("{('a', set())}"), (1, 2));
+        let error = parse("{('a', {'b': 1})}").unwrap_err();
+        assert!(error.value.starts_with("not hashable"), "{}", error.value);
+    }
+
+    #[test]
+    fn refuses_an_item_that_is_not_a_pair() {
+        assert_eq!(refused("[1, 2]"), (1, 2));
+        assert_eq!(refused("[('a',)]"), (1, 2));
+        assert_eq!(refused("[('name', 'x'), ('a', 1, 2)]"), (1, 17));
+        assert_eq!(refused("['abc']"), (1, 2));
+        let error = parse("[('a', f'')]").unwrap_err();
+        assert_eq!((error.pos.col, error.value.starts_with("not a literal")), (8, true));
+    }
+
+    #[test]
+    fn refuses_a_top_expression_of_neither_shape() {
+        assert_eq!(refused("5"), (1, 1));
+        assert_eq!(refused("'ab'"), (1, 1));
         assert_eq!(refused("dict(name='x')"), (1, 1));
     }
 
@@ -1183,10 +1464,30 @@ mod tests {
         assert_eq!(odoo_reads(b"{'name': NAME}", "10.0"), Some(OdooReads::No));
         assert_eq!(odoo_reads(b"dict(name='x')", "9.0"), Some(OdooReads::AsExpression));
         assert_eq!(odoo_reads(b"dict(name='x')", "10.0"), Some(OdooReads::No));
+        assert_eq!(odoo_reads(b"[1, 2]", "9.0"), Some(OdooReads::AsExpression));
+        assert_eq!(odoo_reads(b"[1, 2]", "10.0"), Some(OdooReads::No));
+        assert!(parse_bytes(b"[('name', NAME)]", "9.0").is_ok());
+        assert!(parse_bytes(b"{('name', NAME)}", "9.0").is_ok());
+        assert!(parse_bytes(b"[{NAME, 1}]", "9.0").is_ok());
+        assert_eq!(odoo_reads(b"{['name', 'x']}", "9.0"), Some(OdooReads::AsExpression));
         assert_eq!(odoo_reads(b"'doc'\n{}", "9.0"), Some(OdooReads::No));
         assert_eq!(odoo_reads(b"{'name': 'x',", "9.0"), Some(OdooReads::No));
         assert_eq!(odoo_reads(b"{'sequence': 0755}", "9.0"), Some(OdooReads::AsPython2));
         assert_eq!(odoo_reads(b"{'sequence': 0755}", "11.0"), Some(OdooReads::No));
+    }
+
+    #[test]
+    fn ten_reads_no_set() {
+        for src in [
+            "{('name', 'x'), ('depends', ('base',))}",
+            "set()",
+            "[{1, 2}]",
+            "{'depends': {'base'}}",
+        ] {
+            assert_eq!(odoo_reads(src.as_bytes(), "10.0"), Some(OdooReads::No), "{src}");
+            assert!(parse_bytes(src.as_bytes(), "9.0").is_ok(), "{src}");
+            assert!(parse_bytes(src.as_bytes(), "11.0").is_ok(), "{src}");
+        }
     }
 
     #[test]
