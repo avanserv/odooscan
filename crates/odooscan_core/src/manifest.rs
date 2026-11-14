@@ -363,10 +363,12 @@ impl Manifest {
 
 /// Why the Odoo of `series` will not install a module of `version`, none when it does or when the
 /// series disagree. From saas~16.3 a version is two or three numbers, maybe behind the series (18.0
-/// `odoo/modules/module.py:454-466`); 20.0 also takes `S.x` but makes a module whose version has
-/// four or five parts not behind the series uninstallable (`odoo/modules/module.py:579-608`). `S`
-/// and `S.x` stay silent, since 18.0 takes only the first and 20.0 only the second. On an unknown
-/// series, only the forms every series from saas~16.3 refuses count.
+/// `odoo/modules/module.py:454-466`), and from saas~18.2 also `S.x` (19.0
+/// `odoo/modules/module.py:550-566`). Each of these series but saas~18.1 refuses four or five
+/// numbers not behind the series; saas~18.1 parses only the last three, so takes them
+/// (`origin/saas-18.1:odoo/modules/module.py:450-463`). `S` and `S.x` stay silent, since 18.0
+/// takes only the first and saas~18.2 and later only the second. On an unknown series, only the
+/// forms every series from saas~16.3 refuses count.
 pub fn version_refusal(version: &str, series: Option<Series>) -> Option<String> {
     if series.is_some_and(|s| s < VERSION_FORM) {
         return None;
@@ -435,7 +437,11 @@ pub fn upgrade_folder_named(name: &str) -> bool {
 /// `version`, a version `version_refusal` takes: Odoo skips a name outside `UPGRADE_FOLDER` with a
 /// warning, and runs a folder only up to the module version (18.0 `odoo/modules/migration.py:103-115`,
 /// `:198-211`). A name of at most three numbers takes the series and drops it again to compare, so
-/// it compares with the module version without its series. `0.0.0` runs on every update.
+/// it compares with the module version without its series. `0.0.0` runs whenever the installed
+/// version is below the module version as Odoo compares it (`:198-200`), which puts an `S.x` behind
+/// the series again while the installed version keeps it as is: `0.0.0` then runs on every update
+/// while `x` is at most the series major, and above it only on an update from an earlier series or
+/// from an `x` at most the major.
 pub fn upgrade_folder_refusal(name: &str, version: &str, series: Series) -> Option<String> {
     if !upgrade_folder_named(name) {
         return Some(format!(
@@ -452,8 +458,8 @@ pub fn upgrade_folder_refusal(name: &str, version: &str, series: Series) -> Opti
     } else {
         format!("{own}.{version}")
     };
-    // Odoo compares the version as it compares a folder, so the `S.x` that 20.0 keeps unprefixed
-    // takes the series a second time.
+    // Odoo compares the version as it compares a folder, so the `S.x` that saas~18.2 and later keep
+    // unprefixed takes the series a second time.
     let current = version_key(&if adapted.matches('.').count() > 2 {
         adapted
     } else {
@@ -1287,7 +1293,8 @@ mod tests {
         assert!(!refused("18.0", "18.0") && refused("18.1", "18.0"));
         // Trailing zeros do not count, on either side.
         assert!(!refused("1.2.0", "18.0.1.2") && !refused("1.2.0", "1.2") && !refused("18.0.1.2.0", "1.2"));
-        // 20.0 keeps `S.x` unprefixed, and Odoo then compares it behind the series once more.
+        // From saas~18.2 a series keeps `S.x` unprefixed, and Odoo then compares it behind the
+        // series once more.
         let twenty = Series::parse("20.0").unwrap();
         let twenty_refused = |name: &str, version: &str| upgrade_folder_refusal(name, version, twenty).is_some();
         assert!(!twenty_refused("5.0", "20.0.3") && !twenty_refused("20.0.4.0", "20.0.3"));
