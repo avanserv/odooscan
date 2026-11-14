@@ -1363,6 +1363,8 @@ pub struct JsFacts {
     pub orm_calls: Vec<OrmCall>,
     /// The literal view kinds the file gives `view_registry.add`.
     pub view_kinds: Vec<String>,
+    /// Findings of the file alone, which `checks.rs` reports only for a script a page loads.
+    pub diags: Vec<RawDiag>,
     pub syntax_error: Option<Spanned<String>>,
 }
 

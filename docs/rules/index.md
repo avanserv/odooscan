@@ -207,7 +207,8 @@ place them, while the manifest's `assets` key adds nothing. A script Odoo does n
 module, every one before saas~14.3, has the dependencies of its `odoo.define()` calls checked by
 OD601 and OD608 instead of its imports, and its RPC calls as an ES module's. In an ES module from
 saas~14.5 to 16.0 a patch names itself, and OD602 reads its `this._super()` calls. OD608 reads the
-bundles of the two web client pages, backend and frontend, from 18.0 on.
+bundles of the two web client pages, backend and frontend, from 18.0 on. OD609 to OD612 read each
+script alone, for the HTML sinks and debugging leftovers of what a page runs.
 
 | Code | Name | Reports |
 | --- | --- | --- |
@@ -219,6 +220,10 @@ bundles of the two web client pages, backend and frontend, from 18.0 on.
 | [OD606](OD606.md) | `unmatched-template-locator` | A template locates an element its parent templates do not have. |
 | [OD607](OD607.md) | `private-rpc-method` | An ORM call from JS names a private method, which Odoo refuses to call over RPC. |
 | [OD608](OD608.md) | `cross-bundle-js-import` | A JS import names a module the bundles of the importer's page do not load. |
+| [OD609](OD609.md) | `unescaped-markup` | Owl's `markup()` receives a value built at runtime, which `t-out` renders unescaped. |
+| [OD610](OD610.md) | `html-sink` | A script sets a value built at runtime as the HTML of an element. |
+| [OD611](OD611.md) | `console-log` | A script a page loads calls `console.log()`. |
+| [OD612](OD612.md) | `debugger-statement` | A script a page loads has a `debugger` statement. |
 
 ## OD7: data flows
 

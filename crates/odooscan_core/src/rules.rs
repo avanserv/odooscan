@@ -337,6 +337,14 @@ rules! {
     // templates before it were not checked (18.0 `addons/web/views/webclient_templates.xml:54`,
     // `:58`, `:304`).
     "OD608" "cross-bundle-js-import" Correctness Error Some(">=18.0"), true, "A JS import names a module the bundles of the importer's page do not load.";
+    // Owl's `markup()` wraps a value as is and `t-out` renders the result as HTML (18.0
+    // `addons/web/static/lib/owl/owl.js:379-391`, `:4442-4447`; 20.0 `:1715-1727`, `:4141-4150`).
+    "OD609" "unescaped-markup" Security Info None, false, "Owl's markup() receives a value built at runtime, which t-out renders unescaped.";
+    // jQuery's `html()` sets `innerHTML` (18.0 `addons/web/static/lib/jquery/jquery.js:6381-6404`).
+    "OD610" "html-sink" Security Info None, false, "A script sets a value built at runtime as the HTML of an element.";
+    "OD611" "console-log" Quality Info None, false, "A script a page loads calls console.log().";
+    // Odoo's ESLint config makes it an error (18.0 `addons/web/tooling/_eslintrc.json:23`, 20.0 `:22`).
+    "OD612" "debugger-statement" Quality Warning None, false, "A script a page loads has a debugger statement.";
     "OD701" "sql-injection-flow" Security Error None, false, "Data a user controls reaches the text of an SQL query.";
     "OD702" "code-injection-flow" Security Error None, false, "Data a user controls reaches safe_eval(), eval() or exec().";
     "OD703" "markup-injection-flow" Security Warning None, false, "Data a user controls is wrapped in Markup() without escaping.";

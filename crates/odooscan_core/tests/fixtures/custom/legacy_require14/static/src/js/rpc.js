@@ -5,6 +5,7 @@ odoo.define("legacy_require14.rpc", function (require) {
 
     return Widget.extend({
         start() {
+            this.$el.html(this.value);
             return this._rpc({model: "x.gone14", method: "read"});
         },
     });
