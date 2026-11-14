@@ -614,6 +614,26 @@ fn a_version_of_another_series_is_refused_under_a_default_series_only() {
 }
 
 #[test]
+fn a_saas_series_wants_its_saas_prefix() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+    let report = scan(&ScanOptions {
+        paths: ["manifest_version_plain181", "saas181", "manifest_assets_unmatched_162"]
+            .into_iter()
+            .map(|m| root.join("custom").join(m))
+            .collect(),
+        addons_paths: vec![root.join("core")],
+        ..Default::default()
+    });
+    let refused: Vec<_> = report
+        .diagnostics
+        .iter()
+        .filter(|d| d.code == "OD509")
+        .filter_map(|d| d.path.parent()?.file_name()?.to_str())
+        .collect();
+    assert_eq!(refused, ["manifest_version_plain181"]);
+}
+
+#[test]
 fn a_target_series_checks_a_module_as_of_that_series() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
     let findings = |target_series| {

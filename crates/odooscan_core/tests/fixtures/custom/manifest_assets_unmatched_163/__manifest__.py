@@ -1,6 +1,6 @@
 {
     "name": "An asset outside static in 16.3",
-    "version": "16.3.1.0.0",
+    "version": "saas~16.3.1.0.0",
     "depends": ["web"],
     "license": "LGPL-3",
     "assets": {

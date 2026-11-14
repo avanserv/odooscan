@@ -757,6 +757,7 @@ custom/manifest_unclosed_user/__manifest__.py:4:25: OD503 Odoo cannot read the m
 custom/manifest_unhashable/__manifest__.py:5:17: OD000 not hashable: Python hashes each item of a set
 custom/manifest_unliteral/__manifest__.py:4:16: OD000 not a literal: Odoo reads the manifest with ast.literal_eval
 custom/manifest_unpaired/__manifest__.py:1:40: OD000 not a key/value pair: Odoo updates a dict with each item of the manifest
+custom/manifest_version_plain181/__manifest__.py:3:16: OD509 version '18.1.1.0.0' is not of the form x.y, x.y.z, saas~18.1.x.y or saas~18.1.x.y.z, so Odoo saas~18.1 will not install the module
 custom/manifest_version_refused/__manifest__.py:3:16: OD509 version '1.0-beta' is not of the form x.y or x.y.z, behind the series or not, so Odoo will not install the module
 custom/method_aliases/data/calls.xml:20:34: OD320 method.ticket has no method 'action_dnoe'
 custom/method_aliases/views/tickets.xml:21:45: OD312 method.ticket has no method 'action_dnoe'
