@@ -190,6 +190,7 @@ dependencies, migration scripts and the Python imports between modules.
 | [OD517](OD517.md) | `test-file-not-imported` | A test file is never imported by the tests package, so Odoo never runs its tests. |
 | [OD518](OD518.md) | `python-import-not-in-depends` | A Python import names a module outside depends, which may be missing or load later. |
 | [OD519](OD519.md) | `unresolved-python-import` | A Python import names a module or a name the target module does not have. |
+| [OD520](OD520.md) | `implied-dependency` | A module in depends already comes with another one in depends. |
 
 ## OD6: JavaScript and Owl
 
