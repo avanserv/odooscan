@@ -742,3 +742,16 @@ fn a_refused_version_leaves_folders_unread() {
     let found = migration_findings(None, Series::parse("20.0"));
     assert_eq!(found, [("OD509", "migration_folders".to_owned())]);
 }
+
+#[test]
+fn a_seriesless_web_runs_the_owl_of_the_module_checked() {
+    // Core's `web` gives `'version': '1.0'`, so only the checked module tells which Owl it runs.
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/seriesless_web");
+    let report = scan(&ScanOptions {
+        paths: vec![root.join("custom")],
+        addons_paths: vec![root.join("core")],
+        ..Default::default()
+    });
+    let found: Vec<_> = report.diagnostics.iter().map(|d| (d.code, d.line)).collect();
+    assert_eq!(found, [("OD613", 7), ("OD613", 13), ("OD602", 19), ("OD602", 25)]);
+}

@@ -3,13 +3,16 @@ use std::ops::Range;
 use oxc_allocator::Allocator;
 use oxc_ast::ast::{
     Argument, ArrayExpressionElement, AssignmentExpression, AssignmentOperator, AssignmentTarget, BinaryOperator,
-    CallExpression, Class, ClassElement, DebuggerStatement, Expression, Function, ObjectExpression, ObjectPropertyKind,
-    Program, Statement, StaticMemberExpression, StringLiteral,
+    BindingPattern, CallExpression, Class, ClassElement, DebuggerStatement, Expression, Function, ObjectExpression,
+    ObjectPropertyKind, Program, Statement, StaticMemberExpression, StringLiteral, VariableDeclarator,
 };
 use oxc_ast_visit::Visit;
-use oxc_ast_visit::walk::{walk_assignment_expression, walk_call_expression, walk_class};
+use oxc_ast_visit::walk::{
+    walk_assignment_expression, walk_call_expression, walk_class, walk_static_member_expression,
+    walk_variable_declarator,
+};
 use oxc_parser::Parser;
-use oxc_span::SourceType;
+use oxc_span::{GetSpan, SourceType};
 use oxc_syntax::module_record::{ExportExportName, ExportImportName, ImportImportName, ModuleRecord};
 use oxc_syntax::scope::ScopeFlags;
 
@@ -56,6 +59,9 @@ pub fn analyze(text: &str) -> JsFacts {
         }
     }
     module_record(&parsed.module_record, &lines, &mut facts);
+    let imported = facts.names.iter().filter(|n| n.specifier == OWL_MODULE);
+    let owl1: Vec<_> = imported.filter_map(|n| owl1_api(&n.name.value, n.name.pos)).collect();
+    facts.diags.extend(owl1);
     facts.defines = defines(&parsed.program, &lines);
     let mut collector = Collector {
         lines: &lines,
@@ -320,6 +326,20 @@ fn js_name(specifier: &str, name: String, pos: Pos) -> JsName {
     }
 }
 
+pub(crate) const OWL_MODULE: &str = "@odoo/owl";
+
+/// OD613 on a name of Owl 1 that Owl 2 does not export, read from `owl` or `@odoo/owl` at `pos`.
+fn owl1_api(name: &str, pos: Pos) -> Option<RawDiag> {
+    let instead = match name {
+        "hooks" => "import each hook, such as useState, from @odoo/owl",
+        "tags" => "import xml from @odoo/owl",
+        "QWeb" => "load templates from the bundle's XML files, or an xml`...` template",
+        _ => return None,
+    };
+    let message = format!("Owl 2 has no '{name}', so the script reads undefined; {instead}");
+    Some(RawDiag::new("OD613", pos, message))
+}
+
 /// Named classes and prototype patches, wherever they are.
 struct Collector<'f> {
     lines: &'f Lines,
@@ -333,11 +353,7 @@ impl<'a> Visit<'a> for Collector<'_> {
         if let Some(id) = &class.id {
             self.facts.classes.push(JsClass {
                 name: id.name.to_string(),
-                extends: match class.heritage.as_ref().map(|h| &h.expression) {
-                    None => Heritage::None,
-                    Some(Expression::Identifier(i)) => Heritage::Name(i.name.to_string()),
-                    Some(_) => Heritage::Other,
-                },
+                extends: heritage(class),
                 members: class
                     .body
                     .body
@@ -359,9 +375,38 @@ impl<'a> Visit<'a> for Collector<'_> {
                     }
                     _ => None,
                 }),
+                triggers: class_triggers(class, self.lines),
             });
         }
         walk_class(self, class);
+    }
+
+    fn visit_variable_declarator(&mut self, declarator: &VariableDeclarator<'a>) {
+        if let Some(Expression::Identifier(init)) = &declarator.init
+            && init.name == "owl"
+            && let BindingPattern::ObjectPattern(pattern) = &declarator.id
+        {
+            for property in &pattern.properties {
+                let Some(name) = property.key.static_name() else {
+                    continue;
+                };
+                let name = name.as_str().unwrap_or_default().to_owned();
+                let pos = self.lines.pos(property.key.span().start as usize);
+                self.facts.diags.extend(owl1_api(&name, pos));
+                if let Some(local) = property.value.get_identifier_name() {
+                    self.facts.owl_bindings.push((local.to_string(), name));
+                }
+            }
+        }
+        walk_variable_declarator(self, declarator);
+    }
+
+    fn visit_static_member_expression(&mut self, member: &StaticMemberExpression<'a>) {
+        if matches!(&member.object, Expression::Identifier(o) if o.name == "owl") {
+            let pos = self.lines.pos(member.property.span.start as usize);
+            self.facts.diags.extend(owl1_api(&member.property.name, pos));
+        }
+        walk_static_member_expression(self, member);
     }
 
     fn visit_assignment_expression(&mut self, assignment: &AssignmentExpression<'a>) {
@@ -396,6 +441,41 @@ impl<'a> Visit<'a> for Collector<'_> {
         let pos = self.lines.pos(statement.span.start as usize);
         self.facts.diags.push(RawDiag::new("OD612", pos, message));
     }
+}
+
+fn heritage(class: &Class) -> Heritage {
+    match class.heritage.as_ref().map(|h| &h.expression) {
+        None => Heritage::None,
+        Some(Expression::Identifier(i)) => Heritage::Name(i.name.to_string()),
+        Some(Expression::StaticMemberExpression(m)) if matches!(&m.object, Expression::Identifier(o) if o.name == "owl") => {
+            Heritage::Owl(m.property.name.to_string())
+        }
+        Some(_) => Heritage::Other,
+    }
+}
+
+/// The `this.trigger()` calls of what runs on an instance: its methods, accessors and the values
+/// of its fields. A static member and a static block run on the class.
+fn class_triggers(class: &Class, lines: &Lines) -> Vec<Pos> {
+    let mut calls = ThisCalls {
+        property: "trigger",
+        lines,
+        found: vec![],
+    };
+    // `r#static()` is false for a static block, which the match skips.
+    for element in class.body.body.iter().filter(|e| !e.r#static()) {
+        let value = match element {
+            ClassElement::MethodDefinition(m) => {
+                m.value.body.iter().for_each(|body| calls.visit_function_body(body));
+                continue;
+            }
+            ClassElement::PropertyDefinition(p) => &p.value,
+            ClassElement::AccessorProperty(p) => &p.value,
+            _ => continue,
+        };
+        value.iter().for_each(|value| calls.visit_expression(value));
+    }
+    calls.found
 }
 
 /// OD609 on `markup(x)` or `owl.markup(x)` given a value built at runtime. Owl wraps it as is, and
@@ -681,26 +761,30 @@ fn this_supers(extension: &ObjectExpression, lines: &Lines) -> Vec<Spanned<Strin
             && let Some(name) = name.as_str()
             && let Some(body) = &function.body
         {
-            let mut calls = ThisSupers {
-                name,
+            let mut calls = ThisCalls {
+                property: "_super",
                 lines,
-                found: &mut found,
+                found: vec![],
             };
             calls.visit_function_body(body);
+            found.extend(calls.found.into_iter().map(|pos| Spanned {
+                value: name.to_owned(),
+                pos,
+            }));
         }
     }
     found
 }
 
-/// `this._super(...)`, `this._super.apply(...)` and `this._super.call(...)`. An arrow function keeps
-/// the method's `this`; a nested function or class has its own.
-struct ThisSupers<'f> {
-    name: &'f str,
+/// `this.<property>(...)`, `this.<property>.apply(...)` and `this.<property>.call(...)`, at the
+/// property. An arrow function keeps the method's `this`; a nested function or class has its own.
+struct ThisCalls<'f> {
+    property: &'f str,
     lines: &'f Lines,
-    found: &'f mut Vec<Spanned<String>>,
+    found: Vec<Pos>,
 }
 
-impl<'a> Visit<'a> for ThisSupers<'_> {
+impl<'a> Visit<'a> for ThisCalls<'_> {
     fn visit_function(&mut self, _: &Function<'a>, _: ScopeFlags) {}
 
     fn visit_class(&mut self, _: &Class<'a>) {}
@@ -715,19 +799,12 @@ impl<'a> Visit<'a> for ThisSupers<'_> {
                 }
                 _ => member,
             };
-            if this_super(target) {
-                self.found.push(Spanned {
-                    value: self.name.to_owned(),
-                    pos: self.lines.pos(target.property.span.start as usize),
-                });
+            if target.property.name == self.property && matches!(target.object, Expression::ThisExpression(_)) {
+                self.found.push(self.lines.pos(target.property.span.start as usize));
             }
         }
         walk_call_expression(self, call);
     }
-}
-
-fn this_super(member: &StaticMemberExpression) -> bool {
-    member.property.name == "_super" && matches!(member.object, Expression::ThisExpression(_))
 }
 
 /// The top-level `odoo.define()` calls. Odoo takes a leading string as the name, a list after it as
@@ -1246,6 +1323,76 @@ console.log(x); /* eslint-disable "no-console" -- the rest */ console.log(x);
                 "OD611@28:1",
                 "OD612@30:1",
                 "OD611@31:1"
+            ]
+        );
+    }
+
+    #[test]
+    fn reads_the_owl_heritage_and_bindings() {
+        let facts = analyze(
+            r#"const { Component, hooks: h, QWeb: Q = null, ...rest } = owl;
+let { xml } = owl.tags;
+const { Store } = other;
+class A extends owl.Component {}
+class B extends window.owl.Component {}
+"#,
+        );
+        let bindings: Vec<_> = facts.owl_bindings.iter().map(|(l, n)| format!("{l}={n}")).collect();
+        assert_eq!(bindings, ["Component=Component", "h=hooks", "Q=QWeb"]);
+        let extends: Vec<_> = facts.classes.iter().map(|c| &c.extends).collect();
+        assert_eq!(extends, [&Heritage::Owl("Component".to_owned()), &Heritage::Other]);
+    }
+
+    #[test]
+    fn reads_the_this_trigger_calls_of_an_instance() {
+        let facts = analyze(
+            r#"class A extends Component {
+    setup() { this.trigger("a"); }
+    get value() { return this.trigger.call(this, "b"); }
+    onClick = () => this.trigger("c");
+    handler = function () { this.trigger("x"); };
+    static make() { this.trigger("x"); }
+    static field = this.trigger("x");
+    static { this.trigger("x"); }
+    load() {
+        const run = () => this.trigger("d");
+        function nested() { this.trigger("x"); }
+        class Inner { m() { this.trigger("x"); } }
+        this.env.bus.trigger("x");
+        trigger("x");
+    }
+}
+"#,
+        );
+        let shown =
+            |c: &JsClass| -> Vec<String> { c.triggers.iter().map(|p| format!("{}:{}", p.line, p.col)).collect() };
+        assert_eq!(shown(&facts.classes[0]), ["2:20", "3:31", "4:26", "10:32"]);
+        assert_eq!(facts.classes[1].name, "Inner");
+        assert_eq!(shown(&facts.classes[1]), ["12:34"]);
+    }
+
+    #[test]
+    fn reports_the_owl_1_apis() {
+        let source = r#"import { hooks, xml, QWeb as Q } from "@odoo/owl";
+import { tags } from "@web/other";
+const { useState } = owl.hooks;
+owl.tags.xml`<div/>`;
+const { Component, QWeb, tags: t, utils } = owl;
+owl.QWeb.registerComponent("x", X);
+owl.Component;
+window.owl.hooks;
+const { hooks: h } = other;
+"#;
+        assert_eq!(
+            shown(source),
+            [
+                "OD613@1:10",
+                "OD613@1:22",
+                "OD613@3:26",
+                "OD613@4:5",
+                "OD613@5:20",
+                "OD613@5:26",
+                "OD613@6:5"
             ]
         );
     }
