@@ -40,9 +40,18 @@ pub struct SourceFile<T> {
 }
 
 impl<T> SourceFile<T> {
-    /// Whether the file is under `static/tests`, which only the test bundles load.
+    /// Whether the file is a test by its path: under `static/tests`, or in a `tests` folder under
+    /// `static/src`, which `web.qunit_suite_tests` lists from the manifests of 15.0
+    /// `addons/mail/__manifest__.py:142-161` and `addons/sms/__manifest__.py:53-55`, and 16.0
+    /// `addons/base_iban/__manifest__.py:24-25`. A script is a test also by the bundles that load
+    /// it: ask `Index::js_test` for those.
     pub fn in_tests(&self) -> bool {
         self.rel.starts_with("static/tests/")
+            || self.rel.strip_prefix("static/src/").is_some_and(|rest| {
+                let mut dirs = rest.split('/');
+                dirs.next_back();
+                dirs.any(|d| d == "tests")
+            })
     }
 }
 
@@ -825,6 +834,33 @@ fn parse_static_files<T: Send>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_file_is_a_test_under_static_tests_or_a_tests_folder_under_static_src() {
+        let file = |rel: &str| SourceFile {
+            path: PathBuf::new(),
+            rel: rel.to_owned(),
+            rank: None,
+            demo: false,
+            facts: (),
+            suppressions: Suppressions::default(),
+            mentions: Mentions::default(),
+        };
+        for rel in [
+            "static/tests/a.js",
+            "static/src/tests/a.js",
+            "static/src/c/x/tests/a.js",
+        ] {
+            assert!(file(rel).in_tests(), "{rel}");
+        }
+        for rel in [
+            "static/src/js/tests.js",
+            "static/src/tests_shared/a.js",
+            "static/src/e/test/a.js",
+        ] {
+            assert!(!file(rel).in_tests(), "{rel}");
+        }
+    }
 
     #[test]
     fn code_loads_the_files_it_names_and_chart_templates() {

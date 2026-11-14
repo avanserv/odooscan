@@ -1607,6 +1607,11 @@ custom/test_imports/static/tests/widget.test.js:4:22: OD601 no file of module we
 custom/test_imports/static/tests/widget.test.js:6:30: OD601 '@web/core/utils/functions' does not export 'debounceGone'
 custom/test_imports/static/tests/widget.test.js:9:43: OD601 no file of module test_imports provides '@test_imports/../tests/helpers.js'
 custom/test_imports/static/tests/widget.test.js:11:10: OD601 '@web/core/utils/indexed_db' does not export '_OriginalIndexedDB'
+custom/test_scripts15/static/src/js/partner.js:6:13: OD611 console.log() is a debugging leftover that writes to every user's console; remove it
+custom/test_scripts15/static/src/js/partner.js:7:39: OD603 no indexed module defines model 'x.missing'
+custom/test_scripts15/static/src/js/partner.js:7:60: OD607 method '_secret' is private, so the server refuses to call it over RPC
+custom/test_scripts15/static/src/js/shared.js:6:13: OD611 console.log() is a debugging leftover that writes to every user's console; remove it
+custom/test_scripts18/static/src/services.js:5:24: OD616 no indexed bundle registers service 'test_scripts18_beacon'
 custom/tree_paths/views/partner.xml:8:21: OD306 the <tree> view is renamed <list>
 custom/tree_paths/views/partner.xml:29:13: OD306 the <tree> view is renamed <list>
 custom/tree_paths/views/partner.xml:48:13: OD306 the <tree> view is renamed <list>
