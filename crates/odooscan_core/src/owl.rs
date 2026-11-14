@@ -6,7 +6,7 @@ use std::sync::LazyLock;
 use regex::Regex;
 use roxmltree::{Document, Node, ParsingOptions};
 
-use crate::facts::{ArchElement, Lines, OwlTemplate, Spanned, TemplateFacts, ViewFact};
+use crate::facts::{ArchElement, ComponentTag, Lines, OwlTemplate, Spanned, TemplateFacts, ViewFact};
 use crate::xml::{spec_tag, t_call};
 
 /// An xpath step that names its element by an attribute, as in `div[@t-ref='x']`, or by classes,
@@ -71,17 +71,72 @@ fn template(node: Node, lines: &Lines) -> Option<OwlTemplate> {
     let body = node.descendants().skip(usize::from(extension));
     arch.calls.extend(body.filter_map(|n| t_call(n, lines)));
     if inherit.is_none() {
-        for n in node.descendants().skip(1).filter(Node::is_element) {
+        let body: Vec<_> = node.descendants().skip(1).filter(Node::is_element).collect();
+        for &n in &body {
             elements(n, &mut arch);
         }
-        return Some(OwlTemplate { name, inherit, arch });
+        let components = body.into_iter().filter_map(|n| component_tag(n, lines)).collect();
+        return Some(OwlTemplate {
+            name,
+            inherit,
+            arch,
+            components,
+            sets_attributes: false,
+        });
     }
     // An inheriting template's children are specs; what they hold is content, where an Owl
     // component may well take a `position` prop.
-    for spec in node.children().filter(Node::is_element) {
+    let specs: Vec<_> = node.children().filter(Node::is_element).collect();
+    for &spec in &specs {
         spec_facts(spec, lines, &mut arch);
     }
-    Some(OwlTemplate { name, inherit, arch })
+    let content = specs.iter().flat_map(|s| s.descendants().skip(1));
+    Some(OwlTemplate {
+        name,
+        inherit,
+        arch,
+        components: content.filter_map(|n| component_tag(n, lines)).collect(),
+        sets_attributes: specs.iter().any(|s| s.attribute("position") == Some("attributes")),
+    })
+}
+
+/// The element as Owl compiles a component: a tag not starting lowercase, unless `t-component`
+/// makes it a dynamic one (18.0 `addons/web/static/lib/owl/owl.js:5495-5536`).
+fn component_tag(node: Node, lines: &Lines) -> Option<ComponentTag> {
+    let tag = node.tag_name().name();
+    if !node.is_element() || tag.starts_with(char::is_lowercase) || node.has_attribute("t-component") {
+        return None;
+    }
+    let props = node
+        .attributes()
+        .filter(|a| a.namespace().is_none() && !a.name().starts_with("t-"))
+        .filter_map(|a| {
+            Some(Spanned {
+                value: prop_name(a.name())?.to_owned(),
+                pos: lines.pos(a.range_qname().start),
+            })
+        })
+        .collect();
+    Some(ComponentTag {
+        name: Spanned {
+            value: tag.to_owned(),
+            pos: lines.pos(node.range().start + 1),
+        },
+        props,
+        spread: node.has_attribute("t-props"),
+        content: node.has_children(),
+    })
+}
+
+/// The prop an attribute passes: the text before its first dot, as Owl reads only the next part
+/// as the suffix (`owl.js:4751-4771`). None for a suffix Owl rejects when compiling the template.
+fn prop_name(attr: &str) -> Option<&str> {
+    let mut parts = attr.split('.');
+    let name = parts.next()?;
+    match parts.next() {
+        None | Some("bind" | "translate" | "alike") => Some(name),
+        Some(_) => None,
+    }
 }
 
 /// What a spec locates, and the elements its content adds.
@@ -274,6 +329,54 @@ mod tests {
             .map(|l| show(&l.value))
             .collect();
         assert_eq!(locators, ["t[t-call=x.Old]", "t[t-call=x.Bare]"]);
+    }
+
+    #[test]
+    fn reads_the_component_tags_and_their_props() {
+        let facts = analyze(
+            r#"<templates>
+    <t t-name="x.A">
+        <div><Card named="'x'" onClose.bind="close" label.translate="Hi" t-if="show" t-on-click="go"/></div>
+        <Card t-props="props">
+        </Card>
+        <t t-component="dynamic" title="1"/>
+        <Panel_x.Item size.weird="1" extra.bind.x="go"/>
+    </t>
+    <t t-inherit="x.A" t-inherit-mode="extension">
+        <Card position="after"><Badge count="1"/></Card>
+        <xpath expr="//Card" position="attributes"><attribute name="title">1</attribute></xpath>
+    </t>
+</templates>"#,
+        );
+        let shown = |t: &OwlTemplate| -> Vec<String> {
+            t.components
+                .iter()
+                .map(|c| {
+                    let props: Vec<_> = c.props.iter().map(|p| format!("{}@{}", p.value, p.pos.col)).collect();
+                    format!(
+                        "{}@{}:{} [{}]{}{}",
+                        c.name.value,
+                        c.name.pos.line,
+                        c.name.pos.col,
+                        props.join(" "),
+                        if c.spread { " spread" } else { "" },
+                        if c.content { " content" } else { "" }
+                    )
+                })
+                .collect()
+        };
+        let t = &facts.templates;
+        assert_eq!(
+            shown(&t[0]),
+            [
+                "Card@3:15 [named@20 onClose@32 label@53]",
+                "Card@4:10 [] spread content",
+                "Panel_x.Item@7:10 [extra@38]"
+            ]
+        );
+        assert!(!t[0].sets_attributes);
+        assert_eq!(shown(&t[1]), ["Badge@10:33 [count@39]"]);
+        assert!(t[1].sets_attributes);
     }
 
     #[test]
