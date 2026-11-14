@@ -23,6 +23,7 @@ custom/auto_scope_main/thing.py:20:23: OD210 'country_stamp': field 'country_sta
 custom/auto_scope_main/thing.py:21:23: OD210 'both_next_id.no_past_both': auto.scope.thing has no field 'no_past_both'
 custom/auto_scope_main/views.xml:8:17: OD210 'next_stamp': field 'next_stamp' of auto.scope.thing comes from module auto_scope_next, which is not in depends
 custom/auto_scope_reader_any/thing.py:8:23: OD210 'country_any_stamp': field 'country_any_stamp' of auto.scope.thing comes from module auto_scope_country_any, which is not in depends
+custom/auto_scope_reader_bare/pages.xml:4:20: OD311 template 'manifest_auto_install_bare.page' comes from module manifest_auto_install_bare, which is not in depends
 custom/auto_scope_reader_new/thing.py:8:23: OD210 'country_any_stamp': field 'country_any_stamp' of auto.scope.thing comes from module auto_scope_country_any, which is not in depends
 custom/auto_scope_reader_ten/thing.py:9:23: OD210 'list_any_stamp': field 'list_any_stamp' of auto.scope.thing comes from module auto_scope_list_any, which is not in depends
 custom/auto_scope_v131/data.xml:7:17: OD210 'next_stamp': field 'next_stamp' of auto.scope.thing comes from module auto_scope_next, which is not in depends
