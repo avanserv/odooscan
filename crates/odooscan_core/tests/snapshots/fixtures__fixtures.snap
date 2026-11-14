@@ -1681,6 +1681,14 @@ custom/web_keys/data/actions.xml:19:27: OD331 no indexed bundle registers client
 custom/web_keys/data/actions.xml:24:27: OD331 no indexed bundle registers client action 'web_keys.stray'
 custom/web_keys/data/actions.xml:29:28: OD331 no indexed bundle registers client action ' web_keys.board '
 custom/web_keys/data/actions.xml:34:27: OD331 client action 'web_keys_side.panel' comes from module web_keys_side, which is not in depends
+custom/web_keys/static/src/legacy.js:4:30: OD616 no indexed bundle registers service 'web_keys_pager'
+custom/web_keys/static/src/services.js:9:27: OD616 no indexed bundle registers service 'web_keys_clokc'
+custom/web_keys/static/src/services.js:10:29: OD616 no indexed bundle registers service 'web_keys_mocked'
+custom/web_keys/static/src/services.js:11:28: OD616 service 'web_keys_side_radio' comes from module web_keys_side, which is not in depends
+custom/web_keys/static/src/services.js:13:28: OD616 no indexed bundle registers service 'web_keys_ruler'
+custom/web_keys/tests/test_ui.py:9:34: OD332 no indexed bundle registers tour 'web_keys_chekout'
+custom/web_keys/tests/test_ui.py:10:34: OD332 no indexed bundle registers tour 'web_keys_unit_tour'
+custom/web_keys/tests/test_ui.py:11:51: OD332 no indexed bundle registers tour 'web_keys_cart'
 custom/web_keys/views/views.xml:8:31: OD330 no indexed bundle registers view widget 'web_keys_banerr'
 custom/web_keys/views/views.xml:9:31: OD330 no indexed bundle registers view widget 'web_keys_mocked'
 custom/web_keys/views/views.xml:10:31: OD330 view widget 'web_keys_side_seal' comes from module web_keys_side, which is not in depends
