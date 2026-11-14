@@ -1,0 +1,11 @@
+<odoo>
+    <record id="csv_refused_note" model="res.partner">
+        <field name="name">Note</field>
+        <field name="parent_id" ref="csv_refused_gone"/>
+    </record>
+
+    <record id="csv_refused_other" model="res.partner">
+        <field name="name">Other</field>
+        <field name="parent_id" ref="base.no_such_record"/>
+    </record>
+</odoo>

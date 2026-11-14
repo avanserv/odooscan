@@ -251,10 +251,13 @@ custom/button_private/views/desks.xml:7:45: OD313 method 'ensure_one' of button.
 custom/button_private/views/desks.xml:8:45: OD313 method 'init' of button.desk is private, so Odoo refuses to call it from a button
 custom/button_private/views/desks.xml:9:45: OD313 method 'with_context' of button.desk is private, so Odoo refuses to call it from a button
 custom/button_private15/views/kiosks.xml:7:45: OD313 method 'init' of button.kiosk is private, so Odoo refuses to call it from a button
+custom/csv_refused/data/refs.xml:9:9: OD301 module base defines no XML id 'base.no_such_record'
+custom/csv_refused/data/res.partner.csv:2:1: OD000 the row ends before column 'parent_id:id', where Odoo's import reads a relational field
 custom/csv_rows/data/res.partner-cr.csv:2:21: OD000 a carriage return outside quotes that ends no line, which Python's csv reader refuses
 custom/csv_rows/data/res.partner-empty.csv:1:1: OD000 the file is empty, and Odoo's import reads its first row as the header
 custom/csv_rows/data/res.partner-quote.csv:3:18: OD000 this quote runs to the end of the file, so the row ends before column 'parent_id:id', where Odoo's import reads a relational field
 custom/csv_rows/security/ir.model.access.csv:3:1: OD000 the row ends before column 'group_id:id', where Odoo's import reads a relational field
+custom/csv_rows_any/data/res.partner-feed.csv:2:1: OD301 module base defines no XML id 'base.no_such_partner'
 custom/csv_rows_any/data/res.partner-short.csv:2:1: OD000 the row ends before column 'parent_id:id', where Odoo's import reads a relational field
 custom/cursor_state/controllers/main.py:13:13: OD121 rolling back discards the whole transaction, the caller's work included, while the code carries on; raise an exception so that Odoo rolls back, or run the step that may fail under self.env.cr.savepoint()
 custom/cursor_state/controllers/main.py:19:9: OD122 UPDATE on res_partner bypasses the ORM, so records this transaction already read keep stale values; call flush_model() before the query and invalidate_model() after it (flush() and invalidate_cache() before 16.0)

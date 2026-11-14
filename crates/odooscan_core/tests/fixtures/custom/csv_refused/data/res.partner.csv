@@ -1,0 +1,3 @@
+id,name,parent_id:id
+csv_refused_short,Short
+csv_refused_child,Child,base.no_such_partner
