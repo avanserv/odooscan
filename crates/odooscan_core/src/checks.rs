@@ -16,8 +16,8 @@ use crate::facts::{
 use crate::grants::{self, AttachmentGrant, Grant, Grants};
 use crate::imports::{AddonImport, Fault};
 use crate::index::{
-    BASE_MODEL_METHODS, Export, FieldDef, FieldInfo, Index, JsSpec, PathError, Placed, RELATIONAL_TYPES, Scope, Status,
-    ViewTree, asset_glob_set, base_private_method, full_id, js_module_path, loaded_data, located,
+    BASE_MODEL_METHODS, Export, FieldDef, FieldInfo, Index, JsSpec, JsTarget, PathError, Placed, RELATIONAL_TYPES,
+    Scope, Status, ViewTree, asset_glob_set, base_private_method, full_id, js_module_path, loaded_data, located,
 };
 use crate::mentions::HOOK_PREFIXES;
 use crate::module_state::UPGRADE_DIRS;
@@ -308,7 +308,7 @@ pub fn check_module<'m>(index: &Index<'m>, mi: usize, series: Option<Series>) ->
         ctx.registry(&mut out);
         ctx.data(&mut out);
         for (fi, file) in es_modules(index, mi, series) {
-            ctx.js(&mut out, file);
+            ctx.js(&mut out, fi, file);
             ctx.js_patches(&mut out, mi, fi, file);
             for call in &file.facts.orm_calls {
                 ctx.orm_call(&mut out, &file.path, call);
@@ -792,6 +792,42 @@ fn es_modules<'a, 'm>(
                 Annotation::None => unannotated,
             }
     })
+}
+
+/// The bundles of each web client page. The backend page loads `web.assets_web`, which includes
+/// `web.assets_backend`; the frontend page loads `web.assets_frontend_minimal` and
+/// `web.assets_frontend_lazy`, which includes `web.assets_frontend` (18.0
+/// `addons/web/views/webclient_templates.xml:54`, `:58`, `:304`, `addons/web/__manifest__.py:147-148`,
+/// `:249-250`). A bundle that code loads lazily is on no page: it joins one that holds others.
+const PAGES: &[&[&str]] = &[
+    &["web.assets_backend", "web.assets_web"],
+    &[
+        "web.assets_frontend",
+        "web.assets_frontend_minimal",
+        "web.assets_frontend_lazy",
+    ],
+];
+
+/// The first bundle of a page that loads the importer but none of the target's bundles. A target in
+/// no bundle is left alone, since an `ir.asset` record may load it.
+fn page_miss(importer: &[&str], target: &[&str]) -> Option<&'static str> {
+    if target.is_empty() {
+        return None;
+    }
+    PAGES.iter().find_map(|page| {
+        let loads = page.iter().find(|b| importer.contains(b))?;
+        (!target.iter().any(|b| page.contains(b))).then_some(*loads)
+    })
+}
+
+/// The bundle names, the first three of them and how many more.
+fn bundle_list(names: &[&str]) -> String {
+    match names {
+        [] => String::new(),
+        [one] => (*one).to_owned(),
+        [init @ .., last] if names.len() <= 3 => format!("{} and {last}", init.join(", ")),
+        _ => format!("{} and {} more", names[..3].join(", "), names.len() - 3),
+    }
 }
 
 /// The server refuses to dispatch a method whose name starts with `_` to a model.
@@ -1982,19 +2018,32 @@ impl<'m> Ctx<'_, 'm> {
         }
     }
 
-    fn js(&self, out: &mut Out<'m>, file: &'m SourceFile<JsFacts>) {
+    fn js(&self, out: &mut Out<'m>, fi: usize, file: &'m SourceFile<JsFacts>) {
         let from = js_module_path(&self.module.name, &file.rel).unwrap_or_default();
-        for specifier in &file.facts.specifiers {
-            self.js_specifier(out, &file.path, &from, specifier);
-        }
+        let mut unexported: Vec<&str> = vec![];
         for name in &file.facts.names {
-            self.js_name(out, &file.path, &from, name);
+            if self.js_name(out, &file.path, &from, name) {
+                unexported.push(&name.specifier);
+            }
+        }
+        for specifier in &file.facts.specifiers {
+            let check_page = !unexported.contains(&specifier.value.as_str());
+            self.js_specifier(out, &file.path, fi, &from, specifier, check_page);
         }
     }
 
     /// A dependency outside the index may load the module a specifier names. It cannot add a file
-    /// to that module, so a missing file is reported whatever the scope.
-    fn js_specifier(&self, out: &mut Out<'m>, path: &'m Path, from: &str, specifier: &Spanned<String>) {
+    /// to that module, so a missing file is reported whatever the scope. `check_page` is false when
+    /// OD601 already reports a name the specifier lacks, so the import gets one finding.
+    fn js_specifier(
+        &self,
+        out: &mut Out<'m>,
+        path: &'m Path,
+        fi: usize,
+        from: &str,
+        specifier: &Spanned<String>,
+        check_page: bool,
+    ) {
         let module = |mi: usize| &self.index.modules[mi].name;
         let message = match self.index.js_resolve(from, &specifier.value) {
             JsSpec::Missing(mi) => format!("no file of module {} provides '{}'", module(mi), specifier.value),
@@ -2003,23 +2052,45 @@ impl<'m> Ctx<'_, 'm> {
                 specifier.value,
                 module(t.module)
             ),
-            _ => return,
+            JsSpec::Found(t) if check_page => return self.js_page(out, path, fi, t, specifier),
+            JsSpec::Found(_) | JsSpec::Outside => return,
         };
         out.push(path, "OD601", specifier.pos, message);
     }
 
-    fn js_name(&self, out: &mut Out<'m>, path: &'m Path, from: &str, name: &JsName) {
-        let JsSpec::Found(target) = self.index.js_resolve(from, &name.specifier) else {
+    /// A dependency outside the index, such as an Enterprise one, may add the target, or a bundle
+    /// that holds it, to the importer's page.
+    fn js_page(&self, out: &mut Out<'m>, path: &'m Path, fi: usize, target: JsTarget, specifier: &Spanned<String>) {
+        if self.partial {
+            return;
+        }
+        let importer: Vec<&str> = self.index.js_bundles(self.mi, fi).collect();
+        let bundles: Vec<&str> = self.index.js_bundles(target.module, target.file).collect();
+        let Some(page) = page_miss(&importer, &bundles) else {
             return;
         };
+        let message = format!(
+            "'{}' is in {}, not in {page}, which loads this file",
+            specifier.value,
+            bundle_list(&bundles)
+        );
+        out.push(path, "OD608", specifier.pos, message);
+    }
+
+    /// Whether OD601 reports the name as one its module does not export.
+    fn js_name(&self, out: &mut Out<'m>, path: &'m Path, from: &str, name: &JsName) -> bool {
+        let JsSpec::Found(target) = self.index.js_resolve(from, &name.specifier) else {
+            return false;
+        };
         if self.index.js_export(target, &name.name.value, 0) != Export::Missing {
-            return;
+            return false;
         }
         let message = match name.name.value.as_str() {
             "default" => format!("'{}' has no default export", name.specifier),
             n => format!("'{}' does not export '{n}'", name.specifier),
         };
         out.push(path, "OD601", name.name.pos, message);
+        true
     }
 
     /// A patch of a class from a module outside the index, such as an Enterprise one, may add
@@ -6410,10 +6481,10 @@ mod tests {
     use rustc_hash::FxHashSet;
 
     use super::{
-        MagicEra, applies, cache_global, callable_attr, csv_label, derived_label, fetches_own_view, field_name,
-        has_last_update, magic_era, no_access_message, public_write_message, reads_model_access, shadowed_member,
-        static_only, stores_parent_path, tuple_checked, tuple_listed, unknown_dependency, unmatched_asset,
-        warns_on_labels,
+        MagicEra, applies, bundle_list, cache_global, callable_attr, csv_label, derived_label, fetches_own_view,
+        field_name, has_last_update, magic_era, no_access_message, page_miss, public_write_message, reads_model_access,
+        shadowed_member, static_only, stores_parent_path, tuple_checked, tuple_listed, unknown_dependency,
+        unmatched_asset, warns_on_labels,
     };
     use crate::facts::{AccessRow, DefinitionSource, Perms, Pos};
     use crate::manifest::OdooReads;
@@ -6708,5 +6779,28 @@ mod tests {
         assert!(!callable("pool", "19.0") && !callable("pool", "saas~19.1") && !callable("pool", "20.0"));
         assert!(!callable_attr("ids", None) && !callable_attr("_cr", None));
         assert!(!callable("ids", "18.0") && !callable("_cr", "18.0"));
+    }
+
+    #[test]
+    fn an_import_misses_a_page_that_loads_the_importer_but_not_the_target() {
+        let backend = ["web.assets_backend", "web.assets_web"];
+        assert_eq!(
+            page_miss(&backend, &["web.assets_frontend"]),
+            Some("web.assets_backend")
+        );
+        assert_eq!(page_miss(&backend, &["web.assets_web"]), None);
+        assert_eq!(page_miss(&backend, &[]), None);
+        assert_eq!(page_miss(&["shop.lazy"], &["web.assets_frontend"]), None);
+        let lazy = ["web.assets_frontend_lazy"];
+        assert_eq!(page_miss(&lazy, &["web.assets_frontend_minimal"]), None);
+        let both = ["web.assets_backend", "web.assets_frontend"];
+        assert_eq!(page_miss(&both, &["web.assets_backend"]), Some("web.assets_frontend"));
+    }
+
+    #[test]
+    fn a_bundle_list_names_three_then_counts_the_rest() {
+        assert_eq!(bundle_list(&["a"]), "a");
+        assert_eq!(bundle_list(&["a", "b", "c"]), "a, b and c");
+        assert_eq!(bundle_list(&["a", "b", "c", "d", "e"]), "a, b, c and 2 more");
     }
 }

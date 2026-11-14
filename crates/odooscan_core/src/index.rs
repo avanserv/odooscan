@@ -1335,14 +1335,29 @@ pub(crate) fn asset_glob_set<'g>(globs: impl IntoIterator<Item = &'g String>) ->
 /// Files of a kind, as (module, index among the module's files of that kind).
 type Loaded = FxHashSet<(usize, usize)>;
 
-/// The scripts and the template files some bundle of an indexed manifest loads, as (module, file).
-/// A bundle may load another module's files, and a file only removed from bundles is not loaded.
-fn loaded_static(modules: &[Module], by_name: &FxHashMap<&str, usize>, series: Option<Series>) -> (Loaded, Loaded) {
+/// The bundles each loaded script is in, as indices into the sorted bundle names.
+type ScriptBundles = FxHashMap<(usize, usize), Vec<usize>>;
+
+/// The bundles some indexed manifest names, sorted, the bundles each script is in, and the template
+/// files some bundle loads, as (module, file). A bundle may load another module's files, and a file
+/// only removed from bundles is not loaded.
+fn loaded_static(
+    modules: &[Module],
+    by_name: &FxHashMap<&str, usize>,
+    series: Option<Series>,
+) -> (Vec<String>, ScriptBundles, Loaded) {
     let order = load_order(modules, by_name, series);
     let bundles = bundles::of_modules(modules, by_name, &order);
-    let js = bundles.values().flat_map(|c| &c.js).copied().collect();
+    let mut names: Vec<String> = bundles.keys().cloned().collect();
+    names.sort_unstable();
+    let mut js: ScriptBundles = FxHashMap::default();
+    for (bi, name) in names.iter().enumerate() {
+        for &file in &bundles[name].js {
+            js.entry(file).or_default().push(bi);
+        }
+    }
     let templates = bundles.values().flat_map(|c| &c.templates).copied().collect();
-    (js, templates)
+    (names, js, templates)
 }
 
 /// The templates of the loaded template files: a registered one under its name, and an extension
@@ -1584,7 +1599,8 @@ pub struct Index<'m> {
     /// The series `--target-series` or `--odoo-version` names, for a module whose own is unknown.
     pub default_series: Option<Series>,
     js_paths: FxHashMap<String, JsTarget>,
-    js_loaded: Loaded,
+    bundle_names: Vec<String>,
+    js_bundles: ScriptBundles,
     templates_loaded: Loaded,
     always_installed: Vec<bool>,
     /// Each module's place in `load_order`.
@@ -1639,7 +1655,7 @@ impl<'m> Index<'m> {
             });
         }
         let models_with_access = access_models(modules, &model_by_xmlid, default_series);
-        let (js_loaded, templates_loaded) = loaded_static(modules, &by_name, default_series);
+        let (bundle_names, js_bundles, templates_loaded) = loaded_static(modules, &by_name, default_series);
         let (hook_names, hook_prefixes) = hook_mentions(modules);
         let imports = imports::Graph::of_modules(modules, default_series);
         let unread_dependent = unread_dependents(modules, &by_name, &imports, default_series);
@@ -1666,7 +1682,8 @@ impl<'m> Index<'m> {
             models_with_access,
             model_by_xmlid,
             js_paths: js_paths(modules),
-            js_loaded,
+            bundle_names,
+            js_bundles,
             templates_loaded,
             always_installed: always_installed(modules, &by_name, default_series),
             load_rank: load_rank(modules, &by_name, default_series),
@@ -1927,7 +1944,17 @@ impl<'m> Index<'m> {
     }
 
     pub fn js_loaded(&self, module: usize, file: usize) -> bool {
-        self.js_loaded.contains(&(module, file))
+        self.js_bundles.contains_key(&(module, file))
+    }
+
+    /// The bundles that load the script, sorted by name.
+    pub fn js_bundles(&self, module: usize, file: usize) -> impl Iterator<Item = &str> {
+        let of_file = self
+            .js_bundles
+            .get(&(module, file))
+            .map(Vec::as_slice)
+            .unwrap_or_default();
+        of_file.iter().map(|&bi| self.bundle_names[bi].as_str())
     }
 
     pub fn template_loaded(&self, module: usize, file: usize) -> bool {
@@ -4330,5 +4357,33 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn a_script_lists_the_bundles_that_load_it_by_name() {
+        let mut a = module(
+            "a",
+            r#"{'version': '18.0.1.0', 'assets': {
+                'z.pages': ['a/static/src/*.js', ('remove', 'a/static/src/cut.js')],
+                'b.pages': ['a/static/src/both.js'],
+            }}"#,
+        );
+        a.js = ["static/src/both.js", "static/src/cut.js"]
+            .iter()
+            .map(|rel| SourceFile {
+                path: PathBuf::new(),
+                rel: (*rel).to_owned(),
+                rank: None,
+                demo: false,
+                facts: Default::default(),
+                suppressions: Default::default(),
+                mentions: Mentions::default(),
+            })
+            .collect();
+        let modules = [a];
+        let index = Index::build(&modules, None);
+        assert_eq!(index.js_bundles(0, 0).collect::<Vec<_>>(), ["b.pages", "z.pages"]);
+        assert_eq!(index.js_bundles(0, 1).count(), 0);
+        assert!(index.js_loaded(0, 0) && !index.js_loaded(0, 1));
     }
 }

@@ -199,7 +199,8 @@ import reaches.
 Scripts under `static/src` that a bundle loads, checked against the scripts of every indexed
 module. A bundle holds what its entries leave in it, applied in module load order: `append`,
 `prepend`, `before` and `after` add files, `include` adds another bundle's, `replace` swaps its
-target for its path and `remove` takes files out, so a file only removed is not checked.
+target for its path and `remove` takes files out, so a file only removed is not checked. OD608
+reads the bundles of the two web client pages, backend and frontend, from 18.0 on.
 
 | Code | Name | Reports |
 | --- | --- | --- |
@@ -210,6 +211,7 @@ target for its path and `remove` takes files out, so a file only removed is not 
 | [OD605](OD605.md) | `unknown-template` | A component, a t-inherit or a t-call names a template no indexed bundle defines. |
 | [OD606](OD606.md) | `unmatched-template-locator` | A template locates an element its parent templates do not have. |
 | [OD607](OD607.md) | `private-rpc-method` | orm.call() names a private method, which Odoo refuses to call over RPC. |
+| [OD608](OD608.md) | `cross-bundle-js-import` | A JS import names a module the bundles of the importer's page do not load. |
 
 ## OD7: data flows
 
