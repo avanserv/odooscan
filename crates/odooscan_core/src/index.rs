@@ -552,8 +552,8 @@ pub(crate) fn base_private_method(name: &str, series: Option<Series>) -> bool {
 /// has them, so OD604 keeps reporting a call a series cannot answer. Names only, read off each
 /// branch head: when adding a series, reread the methods of `BaseModel` and date what changed.
 /// `ids` stays out as a property and `lock_for_update` as private since it appeared.
-/// `OLD_BASE_METHODS` stays out: it ends at saas~11.4, and the `orm` service that OD604 reads starts
-/// on saas~14.5.
+/// `OLD_BASE_METHODS` stays out: its public names end at 10.0, and `_rpc`, the oldest client call
+/// OD604 reads, starts on 11.0 (11.0 `addons/web/static/src/js/core/mixins.js:471`).
 const BASE_RPC_METHODS: &[(&str, &[&str])] = &[
     (">=9.0", &["get_external_id", "get_metadata"]),
     (">=10.0", &["concat", "union"]),

@@ -741,11 +741,20 @@ custom/legacy9/views/aliases.xml:23:33: OD318 legacy9.ledger has no primary lega
 custom/legacy9/views/aliases.xml:23:33: OD318 legacy9.ledger has no primary gantt view, and nothing generates one
 custom/legacy9/views/aliases.xml:29:33: OD318 legacy9.gauge has no primary calendar view, and no date field to generate one from
 custom/legacy9/views/columns.xml:8:17: OD304 'ghost': legacy9.columns has no field 'ghost'
+custom/legacy_patch145/static/src/js/form_patch.js:7:21: OD602 neither FormController nor its parents have 'reloadFirst', so this._super() fails
+custom/legacy_patch16/static/src/js/form_patch.js:15:21: OD602 neither FormController nor its parents have 'reloadLegacy', so this._super() fails
+custom/legacy_patch16/static/src/js/form_patch.js:19:21: OD602 neither FormController nor its parents have 'discardLegacy', so this._super() fails
 custom/legacy_require14/static/src/js/counter.js:6:25: OD601 no file of module web provides '@web/gone'
 custom/legacy_require14/static/src/js/counter.js:7:26: OD601 'legacy_require_lib.tools' comes from module legacy_require_lib, which is not in depends
+custom/legacy_require14/static/src/js/rpc.js:8:39: OD603 no indexed module defines model 'x.gone14'
 custom/legacy_require16/static/src/js/counter.js:8:27: OD601 no file of module web provides '@web/gone'
 custom/legacy_require16/static/src/js/counter.js:9:28: OD601 'legacy_require_lib.tools' comes from module legacy_require_lib, which is not in depends
 custom/legacy_require17/static/src/js/counter.js:8:42: OD601 no file of module web provides '@web/listed_gone'
+custom/legacy_rpc16/static/src/js/partner_card.js:5:58: OD604 model 'res.partner' has no method 'action_card_gone'
+custom/legacy_rpc16/static/src/js/partner_widget.js:9:32: OD603 no indexed module defines model 'x.missing'
+custom/legacy_rpc16/static/src/js/partner_widget.js:10:59: OD604 model 'res.partner' has no method 'action_gone'
+custom/legacy_rpc16/static/src/js/partner_widget.js:11:55: OD607 method '_compute_secret' is private, so the server refuses to call it over RPC
+custom/legacy_rpc16/static/src/js/partner_widget.js:12:56: OD607 method '_hidden_helper' is private, so the server refuses to call it over RPC
 custom/manifest_assets_unmatched/__manifest__.py:8:13: OD513 'manifest_assets_unmatched/static/src/jss/**/*' matches no js, css, scss, sass, less or xml file under manifest_assets_unmatched/static/, so Odoo adds nothing
 custom/manifest_assets_unmatched/__manifest__.py:9:13: OD513 'manifest_assets_unmatched/static/src/js/missing.js' does not exist, so the bundle fails to load it
 custom/manifest_assets_unmatched/__manifest__.py:10:24: OD513 'manifest_assets_unmatched/static/src/legacy/**/*.js' matches no js, css, scss, sass, less or xml file under manifest_assets_unmatched/static/, so Odoo adds nothing
