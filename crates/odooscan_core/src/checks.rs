@@ -3,7 +3,7 @@
 use std::path::Path;
 use std::rc::Rc;
 
-use globset::{GlobBuilder, GlobSet};
+use globset::GlobSet;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::facts::{
@@ -204,7 +204,9 @@ const TUPLE_CHECKED: Series = Series { major: 19, minor: 3 };
 /// which 15.0 fetches apart (`addons/web/models/ir_http.py:72`).
 const XML_IN_BUNDLES: Series = Series { major: 16, minor: 0 };
 
-/// The first series that serves assets from `static/` alone (`saas~16.3`).
+/// The first series that serves assets from `static/` alone: it globs only under `<addon>/static/`
+/// (`odoo/addons/base/models/ir_asset.py:332-334` on saas~16.3), where `:330-340` on saas~16.2
+/// serves a script or a style from anywhere in the module and XML only from `static/`.
 const STATIC_ASSETS: Series = Series { major: 16, minor: 3 };
 
 /// The bundles that are templates up to saas~14.2 (`addons/web/views/webclient_templates.xml:56`),
@@ -1072,12 +1074,15 @@ fn upgrade_scripts<'m>(module: &'m Module, out: &mut Out<'m>) {
 /// `static/`; before, a script or a style may sit anywhere in the module, so a path outside
 /// `static/` stays silent there.
 fn unmatched_assets<'m>(module: &'m Module, series: Option<Series>, out: &mut Out<'m>) {
-    let static_only = series.is_none_or(|s| s >= STATIC_ASSETS);
     for path in module.manifest.bundles.iter().flat_map(|b| &b.paths) {
-        if let Some(message) = unmatched_asset(module, &path.value, static_only) {
+        if let Some(message) = unmatched_asset(module, &path.value, static_only(series)) {
             out.push(&module.manifest_path, "OD513", path.pos, message);
         }
     }
+}
+
+fn static_only(series: Option<Series>) -> bool {
+    series.is_none_or(|s| s >= STATIC_ASSETS)
 }
 
 /// Why `path` of an `assets` bundle resolves to no file of `module`, none when it names another
@@ -1096,11 +1101,10 @@ fn unmatched_asset(module: &Module, path: &str, static_only: bool) -> Option<Str
     let rel = parts.join("/");
     if path.contains(['*', '?', '[', ']']) {
         // Odoo globs with `glob.glob(recursive=True)`; a glob globset cannot read stays silent.
-        let glob = GlobBuilder::new(&rel)
-            .literal_separator(true)
-            .build()
-            .ok()?
-            .compile_matcher();
+        let glob = asset_glob_set([&rel]);
+        if glob.is_empty() {
+            return None;
+        }
         let matched = module.static_assets.iter().any(|f| glob.is_match(f));
         return (!matched).then(|| {
             format!(
@@ -6352,7 +6356,7 @@ mod tests {
     use super::{
         MagicEra, applies, cache_global, callable_attr, csv_label, derived_label, fetches_own_view, field_name,
         has_last_update, magic_era, no_access_message, public_write_message, reads_model_access, shadowed_member,
-        stores_parent_path, tuple_checked, tuple_listed, unmatched_asset, warns_on_labels,
+        static_only, stores_parent_path, tuple_checked, tuple_listed, unmatched_asset, warns_on_labels,
     };
     use crate::facts::{AccessRow, DefinitionSource, Perms, Pos};
     use crate::series::Series;
@@ -6583,6 +6587,7 @@ mod tests {
             "loan/static/src/js",
             "other/static/src/missing.js",
             "web/static/src/**/*",
+            "loan/static/src/[js/*.js",
         ] {
             assert!(!unmatched(path, true), "{path}");
         }
@@ -6599,6 +6604,14 @@ mod tests {
         }
         assert!(!unmatched("loan/views/assets.xml", false) && !unmatched("loan/**/*.js", false));
         assert!(unmatched("loan/static/src/jss/**/*", false));
+    }
+
+    #[test]
+    fn assets_come_from_static_alone_from_saas_16_3_and_on_an_unknown_series() {
+        let only = |series: &str| static_only(Series::parse(series));
+        assert!(static_only(None));
+        assert!(!only("saas~16.2"));
+        assert!(only("saas~16.3") && only("20.0"));
     }
 
     #[test]
