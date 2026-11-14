@@ -1258,6 +1258,11 @@ custom/route_overrides/controllers/twins.py:7:9: OD111 route with auth='public' 
 custom/route_overrides/controllers/twins.py:17:9: OD231 path '/route_overrides/twins/stock' is also routed by Twins.stock in module route_overrides, so one of the two hides the other
 custom/route_overrides/controllers/twins.py:21:9: OD111 route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check
 custom/route_overrides/controllers/twins.py:21:9: OD231 path '/route_overrides/twins/count' is also routed by Twins.count in module route_overrides, so one of the two hides the other
+custom/route_rank_bare/controllers/main.py:6:9: OD231 path '/route_rank/page' is also routed by Page.page in module route_rank, so one of the two hides the other
+custom/route_rank_old/controllers/main.py:6:9: OD231 path '/route_rank_old/page' is also routed by Page.page in module route_rank_old_bare, so one of the two hides the other
+custom/route_rank_old_reader/__manifest__.py:5:17: OD521 nothing of module 'route_rank_old_bare' is used, nor of what only it brings
+custom/route_rank_reader/__manifest__.py:5:17: OD521 nothing of module 'route_rank_bare' is used, nor of what only it brings
+custom/route_rank_reader/__manifest__.py:5:36: OD520 module 'base' already comes with 'route_rank_bare', also in depends
 custom/route_unread/controllers/main.py:8:9: OD232 'drop' overrides the route of Routes in module bad_sale without @route(), so Odoo logs a warning and routes it as if it had one
 custom/route_unread/controllers/main.py:14:9: OD231 path '/route_auto/side' is also routed by Shared.side in module route_auto, so one of the two hides the other
 custom/saas124/views/actions.xml:5:33: OD318 saas124.plain has no field activity_ids, which the activity view searches; inherit mail.activity.mixin

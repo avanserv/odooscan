@@ -1138,7 +1138,7 @@ fn install_closure(
         let mut grew = false;
         for mi in ready {
             // Odoo cannot load a module whose depends closure is incomplete, so nothing joins through it.
-            let (closure, complete) = depends_closure(modules, by_name, [mi]);
+            let (closure, complete) = depends_closure(modules, by_name, [mi], series);
             if complete {
                 installed.iter_mut().zip(closure).for_each(|(a, c)| *a |= c);
                 grew = true;
@@ -1153,15 +1153,12 @@ fn install_closure(
 /// The depends whose install auto-installs `module`, or `None` when nothing does. From `saas~12.4` a list
 /// names the triggers, and one naming a module outside `depends` fails the manifest. Before `saas~12.4`,
 /// database creation fails on a list, and `update_list` keeps only whether the value is truthy, so `must_install`
-/// waits on every depend for a non-empty list, like `True`, and `[]` is off. From `saas~18.2` an empty
-/// `depends` reads as `['base']` first for every module but `base` (20.0 `odoo/modules/module.py:471-475`,
-/// `:485-493`); 18.0 keeps it empty.
+/// waits on every depend for a non-empty list, like `True`, and `[]` is off. Odoo reads `depends`
+/// first (`read_depends`, 20.0 `odoo/modules/module.py:485-493`), so `True` on an empty one waits
+/// on `base` from `saas~18.2`.
 fn triggers(module: &Module, series: Option<Series>) -> Option<Vec<&str>> {
+    let depends: Vec<&str> = read_depends(module, series).collect();
     let series = module.series.or(series);
-    let mut depends: Vec<&str> = module.manifest.depends.iter().map(|d| d.value.as_str()).collect();
-    if depends.is_empty() && module.name != "base" && series.is_none_or(|s| s >= DEPENDS_BASE) {
-        depends.push("base");
-    }
     match &module.manifest.auto_install {
         AutoInstall::Off => None,
         AutoInstall::Depends => Some(depends),
@@ -1174,11 +1171,24 @@ fn triggers(module: &Module, series: Option<Series>) -> Option<Vec<&str>> {
     }
 }
 
-/// The modules `seeds` reach through `depends`, and whether every depend on the way is indexed.
+/// The `depends` names of `module` as Odoo reads them, its own series first and `series` in its place
+/// when unknown. From `saas~18.2` an empty `depends` reads as `['base']` for every module but `base`
+/// (20.0 `odoo/modules/module.py:471-475`), and the graph ranks it from that list
+/// (`odoo/modules/module_graph.py:257-262`); 18.0 keeps it empty (`odoo/modules/module.py:56`).
+fn read_depends(module: &Module, series: Option<Series>) -> impl Iterator<Item = &str> {
+    let depends = &module.manifest.depends;
+    let series = module.series.or(series);
+    let base = depends.is_empty() && module.name != "base" && series.is_none_or(|s| s >= DEPENDS_BASE);
+    depends.iter().map(|d| d.value.as_str()).chain(base.then_some("base"))
+}
+
+/// The modules `seeds` reach through `depends` as `read_depends` reads them by `series`, and whether
+/// every depend on the way is indexed, the `base` an empty `depends` reads as excepted.
 fn depends_closure(
     modules: &[Module],
     by_name: &FxHashMap<&str, usize>,
     seeds: impl IntoIterator<Item = usize>,
+    series: Option<Series>,
 ) -> (Vec<bool>, bool) {
     let mut reached = vec![false; modules.len()];
     let mut complete = true;
@@ -1187,10 +1197,13 @@ fn depends_closure(
         if std::mem::replace(&mut reached[mi], true) {
             continue;
         }
-        for d in &modules[mi].manifest.depends {
-            match by_name.get(d.value.as_str()) {
+        // Only the `base` an empty `depends` reads as can be missing with no `depends` written, and
+        // Odoo installs `base` on every database, so the scan leaving it out loses nothing.
+        let unwritten = modules[mi].manifest.depends.is_empty();
+        for name in read_depends(&modules[mi], series) {
+            match by_name.get(name) {
                 Some(&di) => stack.push(di),
-                None => complete = false,
+                None => complete &= unwritten,
             }
         }
     }
@@ -1199,10 +1212,15 @@ fn depends_closure(
 
 /// Whether each module is a depend, direct or not, of a module whose imports the scan cannot read in full.
 /// An unread module on a `depends` cycle counts only when another unread module reaches it.
-fn unread_dependents(modules: &[Module], by_name: &FxHashMap<&str, usize>, imports: &imports::Graph) -> Vec<bool> {
+fn unread_dependents(
+    modules: &[Module],
+    by_name: &FxHashMap<&str, usize>,
+    imports: &imports::Graph,
+    series: Option<Series>,
+) -> Vec<bool> {
     let mut marked = vec![false; modules.len()];
     for u in (0..modules.len()).filter(|&u| imports.unread(&modules[u].name)) {
-        let (reached, _) = depends_closure(modules, by_name, [u]);
+        let (reached, _) = depends_closure(modules, by_name, [u], series);
         for (mi, r) in reached.into_iter().enumerate() {
             marked[mi] |= r && mi != u;
         }
@@ -1210,15 +1228,15 @@ fn unread_dependents(modules: &[Module], by_name: &FxHashMap<&str, usize>, impor
     marked
 }
 
-/// Module indices in the order Odoo loads them: by depth in the `depends` graph, then by name. The
-/// passes end at the deepest module, or at the module count when a cycle keeps deepening.
-fn load_order(modules: &[Module], by_name: &FxHashMap<&str, usize>) -> Vec<usize> {
+/// Module indices in the order Odoo loads them: by depth in the `depends` graph as `read_depends`
+/// reads it by `series`, then by name. The passes end at the deepest module, or at the module count
+/// when a cycle keeps deepening.
+fn load_order(modules: &[Module], by_name: &FxHashMap<&str, usize>, series: Option<Series>) -> Vec<usize> {
     let mut depth = vec![0_usize; modules.len()];
     for _ in modules {
         let mut grew = false;
         for (mi, module) in modules.iter().enumerate() {
-            let depends = module.manifest.depends.iter();
-            let below = depends.filter_map(|d| by_name.get(d.value.as_str()));
+            let below = read_depends(module, series).filter_map(|d| by_name.get(d));
             let deepest = below.map(|&d| depth[d] + 1).max().unwrap_or_default();
             grew |= deepest > depth[mi];
             depth[mi] = depth[mi].max(deepest);
@@ -1233,9 +1251,9 @@ fn load_order(modules: &[Module], by_name: &FxHashMap<&str, usize>) -> Vec<usize
 }
 
 /// The place of each module in `load_order`.
-fn load_rank(modules: &[Module], by_name: &FxHashMap<&str, usize>) -> Vec<usize> {
+fn load_rank(modules: &[Module], by_name: &FxHashMap<&str, usize>, series: Option<Series>) -> Vec<usize> {
     let mut ranks = vec![0; modules.len()];
-    for (rank, mi) in load_order(modules, by_name).into_iter().enumerate() {
+    for (rank, mi) in load_order(modules, by_name, series).into_iter().enumerate() {
         ranks[mi] = rank;
     }
     ranks
@@ -1281,11 +1299,12 @@ fn last_text<'m>(record: &[PlacedWrite<'m>], name: &str) -> Option<&'m str> {
 fn record_writes<'m, T>(
     modules: &'m [Module],
     by_name: &FxHashMap<&str, usize>,
+    series: Option<Series>,
     facts: fn(&DataFacts) -> &[T],
     id: fn(&T) -> Option<&String>,
 ) -> Writes<'m, T> {
     let mut writes: Writes<'m, T> = FxHashMap::default();
-    for mi in load_order(modules, by_name) {
+    for mi in load_order(modules, by_name, series) {
         let module = &modules[mi];
         for file in module.data.iter().filter(|f| f.rank.is_some()) {
             for fact in facts(&file.facts) {
@@ -1634,7 +1653,7 @@ impl<'m> Index<'m> {
         let (js_loaded, templates_loaded) = loaded_static(modules);
         let (hook_names, hook_prefixes) = hook_mentions(modules);
         let imports = imports::Graph::of_modules(modules, default_series);
-        let unread_dependent = unread_dependents(modules, &by_name, &imports);
+        let unread_dependent = unread_dependents(modules, &by_name, &imports, default_series);
         let mut index = Self {
             modules,
             has_base: base.is_some(),
@@ -1643,11 +1662,11 @@ impl<'m> Index<'m> {
             views: Inheritance::new(views),
             view_types: FxHashSet::default(),
             client_views: FxHashSet::default(),
-            action_writes: record_writes(modules, &by_name, |f| &f.actions, |a| a.id.as_ref()),
-            rule_writes: record_writes(modules, &by_name, |f| &f.rules, |r| r.id.as_ref()),
-            server_writes: record_writes(modules, &by_name, |f| &f.servers, |s| s.id.as_ref()),
-            report_writes: record_writes(modules, &by_name, |f| &f.reports, |r| r.id.as_ref()),
-            value_writes: record_writes(modules, &by_name, |f| &f.writes, |w| w.id.as_ref()),
+            action_writes: record_writes(modules, &by_name, default_series, |f| &f.actions, |a| a.id.as_ref()),
+            rule_writes: record_writes(modules, &by_name, default_series, |f| &f.rules, |r| r.id.as_ref()),
+            server_writes: record_writes(modules, &by_name, default_series, |f| &f.servers, |s| s.id.as_ref()),
+            report_writes: record_writes(modules, &by_name, default_series, |f| &f.reports, |r| r.id.as_ref()),
+            value_writes: record_writes(modules, &by_name, default_series, |f| &f.writes, |w| w.id.as_ref()),
             data_fields: FxHashMap::default(),
             derived,
             ir_defaults: ir_defaults(modules),
@@ -1661,7 +1680,7 @@ impl<'m> Index<'m> {
             js_loaded,
             templates_loaded,
             always_installed: always_installed(modules, &by_name, default_series),
-            load_rank: load_rank(modules, &by_name),
+            load_rank: load_rank(modules, &by_name, default_series),
             unread_dependent,
             by_name,
             patched: FxHashMap::default(),
@@ -1685,7 +1704,8 @@ impl<'m> Index<'m> {
     /// The fields the `ir.model.fields` records of the files Odoo loads add.
     fn data_fields(&self, default_series: Option<Series>) -> DataFields<'m> {
         let modules = self.modules;
-        let writes = load_order(modules, &self.by_name).into_iter().flat_map(|mi| {
+        let order = load_order(modules, &self.by_name, default_series);
+        let writes = order.into_iter().flat_map(|mi| {
             let module = &modules[mi];
             let files = loaded_data(module, module.series.or(default_series));
             let name = module.name.as_str();
@@ -2007,7 +2027,12 @@ impl<'m> Index<'m> {
     /// installs those wherever `base` is; they are closed under `depends`, so they add no others.
     pub fn scope(&self, module: usize) -> Scope {
         let always = (0..self.modules.len()).filter(|&mi| self.always_installed(mi));
-        let (visible, _) = depends_closure(self.modules, &self.by_name, std::iter::once(module).chain(always));
+        let (visible, _) = depends_closure(
+            self.modules,
+            &self.by_name,
+            std::iter::once(module).chain(always),
+            self.default_series,
+        );
         Scope {
             records: visible.clone(),
             visible,
@@ -2037,7 +2062,7 @@ impl<'m> Index<'m> {
     /// id of it reports. A module with `countries` joins too: the scan cannot see the companies.
     pub fn guard_scope(&self, module: usize, named: impl IntoIterator<Item = usize>, series: Option<Series>) -> Scope {
         let scope = self.scope(module).visible;
-        let (proven, _) = depends_closure(self.modules, &self.by_name, named);
+        let (proven, _) = depends_closure(self.modules, &self.by_name, named, self.default_series);
         let seeds = scope.iter().zip(proven).map(|(&a, b)| a || b).collect();
         let in_scope = |name: &str| self.by_name.get(name).is_some_and(|&mi| scope[mi]);
         let owed = |m: &Module| triggers(m, series).is_none_or(|t| !t.into_iter().all(in_scope));
@@ -2068,7 +2093,7 @@ impl<'m> Index<'m> {
     /// the `ir.model.fields` records only those of its dependencies count, and a failure there
     /// refuses the install whatever the file order.
     pub fn setup_scope(&self, module: usize) -> Scope {
-        let (mut records, _) = depends_closure(self.modules, &self.by_name, [module]);
+        let (mut records, _) = depends_closure(self.modules, &self.by_name, [module], self.default_series);
         records[module] = false;
         Scope {
             records,
@@ -2107,7 +2132,7 @@ impl<'m> Index<'m> {
         self.unread_dependent[module]
     }
 
-    /// Whether `from` depends on `to`, directly or through other modules.
+    /// Whether `from` depends on `to`, directly or through other modules, as `read_depends` reads them.
     pub fn reaches(&self, from: usize, to: usize) -> bool {
         let mut seen = vec![false; self.modules.len()];
         let mut stack = vec![from];
@@ -2118,13 +2143,7 @@ impl<'m> Index<'m> {
             if std::mem::replace(&mut seen[m], true) {
                 continue;
             }
-            stack.extend(
-                self.modules[m]
-                    .manifest
-                    .depends
-                    .iter()
-                    .filter_map(|d| self.by_name.get(d.value.as_str())),
-            );
+            stack.extend(read_depends(&self.modules[m], self.default_series).filter_map(|d| self.by_name.get(d)));
         }
         false
     }
@@ -2178,7 +2197,7 @@ impl<'m> Index<'m> {
             .iter()
             .map(|d| {
                 let &mi = self.by_name.get(d.value.as_str())?;
-                let (closure, complete) = depends_closure(self.modules, &self.by_name, [mi]);
+                let (closure, complete) = depends_closure(self.modules, &self.by_name, [mi], self.default_series);
                 Some((mi, closure, complete)).filter(|(_, closure, _)| !closure[module])
             })
             .collect();
@@ -2383,7 +2402,7 @@ impl<'m> Index<'m> {
     /// indexed, is another module, and does not lead back to `module`.
     fn candidate_closure(&self, module: usize, name: &str) -> Option<(usize, Vec<bool>)> {
         let &mi = self.by_name.get(name).filter(|&&mi| mi != module)?;
-        let (closure, _) = depends_closure(self.modules, &self.by_name, [mi]);
+        let (closure, _) = depends_closure(self.modules, &self.by_name, [mi], self.default_series);
         (!closure[module]).then_some((mi, closure))
     }
 
@@ -3408,8 +3427,8 @@ mod tests {
     use super::{
         BASE_MODEL_DUNDERS, BASE_MODEL_EXTRA, BASE_MODEL_METHODS, BASE_PRIVATE_METHODS, BASE_RPC_METHODS,
         FIELD_CLASSES, FieldHolder, FieldSpelling, Index, OLD_BASE_METHODS, PlacedWrite, Scope, XmlIdDef,
-        base_private_method, base_rpc_method, class_file, field_id_prefixes, fold_writes, last_text, mangles_alike,
-        old_base_method, triggers, unseen_table_id,
+        base_private_method, base_rpc_method, class_file, depends_closure, field_id_prefixes, fold_writes, last_text,
+        mangles_alike, old_base_method, triggers, unseen_table_id,
     };
     use crate::mentions::{Mentions, Words};
     use crate::project::{SourceFile, module};
@@ -3882,6 +3901,37 @@ mod tests {
         }
         assert!(!Index::build(&modules, Series::parse("18.0")).always_installed[1]);
         assert!(Index::build(&modules, Series::parse("20.0")).always_installed[1]);
+    }
+
+    #[test]
+    fn an_empty_depends_ranks_after_base_from_saas_18_2() {
+        let modules = [module("base", "{}"), module("bare", "{}"), module("aaa", "{}")];
+        let closure = |index: &Index, mi: usize| {
+            let (reached, complete) = depends_closure(&modules, &index.by_name, [mi], index.default_series);
+            let names = (0..modules.len())
+                .filter(|&m| reached[m])
+                .map(|m| modules[m].name.as_str());
+            (names.collect::<Vec<_>>(), complete)
+        };
+        for name in ["18.0", "saas~18.1"] {
+            let index = Index::build(&modules, Series::parse(name));
+            assert_eq!(closure(&index, 1), (vec!["bare"], true), "{name}");
+            assert!(index.loads_before(2, 0) && !index.reaches(1, 0), "{name}");
+        }
+        for series in [Series::parse("saas~18.2"), Series::parse("20.0"), None] {
+            let index = Index::build(&modules, series);
+            assert_eq!(closure(&index, 1), (vec!["base", "bare"], true), "{series:?}");
+            assert_eq!(closure(&index, 0), (vec!["base"], true), "{series:?}");
+            assert!(index.loads_before(0, 1) && index.loads_before(0, 2), "{series:?}");
+            assert!(index.reaches(1, 0) && !index.reaches(0, 1), "{series:?}");
+        }
+        // Odoo installs `base` on every database, so leaving it out of the scan loses nothing.
+        let unbased = &modules[1..];
+        let by_name = unbased.iter().enumerate().map(|(i, m)| (m.name.as_str(), i)).collect();
+        assert_eq!(
+            depends_closure(unbased, &by_name, [0], Series::parse("20.0")),
+            (vec![true, false], true)
+        );
     }
 
     #[test]
