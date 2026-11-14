@@ -134,7 +134,7 @@ pub enum Directive {
 }
 
 /// An entry of a bundle's list, its path and target without a leading `/`.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AssetEntry {
     pub directive: Directive,
     /// The file `before`, `after` and `replace` place the path relative to.

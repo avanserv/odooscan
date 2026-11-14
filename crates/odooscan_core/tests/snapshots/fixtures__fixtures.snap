@@ -227,6 +227,7 @@ custom/bundle_moves/static/src/panels/new_panel.js:3:45: OD607 method '_bundle_n
 custom/bundle_moves/static/src/shared/shared.js:3:45: OD607 method '_bundle_shared' is private, so the server refuses to call it over RPC
 custom/bundle_pages/static/src/backend.js:1:28: OD608 './front' is in web.assets_frontend, not in web.assets_backend, which loads this file
 custom/bundle_pages/static/src/front.js:1:23: OD608 '@web/core/utils/patch' is in web.assets_backend, not in web.assets_frontend, which loads this file
+custom/bundle_pages/static/src/front_legacy.js:2:44: OD608 '@bundle_pages/backend' is in web.assets_backend, not in web.assets_frontend, which loads this file
 custom/bundle_pages/static/src/stray.js:1:10: OD601 './front' does not export 'nope'
 custom/bundle_pages_partial/__manifest__.py:4:24: OD503 module 'ghost_enterprise' is not on the addons path
 custom/button_calls/views/buttons.xml:9:49: OD312 button.order has no method 'action_confrim'
@@ -735,14 +736,16 @@ custom/legacy9/data/rewrites.xml:6:5: OD323 XML id 'rewritten_state' is already 
 custom/legacy9/data/translated.xml:5:9: OD309 res.partner has no field 'name@fr'
 custom/legacy9/models/columns.py:31:33: OD203 'holder_id.ghost': legacy9.columns has no field 'ghost'
 custom/legacy9/models/res_company.py:14:40: OD211 no parent class of res.company defines '_auto_finish', so this super() call fails
-custom/legacy9/static/src/base_calls.js:7:45: OD604 model 'res.partner' has no method 'load_views'
-custom/legacy9/static/src/base_calls.js:8:45: OD604 model 'res.partner' has no method 'concat'
-custom/legacy9/static/src/base_calls.js:9:45: OD604 model 'res.partner' has no method 'ids'
 custom/legacy9/views/aliases.xml:7:45: OD312 legacy9.ledger has no method 'action_absent'
 custom/legacy9/views/aliases.xml:23:33: OD318 legacy9.ledger has no primary legacy9_unregistered view, and nothing generates one
 custom/legacy9/views/aliases.xml:23:33: OD318 legacy9.ledger has no primary gantt view, and nothing generates one
 custom/legacy9/views/aliases.xml:29:33: OD318 legacy9.gauge has no primary calendar view, and no date field to generate one from
 custom/legacy9/views/columns.xml:8:17: OD304 'ghost': legacy9.columns has no field 'ghost'
+custom/legacy_require14/static/src/js/counter.js:6:25: OD601 no file of module web provides '@web/gone'
+custom/legacy_require14/static/src/js/counter.js:7:26: OD601 'legacy_require_lib.tools' comes from module legacy_require_lib, which is not in depends
+custom/legacy_require16/static/src/js/counter.js:8:27: OD601 no file of module web provides '@web/gone'
+custom/legacy_require16/static/src/js/counter.js:9:28: OD601 'legacy_require_lib.tools' comes from module legacy_require_lib, which is not in depends
+custom/legacy_require17/static/src/js/counter.js:8:42: OD601 no file of module web provides '@web/listed_gone'
 custom/manifest_assets_unmatched/__manifest__.py:8:13: OD513 'manifest_assets_unmatched/static/src/jss/**/*' matches no js, css, scss, sass, less or xml file under manifest_assets_unmatched/static/, so Odoo adds nothing
 custom/manifest_assets_unmatched/__manifest__.py:9:13: OD513 'manifest_assets_unmatched/static/src/js/missing.js' does not exist, so the bundle fails to load it
 custom/manifest_assets_unmatched/__manifest__.py:10:24: OD513 'manifest_assets_unmatched/static/src/legacy/**/*.js' matches no js, css, scss, sass, less or xml file under manifest_assets_unmatched/static/, so Odoo adds nothing

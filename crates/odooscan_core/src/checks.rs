@@ -310,27 +310,10 @@ pub fn check_module<'m>(index: &Index<'m>, mi: usize, series: Option<Series>) ->
         ctx.registry(&mut out);
         ctx.data(&mut out);
         for (fi, file) in es_modules(index, mi, series) {
-            ctx.js(&mut out, fi, file);
-            // Only the imports of a test are checked: a unit test runs on a mock server whose models it
-            // defines (18.0 `addons/web/static/tests/_framework/mock_server/mock_server.js:386`).
-            if file.in_tests() {
-                continue;
-            }
-            ctx.js_patches(&mut out, mi, fi, file);
-            for call in &file.facts.orm_calls {
-                ctx.orm_call(&mut out, &file.path, call);
-            }
-            // A base whose subclasses set their own template may name one that is never rendered.
-            for class in file
-                .facts
-                .classes
-                .iter()
-                .filter(|c| !index.template_base(mi, fi, &c.name))
-            {
-                if let Some(template) = &class.template {
-                    ctx.template_ref(&mut out, &file.path, template);
-                }
-            }
+            ctx.es_module_file(&mut out, fi, file);
+        }
+        for (fi, file) in legacy_scripts(index, mi, series) {
+            ctx.legacy_requires(&mut out, fi, file);
         }
         ctx.templates(&mut out, mi);
     }
@@ -783,23 +766,52 @@ fn qweb_view(index: &Index, module: &Module, view: &ViewFact) -> bool {
     root_kind(index, module, view).or(view.kind.as_deref()) == Some(QWEB)
 }
 
-/// The module's scripts that a bundle loads as ES modules: annotated, or from 17.0 on, any script
-/// not marked `ignore`, all of them under `static/src` or `static/tests`. A script that is not one
-/// cannot use `import`.
+/// The first series that transpiles `@odoo-module` scripts (saas~14.3 against 14.0
+/// `odoo/addons/base/models/ir_qweb.py:304-355`, which has no transpiler).
+const TRANSPILER: Series = Series { major: 14, minor: 3 };
+
+/// The first series whose loader waits only for the list given to `odoo.define()`, and no longer
+/// reads the factory's `require` calls (commit `517d3258f23a`; 18.0
+/// `addons/web/static/src/module_loader.js:47-66` against 16.0 `addons/web/static/src/boot.js:205-219`).
+const LISTED_DEPS: Series = Series { major: 16, minor: 3 };
+
+/// Whether a bundle loads the script as an ES module: from saas~14.3, annotated, or from 17.0 on,
+/// not marked `ignore`. A script that is not one cannot use `import`.
+fn es_module(series: Option<Series>, annotation: Annotation) -> bool {
+    let unannotated = series.is_some_and(|s| s >= Series { major: 17, minor: 0 });
+    series.is_none_or(|s| s >= TRANSPILER)
+        && match annotation {
+            Annotation::Module => true,
+            Annotation::Ignore => false,
+            Annotation::None => unannotated,
+        }
+}
+
+/// Whether the loader waits for the `require` calls of a define given no list. On an unknown
+/// series it is not assumed to.
+fn reads_requires(series: Option<Series>) -> bool {
+    series.is_some_and(|s| s < LISTED_DEPS)
+}
+
+/// The module's scripts that a bundle loads as ES modules, all of them under `static/src` or
+/// `static/tests`.
 fn es_modules<'a, 'm>(
     index: &'a Index<'m>,
     mi: usize,
     series: Option<Series>,
 ) -> impl Iterator<Item = (usize, &'m SourceFile<JsFacts>)> + 'a {
-    let unannotated = series.is_some_and(|s| s >= Series { major: 17, minor: 0 });
-    index.modules[mi].js.iter().enumerate().filter(move |(fi, f)| {
-        index.js_loaded(mi, *fi)
-            && match f.facts.annotation {
-                Annotation::Module => true,
-                Annotation::Ignore => false,
-                Annotation::None => unannotated,
-            }
-    })
+    let js = index.modules[mi].js.iter().enumerate();
+    js.filter(move |(fi, f)| index.js_loaded(mi, *fi) && es_module(series, f.facts.annotation))
+}
+
+/// The module's scripts that a bundle loads as they are, which register through `odoo.define()`.
+fn legacy_scripts<'a, 'm>(
+    index: &'a Index<'m>,
+    mi: usize,
+    series: Option<Series>,
+) -> impl Iterator<Item = (usize, &'m SourceFile<JsFacts>)> + 'a {
+    let js = index.modules[mi].js.iter().enumerate();
+    js.filter(move |(fi, f)| index.js_loaded(mi, *fi) && !es_module(series, f.facts.annotation))
 }
 
 /// The first series with Hoot, whose mock of `@web/core/utils/functions` adds `clearMemoizeCaches`
@@ -2050,6 +2062,31 @@ impl<'m> Ctx<'_, 'm> {
         }
     }
 
+    fn es_module_file(&self, out: &mut Out<'m>, fi: usize, file: &'m SourceFile<JsFacts>) {
+        self.js(out, fi, file);
+        // Only the imports of a test are checked: a unit test runs on a mock server whose models it
+        // defines (18.0 `addons/web/static/tests/_framework/mock_server/mock_server.js:386`).
+        if file.in_tests() {
+            return;
+        }
+        self.js_patches(out, self.mi, fi, file);
+        for call in &file.facts.orm_calls {
+            self.orm_call(out, &file.path, call);
+        }
+        // A base whose subclasses set their own template may name one that is never rendered.
+        let index = self.index;
+        for class in file
+            .facts
+            .classes
+            .iter()
+            .filter(|c| !index.template_base(self.mi, fi, &c.name))
+        {
+            if let Some(template) = &class.template {
+                self.template_ref(out, &file.path, template);
+            }
+        }
+    }
+
     fn js(&self, out: &mut Out<'m>, fi: usize, file: &'m SourceFile<JsFacts>) {
         let from = js_url(&self.module.name, &file.rel);
         let mut unexported: Vec<&str> = vec![];
@@ -2062,6 +2099,19 @@ impl<'m> Ctx<'_, 'm> {
         for specifier in &file.facts.specifiers {
             let check_page = !unexported.contains(&specifier.value.as_str());
             self.js_specifier(out, &file.path, fi, &from, specifier, check_page);
+        }
+    }
+
+    /// OD601 and OD608 on the dependencies the loader waits for, as on an import: those listed, and
+    /// before `LISTED_DEPS` the `require` calls of a define without a list. A relative one names no
+    /// module the loader has.
+    fn legacy_requires(&self, out: &mut Out<'m>, fi: usize, file: &'m SourceFile<JsFacts>) {
+        let from = js_url(&self.module.name, &file.rel);
+        let implicit = reads_requires(self.series);
+        for define in file.facts.defines.iter().filter(|d| d.listed || implicit) {
+            for dep in define.deps.iter().filter(|d| !d.value.starts_with('.')) {
+                self.js_specifier(out, &file.path, fi, &from, dep, true);
+            }
         }
     }
 
@@ -6523,12 +6573,12 @@ mod tests {
     use rustc_hash::FxHashSet;
 
     use super::{
-        MagicEra, applies, bundle_list, cache_global, callable_attr, csv_label, derived_label, fetches_own_view,
-        field_name, has_last_update, hoot_adds, magic_era, no_access_message, page_miss, public_write_message,
-        reads_model_access, shadowed_member, static_only, stores_parent_path, tuple_checked, tuple_listed,
-        unknown_dependency, unmatched_asset, warns_on_labels,
+        MagicEra, applies, bundle_list, cache_global, callable_attr, csv_label, derived_label, es_module,
+        fetches_own_view, field_name, has_last_update, hoot_adds, magic_era, no_access_message, page_miss,
+        public_write_message, reads_model_access, reads_requires, shadowed_member, static_only, stores_parent_path,
+        tuple_checked, tuple_listed, unknown_dependency, unmatched_asset, warns_on_labels,
     };
-    use crate::facts::{AccessRow, DefinitionSource, JsName, Perms, Pos, Spanned};
+    use crate::facts::{AccessRow, Annotation, DefinitionSource, JsName, Perms, Pos, Spanned};
     use crate::manifest::OdooReads;
     use crate::series::Series;
 
@@ -6545,6 +6595,26 @@ mod tests {
             model_access: true,
             domain: None,
         }
+    }
+
+    #[test]
+    fn scripts_run_as_es_modules_from_the_transpiler_on() {
+        let at = |s: &str| Series::parse(s);
+        assert!(!es_module(at("saas~14.2"), Annotation::Module));
+        assert!(es_module(at("saas~14.3"), Annotation::Module));
+        assert!(!es_module(at("saas~14.3"), Annotation::None));
+        assert!(!es_module(at("16.0"), Annotation::None));
+        assert!(es_module(at("17.0"), Annotation::None));
+        assert!(!es_module(at("17.0"), Annotation::Ignore));
+        assert!(es_module(None, Annotation::Module));
+    }
+
+    #[test]
+    fn the_loader_reads_requires_up_to_saas_16_2() {
+        assert!(reads_requires(Series::parse("14.0")));
+        assert!(reads_requires(Series::parse("saas~16.2")));
+        assert!(!reads_requires(Series::parse("saas~16.3")));
+        assert!(!reads_requires(None));
     }
 
     #[test]
