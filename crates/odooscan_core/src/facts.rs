@@ -937,6 +937,17 @@ pub struct ArchSubview {
     pub attribute_fields: Vec<String>,
 }
 
+/// A widget an arch names, which the web client looks up in a registry by its name.
+#[derive(Debug)]
+pub struct ArchWidget {
+    pub name: Spanned<String>,
+    /// A `<widget>`'s `name`, rather than a `<field>`'s `widget` or the text an `<attribute
+    /// name="widget">` spec sets.
+    pub view: bool,
+    /// Whether the widget lands in a `div.oe_chatter`.
+    pub in_chatter: bool,
+}
+
 #[derive(Debug, Default)]
 pub struct ViewFact {
     pub id: Option<String>,
@@ -960,6 +971,8 @@ pub struct ViewFact {
     pub buttons: Vec<ArchButton>,
     pub modifiers: Vec<ArchModifier>,
     pub subviews: Vec<ArchSubview>,
+    /// The widgets the arch adds or its specs set, not those its specs locate by.
+    pub widgets: Vec<ArchWidget>,
     /// Literal targets of `t-call`, in the arch or set by an `<attribute>` spec.
     pub calls: Vec<Spanned<String>>,
     /// OD325 on each element the arch adds with `t-esc`, which a spec only locates, reported only
@@ -1427,6 +1440,10 @@ pub struct JsFacts {
     pub orm_calls: Vec<OrmCall>,
     /// The literal view kinds the file gives `view_registry.add`.
     pub view_kinds: Vec<String>,
+    /// The literal keys the file adds to registry categories, as (category, key).
+    pub registrations: Vec<(String, String)>,
+    /// The categories the file adds a key to that only a run tells.
+    pub open_categories: Vec<String>,
     /// Findings of the file alone, which `checks.rs` reports only for a script a page loads.
     pub diags: Vec<RawDiag>,
     pub syntax_error: Option<Spanned<String>>,

@@ -781,6 +781,12 @@
       "count": 1
     },
     {
+      "path": "addons/hr_attendance/views/hr_attendance_view.xml",
+      "code": "OD331",
+      "message": "no indexed bundle registers client action 'hr_attendance_greeting_message'",
+      "count": 1
+    },
+    {
       "path": "addons/hr_expense/__manifest__.py",
       "code": "OD520",
       "message": "module 'web_tour' already comes with 'account', also in depends",
@@ -2657,6 +2663,12 @@
       "code": "OD303",
       "message": "XML id 'mrp_routing_workcenter_4' is already defined earlier in this file",
       "count": 1
+    },
+    {
+      "path": "addons/mrp/views/mrp_production_views.xml",
+      "code": "OD331",
+      "message": "no indexed bundle registers client action 'mrp_display'",
+      "count": 2
     },
     {
       "path": "addons/mrp_subcontracting/security/ir.access.csv",

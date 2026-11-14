@@ -328,7 +328,8 @@ fn kanban_box_severity_follows_the_module_series() {
 
 #[test]
 fn chatter_div_is_reported_from_saas_17_2() {
-    assert_eq!(severities("OD327"), [("bad_sale".to_owned(), Severity::Warning)]);
+    let expected = [("bad_sale", Severity::Warning), ("web_keys", Severity::Warning)];
+    assert_eq!(severities("OD327"), expected.map(|(m, s)| (m.to_owned(), s)));
 }
 
 #[test]

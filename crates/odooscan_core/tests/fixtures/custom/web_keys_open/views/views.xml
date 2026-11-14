@@ -1,0 +1,11 @@
+<odoo>
+    <record id="partner_form" model="ir.ui.view">
+        <field name="model">res.partner</field>
+        <field name="arch" type="xml">
+            <form>
+                <widget name="web_keys_open_seal"/>
+                <field name="name" widget="web_keys_open_gauge"/>
+            </form>
+        </field>
+    </record>
+</odoo>

@@ -71,9 +71,12 @@ pub fn analyze(text: &str) -> JsFacts {
         facts: &mut facts,
         templates: vec![],
         statics: vec![],
+        categories: vec![],
+        adds: vec![],
     };
     collector.visit_program(&parsed.program);
     let (templates, statics) = (collector.templates, collector.statics);
+    registrations(collector.categories, collector.adds, &mut facts);
     for (class, template) in templates {
         if let Some(c) = facts.classes.iter_mut().find(|c| c.name == class) {
             c.template = Some(template);
@@ -367,6 +370,34 @@ struct Collector<'f> {
     templates: Vec<(String, Spanned<String>)>,
     /// `X.props = ...` and `X.components = ...`, which set the class's own when the file declares it.
     statics: Vec<(String, StaticValue)>,
+    /// Bindings of `X.category("c")`, as (binding, category), which may follow their use.
+    categories: Vec<(String, String)>,
+    /// `.add()` calls on a registry category, with their key when a literal.
+    adds: Vec<(AddTarget, Option<String>)>,
+}
+
+/// What a `.add()` call adds to: a category it names, or a binding that may hold one.
+enum AddTarget {
+    Category(String),
+    Binding(String),
+}
+
+/// Files the `.add()` calls the file makes on registry categories under `registrations` and
+/// `open_categories`, through the bindings it declares. An unknown binding is no registry.
+fn registrations(categories: Vec<(String, String)>, adds: Vec<(AddTarget, Option<String>)>, facts: &mut JsFacts) {
+    for (target, key) in adds {
+        let category = match target {
+            AddTarget::Category(c) => c,
+            AddTarget::Binding(b) => match categories.iter().find(|(binding, _)| *binding == b) {
+                Some((_, c)) => c.clone(),
+                None => continue,
+            },
+        };
+        match key {
+            Some(key) => facts.registrations.push((category, key)),
+            None => facts.open_categories.push(category),
+        }
+    }
 }
 
 enum StaticValue {
@@ -426,6 +457,11 @@ impl<'a> Visit<'a> for Collector<'_> {
     }
 
     fn visit_variable_declarator(&mut self, declarator: &VariableDeclarator<'a>) {
+        if let BindingPattern::BindingIdentifier(id) = &declarator.id
+            && let Some(category) = declarator.init.as_ref().and_then(category)
+        {
+            self.categories.push((id.name.to_string(), category));
+        }
         if let Some(Expression::Identifier(init)) = &declarator.init
             && init.name == "owl"
             && let BindingPattern::ObjectPattern(pattern) = &declarator.id
@@ -485,6 +521,7 @@ impl<'a> Visit<'a> for Collector<'_> {
             self.facts.orm_calls.push(orm);
         }
         self.facts.view_kinds.extend(view_kind(call));
+        self.adds.extend(registry_add(call));
         self.facts.diags.extend(unescaped_markup(call, self.lines));
         self.facts.diags.extend(html_call(call, self.lines));
         self.facts.diags.extend(console_log(call, self.lines));
@@ -949,6 +986,56 @@ fn is_view_registry(e: &Expression) -> bool {
     }
 }
 
+/// The target and the literal key of an `.add()` call on a registry category, reached through a
+/// chain of `.add()`, which returns the registry (18.0 `addons/web/static/src/core/registry.js:113`).
+fn registry_add(call: &CallExpression) -> Option<(AddTarget, Option<String>)> {
+    let Expression::StaticMemberExpression(callee) = &call.callee else {
+        return None;
+    };
+    if callee.property.name != "add" {
+        return None;
+    }
+    let target = add_target(&callee.object)?;
+    let key = match call.arguments.first() {
+        Some(Argument::StringLiteral(s)) => s.value.as_str().map(str::to_owned),
+        Some(Argument::TemplateLiteral(t)) => t.single_quasi().and_then(|s| s.as_str().map(str::to_owned)),
+        _ => None,
+    };
+    Some((target, key))
+}
+
+fn add_target(e: &Expression) -> Option<AddTarget> {
+    if let Some(c) = category(e) {
+        return Some(AddTarget::Category(c));
+    }
+    match e {
+        Expression::Identifier(i) => Some(AddTarget::Binding(i.name.to_string())),
+        Expression::CallExpression(c) => match &c.callee {
+            Expression::StaticMemberExpression(m) if m.property.name == "add" => add_target(&m.object),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// The category `X.category("c")` names. One taken from what a call returns, such as a
+/// subcategory, is another registry.
+fn category(e: &Expression) -> Option<String> {
+    let Expression::CallExpression(call) = e else {
+        return None;
+    };
+    let Expression::StaticMemberExpression(callee) = &call.callee else {
+        return None;
+    };
+    if callee.property.name != "category" || matches!(callee.object, Expression::CallExpression(_)) {
+        return None;
+    }
+    let Some(Argument::StringLiteral(name)) = call.arguments.first() else {
+        return None;
+    };
+    Some(name.value.as_str()?.to_owned())
+}
+
 /// A string's value, placed after its opening quote.
 fn literal(s: &StringLiteral, lines: &Lines) -> Option<Spanned<String>> {
     Some(Spanned {
@@ -1172,6 +1259,27 @@ mod tests {
             registry.add("g", G);
         "#;
         assert_eq!(analyze(source).view_kinds, ["a", "b", "d", "c"]);
+    }
+
+    #[test]
+    fn reads_the_keys_added_to_registry_categories() {
+        let source = r#"
+            const fields = registry.category("fields");
+            fields.add("a", A).add("b", B);
+            registry.category("actions").add("c", C).add(tag, D);
+            later.add("d", E);
+            const later = registry.category("view_widgets");
+            registry.category("web_tour").category("tours").add("e", F);
+            set.add("f");
+            registry.category("fields").add(`g`, G).add(`h${i}`, H);
+        "#;
+        let facts = analyze(source);
+        let shown: Vec<_> = facts.registrations.iter().map(|(c, k)| format!("{c}:{k}")).collect();
+        assert_eq!(
+            shown,
+            ["fields:b", "fields:a", "actions:c", "view_widgets:d", "fields:g"]
+        );
+        assert_eq!(facts.open_categories, ["actions", "fields"]);
     }
 
     #[test]

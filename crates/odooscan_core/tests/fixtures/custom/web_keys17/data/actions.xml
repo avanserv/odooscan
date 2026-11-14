@@ -1,0 +1,6 @@
+<odoo>
+    <record id="action_lazy" model="ir.actions.client">
+        <field name="name">Lazy</field>
+        <field name="tag">web_keys17.lazy</field>
+    </record>
+</odoo>

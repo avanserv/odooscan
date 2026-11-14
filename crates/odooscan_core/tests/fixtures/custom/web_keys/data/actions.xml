@@ -1,0 +1,36 @@
+<odoo>
+    <record id="action_board" model="ir.actions.client">
+        <field name="name">Board</field>
+        <field name="tag">web_keys.board</field>
+    </record>
+
+    <record id="action_chart" model="ir.actions.client">
+        <field name="name">Chart</field>
+        <field name="tag">web_keys.chart</field>
+    </record>
+
+    <record id="action_reload" model="ir.actions.client">
+        <field name="name">Reload</field>
+        <field name="tag">reload</field>
+    </record>
+
+    <record id="action_dashboard" model="ir.actions.client">
+        <field name="name">Dashboard</field>
+        <field name="tag">web_keys.dashboard</field>
+    </record>
+
+    <record id="action_stray" model="ir.actions.client">
+        <field name="name">Stray</field>
+        <field name="tag">web_keys.stray</field>
+    </record>
+
+    <record id="action_spaced" model="ir.actions.client">
+        <field name="name">Spaced</field>
+        <field name="tag"> web_keys.board </field>
+    </record>
+
+    <record id="action_side" model="ir.actions.client">
+        <field name="name">Side</field>
+        <field name="tag">web_keys_side.panel</field>
+    </record>
+</odoo>
