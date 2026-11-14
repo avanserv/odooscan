@@ -225,6 +225,27 @@ fn a_lone_cr_waits_for_a_known_series() {
 }
 
 #[test]
+fn a_csv_feeds_other_rules_where_it_loads() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+    let codes = |default_series| {
+        scan(&ScanOptions {
+            paths: vec![root.join("custom")],
+            addons_paths: vec![root.join("core")],
+            default_series,
+            target_series: None,
+            ..Default::default()
+        })
+        .diagnostics
+        .iter()
+        .filter(|d| d.path.ends_with("csv_rows_any/data/res.partner-feed.csv"))
+        .map(|d| d.code)
+        .collect::<Vec<_>>()
+    };
+    assert_eq!(codes(None), ["OD301"]);
+    assert_eq!(codes(Series::parse("16.0")), ["OD000"]);
+}
+
+#[test]
 fn delegate_without_ondelete_waits_for_a_known_series() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
     let code = |default_series| {

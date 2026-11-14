@@ -59,7 +59,8 @@ pub fn undecoded(pos: Pos) -> DataFacts {
 /// A data CSV is named after its model; its header names fields, with `:id` or `/id` for references.
 /// `strict` gives the lines of each series a file Odoo loads may target, none for a file it does
 /// not load. The import fails only when every one refuses, so a module that may target a series
-/// that loads the file is not told it fails; the first gives the place and the reason.
+/// that loads the file is not told it fails; the first gives the place and the reason. A refused
+/// file is `unreadable` and holds no other fact: Odoo stops the install on it and keeps no row.
 pub fn analyze(text: &str, model: &str, strict: &[Lines]) -> DataFacts {
     let mut facts = DataFacts {
         is_data: true,
@@ -68,6 +69,8 @@ pub fn analyze(text: &str, model: &str, strict: &[Lines]) -> DataFacts {
     let refusals: Option<Vec<_>> = strict.iter().map(|&lines| refused(text, lines)).collect();
     if let Some((pos, message)) = refusals.and_then(|r| r.into_iter().next()) {
         facts.diags.push(RawDiag::new("OD000", pos, message));
+        facts.unreadable = true;
+        return facts;
     }
     let mut reader = csv::ReaderBuilder::new().flexible(true).from_reader(text.as_bytes());
     let header = match reader.headers() {
@@ -76,6 +79,7 @@ pub fn analyze(text: &str, model: &str, strict: &[Lines]) -> DataFacts {
             facts
                 .diags
                 .push(RawDiag::new("OD000", Pos { line: 1, col: 1 }, e.to_string()));
+            facts.unreadable = true;
             return facts;
         }
     };
@@ -1018,6 +1022,24 @@ mod tests {
     fn a_file_not_loaded_is_not_read_as_the_import_does() {
         assert!(analyze("", "m", &[]).diags.is_empty());
         assert!(analyze("id,parent_id:id\nr\n", "m", &[]).diags.is_empty());
+    }
+
+    #[test]
+    fn a_refused_file_holds_no_facts() {
+        let text = "id,name,parent_id:id\nr,a\ns,b,base.p\n";
+        let refused = analyze(text, "res.partner", &[Lines::Lf]);
+        assert_eq!(refused.diags.len(), 1);
+        assert!(refused.is_data && refused.unreadable);
+        assert!(refused.defs.is_empty() && refused.refs.is_empty());
+        assert!(refused.records.is_empty() && refused.writes.is_empty());
+        let access = analyze(&format!("{PERMS}\na,m,,1,1,1,1\nb\n"), "ir.model.access", &[Lines::Lf]);
+        assert!(access.unreadable && access.access.is_empty());
+        let silent = analyze(text, "res.partner", &[]);
+        assert!(!silent.unreadable && silent.diags.is_empty());
+        let defs: Vec<&str> = silent.defs.iter().map(|d| d.id.as_str()).collect();
+        assert_eq!(defs, ["r", "s"]);
+        assert_eq!(silent.refs.len(), 1);
+        assert_eq!(silent.refs[0].id, "base.p");
     }
 
     #[test]

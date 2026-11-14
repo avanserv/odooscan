@@ -1123,6 +1123,23 @@ mod tests {
     }
 
     #[test]
+    fn a_refused_csv_loses_its_module_data() {
+        let lost = |series: &str| {
+            let name = format!("refused-csv-{series}");
+            let dir = scratch(&name);
+            let manifest = format!("{{'version': '{series}.1.0.0', 'data': ['data/res.partner.csv']}}");
+            let module = written(&dir, "short", &manifest);
+            std::fs::create_dir_all(module.join("data")).unwrap();
+            std::fs::write(module.join("data/res.partner.csv"), "id,name,parent_id:id\nr,a\n").unwrap();
+            let modules = load(&[module], &[], None, None, &TaintTable::default()).modules;
+            let _ = std::fs::remove_dir_all(&dir);
+            modules[0].lost_data()
+        };
+        assert!(lost("18.0"));
+        assert!(!lost("10.0"));
+    }
+
+    #[test]
     fn a_refused_python_file_still_names_its_model() {
         let dir = scratch("refused-model");
         let module = written(&dir, "refused_model", "{'version': '18.0.1.0.0'}");
