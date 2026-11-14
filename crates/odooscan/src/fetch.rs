@@ -27,6 +27,7 @@ const SPARSE: &[&str] = &[
     "**/static/src/**/*.js",
     "**/static/src/**/*.xml",
     "!**/tests/",
+    "**/static/tests/**/*.js",
     "/odoo/release.py",
 ];
 

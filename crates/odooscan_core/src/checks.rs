@@ -17,7 +17,7 @@ use crate::grants::{self, AttachmentGrant, Grant, Grants};
 use crate::imports::{AddonImport, Fault};
 use crate::index::{
     BASE_MODEL_METHODS, Export, FieldDef, FieldInfo, Index, JsSpec, JsTarget, PathError, Placed, RELATIONAL_TYPES,
-    Scope, Status, ViewTree, asset_glob_set, base_private_method, full_id, js_module_path, loaded_data, located,
+    Scope, Status, ViewTree, asset_glob_set, base_private_method, full_id, js_lookup, js_url, loaded_data, located,
 };
 use crate::mentions::HOOK_PREFIXES;
 use crate::module_state::UPGRADE_DIRS;
@@ -271,7 +271,9 @@ pub fn check_module<'m>(index: &Index<'m>, mi: usize, series: Option<Series>) ->
         if let Some(e) = &file.facts.syntax_error {
             out.push(&file.path, "OD000", e.pos, e.value.clone());
         }
-        private_rpc(&mut out, file);
+        if !file.in_tests() {
+            private_rpc(&mut out, file);
+        }
     }
     let scope = index.scope(mi);
     // Odoo's own rows are needed to tell that none grants, so without `base` nothing does.
@@ -309,6 +311,11 @@ pub fn check_module<'m>(index: &Index<'m>, mi: usize, series: Option<Series>) ->
         ctx.data(&mut out);
         for (fi, file) in es_modules(index, mi, series) {
             ctx.js(&mut out, fi, file);
+            // Only the imports of a test are checked: a unit test runs on a mock server whose models it
+            // defines (18.0 `addons/web/static/tests/_framework/mock_server/mock_server.js:386`).
+            if file.in_tests() {
+                continue;
+            }
             ctx.js_patches(&mut out, mi, fi, file);
             for call in &file.facts.orm_calls {
                 ctx.orm_call(&mut out, &file.path, call);
@@ -777,7 +784,8 @@ fn qweb_view(index: &Index, module: &Module, view: &ViewFact) -> bool {
 }
 
 /// The module's scripts that a bundle loads as ES modules: annotated, or from 17.0 on, any script
-/// under `static/src` not marked `ignore`. A script that is not one cannot use `import`.
+/// not marked `ignore`, all of them under `static/src` or `static/tests`. A script that is not one
+/// cannot use `import`.
 fn es_modules<'a, 'm>(
     index: &'a Index<'m>,
     mi: usize,
@@ -792,6 +800,30 @@ fn es_modules<'a, 'm>(
                 Annotation::None => unannotated,
             }
     })
+}
+
+/// The first series with Hoot, whose mock of `@web/core/utils/functions` adds `clearMemoizeCaches`
+/// (18.0 `addons/web/static/tests/_framework/mock_functions.hoot.js:42`, `module_set.hoot.js:558`).
+const HOOT: Series = Series { major: 18, minor: 0 };
+/// The first series whose Hoot mocks `@web/core/utils/indexed_db`, adding `_OriginalIndexedDB`
+/// (commit `f3d955b3235c`; 20.0 `addons/web/static/tests/_framework/mock_indexed_db.hoot.js:159`).
+const INDEXED_DB_MOCKED: Series = Series { major: 18, minor: 3 };
+
+/// The names a Hoot mock adds to a module in a unit test, with the first series that adds each. The
+/// other mocks only replace what the file exports.
+const HOOT_ADDED: &[(&str, &str, Series)] = &[
+    ("@web/core/utils/functions", "clearMemoizeCaches", HOOT),
+    ("@web/core/utils/indexed_db", "_OriginalIndexedDB", INDEXED_DB_MOCKED),
+];
+
+/// Whether a test script at the URL `from` gets `name` from a Hoot mock rather than from the file.
+fn hoot_adds(series: Option<Series>, from: &str, name: &JsName) -> bool {
+    let Some(lookup) = js_lookup(from, &name.specifier) else {
+        return false;
+    };
+    HOOT_ADDED
+        .iter()
+        .any(|&(m, added, since)| m == lookup.name && added == name.name.value && series.is_none_or(|s| s >= since))
 }
 
 /// The bundles of each web client page. The backend page loads `web.assets_web`, which includes
@@ -2019,9 +2051,10 @@ impl<'m> Ctx<'_, 'm> {
     }
 
     fn js(&self, out: &mut Out<'m>, fi: usize, file: &'m SourceFile<JsFacts>) {
-        let from = js_module_path(&self.module.name, &file.rel).unwrap_or_default();
+        let from = js_url(&self.module.name, &file.rel);
         let mut unexported: Vec<&str> = vec![];
-        for name in &file.facts.names {
+        let mocked = |name: &&JsName| file.in_tests() && hoot_adds(self.series, &from, name);
+        for name in file.facts.names.iter().filter(|n| !mocked(n)) {
             if self.js_name(out, &file.path, &from, name) {
                 unexported.push(&name.specifier);
             }
@@ -2045,27 +2078,36 @@ impl<'m> Ctx<'_, 'm> {
         check_page: bool,
     ) {
         let module = |mi: usize| &self.index.modules[mi].name;
+        // The import works when any file that claims the name is in scope and on the page.
+        let claims = self.index.js_claims(from, &specifier.value);
         let message = match self.index.js_resolve(from, &specifier.value) {
             JsSpec::Missing(mi) => format!("no file of module {} provides '{}'", module(mi), specifier.value),
-            JsSpec::Found(t) if !self.partial && !self.scope.sees(t.module) => format!(
+            JsSpec::Found(t) if !self.partial && !claims.iter().any(|c| self.scope.sees(c.module)) => format!(
                 "'{}' comes from module {}, which is not in depends",
                 specifier.value,
                 module(t.module)
             ),
-            JsSpec::Found(t) if check_page => return self.js_page(out, path, fi, t, specifier),
+            JsSpec::Found(_) if check_page => return self.js_page(out, path, fi, claims, specifier),
             JsSpec::Found(_) | JsSpec::Outside => return,
         };
         out.push(path, "OD601", specifier.pos, message);
     }
 
     /// A dependency outside the index, such as an Enterprise one, may add the target, or a bundle
-    /// that holds it, to the importer's page.
-    fn js_page(&self, out: &mut Out<'m>, path: &'m Path, fi: usize, target: JsTarget, specifier: &Spanned<String>) {
+    /// that holds it, to the importer's page. Any of the `claims` on that page serves the import.
+    fn js_page(&self, out: &mut Out<'m>, path: &'m Path, fi: usize, claims: &[JsTarget], specifier: &Spanned<String>) {
         if self.partial {
             return;
         }
         let importer: Vec<&str> = self.index.js_bundles(self.mi, fi).collect();
-        let bundles: Vec<&str> = self.index.js_bundles(target.module, target.file).collect();
+        let bundles = |t: &JsTarget| self.index.js_bundles(t.module, t.file).collect::<Vec<&str>>();
+        let Some(first) = claims.first() else {
+            return;
+        };
+        if claims.iter().any(|t| page_miss(&importer, &bundles(t)).is_none()) {
+            return;
+        }
+        let bundles = bundles(first);
         let Some(page) = page_miss(&importer, &bundles) else {
             return;
         };
@@ -5595,7 +5637,7 @@ fn csv_label(defs: &[FieldDef], values: &FxHashSet<&str>, cell: &str, series: Op
 /// Whether `module` ships no file but its manifest and `__init__.py`.
 fn is_shell(module: &Module) -> bool {
     module.data.is_empty()
-        && module.js.is_empty()
+        && module.js.iter().all(SourceFile::in_tests)
         && module.templates.is_empty()
         && module
             .python
@@ -6482,11 +6524,11 @@ mod tests {
 
     use super::{
         MagicEra, applies, bundle_list, cache_global, callable_attr, csv_label, derived_label, fetches_own_view,
-        field_name, has_last_update, magic_era, no_access_message, page_miss, public_write_message, reads_model_access,
-        shadowed_member, static_only, stores_parent_path, tuple_checked, tuple_listed, unknown_dependency,
-        unmatched_asset, warns_on_labels,
+        field_name, has_last_update, hoot_adds, magic_era, no_access_message, page_miss, public_write_message,
+        reads_model_access, shadowed_member, static_only, stores_parent_path, tuple_checked, tuple_listed,
+        unknown_dependency, unmatched_asset, warns_on_labels,
     };
-    use crate::facts::{AccessRow, DefinitionSource, Perms, Pos};
+    use crate::facts::{AccessRow, DefinitionSource, JsName, Perms, Pos, Spanned};
     use crate::manifest::OdooReads;
     use crate::series::Series;
 
@@ -6795,6 +6837,35 @@ mod tests {
         assert_eq!(page_miss(&lazy, &["web.assets_frontend_minimal"]), None);
         let both = ["web.assets_backend", "web.assets_frontend"];
         assert_eq!(page_miss(&both, &["web.assets_backend"]), Some("web.assets_frontend"));
+    }
+
+    #[test]
+    fn a_hoot_mock_adds_its_names_from_the_series_that_mocks_the_module() {
+        let adds = |series: &str, from: &str, specifier: &str, name: &str| {
+            let name = JsName {
+                specifier: specifier.to_owned(),
+                name: Spanned {
+                    value: name.to_owned(),
+                    pos: Pos { line: 1, col: 1 },
+                },
+                local: None,
+            };
+            hoot_adds(Series::parse(series), from, &name)
+        };
+        let test = "sale/static/tests/order.test.js";
+        assert!(adds("18.0", test, "@web/core/utils/functions", "clearMemoizeCaches"));
+        assert!(!adds("18.0", test, "@web/core/utils/functions", "debounceGone"));
+        assert!(!adds("18.0", test, "@web/core/user", "clearMemoizeCaches"));
+        assert!(!adds("18.0", test, "@web/core/utils/indexed_db", "_OriginalIndexedDB"));
+        assert!(adds(
+            "saas~18.3",
+            test,
+            "@web/core/utils/indexed_db",
+            "_OriginalIndexedDB"
+        ));
+        // Hoot mocks the module by its name, which a relative specifier resolves to.
+        let web = "web/static/tests/helpers.js";
+        assert!(adds("18.0", web, "../src/core/utils/functions", "clearMemoizeCaches"));
     }
 
     #[test]
