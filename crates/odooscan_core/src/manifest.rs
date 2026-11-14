@@ -68,6 +68,18 @@ const LICENSES: [&str; 10] = [
 /// The first series whose license selection has `OPL-1` (`10.0`).
 const OPL: Series = Series { major: 10, minor: 0 };
 
+/// OD507's message on a manifest without a `license` key, which every series reads as `LGPL-3`
+/// (14.0 `odoo/modules/module.py:323`), and from `LICENSE_FALLBACK` on an empty one too.
+const NO_LICENSE: &str = "the manifest names no license, which Odoo reads as LGPL-3";
+
+/// The first series that reads an empty `license` as `LGPL-3` (`saas~14.5`), where an earlier one
+/// stores the value as it is (14.0 `odoo/addons/base/models/ir_module.py:698`, `:748`, `:754`).
+const LICENSE_FALLBACK: Series = Series { major: 14, minor: 5 };
+
+/// The first series that sets an empty `depends` to `['base']` for every module but `base`
+/// (`saas~18.2`).
+const DEPENDS_BASE: Series = Series { major: 18, minor: 2 };
+
 /// The keys Odoo loads a module's files from in `series`, in its load order.
 pub fn loaded_keys(series: Option<Series>) -> impl Iterator<Item = &'static str> {
     DATA_KEYS.into_iter().chain(DEMO_KEYS).filter(move |k| reads(k, series))
@@ -113,7 +125,8 @@ pub struct Bundle {
 /// The `license` key's value, at the value.
 #[derive(Debug)]
 enum License {
-    /// A value Odoo replaces with `LGPL-3`: an empty string, `False` or `None`.
+    /// An empty string, `False` or `None`, which Odoo replaces with `LGPL-3` from saas~14.5 and
+    /// stores as no license before.
     Empty,
     Named(String),
     /// Any other literal, which this scan does not judge.
@@ -192,7 +205,7 @@ impl Manifest {
             Some(Spanned {
                 value: License::Empty,
                 pos,
-            }) => diags.push(RawDiag::new("OD507", *pos, NO_LICENSE)),
+            }) => diags.push(RawDiag::new("OD507", *pos, empty_license(series))),
             Some(Spanned {
                 value: License::Named(name),
                 pos,
@@ -203,25 +216,24 @@ impl Manifest {
             )),
             Some(_) => {}
         }
-        diags.extend(self.foreign_triggers());
+        diags.extend(self.foreign_triggers(series));
         diags.extend(repeated(&self.data, "data"));
         diags.extend(repeated(&self.demo, "demo"));
         diags
     }
 
     /// The `auto_install` entries `depends` lacks, which fail an assertion as Odoo reads the
-    /// manifest (18.0 `odoo/modules/module.py:331-338`). With no `depends`, 20.0 depends on `base`
-    /// first (`odoo/modules/module.py:471-475`) where 18.0 does not, so that case stays silent.
-    fn foreign_triggers(&self) -> Vec<RawDiag> {
+    /// manifest (18.0 `odoo/modules/module.py:331-338`). From saas~18.2 an empty `depends` reads
+    /// as `['base']` first (20.0 `odoo/modules/module.py:471-475`), so a `base` trigger fails only
+    /// before it; an unknown series reports only what fails on every series.
+    fn foreign_triggers(&self, series: Option<Series>) -> Vec<RawDiag> {
         let AutoInstall::Listed(names) = &self.auto_install else {
             return vec![];
         };
-        if self.depends.is_empty() {
-            return vec![];
-        }
+        let base = self.depends.is_empty() && series.is_none_or(|s| s >= DEPENDS_BASE);
         names
             .iter()
-            .filter(|n| !self.depends.iter().any(|d| d.value == n.value))
+            .filter(|n| !self.depends.iter().any(|d| d.value == n.value) && !(base && n.value == "base"))
             .map(|n| {
                 let message = format!(
                     "auto_install names '{}', which is not in depends, so Odoo fails to read the manifest",
@@ -279,7 +291,8 @@ impl Manifest {
         }
     }
 
-    /// Odoo takes `LGPL-3` for a value that is not truthy (18.0 `odoo/modules/module.py:322-324`).
+    /// From saas~14.5 Odoo takes `LGPL-3` for a value that is not truthy (18.0
+    /// `odoo/modules/module.py:322-324`).
     fn set_license(&mut self, loc: &Source, value: &Expr) {
         let license = match value {
             Expr::BooleanLiteral(b) if !b.value => License::Empty,
@@ -470,7 +483,14 @@ fn version_key(version: &str) -> Vec<u64> {
     key
 }
 
-const NO_LICENSE: &str = "the manifest names no license, which Odoo reads as LGPL-3";
+/// OD507's message on an empty `license` in `series`.
+fn empty_license(series: Option<Series>) -> &'static str {
+    match series {
+        Some(s) if s >= LICENSE_FALLBACK => NO_LICENSE,
+        Some(_) => "the manifest's license is empty, so Odoo records no license for the module",
+        None => "the manifest names no license, which Odoo reads as LGPL-3 from saas~14.5 and as no license before",
+    }
+}
 
 /// Whether `ir.module.module` of `series` takes `name` for its license; one of unknown series may
 /// run on any series from 10.0.
@@ -1100,6 +1120,12 @@ mod tests {
         m.diags.iter().map(|d| (d.code, d.pos.line, d.pos.col)).collect()
     }
 
+    /// The messages of the findings of the manifest `src` read as `series`.
+    fn messages(src: &str, series: Option<&str>) -> Vec<String> {
+        let m = read(src.as_bytes(), |_| series.and_then(Series::parse)).unwrap();
+        m.diags.into_iter().map(|d| d.message).collect()
+    }
+
     const LICENSED: &str = r#""license": "LGPL-3""#;
 
     #[test]
@@ -1115,6 +1141,22 @@ mod tests {
             );
         }
         assert!(findings(&format!("{{{LICENSED}}}"), None).is_empty());
+    }
+
+    #[test]
+    fn words_an_empty_license_by_series() {
+        let stored = "the manifest's license is empty, so Odoo records no license for the module";
+        let either =
+            "the manifest names no license, which Odoo reads as LGPL-3 from saas~14.5 and as no license before";
+        let empty = "{'license': False}";
+        for series in ["14.0", "saas~14.4"] {
+            assert_eq!(messages(empty, Some(series)), [stored], "{series}");
+        }
+        for series in ["saas~14.5", "18.0"] {
+            assert_eq!(messages(empty, Some(series)), [NO_LICENSE], "{series}");
+        }
+        assert_eq!(messages(empty, None), [either]);
+        assert_eq!(messages("{'name': 'x'}", Some("14.0")), [NO_LICENSE]);
     }
 
     #[test]
@@ -1137,8 +1179,17 @@ mod tests {
         assert_eq!(findings(&outside, None), [("OD511", 1, 69)]);
         assert!(findings(&src(r#""depends": ["sale"], "auto_install": ["sale"]"#), None).is_empty());
         assert!(findings(&src(r#""depends": ["sale"], "auto_install": True"#), None).is_empty());
-        assert!(findings(&src(r#""depends": [], "auto_install": ["sale"]"#), None).is_empty());
-        assert!(findings(&src(r#""auto_install": ["sale"]"#), None).is_empty());
+        let empty = src(r#""depends": [], "auto_install": ["sale"]"#);
+        for series in [None, Some("18.0"), Some("20.0")] {
+            assert_eq!(findings(&empty, series), [("OD511", 1, 55)], "{series:?}");
+        }
+        let bare = src(r#""auto_install": ["base"]"#);
+        for series in ["18.0", "saas~18.1"] {
+            assert_eq!(findings(&bare, Some(series)), [("OD511", 1, 40)], "{series}");
+        }
+        for series in [Some("saas~18.2"), Some("20.0"), None] {
+            assert!(findings(&bare, series).is_empty(), "{series:?}");
+        }
     }
 
     #[test]
