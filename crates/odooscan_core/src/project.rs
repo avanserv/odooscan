@@ -655,7 +655,8 @@ impl ModuleContext<'_> {
     }
 
     /// The facts of a data file that decodes. A CSV the manifest loads is read as Odoo's import
-    /// reads it from 11.0, which refuses what the series before leave to the reader.
+    /// reads it from 11.0, which refuses what the series before leave to the reader, on the lines
+    /// of every series the module may target.
     fn data_facts(&self, source: &SourceFile<()>, text: &str, bytes: &[u8]) -> DataFacts {
         let path = &source.path;
         if path.extension().is_some_and(|e| e == "xml") {
@@ -666,7 +667,7 @@ impl ModuleContext<'_> {
             return facts;
         }
         let strict = source.rank.is_some() && decode::csv_strict(self.series);
-        let lines = strict.then(|| csvdata::Lines::of(self.series));
+        let lines = if strict { csvdata::Lines::of(self.series) } else { &[] };
         csvdata::analyze(text, &loads_into(path), lines)
     }
 }
