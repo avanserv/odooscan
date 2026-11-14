@@ -5,6 +5,7 @@
     "sequence": -1,
     "depends": ["base"],
     "external_dependencies": {"python": set()},
+    "x_pairs": [{("a", 1), ("b", 2)}],  # a set of hashable tuples
     "installable": True,
     "license": "LGPL-3",
 }
