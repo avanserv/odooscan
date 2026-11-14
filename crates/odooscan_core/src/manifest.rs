@@ -425,13 +425,19 @@ static UPGRADE_FOLDER: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(&format!(r"^(?:(?:{series})\.)?[0-9]+\.[0-9]+(?:\.[0-9]+)?$")).unwrap()
 });
 
+/// Whether Odoo reads the upgrade folder `name` as a version, rather than skipping it with a
+/// warning, so that it imports the folder's scripts once the module version reaches it.
+pub fn upgrade_folder_named(name: &str) -> bool {
+    UPGRADE_FOLDER.is_match(name)
+}
+
 /// Why the Odoo of `series` never runs the scripts of the upgrade folder `name` of a module of
 /// `version`, a version `version_refusal` takes: Odoo skips a name outside `UPGRADE_FOLDER` with a
 /// warning, and runs a folder only up to the module version (18.0 `odoo/modules/migration.py:103-115`,
 /// `:198-211`). A name of at most three numbers takes the series and drops it again to compare, so
 /// it compares with the module version without its series. `0.0.0` runs on every update.
 pub fn upgrade_folder_refusal(name: &str, version: &str, series: Series) -> Option<String> {
-    if !UPGRADE_FOLDER.is_match(name) {
+    if !upgrade_folder_named(name) {
         return Some(format!(
             "folder '{name}' is not a version of two or three numbers, maybe behind a series, so Odoo skips its scripts"
         ));
@@ -1291,6 +1297,16 @@ mod tests {
         assert!(!saas_refused("1.0", "saas~18.2.1.0") && !saas_refused("saas~18.2.1.0", "1.0"));
         assert!(saas_refused("1.1", "saas~18.2.1.0") && saas_refused("18.2.1.1", "18.2.1.0"));
         assert!(!saas_refused("18.0.5.0", "1.0") && saas_refused("saas~18.3.1.0", "1.0"));
+    }
+
+    #[test]
+    fn takes_an_upgrade_folder_named_as_a_version() {
+        for name in ["1.1", "18.0.1.1", "saas~18.2.1.1"] {
+            assert!(upgrade_folder_named(name), "{name}");
+        }
+        for name in ["v1.1", "tests", "17.2.1.0"] {
+            assert!(!upgrade_folder_named(name), "{name}");
+        }
     }
 
     #[test]

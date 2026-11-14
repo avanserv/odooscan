@@ -1,2 +1,2 @@
-def migrate(cr, version):
+def migrate(env, version):
     """Moves the shelves of the library to the new layout."""
