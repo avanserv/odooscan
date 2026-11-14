@@ -886,7 +886,7 @@ fn legacy_scripts<'a, 'm>(
     js.filter(move |(fi, f)| index.js_loaded(mi, *fi) && !es_module(series, f.facts.annotation))
 }
 
-/// The first series with Hoot, whose mock of `@web/core/utils/functions` adds `clearMemoizeCaches`
+/// The first series whose Hoot mocks `@web/core/utils/functions`, adding `clearMemoizeCaches`
 /// (18.0 `addons/web/static/tests/_framework/mock_functions.hoot.js:42`, `module_set.hoot.js:558`).
 const HOOT: Series = Series { major: 18, minor: 0 };
 /// The first series whose Hoot mocks `@web/core/utils/indexed_db`, adding `_OriginalIndexedDB`
@@ -911,17 +911,17 @@ fn hoot_adds(series: Option<Series>, from: &str, name: &JsName) -> bool {
 }
 
 /// The loads of each web client page in order, a load being the bundles whose scripts arrive
-/// together; the paths below are under Odoo's `addons/web`. The backend page loads `web.assets_web`,
-/// which includes `web.assets_backend` (18.0 `__manifest__.py:147-148`, `views/webclient_templates.xml:304`).
-/// The frontend page loads `web.assets_frontend_minimal` deferred, then `web.assets_frontend_lazy`,
-/// which includes `web.assets_frontend`, once the window has loaded (18.0
-/// `views/webclient_templates.xml:54`, `:58`, `__manifest__.py:249-250`,
-/// `static/src/legacy/js/public/lazyloader.js:144-171`; 20.0 `views/webclient_templates.xml:55`, `:57`,
-/// `static/src/public/lazyloader.js:144-171`). In the microtask after a module is defined, the loader
-/// reports any dependency still undefined (18.0 and 20.0 `static/src/module_loader.js:67-73`), so a
-/// minimal script cannot import from the lazy bundle, while a lazy one sees minimal, which
-/// `web.assets_frontend` includes (18.0 `__manifest__.py:193`, 20.0 `__manifest__.py:186`). A bundle
-/// that code loads lazily is on no page.
+/// together; the paths below are under Odoo's `addons/web`. The backend page loads
+/// `web.assets_web`, which includes `web.assets_backend` (18.0 `__manifest__.py:147-148`,
+/// `views/webclient_templates.xml:304`). The frontend page loads `web.assets_frontend_minimal`
+/// deferred, then `web.assets_frontend_lazy`, which includes `web.assets_frontend`, once the window
+/// has loaded (18.0 `views/webclient_templates.xml:54`, `:58`, `__manifest__.py:249-250`,
+/// `static/src/legacy/js/public/lazyloader.js:144-171`; 20.0 `views/webclient_templates.xml:55`,
+/// `:57`, `static/src/public/lazyloader.js:144-171`). In the microtask after a module is defined,
+/// the loader reports any dependency still undefined (18.0 and 20.0
+/// `static/src/module_loader.js:67-73`), so a minimal script cannot import from the lazy bundle,
+/// while a lazy one sees minimal, which `web.assets_frontend` includes (18.0 `__manifest__.py:193`,
+/// 20.0 `__manifest__.py:186`). A bundle that code loads lazily is on no page.
 const PAGES: &[&[&[&str]]] = &[
     &[&["web.assets_backend", "web.assets_web"]],
     &[
