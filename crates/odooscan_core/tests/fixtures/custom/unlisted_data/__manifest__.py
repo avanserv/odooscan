@@ -9,4 +9,5 @@
     ],
     "update_xml": ["security/ir.model.access-legacy.csv"],
     "post_init_hook": "x_load_extras",
+    "license": "LGPL-3",
 }

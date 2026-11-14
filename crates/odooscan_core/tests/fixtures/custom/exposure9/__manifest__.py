@@ -6,4 +6,5 @@
         "security/ir.model.access.csv",
         "security/rules.xml",
     ],
+    "license": "LGPL-3",
 }

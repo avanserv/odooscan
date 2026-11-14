@@ -4,4 +4,5 @@
     "depends": ["web"],
     "data": ["views/outside.xml"],
     "assets": {"web.assets_backend": ["qweb_outside/static/src/**/*"]},
+    "license": "LGPL-3",
 }

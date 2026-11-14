@@ -5,4 +5,5 @@
     "data": ["data/calls.xml"],
     "qweb": ["static/src/xml/panel.xml"],
     "assets": {"web.assets_qweb": ["legacy154/static/src/xml/panel.xml"]},
+    "license": "LGPL-3",
 }

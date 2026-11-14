@@ -9,4 +9,5 @@
         "data/res.partner-empty.csv",
         "data/res.partner-quiet.csv",
     ],
+    "license": "LGPL-3",
 }

@@ -4,4 +4,5 @@
     "depends": ["web"],
     "data": ["views/assets.xml"],
     "qweb": ["static/src/xml/counter.xml"],
+    "license": "LGPL-3",
 }

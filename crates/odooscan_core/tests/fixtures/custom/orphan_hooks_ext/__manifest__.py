@@ -8,4 +8,5 @@
         "views/orphan_hook.xml",
     ],
     "assets": {"web.assets_backend": ["orphan_hooks_ext/static/src/**/*"]},
+    "license": "LGPL-3",
 }

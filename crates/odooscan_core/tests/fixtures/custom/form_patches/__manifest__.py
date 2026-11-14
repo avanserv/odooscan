@@ -4,4 +4,5 @@
     "depends": ["web"],
     "data": ["security/ir.model.access.csv"],
     "assets": {"web.assets_backend": ["form_patches/static/src/**/*"]},
+    "license": "LGPL-3",
 }

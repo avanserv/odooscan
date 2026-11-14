@@ -513,6 +513,32 @@ fn import_patches_without_base_take_the_advice_of_the_path() {
 }
 
 #[test]
+fn a_version_of_another_series_is_refused_under_a_default_series_only() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+    let refused = |default_series| {
+        let report = scan(&ScanOptions {
+            paths: vec![
+                root.join("custom/legacy17"),
+                root.join("custom/manifest_version_refused"),
+            ],
+            addons_paths: vec![root.join("core")],
+            default_series,
+            ..Default::default()
+        });
+        let mut modules: Vec<_> = report
+            .diagnostics
+            .iter()
+            .filter(|d| d.code == "OD509")
+            .filter_map(|d| d.path.parent()?.file_name()?.to_str().map(str::to_owned))
+            .collect();
+        modules.sort();
+        modules
+    };
+    assert_eq!(refused(None), ["manifest_version_refused"]);
+    assert_eq!(refused(Series::parse("18.0")), ["legacy17", "manifest_version_refused"]);
+}
+
+#[test]
 fn a_target_series_checks_a_module_as_of_that_series() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
     let findings = |target_series| {
@@ -528,7 +554,9 @@ fn a_target_series_checks_a_module_as_of_that_series() {
             .map(|d| (d.line, d.code, rule(d.code).kind(d.severity)))
             .collect::<Vec<_>>()
     };
+    // The manifest still names 17.0, which 18.0 will not install.
     let ported = [
+        (1, "OD509", Kind::Other),
         (7, "OD108", Kind::Deprecated),
         (10, "OD126", Kind::Removed),
         (13, "OD103", Kind::Other),

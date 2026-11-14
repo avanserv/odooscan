@@ -5,4 +5,5 @@
     "auto_install": True,
     "data": ["pages.xml"],
     "demo": ["demo/fields.xml"],
+    "license": "LGPL-3",
 }

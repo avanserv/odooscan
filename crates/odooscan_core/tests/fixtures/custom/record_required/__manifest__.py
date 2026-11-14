@@ -21,4 +21,5 @@
         "demo/defaults.xml",
         "demo/ext_ids.xml",
     ],
+    "license": "LGPL-3",
 }

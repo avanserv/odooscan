@@ -8,4 +8,5 @@
         "security/ir.rule.csv",
         "security/rules_later.xml",
     ],
+    "license": "LGPL-3",
 }

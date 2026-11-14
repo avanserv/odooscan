@@ -1,1 +1,1 @@
-{"name": "Signatures side", "version": "18.0.1.0.0", "depends": ["signatures"]}
+{"name": "Signatures side", "version": "18.0.1.0.0", "depends": ["signatures"], "license": "LGPL-3"}

@@ -9,4 +9,5 @@
         "web.assets_backend": ["legacy16/static/src/js/**/*"],
         "web.assets_qweb": ["legacy16/static/src/xml/widget.xml"],
     },
+    "license": "LGPL-3",
 }

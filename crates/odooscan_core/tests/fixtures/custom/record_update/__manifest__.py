@@ -4,4 +4,5 @@
     "depends": ["record_rules"],
     "data": ["security/ir.model.access.csv", "security/updates.xml", "security/second_writes.xml", "security/over_demo.xml"],
     "demo": ["demo/over_demo.xml"],
+    "license": "LGPL-3",
 }

@@ -4,4 +4,5 @@
     "depends": ["base"],
     "data": ["security/rules.xml", "security/second_writes.xml"],
     "assets": {"web.assets_backend": ["legacy15/static/src/**/*"]},
+    "license": "LGPL-3",
 }

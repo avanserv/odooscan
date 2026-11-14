@@ -1,1 +1,1 @@
-{"name": "Legacy 13", "version": "13.0.1.0.0", "depends": ["base"], "data": ["security/ir.model.access.csv", "security/ir.model.access-named.csv", "views/views.xml", "security/rules.xml", "data/calls.xml"]}
+{"name": "Legacy 13", "version": "13.0.1.0.0", "depends": ["base"], "data": ["security/ir.model.access.csv", "security/ir.model.access-named.csv", "views/views.xml", "security/rules.xml", "data/calls.xml"], "license": "LGPL-3"}

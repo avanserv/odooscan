@@ -12,4 +12,5 @@
         "data/demo_writes.xml",
     ],
     "demo": ["demo/reports.xml", "demo/rewrites.xml"],
+    "license": "LGPL-3",
 }

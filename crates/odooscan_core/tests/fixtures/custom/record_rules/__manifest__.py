@@ -17,4 +17,5 @@
         "security/demo_writes.xml",
     ],
     "demo": ["demo/rewrites.xml"],
+    "license": "LGPL-3",
 }

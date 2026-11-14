@@ -4,4 +4,5 @@
     "depends": ["base"],
     "data": ["views/delegate.xml"],
     "assets": {"web.assets_backend": ["button_delegate/static/src/**/*"]},
+    "license": "LGPL-3",
 }

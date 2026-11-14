@@ -8,4 +8,5 @@
         "data/calls.xml",
         "data/after.xml",
     ],
+    "license": "LGPL-3",
 }

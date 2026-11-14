@@ -6,4 +6,5 @@
     "depends": ["base"],
     "external_dependencies": {"python": set()},
     "installable": True,
+    "license": "LGPL-3",
 }
