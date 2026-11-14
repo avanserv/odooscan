@@ -1,6 +1,7 @@
-//! The text of a data file. Odoo hands the bytes of an XML file to `etree.parse` on every series,
-//! so libxml2 picks the encoding, not Python: 9.0 `openerp/tools/convert.py:838,915`, 10.0
-//! `odoo/tools/convert.py:835,899`, 11.0 `:784,836`, 18.0 `:659,715`, 20.0 `:712,792`.
+//! Whether a file Odoo loads decodes, and the text of a data file as Odoo reads it. Odoo hands the
+//! bytes of an XML file to `etree.parse` on every series, so libxml2 picks the encoding, not
+//! Python: 9.0 `openerp/tools/convert.py:838,915`, 10.0 `odoo/tools/convert.py:835,899`, 11.0
+//! `:784,836`, 18.0 `:659,715`, 20.0 `:712,792`.
 //!
 //! A CSV goes through `ustr` cell by cell below 11.0, UTF-8 first, then Latin-1, which cannot fail:
 //! 8.0 `openerp/tools/convert.py:951`, 9.0 `:899` with `openerp/loglevels.py:28`, 10.0
@@ -8,7 +9,7 @@
 //! `odoo/tools/convert.py:810` with `odoo/tools/pycompat.py:46-48,89-94`, 17.0 `:700`, 18.0 `:683`,
 //! 20.0 `:741`.
 //!
-//! Where a file Odoo loads stops decoding, as Python or libxml2 refuses it, is OD000's.
+//! OD000 reports the place where Python or libxml2 stops decoding a file Odoo loads.
 
 use std::borrow::Cow;
 use std::sync::LazyLock;

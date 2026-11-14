@@ -27,21 +27,21 @@ fn public_cell(group: &str) -> bool {
 
 /// How the Odoo of a series splits a data CSV it loads into lines for Python's `csv` reader.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Lines {
+pub enum LineBreaks {
     /// At any boundary `str.splitlines` knows, so a lone CR ends a row.
     Universal,
     /// At LF alone, so a CR outside quotes that does not end a line stops the reader.
     Lf,
 }
 
-impl Lines {
-    /// The lines of every series the module may target: an unknown one may load on either
+impl LineBreaks {
+    /// The line breaks of every series the module may target: an unknown one may load on either
     /// reader, the newest first.
-    pub fn of(series: Option<Series>) -> &'static [Lines] {
+    pub fn of(series: Option<Series>) -> &'static [LineBreaks] {
         match series {
-            None => &[Lines::Lf, Lines::Universal],
-            Some(s) if s >= STRING_IO => &[Lines::Lf],
-            Some(_) => &[Lines::Universal],
+            None => &[LineBreaks::Lf, LineBreaks::Universal],
+            Some(s) if s >= STRING_IO => &[LineBreaks::Lf],
+            Some(_) => &[LineBreaks::Universal],
         }
     }
 }
@@ -56,17 +56,18 @@ pub fn undecoded(pos: Pos) -> DataFacts {
     }
 }
 
-/// A data CSV is named after its model; its header names fields, with `:id` or `/id` for references.
-/// `strict` gives the lines of each series a file Odoo loads may target, none for a file it does
-/// not load. The import fails only when every one refuses, so a module that may target a series
-/// that loads the file is not told it fails; the first gives the place and the reason. A refused
-/// file is `unreadable` and holds no other fact: Odoo stops the install on it and keeps no row.
-pub fn analyze(text: &str, model: &str, strict: &[Lines]) -> DataFacts {
+/// A data CSV is named after its model; its header names fields, with `:id` or `/id` for
+/// references. `strict` gives the line breaks of each series a file Odoo loads may target, none for
+/// a file it does not load. The import fails only when every one refuses, so a module that may
+/// target a series that loads the file is not told it fails; the first gives the place and the
+/// reason. A refused file is `unreadable` and holds no other fact: Odoo stops the install on it and
+/// keeps no row.
+pub fn analyze(text: &str, model: &str, strict: &[LineBreaks]) -> DataFacts {
     let mut facts = DataFacts {
         is_data: true,
         ..DataFacts::default()
     };
-    let refusals: Option<Vec<_>> = strict.iter().map(|&lines| refused(text, lines)).collect();
+    let refusals: Option<Vec<_>> = strict.iter().map(|&breaks| refused(text, breaks)).collect();
     if let Some((pos, message)) = refusals.and_then(|r| r.into_iter().next()) {
         facts.diags.push(RawDiag::new("OD000", pos, message));
         facts.unreadable = true;
@@ -359,14 +360,14 @@ fn rule_groups(row: &csv::StringRecord, columns: &[(&str, bool)], field: &str) -
 
 /// Where Odoo's import of the CSV `text` fails, and why. It reads every row before it loads one,
 /// so a cell the reader refuses beats a row the import cannot take.
-fn refused(text: &str, lines: Lines) -> Option<(Pos, String)> {
+fn refused(text: &str, breaks: LineBreaks) -> Option<(Pos, String)> {
     if text.is_empty() {
         let message = "the file is empty, and Odoo's import reads its first row as the header";
         return Some((Pos { line: 1, col: 1 }, message.to_owned()));
     }
     let loc = Locator::new(text);
     let at = |offset: usize| loc.pos(TextSize::try_from(offset).unwrap_or_default());
-    let (header, rows) = match Reader::default().read(text, lines) {
+    let (header, rows) = match Reader::default().read(text, breaks) {
         Ok(read) => read,
         Err((offset, message)) => return Some((at(offset), message.to_owned())),
     };
@@ -397,13 +398,13 @@ fn relational_column(column: &str) -> bool {
 }
 
 /// The lines of `text`, each with its end and by its offset, as Odoo hands them to the reader.
-fn split_lines(text: &str, lines: Lines) -> Vec<(usize, &str)> {
+fn split_lines(text: &str, breaks: LineBreaks) -> Vec<(usize, &str)> {
     let mut split = vec![];
     let mut start = 0;
     let mut chars = text.char_indices().peekable();
     while let Some((i, c)) = chars.next() {
-        let crlf = lines == Lines::Universal && c == '\r' && chars.next_if(|&(_, next)| next == '\n').is_some();
-        if crlf || line_end(c, lines) {
+        let crlf = breaks == LineBreaks::Universal && c == '\r' && chars.next_if(|&(_, next)| next == '\n').is_some();
+        if crlf || line_end(c, breaks) {
             let end = i + c.len_utf8() + usize::from(crlf);
             split.push((start, &text[start..end]));
             start = end;
@@ -415,10 +416,10 @@ fn split_lines(text: &str, lines: Lines) -> Vec<(usize, &str)> {
     split
 }
 
-fn line_end(c: char, lines: Lines) -> bool {
-    match lines {
-        Lines::Lf => c == '\n',
-        Lines::Universal => matches!(
+fn line_end(c: char, breaks: LineBreaks) -> bool {
+    match breaks {
+        LineBreaks::Lf => c == '\n',
+        LineBreaks::Universal => matches!(
             c,
             '\n' | '\r' | '\x0B' | '\x0C' | '\x1C' | '\x1D' | '\x1E' | '\u{85}' | '\u{2028}' | '\u{2029}'
         ),
@@ -455,8 +456,8 @@ type Stop = (usize, &'static str);
 struct Reader {
     state: State,
     record: Record,
-    /// The characters of the cell being read.
-    cell: usize,
+    /// How many characters the cell being read holds so far.
+    cell_len: usize,
     cell_start: usize,
     quote: usize,
     cr: usize,
@@ -469,8 +470,8 @@ struct Reader {
 
 impl Reader {
     /// The header and the records below it.
-    fn read(mut self, text: &str, lines: Lines) -> Result<(Vec<String>, Vec<Record>), Stop> {
-        for (start, line) in split_lines(text, lines) {
+    fn read(mut self, text: &str, breaks: LineBreaks) -> Result<(Vec<String>, Vec<Record>), Stop> {
+        for (start, line) in split_lines(text, breaks) {
             for (i, c) in line.char_indices() {
                 self.char(Some(c), start + i)?;
             }
@@ -597,13 +598,13 @@ impl Reader {
     }
 
     fn add(&mut self, c: char) -> Result<(), Stop> {
-        if self.cell >= FIELD_LIMIT {
+        if self.cell_len >= FIELD_LIMIT {
             return Err((
                 self.cell_start,
                 "a cell of more than 131072 characters, which Python's csv reader refuses",
             ));
         }
-        self.cell += 1;
+        self.cell_len += 1;
         if self.header.is_none() {
             self.text.push(c);
         }
@@ -612,8 +613,8 @@ impl Reader {
 
     fn save(&mut self) {
         self.record.cells += 1;
-        self.record.filled |= self.cell > 0;
-        self.cell = 0;
+        self.record.filled |= self.cell_len > 0;
+        self.cell_len = 0;
         if self.header.is_none() {
             let cell = std::mem::take(&mut self.text);
             self.cells.push(cell);
@@ -889,8 +890,8 @@ mod tests {
 
     /// Where and why the import of `text` fails on 18.0, as `(line, col, message)`.
     fn import(text: &str) -> Option<(u32, u32, String)> {
-        let lf = analyze(text, "res.partner", &[Lines::Lf]);
-        let universal = analyze(text, "res.partner", &[Lines::Universal]);
+        let lf = analyze(text, "res.partner", &[LineBreaks::Lf]);
+        let universal = analyze(text, "res.partner", &[LineBreaks::Universal]);
         let lf = lf.diags.into_iter().next().map(|d| (d.pos.line, d.pos.col, d.message));
         if !text.contains('\r') {
             assert_eq!(
@@ -950,36 +951,40 @@ mod tests {
     #[test]
     fn a_lone_cr_fails_from_18() {
         let text = "id,name\nr,a\rb\n";
-        let first = analyze(text, "m", &[Lines::Lf]).diags.remove(0);
+        let first = analyze(text, "m", &[LineBreaks::Lf]).diags.remove(0);
         assert_eq!((first.pos.line, first.pos.col), (2, 4));
         assert!(first.message.starts_with("a carriage return outside quotes"));
-        assert!(analyze(text, "m", &[Lines::Universal]).diags.is_empty());
-        assert!(analyze(text, "m", Lines::of(None)).diags.is_empty());
+        assert!(analyze(text, "m", &[LineBreaks::Universal]).diags.is_empty());
+        assert!(analyze(text, "m", LineBreaks::of(None)).diags.is_empty());
         for quiet in [
             "id,name\r\nr,a\r\n",
             "id,name\nr,\"a\rb\"\n",
             "id,name\nr,a\r\r\n",
             "id,name\nr,a\r",
         ] {
-            assert!(analyze(quiet, "m", &[Lines::Lf]).diags.is_empty(), "{quiet:?}");
+            assert!(analyze(quiet, "m", &[LineBreaks::Lf]).diags.is_empty(), "{quiet:?}");
         }
-        assert!(!analyze("id,name\nr,\"a\"\rb\n", "m", &[Lines::Lf]).diags.is_empty());
+        assert!(
+            !analyze("id,name\nr,\"a\"\rb\n", "m", &[LineBreaks::Lf])
+                .diags
+                .is_empty()
+        );
     }
 
     #[test]
-    fn universal_lines_split_a_row_where_lf_lines_do_not() {
+    fn universal_breaks_split_a_row_where_lf_breaks_do_not() {
         let text = "id,name,parent_id:id\nr,a\x0Cb,p\n";
-        assert_eq!(analyze(text, "m", &[Lines::Lf]).diags.len(), 0);
-        let universal = analyze(text, "m", &[Lines::Universal]).diags;
+        assert_eq!(analyze(text, "m", &[LineBreaks::Lf]).diags.len(), 0);
+        let universal = analyze(text, "m", &[LineBreaks::Universal]).diags;
         assert_eq!(universal.len(), 1);
         assert_eq!(universal[0].pos.line, 2);
-        assert!(analyze(text, "m", Lines::of(None)).diags.is_empty());
+        assert!(analyze(text, "m", LineBreaks::of(None)).diags.is_empty());
     }
 
     #[test]
     fn an_unknown_series_reports_what_every_reader_refuses() {
         let reported = |text: &str| {
-            let diags = analyze(text, "m", Lines::of(None)).diags;
+            let diags = analyze(text, "m", LineBreaks::of(None)).diags;
             diags
                 .into_iter()
                 .map(|d| (d.pos.line, d.pos.col, d.message))
@@ -1027,12 +1032,16 @@ mod tests {
     #[test]
     fn a_refused_file_holds_no_facts() {
         let text = "id,name,parent_id:id\nr,a\ns,b,base.p\n";
-        let refused = analyze(text, "res.partner", &[Lines::Lf]);
+        let refused = analyze(text, "res.partner", &[LineBreaks::Lf]);
         assert_eq!(refused.diags.len(), 1);
         assert!(refused.is_data && refused.unreadable);
         assert!(refused.defs.is_empty() && refused.refs.is_empty());
         assert!(refused.records.is_empty() && refused.writes.is_empty());
-        let access = analyze(&format!("{PERMS}\na,m,,1,1,1,1\nb\n"), "ir.model.access", &[Lines::Lf]);
+        let access = analyze(
+            &format!("{PERMS}\na,m,,1,1,1,1\nb\n"),
+            "ir.model.access",
+            &[LineBreaks::Lf],
+        );
         assert!(access.unreadable && access.access.is_empty());
         let silent = analyze(text, "res.partner", &[]);
         assert!(!silent.unreadable && silent.diags.is_empty());
@@ -1043,10 +1052,10 @@ mod tests {
     }
 
     #[test]
-    fn lines_follow_the_reader_of_the_series() {
-        assert_eq!(Lines::of(Series::parse("17.0")), [Lines::Universal]);
-        assert_eq!(Lines::of(Series::parse("saas~17.4")), [Lines::Universal]);
-        assert_eq!(Lines::of(Series::parse("18.0")), [Lines::Lf]);
-        assert_eq!(Lines::of(None), [Lines::Lf, Lines::Universal]);
+    fn line_breaks_follow_the_reader_of_the_series() {
+        assert_eq!(LineBreaks::of(Series::parse("17.0")), [LineBreaks::Universal]);
+        assert_eq!(LineBreaks::of(Series::parse("saas~17.4")), [LineBreaks::Universal]);
+        assert_eq!(LineBreaks::of(Series::parse("18.0")), [LineBreaks::Lf]);
+        assert_eq!(LineBreaks::of(None), [LineBreaks::Lf, LineBreaks::Universal]);
     }
 }

@@ -1,6 +1,5 @@
 ---
 source: crates/odooscan_core/tests/fixtures.rs
-assertion_line: 36
 expression: "lines.join(\"\\n\")"
 ---
 custom/access_rows/security/ir.model.access-hook.csv:2:1: OD402 no group limits this row, so every user, public and portal included, gets write, create or unlink on model_access_desk; name a group
