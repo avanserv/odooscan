@@ -690,11 +690,16 @@ pub struct FileImports {
     /// The file imports a module whose name it computes, or loads one by its path, so it may run
     /// any file.
     pub dynamic: bool,
+    /// The names the file binds at import, which `from` it can import besides its submodules; none
+    /// when it may bind names the scan cannot list.
+    pub defines: Option<Vec<String>>,
 }
 
 /// An import statement, or a call of `import_module()` or `__import__()` on a literal.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ImportFact {
+    /// The module after `from`, else the statement or the call.
+    pub pos: Pos,
     /// The number of leading dots, 0 for an absolute import.
     pub level: u32,
     /// The module after `from`, none for `from . import x` and for a plain `import`.
@@ -702,6 +707,11 @@ pub struct ImportFact {
     /// The names after `import`: dotted modules for a plain `import`, `*` for a star import.
     pub names: Vec<Spanned<String>>,
     pub from: bool,
+    /// In a function, which runs it only when called.
+    pub deferred: bool,
+    /// Where a failed import changes nothing: in a `try` catching it, under `suppress()` or under
+    /// `if TYPE_CHECKING:`, which never runs.
+    pub guarded: bool,
 }
 
 /// The `__all__` of a file, which decides the submodules a star import of its package runs.

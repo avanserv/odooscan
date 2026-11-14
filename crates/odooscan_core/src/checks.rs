@@ -14,6 +14,7 @@ use crate::facts::{
     UNREAD_TYPE, ViewFact, WrittenValue, XmlDef, XmlRef,
 };
 use crate::grants::{self, AttachmentGrant, Grant, Grants};
+use crate::imports::{AddonImport, Fault};
 use crate::index::{
     BASE_MODEL_METHODS, Export, FieldDef, FieldInfo, Index, JsSpec, PathError, Placed, RELATIONAL_TYPES, Scope, Status,
     ViewTree, asset_glob_set, base_private_method, full_id, js_module_path, loaded_data, located,
@@ -301,6 +302,7 @@ pub fn check_module<'m>(index: &Index<'m>, mi: usize, series: Option<Series>) ->
             grants: &grants,
         };
         ctx.dependencies(&mut out);
+        ctx.addon_imports(&mut out);
         ctx.python(&mut out);
         ctx.routes(&mut out);
         ctx.registry(&mut out);
@@ -1286,6 +1288,17 @@ fn loaded_class(facts: &PyFacts) -> Option<String> {
     Some(format!("controller '{}'", class.name))
 }
 
+/// OD519's position and message for what `import` lacks.
+fn unresolved_import(import: &AddonImport, fault: &Fault) -> (Pos, String) {
+    match fault {
+        Fault::Missing => (
+            import.pos,
+            format!("no file of module {} provides '{}'", import.addon, import.text),
+        ),
+        Fault::Undefined(name) => (name.pos, format!("'{}' does not define '{}'", import.text, name.value)),
+    }
+}
+
 /// OD502's message for a data file Odoo never loads, listed under `ignored` or under no key.
 fn unloaded(rel: &str, ignored: Option<&str>, series: Option<Series>) -> String {
     if let Some(key) = ignored {
@@ -1695,6 +1708,43 @@ impl<'m> Ctx<'_, 'm> {
                 Some(_) => {}
             }
         }
+    }
+
+    /// OD518 on an import of a module outside `depends` that runs as the module loads, and OD519
+    /// on what an import names that its module lacks. Upgrade scripts are no module code, an IoT
+    /// handler runs on the box, and a failed import in a `try` catching it, under `suppress()` or
+    /// under `if TYPE_CHECKING:` changes nothing.
+    fn addon_imports(&self, out: &mut Out<'m>) {
+        for file in &self.module.python {
+            let dir = file.rel.split_once('/').map(|(dir, _)| dir);
+            let upgrade = dir.is_some_and(|d| UPGRADE_DIRS.contains(&d));
+            let Some(imports) = file.facts.imports.as_ref().filter(|_| !upgrade) else {
+                continue;
+            };
+            let loads = dir != Some(IOT_DIR);
+            for fact in imports.list.iter().filter(|f| !f.guarded) {
+                for import in self.index.imports.addon_imports(&file.rel, fact) {
+                    if loads && !fact.deferred && self.outside_depends(&import.addon) {
+                        let message = format!(
+                            "'{}' comes from module {}, which is not in depends; add it there",
+                            import.text, import.addon
+                        );
+                        out.push(&file.path, "OD518", import.pos, message);
+                    }
+                    for fault in &import.faults {
+                        let (pos, message) = unresolved_import(&import, fault);
+                        out.push(&file.path, "OD519", pos, message);
+                    }
+                }
+            }
+        }
+    }
+
+    /// Whether `module` is another module than this one, outside its scope, and no dependency
+    /// outside the index may bring it in.
+    fn outside_depends(&self, module: &str) -> bool {
+        let seen = self.index.by_name.get(module).is_some_and(|&mi| self.scope.sees(mi));
+        module != self.module.name && !self.partial && !seen
     }
 
     fn path(&self, out: &mut Out<'m>, file: &'m Path, model: &str, path: &Spanned<String>) {

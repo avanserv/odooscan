@@ -582,6 +582,100 @@ fn writes_names(body: &[Stmt], name: &str) -> bool {
     writes.found
 }
 
+/// The names the file binds at import, in the module body or a block of it, or that a function or
+/// an assignment expression may bind in it. None when it may bind names no statement shows: through
+/// a star import, a module `__getattr__`, a `NAME_WRITERS` call or `sys.modules`.
+pub(crate) fn defined_names(body: &[Stmt]) -> Option<Vec<String>> {
+    let mut names = vec![];
+    for stmt in bound(body) {
+        stmt_names(stmt, &mut names)?;
+    }
+    let mut unseen = Unseen::default();
+    unseen.visit_body(body);
+    if unseen.writes || names.iter().any(|n| n == "__getattr__") {
+        return None;
+    }
+    names.extend(unseen.names);
+    Some(names)
+}
+
+/// The names `stmt` binds where it runs, or None for a star import.
+fn stmt_names(stmt: &Stmt, names: &mut Vec<String>) -> Option<()> {
+    match stmt {
+        Stmt::FunctionDef(f) => names.push(f.name.to_string()),
+        Stmt::ClassDef(c) => names.push(c.name.to_string()),
+        Stmt::Import(i) => names.extend(i.names.iter().map(|a| match &a.asname {
+            Some(alias) => alias.to_string(),
+            None => a.name.split('.').next().unwrap_or_default().to_owned(),
+        })),
+        Stmt::ImportFrom(i) if i.names.iter().any(|a| a.name.as_str() == "*") => return None,
+        Stmt::ImportFrom(i) => {
+            names.extend(i.names.iter().map(|a| a.asname.as_ref().unwrap_or(&a.name).to_string()));
+        }
+        Stmt::Try(t) => names.extend(t.handlers.iter().filter_map(|h| {
+            let ast::ExceptHandler::ExceptHandler(h) = h;
+            h.name.as_ref().map(ToString::to_string)
+        })),
+        _ => targets(stmt).into_iter().for_each(|t| target_names(t, names)),
+    }
+    Some(())
+}
+
+/// `top_level`, into the bodies of loops and `match` cases too.
+fn bound(body: &[Stmt]) -> Vec<&Stmt> {
+    let mut stmts = vec![];
+    for stmt in top_level(body) {
+        stmts.push(stmt);
+        let blocks: Vec<&[Stmt]> = match stmt {
+            Stmt::For(f) => vec![&f.body, &f.orelse],
+            Stmt::While(w) => vec![&w.body, &w.orelse],
+            Stmt::Match(m) => m.cases.iter().map(|c| &c.body[..]).collect(),
+            _ => continue,
+        };
+        stmts.extend(blocks.into_iter().flat_map(bound));
+    }
+    stmts
+}
+
+/// Each name a target binds, alone or unpacked.
+fn target_names(target: &Expr, names: &mut Vec<String>) {
+    match target {
+        Expr::Tuple(ast::ExprTuple { elts, .. }) | Expr::List(ast::ExprList { elts, .. }) => {
+            elts.iter().for_each(|e| target_names(e, names));
+        }
+        Expr::Starred(s) => target_names(&s.value, names),
+        Expr::Name(n) => names.push(n.id.to_string()),
+        _ => {}
+    }
+}
+
+/// The names a `global` declaration or an assignment expression anywhere in the file may bind in the
+/// module, and whether a call or `sys.modules` may write any.
+#[derive(Default)]
+struct Unseen {
+    names: Vec<String>,
+    writes: bool,
+}
+
+impl<'a> Visitor<'a> for Unseen {
+    fn visit_stmt(&mut self, stmt: &'a Stmt) {
+        if let Stmt::Global(g) = stmt {
+            self.names.extend(g.names.iter().map(ToString::to_string));
+        }
+        visitor::walk_stmt(self, stmt);
+    }
+
+    fn visit_expr(&mut self, expr: &'a Expr) {
+        match expr {
+            Expr::Name(n) => self.writes |= NAME_WRITERS.contains(&n.id.as_str()),
+            Expr::Attribute(a) => self.writes |= a.attr.as_str() == "modules",
+            Expr::Named(n) => target_names(&n.target, &mut self.names),
+            _ => {}
+        }
+        visitor::walk_expr(self, expr);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use ruff_python_parser::parse_module;
@@ -802,6 +896,40 @@ mod tests {
             "if (migrate := build()):\n    pass\n",
         ] {
             assert_eq!(migrate_of(src), Migrate::Unread, "{src}");
+        }
+    }
+
+    fn defined(src: &str) -> Option<Vec<String>> {
+        let parsed = parse_module(src).expect("valid Python");
+        let mut names = defined_names(&parsed.syntax().body)?;
+        names.sort();
+        Some(names)
+    }
+
+    #[test]
+    fn lists_the_names_a_file_binds_at_import() {
+        let src = "import a.b, c as d\nfrom .e import f, g as h\nclass K:\n    inner = 1\ndef run():\n    local = 1\n    global shared\n\
+                   x, (y, *z) = 1, (2, 3)\nn: int\nm: int = 1\nif c:\n    p = 1\nelse:\n    with o() as q:\n        pass\n\
+                   try:\n    r = 1\nexcept E as s:\n    pass\nfor t in ():\n    u = 1\nwhile c:\n    v = 1\n\
+                   match c:\n    case 1:\n        w = 1\nprint(walrus := 1)\nobj.attr = 1\n";
+        let expected = [
+            "K", "a", "d", "f", "h", "m", "p", "q", "r", "run", "s", "shared", "t", "u", "v", "w", "walrus", "x", "y",
+            "z",
+        ];
+        assert_eq!(defined(src), Some(expected.iter().map(|n| (*n).to_owned()).collect()));
+    }
+
+    #[test]
+    fn lists_no_names_where_the_file_may_bind_unseen_ones() {
+        for src in [
+            "from .models import *\n",
+            "def __getattr__(name):\n    pass\n",
+            "__getattr__ = lookup\n",
+            "globals()['x'] = 1\n",
+            "def f():\n    exec('x = 1')\n",
+            "sys.modules[__name__].x = 1\n",
+        ] {
+            assert_eq!(defined(src), None, "{src}");
         }
     }
 

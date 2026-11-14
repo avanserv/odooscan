@@ -7,12 +7,11 @@ use ruff_python_ast::visitor::{self, Visitor};
 use ruff_python_ast::{self as ast, Expr, Stmt};
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use crate::facts::{Exports, FileImports, ImportFact, Spanned};
-use crate::module_state;
+use crate::facts::{Exports, FileImports, ImportFact, Pos, Spanned};
 use crate::project::Module;
 use crate::python::{Locator, str_lit, tail_name};
-use crate::python2;
 use crate::series::Series;
+use crate::{method_body, module_state, python, python2};
 
 /// Calls that import a module by a name or a path the code holds, or list the modules of a package
 /// for code to import.
@@ -31,12 +30,15 @@ pub(crate) fn file_imports(body: &[Stmt], loc: &Locator) -> FileImports {
         loc,
         list: vec![],
         dynamic: false,
+        deferred: false,
+        guarded: false,
     };
     collect.visit_body(body);
     FileImports {
         list: collect.list,
         exports: exports(body),
         dynamic: collect.dynamic,
+        defines: module_state::defined_names(body),
     }
 }
 
@@ -45,23 +47,19 @@ struct Collect<'l> {
     loc: &'l Locator<'l>,
     list: Vec<ImportFact>,
     dynamic: bool,
+    deferred: bool,
+    guarded: bool,
 }
 
 impl<'a> Visitor<'a> for Collect<'_> {
     fn visit_stmt(&mut self, stmt: &'a Stmt) {
         match stmt {
-            Stmt::Import(i) => self.list.push(ImportFact {
-                level: 0,
-                module: None,
-                names: i.names.iter().map(|a| self.spanned(a)).collect(),
-                from: false,
-            }),
-            Stmt::ImportFrom(i) => self.list.push(ImportFact {
-                level: i.level,
-                module: i.module.as_ref().map(ToString::to_string),
-                names: i.names.iter().map(|a| self.spanned(a)).collect(),
-                from: true,
-            }),
+            Stmt::Import(_) | Stmt::ImportFrom(_) => self.import(stmt),
+            Stmt::FunctionDef(f) => {
+                self.function(f);
+                return;
+            }
+            _ if self.guards(stmt) => return,
             _ => {}
         }
         visitor::walk_stmt(self, stmt);
@@ -75,7 +73,82 @@ impl<'a> Visitor<'a> for Collect<'_> {
     }
 }
 
-impl Collect<'_> {
+impl<'a> Collect<'_> {
+    fn fact(&self, pos: Pos, level: u32, module: Option<String>, names: &[ast::Alias], from: bool) -> ImportFact {
+        ImportFact {
+            pos,
+            level,
+            module,
+            names: names.iter().map(|a| self.spanned(a)).collect(),
+            from,
+            deferred: self.deferred,
+            guarded: self.guarded,
+        }
+    }
+
+    fn import(&mut self, stmt: &Stmt) {
+        let fact = match stmt {
+            Stmt::Import(i) => self.fact(self.loc.at(i), 0, None, &i.names, false),
+            Stmt::ImportFrom(i) => {
+                let module = i.module.as_ref();
+                let pos = module.map_or_else(|| self.loc.at(i), |m| self.loc.at(m));
+                self.fact(pos, i.level, module.map(ToString::to_string), &i.names, true)
+            }
+            _ => return,
+        };
+        self.list.push(fact);
+    }
+
+    /// Visits a statement whose body an import may fail in without stopping the module, guarding
+    /// that body, and whether it was one.
+    fn guards(&mut self, stmt: &'a Stmt) -> bool {
+        match stmt {
+            Stmt::Try(t) if t.handlers.iter().any(catches_import) => self.guarded_try(t),
+            Stmt::With(w) if method_body::suppresses(w) => {
+                for item in &w.items {
+                    self.visit_with_item(item);
+                }
+                self.guard(&w.body);
+            }
+            Stmt::If(i) if type_checking(&i.test) => {
+                self.visit_expr(&i.test);
+                self.guard(&i.body);
+                for clause in &i.elif_else_clauses {
+                    self.visit_elif_else_clause(clause);
+                }
+            }
+            _ => return false,
+        }
+        true
+    }
+
+    fn guarded_try(&mut self, t: &'a ast::StmtTry) {
+        self.guard(&t.body);
+        for handler in &t.handlers {
+            self.visit_except_handler(handler);
+        }
+        self.visit_body(&t.orelse);
+        self.visit_body(&t.finalbody);
+    }
+
+    /// The body of a function runs when it is called, outside any `try` around the `def`.
+    fn function(&mut self, f: &'a ast::StmtFunctionDef) {
+        for decorator in &f.decorator_list {
+            self.visit_decorator(decorator);
+        }
+        self.visit_parameters(&f.parameters);
+        let outer = (self.deferred, self.guarded);
+        (self.deferred, self.guarded) = (true, false);
+        self.visit_body(&f.body);
+        (self.deferred, self.guarded) = outer;
+    }
+
+    fn guard(&mut self, body: &'a [Stmt]) {
+        let outer = std::mem::replace(&mut self.guarded, true);
+        self.visit_body(body);
+        self.guarded = outer;
+    }
+
     /// The name an alias imports, which `as` leaves the parent package bound under too.
     fn spanned(&self, alias: &ast::Alias) -> Spanned<String> {
         Spanned {
@@ -100,18 +173,33 @@ impl Collect<'_> {
             _ => None,
         };
         match literal {
-            Some(module) => self.list.push(ImportFact {
-                level: 0,
-                module: None,
-                names: vec![Spanned {
+            Some(module) => {
+                let pos = self.loc.at(call);
+                let name = Spanned {
                     value: module.to_owned(),
-                    pos: self.loc.at(call),
-                }],
-                from: false,
-            }),
+                    pos,
+                };
+                self.list.push(ImportFact {
+                    names: vec![name],
+                    ..self.fact(pos, 0, None, &[], false)
+                });
+            }
             None => self.dynamic = true,
         }
     }
+}
+
+/// Whether a handler catches what a failed import raises.
+fn catches_import(handler: &ast::ExceptHandler) -> bool {
+    let ast::ExceptHandler::ExceptHandler(h) = handler;
+    ["ImportError", "ModuleNotFoundError"]
+        .into_iter()
+        .any(|error| python::catches(h, error))
+}
+
+/// `TYPE_CHECKING` or `typing.TYPE_CHECKING`, true only for a type checker.
+fn type_checking(test: &Expr) -> bool {
+    tail_name(test) == Some("TYPE_CHECKING")
 }
 
 /// What the file binds to `__all__` at import.
@@ -203,6 +291,47 @@ struct Addon {
     /// The module runs on Python 2, or on a series the scan does not know, where `import x` may
     /// name a submodule of the importing package.
     implicit: bool,
+    /// A file of the module does not decode, so it may hold any module or name.
+    lost: bool,
+}
+
+impl Addon {
+    /// The names module `path` binds, an empty list for a namespace package, and none when the
+    /// scan cannot list them.
+    fn defines(&self, path: &[String]) -> Option<&[String]> {
+        let at = path.join("/");
+        let file = if at.is_empty() {
+            "__init__.py".to_owned()
+        } else if self.files.contains_key(&format!("{at}/__init__.py")) {
+            format!("{at}/__init__.py")
+        } else {
+            format!("{at}.py")
+        };
+        match self.files.get(&file) {
+            Some(imports) => imports.as_ref()?.defines.as_deref(),
+            None => Some(&[]),
+        }
+    }
+}
+
+/// An import of a module of an addon by its path under `odoo.addons`, its own addon included, or
+/// by a relative path past the importer's root.
+#[derive(Debug, PartialEq, Eq)]
+pub struct AddonImport {
+    pub addon: String,
+    /// The module as the import writes it, its leading dots included.
+    pub text: String,
+    pub pos: Pos,
+    pub faults: Vec<Fault>,
+}
+
+/// What an import names that its addon does not have.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Fault {
+    /// No module or package of the addon has the path.
+    Missing,
+    /// The module neither binds the name nor has a submodule of it.
+    Undefined(Spanned<String>),
 }
 
 /// The imports of every module of the scan.
@@ -219,7 +348,11 @@ impl Graph {
         let addons = modules.iter().map(|m| {
             let series = m.series.or(default_series);
             let files = m.python.iter().map(|f| (f.rel.clone(), f.facts.imports.clone()));
-            (m.name.clone(), addon(files, series))
+            let addon = Addon {
+                lost: m.lost_text,
+                ..addon(files, series)
+            };
+            (m.name.clone(), addon)
         });
         Self::of(addons.collect())
     }
@@ -266,6 +399,90 @@ impl Graph {
             }
         }
         Some(seen)
+    }
+
+    /// The modules of addons `fact` of file `rel` imports by their path, each with what the addon
+    /// lacks of it. The scan reads no fault where the addon may hold anything: outside the graph,
+    /// with a file that does not decode or parse on the way, under `base.maintenance`, which Odoo
+    /// maps to `odoo.upgrade`, or under a `tests/` it lacks, as a fetched core drops it.
+    pub fn addon_imports(&self, rel: &str, fact: &ImportFact) -> Vec<AddonImport> {
+        let mut found = vec![];
+        if !fact.from {
+            for name in &fact.names {
+                if let Some(Place::In(to, path)) = addon_place(rel, 0, Some(&name.value)) {
+                    found.push(self.addon_import(to, path, name.value.clone(), name.pos, &[]));
+                }
+            }
+            return found;
+        }
+        let module = fact.module.as_deref();
+        let written = format!("{}{}", ".".repeat(fact.level as usize), module.unwrap_or_default());
+        match addon_place(rel, fact.level, module) {
+            Some(Place::In(to, path)) => found.push(self.addon_import(to, path, written, fact.pos, &fact.names)),
+            Some(Place::Addons) => {
+                let sep = if module.is_some() { "." } else { "" };
+                for name in fact.names.iter().filter(|n| n.value != "*") {
+                    let text = format!("{written}{sep}{}", name.value);
+                    found.push(self.addon_import(name.value.clone(), vec![], text, name.pos, &[]));
+                }
+            }
+            None => {}
+        }
+        found
+    }
+
+    fn addon_import(
+        &self,
+        to: String,
+        path: Vec<String>,
+        text: String,
+        pos: Pos,
+        names: &[Spanned<String>],
+    ) -> AddonImport {
+        AddonImport {
+            faults: self.faults(&to, &path, names),
+            addon: to,
+            text,
+            pos,
+        }
+    }
+
+    /// What addon `to` lacks of `path` and of the `names` imported from it.
+    fn faults(&self, to: &str, path: &[String], names: &[Spanned<String>]) -> Vec<Fault> {
+        let Some(target) = self.addons.get(to).filter(|t| !self.blind(to, t, path)) else {
+            return vec![];
+        };
+        if self.locate(to, path).missing.is_some() {
+            return vec![Fault::Missing];
+        }
+        let Some(defines) = target.defines(path) else {
+            return vec![];
+        };
+        let undefined = names.iter().filter(|n| {
+            let name = n.value.as_str();
+            let dunder = name.starts_with("__") && name.ends_with("__");
+            name != "*" && !dunder && !defines.contains(&n.value) && !self.child(to, path, name)
+        });
+        undefined.map(|n| Fault::Undefined(n.clone())).collect()
+    }
+
+    /// Whether the scan cannot tell what `path` of addon `to` holds.
+    fn blind(&self, to: &str, target: &Addon, path: &[String]) -> bool {
+        let head = path.first().map(String::as_str);
+        let unlisted =
+            (to == "base" && head == Some("maintenance")) || (head == Some("tests") && !target.dirs.contains("tests"));
+        let unread = || {
+            let files = self.locate(to, path).files;
+            files.iter().any(|f| target.files.get(f).is_some_and(Option::is_none))
+        };
+        target.lost || unlisted || unread()
+    }
+
+    /// Whether `name` is a module under `path` of addon `to`.
+    fn child(&self, to: &str, path: &[String], name: &str) -> bool {
+        let mut sub = path.to_vec();
+        sub.push(name.to_owned());
+        self.locate(to, &sub).missing.is_none()
     }
 
     /// The files an import of file `rel` of `addon` runs, each with its addon.
@@ -420,6 +637,20 @@ impl Graph {
     }
 }
 
+/// What an import names in `odoo.addons`, by its absolute path under `odoo.addons` or
+/// `openerp.addons` or by one dot more than file `rel` has packages above it.
+fn addon_place(rel: &str, level: u32, module: Option<&str>) -> Option<Place> {
+    let segments = module.into_iter().flat_map(|m| m.split('.'));
+    if level > 0 {
+        let past_root = level as usize == rel.matches('/').count() + 2;
+        return past_root.then(|| Place::Addons.join(segments));
+    }
+    match segments.collect::<Vec<_>>().as_slice() {
+        ["odoo" | "openerp", "addons", rest @ ..] => Some(Place::Addons.join(rest.iter().copied())),
+        _ => None,
+    }
+}
+
 /// An addon of `series` with its Python files.
 fn addon(files: impl Iterator<Item = (String, Option<FileImports>)>, series: Option<Series>) -> Addon {
     let mut addon = Addon {
@@ -481,6 +712,43 @@ mod tests {
         );
         let pos = imports(src).list[1].names[1].pos;
         assert_eq!((pos.line, pos.col), (2, 23));
+    }
+
+    #[test]
+    fn an_import_is_deferred_in_a_function_and_guarded_where_its_failure_changes_nothing() {
+        let src = "import a\ntry:\n    import b\n    def f():\n        import c\nexcept (ImportError, KeyError):\n    import d\nelse:\n    import e\n\
+                   try:\n    import g\nexcept ModuleNotFoundError:\n    pass\ntry:\n    import h\nexcept KeyError:\n    pass\n\
+                   with contextlib.suppress(ImportError):\n    import i\nif typing.TYPE_CHECKING:\n    import j\nelse:\n    import k\n\
+                   class K:\n    def m(self):\n        try:\n            import l\n        except ImportError:\n            pass\n\
+                   def n():\n    importlib.import_module('o')\n";
+        let flags: Vec<(String, bool, bool)> = imports(src)
+            .list
+            .into_iter()
+            .map(|f| (f.names[0].value.clone(), f.deferred, f.guarded))
+            .collect();
+        let expected = [
+            ("a", false, false),
+            ("b", false, true),
+            ("c", true, false),
+            ("d", false, false),
+            ("e", false, false),
+            ("g", false, true),
+            ("h", false, false),
+            ("i", false, true),
+            ("j", false, true),
+            ("k", false, false),
+            ("l", true, true),
+            ("o", true, false),
+        ];
+        let expected: Vec<_> = expected.iter().map(|(n, d, g)| ((*n).to_owned(), *d, *g)).collect();
+        assert_eq!(flags, expected);
+    }
+
+    #[test]
+    fn a_from_import_is_at_its_module_and_any_other_at_the_statement() {
+        let list = imports("x = 1; from  odoo.addons.shop import a\nfrom . import b\nimport c\n").list;
+        let at: Vec<_> = list.iter().map(|f| (f.pos.line, f.pos.col)).collect();
+        assert_eq!(at, [(1, 14), (2, 1), (3, 1)]);
     }
 
     #[test]
@@ -707,6 +975,118 @@ mod tests {
         assert!(g.reached("shop", &["__init__.py"]).is_none());
         assert!(g.reached("shop", &["c.py"]).is_none());
         assert!(g.reached("gone", &["__init__.py"]).is_none());
+    }
+
+    /// The modules and faults of each addon import of file `rel` of `addon`, as
+    /// `(addon, text, line, faults)` with each fault as `-` for a missing path or the name.
+    fn addon_imports(g: &Graph, rel: &str, src: &str) -> Vec<(String, String, u32, Vec<String>)> {
+        let facts = imports(src).list;
+        let found = facts.iter().flat_map(|f| g.addon_imports(rel, f));
+        found
+            .map(|i| {
+                let faults = i.faults.iter().map(|f| match f {
+                    Fault::Missing => "-".to_owned(),
+                    Fault::Undefined(n) => n.value.clone(),
+                });
+                (i.addon, i.text, i.pos.line, faults.collect())
+            })
+            .collect()
+    }
+
+    fn lib() -> Graph {
+        graph(&[
+            (
+                "lib",
+                false,
+                &[
+                    ("__init__.py", Some("from . import models\nVERSION = 1\n")),
+                    (
+                        "models/__init__.py",
+                        Some("from . import book\nfrom .book import Book\n"),
+                    ),
+                    ("models/book.py", Some("class Book:\n    pass\n")),
+                    ("models/extra.py", Some("")),
+                    ("open.py", Some("from .models.book import *\n")),
+                    ("broken.py", None),
+                    ("space/util.py", Some("")),
+                ],
+            ),
+            ("lost", false, &[("__init__.py", Some(""))]),
+            ("base", false, &[("__init__.py", Some(""))]),
+        ])
+    }
+
+    #[test]
+    fn an_addon_import_names_its_addon_and_what_it_lacks() {
+        let g = lib();
+        let src = "from odoo.addons.lib.models import Book, extra, Gone, __path__\n\
+                   import odoo.addons.lib.models.book\n\
+                   import odoo.addons.lib.wizard\n\
+                   from odoo.addons.lib.models.book import Book\n\
+                   from odoo.addons.lib.models.book.Book import x\n\
+                   from openerp.addons import lib, other\n\
+                   from odoo.addons.lib import VERSION, space\n\
+                   from odoo.addons.lib.space import util, nothing\n\
+                   from odoo.addons.lib.open import Anything\n\
+                   from odoo.addons.lib.broken import Anything\n\
+                   from odoo.addons.other.models import x\n\
+                   from odoo.addons.base.maintenance.migrations import util\n\
+                   from odoo.addons.lib.tests.common import Case\n\
+                   from odoo import addons\nfrom . import local\nimport odoo.addons\n";
+        let owned = |faults: &[&str]| faults.iter().map(|f| (*f).to_owned()).collect::<Vec<_>>();
+        let row = |addon: &str, text: &str, line: u32, faults: &[&str]| {
+            (addon.to_owned(), text.to_owned(), line, owned(faults))
+        };
+        assert_eq!(
+            addon_imports(&g, "models/x.py", src),
+            [
+                row("lib", "odoo.addons.lib.models", 1, &["Gone"]),
+                row("lib", "odoo.addons.lib.models.book", 2, &[]),
+                row("lib", "odoo.addons.lib.wizard", 3, &["-"]),
+                row("lib", "odoo.addons.lib.models.book", 4, &[]),
+                row("lib", "odoo.addons.lib.models.book.Book", 5, &["-"]),
+                row("lib", "openerp.addons.lib", 6, &[]),
+                row("other", "openerp.addons.other", 6, &[]),
+                row("lib", "odoo.addons.lib", 7, &[]),
+                row("lib", "odoo.addons.lib.space", 8, &["nothing"]),
+                row("lib", "odoo.addons.lib.open", 9, &[]),
+                row("lib", "odoo.addons.lib.broken", 10, &[]),
+                row("other", "odoo.addons.other.models", 11, &[]),
+                row("base", "odoo.addons.base.maintenance.migrations", 12, &[]),
+                row("lib", "odoo.addons.lib.tests.common", 13, &[]),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_relative_import_names_an_addon_only_past_the_root() {
+        let g = lib();
+        let src = "from ...lib.models import Gone\nfrom ... import lib\nfrom .. import sibling\nfrom .... import far\n";
+        assert_eq!(
+            addon_imports(&g, "models/x.py", src),
+            [
+                ("lib".to_owned(), "...lib.models".to_owned(), 1, vec!["Gone".to_owned()]),
+                ("lib".to_owned(), "...lib".to_owned(), 2, vec![]),
+            ]
+        );
+        let at_root = addon_imports(&g, "x.py", "from ..lib import wizard\n");
+        assert_eq!(
+            at_root,
+            [("lib".to_owned(), "..lib".to_owned(), 1, vec!["wizard".to_owned()])]
+        );
+    }
+
+    #[test]
+    fn an_addon_with_a_file_that_does_not_decode_lacks_nothing() {
+        let mut g = lib();
+        g.addons.get_mut("lost").unwrap().lost = true;
+        let found = addon_imports(
+            &g,
+            "x.py",
+            "from odoo.addons.lost.models import x\nimport odoo.addons.lib.gone\n",
+        );
+        let faults: Vec<_> = found.into_iter().map(|(addon, .., f)| (addon, f.len())).collect();
+        assert_eq!(faults, [("lost".to_owned(), 0), ("lib".to_owned(), 1)]);
     }
 
     #[test]

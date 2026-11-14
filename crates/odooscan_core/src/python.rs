@@ -1038,7 +1038,7 @@ fn raises_if_not_found(call: &ast::ExprCall) -> bool {
 }
 
 /// Whether a handler catches `error`: by name, as a bare `except`, or through a base of every error.
-fn catches(handler: &ast::ExceptHandlerExceptHandler, error: &str) -> bool {
+pub(crate) fn catches(handler: &ast::ExceptHandlerExceptHandler, error: &str) -> bool {
     let names =
         |name: &Expr| matches!(tail_name(name), Some(n) if n == error || n == "Exception" || n == "BaseException");
     match handler.type_.as_deref() {

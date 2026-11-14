@@ -636,7 +636,7 @@ impl Exits {
 
 /// Whether a `with` runs its body under `contextlib.suppress`, which swallows the exceptions it
 /// names.
-fn suppresses(w: &ast::StmtWith) -> bool {
+pub(crate) fn suppresses(w: &ast::StmtWith) -> bool {
     w.items.iter().any(|item| {
         matches!(&item.context_expr, Expr::Call(c)
             if is_name(&c.func, "suppress") || matches!(&*c.func, Expr::Attribute(a) if a.attr.as_str() == "suppress"))
