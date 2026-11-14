@@ -266,7 +266,7 @@ custom/cursor_state/models/caches.py:8:1: OD124 _visits_by_day is filled at runt
 custom/cursor_state/models/caches.py:9:1: OD124 _recent_labels is filled at runtime but lives in the Python process, so every database the server runs shares it and each worker fills its own copy; cache on a model method with tools.ormcache, which Odoo keeps per database and clears in every worker
 custom/cursor_state/models/caches.py:10:1: OD124 _lower_codes is filled at runtime but lives in the Python process, so every database the server runs shares it and each worker fills its own copy; cache on a model method with tools.ormcache, which Odoo keeps per database and clears in every worker
 custom/cursor_state/models/class_patches.py:1:6: OD519 no file of module base provides 'odoo.addons.base.controllers.main'
-custom/cursor_state/models/class_patches.py:5:6: OD518 'odoo.addons.x_label_reports.report.label_report' comes from module x_label_reports, which is not in depends; add it there
+custom/cursor_state/models/class_patches.py:5:6: OD518 'odoo.addons.x_label_reports.report.label_report' comes from module x_label_reports; add it to depends
 custom/cursor_state/models/class_patches.py:8:1: OD123 setting LabelWizard._x_copies at import changes it in every database the server runs, whether this module is installed there or not; inherit the model in a class of this module and override it there, which applies only where the module is installed
 custom/cursor_state/models/class_patches.py:9:1: OD123 setting LabelReport._x_copies at import changes it in every database the server runs, whether this module is installed there or not; inherit the model in a class of this module and override it there, which applies only where the module is installed
 custom/cursor_state/models/class_patches.py:12:1: OD123 setting LabelFormat.x_margin at import changes it in every database the server runs, whether this module is installed there or not; subclass LabelFormat in this module and use the subclass where it needs the change
@@ -479,7 +479,7 @@ custom/exposure_portal/security/ir.model.access.csv:2:1: OD402 base.group_portal
 custom/exposure_portal/security/ir.model.access.csv:2:1: OD403 Html field 'body' of exposure.internal is not sanitized (sanitize=False) and this row lets base.group_portal write exposure.internal, so they can store script that runs for whoever opens the record; keep the sanitizer on, or give the field groups
 custom/exposure_portal/security/ir.model.access.csv:2:1: OD404 'api_token' of exposure.internal holds a secret and has no groups, and this row lets base.group_portal read exposure.internal, so they can read it over RPC; give the field groups, such as base.group_system
 custom/exposure_portal/security/ir.model.access.csv:3:1: OD402 base.group_portal gets write, create or unlink on exposure.model_exposure_board; public and portal access should be read-only and go through controllers
-custom/field_classes/models/lens.py:5:6: OD518 'odoo.addons.optics.orm' comes from module optics, which is not in depends; add it there
+custom/field_classes/models/lens.py:5:6: OD518 'odoo.addons.optics.orm' comes from module optics; add it to depends
 custom/field_classes/models/lens.py:20:25: OD104 this default is computed once at import; pass the function itself, e.g. default=fields.Date.today
 custom/field_classes/models/lens.py:49:23: OD210 'embeding': x.lens has no field 'embeding'
 custom/field_classes/models/lens.py:50:23: OD210 'link.missing': res.partner has no field 'missing'
@@ -559,12 +559,14 @@ custom/form_patches/static/src/quick_form_card.xml:18:19: OD605 no indexed bundl
 custom/imports_old/__init__.py:1:53: OD519 'openerp.addons.base.models' does not define 'res_users'
 custom/imports_partial/__manifest__.py:5:25: OD503 module 'ghost_enterprise' is not on the addons path
 custom/imports_user/models/guarded.py:22:47: OD519 'odoo.addons.imports_lib.tools' does not define 'shelf_height'
-custom/imports_user/models/guarded.py:23:10: OD518 'odoo.addons.project.models.project' comes from module project, which is not in depends; add it there
+custom/imports_user/models/guarded.py:23:10: OD518 'odoo.addons.project.models.project' comes from module project; add it to depends
 custom/imports_user/models/reader.py:3:58: OD519 'odoo.addons.imports_lib.models' does not define 'PartnerShelves'
 custom/imports_user/models/reader.py:7:6: OD519 no file of module imports_lib provides 'odoo.addons.imports_lib.wizard'
-custom/imports_user/models/reader.py:8:6: OD518 'odoo.addons.project.models.project' comes from module project, which is not in depends; add it there
-custom/imports_user/models/reader.py:11:9: OD518 '...project.models' comes from module project, which is not in depends; add it there
-custom/imports_user/models/reader.py:18:51: OD519 'odoo.addons.imports_lib.tools' does not define 'format_label'
+custom/imports_user/models/reader.py:8:6: OD518 'odoo.addons.project.models.project' comes from module project; add it to depends
+custom/imports_user/models/reader.py:10:25: OD518 'odoo.addons.project' comes from module project; add it to depends
+custom/imports_user/models/reader.py:12:9: OD518 '...project.models' comes from module project; add it to depends
+custom/imports_user/models/reader.py:13:17: OD518 '...project' comes from module project; add it to depends
+custom/imports_user/models/reader.py:20:51: OD519 'odoo.addons.imports_lib.tools' does not define 'format_label'
 custom/inherited_ids_bare/data/refs.xml:9:9: OD301 module inherited_ids_bare defines no XML id 'inherited_ids_bare.field_inherited_bare_plain__tag'
 custom/inherited_ids_outside/__manifest__.py:4:25: OD503 module 'ghost_mixins' is not on the addons path
 custom/inherited_ids_outside/data/refs.xml:6:9: OD301 module inherited_ids_outside defines no XML id 'inherited_ids_outside.field_inherited_outside_plain__tag'

@@ -819,7 +819,7 @@
     {
       "path": "addons/html_editor/controllers/main.py",
       "code": "OD518",
-      "message": "'odoo.addons.mail.tools' comes from module mail, which is not in depends; add it there",
+      "message": "'odoo.addons.mail.tools' comes from module mail; add it to depends",
       "count": 1
     },
     {
@@ -2367,7 +2367,7 @@
     {
       "path": "addons/microsoft_outlook/models/microsoft_outlook_mixin.py",
       "code": "OD518",
-      "message": "'odoo.addons.google_gmail.tools' comes from module google_gmail, which is not in depends; add it there",
+      "message": "'odoo.addons.google_gmail.tools' comes from module google_gmail; add it to depends",
       "count": 1
     },
     {

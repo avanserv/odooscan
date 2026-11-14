@@ -1793,7 +1793,7 @@ impl<'m> Ctx<'_, 'm> {
                 for import in self.index.imports.addon_imports(&file.rel, fact) {
                     if loads && !fact.deferred && self.outside_depends(&import.addon) {
                         let message = format!(
-                            "'{}' comes from module {}, which is not in depends; add it there",
+                            "'{}' comes from module {}; add it to depends",
                             import.text, import.addon
                         );
                         out.push(&file.path, "OD518", import.pos, message);
