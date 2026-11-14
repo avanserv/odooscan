@@ -773,6 +773,8 @@ pub struct PyFacts {
     /// Groups named by `has_group()` and the `groups` of fields, which may come from modules
     /// that are not installed.
     pub group_refs: Vec<XmlRef>,
+    /// The literal tour names a test starts or waits for with `start_tour()` or `browser_js()`.
+    pub tour_names: Vec<Spanned<String>>,
     /// Base names of `.xml` and `.csv` files named in string literals, which Python code may load.
     pub file_mentions: Vec<String>,
     /// Functions whose parameters or calls carry data a caller or callee may have from a user.
@@ -1444,6 +1446,11 @@ pub struct JsFacts {
     pub registrations: Vec<(String, String)>,
     /// The categories the file adds a key to that only a run tells.
     pub open_categories: Vec<String>,
+    /// The literal keys the file gives `useService()`.
+    pub services: Vec<Spanned<String>>,
+    /// The services the file tests for with `"key" in env.services`, as code that runs without them
+    /// does.
+    pub service_probes: Vec<String>,
     /// Findings of the file alone, which `checks.rs` reports only for a script a page loads.
     pub diags: Vec<RawDiag>,
     pub syntax_error: Option<Spanned<String>>,

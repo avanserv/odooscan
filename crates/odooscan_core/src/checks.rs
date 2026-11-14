@@ -17,8 +17,9 @@ use crate::grants::{self, AttachmentGrant, Grant, Grants};
 use crate::imports::{AddonImport, Fault};
 use crate::index::{
     ACTION_REGISTRY, BASE_MODEL_METHODS, Export, FIELD_REGISTRY, FieldDef, FieldInfo, Index, JsSpec, JsTarget,
-    PathError, Placed, PropSchema, RELATIONAL_TYPES, Scope, Status, VIEW_WIDGET_REGISTRY, ViewTree, asset_glob_set,
-    base_private_method, full_id, js_lookup, js_url, loaded_data, located,
+    PathError, Placed, PropSchema, RELATIONAL_TYPES, SERVICE_REGISTRY, Scope, Status, TOUR_REGISTRY,
+    VIEW_WIDGET_REGISTRY, ViewTree, asset_glob_set, base_private_method, full_id, js_lookup, js_url, loaded_data,
+    located,
 };
 use crate::mentions::HOOK_PREFIXES;
 use crate::module_state::UPGRADE_DIRS;
@@ -2074,6 +2075,7 @@ impl<'m> Ctx<'_, 'm> {
                 for r in &file.facts.group_refs {
                     self.py_ref(out, path, r, false);
                 }
+                self.tours(out, path, &file.facts.tour_names);
                 self.domains(out, path, &file.facts.domains);
             }
             // env['x'] for a model outside depends is usually guarded by `if 'x' in self.env`, a
@@ -2093,6 +2095,21 @@ impl<'m> Ctx<'_, 'm> {
                         format!("no indexed module defines model '{}'", model.value),
                     );
                 }
+            }
+        }
+    }
+
+    /// OD332 on the tours a test runs that no indexed script registers. A test may run the tour of a
+    /// module outside depends once it has skipped itself unless that module is installed, and a test
+    /// bundle of a module outside the index, such as an Enterprise one, may add any.
+    fn tours(&self, out: &mut Out<'m>, path: &'m Path, names: &[Spanned<String>]) {
+        if self.partial || self.index.registry_open(TOUR_REGISTRY, self.installs) {
+            return;
+        }
+        for name in names {
+            if let Status::Missing = self.index.registry_status(TOUR_REGISTRY, &name.value, self.installs) {
+                let message = format!("no indexed bundle registers tour '{}'", name.value);
+                out.push(path, "OD332", name.pos, message);
             }
         }
     }
@@ -2150,6 +2167,7 @@ impl<'m> Ctx<'_, 'm> {
         }
         self.js_patches(out, self.mi, fi, file);
         self.owl_triggers(out, fi, file);
+        self.services(out, file);
         for call in &file.facts.orm_calls {
             self.orm_call(out, &file.path, call);
         }
@@ -2188,8 +2206,24 @@ impl<'m> Ctx<'_, 'm> {
         self.legacy_requires(out, fi, file);
         if !file.in_tests() {
             self.owl_triggers(out, fi, file);
+            self.services(out, file);
             for call in &file.facts.orm_calls {
                 self.orm_call(out, &file.path, call);
+            }
+        }
+    }
+
+    /// OD616 on the services a script outside tests asks `useService()` for. One that a script of
+    /// the module tests for with `"key" in env.services` may be missing on purpose, and a module
+    /// outside the index, such as an Enterprise one, may register any.
+    fn services(&self, out: &mut Out<'m>, file: &'m SourceFile<JsFacts>) {
+        if self.partial {
+            return;
+        }
+        let scripts = || self.module.js.iter().filter(|f| !f.in_tests());
+        for service in &file.facts.services {
+            if !scripts().any(|f| f.facts.service_probes.contains(&service.value)) {
+                self.registry_key(out, &file.path, ("OD616", SERVICE_REGISTRY, "service"), service);
             }
         }
     }
