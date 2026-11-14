@@ -6,7 +6,7 @@ use crate::facts::{
     FlowSummary, Heritage, JsClass, ModelKind, OptionValue, PyFacts, Receiver, RecordWrite, ReportFact, RouteKey,
     RuleFact, ServerFact, Signature, UNREAD_TYPE, ViewFact, WrittenValue,
 };
-use crate::manifest::AutoInstall;
+use crate::manifest::{AutoInstall, OdooReads};
 use crate::mentions::{HOOK_PREFIXES, Words};
 use crate::project::{Module, SourceFile, code_loaded};
 use crate::series::{self, Series};
@@ -1572,6 +1572,9 @@ pub struct Index<'m> {
     /// The hook names and the prefixes of built ones that any file of any module mentions.
     hook_names: FxHashSet<&'m str>,
     hook_prefixes: Vec<&'m str>,
+    /// The modules whose manifest odooscan rejects, so none of them is in `modules`; `build` leaves
+    /// it empty for the caller to fill.
+    pub rejected: FxHashMap<String, OdooReads>,
 }
 
 impl<'m> Index<'m> {
@@ -1643,6 +1646,7 @@ impl<'m> Index<'m> {
             models,
             hook_names,
             hook_prefixes,
+            rejected: FxHashMap::default(),
         };
         index.patched = index.patched_classes();
         index.template_bases = index.template_bases();

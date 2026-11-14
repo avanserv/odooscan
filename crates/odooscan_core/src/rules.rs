@@ -282,7 +282,7 @@ rules! {
     "OD406" "rule-without-permission" Correctness Error Some("<saas~19.4"), true, "A record rule sets every perm_* false, which Odoo refuses as it loads it.";
     "OD501" "manifest-data-missing" Correctness Error None, false, "A file listed in the manifest does not exist.";
     "OD502" "data-file-not-loaded" Quality Warning None, false, "A data file is listed under no manifest key Odoo reads, so Odoo never loads it.";
-    "OD503" "unknown-dependency" Correctness Error None, true, "A module in depends is not on the addons path.";
+    "OD503" "unknown-dependency" Correctness Error None, true, "A module in depends is not on the addons path, or its manifest cannot be read.";
     "OD504" "circular-dependency" Correctness Error None, true, "A module in depends depends back on this module.";
     // saas~14.2 globs the `qweb` key (`addons/web/controllers/main.py:231`), saas~14.3 reads only
     // `web.assets_qweb` (`:557`).

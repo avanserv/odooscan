@@ -174,7 +174,7 @@ import reaches.
 | --- | --- | --- |
 | [OD501](OD501.md) | `manifest-data-missing` | A file listed in the manifest does not exist. |
 | [OD502](OD502.md) | `data-file-not-loaded` | A data file is listed under no manifest key Odoo reads, so Odoo never loads it. |
-| [OD503](OD503.md) | `unknown-dependency` | A module in depends is not on the addons path. |
+| [OD503](OD503.md) | `unknown-dependency` | A module in depends is not on the addons path, or its manifest cannot be read. |
 | [OD504](OD504.md) | `circular-dependency` | A module in depends depends back on this module. |
 | [OD505](OD505.md) | `qweb-key-ignored` | The manifest lists templates under qweb, which Odoo ignores. |
 | [OD506](OD506.md) | `assets-qweb-unloaded` | The manifest adds files to web.assets_qweb, which Odoo no longer loads. |

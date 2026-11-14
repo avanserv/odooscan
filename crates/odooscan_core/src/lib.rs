@@ -149,7 +149,8 @@ pub fn scan(opts: &ScanOptions) -> Report {
     let mut notices = discovery.notices;
     let modules = discovery.modules;
     let broken = discovery.broken;
-    let index = index::Index::build(&modules, default_series);
+    let mut index = index::Index::build(&modules, default_series);
+    index.rejected = discovery.rejected;
     if !index.has_base && modules.iter().any(|m| m.checked) {
         notices.push(
             "module base is not indexed, so cross-module rules are off; pass --addons-path with an Odoo checkout"
