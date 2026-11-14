@@ -1197,6 +1197,19 @@ fn depends_closure(
     (reached, complete)
 }
 
+/// Whether each module is a depend, direct or not, of a module whose imports the scan cannot read in full.
+/// An unread module on a `depends` cycle counts only when another unread module reaches it.
+fn unread_dependents(modules: &[Module], by_name: &FxHashMap<&str, usize>, imports: &imports::Graph) -> Vec<bool> {
+    let mut marked = vec![false; modules.len()];
+    for u in (0..modules.len()).filter(|&u| imports.unread(&modules[u].name)) {
+        let (reached, _) = depends_closure(modules, by_name, [u]);
+        for (mi, r) in reached.into_iter().enumerate() {
+            marked[mi] |= r && mi != u;
+        }
+    }
+    marked
+}
+
 /// Module indices in the order Odoo loads them: by depth in the `depends` graph, then by name. The
 /// passes end at the deepest module, or at the module count when a cycle keeps deepening.
 fn load_order(modules: &[Module], by_name: &FxHashMap<&str, usize>) -> Vec<usize> {
@@ -1568,6 +1581,8 @@ pub struct Index<'m> {
     always_installed: Vec<bool>,
     /// Each module's place in `load_order`.
     load_rank: Vec<usize>,
+    /// Whether each module is a depend of another module whose imports the scan cannot read in full.
+    unread_dependent: Vec<bool>,
     patched: Patched<'m>,
     /// Classes a subclass with a template of its own extends.
     template_bases: FxHashSet<ClassKey>,
@@ -1618,6 +1633,8 @@ impl<'m> Index<'m> {
         let models_with_access = access_models(modules, &model_by_xmlid, default_series);
         let (js_loaded, templates_loaded) = loaded_static(modules);
         let (hook_names, hook_prefixes) = hook_mentions(modules);
+        let imports = imports::Graph::of_modules(modules, default_series);
+        let unread_dependent = unread_dependents(modules, &by_name, &imports);
         let mut index = Self {
             modules,
             has_base: base.is_some(),
@@ -1637,7 +1654,7 @@ impl<'m> Index<'m> {
             view_keys,
             templates: Inheritance::new(template_nodes(modules, &templates_loaded)),
             routes: routing::Table::of_modules(modules),
-            imports: imports::Graph::of_modules(modules, default_series),
+            imports,
             models_with_access,
             model_by_xmlid,
             js_paths: js_paths(modules),
@@ -1645,6 +1662,7 @@ impl<'m> Index<'m> {
             templates_loaded,
             always_installed: always_installed(modules, &by_name, default_series),
             load_rank: load_rank(modules, &by_name),
+            unread_dependent,
             by_name,
             patched: FxHashMap::default(),
             template_bases: FxHashSet::default(),
@@ -2081,6 +2099,12 @@ impl<'m> Index<'m> {
     /// Whether Odoo loads `a` ahead of `b` on a database that installs both.
     pub fn loads_before(&self, a: usize, b: usize) -> bool {
         self.load_rank[a] < self.load_rank[b]
+    }
+
+    /// Whether a module other than `module` that depends on it, directly or not, has a file that may
+    /// import any file of it (`imports::Graph::unread`).
+    pub fn has_unread_dependent(&self, module: usize) -> bool {
+        self.unread_dependent[module]
     }
 
     /// Whether `from` depends on `to`, directly or through other modules.
@@ -3701,6 +3725,43 @@ mod tests {
         // At one depth the name decides.
         assert!(before("main", "side") && before("aside", "heir") && !before("side", "main"));
         assert!(!before("main", "main"));
+    }
+
+    #[test]
+    fn a_module_has_an_unread_dependent_when_another_unread_module_reaches_it() {
+        let manifest = |depends: &str| format!("{{'depends': [{depends}]}}");
+        let mut modules = [
+            module("base", &manifest("")),
+            module("lib", &manifest("'base'")),
+            module("mid", &manifest("'lib'")),
+            module("reader", &manifest("'mid', 'missing'")),
+            module("side", &manifest("'base'")),
+            module("top", &manifest("'reader'")),
+            module("alone", &manifest("'ring'")),
+            module("ring", &manifest("'alone'")),
+        ];
+        let dynamic = "import importlib\nimportlib.import_module(name)\n";
+        for name in ["reader", "side", "alone"] {
+            let module = modules.iter_mut().find(|m| m.name == name).unwrap();
+            module.python.push(SourceFile {
+                path: PathBuf::new(),
+                rel: "__init__.py".to_owned(),
+                rank: None,
+                demo: false,
+                facts: python::analyze(dynamic, Series::parse("18.0")),
+                suppressions: Default::default(),
+                mentions: Mentions::default(),
+            });
+        }
+        let index = Index::build(&modules, None);
+        let marked = (0..modules.len()).filter(|&mi| index.has_unread_dependent(mi));
+        let marked: Vec<_> = marked.map(|mi| modules[mi].name.as_str()).collect();
+        assert_eq!(marked, ["base", "lib", "mid", "ring"]);
+        let unread = |mi: usize| index.imports.unread(&modules[mi].name);
+        for mi in 0..modules.len() {
+            let walked = (0..modules.len()).any(|o| o != mi && unread(o) && index.reaches(o, mi));
+            assert_eq!(index.has_unread_dependent(mi), walked, "{}", modules[mi].name);
+        }
     }
 
     #[test]

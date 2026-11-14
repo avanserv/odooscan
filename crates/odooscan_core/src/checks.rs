@@ -1294,11 +1294,10 @@ fn unimported_files<'m>(index: &Index<'m>, mi: usize, out: &mut Out<'m>) {
     if module.lost_text || !module.python.iter().any(|f| f.rel == "__init__.py") {
         return;
     }
-    let graph = &index.imports;
-    let mut others = index.modules.iter().enumerate().filter(|(other, _)| *other != mi);
-    if others.any(|(other, m)| graph.unread(&m.name) && index.reaches(other, mi)) {
+    if index.has_unread_dependent(mi) {
         return;
     }
+    let graph = &index.imports;
     let name = module.name.as_str();
     let mut starts: Vec<&str> = graph.elsewhere(name).collect();
     starts.push("__init__.py");
