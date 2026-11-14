@@ -87,12 +87,22 @@ impl Module {
         self.lost_files().next().is_some()
     }
 
-    /// Whether `lost_data` covers a file that may hold an access row. A CSV loads into the model it
-    /// is named after, so one of another model holds none.
+    /// Whether `lost_data` covers a file that may hold an access row.
     pub fn lost_access(&self) -> bool {
+        self.lost_into(ACCESS_MODELS)
+    }
+
+    /// Whether `lost_data` covers a file that may hold a view.
+    pub fn lost_views(&self) -> bool {
+        self.lost_into(&["ir.ui.view"])
+    }
+
+    /// Whether `lost_data` covers a file that may hold a record of one of `models`. A CSV loads into
+    /// the model it is named after, so one of another model holds none.
+    fn lost_into(&self, models: &[&str]) -> bool {
         self.lost_files().any(|f| {
             let path = Path::new(&f.rel);
-            path.extension().is_none_or(|e| e != "csv") || ACCESS_MODELS.contains(&loads_into(path).as_str())
+            path.extension().is_none_or(|e| e != "csv") || models.contains(&loads_into(path).as_str())
         })
     }
 

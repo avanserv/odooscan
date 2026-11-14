@@ -703,6 +703,8 @@ impl Walker<'_> {
             "inherit_id" => view.inherit = field.attribute("ref").filter(|r| !r.is_empty()).map(str::to_owned),
             // A `type` wins over the arch's root wherever the record sets it.
             "type" => view.kind = field.text().map(|t| t.trim().to_owned()),
+            // Odoo writes `arch_base` through to `arch`.
+            "arch_base" => view.arch_unread = true,
             "arch" | "arch_db" => {
                 view.has_arch = true;
                 for root in field.children().filter(Node::is_element) {
