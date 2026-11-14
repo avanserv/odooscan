@@ -1277,6 +1277,15 @@ pub enum Annotation {
     Ignore,
 }
 
+/// `@odoo-module alias=<name>`, a second module name Odoo registers for the file, as written: which
+/// part of it a series reads is `JsAlias::registered`'s call.
+#[derive(Debug, PartialEq, Eq)]
+pub struct JsAlias {
+    pub name: String,
+    /// The value of `default=` right after the name.
+    pub default: Option<String>,
+}
+
 /// A name a JS file imports, or re-exports, from another module.
 #[derive(Debug)]
 pub struct JsName {
@@ -1327,6 +1336,7 @@ pub struct OrmCall {
 #[derive(Debug, Default)]
 pub struct JsFacts {
     pub annotation: Annotation,
+    pub alias: Option<JsAlias>,
     /// Every module specifier the file imports or re-exports from, at its first use.
     pub specifiers: Vec<Spanned<String>>,
     pub names: Vec<JsName>,

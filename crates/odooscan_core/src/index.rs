@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use globset::{GlobBuilder, GlobSet, GlobSetBuilder};
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -1035,10 +1037,31 @@ fn access_models(
     models_with_access
 }
 
-/// The name Odoo registers a script under `static/src` as: `@module/` and its path from there.
+/// The name Odoo registers a script as: `@module/` and its path from `static/src`, or
+/// `@module/../tests/` and its path from `static/tests` (18.0 `odoo/tools/js_transpiler.py:61-96`).
 pub fn js_module_path(module: &str, rel: &str) -> Option<String> {
-    let path = rel.strip_prefix("static/src/")?.strip_suffix(".js")?;
-    Some(format!("@{module}/{path}"))
+    let path = rel.strip_suffix(".js")?;
+    if let Some(src) = path.strip_prefix("static/src/") {
+        return Some(format!("@{module}/{src}"));
+    }
+    Some(format!("@{module}/../tests/{}", path.strip_prefix("static/tests/")?))
+}
+
+/// The URL of a module's file, `module/rel`, as the importer of a relative specifier.
+pub fn js_url(module: &str, rel: &str) -> String {
+    format!("{module}/{rel}")
+}
+
+/// The module name of the URL `segments`, `module/static/...` with `.js` or without, when Odoo
+/// names a script there: `static/lib` holds libraries, and the rest is no module.
+fn url_module_path(segments: &[&str]) -> Option<String> {
+    let (module, folder, rest) = match segments {
+        [module, "static", folder @ ("src" | "tests"), rest @ ..] if !rest.is_empty() => (module, folder, rest),
+        _ => return None,
+    };
+    let rel = format!("static/{folder}/{}", rest.join("/"));
+    let rel = if rel.ends_with(".js") { rel } else { rel + ".js" };
+    js_module_path(module, &rel)
 }
 
 /// Instance members of Owl's `Component`, which odooscan does not index: Owl is a library.
@@ -1078,9 +1101,27 @@ pub enum Export {
     Unknown,
 }
 
-fn js_paths(modules: &[Module]) -> FxHashMap<String, JsTarget> {
-    let mut paths = FxHashMap::default();
-    for (mi, module) in modules.iter().enumerate() {
+/// The files that claim each module name, in load order. Odoo keeps the first file that defines a
+/// name and a bundle lists modules in load order (18.0 `addons/web/static/src/module_loader.js:59`),
+/// but a page that loads only a later claimant gets that one.
+fn js_paths(
+    modules: &[Module],
+    by_name: &FxHashMap<&str, usize>,
+    default_series: Option<Series>,
+) -> FxHashMap<String, Vec<JsTarget>> {
+    let mut paths: FxHashMap<String, Vec<JsTarget>> = FxHashMap::default();
+    let mut claim = |name: &str, target: JsTarget| {
+        let claims = paths.entry(name.to_owned()).or_default();
+        if !claims
+            .iter()
+            .any(|t| t.module == target.module && t.file == target.file)
+        {
+            claims.push(target);
+        }
+    };
+    for mi in load_order(modules, by_name, default_series) {
+        let module = &modules[mi];
+        let series = module.series.or(default_series);
         for (fi, file) in module.js.iter().enumerate() {
             let target = JsTarget {
                 module: mi,
@@ -1089,12 +1130,23 @@ fn js_paths(modules: &[Module]) -> FxHashMap<String, JsTarget> {
             };
             if let Some(path) = js_module_path(&module.name, &file.rel) {
                 if let Some(dir) = path.strip_suffix("/index") {
-                    paths.entry(dir.to_owned()).or_insert(target);
+                    claim(dir, target);
                 }
-                paths.insert(path, target);
+                claim(&path, target);
             }
             for name in &file.facts.defines {
-                paths.entry(name.clone()).or_insert(JsTarget { opaque: true, ..target });
+                claim(name, JsTarget { opaque: true, ..target });
+            }
+            // An alias stands for the default export, whose names only a run tells, unless it proxies:
+            // it has `default=`, and before saas~17.2 one of `false`, `False` or `0`.
+            if let Some((name, proxies)) = file.facts.alias.as_ref().and_then(|a| a.registered(series)) {
+                claim(
+                    name,
+                    JsTarget {
+                        opaque: target.opaque || !proxies,
+                        ..target
+                    },
+                );
             }
         }
     }
@@ -1384,9 +1436,46 @@ fn template_nodes<'m>(modules: &'m [Module], loaded: &Loaded) -> Nodes<'m> {
     nodes
 }
 
-/// Appends the segments of a specifier to a module path's, or None when it climbs out of the
-/// module, as `@web/../tests` does.
-fn join_segments<'s>(mut parts: Vec<&'s str>, specifier: &'s str) -> Option<String> {
+/// What a specifier names: the name Odoo looks up, and for a module path the module and the folder
+/// under `static` that should hold the file.
+pub struct JsLookup<'s> {
+    pub name: Cow<'s, str>,
+    home: Option<(&'s str, &'s str)>,
+}
+
+/// What a specifier imported by the script at the URL `from` names. Odoo turns a relative specifier
+/// into the name of the file at its URL, and looks any other up as written (18.0
+/// `odoo/tools/js_transpiler.py:523-548`): `@m/x` names a script under `m/static/src`,
+/// `@m/../tests/x` one under `m/static/tests`, and the rest an alias or a name given to `odoo.define()`.
+/// None when the specifier names a library or climbs out of the module.
+pub fn js_lookup<'s>(from: &'s str, specifier: &'s str) -> Option<JsLookup<'s>> {
+    if specifier.starts_with('.') {
+        let mut dir: Vec<&str> = from.split('/').collect();
+        dir.pop();
+        let url = join_segments(dir, specifier)?;
+        let name = url_module_path(&url)?.into();
+        return Some(JsLookup {
+            name,
+            home: Some((url[0], url[2])),
+        });
+    }
+    let name = specifier.into();
+    let Some((module, rest)) = specifier.strip_prefix('@').and_then(|s| s.split_once('/')) else {
+        return Some(JsLookup { name, home: None });
+    };
+    let folder = match rest.strip_prefix("../") {
+        None => "src",
+        Some(r) if r.starts_with("tests/") => "tests",
+        Some(_) => return None,
+    };
+    Some(JsLookup {
+        name,
+        home: Some((module, folder)),
+    })
+}
+
+/// Appends the segments of a specifier to a URL's, or None when it climbs out of the module.
+fn join_segments<'s>(mut parts: Vec<&'s str>, specifier: &'s str) -> Option<Vec<&'s str>> {
     for segment in specifier.split('/') {
         match segment {
             "." | "" => {}
@@ -1397,7 +1486,7 @@ fn join_segments<'s>(mut parts: Vec<&'s str>, specifier: &'s str) -> Option<Stri
             s => parts.push(s),
         }
     }
-    Some(parts.join("/"))
+    Some(parts)
 }
 
 pub struct XmlIdDef<'m> {
@@ -1598,7 +1687,7 @@ pub struct Index<'m> {
     pub has_base: bool,
     /// The series `--target-series` or `--odoo-version` names, for a module whose own is unknown.
     pub default_series: Option<Series>,
-    js_paths: FxHashMap<String, JsTarget>,
+    js_paths: FxHashMap<String, Vec<JsTarget>>,
     bundle_names: Vec<String>,
     js_bundles: ScriptBundles,
     templates_loaded: Loaded,
@@ -1681,7 +1770,7 @@ impl<'m> Index<'m> {
             imports,
             models_with_access,
             model_by_xmlid,
-            js_paths: js_paths(modules),
+            js_paths: js_paths(modules, &by_name, default_series),
             bundle_names,
             js_bundles,
             templates_loaded,
@@ -1805,10 +1894,11 @@ impl<'m> Index<'m> {
         (kind.is_some() || unread || view.primary.is_none()).then_some((model, kind))
     }
 
+    /// A test that subclasses a component with a template of its own leaves the base's template used.
     fn template_bases(&self) -> FxHashSet<ClassKey> {
         let mut bases = FxHashSet::default();
         for (mi, module) in self.modules.iter().enumerate() {
-            for (fi, file) in module.js.iter().enumerate() {
+            for (fi, file) in module.js.iter().enumerate().filter(|(_, f)| !f.in_tests()) {
                 for class in file.facts.classes.iter().filter(|c| c.template.is_some()) {
                     if let Heritage::Name(parent) = &class.extends
                         && let Some((t, base)) = self.js_class(self.js_target(mi, fi), parent, 0)
@@ -1826,10 +1916,11 @@ impl<'m> Index<'m> {
         self.template_bases.contains(&(module, file, class.to_owned()))
     }
 
+    /// A patch in a test applies only while that test runs.
     fn patched_classes(&self) -> Patched<'m> {
         let mut patched: Patched<'m> = FxHashMap::default();
         for (mi, module) in self.modules.iter().enumerate() {
-            for (fi, file) in module.js.iter().enumerate() {
+            for (fi, file) in module.js.iter().enumerate().filter(|(_, f)| !f.in_tests()) {
                 let here = self.js_target(mi, fi);
                 for (pi, patch) in file.facts.patches.iter().enumerate() {
                     if let Some((t, class)) = self.js_class(here, &patch.target, 0) {
@@ -1853,9 +1944,17 @@ impl<'m> Index<'m> {
         }
     }
 
+    /// The URL of the file `t`, which a relative specifier is read from.
     fn js_from(&self, t: JsTarget) -> String {
         let module = &self.modules[t.module];
-        js_module_path(&module.name, &module.js[t.file].rel).unwrap_or_default()
+        js_url(&module.name, &module.js[t.file].rel)
+    }
+
+    /// The files that claim the name a specifier imported at the URL `from` stands for, in load order.
+    pub fn js_claims(&self, from: &str, specifier: &str) -> &[JsTarget] {
+        js_lookup(from, specifier)
+            .and_then(|l| self.js_paths.get(l.name.as_ref()))
+            .map_or(&[], Vec::as_slice)
     }
 
     /// The file and binding behind the name `exported` of the file `t`.
@@ -1991,24 +2090,27 @@ impl<'m> Index<'m> {
         }
     }
 
-    /// The file a specifier imported by the module `from` names.
+    /// The file a specifier imported by the script at the URL `from` names, as `js_lookup` reads it.
+    /// A name two files claim goes to the one loaded first, opaque since a page that loads only the
+    /// other gets that one.
     pub fn js_resolve(&self, from: &str, specifier: &str) -> JsSpec {
-        let path = if specifier.starts_with('.') {
-            let mut dir: Vec<&str> = from.split('/').collect();
-            dir.pop();
-            join_segments(dir, specifier)
-        } else {
-            join_segments(vec![], specifier).filter(|_| specifier.starts_with('@'))
-        };
-        let Some(path) = path.map(|p| p.strip_suffix(".js").map(str::to_owned).unwrap_or(p)) else {
+        let Some(JsLookup { name, home }) = js_lookup(from, specifier) else {
             return JsSpec::Outside;
         };
-        if let Some(target) = self.js_paths.get(&path) {
-            return JsSpec::Found(*target);
+        if let Some(claims) = self.js_paths.get(name.as_ref()) {
+            let first = claims[0];
+            return JsSpec::Found(JsTarget {
+                opaque: first.opaque || claims.len() > 1,
+                ..first
+            });
         }
-        let addon = path[1..].split('/').next().unwrap_or_default();
-        match self.by_name.get(addon) {
-            Some(&mi) if !self.modules[mi].js.is_empty() => JsSpec::Missing(mi),
+        let Some((module, folder)) = home else {
+            return JsSpec::Outside;
+        };
+        // A core fetched without its tests has none of their scripts, so a test path names no file there.
+        let folder = format!("static/{folder}/");
+        match self.by_name.get(module) {
+            Some(&mi) if self.modules[mi].js.iter().any(|f| f.rel.starts_with(&folder)) => JsSpec::Missing(mi),
             _ => JsSpec::Outside,
         }
     }
@@ -2023,7 +2125,7 @@ impl<'m> Index<'m> {
         if file.facts.exports.iter().any(|e| e == name) {
             return Export::Found;
         }
-        let from = js_module_path(&module.name, &file.rel).unwrap_or_default();
+        let from = js_url(&module.name, &file.rel);
         let mut found = Export::Missing;
         for specifier in file.facts.star_exports.iter().filter(|_| name != "default") {
             let next = match self.js_resolve(&from, specifier) {
@@ -3416,13 +3518,14 @@ fn mangles_alike(method: &str, a: &str, b: &str) -> bool {
     !method.starts_with("__") || method.ends_with("__") || a.trim_start_matches('_') == b.trim_start_matches('_')
 }
 
-/// What `Index::names_hook` reads: the union of the mentions of every file of `modules`.
+/// What `Index::names_hook` reads: the union of the mentions of every file of `modules` but the
+/// scripts of tests, which run on a mock server.
 fn hook_mentions(modules: &[Module]) -> (FxHashSet<&str>, Vec<&str>) {
     let files = modules.iter().flat_map(|m| {
         let python = m.python.iter().map(|f| &f.mentions);
         python
             .chain(m.data.iter().map(|f| &f.mentions))
-            .chain(m.js.iter().map(|f| &f.mentions))
+            .chain(m.js.iter().filter(|f| !f.in_tests()).map(|f| &f.mentions))
             .chain(m.templates.iter().map(|f| &f.mentions))
     });
     let mut names = FxHashSet::default();
@@ -3441,10 +3544,10 @@ mod tests {
     use std::path::PathBuf;
 
     use super::{
-        BASE_MODEL_DUNDERS, BASE_MODEL_EXTRA, BASE_MODEL_METHODS, BASE_PRIVATE_METHODS, BASE_RPC_METHODS,
-        FIELD_CLASSES, FieldHolder, FieldSpelling, Index, OLD_BASE_METHODS, PlacedWrite, Scope, XmlIdDef,
-        base_private_method, base_rpc_method, class_file, depends_closure, field_id_prefixes, fold_writes, last_text,
-        mangles_alike, old_base_method, triggers, unseen_table_id,
+        BASE_MODEL_DUNDERS, BASE_MODEL_EXTRA, BASE_MODEL_METHODS, BASE_PRIVATE_METHODS, BASE_RPC_METHODS, Export,
+        FIELD_CLASSES, FieldHolder, FieldSpelling, Index, JsSpec, OLD_BASE_METHODS, PlacedWrite, Scope, XmlIdDef,
+        base_private_method, base_rpc_method, class_file, depends_closure, field_id_prefixes, fold_writes,
+        js_module_path, last_text, mangles_alike, old_base_method, triggers, unseen_table_id,
     };
     use crate::mentions::{Mentions, Words};
     use crate::project::{SourceFile, module};
@@ -4385,5 +4488,114 @@ mod tests {
         assert_eq!(index.js_bundles(0, 0).collect::<Vec<_>>(), ["b.pages", "z.pages"]);
         assert_eq!(index.js_bundles(0, 1).count(), 0);
         assert!(index.js_loaded(0, 0) && !index.js_loaded(0, 1));
+    }
+
+    fn script(rel: &str, text: &str) -> SourceFile<crate::facts::JsFacts> {
+        SourceFile {
+            path: PathBuf::new(),
+            rel: rel.to_owned(),
+            rank: None,
+            demo: false,
+            facts: crate::js::analyze(text),
+            suppressions: Default::default(),
+            mentions: Mentions::default(),
+        }
+    }
+
+    #[test]
+    fn a_test_script_is_named_from_the_source_folder() {
+        assert_eq!(
+            js_module_path("web", "static/tests/helpers/utils.js").as_deref(),
+            Some("@web/../tests/helpers/utils")
+        );
+        assert_eq!(
+            js_module_path("web", "static/src/core/hooks.js").as_deref(),
+            Some("@web/core/hooks")
+        );
+        assert_eq!(js_module_path("web", "static/lib/hoot/hoot.js"), None);
+    }
+
+    #[test]
+    fn a_specifier_resolves_through_the_url_it_stands_for() {
+        let mut web = module("web", "{'version': '18.0.1.0'}");
+        web.js = vec![
+            script("static/src/core/hooks.js", "export const useService = 1;"),
+            script("static/tests/helpers.js", "export function onRpc() {}"),
+            script(
+                "static/tests/legacy/utils.js",
+                "/** @odoo-module alias=@web/../tests/utils default=false */\nexport const click = 1;",
+            ),
+            script(
+                "static/tests/legacy/views.js",
+                "/** @odoo-module alias=web.views */\nexport default {};",
+            ),
+        ];
+        let mut sale = module("sale", "{'version': '18.0.1.0'}");
+        sale.js = vec![script("static/src/order.js", "")];
+        let modules = [web, sale];
+        let index = Index::build(&modules, None);
+        let resolve = |from: &str, specifier: &str| match index.js_resolve(from, specifier) {
+            JsSpec::Found(t) => modules[t.module].js[t.file].rel.clone(),
+            JsSpec::Missing(mi) => format!("missing in {}", modules[mi].name),
+            JsSpec::Outside => "outside".to_owned(),
+        };
+        let test = "sale/static/tests/order.test.js";
+        assert_eq!(resolve(test, "@web/../tests/helpers"), "static/tests/helpers.js");
+        // Odoo looks an `@` name up as written.
+        assert_eq!(resolve(test, "@web/core/../../tests/helpers"), "missing in web");
+        assert_eq!(resolve(test, "@web/core/hooks.js"), "missing in web");
+        assert_eq!(resolve(test, "@web/core/hooks"), "static/src/core/hooks.js");
+        assert_eq!(
+            resolve("web/static/tests/legacy/utils.js", "../helpers"),
+            "static/tests/helpers.js"
+        );
+        assert_eq!(
+            resolve("web/static/tests/helpers.js", "../src/core/hooks"),
+            "static/src/core/hooks.js"
+        );
+        assert_eq!(resolve(test, "../src/order"), "static/src/order.js");
+        assert_eq!(resolve(test, "../../../web/static/src/core/hooks"), "outside");
+        assert_eq!(resolve(test, "@web/../lib/hoot/hoot"), "outside");
+        assert_eq!(resolve(test, "@web/../../base/x"), "outside");
+        assert_eq!(resolve(test, "@web/../tests/gone"), "missing in web");
+        assert_eq!(resolve(test, "@sale/gone"), "missing in sale");
+        // Sale has no test script, as in a core fetched without tests.
+        assert_eq!(resolve(test, "@sale/../tests/gone"), "outside");
+        assert_eq!(resolve(test, "@web/../tests/utils"), "static/tests/legacy/utils.js");
+        assert_eq!(resolve(test, "web.views"), "static/tests/legacy/views.js");
+        let export = |specifier: &str, name: &str| match index.js_resolve(test, specifier) {
+            JsSpec::Found(t) => index.js_export(t, name, 0),
+            _ => panic!("{specifier} resolves to no file"),
+        };
+        assert!(export("@web/../tests/utils", "click") == Export::Found);
+        assert!(export("@web/../tests/utils", "gone") == Export::Missing);
+        assert!(export("web.views", "gone") == Export::Unknown);
+    }
+
+    #[test]
+    fn a_name_two_modules_claim_goes_to_the_one_loaded_first() {
+        let utils = "/** @odoo-module alias=@web/../tests/utils default=false */\nexport const click = 1;";
+        // Named first, so only the load order puts web before it.
+        let mut chat = module("chat", "{'version': '18.0.1.0', 'depends': ['web']}");
+        chat.js = vec![script("static/tests/contains.js", utils)];
+        let mut web = module("web", "{'version': '18.0.1.0'}");
+        web.js = vec![script("static/tests/legacy/utils.js", utils)];
+        let mut old = module("old", "{'version': '17.0.1.0.0'}");
+        old.js = vec![script(
+            "static/tests/utils.js",
+            &utils.replace("@web/../tests/utils", "@old/../tests/kit"),
+        )];
+        let modules = [chat, web, old];
+        let index = Index::build(&modules, None);
+        let JsSpec::Found(t) = index.js_resolve("x/static/tests/a.js", "@web/../tests/utils") else {
+            panic!("the alias resolves to no file");
+        };
+        assert_eq!(modules[t.module].name, "web");
+        assert!(index.js_export(t, "gone", 0) == Export::Unknown);
+        // 17.0 reads no alias of that form.
+        assert!(matches!(
+            index.js_resolve("x/static/tests/a.js", "@old/../tests/kit"),
+            JsSpec::Missing(2)
+        ));
     }
 }

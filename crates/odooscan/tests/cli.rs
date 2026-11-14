@@ -376,11 +376,12 @@ fn port_fetched(remote: &Path, cache: &Path, target: &str) -> Command {
     command
 }
 
-/// The fetched commit holds the modules and `release.py`, without tests.
+/// The fetched commit holds the modules and `release.py`, without tests but their scripts.
 fn assert_fetched(cache: &Path, sha: &str) {
     let dir = cache.join("core").join(sha);
     assert!(dir.join("odoo/addons/base").is_dir() && dir.join("odoo/release.py").is_file());
     assert!(!dir.join("odoo/addons/base/tests").exists());
+    assert!(dir.join("odoo/addons/web/static/tests/web_test_helpers.js").is_file());
 }
 
 fn run(mut command: Command) -> (Option<i32>, String, String) {
