@@ -89,8 +89,10 @@ pub const SUPERSEDED: &[(&str, &str)] = &[
 /// saas~19.1 drops `t-raw` from QWeb's directives (`odoo/addons/base/models/ir_qweb.py:1681`), so
 /// the server logs it as unknown and renders nothing for it. From saas~18.1 a kanban arch without a
 /// `card` template fails in the browser (`addons/web/static/src/views/kanban/kanban_arch_parser.js:136`).
+/// From saas~15.3 Odoo serves an override that drops `@route()` as if it had kept it.
 const SEVERITY_BY_SERIES: &[(&str, &str, Severity)] = &[
     ("OD401", ">=saas~19.4", Severity::Info),
+    ("OD232", ">=saas~15.3", Severity::Info),
     ("OD307", ">=saas~19.1", Severity::Error),
     ("OD326", ">=saas~18.1", Severity::Error),
     ("OD218", ">=saas~18.3", Severity::Error),
@@ -220,6 +222,12 @@ rules! {
     // `@api.onchange` on the method itself (18.0 `odoo/models.py:944`-`:976`), or through 11.0 by a
     // view's `on_change` attribute (10.0 `odoo/models.py:5424`, `:5460`).
     "OD230" "orphan-hook-method" Correctness Info None, true, "A compute, inverse, search or onchange method of a model extension is named nowhere, so Odoo never runs it.";
+    // Odoo builds one controller per class with `Controller` among its own bases (18.0 `odoo/http.py:676-684`)
+    // and adds each of their URLs to one map (18.0 `odoo/addons/base/models/ir_http.py:374-381`).
+    "OD231" "route-path-shadowed" Correctness Warning None, true, "Two controllers declare the same route path, so one hides the other.";
+    // Through saas~15.2 Odoo skips a method whose override is not decorated (15.0 `odoo/http.py:977`); saas~15.3
+    // decorates it and logs a warning (347a3ccf763c, 18.0 `odoo/http.py:843-845`).
+    "OD232" "route-override-undecorated" Correctness Error None, true, "An override of a route method has no @route(), so Odoo drops the route or, from saas~15.3, warns.";
     "OD301" "unresolved-xmlid" Correctness Error None, true, "The XML id is not defined by its module.";
     "OD302" "xmlid-not-in-depends" Correctness Error None, true, "The XML id comes from a module missing from depends.";
     "OD303" "duplicate-xmlid" Correctness Warning None, false, "The same XML id is defined twice in one file, with another model or overwriting a field.";
@@ -399,6 +407,18 @@ mod tests {
         assert_eq!(od222.severity_for(Series::parse("18.0")), Severity::Error);
         assert_eq!(od222.severity_for(Series::parse("20.0")), Severity::Error);
         assert_eq!(od222.severity_for(None), Severity::Warning);
+    }
+
+    #[test]
+    fn an_undecorated_route_override_is_an_error_before_saas_15_3() {
+        let od232 = rule("OD232");
+        for series in ["9.0", "12.0", "15.0", "saas~15.2"] {
+            assert_eq!(od232.severity_for(Series::parse(series)), Severity::Error, "{series}");
+        }
+        for series in ["saas~15.3", "16.0", "18.0", "20.0"] {
+            assert_eq!(od232.severity_for(Series::parse(series)), Severity::Info, "{series}");
+        }
+        assert_eq!(od232.severity_for(None), Severity::Error);
     }
 
     #[test]

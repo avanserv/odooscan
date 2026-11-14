@@ -7,10 +7,11 @@ use ruff_python_ast::{self as ast, Expr, Stmt};
 use ruff_text_size::{Ranged, TextSize};
 use rustc_hash::{FxBuildHasher, FxHashMap, FxHashSet};
 
-use crate::facts::{ClassBase, ControllerFact, PyFacts, RouteDef, RouteKey};
+use crate::facts::{ClassBase, ControllerFact, PyFacts, RouteDef, RouteKey, Spanned};
 use crate::index::class_file;
 use crate::module_state;
-use crate::python::{BoundNames, declares_model, keyword, str_lit, tail_name};
+use crate::project::Module;
+use crate::python::{BoundNames, Locator, declares_model, keyword, str_lit, tail_name};
 
 /// The controllers of the scan by addon, then by file relative to it.
 #[derive(Debug, Default)]
@@ -27,6 +28,84 @@ impl Table {
             classes.insert(rel.to_owned(), facts.controllers.clone());
         }
         table
+    }
+
+    /// The controllers of the Python files of `modules`.
+    pub fn of_modules(modules: &[Module]) -> Self {
+        let files = modules
+            .iter()
+            .flat_map(|m| m.python.iter().map(|f| (m.name.as_str(), f.rel.as_str(), &f.facts)));
+        Self::of(files)
+    }
+
+    /// The controllers of `addon`.
+    pub fn module<'t>(&'t self, addon: &str) -> impl Iterator<Item = ClassAt<'t>> {
+        let files = self.0.get_key_value(addon).into_iter();
+        files.flat_map(|(addon, files)| {
+            files
+                .iter()
+                .flat_map(move |(rel, classes)| classes.iter().map(move |class| ClassAt { addon, rel, class }))
+        })
+    }
+
+    /// The addons that have controllers.
+    pub fn addons(&self) -> impl Iterator<Item = &str> {
+        self.0.keys().map(String::as_str)
+    }
+
+    /// The class a base of `at` names, none for a base the table does not hold or that names none.
+    fn base<'t>(&'t self, at: ClassAt<'t>, base: &ClassBase) -> Option<ClassAt<'t>> {
+        let (addon, rel, class) = match base {
+            ClassBase::Local(i) => {
+                let (rel, classes) = self.file(at.addon, at.rel)?;
+                (at.addon, rel, classes.get(*i)?)
+            }
+            ClassBase::Addon(path) => self.resolve(path)?,
+            ClassBase::Root | ClassBase::Object | ClassBase::Unread => return None,
+        };
+        Some(ClassAt { addon, rel, class })
+    }
+
+    /// The classes `at` is made of, itself included, none when a base is one the table does not
+    /// hold, whose own bases may be anything, or when none is Odoo's `Controller`, so that Odoo
+    /// builds no controller of it.
+    pub fn lineage(&self, at: ClassAt<'_>) -> Option<Lineage> {
+        let mut lineage = Lineage::default();
+        let mut todo = vec![at];
+        while let Some(c) = todo.pop() {
+            if !lineage.classes.insert(std::ptr::from_ref(c.class)) {
+                continue;
+            }
+            for base in &c.class.bases {
+                match base {
+                    ClassBase::Root => _ = lineage.tops.insert(std::ptr::from_ref(c.class)),
+                    ClassBase::Object => {}
+                    base => todo.push(self.base(c, base)?),
+                }
+            }
+        }
+        (!lineage.tops.is_empty()).then_some(lineage)
+    }
+
+    /// The nearest ancestor of `at` that routes `method`, when `at` is a controller: a held
+    /// base reaches Odoo's `Controller`.
+    pub fn routed_ancestor<'t>(&'t self, at: ClassAt<'t>, method: &str) -> Option<ClassAt<'t>> {
+        let mut seen = FxHashSet::default();
+        let mut todo = vec![at];
+        let (mut routed, mut rooted) = (None, false);
+        while let Some(c) = todo.pop() {
+            if !seen.insert(std::ptr::from_ref(c.class)) {
+                continue;
+            }
+            let routes = c.class.routes.iter().any(|r| r.method == method);
+            if routed.is_none() && routes && !std::ptr::eq(c.class, at.class) {
+                routed = Some(c);
+            }
+            rooted |= c.class.bases.contains(&ClassBase::Root);
+            // Pushed in reverse, so that the first base and its own bases are walked first.
+            todo.extend(c.class.bases.iter().rev().filter_map(|b| self.base(c, b)));
+        }
+        routed.filter(|_| rooted)
     }
 
     /// The controllers of a file, with its path as the table holds it.
@@ -53,6 +132,34 @@ impl Table {
         let (addon, _) = self.0.get_key_value(addon)?;
         let found = files.iter().find_map(|rel| self.class(addon, rel, name))?;
         Some((addon.as_str(), found.0, found.1))
+    }
+}
+
+/// A class of the table, with its addon and its file.
+#[derive(Clone, Copy, Debug)]
+pub struct ClassAt<'t> {
+    pub addon: &'t str,
+    pub rel: &'t str,
+    pub class: &'t ControllerFact,
+}
+
+/// The classes a controller class is made of, by address.
+#[derive(Debug, Default)]
+pub struct Lineage {
+    classes: FxHashSet<*const ControllerFact>,
+    /// Those with Odoo's `Controller` among their own bases, each of which Odoo builds one
+    /// controller of, merged with all of its subclasses.
+    tops: FxHashSet<*const ControllerFact>,
+}
+
+impl Lineage {
+    pub fn holds(&self, class: &ControllerFact) -> bool {
+        self.classes.contains(&std::ptr::from_ref(class))
+    }
+
+    /// Whether Odoo merges both classes into one controller.
+    pub fn shares_top(&self, other: &Self) -> bool {
+        !self.tops.is_disjoint(&other.tops)
     }
 }
 
@@ -100,7 +207,11 @@ impl Scope<'_> {
             seen: FxHashSet::default(),
             layers: vec![],
         };
-        walk.class(self.addon, rel, own);
+        walk.class(ClassAt {
+            addon: self.addon,
+            rel,
+            class: own,
+        });
         let layers = &walk.layers;
         Some(Routing {
             urls: last_given(layers, vec![], |r| &r.urls),
@@ -123,30 +234,22 @@ struct Walk<'t, 'm> {
 }
 
 impl<'t> Walk<'t, '_> {
-    fn class(&mut self, addon: &'t str, rel: &'t str, class: &'t ControllerFact) {
-        if !self.seen.insert(std::ptr::from_ref(class)) {
+    fn class(&mut self, at: ClassAt<'t>) {
+        if !self.seen.insert(std::ptr::from_ref(at.class)) {
             return;
         }
         // The first base comes last in the reversed method resolution order.
-        for base in class.bases.iter().rev() {
-            self.base(addon, rel, base);
+        for base in at.class.bases.iter().rev() {
+            self.base(at, base);
         }
-        let own = class.routes.iter().find(|r| r.method == self.method);
+        let own = at.class.routes.iter().find(|r| r.method == self.method);
         self.layers.extend(own.map(Some));
     }
 
-    fn base(&mut self, addon: &'t str, rel: &'t str, base: &'t ClassBase) {
-        let found = match base {
-            ClassBase::Root => return,
-            ClassBase::Unread => None,
-            ClassBase::Local(at) => self
-                .table
-                .file(addon, rel)
-                .and_then(|(rel, classes)| Some((addon, rel, classes.get(*at)?))),
-            ClassBase::Addon(path) => self.table.resolve(path),
-        };
-        match found {
-            Some((addon, rel, class)) => self.class(addon, rel, class),
+    fn base(&mut self, at: ClassAt<'t>, base: &ClassBase) {
+        match self.table.base(at, base) {
+            Some(class) => self.class(class),
+            None if matches!(base, ClassBase::Root | ClassBase::Object) => {}
             None => self.layers.push(None),
         }
     }
@@ -176,8 +279,8 @@ fn first_kind(layers: &[Option<&RouteDef>]) -> Option<String> {
 }
 
 /// The classes at the top of a file that are no models and have a base, with the routes of their
-/// methods.
-pub(crate) fn controllers(body: &[Stmt]) -> Vec<ControllerFact> {
+/// methods and the methods they keep undecorated.
+pub(crate) fn controllers(body: &[Stmt], loc: &Locator) -> Vec<ControllerFact> {
     // The names bound above, in source order, so that a base reads the nearest binding.
     let mut bound: Vec<(&str, Binding)> = vec![];
     let mut controllers = vec![];
@@ -188,11 +291,17 @@ pub(crate) fn controllers(body: &[Stmt]) -> Vec<ControllerFact> {
         };
         let controller = (!class.bases().is_empty() && !declares_model(class)).then_some(controllers.len());
         if controller.is_some() {
+            let defs = last_defs(&class.body);
+            let plain = defs.iter().filter(|f| f.decorator_list.is_empty()).map(|f| Spanned {
+                value: f.name.to_string(),
+                pos: loc.at(&f.name),
+            });
             controllers.push(ControllerFact {
                 name: class.name.to_string(),
                 start: class.start(),
                 bases: class.bases().iter().map(|b| base(b, &bound)).collect(),
-                routes: last_defs(&class.body).into_iter().filter_map(route_def).collect(),
+                plain: plain.collect(),
+                routes: defs.into_iter().filter_map(|f| route_def(f, loc)).collect(),
             });
         }
         bound.push((class.name.as_str(), Binding::Class(controller)));
@@ -263,7 +372,7 @@ fn base(expr: &Expr, bound: &[(&str, Binding)]) -> ClassBase {
             odoo_base(path)
         }
         Some(Binding::Class(Some(at))) if expr.is_name_expr() => ClassBase::Local(*at),
-        None if name == "object" && expr.is_name_expr() => ClassBase::Root,
+        None if name == "object" && expr.is_name_expr() => ClassBase::Object,
         _ => ClassBase::Unread,
     }
 }
@@ -283,7 +392,7 @@ fn odoo_base(path: String) -> ClassBase {
 }
 
 /// The route of a method, from its outermost `@route`, the one whose routing Odoo keeps.
-fn route_def(func: &ast::StmtFunctionDef) -> Option<RouteDef> {
+fn route_def(func: &ast::StmtFunctionDef, loc: &Locator) -> Option<RouteDef> {
     let call = func.decorator_list.iter().find_map(|d| match &d.expression {
         Expr::Call(call) if tail_name(&call.func) == Some("route") => Some(call),
         _ => None,
@@ -296,6 +405,7 @@ fn route_def(func: &ast::StmtFunctionDef) -> Option<RouteDef> {
         .filter(|e| !falsy(e));
     Some(RouteDef {
         method: func.name.to_string(),
+        pos: loc.at(&func.name),
         urls: url.map_or(RouteKey::Absent, |e| given(strings(e))),
         methods: read(call, "methods", |e| match e {
             Expr::NoneLiteral(_) => Some(None),
@@ -546,6 +656,90 @@ mod tests {
         let nearer = "from odoo import http\n\nclass Shop(http.Controller):\n    pass\n\nfrom odoo.addons.shop.controllers.main import Shop\n\nclass Ext(Shop):\n    pass\n";
         let addon = ClassBase::Addon("odoo.addons.shop.controllers.main.Shop".to_owned());
         assert_eq!(bases(nearer)[1], [addon]);
+    }
+
+    #[test]
+    fn an_object_base_is_no_controller_root() {
+        let src = "from odoo import http\n\nclass Mixin(object):\n    pass\n\nclass Main(Mixin, http.Controller):\n    pass\n";
+        let bases: Vec<_> = analyze(src, None).controllers.into_iter().map(|c| c.bases).collect();
+        assert_eq!(
+            bases,
+            [vec![ClassBase::Object], vec![ClassBase::Local(0), ClassBase::Root]]
+        );
+    }
+
+    #[test]
+    fn a_class_keeps_its_undecorated_methods_and_its_routes_at_the_def_name() {
+        let src = "from odoo import http\n\nclass Main(http.Controller):\n    @http.route('/a')\n    def a(self):\n        pass\n\n    def a(self):\n        pass\n\n    @staticmethod\n    def b():\n        pass\n\n    def c(self):\n        pass\n\n    @http.route('/d')\n    def d(self):\n        pass\n";
+        let main = analyze(src, None).controllers.remove(0);
+        let plain: Vec<_> = main
+            .plain
+            .iter()
+            .map(|p| (p.value.as_str(), p.pos.line, p.pos.col))
+            .collect();
+        assert_eq!(plain, [("a", 8, 9), ("c", 15, 9)]);
+        let routes: Vec<_> = main
+            .routes
+            .iter()
+            .map(|r| (r.method.as_str(), r.pos.line, r.pos.col))
+            .collect();
+        assert_eq!(routes, [("d", 19, 9)]);
+    }
+
+    /// The `nth` class named `class` of a file of the table.
+    fn class_at<'t>(table: &'t Table, (addon, rel): (&str, &str), (class, nth): (&str, usize)) -> ClassAt<'t> {
+        let at = table
+            .module(addon)
+            .filter(|c| c.rel == rel && c.class.name == class)
+            .nth(nth);
+        at.unwrap_or_else(|| panic!("{addon}/{rel} has no class {class}"))
+    }
+
+    #[test]
+    fn a_lineage_holds_the_ancestors_and_tells_merged_controllers() {
+        let ext = "from odoo import http\nfrom odoo.addons.shop.controllers.main import Shop\n\nclass Left(Shop):\n    pass\n\nclass Right(Shop):\n    pass\n\nclass Mixin(object):\n    pass\n\nclass Own(Mixin, http.Controller):\n    pass\n\nclass Other(Mixin, http.Controller):\n    pass\n";
+        let scan = table(&[SHOP, ("ext", "main.py", ext)]);
+        let at = |class| class_at(&scan, ("ext", "main.py"), (class, 0));
+        let shop = class_at(&scan, ("shop", "controllers/main.py"), ("Shop", 0));
+        let [left, right, own, other] = ["Left", "Right", "Own", "Other"].map(|c| scan.lineage(at(c)).unwrap());
+        assert!(left.holds(shop.class) && !left.holds(at("Right").class));
+        assert!(left.shares_top(&right));
+        // Each class with `Controller` among its own bases is a controller of its own.
+        assert!(own.holds(at("Mixin").class) && !own.shares_top(&other));
+        assert!(!left.shares_top(&own));
+        assert!(scan.lineage(at("Mixin")).is_none());
+    }
+
+    #[test]
+    fn a_lineage_is_unknown_past_a_base_the_table_does_not_hold() {
+        let ext = "from odoo import http\nfrom odoo.addons.gone.controllers.main import Gone\nfrom .main import Near\n\nclass Lost(Gone):\n    pass\n\nclass Relative(Near, http.Controller):\n    pass\n\nclass Leaf(Lost):\n    pass\n";
+        let scan = table(&[("ext", "main.py", ext)]);
+        for class in ["Lost", "Relative", "Leaf"] {
+            assert!(
+                scan.lineage(class_at(&scan, ("ext", "main.py"), (class, 0))).is_none(),
+                "{class}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_routed_ancestor_is_found_across_modules_for_a_controller() {
+        let mid = (
+            "shop_mid",
+            "controllers/mid.py",
+            "from odoo.addons.shop.controllers import main\n\nclass Mid(main.Shop):\n    def a(self):\n        pass\n",
+        );
+        let leaf = "from odoo.addons.shop_mid.controllers.mid import Mid\nfrom odoo import http\n\nclass Leaf(Mid):\n    def a(self):\n        pass\n\nclass Mixin(object):\n    @http.route('/m')\n    def m(self):\n        pass\n\nclass Plain(Mixin):\n    def m(self):\n        pass\n\nclass Served(Mixin, http.Controller):\n    def m(self):\n        pass\n";
+        let scan = table(&[SHOP, mid, ("shop_leaf", "main.py", leaf)]);
+        let at = |class| class_at(&scan, ("shop_leaf", "main.py"), (class, 0));
+        let found = scan.routed_ancestor(at("Leaf"), "a").unwrap();
+        assert_eq!((found.addon, found.class.name.as_str()), ("shop", "Shop"));
+        assert!(scan.routed_ancestor(at("Leaf"), "b").is_none());
+        let shop = class_at(&scan, ("shop", "controllers/main.py"), ("Shop", 0));
+        assert!(scan.routed_ancestor(shop, "a").is_none());
+        // A mixin's route counts only in a class Odoo builds a controller of.
+        assert!(scan.routed_ancestor(at("Plain"), "m").is_none());
+        assert_eq!(scan.routed_ancestor(at("Served"), "m").unwrap().class.name, "Mixin");
     }
 
     #[test]

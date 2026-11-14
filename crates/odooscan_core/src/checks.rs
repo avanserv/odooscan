@@ -10,8 +10,8 @@ use crate::facts::{
     AccessRow, ActionFact, ActionValue, ActionViewId, Annotation, ArchElement, ArchModifier, ArchSubview, ClassFact,
     DataFacts, DefinitionSource, DomainFact, FieldFact, FieldWrite, Flag, FunctionCall, GuardedRef, JsFacts, JsName,
     MethodDef, Migrate, ModelKind, OptionValue, OrmCall, Pos, PyFacts, RawDiag, RecordFact, RecordWrite, Refusal,
-    ReportFact, RuleFact, ServerFact, Signature, Spanned, SqlColumn, SqlView, Subject, UNREAD_TYPE, ViewFact,
-    WrittenValue, XmlDef, XmlRef,
+    ReportFact, RouteDef, RouteKey, RuleFact, ServerFact, Signature, Spanned, SqlColumn, SqlView, Subject, UNREAD_TYPE,
+    ViewFact, WrittenValue, XmlDef, XmlRef,
 };
 use crate::grants::{self, AttachmentGrant, Grant, Grants};
 use crate::index::{
@@ -20,13 +20,19 @@ use crate::index::{
 };
 use crate::mentions::HOOK_PREFIXES;
 use crate::project::{ASSET_EXTENSIONS, Module, SourceFile, code_loaded};
+use crate::routing::{ClassAt, Lineage, Table};
 use crate::rules::rule;
 use crate::series::{self, Series};
 use crate::xml::{LOCATOR, QWEB, UNKNOWN_CONTEXT};
-use crate::{domain, flows, manifest, modifier, module_state, python};
+use crate::{domain, flows, manifest, modifier, module_state, python, routing};
 
 /// Directories of upgrade scripts, which name XML ids of past versions.
 const UPGRADE_DIRS: &[&str] = &["migrations", "upgrades"];
+
+/// The first series that serves a route method whose override drops `@route()`, decorating the
+/// override itself and logging a warning (347a3ccf763c, 18.0 `odoo/http.py:843-845`). Before it
+/// Odoo skips the method (15.0 `odoo/http.py:977`, 9.0 `openerp/http.py:1007`).
+const ROUTE_REDECORATED: Series = Series { major: 15, minor: 3 };
 
 /// The decorators that leave a hook method to run only by its name. `api.onchange` runs it by the
 /// fields it lists, and any other may register it elsewhere.
@@ -290,6 +296,7 @@ pub fn check_module<'m>(index: &Index<'m>, mi: usize, series: Option<Series>) ->
         };
         ctx.dependencies(&mut out);
         ctx.python(&mut out);
+        ctx.routes(&mut out);
         ctx.registry(&mut out);
         ctx.data(&mut out);
         for (fi, file) in es_modules(index, mi, series) {
@@ -313,6 +320,95 @@ pub fn check_module<'m>(index: &Index<'m>, mi: usize, series: Option<Series>) ->
         ctx.templates(&mut out, mi);
     }
     out.diags
+}
+
+/// Whether Odoo serves the controllers of a file of a module: those of `tests/` only run with the
+/// tests, and upgrade scripts are no module code.
+fn served(rel: &str) -> bool {
+    let dir = rel.split('/').next().unwrap_or_default();
+    dir != "tests" && !UPGRADE_DIRS.contains(&dir)
+}
+
+/// The paths a route spells out, none when it leaves them to the route it overrides or computes
+/// one of them.
+fn literal_urls(route: &RouteDef) -> &[String] {
+    match &route.urls {
+        RouteKey::Given(urls) => urls,
+        RouteKey::Absent | RouteKey::Unknown => &[],
+    }
+}
+
+/// The literal paths the controllers a module sees declare, for OD231.
+struct Paths<'t> {
+    table: &'t Table,
+    declared: FxHashMap<&'t str, Vec<(ClassAt<'t>, &'t RouteDef)>>,
+}
+
+impl<'t> Paths<'t> {
+    /// OD231 on each literal path of `class` that another class declares too, as its position and
+    /// its message. Of two classes of one module, the later one is reported, and of two modules,
+    /// the one that sees the other.
+    fn shadowed(&self, class: ClassAt<'t>) -> Vec<(Pos, String)> {
+        let Some(ours) = self.table.lineage(class) else {
+            return vec![];
+        };
+        let mut found = vec![];
+        for route in &class.class.routes {
+            for url in literal_urls(route) {
+                let declared = self.declared.get(url.as_str()).into_iter().flatten();
+                if let Some((other, theirs)) = declared.copied().find(|o| self.clashes((class, route, &ours), *o)) {
+                    let message = format!(
+                        "path '{url}' is also routed by {}.{} in module {}, so one of the two hides the other",
+                        other.class.name, theirs.method, other.addon
+                    );
+                    found.push((route.pos, message));
+                }
+            }
+        }
+        found
+    }
+
+    /// Whether Odoo serves two endpoints for the path both routes declare: the classes are built
+    /// into controllers apart, or they are one controller and the methods differ, and a request
+    /// method may reach either.
+    fn clashes(
+        &self,
+        (class, route, ours): (ClassAt<'t>, &RouteDef, &Lineage),
+        (other, theirs): (ClassAt<'t>, &RouteDef),
+    ) -> bool {
+        let earlier = (other.rel, other.class.start) < (class.rel, class.class.start);
+        if std::ptr::eq(other.class, class.class) || (other.addon == class.addon && !earlier) {
+            return false;
+        }
+        if !overlap(self.methods(class, route), self.methods(other, theirs)) {
+            return false;
+        }
+        let Some(lineage) = self.table.lineage(other) else {
+            return false;
+        };
+        let one_endpoint = route.method == theirs.method && ours.shares_top(&lineage);
+        !(ours.holds(other.class) || lineage.holds(class.class) || one_endpoint)
+    }
+
+    /// The request methods Odoo merges for a route, none when the scan does not read them.
+    fn methods(&self, at: ClassAt<'t>, route: &RouteDef) -> Option<Option<Vec<String>>> {
+        let scope = routing::Scope {
+            table: self.table,
+            addon: at.addon,
+            rel: at.rel,
+        };
+        scope.routing(at.class.start, &route.method)?.methods
+    }
+}
+
+/// Whether a request may take either of two lists of methods, `None` inside letting every method
+/// through. Methods the scan does not read may be any, so they overlap none.
+fn overlap(a: Option<Option<Vec<String>>>, b: Option<Option<Vec<String>>>) -> bool {
+    match (a, b) {
+        (Some(Some(a)), Some(Some(b))) => a.iter().any(|m| b.iter().any(|n| m.eq_ignore_ascii_case(n))),
+        (Some(_), Some(_)) => true,
+        _ => false,
+    }
 }
 
 /// OD229's message: what the override of `method` refuses of the parent definition of `module`.
@@ -1617,6 +1713,54 @@ impl<'m> Ctx<'_, 'm> {
                     );
                 }
             }
+        }
+    }
+
+    /// OD231 and OD232 on the controllers of the module that Odoo serves.
+    fn routes(&self, out: &mut Out<'m>) {
+        let table = &self.index.routes;
+        let name = self.module.name.as_str();
+        let seen = |addon: &&str| self.index.by_name.get(addon).is_some_and(|&mi| self.scope.sees(mi));
+        let mut others: Vec<_> = table.addons().filter(seen).flat_map(|a| table.module(a)).collect();
+        others.retain(|c| served(c.rel));
+        others.sort_by_key(|c| (c.addon, c.rel, c.class.start));
+        let mut paths = Paths {
+            table,
+            declared: FxHashMap::default(),
+        };
+        for other in others {
+            for route in &other.class.routes {
+                for url in literal_urls(route) {
+                    paths.declared.entry(url).or_default().push((other, route));
+                }
+            }
+        }
+        for file in self.module.python.iter().filter(|f| served(&f.rel)) {
+            for class in table.module(name).filter(|c| c.rel == file.rel) {
+                self.undecorated_overrides(out, &file.path, class);
+                for (pos, message) in paths.shadowed(class) {
+                    out.push(&file.path, "OD231", pos, message);
+                }
+            }
+        }
+    }
+
+    /// OD232 on each method of `class` without a decorator that overrides a route method.
+    fn undecorated_overrides(&self, out: &mut Out<'m>, path: &'m Path, class: ClassAt<'_>) {
+        for def in &class.class.plain {
+            let Some(routed) = self.index.routes.routed_ancestor(class, &def.value) else {
+                continue;
+            };
+            let outcome = match self.series {
+                Some(s) if s >= ROUTE_REDECORATED => "so Odoo logs a warning and routes it as if it had one",
+                Some(_) => "so Odoo drops the route",
+                None => "so Odoo drops the route before saas~15.3, and logs a warning from it",
+            };
+            let message = format!(
+                "'{}' overrides the route of {} in module {} without @route(), {outcome}",
+                def.value, routed.class.name, routed.addon
+            );
+            out.push(path, "OD232", def.pos, message);
         }
     }
 

@@ -309,6 +309,12 @@ fn python_api_stages_keep_their_severity() {
 }
 
 #[test]
+fn an_undecorated_route_override_is_an_error_before_saas_15_3() {
+    let expected = [("route_clash", Severity::Info), ("route_drop15", Severity::Error)];
+    assert_eq!(severities("OD232"), expected.map(|(m, s)| (m.to_owned(), s)));
+}
+
+#[test]
 fn access_severity_follows_the_module_series() {
     let expected = [
         ("bad_sale", Severity::Warning),
