@@ -1,0 +1,5 @@
+<odoo>
+    <template id="assets_counter">
+        <script type="text/javascript" src="/legacy_require15/static/src/js/counter.js"/>
+    </template>
+</odoo>

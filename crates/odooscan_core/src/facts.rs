@@ -5,6 +5,7 @@ use std::path::PathBuf;
 use ruff_text_size::TextSize;
 
 use crate::fix::Fix;
+use crate::manifest::AssetEntry;
 
 /// The type of a field the scan cannot tell: an `ir.model.fields` record gives no `ttype` it can
 /// read, or a field class's name stands for two types.
@@ -988,6 +989,9 @@ pub struct ViewFact {
     /// `inherit_id` holds a parent `inherit` does not read, so what the view takes from it, such as
     /// its type, is out of reach.
     pub unread_parent: bool,
+    /// What a `<template>` adds to the bundle its root names, where a template is one: its scripts
+    /// as files and its literal `t-call` as an `include`, placed as its specs place them.
+    pub assets: Vec<AssetEntry>,
 }
 
 #[derive(Debug)]
@@ -1348,14 +1352,25 @@ pub struct JsFacts {
     pub reexports: Vec<(String, String, String)>,
     /// Specifiers of `export * from`, whose names the file exports too.
     pub star_exports: Vec<String>,
-    /// Module names given to `odoo.define()`, which a hand-written file registers under.
-    pub defines: Vec<String>,
+    /// The top-level `odoo.define()` calls, by which a hand-written file registers modules.
+    pub defines: Vec<JsDefine>,
     pub classes: Vec<JsClass>,
     pub patches: Vec<JsPatch>,
     pub orm_calls: Vec<OrmCall>,
     /// The literal view kinds the file gives `view_registry.add`.
     pub view_kinds: Vec<String>,
     pub syntax_error: Option<Spanned<String>>,
+}
+
+/// An `odoo.define()` call.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct JsDefine {
+    /// The name it registers; without one Odoo makes one up.
+    pub name: Option<String>,
+    /// What it waits for: the strings of its list, or else the `require("x")` calls of its factory.
+    pub deps: Vec<Spanned<String>>,
+    /// A list precedes the factory, so the calls of the factory are no dependencies.
+    pub listed: bool,
 }
 
 /// A template of a bundle's XML file, the child of its root element.
