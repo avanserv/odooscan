@@ -540,6 +540,24 @@ mod tests {
     }
 
     #[test]
+    fn a_module_of_unknown_series_fills_from_the_manifest_then_the_templates() {
+        let mut x = rendered(
+            "x",
+            "1.0",
+            "'web'",
+            &["m.js", "t.js"],
+            r#"<template id="assets" inherit_id="web.assets_backend"><xpath expr="." position="inside"><script src="/x/static/src/t.js"/></xpath></template>"#,
+        );
+        x.manifest.bundles = module("x", "{'assets': {'web.assets_backend': ['x/static/src/m.js']}}")
+            .manifest
+            .bundles;
+        assert_eq!(
+            contents(&[web14(), x])["web.assets_backend"],
+            ["web/a.js", "web/h.js", "x/m.js", "x/t.js"]
+        );
+    }
+
+    #[test]
     fn appends_a_file_once() {
         let a = addon(
             "a",
