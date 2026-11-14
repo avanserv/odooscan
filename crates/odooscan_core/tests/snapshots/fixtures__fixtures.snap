@@ -366,6 +366,7 @@ custom/depends_unused/__manifest__.py:9:9: OD521 nothing of module 'prov_shared'
 custom/depends_unused/__manifest__.py:25:9: OD503 module 'ghost_unused' is not on the addons path
 custom/depends_unused/__manifest__.py:26:9: OD504 module 'prov_back' depends back on depends_unused, so Odoo installs neither
 custom/depends_unused_implied/__manifest__.py:4:25: OD520 module 'mail' already comes with 'sale', also in depends
+custom/depends_unused_mist/__manifest__.py:4:30: OD521 nothing of module 'prov_veil' is used, nor of what only it brings
 custom/domain_bases/models/domain_models.py:23:23: OD210 'whole_id.no_past_base': domain.whole has no field 'no_past_base'
 custom/domain_bases/models/domain_models.py:53:30: OD210 'no_chained': domain.chained has no field 'no_chained'
 custom/domain_bases/models/domain_models.py:99:23: OD210 'label.no_past_char': domain.found.label is not a relational field, so the path cannot continue

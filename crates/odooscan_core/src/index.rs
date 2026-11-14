@@ -2290,21 +2290,32 @@ impl<'m> Index<'m> {
         ours
     }
 
+    /// Whether a module of `set` loads a data file the scan cannot read that may hold a view.
+    fn loses_views(&self, set: &[bool]) -> bool {
+        let mut modules = self.modules.iter().enumerate();
+        modules.any(|(mi, other)| set[mi] && other.lost_views())
+    }
+
     /// Whether a spec of a loaded view or template of `module` locates an element that, of the
     /// modules of `scope`, only those of `set` add to the tree it extends. A spec on a tree whose
-    /// way up to the root the index does not hold counts, as it may locate one.
+    /// way up to the root the index does not hold counts, as it may locate one. So does one locating
+    /// what no readable view outside `set` adds, when `set` extends the tree with a view whose arch
+    /// the scan did not read, or loads a data file it cannot read that may hold one: Odoo combines
+    /// every extension below the root.
     pub fn locates_in(&self, module: usize, set: &[bool], scope: &Scope) -> bool {
         let m = &self.modules[module];
         let name = m.name.as_str();
-        let sole = |tree: &Inheritance<'m>, parent: String, elements: Vec<ArchElement>| {
+        let lost_views = self.loses_views(set);
+        let sole = |tree: &Inheritance<'m>, lost: bool, parent: String, elements: Vec<ArchElement>| {
             let Some(root) = tree.root(parent) else {
                 return true;
             };
+            let unread = lost || tree.any(&root, |mi, fact| set[mi] && fact.arch_unread);
             let all = tree.tree(root.clone(), self.modules, |mi| scope.sees(mi));
             let without = tree.tree(root, self.modules, |mi| scope.sees(mi) && !set[mi]);
             elements
                 .iter()
-                .any(|e| all.visible.contains(e) && !without.visible.contains(e))
+                .any(|e| (unread || all.visible.contains(e)) && !without.visible.contains(e))
         };
         let views = m.data.iter().filter(|f| f.rank.is_some()).flat_map(|f| &f.facts.views);
         let mut views = views.filter(|v| !v.locators.is_empty());
@@ -2314,13 +2325,14 @@ impl<'m> Index<'m> {
         views.any(|v| {
             let Some(parent) = &v.inherit else { return false };
             let elements = v.locators.iter().map(|l| located(&l.value, name)).collect();
-            sole(&self.views, full_id(name, parent), elements)
+            sole(&self.views, lost_views, full_id(name, parent), elements)
         }) || templates.any(|t| {
             let Some(parent) = t.inherit.as_ref().filter(|_| !t.arch.locators.is_empty()) else {
                 return false;
             };
             let elements = t.arch.locators.iter().map(|l| l.value.clone()).collect();
-            sole(&self.templates, parent.value.clone(), elements)
+            // A template file that does not parse leaves no mark to tell an unread branch by.
+            sole(&self.templates, false, parent.value.clone(), elements)
         })
     }
 
@@ -3943,6 +3955,89 @@ mod tests {
         ] {
             assert!(!takes(text), "{text}");
         }
+    }
+
+    #[test]
+    fn a_spec_locates_in_a_set_that_extends_its_tree_unread() {
+        fn file(rel: &str, facts: crate::facts::DataFacts) -> SourceFile<crate::facts::DataFacts> {
+            SourceFile {
+                path: PathBuf::new(),
+                rel: rel.to_owned(),
+                rank: Some(0),
+                demo: false,
+                facts,
+                suppressions: Default::default(),
+                mentions: Mentions::default(),
+            }
+        }
+        let view = |record: &str| {
+            file(
+                "views/views.xml",
+                xml::analyze(&format!("<odoo>{record}</odoo>"), Series::parse("18.0")),
+            )
+        };
+        let extension = |id: &str, arch: &str| {
+            format!(
+                r#"<record id="{id}" model="ir.ui.view">
+                    <field name="model">res.partner</field>
+                    <field name="inherit_id" ref="base.view_partner_simple"/>
+                    {arch}
+                </record>"#
+            )
+        };
+        let adds = |field: &str, id: &str| {
+            let spec = format!(r#"<xpath expr="//div[@id='notes']" position="after"><div id="{id}"/></xpath>"#);
+            format!(r#"<field name="{field}" type="xml">{spec}</field>"#)
+        };
+        let manifest = |depends: &str| format!("{{'version': '18.0.1.0', 'depends': [{depends}]}}");
+        // Whether main's spec on `haze_block` locates in `member`, haze writing `haze_arch` and
+        // loading a file at `lost` the scan cannot read.
+        let locates = |haze_arch: &str, lost: Option<&str>, member: &str| {
+            let mut modules = [
+                module("base", &manifest("")),
+                module("haze", &manifest("'base'")),
+                module("veil", &manifest("'base'")),
+                module("main", &manifest("'haze', 'veil'")),
+            ];
+            modules[0].data.push(view(
+                r#"<record id="view_partner_simple" model="ir.ui.view">
+                    <field name="model">res.partner</field>
+                    <field name="arch" type="xml"><form><div id="notes"/></form></field>
+                </record>"#,
+            ));
+            modules[1].data.push(view(&extension("view_haze", haze_arch)));
+            let unreadable = crate::facts::DataFacts {
+                unreadable: true,
+                ..Default::default()
+            };
+            modules[1].data.extend(lost.map(|rel| file(rel, unreadable)));
+            modules[2]
+                .data
+                .push(view(&extension("view_veil", &adds("arch", "veil_block"))));
+            let spec = r#"<xpath expr="//div[@id='haze_block']" position="inside"><span/></xpath>"#;
+            let spec = format!(r#"<field name="arch" type="xml">{spec}</field>"#);
+            modules[3].data.push(view(&extension("view_main", &spec)));
+            let index = Index::build(&modules, None);
+            let main = index.by_name["main"];
+            let set: Vec<bool> = modules.iter().map(|m| m.name == member).collect();
+            index.locates_in(main, &set, &index.scope(main))
+        };
+        assert!(locates(&adds("arch_base", "haze_block"), None, "haze"));
+        assert!(!locates(&adds("arch_base", "haze_block"), None, "veil"));
+        assert!(!locates(&adds("arch", "haze_other"), None, "haze"));
+        // A record that writes no arch adds nothing.
+        assert!(!locates("", None, "haze"));
+        assert!(!locates(
+            &adds("arch", "haze_other"),
+            Some("data/res.partner.csv"),
+            "haze"
+        ));
+        assert!(locates(
+            &adds("arch", "haze_other"),
+            Some("data/ir.ui.view.csv"),
+            "haze"
+        ));
+        assert!(locates(&adds("arch", "haze_other"), Some("views/lost.xml"), "haze"));
     }
 
     #[test]

@@ -944,6 +944,9 @@ pub struct ViewFact {
     pub fields: Vec<ArchField>,
     /// The view's arch was read, so `elements` is complete.
     pub has_arch: bool,
+    /// The record writes its arch to a field the scan does not read (`arch_base`), so the view
+    /// may add elements `elements` lacks. A record writing no arch adds none.
+    pub arch_unread: bool,
     /// Elements the arch adds, which views extending it can locate.
     pub elements: Vec<ArchElement>,
     /// The elements the arch's own tags add, with their modifiers.
