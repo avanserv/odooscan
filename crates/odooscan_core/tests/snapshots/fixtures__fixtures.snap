@@ -737,6 +737,7 @@ custom/manifest_assets_unmatched/__manifest__.py:8:13: OD513 'manifest_assets_un
 custom/manifest_assets_unmatched/__manifest__.py:9:13: OD513 'manifest_assets_unmatched/static/src/js/missing.js' does not exist, so the bundle fails to load it
 custom/manifest_assets_unmatched/__manifest__.py:10:24: OD513 'manifest_assets_unmatched/static/src/legacy/**/*.js' matches no js, css, scss, sass, less or xml file under manifest_assets_unmatched/static/, so Odoo adds nothing
 custom/manifest_assets_unmatched/__manifest__.py:11:13: OD513 'manifest_assets_unmatched/views/*.js' is outside manifest_assets_unmatched/static/, the only files Odoo serves as assets
+custom/manifest_assets_unmatched_162/__manifest__.py:9:13: OD513 'manifest_assets_unmatched_162/views/shelf_templates.xml' is outside manifest_assets_unmatched_162/static/, the only place Odoo serves XML assets from
 custom/manifest_assets_unmatched_163/__manifest__.py:8:13: OD513 'manifest_assets_unmatched_163/lib/shelf.js' is outside manifest_assets_unmatched_163/static/, the only files Odoo serves as assets
 custom/manifest_auto_install_bare/__manifest__.py:4:22: OD511 auto_install names 'base', which is not in depends, so Odoo fails to read the manifest
 custom/manifest_auto_install_bare_20/__manifest__.py:4:30: OD511 auto_install names 'web', which is not in depends, so Odoo fails to read the manifest

@@ -1090,8 +1090,8 @@ fn upgrade_scripts<'m>(module: &'m Module, series: Option<Series>, out: &mut Out
 /// OD513 on an `assets` path of the module's own that resolves to no file, which Odoo drops with a
 /// warning when it is a glob and keeps as a URL that fails to load otherwise (18.0
 /// `odoo/addons/base/models/ir_asset.py:330-374`). From saas~16.3 Odoo serves only files under
-/// `static/`; before, a script or a style may sit anywhere in the module, so a path outside
-/// `static/` stays silent there.
+/// `static/`; before, a script or a style may sit anywhere in the module, so only an XML path
+/// outside `static/` is reported there, since Odoo refuses templates elsewhere (saas~16.2 `:330-340`).
 fn unmatched_assets<'m>(module: &'m Module, series: Option<Series>, out: &mut Out<'m>) {
     for path in module.manifest.bundles.iter().flat_map(|b| &b.paths) {
         if let Some(message) = unmatched_asset(module, &path.value, static_only(series)) {
@@ -1114,11 +1114,10 @@ fn unmatched_asset(module: &Module, path: &str, static_only: bool) -> Option<Str
     }
     let parts = normal_parts(path);
     if !(parts.len() > 2 && parts[0] == name && parts[1] == "static") {
-        return static_only
-            .then(|| format!("'{path}' is outside {name}/static/, the only files Odoo serves as assets"));
+        return outside_static(name, path, &parts, static_only);
     }
     let rel = parts.join("/");
-    if path.contains(['*', '?', '[', ']']) {
+    if wildcard(path) {
         // Odoo globs with `glob.glob(recursive=True)`; a glob globset cannot read stays silent.
         let glob = asset_glob_set([&rel]);
         if glob.is_empty() {
@@ -1134,6 +1133,29 @@ fn unmatched_asset(module: &Module, path: &str, static_only: bool) -> Option<Str
     let extension = rel.rsplit('.').next().unwrap_or_default();
     (ASSET_EXTENSIONS.contains(&extension) && !module.static_assets.contains(&rel))
         .then(|| format!("'{path}' does not exist, so the bundle fails to load it"))
+}
+
+/// Why `path`, normalized to `parts` outside `name/static/`, is not served, none when it is.
+fn outside_static(name: &str, path: &str, parts: &[&str], static_only: bool) -> Option<String> {
+    if static_only {
+        return Some(format!(
+            "'{path}' is outside {name}/static/, the only files Odoo serves as assets"
+        ));
+    }
+    // Odoo's leak check compares the extension case-sensitively, so it lets `a.XML` through (a
+    // later lowercase filter drops it), and a wildcard first directory may glob into `static/`.
+    let xml = parts
+        .last()
+        .and_then(|p| p.rsplit_once('.'))
+        .is_some_and(|(_, ext)| ext == "xml");
+    let may_reach_static = parts.len() > 2 && parts[0] == name && wildcard(parts[1]);
+    (xml && !may_reach_static)
+        .then(|| format!("'{path}' is outside {name}/static/, the only place Odoo serves XML assets from"))
+}
+
+/// Whether `path` holds one of the characters Odoo reads as a glob (`WILDCARD_CHARACTERS`).
+fn wildcard(path: &str) -> bool {
+    path.contains(['*', '?', '[', ']'])
 }
 
 /// The parts of `path` as `os.path.normpath` leaves them: without empty ones or `.`, and with each
@@ -6655,7 +6677,18 @@ mod tests {
         ] {
             assert!(unmatched(path, true), "{path}");
         }
-        assert!(!unmatched("loan/views/assets.xml", false) && !unmatched("loan/**/*.js", false));
+        for path in ["loan/views/assets.xml", "loan/views/*.xml", "loan/../other/views/a.xml"] {
+            assert!(unmatched(path, false), "{path}");
+        }
+        for path in [
+            "loan/**/*.js",
+            "loan/**/*.xml",
+            "loan/*/src/a.xml",
+            "loan/views/a.XML",
+            "loan/views/a.js",
+        ] {
+            assert!(!unmatched(path, false), "{path}");
+        }
         assert!(unmatched("loan/static/src/jss/**/*", false));
     }
 
