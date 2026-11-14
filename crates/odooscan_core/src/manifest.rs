@@ -184,7 +184,7 @@ impl Manifest {
     }
 
     /// OD507 and OD508 on the license, OD511 on an `auto_install` trigger outside `depends`, and
-    /// OD512 on a file listed again under `data` or `demo`. `at` is where the dict opens.
+    /// OD512 on a file listed again under `data` or `demo`. `at` is where the top expression opens.
     fn findings(&self, at: Pos, series: Option<Series>) -> Vec<RawDiag> {
         let mut diags = vec![];
         match &self.license {
@@ -506,23 +506,34 @@ impl Source<'_> {
     fn at(&self, node: &impl Ranged) -> Pos {
         self.pos(node.start())
     }
+
+    fn text(&self, node: &impl Ranged) -> &str {
+        self.loc.text(&(node.range() + self.blanks))
+    }
 }
 
 /// Why odooscan reads no module from a manifest, in the series it read the manifest as.
 #[derive(Debug)]
-pub struct Refusal {
+pub struct Rejection {
     pub error: Spanned<String>,
     pub series: Option<Series>,
     pub odoo: OdooReads,
 }
 
-/// Whether the Odoo of the series reads a manifest odooscan refuses.
+impl Rejection {
+    /// The OD000 of a checked manifest Odoo cannot read.
+    pub fn diag(&self) -> RawDiag {
+        RawDiag::new("OD000", self.error.pos, self.error.value.clone())
+    }
+}
+
+/// Whether the Odoo of the series reads a manifest odooscan rejects.
 #[derive(Debug, PartialEq, Eq)]
 pub enum OdooReads {
     No,
     /// It parses only as the Python 2 the series runs.
     AsPython2,
-    /// It is an expression 9.0 evaluates but odooscan refuses: no dict or iterable of pairs, or one
+    /// It is an expression 9.0 evaluates but odooscan rejects: no dict or iterable of pairs, or one
     /// whose item is no pair or cannot be hashed.
     AsExpression,
 }
@@ -533,8 +544,8 @@ pub enum OdooReads {
 /// hands `literal_eval` the bytes, which Python 2 takes in any encoding
 /// (`odoo/modules/module.py:330-332`), and 9.0 hands them to `eval`
 /// (`openerp/modules/module.py:263-265`), which takes any expression.
-pub fn read(bytes: &[u8], series: impl FnOnce(Option<Series>) -> Option<Series>) -> Result<Manifest, Refusal> {
-    let (src, not_utf8) = decode(bytes);
+pub fn read(bytes: &[u8], series: impl FnOnce(Option<Series>) -> Option<Series>) -> Result<Manifest, Rejection> {
+    let (src, not_utf8) = text(bytes);
     let body = src.trim_start_matches([' ', '\t']);
     let loc = Source {
         loc: Locator::new(&src),
@@ -552,23 +563,26 @@ pub fn read(bytes: &[u8], series: impl FnOnce(Option<Series>) -> Option<Series>)
     if let (Some(m), Some(e)) = (manifest.as_mut(), expr) {
         m.diags = m.findings(loc.at(e), series);
     }
-    let refuse = |(error, odoo)| Refusal { error, series, odoo };
+    let reject = |(error, odoo)| Rejection { error, series, odoo };
     if let Some(pos) = not_utf8.filter(|_| !python2::runs_on(series)) {
-        return Err(refuse((error(pos, "the manifest is not UTF-8"), OdooReads::No)));
+        return Err(reject((error(pos, "the manifest is not UTF-8"), OdooReads::No)));
     }
     let top = top.map_err(|(e, syntax)| {
         let python2 = syntax && python2::runs_on(series) && python2::remaining_error(body, series).is_none();
-        refuse((e, if python2 { OdooReads::AsPython2 } else { OdooReads::No }))
+        reject((e, if python2 { OdooReads::AsPython2 } else { OdooReads::No }))
     })?;
-    literal_manifest(&loc, top, manifest, series).map_err(refuse)
+    literal_manifest(&loc, top, manifest, series).map_err(reject)
 }
 
 /// `bytes` as text, each byte one character when they are not UTF-8, with the position of the
 /// first byte that is not.
-fn decode(bytes: &[u8]) -> (Cow<'_, str>, Option<Pos>) {
+fn text(bytes: &[u8]) -> (Cow<'_, str>, Option<Pos>) {
     match decode::invalid_utf8(bytes) {
         None => (String::from_utf8_lossy(bytes), None),
-        Some(pos) => (Cow::Owned(bytes.iter().copied().map(char::from).collect()), Some(pos)),
+        Some(pos) => (
+            Cow::Owned(bytes.iter().copied().map(decode::latin1).collect()),
+            Some(pos),
+        ),
     }
 }
 
@@ -581,8 +595,9 @@ fn literal_manifest(
     series: Option<Series>,
 ) -> Result<Manifest, (Spanned<String>, OdooReads)> {
     let literal = series.is_none_or(|s| s >= LITERAL_EVAL);
+    let python2 = python2::runs_on(series).then_some(loc);
     // Python 2's literal_eval, which 10.0 calls, knows no set.
-    let sets = !python2::runs_on(series);
+    let sets = python2.is_none();
     let odoo = if literal {
         OdooReads::No
     } else {
@@ -606,7 +621,7 @@ fn literal_manifest(
             OdooReads::No,
         ));
     }
-    match refused_item(top) {
+    match refused_item(top, python2) {
         Some((item, why)) => Err((error(loc.at(item), why), odoo)),
         None => Ok(manifest),
     }
@@ -614,15 +629,16 @@ fn literal_manifest(
 
 /// The first item of a list, tuple or set `top` that Odoo cannot load, with why. Python builds a
 /// set before Odoo hands it to `dict.update`, so an item it cannot hash fails first. An item that
-/// is no literal, which 9.0 evaluates, is not judged.
-fn refused_item(top: &Expr) -> Option<(&Expr, &'static str)> {
+/// is no literal, which 9.0 evaluates, is not judged. When `python2` holds the manifest's source,
+/// a string is judged as Python 2 takes it.
+fn refused_item<'a>(top: &'a Expr, python2: Option<&Source>) -> Option<(&'a Expr, &'static str)> {
     let mut items = sequence(top)?;
     items.retain(|i| unliteral(i, true).is_none());
-    let unhashable = items.iter().find(|i| top.is_set_expr() && value(i).is_none());
+    let unhashable = items.iter().find(|i| top.is_set_expr() && value(i, python2).is_none());
     if let Some(item) = unhashable {
         return Some((item, "not hashable: Python puts each item of the manifest in a set"));
     }
-    let item = items.into_iter().find(|i| !pair(i))?;
+    let item = items.into_iter().find(|i| !pair(i, python2))?;
     Some((
         item,
         "not a key/value pair: Odoo updates a dict with each item of the manifest",
@@ -691,23 +707,31 @@ fn entry(item: &Expr) -> Option<(&Expr, &Expr)> {
 
 /// Whether `dict.update` takes `item` for a key/value pair: two characters or bytes, a list or
 /// tuple of two items, or a set or dict of two distinct hashable values, as Python keeps one of
-/// equal ones.
-fn pair(item: &Expr) -> bool {
+/// equal ones. A string whose length odooscan does not know is taken for a pair.
+fn pair(item: &Expr, python2: Option<&Source>) -> bool {
     match item {
-        Expr::StringLiteral(s) => s.value.chars().count() == 2,
+        Expr::StringLiteral(s) => match string(s, python2) {
+            Value::Str(s) => s.chars().count() == 2,
+            Value::Bytes(b) => b.len() == 2,
+            _ => true,
+        },
         Expr::BytesLiteral(b) => b.value.len() == 2,
         Expr::List(l) => l.elts.len() == 2,
         Expr::Tuple(t) => t.elts.len() == 2,
-        Expr::Set(_) | Expr::Dict(_) => two_distinct(item),
+        Expr::Set(_) | Expr::Dict(_) => two_distinct(item, python2),
         _ => false,
     }
 }
 
 /// Whether the items or keys of a set or dict literal are hashable and hold two distinct values.
 /// An unknown value may equal any other, so with one the count is taken as two when it can be.
-fn two_distinct(expr: &Expr) -> bool {
-    let values =
-        module_state::items(expr).and_then(|items| items.into_iter().map(|i| value(i?)).collect::<Option<Vec<_>>>());
+fn two_distinct(expr: &Expr, python2: Option<&Source>) -> bool {
+    let values = module_state::items(expr).and_then(|items| {
+        items
+            .into_iter()
+            .map(|i| value(i?, python2))
+            .collect::<Option<Vec<_>>>()
+    });
     let Some(values) = values else {
         return false;
     };
@@ -775,16 +799,46 @@ impl Value {
 }
 
 /// The value of `expr` when it is a hashable literal: a `leaf` but `set()`, or a tuple of them.
-fn value(expr: &Expr) -> Option<Value> {
+fn value(expr: &Expr, python2: Option<&Source>) -> Option<Value> {
     Some(match expr {
-        Expr::StringLiteral(s) => Value::Str(s.value.to_str().to_owned()),
+        Expr::StringLiteral(s) => string(s, python2),
         Expr::BytesLiteral(b) => Value::Bytes(b.value.bytes().collect()),
         Expr::BooleanLiteral(b) => Value::Int(b.value.into()),
         Expr::NoneLiteral(_) => Value::None,
         Expr::EllipsisLiteral(_) => Value::Ellipsis,
-        Expr::Tuple(t) => Value::Tuple(t.elts.iter().map(value).collect::<Option<_>>()?),
+        Expr::Tuple(t) => Value::Tuple(t.elts.iter().map(|e| value(e, python2)).collect::<Option<_>>()?),
         e => numeric(e)?,
     })
+}
+
+/// The value of `s`, as Python 2 takes it when `python2` holds the manifest's source. There a
+/// plain string is bytes, in the file's encoding, and a `u` one is unicode, which equals and hashes
+/// as the same bytes when it is ASCII. So an ASCII string is held as its bytes, and one with other
+/// characters, or with an escape a plain string keeps as written, is `Unknown`.
+fn string(s: &ast::ExprStringLiteral, python2: Option<&Source>) -> Value {
+    let text = s.value.to_str();
+    match python2 {
+        None => Value::Str(text.to_owned()),
+        Some(src) if text.is_ascii() && !s.value.iter().any(|p| kept_escape(src, p)) => {
+            Value::Bytes(text.as_bytes().to_vec())
+        }
+        Some(_) => Value::Unknown,
+    }
+}
+
+/// Whether `part` is a plain string holding a `\u`, `\U` or `\N` escape, which Python 2 decodes
+/// only in a `u` string.
+fn kept_escape(src: &Source, part: &ast::StringLiteral) -> bool {
+    if !part.flags.prefix().is_empty() {
+        return false;
+    }
+    let mut chars = src.text(part).chars();
+    while let Some(c) = chars.next() {
+        if c == '\\' && matches!(chars.next(), Some('u' | 'U' | 'N')) {
+            return true;
+        }
+    }
+    false
 }
 
 /// The value of a number, a signed number or a complex sum.
@@ -1474,6 +1528,32 @@ mod tests {
         assert_eq!(odoo_reads(b"{'name': 'x',", "9.0"), Some(OdooReads::No));
         assert_eq!(odoo_reads(b"{'sequence': 0755}", "9.0"), Some(OdooReads::AsPython2));
         assert_eq!(odoo_reads(b"{'sequence': 0755}", "11.0"), Some(OdooReads::No));
+    }
+
+    #[test]
+    fn python_2_judges_a_string_by_its_bytes() {
+        assert!(parse_bytes("['\u{e9}']".as_bytes(), "10.0").is_ok());
+        assert!(parse_bytes("['\u{e9}a']".as_bytes(), "10.0").is_ok());
+        assert!(parse_bytes("['\u{e9}']".as_bytes(), "11.0").is_err());
+        let same_key = b"[{'a': 1, b'a': 2}]";
+        assert_eq!(odoo_reads(same_key, "9.0"), Some(OdooReads::AsExpression));
+        assert_eq!(odoo_reads(same_key, "10.0"), Some(OdooReads::No));
+        assert_eq!(odoo_reads(same_key, "11.0"), None);
+        let escaped = br"[{'\u0041': 1, 'A': 2}]";
+        assert!(parse_bytes(escaped, "10.0").is_ok());
+        assert!(parse_bytes(br"[{'\N{LATIN CAPITAL LETTER A}': 1, 'A': 2}]", "10.0").is_ok());
+        assert_eq!(odoo_reads(escaped, "11.0"), Some(OdooReads::No));
+        assert_eq!(odoo_reads(br"[{u'\u0041': 1, 'A': 2}]", "10.0"), Some(OdooReads::No));
+        assert_eq!(odoo_reads(br"[{u'a': 1, 'a': 2}]", "10.0"), Some(OdooReads::No));
+        assert_eq!(odoo_reads(br"[r'\u0041']", "10.0"), Some(OdooReads::No));
+        assert!(parse_bytes(br"[{'\U00000041': 1, 'A': 2}]", "10.0").is_ok());
+        assert_eq!(odoo_reads(br"['\\u0041']", "10.0"), Some(OdooReads::No));
+        assert_eq!(odoo_reads(br"[{u'A' 'B': 1, 'AB': 2}]", "10.0"), Some(OdooReads::No));
+        assert_eq!(
+            odoo_reads(br"[{u'\u0041' 'B': 1, 'AB': 2}]", "10.0"),
+            Some(OdooReads::No)
+        );
+        assert!(parse_bytes(br"[{u'A' '\u0042': 1, 'AB': 2}]", "10.0").is_ok());
     }
 
     #[test]

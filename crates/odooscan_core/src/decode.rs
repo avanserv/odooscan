@@ -101,7 +101,7 @@ pub fn csv_strict(series: Option<Series>) -> bool {
     series.is_none_or(|s| s >= CSV_UTF8)
 }
 
-fn latin1(byte: u8) -> char {
+pub(crate) fn latin1(byte: u8) -> char {
     char::from(byte)
 }
 
