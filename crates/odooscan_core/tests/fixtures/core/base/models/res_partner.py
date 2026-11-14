@@ -228,3 +228,10 @@ class IrAttachment(models.Model):
     raw = fields.Binary()
     datas = fields.Binary()
     db_datas = fields.Binary()
+
+
+class IrActionsClient(models.Model):
+    _name = "ir.actions.client"
+
+    name = fields.Char()
+    tag = fields.Char()

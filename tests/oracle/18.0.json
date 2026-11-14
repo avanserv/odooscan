@@ -757,6 +757,12 @@
       "count": 2
     },
     {
+      "path": "addons/hr_attendance/views/hr_attendance_view.xml",
+      "code": "OD331",
+      "message": "no indexed bundle registers client action 'hr_attendance_greeting_message'",
+      "count": 1
+    },
+    {
       "path": "addons/hr_contract/models/hr_contract.py",
       "code": "OD103",
       "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
@@ -2339,6 +2345,12 @@
       "code": "OD303",
       "message": "XML id 'action_print_labels' is already defined earlier in this file",
       "count": 1
+    },
+    {
+      "path": "addons/mrp/views/mrp_production_views.xml",
+      "code": "OD331",
+      "message": "no indexed bundle registers client action 'mrp_display'",
+      "count": 2
     },
     {
       "path": "addons/mrp_subcontracting/data/mrp_subcontracting_demo.xml",
@@ -4090,6 +4102,12 @@
       "path": "addons/website_crm_iap_reveal/models/crm_reveal_rule.py",
       "code": "OD103",
       "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
+      "count": 1
+    },
+    {
+      "path": "addons/website_crm_iap_reveal/views/crm_reveal_views.xml",
+      "code": "OD329",
+      "message": "no indexed bundle registers field widget 'website_urls'",
       "count": 1
     },
     {
