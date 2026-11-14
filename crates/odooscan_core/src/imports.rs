@@ -253,10 +253,26 @@ fn exports(body: &[Stmt]) -> Exports {
     for stmt in module_state::top_level(body) {
         exports = match stmt {
             Stmt::Expr(e) => grown(exports, &e.value),
+            Stmt::For(_) | Stmt::While(_) | Stmt::Match(_) => module_state::bound(std::slice::from_ref(stmt))
+                .into_iter()
+                .fold(exports, looped),
             _ => bound(exports, stmt),
         };
     }
     exports
+}
+
+/// `__all__` after `stmt` in a loop or `match` case, which may run any number of times or none,
+/// so an assignment may leave the earlier list in place.
+fn looped(exports: Exports, stmt: &Stmt) -> Exports {
+    match stmt {
+        Stmt::Expr(e) => grown(exports, &e.value),
+        Stmt::AugAssign(_) => bound(exports, stmt),
+        Stmt::Assign(a) if a.targets.iter().any(is_all) => Exports::Unread,
+        Stmt::AnnAssign(a) if is_all(&a.target) => Exports::Unread,
+        Stmt::For(f) if is_all(&f.target) => Exports::Unread,
+        _ => exports,
+    }
 }
 
 /// `__all__` after `stmt`, when it assigns it or extends it with `+=`.
@@ -951,6 +967,38 @@ mod tests {
             "__all__ = ['a']\n__all__.append('b', 'c')\n",
         ] {
             assert_eq!(read(unread), Exports::Unread, "{unread}");
+        }
+    }
+
+    #[test]
+    fn all_grown_in_a_loop_or_case_is_read() {
+        let read = |src: &str| imports(src).exports;
+        for place in [
+            "for _ in x:\n        ",
+            "for _ in x:\n    pass\nelse:\n        ",
+            "while x:\n        ",
+            "for _ in x:\n    if y:\n        ",
+            "match x:\n    case 1:\n        ",
+        ] {
+            for grows in ["__all__.append('b')", "__all__.extend(['b'])", "__all__ += ['b']"] {
+                let src = format!("__all__ = ['a']\n{place}{grows}\n");
+                assert_eq!(read(&src), Exports::Literal(owned(&["a", "b"])), "{src}");
+            }
+        }
+        assert_eq!(
+            read("__all__ = ['a']\nfor _ in x:\n    def f():\n        __all__.append('b')\n"),
+            Exports::Literal(owned(&["a"]))
+        );
+        for unread in [
+            "for n in ('a',):\n    __all__.append(n)\n",
+            "for _ in x:\n    __all__ = ['b']\n",
+            "for _ in x:\n    __all__: list = ['b']\n",
+            "match x:\n    case 1:\n        __all__ = ['b']\n",
+            "for __all__ in x:\n    pass\n",
+            "while x:\n    __all__.remove('a')\n",
+        ] {
+            let src = format!("__all__ = ['a']\n{unread}");
+            assert_eq!(read(&src), Exports::Unread, "{unread}");
         }
     }
 

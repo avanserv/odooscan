@@ -639,7 +639,7 @@ fn stmt_names(stmt: &Stmt, names: &mut Vec<String>) -> Option<()> {
 }
 
 /// `top_level`, into the bodies of loops and `match` cases too.
-fn bound(body: &[Stmt]) -> Vec<&Stmt> {
+pub(crate) fn bound(body: &[Stmt]) -> Vec<&Stmt> {
     let mut stmts = vec![];
     for stmt in top_level(body) {
         stmts.push(stmt);
