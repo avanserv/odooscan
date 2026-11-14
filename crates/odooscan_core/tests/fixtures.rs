@@ -110,17 +110,26 @@ fn python_2_files_of_checked_modules_get_a_notice() {
 fn an_indexed_manifest_that_does_not_parse_gets_a_notice() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
     let report = scan(&ScanOptions {
-        paths: vec![root.join("custom/cycle_a")],
+        paths: vec![root.join("custom/manifest_unclosed_user")],
         addons_paths: vec![root.join("custom"), root.join("core")],
         ..Default::default()
     });
-    let manifest = root.join("custom/manifest_unclosed/__manifest__.py");
-    let notice = format!(
-        "{}:5:1: the manifest does not parse, so module manifest_unclosed is not indexed: unexpected EOF while parsing",
-        manifest.display()
-    );
-    assert!(report.notices.contains(&notice), "{:#?}", report.notices);
-    assert!(!report.diagnostics.iter().any(|d| d.code == "OD000"));
+    let notice = "manifest_unclosed/__manifest__.py:5:1: unexpected EOF while parsing; this module is not indexed";
+    assert!(report.notices.iter().any(|n| n == notice), "{:#?}", report.notices);
+    let found: Vec<_> = report.diagnostics.iter().map(|d| (d.code, d.line, d.column)).collect();
+    assert_eq!(found, [("OD503", 4, 25)]);
+}
+
+#[test]
+fn an_ignored_manifest_error_is_silent() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+    let report = scan(&ScanOptions {
+        paths: vec![root.join("custom/manifest_ignored")],
+        addons_paths: vec![root.join("core")],
+        ..Default::default()
+    });
+    assert!(report.diagnostics.is_empty(), "{:#?}", report.diagnostics);
+    assert_eq!(report.modules_checked, 1);
 }
 
 #[test]

@@ -200,14 +200,11 @@ pub fn scan(opts: &ScanOptions) -> Report {
         })
         .collect();
     // Odoo cannot read the manifest, so the module is not loaded and this is all it gets.
-    let unread = broken
+    let broken_diags = broken
         .iter()
-        .filter(|b| b.suppressions.allows(b.error.pos.line, "OD000") && rule("OD000").applies_to(default_series))
-        .map(|b| {
-            let raw = RawDiag::new("OD000", b.error.pos, b.error.value.clone());
-            Diagnostic::new(b.path.clone(), raw, default_series)
-        });
-    diagnostics.extend(unread);
+        .filter(|b| b.suppressions.allows(b.diag.pos.line, b.diag.code) && rule(b.diag.code).applies_to(default_series))
+        .map(|b| Diagnostic::new(b.path.clone(), b.diag.clone(), default_series));
+    diagnostics.extend(broken_diags);
     diagnostics.sort_by(|a, b| (&a.path, a.line, a.column, a.code).cmp(&(&b.path, b.line, b.column, b.code)));
     Report {
         diagnostics,
