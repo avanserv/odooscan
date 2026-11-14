@@ -39,6 +39,8 @@ page in the terminal.
 - `index.rs` merges the facts. It resolves fields through `_inherit`, `_inherits` and
   `delegate=True`, related comodels, view inheritance, JS module paths and the scripts bundles
   load, and the dependency scope of each module.
+  - `bundles.rs` fills each asset bundle as Odoo does, in module load order, applying `append`,
+    `prepend`, `before`, `after`, `replace`, `remove` and `include`.
 - `checks.rs` holds the cross-file rules.
 - `rules.rs` is the registry: code, series range, severity and category. `docs/rules/` has a page
   per rule.
