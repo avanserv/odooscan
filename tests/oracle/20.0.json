@@ -91,6 +91,12 @@
       "count": 1
     },
     {
+      "path": "addons/account/static/src/components/document_file_uploader/document_file_uploader.js",
+      "code": "OD609",
+      "message": "markup() of a value built at runtime makes t-out render it as HTML unescaped; check that no user input reaches it, or use markup`...`, which escapes each placeholder",
+      "count": 1
+    },
+    {
       "path": "addons/account_edi/models/account_edi_document.py",
       "code": "OD103",
       "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
@@ -167,6 +173,24 @@
       "code": "OD520",
       "message": "module 'base' already comes with 'mail', also in depends",
       "count": 1
+    },
+    {
+      "path": "addons/api_doc/static/src/components/doc_method.js",
+      "code": "OD609",
+      "message": "markup() of a value built at runtime makes t-out render it as HTML unescaped; check that no user input reaches it, or use markup`...`, which escapes each placeholder",
+      "count": 1
+    },
+    {
+      "path": "addons/api_doc/static/src/components/doc_model.js",
+      "code": "OD609",
+      "message": "markup() of a value built at runtime makes t-out render it as HTML unescaped; check that no user input reaches it, or use markup`...`, which escapes each placeholder",
+      "count": 1
+    },
+    {
+      "path": "addons/api_doc/static/src/doc_model_store.js",
+      "code": "OD609",
+      "message": "markup() of a value built at runtime makes t-out render it as HTML unescaped; check that no user input reaches it, or use markup`...`, which escapes each placeholder",
+      "count": 2
     },
     {
       "path": "addons/attachment_indexation/__manifest__.py",
@@ -247,6 +271,18 @@
       "count": 1
     },
     {
+      "path": "addons/auth_passkey/static/src/services/check_identity/check_identity.js",
+      "code": "OD611",
+      "message": "console.log() is a debugging leftover that writes to every user's console; remove it",
+      "count": 1
+    },
+    {
+      "path": "addons/auth_passkey/static/src/views/auth_passkey_identity_check_form_view.js",
+      "code": "OD611",
+      "message": "console.log() is a debugging leftover that writes to every user's console; remove it",
+      "count": 1
+    },
+    {
       "path": "addons/auth_password_policy/__manifest__.py",
       "code": "OD520",
       "message": "module 'web' already comes with 'base_setup', also in depends",
@@ -310,6 +346,12 @@
       "path": "addons/auth_totp_portal/security/ir.access.csv",
       "code": "OD402",
       "message": "base.group_portal gets write, create or unlink on auth_totp.wizard; public and portal access should be read-only and go through controllers",
+      "count": 1
+    },
+    {
+      "path": "addons/auth_totp_portal/static/src/interactions/totp_enable.js",
+      "code": "OD609",
+      "message": "markup() of a value built at runtime makes t-out render it as HTML unescaped; check that no user input reaches it, or use markup`...`, which escapes each placeholder",
       "count": 1
     },
     {
@@ -409,6 +451,12 @@
       "count": 1
     },
     {
+      "path": "addons/bus/static/src/debug/bus_logs_plugin.js",
+      "code": "OD611",
+      "message": "console.log() is a debugging leftover that writes to every user's console; remove it",
+      "count": 1
+    },
+    {
       "path": "addons/calendar/__init__.py",
       "code": "OD103",
       "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
@@ -442,6 +490,12 @@
       "path": "addons/calendar/models/ir_http.py",
       "code": "OD130",
       "message": "_auth_method_calendar() decides which user every route with auth='calendar' runs as; check that it sets only a user the request has proven to be",
+      "count": 1
+    },
+    {
+      "path": "addons/calendar/static/src/js/services/calendar_notification_service.js",
+      "code": "OD609",
+      "message": "markup() of a value built at runtime makes t-out render it as HTML unescaped; check that no user input reaches it, or use markup`...`, which escapes each placeholder",
       "count": 1
     },
     {
@@ -769,6 +823,12 @@
       "count": 1
     },
     {
+      "path": "addons/hr_recruitment_skills/static/src/components/search_job_applicant_menu/search_job_applicant_menu.js",
+      "code": "OD609",
+      "message": "markup() of a value built at runtime makes t-out render it as HTML unescaped; check that no user input reaches it, or use markup`...`, which escapes each placeholder",
+      "count": 1
+    },
+    {
       "path": "addons/hr_skills/data/hr_skill_demo.xml",
       "code": "OD303",
       "message": "XML id 'hr_skill_nosql' is already defined earlier in this file",
@@ -796,6 +856,18 @@
       "path": "addons/hr_work_entry/static/src/components/domain_count_field/domain_count_field.js",
       "code": "OD602",
       "message": "neither ListRenderer nor its parents have 'getCellTitle', so super.getCellTitle() fails",
+      "count": 1
+    },
+    {
+      "path": "addons/html_builder/static/src/core/building_blocks/builder_select_item.js",
+      "code": "OD609",
+      "message": "markup() of a value built at runtime makes t-out render it as HTML unescaped; check that no user input reaches it, or use markup`...`, which escapes each placeholder",
+      "count": 1
+    },
+    {
+      "path": "addons/html_builder/static/src/snippets/snippet_viewer.js",
+      "code": "OD609",
+      "message": "markup() of a value built at runtime makes t-out render it as HTML unescaped; check that no user input reaches it, or use markup`...`, which escapes each placeholder",
       "count": 1
     },
     {
@@ -838,6 +910,108 @@
       "path": "addons/html_editor/models/ir_qweb_fields.py",
       "code": "OD706",
       "message": "RPC argument 'url' reaches the URL of requests.get(), so the user picks the host the server connects to; start the URL with a host the code picks",
+      "count": 1
+    },
+    {
+      "path": "addons/html_editor/static/src/components/history_dialog/history_dialog.js",
+      "code": "OD609",
+      "message": "markup() of a value built at runtime makes t-out render it as HTML unescaped; check that no user input reaches it, or use markup`...`, which escapes each placeholder",
+      "count": 4
+    },
+    {
+      "path": "addons/html_editor/static/src/components/html_viewer/html_viewer.js",
+      "code": "OD609",
+      "message": "markup() of a value built at runtime makes t-out render it as HTML unescaped; check that no user input reaches it, or use markup`...`, which escapes each placeholder",
+      "count": 1
+    },
+    {
+      "path": "addons/html_editor/static/src/components/html_viewer/html_viewer.js",
+      "code": "OD610",
+      "message": "assigning innerHTML renders the value as HTML unescaped; check that no user input reaches it, or set textContent",
+      "count": 1
+    },
+    {
+      "path": "addons/html_editor/static/src/core/clipboard_plugin.js",
+      "code": "OD610",
+      "message": "assigning innerHTML renders the value as HTML unescaped; check that no user input reaches it, or set textContent",
+      "count": 1
+    },
+    {
+      "path": "addons/html_editor/static/src/fields/html_field.js",
+      "code": "OD609",
+      "message": "markup() of a value built at runtime makes t-out render it as HTML unescaped; check that no user input reaches it, or use markup`...`, which escapes each placeholder",
+      "count": 1
+    },
+    {
+      "path": "addons/html_editor/static/src/fields/html_field.js",
+      "code": "OD610",
+      "message": "assigning innerHTML renders the value as HTML unescaped; check that no user input reaches it, or set textContent",
+      "count": 1
+    },
+    {
+      "path": "addons/html_editor/static/src/html_migrations/html_upgrade_manager.js",
+      "code": "OD609",
+      "message": "markup() of a value built at runtime makes t-out render it as HTML unescaped; check that no user input reaches it, or use markup`...`, which escapes each placeholder",
+      "count": 1
+    },
+    {
+      "path": "addons/html_editor/static/src/main/media/media_dialog/video_selector.js",
+      "code": "OD610",
+      "message": "assigning innerHTML renders the value as HTML unescaped; check that no user input reaches it, or set textContent",
+      "count": 1
+    },
+    {
+      "path": "addons/html_editor/static/src/main/translate/translate_dialog.js",
+      "code": "OD609",
+      "message": "markup() of a value built at runtime makes t-out render it as HTML unescaped; check that no user input reaches it, or use markup`...`, which escapes each placeholder",
+      "count": 1
+    },
+    {
+      "path": "addons/html_editor/static/src/main/user_signature_plugin.js",
+      "code": "OD609",
+      "message": "markup() of a value built at runtime makes t-out render it as HTML unescaped; check that no user input reaches it, or use markup`...`, which escapes each placeholder",
+      "count": 1
+    },
+    {
+      "path": "addons/html_editor/static/src/others/collaboration/PeerToPeer.js",
+      "code": "OD611",
+      "message": "console.log() is a debugging leftover that writes to every user's console; remove it",
+      "count": 25
+    },
+    {
+      "path": "addons/html_editor/static/src/others/collaboration/collaboration_odoo_plugin.js",
+      "code": "OD610",
+      "message": "assigning innerHTML renders the value as HTML unescaped; check that no user input reaches it, or set textContent",
+      "count": 1
+    },
+    {
+      "path": "addons/html_editor/static/src/others/embedded_components/core/syntax_highlighting/syntax_highlighting_utils.js",
+      "code": "OD610",
+      "message": "assigning innerHTML renders the value as HTML unescaped; check that no user input reaches it, or set textContent",
+      "count": 2
+    },
+    {
+      "path": "addons/html_editor/static/src/public/html_migrations/html_migrations_interaction.js",
+      "code": "OD609",
+      "message": "markup() of a value built at runtime makes t-out render it as HTML unescaped; check that no user input reaches it, or use markup`...`, which escapes each placeholder",
+      "count": 1
+    },
+    {
+      "path": "addons/html_editor/static/src/public/html_migrations/html_migrations_interaction.js",
+      "code": "OD610",
+      "message": "assigning innerHTML renders the value as HTML unescaped; check that no user input reaches it, or set textContent",
+      "count": 1
+    },
+    {
+      "path": "addons/html_editor/static/src/utils/dom_state.js",
+      "code": "OD611",
+      "message": "console.log() is a debugging leftover that writes to every user's console; remove it",
+      "count": 4
+    },
+    {
+      "path": "addons/html_editor/static/src/utils/sanitize.js",
+      "code": "OD609",
+      "message": "markup() of a value built at runtime makes t-out render it as HTML unescaped; check that no user input reaches it, or use markup`...`, which escapes each placeholder",
       "count": 1
     },
     {
@@ -2035,6 +2209,12 @@
       "count": 1
     },
     {
+      "path": "addons/lunch/static/src/components/lunch_dashboard.js",
+      "code": "OD609",
+      "message": "markup() of a value built at runtime makes t-out render it as HTML unescaped; check that no user input reaches it, or use markup`...`, which escapes each placeholder",
+      "count": 1
+    },
+    {
       "path": "addons/mail/__manifest__.py",
       "code": "OD520",
       "message": "module 'base' already comes with 'base_setup', also in depends",
@@ -2155,10 +2335,46 @@
       "count": 3
     },
     {
+      "path": "addons/mail/static/src/core/common/composer.js",
+      "code": "OD609",
+      "message": "markup() of a value built at runtime makes t-out render it as HTML unescaped; check that no user input reaches it, or use markup`...`, which escapes each placeholder",
+      "count": 1
+    },
+    {
+      "path": "addons/mail/static/src/core/common/message_model.js",
+      "code": "OD609",
+      "message": "markup() of a value built at runtime makes t-out render it as HTML unescaped; check that no user input reaches it, or use markup`...`, which escapes each placeholder",
+      "count": 1
+    },
+    {
       "path": "addons/mail/static/src/core/common/thread.js",
       "code": "OD601",
       "message": "'@web/core/utils/strings' does not export 'escape'",
       "count": 1
+    },
+    {
+      "path": "addons/mail/static/src/model/store_internal.js",
+      "code": "OD609",
+      "message": "markup() of a value built at runtime makes t-out render it as HTML unescaped; check that no user input reaches it, or use markup`...`, which escapes each placeholder",
+      "count": 1
+    },
+    {
+      "path": "addons/mail/static/src/views/fields/call_debrief/call_debrief.js",
+      "code": "OD611",
+      "message": "console.log() is a debugging leftover that writes to every user's console; remove it",
+      "count": 1
+    },
+    {
+      "path": "addons/mail/static/src/views/web/fields/html_composer_message_field/html_composer_message_field.js",
+      "code": "OD609",
+      "message": "markup() of a value built at runtime makes t-out render it as HTML unescaped; check that no user input reaches it, or use markup`...`, which escapes each placeholder",
+      "count": 1
+    },
+    {
+      "path": "addons/mail/static/src/views/web/fields/html_mail_field/convert_inline.js",
+      "code": "OD611",
+      "message": "console.log() is a debugging leftover that writes to every user's console; remove it",
+      "count": 2
     },
     {
       "path": "addons/mail/static/tests/chatter/web/chatter.test.js",
@@ -2321,6 +2537,12 @@
       "code": "OD715",
       "message": "RPC argument 'extra_domain' reaches the domain or the fields of sudo().search() through 'domain', so the user searches or groups by any field as superuser; build each condition with a field and an operator the code picks",
       "count": 2
+    },
+    {
+      "path": "addons/mass_mailing/static/src/themes/theme_selector/theme_selector_iframe.js",
+      "code": "OD609",
+      "message": "markup() of a value built at runtime makes t-out render it as HTML unescaped; check that no user input reaches it, or use markup`...`, which escapes each placeholder",
+      "count": 1
     },
     {
       "path": "addons/mass_mailing_event_sms/__manifest__.py",
@@ -2506,6 +2728,12 @@
       "path": "addons/payment/models/ir_websocket.py",
       "code": "OD131",
       "message": "== between secrets takes longer the more of the secret a guess gets right, which lets a caller find it a character at a time; compare them with consteq() or hmac.compare_digest()",
+      "count": 1
+    },
+    {
+      "path": "addons/payment/static/src/interactions/payment_form.js",
+      "code": "OD610",
+      "message": "assigning innerHTML renders the value as HTML unescaped; check that no user input reaches it, or set textContent",
       "count": 1
     },
     {
@@ -2815,6 +3043,30 @@
       "count": 1
     },
     {
+      "path": "addons/point_of_sale/static/src/app/models/product_tag.js",
+      "code": "OD609",
+      "message": "markup() of a value built at runtime makes t-out render it as HTML unescaped; check that no user input reaches it, or use markup`...`, which escapes each placeholder",
+      "count": 1
+    },
+    {
+      "path": "addons/point_of_sale/static/src/app/models/product_template.js",
+      "code": "OD609",
+      "message": "markup() of a value built at runtime makes t-out render it as HTML unescaped; check that no user input reaches it, or use markup`...`, which escapes each placeholder",
+      "count": 1
+    },
+    {
+      "path": "addons/point_of_sale/static/src/app/utils/html-to-image.js",
+      "code": "OD610",
+      "message": "assigning innerHTML renders the value as HTML unescaped; check that no user input reaches it, or set textContent",
+      "count": 1
+    },
+    {
+      "path": "addons/point_of_sale/static/src/app/utils/pretty_console_log.js",
+      "code": "OD611",
+      "message": "console.log() is a debugging leftover that writes to every user's console; remove it",
+      "count": 1
+    },
+    {
       "path": "addons/point_of_sale/static/tests/unit/tools/lazy_getter.test.js",
       "code": "OD601",
       "message": "'@point_of_sale/lazy_getter' does not export 'clearGettersCache'",
@@ -3019,6 +3271,18 @@
       "count": 1
     },
     {
+      "path": "addons/pos_self_order/static/src/app/root.js",
+      "code": "OD611",
+      "message": "console.log() is a debugging leftover that writes to every user's console; remove it",
+      "count": 1
+    },
+    {
+      "path": "addons/pos_self_order/static/src/app/services/self_order_service.js",
+      "code": "OD609",
+      "message": "markup() of a value built at runtime makes t-out render it as HTML unescaped; check that no user input reaches it, or use markup`...`, which escapes each placeholder",
+      "count": 1
+    },
+    {
       "path": "addons/pos_self_order_bancontact_pay/controllers/kiosk.py",
       "code": "OD111",
       "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
@@ -3094,6 +3358,18 @@
       "path": "addons/product/populate/populate_demo.xml",
       "code": "OD502",
       "message": "'populate/populate_demo.xml' is not in the manifest's data or demo, so Odoo never loads it",
+      "count": 1
+    },
+    {
+      "path": "addons/product/static/src/js/pricelist_report/product_pricelist_report.js",
+      "code": "OD609",
+      "message": "markup() of a value built at runtime makes t-out render it as HTML unescaped; check that no user input reaches it, or use markup`...`, which escapes each placeholder",
+      "count": 1
+    },
+    {
+      "path": "addons/product_matrix/static/src/js/product_matrix_dialog.js",
+      "code": "OD609",
+      "message": "markup() of a value built at runtime makes t-out render it as HTML unescaped; check that no user input reaches it, or use markup`...`, which escapes each placeholder",
       "count": 1
     },
     {
@@ -3439,6 +3715,12 @@
       "count": 1
     },
     {
+      "path": "addons/spreadsheet/static/src/o_spreadsheet/o_spreadsheet.js",
+      "code": "OD611",
+      "message": "console.log() is a debugging leftover that writes to every user's console; remove it",
+      "count": 5
+    },
+    {
       "path": "addons/spreadsheet_dashboard/static/src/bundle/dashboard_action/dashboard_action.js",
       "code": "OD604",
       "message": "model 'spreadsheet.dashboard' has no method 'action_edit_dashboard'",
@@ -3472,6 +3754,18 @@
       "path": "addons/stock/populate/populate_demo.xml",
       "code": "OD502",
       "message": "'populate/populate_demo.xml' is not in the manifest's data or demo, so Odoo never loads it",
+      "count": 1
+    },
+    {
+      "path": "addons/stock/static/src/stock_forecasted/forecasted_buttons.js",
+      "code": "OD609",
+      "message": "markup() of a value built at runtime makes t-out render it as HTML unescaped; check that no user input reaches it, or use markup`...`, which escapes each placeholder",
+      "count": 1
+    },
+    {
+      "path": "addons/stock/static/src/stock_forecasted/forecasted_header.js",
+      "code": "OD609",
+      "message": "markup() of a value built at runtime makes t-out render it as HTML unescaped; check that no user input reaches it, or use markup`...`, which escapes each placeholder",
       "count": 1
     },
     {
@@ -3823,6 +4117,12 @@
       "count": 1
     },
     {
+      "path": "addons/test_translation_mode/static/src/translation_mode_service.js",
+      "code": "OD611",
+      "message": "console.log() is a debugging leftover that writes to every user's console; remove it",
+      "count": 1
+    },
+    {
       "path": "addons/test_translation_mode/tools/translate.py",
       "code": "OD123",
       "message": "setting TranslationImporter._load at import changes it in every database the server runs, whether this module is installed there or not; subclass TranslationImporter in this module and use the subclass where it needs the change",
@@ -3937,10 +4237,124 @@
       "count": 1
     },
     {
+      "path": "addons/web/static/src/core/effects/effect_plugin.js",
+      "code": "OD611",
+      "message": "console.log() is a debugging leftover that writes to every user's console; remove it",
+      "count": 1
+    },
+    {
+      "path": "addons/web/static/src/core/errors/error_dialogs.js",
+      "code": "OD609",
+      "message": "markup() of a value built at runtime makes t-out render it as HTML unescaped; check that no user input reaches it, or use markup`...`, which escapes each placeholder",
+      "count": 1
+    },
+    {
+      "path": "addons/web/static/src/core/errors/scss_error_dialog.js",
+      "code": "OD611",
+      "message": "console.log() is a debugging leftover that writes to every user's console; remove it",
+      "count": 1
+    },
+    {
+      "path": "addons/web/static/src/core/network/rpc_cache.js",
+      "code": "OD611",
+      "message": "console.log() is a debugging leftover that writes to every user's console; remove it",
+      "count": 1
+    },
+    {
+      "path": "addons/web/static/src/core/notification_alert_dialog/notification_alert_dialog.js",
+      "code": "OD609",
+      "message": "markup() of a value built at runtime makes t-out render it as HTML unescaped; check that no user input reaches it, or use markup`...`, which escapes each placeholder",
+      "count": 1
+    },
+    {
+      "path": "addons/web/static/src/core/utils/html.js",
+      "code": "OD609",
+      "message": "markup() of a value built at runtime makes t-out render it as HTML unescaped; check that no user input reaches it, or use markup`...`, which escapes each placeholder",
+      "count": 13
+    },
+    {
+      "path": "addons/web/static/src/core/utils/html.js",
+      "code": "OD610",
+      "message": "assigning innerHTML renders the value as HTML unescaped; check that no user input reaches it, or set textContent",
+      "count": 1
+    },
+    {
+      "path": "addons/web/static/src/core/utils/render.js",
+      "code": "OD609",
+      "message": "markup() of a value built at runtime makes t-out render it as HTML unescaped; check that no user input reaches it, or use markup`...`, which escapes each placeholder",
+      "count": 1
+    },
+    {
+      "path": "addons/web/static/src/model/relational_model/record.js",
+      "code": "OD609",
+      "message": "markup() of a value built at runtime makes t-out render it as HTML unescaped; check that no user input reaches it, or use markup`...`, which escapes each placeholder",
+      "count": 1
+    },
+    {
+      "path": "addons/web/static/src/model/relational_model/utils.js",
+      "code": "OD609",
+      "message": "markup() of a value built at runtime makes t-out render it as HTML unescaped; check that no user input reaches it, or use markup`...`, which escapes each placeholder",
+      "count": 1
+    },
+    {
+      "path": "addons/web/static/src/model/sample_server.js",
+      "code": "OD611",
+      "message": "console.log() is a debugging leftover that writes to every user's console; remove it",
+      "count": 1
+    },
+    {
+      "path": "addons/web/static/src/public/colibri.js",
+      "code": "OD609",
+      "message": "markup() of a value built at runtime makes t-out render it as HTML unescaped; check that no user input reaches it, or use markup`...`, which escapes each placeholder",
+      "count": 1
+    },
+    {
+      "path": "addons/web/static/src/public/colibri.js",
+      "code": "OD610",
+      "message": "assigning innerHTML renders the value as HTML unescaped; check that no user input reaches it, or set textContent",
+      "count": 1
+    },
+    {
       "path": "addons/web/static/src/views/kanban/kanban_record.js",
       "code": "OD601",
       "message": "'@web/views/card/card_renderer' does not export 'getImageSrcFromRecordInfo'",
       "count": 1
+    },
+    {
+      "path": "addons/web/static/src/webclient/actions/action_plugin.js",
+      "code": "OD609",
+      "message": "markup() of a value built at runtime makes t-out render it as HTML unescaped; check that no user input reaches it, or use markup`...`, which escapes each placeholder",
+      "count": 4
+    },
+    {
+      "path": "addons/web/static/src/webclient/clickbot/clickbot.js",
+      "code": "OD611",
+      "message": "console.log() is a debugging leftover that writes to every user's console; remove it",
+      "count": 27
+    },
+    {
+      "path": "addons/web_tour/static/src/tour_automatic/tour_automatic.js",
+      "code": "OD611",
+      "message": "console.log() is a debugging leftover that writes to every user's console; remove it",
+      "count": 1
+    },
+    {
+      "path": "addons/web_tour/static/src/tour_automatic/tour_step_automatic.js",
+      "code": "OD611",
+      "message": "console.log() is a debugging leftover that writes to every user's console; remove it",
+      "count": 5
+    },
+    {
+      "path": "addons/web_tour/static/src/tour_interactive/tour_interactive.js",
+      "code": "OD609",
+      "message": "markup() of a value built at runtime makes t-out render it as HTML unescaped; check that no user input reaches it, or use markup`...`, which escapes each placeholder",
+      "count": 1
+    },
+    {
+      "path": "addons/web_tour/static/src/tour_interactive/tour_interactive.js",
+      "code": "OD611",
+      "message": "console.log() is a debugging leftover that writes to every user's console; remove it",
+      "count": 3
     },
     {
       "path": "addons/website/__manifest__.py",
@@ -4057,9 +4471,27 @@
       "count": 1
     },
     {
+      "path": "addons/website/static/src/builder/plugins/translation/translation_plugin.js",
+      "code": "OD610",
+      "message": "assigning innerHTML renders the value as HTML unescaped; check that no user input reaches it, or set textContent",
+      "count": 1
+    },
+    {
       "path": "addons/website/static/src/components/burger_menu/burger_menu.js",
       "code": "OD602",
       "message": "neither BurgerMenu nor its parents have '_onMenuClicked', so super._onMenuClicked() fails",
+      "count": 1
+    },
+    {
+      "path": "addons/website/static/src/core/website_edit_service.js",
+      "code": "OD611",
+      "message": "console.log() is a debugging leftover that writes to every user's console; remove it",
+      "count": 1
+    },
+    {
+      "path": "addons/website/static/src/snippets/s_searchbar/search_bar.js",
+      "code": "OD609",
+      "message": "markup() of a value built at runtime makes t-out render it as HTML unescaped; check that no user input reaches it, or use markup`...`, which escapes each placeholder",
       "count": 1
     },
     {
@@ -4243,6 +4675,12 @@
       "count": 2
     },
     {
+      "path": "addons/website_event_exhibitor/static/src/components/exhibitor_connect_closed_dialog/exhibitor_connect_closed_dialog.js",
+      "code": "OD609",
+      "message": "markup() of a value built at runtime makes t-out render it as HTML unescaped; check that no user input reaches it, or use markup`...`, which escapes each placeholder",
+      "count": 1
+    },
+    {
       "path": "addons/website_event_sale/controllers/main.py",
       "code": "OD111",
       "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
@@ -4253,6 +4691,12 @@
       "code": "OD111",
       "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
       "count": 3
+    },
+    {
+      "path": "addons/website_event_track/static/src/interactions/website_event_pwa.js",
+      "code": "OD611",
+      "message": "console.log() is a debugging leftover that writes to every user's console; remove it",
+      "count": 2
     },
     {
       "path": "addons/website_event_track_live/controllers/track_live.py",
@@ -4324,6 +4768,18 @@
       "path": "addons/website_forum/security/ir.access.csv",
       "code": "OD402",
       "message": "base.group_portal gets write, create or unlink on forum.post; public and portal access should be read-only and go through controllers",
+      "count": 1
+    },
+    {
+      "path": "addons/website_forum/static/src/components/website_forum_wysiwyg/website_forum_wysiwyg.js",
+      "code": "OD609",
+      "message": "markup() of a value built at runtime makes t-out render it as HTML unescaped; check that no user input reaches it, or use markup`...`, which escapes each placeholder",
+      "count": 1
+    },
+    {
+      "path": "addons/website_forum/static/src/interactions/website_forum.js",
+      "code": "OD609",
+      "message": "markup() of a value built at runtime makes t-out render it as HTML unescaped; check that no user input reaches it, or use markup`...`, which escapes each placeholder",
       "count": 1
     },
     {
@@ -4426,6 +4882,12 @@
       "path": "addons/website_profile/models/res_users.py",
       "code": "OD131",
       "message": "== between secrets takes longer the more of the secret a guess gets right, which lets a caller find it a character at a time; compare them with consteq() or hmac.compare_digest()",
+      "count": 1
+    },
+    {
+      "path": "addons/website_profile/static/src/components/profile_dialog/profile_dialog.js",
+      "code": "OD609",
+      "message": "markup() of a value built at runtime makes t-out render it as HTML unescaped; check that no user input reaches it, or use markup`...`, which escapes each placeholder",
       "count": 1
     },
     {
@@ -4549,6 +5011,54 @@
       "count": 1
     },
     {
+      "path": "addons/website_sale/static/src/interactions/cart_line.js",
+      "code": "OD609",
+      "message": "markup() of a value built at runtime makes t-out render it as HTML unescaped; check that no user input reaches it, or use markup`...`, which escapes each placeholder",
+      "count": 1
+    },
+    {
+      "path": "addons/website_sale/static/src/interactions/checkout.js",
+      "code": "OD609",
+      "message": "markup() of a value built at runtime makes t-out render it as HTML unescaped; check that no user input reaches it, or use markup`...`, which escapes each placeholder",
+      "count": 1
+    },
+    {
+      "path": "addons/website_sale/static/src/interactions/checkout.js",
+      "code": "OD610",
+      "message": "assigning innerHTML renders the value as HTML unescaped; check that no user input reaches it, or set textContent",
+      "count": 4
+    },
+    {
+      "path": "addons/website_sale/static/src/interactions/checkout.js",
+      "code": "OD610",
+      "message": "assigning outerHTML renders the value as HTML unescaped; check that no user input reaches it, or set textContent",
+      "count": 1
+    },
+    {
+      "path": "addons/website_sale/static/src/interactions/product_page.js",
+      "code": "OD609",
+      "message": "markup() of a value built at runtime makes t-out render it as HTML unescaped; check that no user input reaches it, or use markup`...`, which escapes each placeholder",
+      "count": 5
+    },
+    {
+      "path": "addons/website_sale/static/src/interactions/quick_reorder.js",
+      "code": "OD609",
+      "message": "markup() of a value built at runtime makes t-out render it as HTML unescaped; check that no user input reaches it, or use markup`...`, which escapes each placeholder",
+      "count": 2
+    },
+    {
+      "path": "addons/website_sale/static/src/js/website_sale_utils.js",
+      "code": "OD609",
+      "message": "markup() of a value built at runtime makes t-out render it as HTML unescaped; check that no user input reaches it, or use markup`...`, which escapes each placeholder",
+      "count": 1
+    },
+    {
+      "path": "addons/website_sale/static/src/js/website_sale_utils.js",
+      "code": "OD610",
+      "message": "assigning innerHTML renders the value as HTML unescaped; check that no user input reaches it, or set textContent",
+      "count": 1
+    },
+    {
       "path": "addons/website_sale_collect/__manifest__.py",
       "code": "OD520",
       "message": "module 'payment_custom' already comes with 'website_sale_stock', also in depends",
@@ -4565,6 +5075,12 @@
       "code": "OD111",
       "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
       "count": 1
+    },
+    {
+      "path": "addons/website_sale_loyalty/static/src/interactions/checkout.js",
+      "code": "OD610",
+      "message": "assigning innerHTML renders the value as HTML unescaped; check that no user input reaches it, or set textContent",
+      "count": 2
     },
     {
       "path": "addons/website_sale_stock/__manifest__.py",
@@ -4636,6 +5152,24 @@
       "path": "addons/website_slides/models/slide_slide.py",
       "code": "OD223",
       "message": "_compute_vimeo_id() can leave 'vimeo_id' unassigned on a record, so reading it raises ValueError; assign it on every path through the loop, False when there is no value",
+      "count": 1
+    },
+    {
+      "path": "addons/website_slides/static/src/interactions/slides_course_fullscreen.js",
+      "code": "OD609",
+      "message": "markup() of a value built at runtime makes t-out render it as HTML unescaped; check that no user input reaches it, or use markup`...`, which escapes each placeholder",
+      "count": 1
+    },
+    {
+      "path": "addons/website_slides/static/src/interactions/slides_course_quiz.js",
+      "code": "OD609",
+      "message": "markup() of a value built at runtime makes t-out render it as HTML unescaped; check that no user input reaches it, or use markup`...`, which escapes each placeholder",
+      "count": 3
+    },
+    {
+      "path": "addons/website_slides/static/src/js/slides_course_service.js",
+      "code": "OD609",
+      "message": "markup() of a value built at runtime makes t-out render it as HTML unescaped; check that no user input reaches it, or use markup`...`, which escapes each placeholder",
       "count": 1
     },
     {

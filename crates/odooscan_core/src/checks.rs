@@ -274,7 +274,7 @@ pub fn check_module<'m>(index: &Index<'m>, mi: usize, series: Option<Series>) ->
     }
     let scripts = module.js.iter().enumerate().filter(|(fi, _)| index.js_loaded(mi, *fi));
     for (_, file) in scripts.filter(|(_, f)| !f.in_tests()) {
-        private_rpc(&mut out, file);
+        loaded_script(&mut out, file);
     }
     let scope = index.scope(mi);
     // Odoo's own rows are needed to tell that none grants, so without `base` nothing does.
@@ -884,6 +884,14 @@ fn bundle_list(names: &[&str]) -> String {
         [init @ .., last] if names.len() <= 3 => format!("{} and {last}", init.join(", ")),
         _ => format!("{} and {} more", names[..3].join(", "), names.len() - 3),
     }
+}
+
+/// The findings of a script a page loads: a script only the tests or no bundle load is no code the
+/// users run.
+fn loaded_script<'m>(out: &mut Out<'m>, file: &'m SourceFile<JsFacts>) {
+    private_rpc(out, file);
+    out.diags
+        .extend(file.facts.diags.iter().map(|d| (file.path.as_path(), d.clone())));
 }
 
 /// The server refuses to dispatch a method whose name starts with `_` to a model.
