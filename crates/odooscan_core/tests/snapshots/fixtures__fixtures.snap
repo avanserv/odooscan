@@ -12,6 +12,7 @@ custom/access_rows/security/ir.model.access-rewrite.csv:2:1: OD323 XML id 'acces
 custom/access_rows/security/ir.model.access.csv:2:1: OD402 no group limits this row, so every user, public and portal included, gets write, create or unlink on model_access_desk; name a group
 custom/access_rows/security/ir.model.access.csv:3:1: OD402 no group limits this row, so every user, public and portal included, gets write, create or unlink on model_access_desk; name a group
 custom/access_rows/security/ir.model.access.csv:4:1: OD402 no group limits this row, so every user, public and portal included, gets write, create or unlink on model_access_desk; name a group
+custom/auto_scope_built/__manifest__.py:4:17: OD521 nothing of module 'auto_scope_left' is used, nor of what only it brings
 custom/auto_scope_main/demo/rules.xml:11:36: OD210 'next_stamp': field 'next_stamp' of auto.scope.thing comes from module auto_scope_next, which is not in depends
 custom/auto_scope_main/pages.xml:6:20: OD311 template 'auto_scope_wide.page' comes from module auto_scope_wide, which is not in depends
 custom/auto_scope_main/pages.xml:7:20: OD311 template 'auto_scope_far.page' comes from module auto_scope_far, which is not in depends
@@ -353,6 +354,14 @@ custom/data_fields_dep/views/partner_views.xml:8:17: OD304 'x_demo': res.partner
 custom/data_fields_old/data/properties.xml:4:9: OD309 ir.property has no field 'value'
 custom/data_fields_old/data/properties.xml:5:9: OD309 ir.property has no field 'ghost'
 custom/data_fields_side/views/partner_views.xml:7:17: OD304 'x_flag': field 'x_flag' of res.partner comes from module data_fields, which is not in depends
+custom/depends_unused/__manifest__.py:5:9: OD520 module 'base' already comes with 'sale', also in depends
+custom/depends_unused/__manifest__.py:6:9: OD520 module 'mail' already comes with 'sale', also in depends
+custom/depends_unused/__manifest__.py:7:9: OD521 nothing of module 'sale' is used, nor of what only it brings
+custom/depends_unused/__manifest__.py:8:9: OD521 nothing of module 'prov_bare' is used, nor of what only it brings
+custom/depends_unused/__manifest__.py:9:9: OD521 nothing of module 'prov_shared' is used, nor of what only it brings
+custom/depends_unused/__manifest__.py:25:9: OD503 module 'ghost_unused' is not on the addons path
+custom/depends_unused/__manifest__.py:26:9: OD504 module 'prov_back' depends back on depends_unused, so Odoo installs neither
+custom/depends_unused_implied/__manifest__.py:4:25: OD520 module 'mail' already comes with 'sale', also in depends
 custom/domain_bases/models/domain_models.py:23:23: OD210 'whole_id.no_past_base': domain.whole has no field 'no_past_base'
 custom/domain_bases/models/domain_models.py:53:30: OD210 'no_chained': domain.chained has no field 'no_chained'
 custom/domain_bases/models/domain_models.py:99:23: OD210 'label.no_past_char': domain.found.label is not a relational field, so the path cannot continue
@@ -1187,8 +1196,10 @@ custom/report_actions/demo/reports.xml:5:35: OD311 no indexed module defines tem
 custom/report_actions/demo/reports.xml:12:46: OD319 Odoo refuses this expression when it prints the report: Unexpected token at the end of an expression
 custom/report_actions_ext/data/updates.xml:19:35: OD311 no indexed module defines template 'report_actions.absent_in_extension'
 custom/report_actions_ext/data/updates.xml:23:46: OD319 Odoo refuses this expression when it prints the report: Unexpected token at the end of an expression
+custom/report_tag10/__manifest__.py:1:63: OD521 nothing of module 'web' is used, nor of what only it brings
 custom/report_tag10/data/updates.xml:2:5: OD323 XML id 'tag_replaces' is already defined in data/reports.xml, and this definition overwrites the fields both name; remove the copy when the two say the same thing, or rename one when both are meant to exist
 custom/report_tag10/data/updates.xml:8:5: OD323 XML id 'record_then_tag' is already defined in data/reports.xml, and this definition overwrites the fields both name; remove the copy when the two say the same thing, or rename one when both are meant to exist
+custom/report_tag11/__manifest__.py:1:63: OD521 nothing of module 'web' is used, nor of what only it brings
 custom/report_tag11/data/reports.xml:6:71: OD311 no indexed module defines template 'report_tag11.absent_tag'
 custom/report_tag11/data/reports.xml:8:71: OD311 no indexed module defines template 'report_tag11.absent_type'
 custom/report_tag11/data/reports.xml:10:125: OD319 Odoo refuses this expression when it prints the report: Unexpected token at the end of an expression
@@ -1197,17 +1208,20 @@ custom/report_tag11/data/reports.xml:29:46: OD319 Odoo refuses this expression w
 custom/report_tag11/data/reports.xml:45:5: OD303 XML id 'tag_then_paper' is already defined earlier in this file
 custom/report_tag11/data/updates.xml:2:5: OD323 XML id 'tag_replaces' is already defined in data/reports.xml, and this definition overwrites the fields both name; remove the copy when the two say the same thing, or rename one when both are meant to exist
 custom/report_tag11/data/updates.xml:4:5: OD323 XML id 'tag_then_record' is already a record of ir.actions.report in data/reports.xml, and this definition is one of ir.actions.report.xml; rename one
+custom/report_tag16/__manifest__.py:1:63: OD521 nothing of module 'web' is used, nor of what only it brings
 custom/report_tag16/data/reports.xml:6:71: OD311 no indexed module defines template 'report_tag16.absent_tag'
 custom/report_tag16/data/reports.xml:8:71: OD311 no indexed module defines template 'report_tag16.absent_type'
 custom/report_tag16/data/reports.xml:10:125: OD319 Odoo refuses this expression when it prints the report: Unexpected token at the end of an expression
 custom/report_tag16/data/reports.xml:28:35: OD311 no indexed module defines template 'report_tag16.absent_record'
 custom/report_tag16/data/reports.xml:29:46: OD319 Odoo refuses this expression when it prints the report: Unexpected token at the end of an expression
 custom/report_tag16/data/updates.xml:2:5: OD323 XML id 'tag_replaces' is already defined in data/reports.xml, and this definition overwrites the fields both name; remove the copy when the two say the same thing, or rename one when both are meant to exist
+custom/report_tag161/__manifest__.py:1:64: OD521 nothing of module 'web' is used, nor of what only it brings
 custom/report_tag161/data/reports.xml:21:35: OD311 no indexed module defines template 'report_tag161.absent_replaced'
 custom/report_tag161/data/reports.xml:22:46: OD319 Odoo refuses this expression when it prints the report: Unexpected token at the end of an expression
 custom/report_tag161/data/reports.xml:28:35: OD311 no indexed module defines template 'report_tag161.absent_record'
 custom/report_tag161/data/reports.xml:29:46: OD319 Odoo refuses this expression when it prints the report: Unexpected token at the end of an expression
 custom/report_tag161/data/updates.xml:2:5: OD323 XML id 'tag_replaces' is already defined in data/reports.xml, and this definition overwrites the fields both name; remove the copy when the two say the same thing, or rename one when both are meant to exist
+custom/report_unversioned/__manifest__.py:1:44: OD521 nothing of module 'web' is used, nor of what only it brings
 custom/route_clash/controllers/main.py:13:9: OD231 path '/bad/routes/new' is also routed by Routes.new in module bad_sale, so one of the two hides the other
 custom/route_clash/controllers/main.py:25:9: OD231 path '/route_clash/catalog' is also routed by Catalog.catalog in module route_clash, so one of the two hides the other
 custom/route_clash/controllers/main.py:30:9: OD232 'drop' overrides the route of Routes in module bad_sale without @route(), so Odoo logs a warning and routes it as if it had one
@@ -1435,6 +1449,8 @@ custom/soft_guards/tests/test_soft_guards.py:209:38: OD302 'soft_guards_side.aft
 custom/soft_guards/tests/test_soft_guards.py:214:38: OD302 'soft_guards_side.after_an_unrelated_state' belongs to module soft_guards_side; add it to depends
 custom/soft_guards/tests/test_soft_guards.py:255:38: OD302 'soft_guards_side.after_a_lookup_that_does_not_raise' belongs to module soft_guards_side; add it to depends
 custom/soft_guards/tests/test_soft_guards.py:264:38: OD302 'soft_guards_side.after_a_lookup_under_a_branch' belongs to module soft_guards_side; add it to depends
+custom/soft_guards_both/__manifest__.py:4:17: OD521 nothing of module 'soft_guards' is used, nor of what only it brings
+custom/soft_guards_both/__manifest__.py:4:32: OD521 nothing of module 'soft_guards_side' is used, nor of what only it brings
 custom/soft_guards_both/tests/test_soft_guards_both.py:6:38: OD302 'soft_guards_heir.heir_thing' belongs to module soft_guards_heir; add it to depends
 custom/soft_guards_both/tests/test_soft_guards_both.py:10:38: OD302 'soft_guards_heir.heir_thing' belongs to module soft_guards_heir; add it to depends
 custom/soft_guards_both/tests/test_soft_guards_both.py:15:38: OD302 'soft_guards_heir.heir_thing' belongs to module soft_guards_heir; add it to depends
@@ -1494,6 +1510,7 @@ custom/sql_objects/models/pallets.py:12:47: OD227 lane_code: freight_pallet has 
 custom/sql_objects/models/pallets.py:13:45: OD227 slot: freight_pallet has no such column, since freight.pallet has no field slot; name the column of a stored field of freight.pallet
 custom/sql_objects/models/pallets.py:14:64: OD227 bin: freight_pallet has no such column, since freight.pallet has no field bin; name the column of a stored field of freight.pallet
 custom/sql_view_builders/models/builders.py:8:29: OD225 the view parcel_manifest of parcel.manifest selects no column weight_total, which the stored field parcel.manifest.weight_total of sql_columns needs; select one AS weight_total
+custom/sql_view_users/__manifest__.py:4:17: OD521 nothing of module 'sql_view_builders' is used, nor of what only it brings
 custom/sql_view_users/models/summary.py:7:5: OD226 _auto = False leaves drawer.summary without a table, and nothing creates the view drawer_summary; create it in init(), or drop _auto = False
 custom/supers/models/supers.py:29:24: OD211 no parent class of bad.super defines '_prepare_gone', so this super() call fails
 custom/supers/models/supers.py:74:24: OD211 no parent class of bad.super.child defines '_stamp', so this super() call fails
@@ -1594,6 +1611,7 @@ custom/window_activity/views/actions.xml:23:33: OD318 window.boxed has no field 
 custom/window_activity/views/actions.xml:36:33: OD318 window.delegated.bare has no field activity_ids, which the activity view searches; inherit mail.activity.mixin
 custom/window_clone/__manifest__.py:4:35: OD503 module 'ghost_enterprise' is not on the addons path
 custom/window_delegate/views/actions.xml:5:33: OD318 window.borrower has no primary gantt view, and nothing generates one
+custom/window_gantt/__manifest__.py:4:17: OD521 nothing of module 'window_default' is used, nor of what only it brings
 custom/window_hidden/views/actions.xml:4:33: OD202 model 'window.plain' comes from module window_actions; add it to depends
 custom/window_named/views/actions.xml:19:33: OD318 window.plain has no primary gantt view, and nothing generates one
 custom/window_named/views/actions.xml:32:33: OD318 window.plain has no primary map view, and nothing generates one
@@ -1624,6 +1642,7 @@ custom/window_named/views/actions.xml:330:41: OD318 window.plain has no primary 
 custom/window_named/views/later.xml:6:5: OD323 XML id 'action_view_id_undone' is already defined in views/actions.xml, and this definition overwrites the fields both name; remove the copy when the two say the same thing, or rename one when both are meant to exist
 custom/window_named/views/later.xml:10:5: OD323 XML id 'action_context_undone' is already defined in views/actions.xml, and this definition overwrites the fields both name; remove the copy when the two say the same thing, or rename one when both are meant to exist
 custom/window_nested15/views/actions.xml:5:33: OD318 window.nested.old has no primary gantt view, and nothing generates one
+custom/window_stray/__manifest__.py:4:17: OD521 nothing of module 'window_actions' is used, nor of what only it brings
 custom/window_tag15/views/later.xml:2:5: OD323 XML id 'action_tag_view_undone' is already defined in views/actions.xml, and this definition overwrites the fields both name; remove the copy when the two say the same thing, or rename one when both are meant to exist
 custom/window_tag15/views/later.xml:2:106: OD318 window.tag.old has no primary gantt view, and nothing generates one
 custom/window_tag15/views/later.xml:3:5: OD323 XML id 'action_tag_context_undone' is already defined in views/actions.xml, and this definition overwrites the fields both name; remove the copy when the two say the same thing, or rename one when both are meant to exist

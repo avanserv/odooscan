@@ -8,7 +8,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::facts::{DataFacts, JsFacts, Pos, PyFacts, Spanned, TemplateFacts};
 use crate::manifest::{self, Manifest, OdooReads, Refusal, normalize};
-use crate::mentions::Mentions;
+use crate::mentions::{Mentions, Words};
 use crate::series::Series;
 use crate::suppress::Suppressions;
 use crate::taint::TaintTable;
@@ -75,6 +75,9 @@ pub struct Module {
     /// A file whose text may name a method could not be read: Python, XML or CSV that does not
     /// decode, or a script or template under `static/src` that is not UTF-8.
     pub lost_text: bool,
+    /// The words of every file of a checked module read with text, the manifest included; none
+    /// for an indexed one.
+    pub words: Words,
 }
 
 impl Module {
@@ -122,6 +125,7 @@ pub(crate) fn module(name: &str, manifest: &str) -> Module {
         sql_views: vec![],
         static_assets: vec![],
         lost_text: false,
+        words: Words::default(),
     }
 }
 
@@ -261,6 +265,31 @@ fn static_files(dir: &Path, extension: &str) -> Vec<PathBuf> {
         .map(|e| e.into_path())
         .filter(|p| p.extension().is_some_and(|e| e == extension))
         .collect()
+}
+
+/// The words of the scripts and templates under `dir/static` outside `static/src`, which the scan
+/// reads already, and the third-party `static/lib`. A tour under `static/tests` that a test bundle
+/// loads uses a module as `static/src` does. Words are ASCII, so a file that is not UTF-8 loses none.
+fn static_words(dir: &Path) -> Words {
+    let root = dir.join("static");
+    if !root.is_dir() {
+        return Words::default();
+    }
+    let skipped = [root.join("src"), root.join("lib")];
+    let paths: Vec<PathBuf> = WalkBuilder::new(&root)
+        .filter_entry(move |e| e.file_name() != "node_modules" && !skipped.iter().any(|s| s == e.path()))
+        .build()
+        .filter_map(Result::ok)
+        .filter(|e| e.file_type().is_some_and(|t| t.is_file()))
+        .map(|e| e.into_path())
+        .filter(|p| matches!(p.extension().and_then(|e| e.to_str()), Some("js" | "xml")))
+        .collect();
+    let words: Vec<Words> = paths
+        .into_par_iter()
+        .filter_map(|path| std::fs::read(path).ok())
+        .map(|bytes| Words::scan(&String::from_utf8_lossy(&bytes)))
+        .collect();
+    Words::merge(&words)
 }
 
 /// The files under `dir/static` whose extension Odoo serves as an asset, as `name/<path>`. Odoo
@@ -509,6 +538,7 @@ fn read_module(
             sql_views: vec![],
             static_assets: vec![],
             lost_text: false,
+            words: Words::default(),
         })
     })
 }
@@ -539,16 +569,22 @@ type ParsedFile = Result<SourceFile<PyFacts>, SourceFile<DataFacts>>;
 
 impl ModuleContext<'_> {
     /// Reads `path`, none when it cannot be read or is Python that does not decode and that Odoo does
-    /// not refuse, and whether its text is lost. A data file that does not decode stays, since what
-    /// it may define matters to the rules; one that decodes but does not parse keeps its text.
-    fn file(&self, path: PathBuf) -> (Option<ParsedFile>, bool) {
+    /// not refuse, whether its text is lost, and its words in a checked module. A data file that does
+    /// not decode stays, since what it may define matters to the rules; one that decodes but does
+    /// not parse keeps its text.
+    fn file(&self, path: PathBuf) -> (Option<ParsedFile>, bool, Words) {
         let Ok(bytes) = std::fs::read(&path) else {
-            return (None, true);
+            return (None, true, Words::default());
         };
         let Some(text) = decoded(&path, &bytes, self.series) else {
-            return (self.undecoded(path, &bytes), true);
+            return (self.undecoded(path, &bytes), true, Words::default());
         };
-        (self.parsed(path, &text, &bytes), false)
+        let words = if self.checked {
+            Words::scan(&text)
+        } else {
+            Words::default()
+        };
+        (self.parsed(path, &text, &bytes), false, words)
     }
 
     fn parsed(&self, path: PathBuf, text: &str, bytes: &[u8]) -> Option<ParsedFile> {
@@ -668,8 +704,10 @@ fn parse_module_files(module: &mut Module, default_series: Option<Series>, taint
     };
     let files = module_files(&module.dir);
     let parsed: Vec<_> = files.into_par_iter().map(|path| context.file(path)).collect();
-    for (file, lost) in parsed {
+    let mut words = Vec::with_capacity(parsed.len() + 2);
+    for (file, lost, file_words) in parsed {
         module.lost_text |= lost;
+        words.push(file_words);
         match file {
             Some(Ok(py)) => module.python.push(py),
             Some(Err(data)) => module.data.push(data),
@@ -679,11 +717,16 @@ fn parse_module_files(module: &mut Module, default_series: Option<Series>, taint
     module
         .data
         .sort_by_key(|f| (f.rank.unwrap_or(usize::MAX), f.rel.clone()));
-    let (js, lost_js) = parse_static_files(&module.dir, "js", checked, js::analyze);
+    let (js, lost_js, js_words) = parse_static_files(&module.dir, "js", checked, js::analyze);
     module.js = js;
-    let (templates, lost_templates) = parse_static_files(&module.dir, "xml", checked, owl::analyze);
+    let (templates, lost_templates, template_words) = parse_static_files(&module.dir, "xml", checked, owl::analyze);
     module.templates = templates;
     module.lost_text |= lost_js || lost_templates;
+    words.extend([js_words, template_words]);
+    if checked {
+        words.push(static_words(&module.dir));
+    }
+    module.words = Words::merge(&words);
     module.sql_views = sql_views(module, series);
     if checked && !module.manifest.bundles.is_empty() {
         module.static_assets = static_assets(&module.dir, &module.name);
@@ -699,21 +742,23 @@ fn sql_views(module: &Module, series: Option<Series>) -> Vec<String> {
     texts.flat_map(|text| sql::file_views(&text)).collect()
 }
 
-/// The files of `extension` under `static/src`, and whether one of them could not be read.
+/// The files of `extension` under `static/src`, whether one of them could not be read, and their
+/// words when the module is checked.
 fn parse_static_files<T: Send>(
     dir: &Path,
     extension: &str,
     checked: bool,
     analyze: fn(&str) -> T,
-) -> (Vec<SourceFile<T>>, bool) {
+) -> (Vec<SourceFile<T>>, bool, Words) {
     let paths = static_files(dir, extension);
     let count = paths.len();
-    let mut files: Vec<_> = paths
+    let (mut files, words): (Vec<_>, Vec<_>) = paths
         .into_par_iter()
         .filter_map(|path| {
             // Odoo decodes assets as UTF-8 whatever they declare (18.0 `odoo/addons/base/models/assetsbundle.py:776`).
             let text = std::fs::read_to_string(&path).ok()?;
-            Some(SourceFile {
+            let words = if checked { Words::scan(&text) } else { Words::default() };
+            let file = SourceFile {
                 rel: normalize(&path.strip_prefix(dir).ok()?.to_string_lossy()),
                 rank: None,
                 demo: false,
@@ -725,12 +770,13 @@ fn parse_static_files<T: Send>(
                 facts: analyze(&text),
                 mentions: Mentions::scan(&text),
                 path,
-            })
+            };
+            Some((file, words))
         })
-        .collect();
+        .unzip();
     files.sort_by(|a, b| a.rel.cmp(&b.rel));
     let lost = files.len() < count;
-    (files, lost)
+    (files, lost, Words::merge(&words))
 }
 
 #[cfg(test)]
@@ -847,6 +893,46 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("odooscan-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         dir
+    }
+
+    #[test]
+    fn only_a_checked_module_keeps_the_words_of_its_text() {
+        let dir = scratch("words");
+        let own = written(&dir, "own", "{'depends': ['lib']}");
+        std::fs::create_dir_all(own.join("static/src")).unwrap();
+        std::fs::write(own.join("static/src/a.js"), "import '@lib/b';").unwrap();
+        std::fs::write(own.join("a.py"), "x = 'lib.b'  # odoo.addons.lib").unwrap();
+        std::fs::create_dir_all(own.join("static/tests/tours")).unwrap();
+        std::fs::write(
+            own.join("static/tests/tours/t.js"),
+            b"// tour \xff\nimport '@lib/../c';",
+        )
+        .unwrap();
+        std::fs::create_dir_all(own.join("static/lib")).unwrap();
+        std::fs::write(own.join("static/lib/vendor.js"), "vendored").unwrap();
+        let addons = dir.join("addons");
+        written(&addons, "lib", "{'name': 'lib.c'}");
+        let modules = load(&[own], &[addons], None, None, &TaintTable::default()).modules;
+        let _ = std::fs::remove_dir_all(&dir);
+        let words = |name: &str| {
+            let module = modules.iter().find(|m| m.name == name).unwrap();
+            module.words.iter().map(str::to_owned).collect::<Vec<_>>()
+        };
+        assert_eq!(
+            words("own"),
+            [
+                "depends",
+                "import",
+                "lib",
+                "lib.b",
+                "lib/../c",
+                "lib/b",
+                "odoo.addons.lib",
+                "tour",
+                "x"
+            ]
+        );
+        assert!(words("lib").is_empty());
     }
 
     #[test]

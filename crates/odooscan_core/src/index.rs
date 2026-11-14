@@ -3,10 +3,11 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::facts::{
     ActionFact, Annotation, ArchElement, ArchEmptied, ArchSubview, ArchValued, ClassFact, DataFacts, FieldFact,
-    FlowSummary, Heritage, JsClass, ModelKind, OptionValue, PyFacts, Receiver, RecordWrite, ReportFact, RuleFact,
-    ServerFact, Signature, UNREAD_TYPE, ViewFact, WrittenValue,
+    FlowSummary, Heritage, JsClass, ModelKind, OptionValue, PyFacts, Receiver, RecordWrite, ReportFact, RouteKey,
+    RuleFact, ServerFact, Signature, UNREAD_TYPE, ViewFact, WrittenValue,
 };
 use crate::manifest::AutoInstall;
+use crate::mentions::{HOOK_PREFIXES, Words};
 use crate::project::{Module, SourceFile, code_loaded};
 use crate::series::{self, Series};
 use crate::{imports, routing};
@@ -1566,6 +1567,8 @@ pub struct Index<'m> {
     method_flows: MethodFlows<'m>,
     /// The models whose table each table name may be, from any module.
     table_models: FxHashMap<String, Vec<&'m str>>,
+    /// Where the classes define each field, method or `selection_add` value name.
+    members: FxHashMap<&'m str, Vec<Member<'m>>>,
     /// The hook names and the prefixes of built ones that any file of any module mentions.
     hook_names: FxHashSet<&'m str>,
     hook_prefixes: Vec<&'m str>,
@@ -1636,6 +1639,7 @@ impl<'m> Index<'m> {
             template_bases: FxHashSet::default(),
             method_flows: method_flows(modules),
             table_models: table_models(&models),
+            members: members(&models),
             models,
             hook_names,
             hook_prefixes,
@@ -2112,6 +2116,163 @@ impl<'m> Index<'m> {
             .filter(|&d| !triggers.contains(&manifest.depends[d].value.as_str()))
             .filter_map(|d| implier(d).map(|e| (d, e)))
             .collect()
+    }
+
+    /// What each `depends` entry of `module` alone brings it, as (entry, modules), the entry a
+    /// position in `depends`: the entry, and what its closure holds that no other entry's does, an
+    /// implied one's aside, and Odoo does not install with `base` anyway. Leaves out `base`, which 20.0 restores in an empty
+    /// `depends`, and the entries whose use is not to be read from the module: one not indexed or
+    /// with a dependency that is not, one another entry already brings (OD520), and one leading back
+    /// to the module (OD504), whose closure holds the module's own and so is taken from no other.
+    pub fn sole_brought(&self, module: usize) -> Vec<(usize, Vec<bool>)> {
+        let depends = &self.modules[module].manifest.depends;
+        let closures: Vec<Option<(usize, Vec<bool>, bool)>> = depends
+            .iter()
+            .map(|d| {
+                let &mi = self.by_name.get(d.value.as_str())?;
+                let (closure, complete) = depends_closure(self.modules, &self.by_name, [mi]);
+                Some((mi, closure, complete)).filter(|(_, closure, _)| !closure[module])
+            })
+            .collect();
+        let implied: Vec<usize> = self.implied_depends(module).into_iter().map(|(d, _)| d).collect();
+        let mut brought = vec![];
+        for (d, entry) in closures.iter().enumerate() {
+            let Some((mi, closure, true)) = entry else {
+                continue;
+            };
+            if depends[d].value == "base" || implied.contains(&d) {
+                continue;
+            }
+            let mut sole: Vec<bool> = closure
+                .iter()
+                .zip(&self.always_installed)
+                .map(|(&c, &a)| c && !a)
+                .collect();
+            // An implied entry comes with another, so dropping that one loses it: what it brings
+            // stays in the other's share.
+            let others = closures
+                .iter()
+                .enumerate()
+                .filter(|&(e, _)| e != d && !implied.contains(&e));
+            for (_, other, _) in others.filter_map(|(_, c)| c.as_ref()) {
+                sole.iter_mut().zip(other).for_each(|(s, &o)| *s &= !o);
+            }
+            sole[*mi] = true;
+            brought.push((d, sole));
+        }
+        brought
+    }
+
+    /// Whether `words` take anything from the modules of `set`: a word joining the name of one with
+    /// others, as an XML id, a Python import or a JS specifier does; a name `gives` holds; or a URL
+    /// path one routes.
+    pub fn takes_from(&self, words: &Words, set: &[bool], scope: &Scope, module: usize) -> bool {
+        let gives = |word: &str| self.gives(word, set, scope, module);
+        let module_named = |segment: &str| self.by_name.get(segment).is_some_and(|&mi| set[mi]);
+        let routes = self.sole_routes(set, scope, module);
+        let routed = |word: &str| routes.iter().any(|r| r.matches(word));
+        words.iter().any(|word| {
+            let mut segments = Words::segments(word);
+            gives(word) || routed(word) || segments.any(|s| module_named(s) || gives(s))
+        })
+    }
+
+    /// Whether `name` is something the modules of `set` give: a model one introduces, or its
+    /// table; a template or QWeb view one defines; or a member `gives_member` holds.
+    fn gives(&self, name: &str, set: &[bool], scope: &Scope, module: usize) -> bool {
+        let introduces = |model: &str| self.introduced_in(model, set);
+        introduces(name)
+            || self.table_models(name).iter().any(|m| introduces(m))
+            || self.templates.definers(name).any(|mi| set[mi])
+            || self.qweb_definers(name).any(|mi| set[mi])
+            || self.gives_member(name, set, scope, module)
+    }
+
+    /// Whether the modules of `set` define field, method or `selection_add` value `name` where it
+    /// is theirs. On a model they introduce, or as a method every model has or a hook the ORM runs,
+    /// which a word names on any model: when no module of `scope` outside them but `module` defines
+    /// the name. Otherwise when no such module defines it on the model, or when it is a method,
+    /// whose override may be all that makes a call do anything (18.0 `base_vat` on `_run_vat_test`).
+    fn gives_member(&self, name: &str, set: &[bool], scope: &Scope, module: usize) -> bool {
+        let Some(members) = self.members.get(name) else {
+            return false;
+        };
+        let elsewhere = |m: &&Member| !set[m.module] && m.module != module && scope.sees(m.module);
+        let others: Vec<&Member> = members.iter().filter(elsewhere).collect();
+        let generic = HOOK_PREFIXES.iter().any(|p| name.starts_with(p))
+            || [BASE_MODEL_METHODS, BASE_MODEL_EXTRA, BASE_MODEL_DUNDERS, BASE_METHODS]
+                .iter()
+                .any(|list| list.contains(&name));
+        members.iter().filter(|m| set[m.module]).any(|m| {
+            if self.introduced_in(m.model, set) || (m.method && generic) {
+                others.is_empty()
+            } else {
+                m.method || others.iter().all(|o| o.model != m.model)
+            }
+        })
+    }
+
+    fn introduced_in(&self, model: &str, set: &[bool]) -> bool {
+        self.classes(model).iter().any(|&(mi, c)| c.new_model && set[mi])
+    }
+
+    /// The URL paths the controllers of `set` route and no module of `scope` outside it but `module`
+    /// does.
+    fn sole_routes(&self, set: &[bool], scope: &Scope, module: usize) -> Vec<RoutePath<'_>> {
+        let mut ours = vec![];
+        let mut theirs = FxHashSet::default();
+        for addon in self.routes.addons() {
+            let Some(&mi) = self.by_name.get(addon) else {
+                continue;
+            };
+            let paths = self.routes.module(addon).flat_map(|at| &at.class.routes);
+            let urls = paths.filter_map(|r| match &r.urls {
+                RouteKey::Given(urls) => Some(urls),
+                _ => None,
+            });
+            for url in urls.flatten() {
+                if set[mi] {
+                    ours.extend(RoutePath::of(url));
+                } else if mi != module && scope.sees(mi) {
+                    theirs.insert(url.as_str());
+                }
+            }
+        }
+        ours.retain(|r| !theirs.contains(r.url));
+        ours
+    }
+
+    /// Whether a spec of a loaded view or template of `module` locates an element that, of the
+    /// modules of `scope`, only those of `set` add to the tree it extends.
+    pub fn locates_in(&self, module: usize, set: &[bool], scope: &Scope) -> bool {
+        let m = &self.modules[module];
+        let name = m.name.as_str();
+        let sole = |tree: &Inheritance<'m>, parent: String, elements: Vec<ArchElement>| {
+            let Some(root) = tree.root(parent) else {
+                return false;
+            };
+            let all = tree.tree(root.clone(), self.modules, |mi| scope.sees(mi));
+            let without = tree.tree(root, self.modules, |mi| scope.sees(mi) && !set[mi]);
+            elements
+                .iter()
+                .any(|e| all.visible.contains(e) && !without.visible.contains(e))
+        };
+        let views = m.data.iter().filter(|f| f.rank.is_some()).flat_map(|f| &f.facts.views);
+        let mut views = views.filter(|v| !v.locators.is_empty());
+        let templates = m.templates.iter().enumerate();
+        let templates = templates.filter(|&(fi, _)| self.template_loaded(module, fi));
+        let mut templates = templates.flat_map(|(_, f)| &f.facts.templates);
+        views.any(|v| {
+            let Some(parent) = &v.inherit else { return false };
+            let elements = v.locators.iter().map(|l| located(&l.value, name)).collect();
+            sole(&self.views, full_id(name, parent), elements)
+        }) || templates.any(|t| {
+            let Some(parent) = t.inherit.as_ref().filter(|_| !t.arch.locators.is_empty()) else {
+                return false;
+            };
+            let elements = t.arch.locators.iter().map(|l| l.value.clone()).collect();
+            sole(&self.templates, parent.value.clone(), elements)
+        })
     }
 
     /// The index and the `depends` closure of the dependency `name` of `module`, when it is
@@ -2974,6 +3135,59 @@ impl PathError<'_> {
     }
 }
 
+/// A field, method or `selection_add` value a module defines on a model.
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct Member<'m> {
+    module: usize,
+    model: &'m str,
+    method: bool,
+}
+
+/// What `Index::members` holds: the name of each field, method and `selection_add` value of each
+/// class, to the modules and models that define it.
+fn members<'m>(models: &Models<'m>) -> FxHashMap<&'m str, Vec<Member<'m>>> {
+    let mut members: FxHashMap<&str, Vec<Member>> = FxHashMap::default();
+    for (&model, classes) in models {
+        for &(module, class) in classes {
+            let added = class.fields.iter().filter_map(|f| f.option("selection_add"));
+            let values = added.filter_map(|o| o.value.listed(true)).flatten();
+            let fields = class.fields.iter().map(|f| &f.name).chain(values);
+            let named = fields
+                .map(|n| (n, false))
+                .chain(class.methods.iter().map(|n| (n, true)));
+            for (name, method) in named {
+                let member = Member { module, model, method };
+                let definers = members.entry(name.as_str()).or_default();
+                if !definers.contains(&member) {
+                    definers.push(member);
+                }
+            }
+        }
+    }
+    members
+}
+
+/// A URL path a controller routes, up to its first converter.
+struct RoutePath<'m> {
+    url: &'m str,
+    head: &'m str,
+    converted: bool,
+}
+
+impl<'m> RoutePath<'m> {
+    /// None for a path that is all converter, or the root, which no word names.
+    fn of(url: &'m str) -> Option<Self> {
+        let (head, converted) = url.find('<').map_or((url, false), |i| (&url[..i], true));
+        let head = head.trim_end_matches('/');
+        (!head.is_empty()).then_some(Self { url, head, converted })
+    }
+
+    /// Whether `word` is this path, or one it takes with its converters filled in.
+    fn matches(&self, word: &str) -> bool {
+        word == self.head || self.converted && word.strip_prefix(self.head).is_some_and(|r| r.starts_with('/'))
+    }
+}
+
 /// The tables of the models a non-abstract class introduces with `_name`: each `_table` their
 /// classes set, or else the name with dots made underscores. A model with a `_table` that is no
 /// literal has none.
@@ -3069,7 +3283,7 @@ mod tests {
         base_private_method, base_rpc_method, class_file, field_id_prefixes, fold_writes, last_text, mangles_alike,
         old_base_method, unseen_table_id,
     };
-    use crate::mentions::Mentions;
+    use crate::mentions::{Mentions, Words};
     use crate::project::{SourceFile, module};
     use crate::python;
     use crate::series::Series;
@@ -3464,6 +3678,121 @@ mod tests {
         assert_eq!(implied("trigger"), []);
         assert_eq!(implied("unindexed"), []);
         assert_eq!(implied("twice"), []);
+    }
+
+    #[test]
+    fn an_entry_alone_brings_what_no_other_entry_or_base_does() {
+        let manifest = |depends: &str, extra: &str| format!("{{'depends': [{depends}]{extra}}}");
+        let modules = [
+            module("base", &manifest("", "")),
+            module("web", &manifest("'base'", ", 'auto_install': True")),
+            module("mail", &manifest("'base'", "")),
+            module("product", &manifest("'mail'", "")),
+            module("team", &manifest("'base'", "")),
+            module("sale", &manifest("'product', 'team'", "")),
+            module("stock", &manifest("'product'", "")),
+            module("partial", &manifest("'ghost'", "")),
+            module("back", &manifest("'main'", "")),
+            module(
+                "main",
+                &manifest(
+                    "'base', 'web', 'sale', 'stock', 'mail', 'ghost', 'partial', 'back', 'main'",
+                    "",
+                ),
+            ),
+            module("solo", &manifest("'sale'", "")),
+            module("pair", &manifest("'sale', 'mail'", "")),
+        ];
+        let index = Index::build(&modules, None);
+        let brought = |name: &str| -> Vec<(usize, Vec<&str>)> {
+            let sole = index.sole_brought(index.by_name[name]);
+            let names = |set: &[bool]| {
+                modules
+                    .iter()
+                    .filter(|m| set[index.by_name[m.name.as_str()]])
+                    .map(|m| m.name.as_str())
+                    .collect()
+            };
+            sole.iter().map(|(d, set)| (*d, names(set))).collect()
+        };
+        assert_eq!(
+            brought("main"),
+            [(1, vec!["web"]), (2, vec!["team", "sale"]), (3, vec!["stock"])]
+        );
+        assert_eq!(brought("solo"), [(0, vec!["mail", "product", "team", "sale"])]);
+        // `mail` comes with `sale`, so dropping `sale` would lose it.
+        assert_eq!(brought("pair"), [(0, vec!["mail", "product", "team", "sale"])]);
+    }
+
+    #[test]
+    fn words_take_from_a_set_by_any_name_only_it_gives() {
+        fn python(source: &str) -> SourceFile<crate::facts::PyFacts> {
+            SourceFile {
+                path: PathBuf::new(),
+                rel: String::new(),
+                rank: None,
+                demo: false,
+                facts: python::analyze(source, Series::parse("18.0")),
+                suppressions: Default::default(),
+                mentions: Mentions::default(),
+            }
+        }
+        let manifest = |depends: &str| format!("{{'version': '18.0.1.0', 'depends': [{depends}]}}");
+        let mut modules = [
+            module("base", &manifest("")),
+            module("prov", &manifest("'base'")),
+            module("main", &manifest("'prov'")),
+        ];
+        modules[0].python.push(python(
+            "class P(models.Model):\n    _name = 'res.partner'\n    name = fields.Char()\n    tz = fields.Char()\n\n    def _engine(self):\n        raise NotImplementedError()\n\n    def copy(self):\n        pass\n\n    def _compute_kind(self):\n        pass\n\n\
+             class C(models.Model):\n    _name = 'res.company'\n    name = fields.Char()\n",
+        ));
+        modules[1].python.push(python(
+            "from odoo import http\n\n\
+             class T(models.Model):\n    _name = 'prov.thing'\n    name = fields.Char()\n    prov_code = fields.Char()\n\n    def action_prov(self):\n        pass\n\n\
+             class P(models.Model):\n    _inherit = 'res.partner'\n    name = fields.Char(required=True)\n    kind = fields.Selection(selection_add=[('prov_kind', 'Prov')])\n\n    def _engine(self):\n        return 1\n\n    def copy(self):\n        pass\n\n    def _compute_kind(self):\n        pass\n\n\
+             class C(models.Model):\n    _inherit = 'res.company'\n    tz = fields.Char()\n\n    def copy(self):\n        pass\n\n    def _compute_zone(self):\n        pass\n\n\
+             class Map(http.Controller):\n    @http.route('/prov_map', auth='public')\n    def map(self):\n        pass\n\n    @http.route(['/prov/item/<int:x>'])\n    def item(self, x):\n        pass\n",
+        ));
+        modules[2].python.push(python(
+            "class P(models.Model):\n    _inherit = 'res.partner'\n    prov_code = fields.Char()\n",
+        ));
+        let index = Index::build(&modules, None);
+        let main = index.by_name["main"];
+        let set: Vec<bool> = modules.iter().map(|m| m.name == "prov").collect();
+        let scope = index.scope(main);
+        let takes = |text: &str| index.takes_from(&Words::scan(text), &set, &scope, main);
+        for text in [
+            "'prov.thing'",
+            "FROM prov_thing",
+            "rec.prov_code",
+            "action_prov",
+            "'prov_kind'",
+            "ref('prov.menu')",
+            "from odoo.addons.prov.models import x",
+            "import '@prov/static/a'",
+            "import '@prov/../lib/a'",
+            "company.tz",
+            "self._engine()",
+            "src='/prov_map?z=1'",
+            "'/prov/item/4'",
+            "compute='_compute_zone'",
+        ] {
+            assert!(takes(text), "{text}");
+        }
+        for text in [
+            "name",
+            "rec.name",
+            "'prov'",
+            "res.partner",
+            "other.thing",
+            "prov_map",
+            "'/prov'",
+            "rec.copy()",
+            "_compute_kind",
+        ] {
+            assert!(!takes(text), "{text}");
+        }
     }
 
     #[test]

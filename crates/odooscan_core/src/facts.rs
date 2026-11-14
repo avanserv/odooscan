@@ -103,6 +103,17 @@ pub enum OptionValue {
     Other,
 }
 
+impl OptionValue {
+    /// The values a literal list gives, or a literal tuple when `tuples`.
+    pub fn listed(&self, tuples: bool) -> Option<&[String]> {
+        match self {
+            Self::Strs(values) => Some(values),
+            Self::Tuple(values) if tuples => Some(values),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct FieldFact {
     pub name: String,

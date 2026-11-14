@@ -1709,6 +1709,7 @@ impl<'m> Ctx<'_, 'm> {
             }
         }
         self.implied_dependencies(out);
+        self.unused_dependencies(out);
     }
 
     /// OD520 on a `depends` entry another entry already brings, naming the top of the chain.
@@ -1720,6 +1721,29 @@ impl<'m> Ctx<'_, 'm> {
                 depends[d].value, depends[e].value
             );
             out.push(&self.module.manifest_path, "OD520", depends[d].pos, message);
+        }
+    }
+
+    /// OD521 on a `depends` entry from which the module's words and view specs take nothing it alone
+    /// brings. A module with `auto_install` is a bridge that exists to pull its dependencies in, as
+    /// is one with no file but its manifest and `__init__.py`, and a text the scan lost may hold the
+    /// use.
+    fn unused_dependencies(&self, out: &mut Out<'m>) {
+        let module = self.module;
+        if module.manifest.auto_install != manifest::AutoInstall::Off || module.lost_text || is_shell(module) {
+            return;
+        }
+        let depends = &module.manifest.depends;
+        for (d, set) in self.index.sole_brought(self.mi) {
+            let used = self.index.takes_from(&module.words, &set, self.scope, self.mi)
+                || self.index.locates_in(self.mi, &set, self.scope);
+            if !used {
+                let message = format!(
+                    "nothing of module '{}' is used, nor of what only it brings",
+                    depends[d].value
+                );
+                out.push(&module.manifest_path, "OD521", depends[d].pos, message);
+            }
         }
     }
 
@@ -5365,7 +5389,7 @@ fn delegation_fix(field: &Field, defaulted: bool) -> Option<String> {
 /// whether the series takes a tuple as a `selection` list.
 fn earlier_values<'m>(field: &Field<'m>, at: usize, tuples: bool) -> Option<FxHashSet<&'m str>> {
     if let Some(own) = field.defs[at].2.option("selection") {
-        let own = listed(&own.value, tuples)?;
+        let own = own.value.listed(tuples)?;
         return (field.defs.len() > 1).then(|| own.iter().map(String::as_str).collect());
     }
     let setters = earlier_setters(field, at)?;
@@ -5411,7 +5435,7 @@ fn last_list(field: &Field, setters: &[usize]) -> Option<usize> {
 fn selection_values<'m>(def: &'m FieldFact, tuples: bool, values: &mut FxHashSet<&'m str>) -> Option<()> {
     for (name, tuples) in [("selection", tuples), ("selection_add", true)] {
         if let Some(option) = def.option(name) {
-            values.extend(listed(&option.value, tuples)?.iter().map(String::as_str));
+            values.extend(option.value.listed(tuples)?.iter().map(String::as_str));
         }
     }
     Some(())
@@ -5437,13 +5461,15 @@ fn csv_label(defs: &[FieldDef], values: &FxHashSet<&str>, cell: &str, series: Op
     values.iter().any(|v| same(v)) || labels.any(|l| l.as_deref().is_none_or(same))
 }
 
-/// The values a literal list gives, or a literal tuple when `tuples`.
-fn listed(value: &OptionValue, tuples: bool) -> Option<&[String]> {
-    match value {
-        OptionValue::Strs(values) => Some(values),
-        OptionValue::Tuple(values) if tuples => Some(values),
-        _ => None,
-    }
+/// Whether `module` ships no file but its manifest and `__init__.py`.
+fn is_shell(module: &Module) -> bool {
+    module.data.is_empty()
+        && module.js.is_empty()
+        && module.templates.is_empty()
+        && module
+            .python
+            .iter()
+            .all(|f| f.path == module.manifest_path || f.rel == "__init__.py")
 }
 
 fn sets_parent_store(class: &ClassFact) -> bool {
