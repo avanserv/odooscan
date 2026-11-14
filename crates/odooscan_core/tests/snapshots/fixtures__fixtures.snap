@@ -1232,10 +1232,14 @@ custom/report_tag161/data/reports.xml:28:35: OD311 no indexed module defines tem
 custom/report_tag161/data/reports.xml:29:46: OD319 Odoo refuses this expression when it prints the report: Unexpected token at the end of an expression
 custom/report_tag161/data/updates.xml:2:5: OD323 XML id 'tag_replaces' is already defined in data/reports.xml, and this definition overwrites the fields both name; remove the copy when the two say the same thing, or rename one when both are meant to exist
 custom/report_unversioned/__manifest__.py:1:44: OD521 nothing of module 'web' is used, nor of what only it brings
+custom/route_auto_heir/controllers/main.py:6:9: OD231 path '/route_auto/shared' is also routed by Shared.shared in module route_auto, so one of the two hides the other
+custom/route_auto_side/controllers/main.py:6:9: OD231 path '/route_auto/side' is also routed by Shared.side in module route_auto, so one of the two hides the other
 custom/route_clash/controllers/main.py:13:9: OD231 path '/bad/routes/new' is also routed by Routes.new in module bad_sale, so one of the two hides the other
 custom/route_clash/controllers/main.py:25:9: OD231 path '/route_clash/catalog' is also routed by Catalog.catalog in module route_clash, so one of the two hides the other
 custom/route_clash/controllers/main.py:30:9: OD232 'drop' overrides the route of Routes in module bad_sale without @route(), so Odoo logs a warning and routes it as if it had one
+custom/route_clash/controllers/main.py:78:9: OD231 path '/bad/routes/rename/<int:order_id>' is also routed by Routes.rename in module bad_sale, so one of the two hides the other
 custom/route_drop15/controllers/main.py:11:9: OD232 'page' overrides the route of Pages in module route_drop15 without @route(), so Odoo drops the route
+custom/route_moved/controllers/main.py:19:9: OD231 path '/route_moved/new' is also routed by RoutesMove.new in module route_moved, so one of the two hides the other
 custom/route_overrides/controllers/rebound.py:18:9: OD127 route accepts GET, on which Odoo checks no CSRF token, and calls create(); restrict it with methods=['POST'] or check a token
 custom/route_overrides/controllers/routes.py:8:9: OD127 route accepts GET, on which Odoo checks no CSRF token, and calls write(); restrict it with methods=['POST'] or check a token
 custom/route_overrides/controllers/routes.py:13:9: OD127 route accepts GET, on which Odoo checks no CSRF token, and calls unlink(); restrict it with methods=['POST'] or check a token
