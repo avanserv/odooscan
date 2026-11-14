@@ -594,9 +594,10 @@ fn writes_names(body: &[Stmt], name: &str) -> bool {
     unseen.writes || unseen.names.iter().any(|n| n == name)
 }
 
-/// The names the file binds at import, in the module body or a block of it, or that a function or
-/// an assignment expression may bind in it. None when it may bind names no statement shows: through
-/// a star import, a module `__getattr__` or code that may write any name, as `Unseen` reads them.
+/// The names the file binds at import, in the module body or a block of it, a `match` pattern
+/// included, or that a function or an assignment expression may bind in it. None when it may bind
+/// names no statement shows: through a star import, a module `__getattr__` or code that may write
+/// any name, as `Unseen` reads them.
 pub(crate) fn defined_names(body: &[Stmt]) -> Option<Vec<String>> {
     let mut names = vec![];
     for stmt in bound(body) {
@@ -628,6 +629,10 @@ fn stmt_names(stmt: &Stmt, names: &mut Vec<String>) -> Option<()> {
             let ast::ExceptHandler::ExceptHandler(h) = h;
             h.name.as_ref().map(ToString::to_string)
         })),
+        Stmt::Match(m) => {
+            let cases = m.cases.iter().flat_map(|c| captures(&c.pattern));
+            names.extend(cases.map(str::to_owned));
+        }
         _ => targets(stmt).into_iter().for_each(|t| target_names(t, names)),
     }
     Some(())
@@ -987,10 +992,12 @@ mod tests {
         let src = "import a.b, c as d\nfrom .e import f, g as h\nclass K:\n    inner = 1\ndef run():\n    local = 1\n    global shared\n\
                    x, (y, *z) = 1, (2, 3)\nn: int\nm: int = 1\nif c:\n    p = 1\nelse:\n    with o() as q:\n        pass\n\
                    try:\n    r = 1\nexcept E as s:\n    pass\nfor t in ():\n    u = 1\nwhile c:\n    v = 1\n\
-                   match c:\n    case 1:\n        w = 1\nprint(walrus := 1)\nobj.attr = 1\n";
+                   match c:\n    case 1:\n        w = 1\n    case Point(x=px): pass\n    case [ab, *rest]: pass\n\
+                   match c:\n    case {\"k\": kv, **others}: pass\n    case int() as whole: pass\n\
+                   print(walrus := 1)\nobj.attr = 1\n";
         let expected = [
-            "K", "a", "d", "f", "h", "m", "p", "q", "r", "run", "s", "shared", "t", "u", "v", "w", "walrus", "x", "y",
-            "z",
+            "K", "a", "ab", "d", "f", "h", "kv", "m", "others", "p", "px", "q", "r", "rest", "run", "s", "shared", "t",
+            "u", "v", "w", "walrus", "whole", "x", "y", "z",
         ];
         assert_eq!(defined(src), Some(expected.iter().map(|n| (*n).to_owned()).collect()));
     }

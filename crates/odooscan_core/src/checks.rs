@@ -1778,8 +1778,9 @@ impl<'m> Ctx<'_, 'm> {
 
     /// OD518 on an import of a module outside `depends` that runs as the module loads, and OD519
     /// on what an import names that its module lacks. Upgrade scripts are no module code, an IoT
-    /// handler runs on the box, and a failed import in a `try` catching it, under `suppress()` or
-    /// under `if TYPE_CHECKING:` changes nothing.
+    /// handler runs on the box, and a failed import in a `try` catching it or under a `suppress()`
+    /// that may changes nothing, nor does any import under `if TYPE_CHECKING:`, a function defined
+    /// there included.
     fn addon_imports(&self, out: &mut Out<'m>) {
         for file in &self.module.python {
             let dir = file.rel.split_once('/').map(|(dir, _)| dir);

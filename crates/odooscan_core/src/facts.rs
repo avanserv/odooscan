@@ -722,8 +722,9 @@ pub struct ImportFact {
     pub from: bool,
     /// In a function, which runs it only when called.
     pub deferred: bool,
-    /// Where a failed import changes nothing: in a `try` catching it, under `suppress()` or under
-    /// `if TYPE_CHECKING:`, which never runs.
+    /// Where a failed import changes nothing: in a `try` catching it or under a `suppress()` that
+    /// may, or anywhere under `if TYPE_CHECKING:`, which never runs, a function defined there
+    /// included.
     pub guarded: bool,
 }
 

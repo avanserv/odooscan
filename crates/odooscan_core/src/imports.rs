@@ -33,6 +33,7 @@ pub(crate) fn file_imports(body: &[Stmt], loc: &Locator) -> FileImports {
         dynamic: false,
         deferred: false,
         guarded: false,
+        typing: false,
     };
     collect.visit_body(body);
     FileImports {
@@ -50,17 +51,21 @@ struct Collect<'l> {
     dynamic: bool,
     deferred: bool,
     guarded: bool,
+    /// Under `if TYPE_CHECKING:`, which never runs.
+    typing: bool,
 }
 
 impl<'a> Visitor<'a> for Collect<'_> {
     fn visit_stmt(&mut self, stmt: &'a Stmt) {
+        if self.guards(stmt) {
+            return;
+        }
         match stmt {
             Stmt::Import(_) | Stmt::ImportFrom(_) => self.import(stmt),
             Stmt::FunctionDef(f) => {
                 self.function(f);
                 return;
             }
-            _ if self.guards(stmt) => return,
             _ => {}
         }
         visitor::walk_stmt(self, stmt);
@@ -105,7 +110,7 @@ impl<'a> Collect<'_> {
     fn guards(&mut self, stmt: &'a Stmt) -> bool {
         match stmt {
             Stmt::Try(t) if t.handlers.iter().any(catches_import) => self.guarded_try(t),
-            Stmt::With(w) if method_body::suppresses(w) => {
+            Stmt::With(w) if suppresses_import(w) => {
                 for item in &w.items {
                     self.visit_with_item(item);
                 }
@@ -113,7 +118,9 @@ impl<'a> Collect<'_> {
             }
             Stmt::If(i) if type_checking(&i.test) => {
                 self.visit_expr(&i.test);
+                let outer = std::mem::replace(&mut self.typing, true);
                 self.guard(&i.body);
+                self.typing = outer;
                 for clause in &i.elif_else_clauses {
                     self.visit_elif_else_clause(clause);
                 }
@@ -132,14 +139,15 @@ impl<'a> Collect<'_> {
         self.visit_body(&t.finalbody);
     }
 
-    /// The body of a function runs when it is called, outside any `try` around the `def`.
+    /// The body of a function runs when it is called, outside any `try` around the `def`, and
+    /// never when the `def` sits under `if TYPE_CHECKING:`, which never defines it.
     fn function(&mut self, f: &'a ast::StmtFunctionDef) {
         for decorator in &f.decorator_list {
             self.visit_decorator(decorator);
         }
         self.visit_parameters(&f.parameters);
         let outer = (self.deferred, self.guarded);
-        (self.deferred, self.guarded) = (true, false);
+        (self.deferred, self.guarded) = (true, self.typing);
         self.visit_body(&f.body);
         (self.deferred, self.guarded) = outer;
     }
@@ -190,12 +198,48 @@ impl<'a> Collect<'_> {
     }
 }
 
+/// What a failed import raises.
+const IMPORT_ERRORS: [&str; 2] = ["ImportError", "ModuleNotFoundError"];
+
 /// Whether a handler catches what a failed import raises.
 fn catches_import(handler: &ast::ExceptHandler) -> bool {
     let ast::ExceptHandler::ExceptHandler(h) = handler;
-    ["ImportError", "ModuleNotFoundError"]
-        .into_iter()
-        .any(|error| python::catches(h, error))
+    IMPORT_ERRORS.into_iter().any(|error| python::catches(h, error))
+}
+
+/// Whether a `with` holds a `suppress()` that may swallow what a failed import raises.
+fn suppresses_import(w: &ast::StmtWith) -> bool {
+    let items = w.items.iter();
+    let calls = items.filter_map(|i| method_body::suppress_call(&i.context_expr));
+    let mut args = calls.flat_map(|c| c.arguments.args.iter());
+    args.any(may_catch_import)
+}
+
+/// Whether a `suppress()` argument may name what a failed import raises. Only another exception
+/// class by its name is known not to: any other name, such as `OPTIONAL_ERRORS`, may hold a tuple
+/// of classes, and a starred argument or a call any class.
+fn may_catch_import(arg: &Expr) -> bool {
+    match arg {
+        Expr::Tuple(types) => types.iter().any(may_catch_import),
+        _ => {
+            tail_name(arg).is_none_or(|name| !exception_class(name))
+                || IMPORT_ERRORS.into_iter().any(|error| python::names_error(arg, error))
+        }
+    }
+}
+
+/// Whether `name` reads as an exception class: by the suffix Python and Odoo give them, or as one
+/// of the built-in ones without it.
+fn exception_class(name: &str) -> bool {
+    ["Error", "Exception", "Warning"].iter().any(|s| name.ends_with(s))
+        || [
+            "GeneratorExit",
+            "KeyboardInterrupt",
+            "StopAsyncIteration",
+            "StopIteration",
+            "SystemExit",
+        ]
+        .contains(&name)
 }
 
 /// `TYPE_CHECKING` or `typing.TYPE_CHECKING`, true only for a type checker.
@@ -796,6 +840,43 @@ mod tests {
         ];
         let expected: Vec<_> = expected.iter().map(|(n, d, g)| ((*n).to_owned(), *d, *g)).collect();
         assert_eq!(flags, expected);
+    }
+
+    /// Whether the first import of `src` is guarded.
+    fn guarded(src: &str) -> bool {
+        imports(src).list[0].guarded
+    }
+
+    #[test]
+    fn a_suppress_guards_only_when_it_may_swallow_an_import_error() {
+        for (args, expected) in [
+            ("KeyError", false),
+            ("()", false),
+            ("", false),
+            ("ImportError", true),
+            ("KeyError, ModuleNotFoundError", true),
+            ("(KeyError, ImportError)", true),
+            ("Exception", true),
+            ("builtins.BaseException", true),
+            ("*errors", true),
+            ("UserError, binascii.Error, KeyboardInterrupt", false),
+            ("OPTIONAL_ERRORS", true),
+            ("(KeyError, self.errors)", true),
+            ("errors()", true),
+        ] {
+            let src = format!("with suppress({args}):\n    import a\n");
+            assert_eq!(guarded(&src), expected, "{args}");
+        }
+        let among = "with open(p) as f, contextlib.suppress(ImportError):\n    import a\n";
+        assert!(guarded(among));
+    }
+
+    #[test]
+    fn a_def_under_type_checking_is_guarded_and_one_in_its_else_is_not() {
+        let src = "if TYPE_CHECKING:\n    def f():\n        import a\n    class K:\n        def m(self):\n            import b\n\
+                   else:\n    def g():\n        import c\n";
+        let flags: Vec<(bool, bool)> = imports(src).list.iter().map(|f| (f.deferred, f.guarded)).collect();
+        assert_eq!(flags, [(true, true), (true, true), (true, false)]);
     }
 
     #[test]

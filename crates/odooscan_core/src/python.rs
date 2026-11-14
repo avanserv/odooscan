@@ -1049,12 +1049,15 @@ fn raises_if_not_found(call: &ast::ExprCall) -> bool {
 
 /// Whether a handler catches `error`: by name, as a bare `except`, or through a base of every error.
 pub(crate) fn catches(handler: &ast::ExceptHandlerExceptHandler, error: &str) -> bool {
-    let names =
-        |name: &Expr| matches!(tail_name(name), Some(n) if n == error || n == "Exception" || n == "BaseException");
-    match handler.type_.as_deref() {
-        None => true,
-        Some(Expr::Tuple(types)) => types.iter().any(names),
-        Some(name) => names(name),
+    handler.type_.as_deref().is_none_or(|types| names_error(types, error))
+}
+
+/// Whether an exception class, or a tuple of them as `except` and `issubclass` take, covers `error`
+/// by its name or as a base of every error.
+pub(crate) fn names_error(expr: &Expr, error: &str) -> bool {
+    match expr {
+        Expr::Tuple(types) => types.iter().any(|t| names_error(t, error)),
+        _ => matches!(tail_name(expr), Some(n) if n == error || n == "Exception" || n == "BaseException"),
     }
 }
 
@@ -3946,6 +3949,18 @@ mod tests {
             &format!("{header}class C({class}):\n{func}{PUBLIC_CREATE}"),
             None,
         ))
+    }
+
+    #[test]
+    fn a_handler_catches_an_error_named_in_a_nested_tuple() {
+        let parsed = parse_module("try:\n    pass\nexcept ((KeyError, ImportError), X):\n    pass\n").unwrap();
+        let Some(Stmt::Try(t)) = parsed.syntax().body.first() else {
+            panic!("no try")
+        };
+        let ast::ExceptHandler::ExceptHandler(h) = &t.handlers[0];
+        assert!(catches(h, "ImportError"));
+        assert!(catches(h, "KeyError"));
+        assert!(!catches(h, "ValueError"));
     }
 
     #[test]
