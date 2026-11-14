@@ -1,0 +1,6 @@
+<odoo>
+    <template id="sheet">
+        <t t-call="auto_scope_bare.page"/>
+        <t t-call="manifest_auto_install_bare.page"/>
+    </template>
+</odoo>

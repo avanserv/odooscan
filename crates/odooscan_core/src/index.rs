@@ -6,7 +6,7 @@ use crate::facts::{
     FlowSummary, Heritage, JsClass, ModelKind, OptionValue, PyFacts, Receiver, RecordWrite, ReportFact, RouteKey,
     RuleFact, ServerFact, Signature, UNREAD_TYPE, ViewFact, WrittenValue,
 };
-use crate::manifest::{AutoInstall, OdooReads};
+use crate::manifest::{AutoInstall, DEPENDS_BASE, OdooReads};
 use crate::mentions::{HOOK_PREFIXES, Words};
 use crate::project::{Module, SourceFile, code_loaded};
 use crate::series::{self, Series};
@@ -1117,8 +1117,8 @@ fn always_installed(modules: &[Module], by_name: &FxHashMap<&str, usize>, defaul
 }
 
 /// `seeds`, and each auto-install module `joins` admits whose triggers (see `triggers` for how a series
-/// reads them) lie among them and whose depends closure is indexed, with that closure dragged in,
-/// repeating until nothing is added.
+/// reads them) lie among them, or are a `base` the scan leaves out, and whose depends closure is
+/// indexed, with that closure dragged in, repeating until nothing is added.
 fn install_closure(
     modules: &[Module],
     by_name: &FxHashMap<&str, usize>,
@@ -1128,7 +1128,9 @@ fn install_closure(
 ) -> Vec<bool> {
     let mut installed = seeds;
     loop {
-        let holds = |name: &str| by_name.get(name).is_some_and(|&di| installed[di]);
+        // Odoo installs `base` on every database, so the `base` an empty `depends` reads as still
+        // holds when the scan leaves it out, for the checks that run without it.
+        let holds = |name: &str| by_name.get(name).map_or(name == "base", |&di| installed[di]);
         let ready: Vec<usize> = (0..modules.len())
             .filter(|&mi| !installed[mi] && joins(&modules[mi]))
             .filter(|&mi| triggers(&modules[mi], series).is_some_and(|t| t.into_iter().all(holds)))
@@ -1151,13 +1153,19 @@ fn install_closure(
 /// The depends whose install auto-installs `module`, or `None` when nothing does. From `saas~12.4` a list
 /// names the triggers, and one naming a module outside `depends` fails the manifest. Before `saas~12.4`,
 /// database creation fails on a list, and `update_list` keeps only whether the value is truthy, so `must_install`
-/// waits on every depend for a non-empty list, like `True`, and `[]` is off.
+/// waits on every depend for a non-empty list, like `True`, and `[]` is off. From `saas~18.2` an empty
+/// `depends` reads as `['base']` first for every module but `base` (20.0 `odoo/modules/module.py:471-475`,
+/// `:485-493`); 18.0 keeps it empty.
 fn triggers(module: &Module, series: Option<Series>) -> Option<Vec<&str>> {
-    let depends: Vec<&str> = module.manifest.depends.iter().map(|d| d.value.as_str()).collect();
+    let series = module.series.or(series);
+    let mut depends: Vec<&str> = module.manifest.depends.iter().map(|d| d.value.as_str()).collect();
+    if depends.is_empty() && module.name != "base" && series.is_none_or(|s| s >= DEPENDS_BASE) {
+        depends.push("base");
+    }
     match &module.manifest.auto_install {
         AutoInstall::Off => None,
         AutoInstall::Depends => Some(depends),
-        AutoInstall::Listed(names) if module.series.or(series).is_none_or(|s| s >= LISTED_TRIGGERS) => names
+        AutoInstall::Listed(names) if series.is_none_or(|s| s >= LISTED_TRIGGERS) => names
             .iter()
             .map(|n| n.value.as_str())
             .map(|n| depends.contains(&n).then_some(n))
@@ -2136,8 +2144,8 @@ impl<'m> Index<'m> {
     /// What each `depends` entry of `module` alone brings it, as (entry, modules), the entry a
     /// position in `depends`: the entry, and each module of its closure that Odoo does not install
     /// on every database (`always_installed`) and no other entry's closure holds, implied entries'
-    /// closures not taken away. Leaves out `base`, which 20.0 restores in an empty `depends`, and
-    /// the entries whose use is not to be read from the module: one not indexed or with a
+    /// closures not taken away. Leaves out `base`, which saas~18.2 restores in an empty `depends`,
+    /// and the entries whose use is not to be read from the module: one not indexed or with a
     /// dependency that is not, one another entry already brings (OD520), and one leading back to
     /// the module (OD504), whose closure holds the module's own and so is taken from no other.
     pub fn sole_brought(&self, module: usize) -> Vec<(usize, Vec<bool>)> {
@@ -3298,7 +3306,7 @@ mod tests {
         BASE_MODEL_DUNDERS, BASE_MODEL_EXTRA, BASE_MODEL_METHODS, BASE_PRIVATE_METHODS, BASE_RPC_METHODS,
         FIELD_CLASSES, FieldHolder, FieldSpelling, Index, OLD_BASE_METHODS, PlacedWrite, Scope, XmlIdDef,
         base_private_method, base_rpc_method, class_file, field_id_prefixes, fold_writes, last_text, mangles_alike,
-        old_base_method, unseen_table_id,
+        old_base_method, triggers, unseen_table_id,
     };
     use crate::mentions::{Mentions, Words};
     use crate::project::{SourceFile, module};
@@ -3693,6 +3701,47 @@ mod tests {
         // At one depth the name decides.
         assert!(before("main", "side") && before("aside", "heir") && !before("side", "main"));
         assert!(!before("main", "main"));
+    }
+
+    #[test]
+    fn an_empty_depends_waits_on_base_from_saas_18_2() {
+        let modules = [
+            module("base", "{'auto_install': True}"),
+            module("bare", "{'auto_install': ['base']}"),
+            module("whole", "{'auto_install': True}"),
+        ];
+        for name in ["18.0", "saas~18.1"] {
+            let series = Series::parse(name);
+            let index = Index::build(&modules, series);
+            assert!(!index.always_installed[1], "{name}");
+            assert_eq!(triggers(&modules[1], series), None, "{name}");
+            assert_eq!(triggers(&modules[2], series), Some(vec![]), "{name}");
+            assert_eq!(triggers(&modules[0], series), Some(vec![]), "{name}");
+        }
+        for series in [Series::parse("saas~18.2"), Series::parse("20.0"), None] {
+            let index = Index::build(&modules, series);
+            assert!(index.always_installed[1], "{series:?}");
+            assert_eq!(triggers(&modules[1], series), Some(vec!["base"]), "{series:?}");
+            assert_eq!(triggers(&modules[2], series), Some(vec!["base"]), "{series:?}");
+            assert_eq!(triggers(&modules[0], series), Some(vec![]), "{series:?}");
+        }
+    }
+
+    #[test]
+    fn an_empty_depends_still_auto_installs_when_base_is_not_indexed() {
+        let modules = [
+            module("bare", "{'auto_install': True}"),
+            module("listed", "{'auto_install': ['base']}"),
+            module("named", "{'depends': ['base'], 'auto_install': True}"),
+        ];
+        for series in [Series::parse("18.0"), Series::parse("20.0"), None] {
+            let index = Index::build(&modules, series);
+            assert!(index.always_installed[0], "{series:?}");
+            // A depend off the index keeps the module from loading, `base` included.
+            assert!(!index.always_installed[2], "{series:?}");
+        }
+        assert!(!Index::build(&modules, Series::parse("18.0")).always_installed[1]);
+        assert!(Index::build(&modules, Series::parse("20.0")).always_installed[1]);
     }
 
     #[test]

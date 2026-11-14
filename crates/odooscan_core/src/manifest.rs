@@ -87,7 +87,7 @@ const LICENSE_FALLBACK: Series = Series { major: 14, minor: 5 };
 
 /// The first series that sets an empty `depends` to `['base']` for every module but `base`
 /// (`saas~18.2`).
-const DEPENDS_BASE: Series = Series { major: 18, minor: 2 };
+pub const DEPENDS_BASE: Series = Series { major: 18, minor: 2 };
 
 /// The keys Odoo loads a module's files from in `series`, in its load order.
 pub fn loaded_keys(series: Option<Series>) -> impl Iterator<Item = &'static str> {
