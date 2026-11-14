@@ -716,6 +716,14 @@ custom/method_aliases/data/calls.xml:20:34: OD320 method.ticket has no method 'a
 custom/method_aliases/views/tickets.xml:21:45: OD312 method.ticket has no method 'action_dnoe'
 custom/method_aliases/views/tickets.xml:22:45: OD312 method.ticket has no method 'limit'
 custom/method_aliases/views/tickets.xml:23:45: OD312 method.ticket has no method 'state'
+custom/migration_folders/migrations/1.3/post-shelves.py:1:1: OD514 folder '1.3' is above the module version 18.0.1.2.0, so Odoo never runs its scripts
+custom/migration_folders/migrations/18.0.1.3.0/post-shelves.py:1:1: OD514 folder '18.0.1.3.0' is above the module version 18.0.1.2.0, so Odoo never runs its scripts
+custom/migration_folders/migrations/19.0.1.0/end-shelves.py:1:1: OD514 folder '19.0.1.0' is above the module version 18.0.1.2.0, so Odoo never runs its scripts
+custom/migration_folders/upgrades/v1.1/pre-shelves.py:1:1: OD514 folder 'v1.1' is not a version of two or three numbers, maybe behind a series, so Odoo skips its scripts
+custom/migration_scripts/migrations/18.0.1.0.0/post-a_none.py:1:1: OD515 the script defines no migrate(cr, version), so Odoo raises and the update fails
+custom/migration_scripts/migrations/18.0.1.0.0/post-b_env.py:1:1: OD515 migrate(env, version) is not migrate(cr, version), so Odoo raises and the update fails
+custom/migration_scripts/migrations/18.0.1.0.0/post-c_named.py:1:1: OD515 migrate(cr, installed_version) is not migrate(cr, version), so Odoo raises and the update fails
+custom/migration_scripts/migrations/18.0.1.0.0/post-d_extra.py:1:1: OD515 migrate(cr, version, extra=None) is not migrate(cr, version), so Odoo raises and the update fails
 custom/model_attributes/models/bed.py:7:20: OD203 'parent_bed_id': garden.bed has no field 'parent_bed_id'
 custom/model_attributes/models/bed.py:8:18: OD203 'folded': garden.bed has no field 'folded'
 custom/model_attributes/models/bed.py:9:20: OD203 'x_active': garden.bed has no field 'x_active'

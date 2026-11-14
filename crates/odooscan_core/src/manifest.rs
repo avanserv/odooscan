@@ -1,5 +1,7 @@
 use std::borrow::Cow;
+use std::sync::LazyLock;
 
+use regex::Regex;
 use ruff_python_ast::{self as ast, Expr, Number, Operator, Stmt, UnaryOp};
 use ruff_python_parser::parse_module;
 use ruff_text_size::{Ranged, TextSize};
@@ -400,6 +402,72 @@ fn prefixes(series: Series) -> Vec<String> {
     } else {
         vec![format!("saas~{plain}"), plain]
     }
+}
+
+/// The names Odoo takes for a folder of upgrade scripts: two or three numbers, maybe behind a
+/// series written `6.1`, `N.0` from 6, `N.saas~M` for N of 7 to 10, or `saas~N.m` for N from 11 but
+/// not 100 to 199, and m of 1 to 9 (18.0 `odoo/modules/migration.py:23-47`).
+static UPGRADE_FOLDER: LazyLock<Regex> = LazyLock::new(|| {
+    let series = r"6\.1|[6-9]\.0|[1-9][0-9]+\.0|(?:7|8|9|10)\.saas~[1-9][0-9]*|saas~(?:1[1-9]|[2-9][0-9]+)\.[1-9]";
+    Regex::new(&format!(r"^(?:(?:{series})\.)?[0-9]+\.[0-9]+(?:\.[0-9]+)?$")).unwrap()
+});
+
+/// Why the Odoo of `series` never runs the scripts of the upgrade folder `name` of a module of
+/// `version`, a version `version_refusal` takes: Odoo skips a name outside `UPGRADE_FOLDER` with a
+/// warning, and runs a folder only up to the module version (18.0 `odoo/modules/migration.py:103-115`,
+/// `:198-211`). A name of at most three numbers takes the series and drops it again to compare, so
+/// it compares with the module version without its series. `0.0.0` runs on every update.
+pub fn upgrade_folder_refusal(name: &str, version: &str, series: Series) -> Option<String> {
+    if !UPGRADE_FOLDER.is_match(name) {
+        return Some(format!(
+            "folder '{name}' is not a version of two or three numbers, maybe behind a series, so Odoo skips its scripts"
+        ));
+    }
+    if name == "0.0.0" {
+        return None;
+    }
+    let prefixes = prefixes(series);
+    let own = &prefixes[0];
+    let adapted = if prefixes.iter().any(|p| version.starts_with(&format!("{p}."))) {
+        version.to_owned()
+    } else {
+        format!("{own}.{version}")
+    };
+    // Odoo compares the version as it compares a folder, so the `S.x` that 20.0 keeps unprefixed
+    // takes the series a second time.
+    let current = version_key(&if adapted.matches('.').count() > 2 {
+        adapted
+    } else {
+        format!("{own}.{adapted}")
+    });
+    let whole = name.matches('.').count() > 2;
+    let folder = version_key(&if whole {
+        name.to_owned()
+    } else {
+        format!("{own}.{name}")
+    });
+    let above = if whole {
+        folder > current
+    } else {
+        folder.get(2..).unwrap_or_default() > current.get(2..).unwrap_or_default()
+    };
+    above.then(|| format!("folder '{name}' is above the module version {version}, so Odoo never runs its scripts"))
+}
+
+/// The order Odoo's `parse_version` gives a version of numbers and `saas~` (18.0
+/// `odoo/tools/parse_version.py:12-64`): the numbers, each one up, without trailing zeros, then a
+/// 0 for the end, which comes before any number.
+fn version_key(version: &str) -> Vec<u64> {
+    let mut key: Vec<u64> = version
+        .split(|c: char| !c.is_ascii_digit())
+        .filter(|p| !p.is_empty())
+        .map(|p| p.parse::<u64>().unwrap_or(u64::MAX - 1) + 1)
+        .collect();
+    while key.last() == Some(&1) {
+        key.pop();
+    }
+    key.push(0);
+    key
 }
 
 const NO_LICENSE: &str = "the manifest names no license, which Odoo reads as LGPL-3";
@@ -862,6 +930,74 @@ mod tests {
             "version '17.0.1.0.0' is not of the form x.y, x.y.z, 18.0.x.y or 18.0.x.y.z, so Odoo 18.0 will not install the module"
         );
         assert!(message("1", "saas~18.1").contains("saas~18.1.x.y"));
+    }
+
+    #[test]
+    fn skips_an_upgrade_folder_of_another_form_or_above_the_module_version() {
+        let eighteen = Series::parse("18.0").unwrap();
+        let refused = |name: &str, version: &str| upgrade_folder_refusal(name, version, eighteen).is_some();
+        for name in [
+            "1.2.0",
+            "1.1",
+            "1.2",
+            "17.0.1.5",
+            "18.0.1.2",
+            "9.0.9.0",
+            "0.0.0",
+            "6.1.1.0",
+            "8.saas~6.1.0",
+        ] {
+            assert!(!refused(name, "18.0.1.2.0"), "{name}");
+        }
+        for name in [
+            "18.0.1.3.0",
+            "1.3",
+            "1.2.1",
+            "13.0.2",
+            "19.0.1.0",
+            "saas~19.5.2.2",
+            "5.0.1.0",
+            "v1.1",
+            "17.2.1.0",
+            "1",
+            "1.2.3.4",
+            "1.1.0.0",
+            "saas~10.1.1.0",
+            "saas~100.1.1.0",
+            "saas~18.0.1.0",
+        ] {
+            assert!(refused(name, "18.0.1.2.0"), "{name}");
+        }
+        // A version without the series takes it, and `18.0` alone is the module version 18.0.
+        assert!(!refused("1.2", "1.2.0") && refused("1.3", "1.2"));
+        assert!(!refused("18.0", "18.0") && refused("18.1", "18.0"));
+        // Trailing zeros do not count, on either side.
+        assert!(!refused("1.2.0", "18.0.1.2") && !refused("1.2.0", "1.2") && !refused("18.0.1.2.0", "1.2"));
+        // 20.0 keeps `S.x` unprefixed, and Odoo then compares it behind the series once more.
+        let twenty = Series::parse("20.0").unwrap();
+        let twenty_refused = |name: &str, version: &str| upgrade_folder_refusal(name, version, twenty).is_some();
+        assert!(!twenty_refused("5.0", "20.0.3") && !twenty_refused("20.0.4.0", "20.0.3"));
+        assert!(twenty_refused("20.0.21.0.0", "20.0.3") && !twenty_refused("1.2", "20.0.1.2"));
+        let saas = Series::parse("saas~18.2").unwrap();
+        let saas_refused = |name: &str, version: &str| upgrade_folder_refusal(name, version, saas).is_some();
+        assert!(!saas_refused("1.0", "saas~18.2.1.0") && !saas_refused("saas~18.2.1.0", "1.0"));
+        assert!(saas_refused("1.1", "saas~18.2.1.0") && saas_refused("18.2.1.1", "18.2.1.0"));
+        assert!(!saas_refused("18.0.5.0", "1.0") && saas_refused("saas~18.3.1.0", "1.0"));
+    }
+
+    #[test]
+    fn names_why_odoo_skips_an_upgrade_folder() {
+        let eighteen = Series::parse("18.0").unwrap();
+        assert_eq!(
+            upgrade_folder_refusal("v1.1", "18.0.1.2.0", eighteen).as_deref(),
+            Some(
+                "folder 'v1.1' is not a version of two or three numbers, maybe behind a series, so Odoo skips its scripts"
+            )
+        );
+        assert_eq!(
+            upgrade_folder_refusal("1.3", "18.0.1.2.0", eighteen).as_deref(),
+            Some("folder '1.3' is above the module version 18.0.1.2.0, so Odoo never runs its scripts")
+        );
     }
 
     #[test]

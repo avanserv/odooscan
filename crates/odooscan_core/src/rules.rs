@@ -292,6 +292,10 @@ rules! {
     // saas~14.3 adds the `assets` key and `ir.asset` (`odoo/addons/base/models/ir_asset.py`), which
     // saas~14.2 lacks.
     "OD513" "asset-path-unmatched" Correctness Warning Some(">=saas~14.3"), false, "An assets path or glob of the module matches no file Odoo serves.";
+    // 18.0 `odoo/modules/migration.py` is the only series read: an earlier one may take other
+    // folder names or call `migrate` otherwise.
+    "OD514" "migration-folder-skipped" Correctness Warning Some(">=18.0"), false, "Odoo never runs the scripts of a migration folder of this name.";
+    "OD515" "migration-script-refused" Correctness Error Some(">=18.0"), false, "A migration script lacks the migrate(cr, version) Odoo calls, so the update fails.";
     "OD601" "unresolved-js-import" Correctness Error None, true, "A JS import names a module or an export no indexed module provides.";
     "OD602" "orphan-patch-super" Correctness Error Some(">=17.0"), true, "A patch calls a super method the class it patches does not have.";
     "OD603" "unknown-rpc-model" Correctness Error None, true, "An ORM call from JS names a model no indexed module defines.";
@@ -444,7 +448,7 @@ mod tests {
 
     #[test]
     fn series_gates_follow_source() {
-        let gates: [(&str, &[&str], &[&str]); 20] = [
+        let gates: [(&str, &[&str], &[&str]); 22] = [
             ("OD117", &["saas~15.1", "saas~18.2"], &["saas~15.2", "saas~18.1"]),
             ("OD118", &["saas~18.1"], &["saas~18.2"]),
             ("OD125", &["saas~12.4"], &["saas~12.5", "20.0"]),
@@ -465,6 +469,8 @@ mod tests {
             ("OD506", &["saas~15.4"], &["16.0", "20.0"]),
             ("OD511", &["saas~12.3"], &["saas~12.4", "20.0"]),
             ("OD513", &["14.0", "saas~14.2"], &["saas~14.3", "15.0", "20.0"]),
+            ("OD514", &["17.0", "saas~17.4"], &["18.0", "saas~18.1", "20.0"]),
+            ("OD515", &["17.0", "saas~17.4"], &["18.0", "saas~18.1", "20.0"]),
         ];
         for (code, silent, reported) in gates {
             let r = rule(code);
