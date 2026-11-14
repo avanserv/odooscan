@@ -1471,8 +1471,13 @@ pub(crate) fn asset_glob_set<'g>(globs: impl IntoIterator<Item = &'g String>) ->
     builder.build().unwrap_or_else(|_| GlobSet::empty())
 }
 
-/// Files of a kind, as (module, index among the module's files of that kind).
-type Loaded = FxHashSet<(usize, usize)>;
+/// Whether `path` holds one of the characters Odoo reads as a glob (`WILDCARD_CHARACTERS`).
+pub(crate) fn wildcard(path: &str) -> bool {
+    path.contains(['*', '?', '[', ']'])
+}
+
+/// Files of a kind.
+type Loaded = FxHashSet<bundles::File>;
 
 /// The bundles each loaded script is in, as indices into the sorted bundle names.
 type ScriptBundles = FxHashMap<(usize, usize), Vec<usize>>;

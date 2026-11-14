@@ -10,9 +10,8 @@
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use crate::checks::wildcard;
 use crate::facts::ViewFact;
-use crate::index::{asset_glob_set, full_id, loaded_data};
+use crate::index::{asset_glob_set, full_id, loaded_data, wildcard};
 use crate::manifest::{AssetEntry, Directive};
 use crate::project::{ASSET_EXTENSIONS, Module};
 use crate::series::Series;
@@ -222,9 +221,9 @@ impl<'m> Paths<'m> {
         self.text.len() - 1
     }
 
-    /// The paths `path` stands for: a glob the files of the module its first segment names that
-    /// it matches, sorted, and any other path itself, whether a file of the scan or not (`:47-49`,
-    /// `:367`).
+    /// The paths `path` stands for: a glob stands for the files it matches in the module its first
+    /// segment names, sorted; any other path stands for itself, whether a file of the scan or not
+    /// (`:47-49`, `:367`).
     fn resolve(&mut self, path: &'m str) -> Vec<usize> {
         if let Some(ids) = self.resolved.get(path) {
             return ids.clone();
