@@ -1233,6 +1233,21 @@ fn unloaded_files<'m>(module: &'m Module, series: Option<Series>, out: &mut Out<
     }
 }
 
+/// OD502's message for a data file Odoo never loads, listed under `ignored` or under no key.
+fn unloaded(rel: &str, ignored: Option<&str>, series: Option<Series>) -> String {
+    if let Some(key) = ignored {
+        let to = if key == "demo_xml" { "demo" } else { "data" };
+        return format!("'{rel}' is listed under {key}, which Odoo ignores in this series; move it to {to}");
+    }
+    let keys: Vec<_> = manifest::loaded_keys(series).collect();
+    let keys = match keys.split_last() {
+        Some((last, [])) => (*last).to_owned(),
+        Some((last, rest)) => format!("{} or {last}", rest.join(", ")),
+        None => String::new(),
+    };
+    format!("'{rel}' is not in the manifest's {keys}, so Odoo never loads it")
+}
+
 /// OD516 on a file of models or controllers, and OD517 on a test file, that no import reaches from
 /// the module's root, from `tests/__init__.py` for a test, or from another module. Silent when the
 /// scan cannot tell what Odoo runs: without a root `__init__.py`, with a file it cannot decode, past
@@ -1258,7 +1273,7 @@ fn unimported_files<'m>(index: &Index<'m>, mi: usize, out: &mut Out<'m>) {
     for file in &module.python {
         let finding = match file.rel.strip_prefix("tests/") {
             Some(test) => unrun_test(test, &file.rel, tests.as_ref()),
-            None => unloaded_code(module, file, code.as_ref()),
+            None => unimported_code(module, file, code.as_ref()),
         };
         if let Some((rule, message)) = finding {
             out.push(&file.path, rule, Pos { line: 1, col: 1 }, message);
@@ -1278,7 +1293,7 @@ fn unrun_test(test: &str, rel: &str, reached: Option<&FxHashSet<String>>) -> Opt
 
 /// OD516 on a file of models or controllers that `reached` lacks, upgrade scripts, IoT handlers and
 /// the manifest aside.
-fn unloaded_code(
+fn unimported_code(
     module: &Module,
     file: &SourceFile<PyFacts>,
     reached: Option<&FxHashSet<String>>,
@@ -1326,21 +1341,6 @@ fn unresolved_import(import: &AddonImport, fault: &Fault) -> (Pos, String) {
         ),
         Fault::Undefined(name) => (name.pos, format!("'{}' does not define '{}'", import.text, name.value)),
     }
-}
-
-/// OD502's message for a data file Odoo never loads, listed under `ignored` or under no key.
-fn unloaded(rel: &str, ignored: Option<&str>, series: Option<Series>) -> String {
-    if let Some(key) = ignored {
-        let to = if key == "demo_xml" { "demo" } else { "data" };
-        return format!("'{rel}' is listed under {key}, which Odoo ignores in this series; move it to {to}");
-    }
-    let keys: Vec<_> = manifest::loaded_keys(series).collect();
-    let keys = match keys.split_last() {
-        Some((last, [])) => (*last).to_owned(),
-        Some((last, rest)) => format!("{} or {last}", rest.join(", ")),
-        None => String::new(),
-    };
-    format!("'{rel}' is not in the manifest's {keys}, so Odoo never loads it")
 }
 
 fn same_module_xmlids<'m>(index: &Index<'m>, mi: usize, series: Option<Series>, out: &mut Out<'m>) {

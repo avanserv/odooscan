@@ -1,7 +1,8 @@
 //! The files Odoo runs of a module. Loading a module imports `odoo.addons.<name>`, which runs its
 //! root `__init__.py` and only what that imports (18.0 `odoo/modules/module.py:370-384`, 20.0
 //! `:536-541`, 9.0 `openerp/modules/module.py:316-331`), and the tests are the submodules `tests`
-//! binds under a `test_` name (18.0 `odoo/tests/loader.py:57-67`, 9.0 `module.py:387-408`).
+//! binds under a `test_` name (18.0 `odoo/tests/loader.py:57-67`, 20.0 `:56-66`, 9.0
+//! `openerp/modules/module.py:387-408`).
 
 use ruff_python_ast::visitor::{self, Visitor};
 use ruff_python_ast::{self as ast, Expr, Stmt};
