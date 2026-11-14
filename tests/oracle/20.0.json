@@ -1947,7 +1947,7 @@
     {
       "path": "addons/l10n_sa_edi_pos/models/l10n_sa_edi_document.py",
       "code": "OD516",
-      "message": "no import from the module's __init__.py reaches this file, so Odoo never loads model 'l10n_sa_edi.document'",
+      "message": "no import from the module's __init__.py reaches this file, so Odoo never loads the extension of model 'l10n_sa_edi.document'",
       "count": 1
     },
     {
@@ -4179,7 +4179,7 @@
     {
       "path": "addons/website_event_booth_sale/models/sale_order_line.py",
       "code": "OD516",
-      "message": "no import from the module's __init__.py reaches this file, so Odoo never loads model 'sale.order.line'",
+      "message": "no import from the module's __init__.py reaches this file, so Odoo never loads the extension of model 'sale.order.line'",
       "count": 1
     },
     {

@@ -206,26 +206,61 @@ fn type_checking(test: &Expr) -> bool {
 fn exports(body: &[Stmt]) -> Exports {
     let mut exports = Exports::Absent;
     for stmt in module_state::top_level(body) {
-        let (targets, value, extends) = match stmt {
-            Stmt::Assign(a) => (a.targets.iter().collect::<Vec<_>>(), Some(&*a.value), false),
-            Stmt::AnnAssign(a) => (vec![&*a.target], a.value.as_deref(), false),
-            Stmt::AugAssign(a) => (vec![&*a.target], Some(&*a.value), true),
-            _ => continue,
-        };
-        if !targets.iter().any(|t| is_all(t)) {
-            continue;
-        }
-        let names = value.filter(|_| targets.len() == 1).and_then(literal_names);
-        exports = match (exports, names) {
-            (Exports::Literal(mut all), Some(more)) if extends => {
-                all.extend(more);
-                Exports::Literal(all)
-            }
-            (_, Some(names)) if !extends => Exports::Literal(names),
-            _ => Exports::Unread,
+        exports = match stmt {
+            Stmt::Expr(e) => grown(exports, &e.value),
+            _ => bound(exports, stmt),
         };
     }
     exports
+}
+
+/// `__all__` after `stmt`, when it assigns it or extends it with `+=`.
+fn bound(exports: Exports, stmt: &Stmt) -> Exports {
+    let (targets, value, extends) = match stmt {
+        Stmt::Assign(a) => (a.targets.iter().collect::<Vec<_>>(), Some(&*a.value), false),
+        Stmt::AnnAssign(a) => (vec![&*a.target], a.value.as_deref(), false),
+        Stmt::AugAssign(a) => (vec![&*a.target], Some(&*a.value), true),
+        _ => return exports,
+    };
+    if !targets.iter().any(|t| is_all(t)) {
+        return exports;
+    }
+    let names = value.filter(|_| targets.len() == 1).and_then(literal_names);
+    match (exports, names) {
+        (Exports::Literal(mut all), Some(more)) if extends => {
+            all.extend(more);
+            Exports::Literal(all)
+        }
+        (_, Some(names)) if !extends => Exports::Literal(names),
+        _ => Exports::Unread,
+    }
+}
+
+/// `__all__` after `expr` runs at the top of the file. `append` of a string and `extend` of
+/// literals grow a read list; any other method of `__all__` may change it in any way.
+fn grown(exports: Exports, expr: &Expr) -> Exports {
+    let Expr::Call(call) = expr else { return exports };
+    let Expr::Attribute(method) = &*call.func else {
+        return exports;
+    };
+    if !matches!(&*method.value, Expr::Name(n) if n.id.as_str() == "__all__") {
+        return exports;
+    }
+    let more = match call.arguments.args.as_ref() {
+        [only] if call.arguments.keywords.is_empty() => match method.attr.as_str() {
+            "append" => str_lit(only).map(|name| vec![name.to_owned()]),
+            "extend" => literal_names(only),
+            _ => None,
+        },
+        _ => None,
+    };
+    match (exports, more) {
+        (Exports::Literal(mut all), Some(more)) => {
+            all.extend(more);
+            Exports::Literal(all)
+        }
+        _ => Exports::Unread,
+    }
 }
 
 fn is_all(target: &Expr) -> bool {
@@ -296,6 +331,10 @@ struct Addon {
 }
 
 impl Addon {
+    fn unread(&self) -> bool {
+        self.lost || self.files.values().any(|f| f.as_ref().is_none_or(|i| i.dynamic))
+    }
+
     /// The names module `path` binds, an empty list for a namespace package, and none when the
     /// scan cannot list them.
     fn defines(&self, path: &[String]) -> Option<&[String]> {
@@ -340,6 +379,9 @@ pub struct Graph {
     addons: FxHashMap<String, Addon>,
     /// The files of each addon that a file of another addon imports.
     elsewhere: FxHashMap<String, FxHashSet<String>>,
+    /// The addons with a file the scan cannot read the imports of, which may import any file of
+    /// any addon.
+    unread: FxHashSet<String>,
 }
 
 impl Graph {
@@ -358,9 +400,14 @@ impl Graph {
     }
 
     fn of(addons: FxHashMap<String, Addon>) -> Self {
+        let unread = addons
+            .iter()
+            .filter(|(_, addon)| addon.unread())
+            .map(|(name, _)| name.clone());
         let mut graph = Self {
-            addons,
+            unread: unread.collect(),
             elsewhere: FxHashMap::default(),
+            addons,
         };
         let mut elsewhere: FxHashMap<String, FxHashSet<String>> = FxHashMap::default();
         for (name, addon) in &graph.addons {
@@ -380,6 +427,12 @@ impl Graph {
     /// The files of `addon` that a file of another addon imports.
     pub fn elsewhere(&self, addon: &str) -> impl Iterator<Item = &str> {
         self.elsewhere.get(addon).into_iter().flatten().map(String::as_str)
+    }
+
+    /// Whether a file of `addon` may import a file of another addon that `elsewhere` lacks: one
+    /// that does not decode or parse, or imports by a computed name.
+    pub fn unread(&self, addon: &str) -> bool {
+        self.unread.contains(addon)
     }
 
     /// The files of `addon` that importing `starts` runs, those that exist among them included,
@@ -794,6 +847,32 @@ mod tests {
     }
 
     #[test]
+    fn all_grows_by_a_literal_append_or_extend() {
+        let read = |src: &str| imports(src).exports;
+        assert_eq!(
+            read("__all__ = ['a']\n__all__.append('b')\n__all__.extend(['c', 'd'])\n__all__.extend(('e',))\n"),
+            Exports::Literal(owned(&["a", "b", "c", "d", "e"]))
+        );
+        assert_eq!(
+            read("__all__ = ['a']\nif x:\n    __all__.append('b')\n"),
+            Exports::Literal(owned(&["a", "b"]))
+        );
+        assert_eq!(read("names.append('b')\n"), Exports::Absent);
+        for unread in [
+            "__all__.append('a')\n",
+            "__all__ = names\n__all__.append('a')\n",
+            "__all__ = ['a']\n__all__.append(name)\n",
+            "__all__ = ['a']\n__all__.extend(names)\n",
+            "__all__ = ['a']\n__all__.extend(['b', c])\n",
+            "__all__ = ['a']\n__all__.insert(0, 'b')\n",
+            "__all__ = ['a']\n__all__.remove('a')\n",
+            "__all__ = ['a']\n__all__.append('b', 'c')\n",
+        ] {
+            assert_eq!(read(unread), Exports::Unread, "{unread}");
+        }
+    }
+
+    #[test]
     fn a_file_that_does_not_parse_has_no_imports() {
         assert!(analyze("from . import (\n", None).imports.is_none());
     }
@@ -975,6 +1054,29 @@ mod tests {
         assert!(g.reached("shop", &["__init__.py"]).is_none());
         assert!(g.reached("shop", &["c.py"]).is_none());
         assert!(g.reached("gone", &["__init__.py"]).is_none());
+    }
+
+    #[test]
+    fn an_addon_is_unread_with_a_file_that_is_lost_unparsed_or_dynamic() {
+        let mut addons: FxHashMap<String, Addon> = [
+            ("clean", Some("from . import models\n")),
+            ("unparsed", None),
+            ("dynamic", Some("import importlib\nimportlib.import_module(name)\n")),
+            ("lost", Some("")),
+        ]
+        .into_iter()
+        .map(|(name, src)| {
+            let files = [("__init__.py".to_owned(), src.map(imports))].into_iter();
+            (name.to_owned(), addon(files, Series::parse("18.0")))
+        })
+        .collect();
+        addons.get_mut("lost").unwrap().lost = true;
+        let g = Graph::of(addons);
+        let unread: Vec<_> = ["clean", "unparsed", "dynamic", "lost", "gone"]
+            .into_iter()
+            .map(|name| g.unread(name))
+            .collect();
+        assert_eq!(unread, [false, true, true, true, false]);
     }
 
     /// The modules and faults of each addon import of file `rel` of `addon`, as

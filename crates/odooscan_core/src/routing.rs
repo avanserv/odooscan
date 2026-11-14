@@ -424,6 +424,7 @@ pub(crate) fn controllers(body: &[Stmt], loc: &Locator) -> Vec<ControllerFact> {
             });
             controllers.push(ControllerFact {
                 name: class.name.to_string(),
+                pos: loc.at(&class.name),
                 start: class.start(),
                 bases: class.bases().iter().map(|b| base(b, &bound)).collect(),
                 plain: plain.collect(),

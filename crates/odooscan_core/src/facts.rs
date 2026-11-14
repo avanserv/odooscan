@@ -684,6 +684,8 @@ pub enum ClassBase {
 #[derive(Clone, Debug)]
 pub struct ControllerFact {
     pub name: String,
+    /// The class name.
+    pub pos: Pos,
     /// Where the class starts, which tells apart two classes of one name: Odoo registers both.
     pub start: TextSize,
     pub bases: Vec<ClassBase>,
