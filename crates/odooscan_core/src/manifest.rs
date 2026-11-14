@@ -374,17 +374,21 @@ impl Manifest {
 /// series disagree. From saas~16.3 a version is two or three numbers, maybe behind the series (18.0
 /// `odoo/modules/module.py:454-466`), and from saas~18.2 also `S.x` (19.0
 /// `odoo/modules/module.py:550-566`). Every series from saas~16.3 refuses four or five numbers
-/// not behind the series. saas~18.1 does it by prefixing them with the series, then failing on the
-/// six or seven parts it gets (`origin/saas-18.1:odoo/modules/module.py:450-476`). A version
-/// behind `18.1.` counts as behind saas~18.1 too, though Odoo wants `saas~18.1.`, as OD509's page
-/// says. `S` and `S.x` stay silent, since 18.0 takes only the first and saas~18.2 and later only
-/// the second. On an unknown series, only the forms every series from saas~16.3 refuses count.
+/// not behind the series. A saas series heads a version only as `saas~M.m`, so a plain `M.m` counts
+/// as two of the version's numbers: saas~16.3 to saas~17.4 refuse four or five as invalid
+/// (`origin/saas-16.3:odoo/modules/module.py:445-456`, `origin/saas-17.4:...:415-427`), saas~18.1
+/// prefixes them again and fails on the parts (`origin/saas-18.1:...:450-476`), and later ones
+/// mark the module uninstallable (`origin/saas-18.2:...:337-343`, `:458-487`). `S` and `S.x` stay
+/// silent, since 18.0 takes only the first and saas~18.2 and later only the second. On an unknown
+/// series, only the forms every series from saas~16.3 refuses count.
 pub fn version_refusal(version: &str, series: Option<Series>) -> Option<String> {
     if series.is_some_and(|s| s < VERSION_FORM) {
         return None;
     }
     let number = |p: &str| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit());
-    let behind = series.and_then(|s| prefixes(s).into_iter().find(|p| version.starts_with(&format!("{p}."))));
+    let behind = series
+        .map(series_prefix)
+        .filter(|p| version.starts_with(&format!("{p}.")));
     let taken = match behind {
         Some(prefix) => {
             let rest: Vec<&str> = version[prefix.len() + 1..].split('.').collect();
@@ -407,7 +411,7 @@ pub fn version_refusal(version: &str, series: Option<Series>) -> Option<String> 
     }
     Some(match series {
         Some(s) => {
-            let own = prefixes(s).swap_remove(0);
+            let own = series_prefix(s);
             format!(
                 "version '{version}' is not of the form x.y, x.y.z, {own}.x.y or {own}.x.y.z, so Odoo {own} will not install the module"
             )
@@ -418,14 +422,14 @@ pub fn version_refusal(version: &str, series: Option<Series>) -> Option<String> 
     })
 }
 
-/// How a version starts with `series` behind it: Odoo's own name of the series first, then the
-/// `major.minor` a saas series is read from too.
-fn prefixes(series: Series) -> Vec<String> {
+/// How Odoo writes `series` at the head of a module version: its `release.major_version`, which a
+/// saas series spells `saas~M.m` (`origin/saas-*:odoo/release.py:15-17`).
+fn series_prefix(series: Series) -> String {
     let plain = format!("{}.{}", series.major, series.minor);
     if series.minor == 0 {
-        vec![plain]
+        plain
     } else {
-        vec![format!("saas~{plain}"), plain]
+        format!("saas~{plain}")
     }
 }
 
@@ -461,9 +465,8 @@ pub fn upgrade_folder_refusal(name: &str, version: &str, series: Series) -> Opti
     if name == "0.0.0" {
         return None;
     }
-    let prefixes = prefixes(series);
-    let own = &prefixes[0];
-    let adapted = if prefixes.iter().any(|p| version.starts_with(&format!("{p}."))) {
+    let own = &series_prefix(series);
+    let adapted = if version.starts_with(&format!("{own}.")) {
         version.to_owned()
     } else {
         format!("{own}.{version}")
@@ -1266,7 +1269,29 @@ mod tests {
             assert!(refused(version, Some("18.0")), "{version}");
         }
         assert!(!refused("20.0.1.0.0", Some("20.0")) && refused("18.0.1.0.0", Some("20.0")));
-        assert!(!refused("saas~18.1.1.0.0", Some("saas~18.1")) && !refused("18.1.1.0.0", Some("saas~18.1")));
+        assert!(!refused("saas~18.1.1.0.0", Some("saas~18.1")) && refused("18.1.1.0.0", Some("saas~18.1")));
+        // A saas series heads a version only as `saas~P`, so a plain `P` counts as two of its numbers.
+        for (series, plain) in [
+            ("saas~16.3", "16.3"),
+            ("saas~17.1", "17.1"),
+            ("saas~17.2", "17.2"),
+            ("saas~18.1", "18.1"),
+            ("saas~18.2", "18.2"),
+            ("saas~19.4", "19.4"),
+        ] {
+            for version in [format!("{plain}.1.0"), format!("{plain}.1.0.0")] {
+                assert!(refused(&version, Some(series)), "{version} on {series}");
+            }
+            for version in [
+                plain.to_owned(),
+                format!("{plain}.1"),
+                format!("saas~{plain}.1.0"),
+                format!("saas~{plain}.1.0.0"),
+            ] {
+                assert!(!refused(&version, Some(series)), "{version} on {series}");
+            }
+        }
+        assert!(!refused("18.0.1.0.0", Some("18.0")) && !refused("16.2.1.0.0", Some("saas~16.2")));
         assert!(refused("18.0.1.0.0", Some("saas~18.1")) && refused("17.0.1.0.0", Some("saas~18.1")));
         for series in ["saas~18.1", "18.0", "saas~18.2", "20.0"] {
             for version in ["1.2.3.4", "1.2.3.4.5"] {
@@ -1340,7 +1365,12 @@ mod tests {
         let saas = Series::parse("saas~18.2").unwrap();
         let saas_refused = |name: &str, version: &str| upgrade_folder_refusal(name, version, saas).is_some();
         assert!(!saas_refused("1.0", "saas~18.2.1.0") && !saas_refused("saas~18.2.1.0", "1.0"));
-        assert!(saas_refused("1.1", "saas~18.2.1.0") && saas_refused("18.2.1.1", "18.2.1.0"));
+        assert!(saas_refused("1.1", "saas~18.2.1.0") && saas_refused("saas~18.2.1.1", "saas~18.2.1.0"));
+        assert!(!saas_refused("saas~18.2.1.1", "saas~18.2.1.1"));
+        // A plain `18.2.3` is three numbers, so it takes the series in front like `1.0` does.
+        assert!(
+            !saas_refused("5.0", "18.2.3") && !saas_refused("18.2.3", "18.2.3") && saas_refused("18.2.4", "18.2.3")
+        );
         assert!(!saas_refused("18.0.5.0", "1.0") && saas_refused("saas~18.3.1.0", "1.0"));
     }
 
