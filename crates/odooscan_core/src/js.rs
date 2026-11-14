@@ -924,7 +924,10 @@ fn orm_call(call: &CallExpression, lines: &Lines) -> Option<OrmCall> {
 /// `call_kw` (14.0 `addons/web/static/src/js/core/rpc.js:16-19`, `:37-45`, and `service_mixins.js:146`
 /// beside it).
 fn legacy_rpc(call: &CallExpression, lines: &Lines) -> Option<OrmCall> {
-    let Argument::ObjectExpression(options) = call.arguments.first().filter(|_| is_legacy_rpc(&call.callee))? else {
+    if !is_legacy_rpc(&call.callee) {
+        return None;
+    }
+    let Some(Argument::ObjectExpression(options)) = call.arguments.first() else {
         return None;
     };
     let (mut model, mut method) = (None, None);
