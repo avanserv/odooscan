@@ -214,13 +214,14 @@ place them, while the manifest's `assets` key adds nothing. A script Odoo does n
 module, every one before saas~14.3, has the dependencies of its `odoo.define()` calls checked by
 OD601 and OD608 instead of its imports, and its RPC calls as an ES module's. In an ES module from
 saas~14.5 to 16.0 a patch names itself, and OD602 reads its `this._super()` calls. OD608 reads the
-bundles of the two web client pages, backend and frontend, from 18.0 on. OD609 to OD612 read each
-script alone, for the HTML sinks and debugging leftovers of what a page runs. OD613 reads, from
-saas~15.3, the Owl 1 APIs that Owl 2 dropped, following a component's parents for its `trigger()`
-calls. OD614 and OD615 read the component tags of a bundled template against the `static props` of
-the class that each owning component's `static components` maps the tag to, from 17.0 to
-saas~19.3, where Owl validates props. OD616 reads, from 17.0, the keys that scripts give
-`useService()` against those the loaded scripts add to the services registry.
+bundles of the two web client pages, backend and frontend, from 18.0 on, and on the frontend which
+of them load before the others. OD609 to OD612 read each script alone, for the HTML sinks and
+debugging leftovers of what a page runs. OD613 reads, from saas~15.3, the Owl 1 APIs that Owl 2
+dropped, following a component's parents for its `trigger()` calls. OD614 and OD615 read the
+component tags of a bundled template against the `static props` of the class that each owning
+component's `static components` maps the tag to, from 17.0 to saas~19.3, where Owl validates props.
+OD616 reads, from 17.0, the keys that scripts give `useService()` against those the loaded scripts
+add to the services registry.
 
 | Code | Name | Reports |
 | --- | --- | --- |
@@ -231,7 +232,7 @@ saas~19.3, where Owl validates props. OD616 reads, from 17.0, the keys that scri
 | [OD605](OD605.md) | `unknown-template` | A component, a t-inherit or a t-call names a template no indexed bundle defines. |
 | [OD606](OD606.md) | `unmatched-template-locator` | A template locates an element its parent templates do not have. |
 | [OD607](OD607.md) | `private-rpc-method` | An ORM call from JS names a private method, which Odoo refuses to call over RPC. |
-| [OD608](OD608.md) | `cross-bundle-js-import` | A JS import names a module the bundles of the importer's page do not load. |
+| [OD608](OD608.md) | `cross-bundle-js-import` | A JS import names a module the importer's page has not loaded when the importer runs. |
 | [OD609](OD609.md) | `unescaped-markup` | Owl's `markup()` receives a value built at runtime, which `t-out` renders unescaped. |
 | [OD610](OD610.md) | `html-sink` | A script sets a value built at runtime as the HTML of an element. |
 | [OD611](OD611.md) | `console-log` | A script a page loads calls `console.log()`. |

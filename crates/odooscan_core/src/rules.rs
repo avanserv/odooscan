@@ -350,7 +350,7 @@ rules! {
     // `addons/web/static/src/module_loader.js:146`). The range stops at 18.0 because the page
     // templates before it were not checked (18.0 `addons/web/views/webclient_templates.xml:54`,
     // `:58`, `:304`).
-    "OD608" "cross-bundle-js-import" Correctness Error Some(">=18.0"), true, "A JS import names a module the bundles of the importer's page do not load.";
+    "OD608" "cross-bundle-js-import" Correctness Error Some(">=18.0"), true, "A JS import names a module the importer's page has not loaded when the importer runs.";
     // Owl's `markup()` wraps a value as is and `t-out` renders the result as HTML (18.0
     // `addons/web/static/lib/owl/owl.js:379-391`, `:4442-4447`; 20.0 `:1715-1727`, `:4141-4150`).
     "OD609" "unescaped-markup" Security Info None, false, "Owl's markup() receives a value built at runtime, which t-out renders unescaped.";
