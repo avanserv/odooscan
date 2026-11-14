@@ -1071,7 +1071,7 @@
     {
       "path": "addons/l10n_dk_oioubl/models/account_move.py",
       "code": "OD516",
-      "message": "no import from the module's __init__.py reaches this file, so Odoo never loads model 'account.move'",
+      "message": "no import from the module's __init__.py reaches this file, so Odoo never loads the extension of model 'account.move'",
       "count": 1
     },
     {
@@ -1347,7 +1347,7 @@
     {
       "path": "addons/l10n_in_purchase/models/account_move.py",
       "code": "OD516",
-      "message": "no import from the module's __init__.py reaches this file, so Odoo never loads model 'account.move'",
+      "message": "no import from the module's __init__.py reaches this file, so Odoo never loads the extension of model 'account.move'",
       "count": 1
     },
     {
@@ -1557,7 +1557,7 @@
     {
       "path": "addons/l10n_sa_edi/models/account_edi_document.py",
       "code": "OD516",
-      "message": "no import from the module's __init__.py reaches this file, so Odoo never loads model 'account.edi.document'",
+      "message": "no import from the module's __init__.py reaches this file, so Odoo never loads the extension of model 'account.edi.document'",
       "count": 1
     },
     {
@@ -1617,7 +1617,7 @@
     {
       "path": "addons/l10n_uy_website_sale/models/website.py",
       "code": "OD516",
-      "message": "no import from the module's __init__.py reaches this file, so Odoo never loads model 'website'",
+      "message": "no import from the module's __init__.py reaches this file, so Odoo never loads the extension of model 'website'",
       "count": 1
     },
     {
@@ -2661,7 +2661,7 @@
     {
       "path": "addons/repair/models/mail_compose_message.py",
       "code": "OD516",
-      "message": "no import from the module's __init__.py reaches this file, so Odoo never loads model 'mail.compose.message'",
+      "message": "no import from the module's __init__.py reaches this file, so Odoo never loads the extension of model 'mail.compose.message'",
       "count": 1
     },
     {

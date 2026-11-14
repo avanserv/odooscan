@@ -253,7 +253,7 @@ pub fn check_module<'m>(index: &Index<'m>, mi: usize, series: Option<Series>) ->
     unread_template_lists(module, series, &mut out);
     bundle_templates(module, &mut out);
     unloaded_files(module, series, &mut out);
-    unimported_files(index, module, &mut out);
+    unimported_files(index, mi, &mut out);
     ids_repeated_in_a_file(module, series, &mut out);
     ids_repeated_across_files(module, series, &mut out);
     same_module_xmlids(index, mi, series, &mut out);
@@ -1235,13 +1235,21 @@ fn unloaded_files<'m>(module: &'m Module, series: Option<Series>, out: &mut Out<
 
 /// OD516 on a file of models or controllers, and OD517 on a test file, that no import reaches from
 /// the module's root, from `tests/__init__.py` for a test, or from another module. Silent when the
-/// scan cannot tell what Odoo runs: without a root `__init__.py`, with a file it cannot decode, or
-/// past a file that does not parse or imports by a computed name.
-fn unimported_files<'m>(index: &Index<'m>, module: &'m Module, out: &mut Out<'m>) {
+/// scan cannot tell what Odoo runs: without a root `__init__.py`, with a file it cannot decode, past
+/// a file that does not parse or imports by a computed name, or when a module depending on this one
+/// has such a file, as it may import any file of this one. A module outside the dependents is
+/// OD518's when it imports one.
+fn unimported_files<'m>(index: &Index<'m>, mi: usize, out: &mut Out<'m>) {
+    let module = &index.modules[mi];
     if module.lost_text || !module.python.iter().any(|f| f.rel == "__init__.py") {
         return;
     }
-    let (graph, name) = (&index.imports, module.name.as_str());
+    let graph = &index.imports;
+    let mut others = index.modules.iter().enumerate().filter(|(other, _)| *other != mi);
+    if others.any(|(other, m)| graph.unread(&m.name) && index.reaches(other, mi)) {
+        return;
+    }
+    let name = module.name.as_str();
     let mut starts: Vec<&str> = graph.elsewhere(name).collect();
     starts.push("__init__.py");
     let code = graph.reached(name, &starts);
@@ -1290,12 +1298,23 @@ fn unloaded_code(
 /// The first model or controller a file defines, as OD516 names it. A class extending a controller
 /// of the file is one too, but the class it extends comes first.
 fn loaded_class(facts: &PyFacts) -> Option<String> {
-    if let Some(class) = facts.classes.first() {
-        return Some(format!("model '{}'", class.model));
-    }
-    let mut controllers = facts.controllers.iter();
-    let class = controllers.find(|c| !c.routes.is_empty() || c.bases.contains(&ClassBase::Root))?;
-    Some(format!("controller '{}'", class.name))
+    let models = facts.classes.iter().map(|class| {
+        let what = if class.new_model {
+            "model"
+        } else {
+            "the extension of model"
+        };
+        (class.pos, format!("{what} '{}'", class.model))
+    });
+    let controllers = facts
+        .controllers
+        .iter()
+        .filter(|c| !c.routes.is_empty() || c.bases.contains(&ClassBase::Root))
+        .map(|c| (c.pos, format!("controller '{}'", c.name)));
+    models
+        .chain(controllers)
+        .min_by_key(|(pos, _)| *pos)
+        .map(|(_, what)| what)
 }
 
 /// OD519's position and message for what `import` lacks.
