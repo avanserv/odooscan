@@ -69,6 +69,7 @@ class IrUiView(models.Model):
     type = fields.Char()
     key = fields.Char()
     arch = fields.Text()
+    arch_base = fields.Text()
     inherit_id = fields.Many2one("ir.ui.view")
     mode = fields.Char()
 

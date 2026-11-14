@@ -2130,11 +2130,12 @@ impl<'m> Index<'m> {
     }
 
     /// What each `depends` entry of `module` alone brings it, as (entry, modules), the entry a
-    /// position in `depends`: the entry, and what its closure holds that no other entry's does, an
-    /// implied one's aside, and Odoo does not install with `base` anyway. Leaves out `base`, which 20.0 restores in an empty
-    /// `depends`, and the entries whose use is not to be read from the module: one not indexed or
-    /// with a dependency that is not, one another entry already brings (OD520), and one leading back
-    /// to the module (OD504), whose closure holds the module's own and so is taken from no other.
+    /// position in `depends`: the entry, and each module of its closure that Odoo does not install
+    /// on every database (`always_installed`) and no other entry's closure holds, implied entries'
+    /// closures not taken away. Leaves out `base`, which 20.0 restores in an empty `depends`, and
+    /// the entries whose use is not to be read from the module: one not indexed or with a
+    /// dependency that is not, one another entry already brings (OD520), and one leading back to
+    /// the module (OD504), whose closure holds the module's own and so is taken from no other.
     pub fn sole_brought(&self, module: usize) -> Vec<(usize, Vec<bool>)> {
         let depends = &self.modules[module].manifest.depends;
         let closures: Vec<Option<(usize, Vec<bool>, bool)>> = depends
@@ -2254,13 +2255,14 @@ impl<'m> Index<'m> {
     }
 
     /// Whether a spec of a loaded view or template of `module` locates an element that, of the
-    /// modules of `scope`, only those of `set` add to the tree it extends.
+    /// modules of `scope`, only those of `set` add to the tree it extends. A spec on a tree whose
+    /// way up to the root the index does not hold counts, as it may locate one.
     pub fn locates_in(&self, module: usize, set: &[bool], scope: &Scope) -> bool {
         let m = &self.modules[module];
         let name = m.name.as_str();
         let sole = |tree: &Inheritance<'m>, parent: String, elements: Vec<ArchElement>| {
             let Some(root) = tree.root(parent) else {
-                return false;
+                return true;
             };
             let all = tree.tree(root.clone(), self.modules, |mi| scope.sees(mi));
             let without = tree.tree(root, self.modules, |mi| scope.sees(mi) && !set[mi]);
