@@ -57,7 +57,7 @@
     {
       "path": "addons/account/models/company.py",
       "code": "OD518",
-      "message": "'odoo.addons.base_vat.models.res_partner' comes from module base_vat, which is not in depends; add it there",
+      "message": "'odoo.addons.base_vat.models.res_partner' comes from module base_vat; add it to depends",
       "count": 1
     },
     {
@@ -81,7 +81,7 @@
     {
       "path": "addons/account/models/partner.py",
       "code": "OD518",
-      "message": "'odoo.addons.base_vat.models.res_partner' comes from module base_vat, which is not in depends; add it there",
+      "message": "'odoo.addons.base_vat.models.res_partner' comes from module base_vat; add it to depends",
       "count": 1
     },
     {
@@ -855,7 +855,7 @@
     {
       "path": "addons/html_editor/controllers/main.py",
       "code": "OD518",
-      "message": "'odoo.addons.mail.tools' comes from module mail, which is not in depends; add it there",
+      "message": "'odoo.addons.mail.tools' comes from module mail; add it to depends",
       "count": 1
     },
     {
@@ -2649,7 +2649,7 @@
     {
       "path": "addons/rating/controllers/portal_chatter.py",
       "code": "OD518",
-      "message": "'odoo.addons.portal.controllers' comes from module portal, which is not in depends; add it there",
+      "message": "'odoo.addons.portal.controllers' comes from module portal; add it to depends",
       "count": 1
     },
     {
@@ -2673,7 +2673,7 @@
     {
       "path": "addons/resource/models/resource_calendar.py",
       "code": "OD518",
-      "message": "'odoo.addons.hr_work_entry_contract.models.hr_work_intervals' comes from module hr_work_entry_contract, which is not in depends; add it there",
+      "message": "'odoo.addons.hr_work_entry_contract.models.hr_work_intervals' comes from module hr_work_entry_contract; add it to depends",
       "count": 1
     },
     {

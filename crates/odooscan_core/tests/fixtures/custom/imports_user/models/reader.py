@@ -7,8 +7,10 @@ from odoo.addons.imports_lib.tools import SHELF_WIDTH, format_shelf, shelf_depth
 from odoo.addons.imports_lib.wizard import shelf_wizard
 from odoo.addons.project.models.project import Task
 from odoo.addons.web.models import res_partner
+from odoo.addons import project as project_addon
 
 from ...project.models import project
+from ... import project as project_root
 
 
 class PartnerReader(models.Model):

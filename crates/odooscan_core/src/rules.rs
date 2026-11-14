@@ -310,9 +310,11 @@ rules! {
     // Odoo runs the submodules `tests` binds under a `test_` name (18.0 `odoo/tests/loader.py:57-67`,
     // 20.0 `:56-66`, 9.0 `openerp/modules/module.py:387-408`).
     "OD517" "test-file-not-imported" Quality Warning None, false, "A test file is never imported by the tests package, so Odoo never runs its tests.";
-    // Every addon joins `odoo.addons.__path__` (18.0 `odoo/modules/module.py:121-140`), so the
-    // import works wherever the target is on the addons path, but its classes count only once it
-    // is installed and loaded first (18.0 `odoo/modules/registry.py:290`): hence a warning.
+    // An addon on the addons path is importable as `odoo.addons.<name>` (18.0
+    // `odoo/modules/module.py:121-140`, 20.0 `:145-155`), or `openerp.addons.<name>` in 9.0 by an
+    // import hook over `ad_paths` (`openerp/modules/module.py:49-62`), but its classes count only
+    // once installed and loaded first (18.0 `odoo/modules/registry.py:290`, 20.0
+    // `odoo/orm/registry.py:459`): a warning.
     "OD518" "python-import-not-in-depends" Correctness Warning None, true, "A Python import names a module outside depends, which may be missing or load later.";
     "OD519" "unresolved-python-import" Correctness Error None, true, "A Python import names a module or a name the target module does not have.";
     // Odoo places a module by its deepest dependency (18.0 `odoo/modules/graph.py:30-40`, 20.0
