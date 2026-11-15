@@ -42,7 +42,7 @@ pub struct SourceFile<T> {
 impl<T> SourceFile<T> {
     /// Whether the file is a test by its path: under `static/tests`, or in a `tests` folder under
     /// `static/src`, which `web.qunit_suite_tests` lists from the manifests of 15.0
-    /// `addons/mail/__manifest__.py:142-161` and `addons/sms/__manifest__.py:53-55`, and 16.0
+    /// `addons/mail/__manifest__.py:148-158` and `addons/sms/__manifest__.py:53-56`, and 16.0
     /// `addons/base_iban/__manifest__.py:24-25`. A script is a test also by the bundles that load
     /// it: ask `Index::js_test` for those.
     pub fn in_tests(&self) -> bool {
