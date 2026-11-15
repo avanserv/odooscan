@@ -941,6 +941,17 @@ custom/orphan_hooks_ext/models/orphan_hook.py:25:9: OD230 no parent class of orp
 custom/orphan_hooks_ext/models/orphan_hook.py:28:9: OD230 no parent class of orphan.hook defines '_search_hook_spread' and no file names it, so Odoo never runs it
 custom/orphan_hooks_ext/models/orphan_hook.py:31:9: OD230 no parent class of orphan.hook defines 'onchange_hook_legacy' and no file names it, so Odoo never runs it
 custom/orphan_hooks_ext/models/orphan_hook.py:79:24: OD211 no parent class of orphan.hook defines '_compute_hook_super', so this super() call fails
+custom/owl_api153/static/src/js/counter.js:2:26: OD613 Owl 2 has no 'hooks', so the script reads undefined; import each hook, such as useState, from @odoo/owl
+custom/owl_api16/static/src/js/legacy_panel.js:9:18: OD613 Owl 2's Component has no trigger(), so this.trigger() in LegacyPanel throws; pass a callback in props, or use the env bus
+custom/owl_api16/static/src/js/panel.js:2:20: OD613 Owl 2 has no 'tags', so the script reads undefined; import xml from @odoo/owl
+custom/owl_api16/static/src/js/panel.js:5:20: OD613 Owl 2 has no 'hooks', so the script reads undefined; import each hook, such as useState, from @odoo/owl
+custom/owl_api16/static/src/js/panel.js:5:27: OD613 Owl 2 has no 'QWeb', so the script reads undefined; load templates from the bundle's XML files, or an xml`...` template
+custom/owl_api16/static/src/js/panel.js:6:26: OD613 Owl 2 has no 'hooks', so the script reads undefined; import each hook, such as useState, from @odoo/owl
+custom/owl_api16/static/src/js/panel.js:9:27: OD613 Owl 2 has no 'tags', so the script reads undefined; import xml from @odoo/owl
+custom/owl_api16/static/src/js/panel.js:17:14: OD613 Owl 2's Component has no trigger(), so this.trigger() in Panel throws; pass a callback in props, or use the env bus
+custom/owl_api16/static/src/js/panel.js:22:26: OD613 Owl 2's Component has no trigger(), so this.trigger() in Header throws; pass a callback in props, or use the env bus
+custom/owl_api17/static/src/js/save_button.js:6:14: OD613 Owl 2's Component has no trigger(), so this.trigger() in SaveButton throws; pass a callback in props, or use the env bus
+custom/owl_api17/static/src/js/save_button.js:12:14: OD613 Owl 2's Component has no trigger(), so this.trigger() in NoteController throws; pass a callback in props, or use the env bus
 custom/partial_sites/__manifest__.py:5:25: OD503 module 'ghost_enterprise' is not on the addons path
 custom/partial_sites/models/sites.py:24:22: OD301 module base defines no XML id 'base.no_such_id'
 custom/partial_sites/models/sites.py:25:22: OD302 'mail.no_such_id' belongs to module mail; add it to depends

@@ -208,7 +208,9 @@ module, every one before saas~14.3, has the dependencies of its `odoo.define()` 
 OD601 and OD608 instead of its imports, and its RPC calls as an ES module's. In an ES module from
 saas~14.5 to 16.0 a patch names itself, and OD602 reads its `this._super()` calls. OD608 reads the
 bundles of the two web client pages, backend and frontend, from 18.0 on. OD609 to OD612 read each
-script alone, for the HTML sinks and debugging leftovers of what a page runs.
+script alone, for the HTML sinks and debugging leftovers of what a page runs. OD613 reads, from
+saas~15.3, the Owl 1 APIs that Owl 2 dropped, following a component's parents for its `trigger()`
+calls.
 
 | Code | Name | Reports |
 | --- | --- | --- |
@@ -224,6 +226,7 @@ script alone, for the HTML sinks and debugging leftovers of what a page runs.
 | [OD610](OD610.md) | `html-sink` | A script sets a value built at runtime as the HTML of an element. |
 | [OD611](OD611.md) | `console-log` | A script a page loads calls `console.log()`. |
 | [OD612](OD612.md) | `debugger-statement` | A script a page loads has a `debugger` statement. |
+| [OD613](OD613.md) | `owl1-api-removed` | A script uses an Owl 1 API that Owl 2 removed: `hooks`, `tags`, `QWeb` or a component's `trigger()`. |
 
 ## OD7: data flows
 

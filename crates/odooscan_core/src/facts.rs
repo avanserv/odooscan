@@ -1305,6 +1305,8 @@ pub struct JsName {
 pub enum Heritage {
     None,
     Name(String),
+    /// `owl.X`, a class of the global the Owl library sets.
+    Owl(String),
     /// An expression, such as a mixin call, whose class only runs tell.
     Other,
 }
@@ -1317,6 +1319,8 @@ pub struct JsClass {
     pub members: Vec<String>,
     /// The Owl template a literal `static template` or `Class.template = "..."` names.
     pub template: Option<Spanned<String>>,
+    /// The `this.trigger()` calls of its instance methods, accessors and fields, at `trigger`.
+    pub triggers: Vec<Pos>,
 }
 
 /// `patch(Target.prototype, { ... })`, or `patch(Target.prototype, "name", { ... })` when `named`.
@@ -1359,6 +1363,8 @@ pub struct JsFacts {
     /// The top-level `odoo.define()` calls, by which a hand-written file registers modules.
     pub defines: Vec<JsDefine>,
     pub classes: Vec<JsClass>,
+    /// `const { A, B: c } = owl` anywhere in the file, as (binding, name of the Owl export).
+    pub owl_bindings: Vec<(String, String)>,
     pub patches: Vec<JsPatch>,
     pub orm_calls: Vec<OrmCall>,
     /// The literal view kinds the file gives `view_registry.add`.
