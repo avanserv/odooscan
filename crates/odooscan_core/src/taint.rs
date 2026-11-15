@@ -101,7 +101,7 @@ struct SinkRow {
     /// The pattern matches the bare name alone, so that `Image.open` is no `open`.
     whole: bool,
     /// The path names the standard library's module, not the one of that name an import from
-    /// `odoo` binds: 17.0 `odoo.tools.pickle` loads only plain data (`odoo/tools/misc.py:1689`).
+    /// `odoo` binds: 17.0's `odoo.tools.pickle` loads only plain data, and 18.0 has none.
     stdlib: bool,
     /// The argument in a module on Python 2, where it differs from `arg`.
     python2: Option<Arg>,
@@ -167,10 +167,10 @@ const FILE: Arg = Arg::At(0, &["file", "path_or_file", "filepath_or_fp"]);
 const OPEN_PY2: Arg = Arg::At(0, &["name", "file"]);
 
 /// `request.redirect()` takes `local` from 15.0, which drops the scheme and the host of the URL
-/// unless it is false. 15.0 then strips only leading slashes (`odoo/http.py:308`), so
-/// `/\evil.example` still names a host to a browser; 16.0 also strips backslashes
-/// (`odoo/http.py:1724`). Before 16.0 every URL is the sink. The bound is a choice: 16.0 strips them
-/// only from fix a1e710378077 (2024-10-28), and saas~16.1-16.4, saas~17.1 and saas~17.3 never do.
+/// unless it is false. 15.0 then strips only leading slashes, so `/\evil.example` still names a
+/// host to a browser; 16.0 also strips backslashes, as 18.0 does (`odoo/http.py:1946-1948`).
+/// Before 16.0 every URL is the sink. The bound is a choice: 16.0 strips backslashes only from fix
+/// a1e710378077 (2024-10-28), and saas~16.1-16.4, saas~17.1 and saas~17.3 never do.
 const REDIRECT_LOCAL: Guard = Guard {
     keyword: "local",
     pos: 2,
@@ -200,9 +200,9 @@ const SAFE_LOADER: Guard = Guard {
 
 const XML: Arg = Arg::At(0, &["text", "source", "xml"]);
 
-/// From saas~19.1 Odoo needs Python 3.12 (`odoo/release.py:39`) and so lxml 5.2.1
-/// (`requirements.txt:21`), whose default parser resolves no external entity; 18.0 pins lxml 4
-/// below Python 3.12 (`requirements.txt:38-39`). Odoo's own default parser is set per thread only.
+/// From saas~19.1 Odoo needs Python 3.12 (20.0 `odoo/release.py:39`) and so lxml 5.2.1, whose
+/// default parser resolves no external entity; 18.0 pins lxml 4 below Python 3.12. Odoo's own
+/// default parser is set per thread only.
 const RESOLVES: Guard = Guard {
     keyword: "parser",
     pos: 1,
@@ -212,16 +212,15 @@ const RESOLVES: Guard = Guard {
 
 const HEADERS: Arg = Arg::At(1, &["headers"]);
 
-/// The domain of a search, the keyword `args` of `search()` and `search_count()` through 15.0
-/// (`odoo/models.py:1792`, `:1805`).
+/// The domain of a search, the keyword `args` of `search()` and `search_count()` through 15.0.
 const DOMAIN: Arg = Arg::At(0, &["domain", "args"]);
 /// The fields `search_read()` and `search_fetch()` read, a list of names rather than a domain.
 const FIELD_NAMES: Arg = Arg::At(1, &["fields", "field_names"]);
 const SEARCH_READ: Arg = Arg::Each(&[DOMAIN, FIELD_NAMES]);
 /// `read_group(domain, fields, groupby)` through 19.0 (18.0 `odoo/models.py:2819`), and
 /// `(domain, groupby, aggregates)` for `_read_group` from 17.0 (18.0 `odoo/models.py:1978`),
-/// `formatted_read_group` from 19.0 and `read_group` in 20.0 (`odoo/orm/models.py:1932`,
-/// `addons/web/models/models.py:1022`).
+/// `formatted_read_group` from 19.0 and `read_group` in 20.0 (20.0
+/// `addons/web/models/models.py:1022`, `odoo/orm/models.py:1932`).
 const READ_GROUP: Arg = Arg::Each(&[
     DOMAIN,
     Arg::At(1, &["fields", "groupby"]),
@@ -241,7 +240,7 @@ const TABLE: &[(&str, Role)] = &[
     ("request.get_json_data", Role::Source(Kind::Keys)),
     ("request.jsonrequest", Role::Source(Kind::Keys)),
     // The form of the row above from saas~15.3, whose Request keeps the body on its dispatcher
-    // (`odoo/http.py:1598`). It needs its own row, as a source matches a contiguous path only.
+    // (18.0 `odoo/http.py:2370`). It needs its own row, as a source matches a contiguous path only.
     ("request.dispatcher.jsonrequest", Role::Source(Kind::Keys)),
     ("request.httprequest.args", Role::Source(Kind::Keys)),
     ("request.httprequest.form", Role::Source(Kind::Keys)),
@@ -1058,16 +1057,16 @@ fn join_vals(a: Option<Vals>, b: Option<Vals>) -> Option<Vals> {
 }
 
 /// From saas~19.3 `ir.attachment` has no `datas`: 20.0 reads the content from `raw` and `db_datas`
-/// only (`odoo/addons/base/models/ir_attachment.py:540-542`).
+/// only (`odoo/addons/base/models/ir_attachment.py:540-544`).
 const NO_DATAS: Series = Series { major: 19, minor: 3 };
 
 /// The first series whose `ir.attachment` refuses a create to any user but an internal one,
-/// whatever the access rows: `create()` calls `check()`, which raises for them (saas~13.1
-/// `odoo/addons/base/models/ir_attachment.py:352-353`, 18.0 `:472-473`, `:677`).
+/// whatever the access rows: `create()` calls `check()`, which raises for them (18.0
+/// `odoo/addons/base/models/ir_attachment.py:677`, `:472-473`).
 const INTERNAL_CREATES: Series = Series { major: 13, minor: 1 };
 
 /// The first series whose `ir.attachment` lets the access rows and the linked records decide a
-/// create again (19.0 `odoo/addons/base/models/ir_attachment.py:780-818`).
+/// create again (20.0 `odoo/addons/base/models/ir_attachment.py:954-959`).
 const ROW_CREATES: Series = Series { major: 19, minor: 0 };
 
 /// Whether a portal or public user may create an attachment in `series` once a row grants it, an
@@ -2070,9 +2069,8 @@ impl Flows<'_> {
     }
 
     /// What `with_user(u)` does for a `u` of `None` or `False`. From 13.0 it returns its receiver
-    /// (13.0 `odoo/models.py:5196-5197`, 18.0 `:6341-6342`); on saas~12.5 it builds
-    /// `env(user=u, su=False)` (saas-12.5 `odoo/models.py:4925-4932`), which keeps the user for
-    /// `None` and runs as uid 0 for `False` (saas-12.5 `odoo/api.py:504-506`).
+    /// (18.0 `odoo/models.py:6341-6342`); on saas~12.5 it builds `env(user=u, su=False)`, which
+    /// keeps the user for `None` and runs as uid 0 for `False`.
     fn no_user(&self, u: &Expr) -> Effect {
         match self.series {
             Some(s) if s < WITH_USER_SELF && is_false(u) => Effect::LeaveUser,
@@ -2082,8 +2080,8 @@ impl Flows<'_> {
     }
 
     /// What `sudo(x)` does: before `SUDO_FLAG` it switches to the user `x`, then up to `SUDO_USER`
-    /// it does so unless `x` is a bool (saas~12.5 `odoo/models.py:4920-4922`, 14.0 `:5093-5095`),
-    /// and from it `x` is a flag. A computed `x` the code may mean as a user reads as one.
+    /// it does so unless `x` is a bool, and from it `x` is a flag (18.0 `odoo/models.py:6328`). A
+    /// computed `x` the code may mean as a user reads as one.
     fn sudo_effect(&self, c: &ast::ExprCall) -> Effect {
         let Some(arg) = sudo_argument(c).filter(|a| !is_true(a) && !superuser::is_superuser(a)) else {
             return Effect::Keep;
@@ -2100,8 +2098,8 @@ impl Flows<'_> {
         }
     }
 
-    /// What `sudo(None)` does: it keeps the user before `SUDO_FLAG` (12.0 `odoo/api.py:859`), then
-    /// up to `SUDO_USER` it is `with_user(None)`.
+    /// What `sudo(None)` does: it keeps the user before `SUDO_FLAG`, then up to `SUDO_USER` it is
+    /// `with_user(None)`.
     fn sudo_none(&self, none: &Expr) -> Effect {
         match self.series {
             Some(s) if s < SUDO_FLAG => Effect::Same,
@@ -3180,8 +3178,9 @@ impl Flows<'_> {
 
     /// The locals a call checks the access to: the id of a document or a token check, what a
     /// token is compared to, the arguments and records of a `_check` method, and the records of
-    /// an access check on records that do not run as superuser, which skips them (18.0
-    /// `odoo/models.py:4456`, `:4464`; 16.0 `:3524`), as `runs_as_superuser` reads their path.
+    /// an access check on records that do not run as superuser, as `runs_as_superuser` reads their
+    /// path: the check skips superuser records (18.0 `odoo/models.py:4456`, `:4464`), and so does
+    /// `check_access_rule()`, which calls it (`:4531`).
     /// `check_access_rights()` checks the model only (18.0 `odoo/models.py:4516`).
     fn checked_by(&self, call: &ast::ExprCall) -> Vec<String> {
         let receiver = match &*call.func {
@@ -4016,9 +4015,8 @@ fn hold_value(elts: &[Expr], list: bool, ts: &mut [Option<Taint>]) {
 
 /// The operators of a condition whose value filters the condition's field only, from 18.0
 /// `odoo/osv/expression.py:140` and 20.0 `odoo/orm/domains.py:80`; `any` and its kin take a
-/// domain. `<>` spells `!=` up to 19.0 (18.0 `odoo/osv/expression.py:710,737`, 19.0
-/// `odoo/orm/domains.py:1283-1288`), `==` spells `=` in 19.0 only (`odoo/orm/domains.py:1291-1296`),
-/// and the value of `access`, from saas~19.3, names an operation (20.0
+/// domain. `<>` spells `!=` up to 19.0 (18.0 `odoo/osv/expression.py:710,737`), `==` spells `=`
+/// in 19.0 only, and the value of `access`, from saas~19.3, names an operation (20.0
 /// `odoo/orm/domains.py:1926,1940-1942`). No series gate: a series that rejects one, `==` before
 /// 19.0, both spellings from saas~19.1 (20.0 `odoo/orm/domains.py:864-865`) and `access` before
 /// saas~19.3, raises before it searches, so holding the value hides no leak.
@@ -4134,17 +4132,16 @@ fn runs_as_superuser(records: &[String]) -> bool {
 /// `odoo/orm/environments.py:66-67`). No pattern names it, as it is no identifier.
 const UID_1: &str = "(uid 1)";
 
-/// The first series whose `sudo()` takes a flag (saas~12.5 `odoo/models.py`). Before it,
-/// `sudo(False)` calls `env(user=False)`, which runs as uid 0, so even uid 1 leaves superuser mode
-/// (12.0 `odoo/api.py:859`, `odoo/models.py:4818`).
+/// The first series whose `sudo()` takes a flag. Before it, `sudo(False)` calls
+/// `env(user=False)`, which runs as uid 0, so even uid 1 leaves superuser mode.
 const SUDO_FLAG: Series = Series { major: 12, minor: 5 };
 
-/// The first series whose `sudo()` takes a flag only (saas~15.3 `odoo/models.py`). Before it, from
+/// The first series whose `sudo()` takes a flag only (18.0 `odoo/models.py:6328`). Before it, from
 /// `SUDO_FLAG`, an argument that is no bool is a user, which `sudo()` switches to.
 const SUDO_USER: Series = Series { major: 15, minor: 3 };
 
-/// The first series whose `with_user()` of no user returns its receiver (13.0
-/// `odoo/models.py:5196-5197`, from commit 20d2659ec29e, which saas~12.5 lacks).
+/// The first series whose `with_user()` of no user returns its receiver, from commit
+/// 20d2659ec29e, which saas~12.5 lacks (18.0 `odoo/models.py:6341-6342`).
 const WITH_USER_SELF: Series = Series { major: 13, minor: 0 };
 
 /// What a call does to superuser mode.
@@ -4182,8 +4179,8 @@ fn is_root(c: &ast::ExprCall) -> bool {
     superuser::root(c) || tail_name(&c.func) == Some("sudo") && sudo_argument(c).is_some_and(superuser::is_superuser)
 }
 
-/// The flag of a `sudo()`, or before saas~15.3 its user: by position, or by name, `user` up to 12.0
-/// (12.0 `odoo/models.py:4789`; 15.0 `:5286-5288`).
+/// The flag of a `sudo()`, or before saas~15.3 its user: by position, or by name, `flag` (18.0
+/// `odoo/models.py:6305`) or `user` up to 12.0.
 fn sudo_argument(c: &ast::ExprCall) -> Option<&Expr> {
     let args = &c.arguments;
     args.find_argument_value("flag", 0)
@@ -5849,8 +5846,9 @@ mod tests {
                 let body = format!("<loop>\n        <sink>\n        {set}");
                 assert!(looped(&body, sink, read, t).is_empty(), "{code}: {body}");
             }
-            // The shape of `_get_icon_image` in `ir_module.py`, which reads an attribute of a
-            // module and then sets another from a call.
+            // The shape of `_get_icon_image` (18.0 `odoo/addons/base/models/ir_module.py:269-286`,
+            // 20.0 `:256-278`), which reads an attribute of a module and then sets another from a
+            // call.
             let attr_set = set.replace("<t>", "self._x()").replace("x.b", "x.icon_flag");
             let body = format!(
                 "for x in self:\n        {}\n        {attr_set}",

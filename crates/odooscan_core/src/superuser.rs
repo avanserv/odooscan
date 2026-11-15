@@ -9,8 +9,9 @@ use crate::python::tail_name;
 use crate::route_body;
 use crate::series::Series;
 
-/// The first series whose `request.uid` raises on assignment (16.0 `odoo/http.py:1493`); before it,
-/// assigning it rebuilds `request.env` for that user (15.0 `odoo/http.py:223`).
+/// The first series whose `request.uid` raises on assignment (18.0 `odoo/http.py:1734-1736`, 20.0
+/// `odoo/http/requestlib.py:178-181`); before it, assigning it rebuilds `request.env` for that
+/// user.
 pub(crate) const REQUEST_UID_END: Series = Series { major: 16, minor: 0 };
 
 /// How a body first runs as the superuser.

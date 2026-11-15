@@ -275,10 +275,10 @@ rules! {
     // saas~14.2 defines the bundles as templates, saas~14.3 only in `assets`, so a reference to one fails
     // (18.0 `odoo/addons/base/models/ir_model.py:2298`, 20.0 `:2368`).
     "OD328" "bundle-template-removed" Deprecation Error Some(">=saas~14.3"), false, "A data file inherits or references an asset bundle, which is no longer a template.";
-    // Through saas~16.4 a widget or a client action may sit in a legacy registry that 16.0 bridges to
-    // the Owl one. 18.0 warns and falls back on an unknown field widget
-    // (`addons/web/static/src/views/fields/field.js:89-106`) and throws on an unknown view widget or
-    // client action (`core/registry.js:122-125`).
+    // Through saas~16.4 a widget or a client action may sit in a legacy registry that 16.0 bridges
+    // to the Owl one. 18.0 warns and falls back on an unknown field widget
+    // (`addons/web/static/src/views/fields/field.js:89-106`) and throws on an unknown view widget
+    // or client action (`addons/web/static/src/core/registry.js:122-125`).
     "OD329" "unknown-field-widget" Correctness Warning Some(">=17.0"), true, "A view gives a field a widget no script registers.";
     "OD330" "unknown-view-widget" Correctness Error Some(">=17.0"), true, "A view names a widget no script registers.";
     "OD331" "unknown-client-action" Correctness Error Some(">=17.0"), true, "A client action's tag names an action no script registers.";
@@ -371,9 +371,9 @@ rules! {
     "OD614" "unknown-component-prop" Correctness Error Some(">=17.0,<saas~19.4"), true, "A template passes a component a prop its static props do not declare.";
     "OD615" "missing-component-prop" Correctness Error Some(">=17.0,<saas~19.4"), true, "A template leaves out a prop a component's static props require.";
     // `useService` throws on a service the web client did not start (18.0
-    // `addons/web/static/src/core/utils/hooks.js:132-137`, 20.0 `:157-161`), which it starts from the
-    // keys of the `services` registry (18.0 `env.js:45`, `:97-101`). 16.0 adds its legacy services
-    // to it by a name only a run tells.
+    // `addons/web/static/src/core/utils/hooks.js:132-137`, 20.0 `:157-161`), which it starts from
+    // the keys of the `services` registry (18.0 `addons/web/static/src/env.js:45`, `:97-101`). 16.0
+    // adds its legacy services to it by a name only a run tells.
     "OD616" "unknown-service" Correctness Error Some(">=17.0"), true, "A script asks useService() for a service no script registers.";
     "OD701" "sql-injection-flow" Security Error None, false, "Data a user controls reaches the text of an SQL query.";
     "OD702" "code-injection-flow" Security Error None, false, "Data a user controls reaches safe_eval(), eval() or exec().";
