@@ -178,16 +178,18 @@ custom/bad_sale/models/models.py:72:19: OD131 == between secrets takes longer th
 custom/bad_sale/models/projects.py:7:34: OD202 model 'project.project' comes from module project; add it to depends
 custom/bad_sale/models/projects.py:8:31: OD202 model 'project.task' comes from module project; add it to depends
 custom/bad_sale/models/projects.py:9:36: OD202 model 'account.analytic.line' comes from module hr_timesheet; add it to depends
-custom/bad_sale/models/queries.py:13:13: OD137 write() of the same values on each record of the loop updates them one at a time; write them once on the whole recordset
-custom/bad_sale/models/queries.py:18:13: OD134 search() runs the same query on each pass of the loop; run it once before the loop
-custom/bad_sale/models/queries.py:19:13: OD134 search_count() runs a query for each record of the loop, keyed on order_id; count them all at once with _read_group() grouped by order_id
-custom/bad_sale/models/queries.py:20:13: OD134 search() runs a query for each record of the loop, keyed on order_id; search once for all of them and group the result by order_id
-custom/bad_sale/models/queries.py:21:13: OD135 browse() of one id in a loop fetches each record on its own, a query per record; browse every id at once before the loop, or use the records the id comes from
-custom/bad_sale/models/queries.py:22:13: OD136 create() in a loop inserts one record per query; collect the values in a list and create them all in one call
-custom/bad_sale/models/queries.py:23:13: OD137 write() of the same values on each record of the loop updates them one at a time; write them once on the whole recordset
-custom/bad_sale/models/queries.py:46:17: OD138 len() of search() fetches every matching id only to count them; search_count() counts them in the database
-custom/bad_sale/models/queries.py:47:17: OD139 search() without a limit fetches every matching id to keep the first; pass limit=1
-custom/bad_sale/models/queries.py:48:16: OD139 search() without a limit fetches every matching id to keep the first; pass limit=1
+custom/bad_sale/models/queries.py:15:13: OD137 write() of the same values on each record of the loop updates them one at a time; write them once on the whole recordset
+custom/bad_sale/models/queries.py:20:13: OD134 search() runs the same query on each pass of the loop; run it once before the loop
+custom/bad_sale/models/queries.py:21:13: OD134 search_count() runs a query for each record of the loop, keyed on order_id; count them all at once with _read_group() grouped by order_id
+custom/bad_sale/models/queries.py:22:13: OD134 search() runs a query for each record of the loop, keyed on order_id; search once for all of them and group the result by order_id
+custom/bad_sale/models/queries.py:23:13: OD135 browse() of one id in a loop fetches each record on its own, a query per record; browse every id at once before the loop, or use the records the id comes from
+custom/bad_sale/models/queries.py:24:13: OD136 create() in a loop inserts one record per query; collect the values in a list and create them all in one call
+custom/bad_sale/models/queries.py:25:13: OD137 write() of the same values on each record of the loop updates them one at a time; write them once on the whole recordset
+custom/bad_sale/models/queries.py:48:17: OD138 len() of search() fetches every matching id only to count them; search_count() counts them in the database
+custom/bad_sale/models/queries.py:49:17: OD139 search() without a limit fetches every matching id to keep the first; pass limit=1
+custom/bad_sale/models/queries.py:50:16: OD139 search() without a limit fetches every matching id to keep the first; pass limit=1
+custom/bad_sale/models/queries.py:80:13: OD134 search() runs a query for each record of the loop, keyed on name; search once for all of them and group the result by name
+custom/bad_sale/models/queries.py:81:29: OD134 search_count() runs the same query on each pass of the loop; run it once before the loop
 custom/bad_sale/models/quiet.py:30:22: OD302 'encoded_lost.no_such_id' belongs to module encoded_lost; add it to depends
 custom/bad_sale/models/registry.py:6:14: OD203 'stat': bad.registry has no field 'stat'
 custom/bad_sale/models/registry.py:7:17: OD203 'titel': bad.registry has no field 'titel'
