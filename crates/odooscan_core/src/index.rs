@@ -1478,6 +1478,27 @@ pub(crate) fn wildcard(path: &str) -> bool {
     path.contains(['*', '?', '[', ']'])
 }
 
+/// The parts of `path` as `os.path.normpath` leaves them: without empty ones or `.`, and with each
+/// `..` taking the part before it away.
+pub(crate) fn normal_parts(path: &str) -> Vec<&str> {
+    let mut parts = vec![];
+    for part in path.split('/').filter(|p| !p.is_empty() && *p != ".") {
+        if part == ".." {
+            parts.pop();
+        } else {
+            parts.push(part);
+        }
+    }
+    parts
+}
+
+/// Whether `parts`, as `normal_parts` leaves them, name something under `module/static/`, the only
+/// place Odoo globs assets from (18.0 `odoo/addons/base/models/ir_asset.py:349-362`, 20.0
+/// `:342-352`).
+pub(crate) fn in_static(module: &str, parts: &[&str]) -> bool {
+    parts.len() > 2 && parts[0] == module && parts[1] == "static"
+}
+
 /// Files of a kind.
 type Loaded = FxHashSet<bundles::File>;
 
