@@ -44,12 +44,12 @@ impl Kind {
 /// Index rules whose finding means the modules in scope lack the model, field, column, method, id,
 /// template, element, selection value or module the code names, or no longer take or call a method
 /// it overrides or hooks: on a port, what the target core dropped, renamed or reshaped. An inherited
-/// or related field whose type the module no longer matches, or a required field a data record
-/// leaves unset, counts too.
+/// or related field whose type the module no longer matches, a required field a data record leaves
+/// unset, or a script its page lacks, counts too.
 const UPSTREAM: &[&str] = &[
     "OD201", "OD202", "OD203", "OD204", "OD205", "OD206", "OD207", "OD210", "OD211", "OD212", "OD224", "OD227",
     "OD229", "OD230", "OD301", "OD302", "OD304", "OD309", "OD310", "OD311", "OD312", "OD314", "OD316", "OD320",
-    "OD322", "OD324", "OD503", "OD518", "OD519", "OD601", "OD602", "OD603", "OD604", "OD605", "OD606",
+    "OD322", "OD324", "OD503", "OD518", "OD519", "OD601", "OD602", "OD603", "OD604", "OD605", "OD606", "OD608",
 ];
 
 /// Info-level security rules are hotspots: code to review, not a confirmed flaw.
@@ -331,6 +331,11 @@ rules! {
     "OD605" "unknown-template" Correctness Error Some(">=17.0"), true, "A component, a t-inherit or a t-call names a template no indexed bundle defines.";
     "OD606" "unmatched-template-locator" Correctness Error Some(">=17.0"), true, "A template locates an element its parent templates do not have.";
     "OD607" "private-rpc-method" Correctness Error None, false, "orm.call() names a private method, which Odoo refuses to call over RPC.";
+    // The loader starts a module only once every dependency is defined (18.0 and 20.0
+    // `addons/web/static/src/module_loader.js:146`). The range stops at 18.0 because the page
+    // templates before it were not checked (18.0 `addons/web/views/webclient_templates.xml:54`,
+    // `:58`, `:304`).
+    "OD608" "cross-bundle-js-import" Correctness Error Some(">=18.0"), true, "A JS import names a module the bundles of the importer's page do not load.";
     "OD701" "sql-injection-flow" Security Error None, false, "Data a user controls reaches the text of an SQL query.";
     "OD702" "code-injection-flow" Security Error None, false, "Data a user controls reaches safe_eval(), eval() or exec().";
     "OD703" "markup-injection-flow" Security Warning None, false, "Data a user controls is wrapped in Markup() without escaping.";
