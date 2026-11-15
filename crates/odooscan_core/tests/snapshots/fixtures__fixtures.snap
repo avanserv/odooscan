@@ -482,6 +482,8 @@ custom/encoded_python/models/memo.py:8:34: OD000 the file is not UTF-8, and no c
 custom/exported_broken/models/broken.py:4:17: OD000 Expected a parameter or the end of the parameter list
 custom/exported_stall/i18n/exported_stall.pot:68:1: OD805 no _() or _lt() call of the module has this message, so translators work on text no one sees; export the template again
 custom/exported_stall/i18n/exported_stall.pot:74:1: OD805 no _() or _lt() call of the module has this message, so translators work on text no one sees; export the template again
+custom/exported_stall/i18n/exported_stall.pot:117:1: OD805 no _() or _lt() call of the module has this message, so translators work on text no one sees; export the template again
+custom/exported_stall/models/counter.py:12:13: OD804 i18n/exported_stall.pot lacks this message, so no translation file offers it to translators; export the template again
 custom/exported_stall/models/stall.py:3:8: OD804 i18n/exported_stall.pot lacks this message, so no translation file offers it to translators; export the template again
 custom/exported_stall/models/stall.py:16:13: OD804 i18n/exported_stall.pot lacks this message, so no translation file offers it to translators; export the template again
 custom/exported_stall/models/stall.py:17:13: OD804 i18n/exported_stall.pot holds this message only for records or the web client, so _() finds no translation of it; export the template again

@@ -93,5 +93,29 @@ msgstr ""
 msgid "Stall tool"
 msgstr ""
 
+#. module: exported_stall
+#. odoo-python
+#: code:addons/exported_stall/models/counter.py:0
+msgid "Counter shut"
+msgstr ""
+
+#. module: exported_stall
+#. odoo-python
+#: code:addons/exported_stall/models/counter.py:0
+msgid "Counter bell"
+msgstr ""
+
+#. module: exported_stall
+#. odoo-python
+#: code:addons/exported_stall/models/counter.py:0
+msgid "Counter tray"
+msgstr ""
+
+#. module: exported_stall
+#. odoo-python
+#: code:addons/exported_stall/models/counter.py:0
+msgid "Counter rope rung"
+msgstr ""
+
 #~ msgid "Stall razed"
 #~ msgstr ""
