@@ -1711,6 +1711,10 @@ custom/web_keys/views/views.xml:40:42: OD329 no indexed bundle registers field w
 custom/web_keys/views/views.xml:43:31: OD330 no indexed bundle registers view widget 'web_keys_shield'
 custom/web_keys17/views/views.xml:6:44: OD329 no indexed bundle registers field widget 'web_keys17_badge'
 custom/web_keys17/views/views.xml:7:31: OD330 no indexed bundle registers view widget 'web_keys17_banner'
+custom/web_keys171/views/views.xml:6:44: OD329 no indexed bundle registers field widget 'web_keys171_badge'
+custom/web_keys172/views/views.xml:6:44: OD329 no indexed bundle registers field widget 'web_keys172_badge'
+custom/web_keys172/views/views.xml:7:17: OD327 a div with class oe_chatter renders as a plain div, without the chatter; write <chatter/>
+custom/web_keys172/views/views.xml:8:53: OD329 no indexed bundle registers field widget 'mail_followers'
 custom/window_actions/views/actions.xml:4:33: OD201 no indexed module defines model 'sale.ordr'
 custom/window_actions/views/actions.xml:11:33: OD318 window.plain has no primary gantt view, and nothing generates one
 custom/window_actions/views/actions.xml:11:33: OD318 window.plain has no primary map view, and nothing generates one
