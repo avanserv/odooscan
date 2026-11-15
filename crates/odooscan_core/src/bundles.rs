@@ -259,7 +259,9 @@ impl<'m> Paths<'m> {
     /// Whether Odoo skips an entry placed at `target`: a glob whose extension is no asset's and
     /// that matches no file under `static` of its module (`:217-221`); any other target stands for
     /// itself when nothing matches (`:367-368`). `static_assets` holds the styles too, which
-    /// `files` leaves out. A module whose `static_assets` the scan does not read keeps the entry.
+    /// `files` leaves out. A module whose `static_assets` the scan does not read keeps the entry,
+    /// and so does a module the scan does not index, where Odoo skips it: the module may be on the
+    /// server's addons path, and the entry then loads.
     fn skips(&self, target: &str) -> bool {
         let extension = target.rsplit('.').next().unwrap_or_default();
         if !wildcard(target) || ASSET_EXTENSIONS.contains(&extension) {
@@ -267,7 +269,7 @@ impl<'m> Paths<'m> {
         }
         let module = target.split('/').next().and_then(|name| self.by_name.get(name));
         let Some(&mi) = module else {
-            return true;
+            return false;
         };
         let module = &self.modules[mi];
         let set = asset_glob_set([&target.to_owned()]);
@@ -684,6 +686,33 @@ mod tests {
             &[],
         );
         assert_eq!(contents(&[web, x])["b"], ["web/views/v.js", "x/a.js", "web/views/w.js"]);
+    }
+
+    #[test]
+    fn keeps_an_entry_whose_target_module_is_not_indexed() {
+        let x = addon(
+            "x",
+            r#""assets": {"b": [("after", "web_enterprise/static/src/webclient/*", "x/static/src/a.js")]}"#,
+            &["a.js"],
+            &[],
+        );
+        assert_eq!(contents(&[x])["b"], ["x/a.js"]);
+    }
+
+    #[test]
+    fn prepends_past_the_end_of_an_included_bundle_shortened_by_a_remove() {
+        let a = addon(
+            "a",
+            r#""assets": {
+                "outer": ["a/static/src/a.js", "a/static/src/b.js", ("include", "inner")],
+                "inner": [("remove", "a/static/src/a.js"), ("prepend", "a/static/src/p.js")],
+            }"#,
+            &["a.js", "b.js", "p.js"],
+            &[],
+        );
+        let bundles = contents(&[a]);
+        assert_eq!(bundles["outer"], ["a/b.js", "a/p.js"]);
+        assert_eq!(bundles["inner"], ["a/p.js"]);
     }
 
     #[test]
