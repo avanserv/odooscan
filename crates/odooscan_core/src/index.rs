@@ -1505,6 +1505,28 @@ fn loaded_static(
     (names, js, templates)
 }
 
+/// Whether only a test runner page calls the bundle: one of the words of its name after the module
+/// is `test`, `tests`, `qunit` or `mocha`. The pages are those of 15.0
+/// `addons/web/views/webclient_templates.xml:6,180,212,233`, 16.0 `:6,185,212,217,239`, 18.0
+/// `:5-12,197,217-246,265` and `web_editor/views/editor.xml:159-181`.
+pub(crate) fn test_bundle(name: &str) -> bool {
+    let mut words = name.split_once('.').map_or("", |(_, rest)| rest).split('_');
+    words.any(|w| matches!(w, "test" | "tests" | "qunit" | "mocha"))
+}
+
+/// The scripts that are tests, as (module, file): by their path, or loaded only by test bundles.
+fn test_scripts(modules: &[Module], bundle_names: &[String], js_bundles: &ScriptBundles) -> Loaded {
+    let by_bundles = js_bundles
+        .iter()
+        .filter(|(_, bundles)| bundles.iter().all(|&bi| test_bundle(&bundle_names[bi])))
+        .map(|(&file, _)| file);
+    let by_path = modules.iter().enumerate().flat_map(|(mi, m)| {
+        let files = m.js.iter().enumerate().filter(|(_, f)| f.in_tests());
+        files.map(move |(fi, _)| (mi, fi))
+    });
+    by_bundles.chain(by_path).collect()
+}
+
 /// The templates of the loaded template files: a registered one under its name, and an extension
 /// under its parent's, since it changes the parent in place.
 fn template_nodes<'m>(modules: &'m [Module], loaded: &Loaded) -> Nodes<'m> {
@@ -1783,6 +1805,7 @@ pub struct Index<'m> {
     js_paths: FxHashMap<String, Vec<JsTarget>>,
     bundle_names: Vec<String>,
     js_bundles: ScriptBundles,
+    test_scripts: Loaded,
     templates_loaded: Loaded,
     always_installed: Vec<bool>,
     /// Each module's place in `load_order`.
@@ -1847,7 +1870,8 @@ impl<'m> Index<'m> {
         }
         let models_with_access = access_models(modules, &model_by_xmlid, default_series);
         let (bundle_names, js_bundles, templates_loaded) = loaded_static(modules, &by_name, default_series);
-        let (hook_names, hook_prefixes) = hook_mentions(modules);
+        let test_scripts = test_scripts(modules, &bundle_names, &js_bundles);
+        let (hook_names, hook_prefixes) = hook_mentions(modules, &test_scripts);
         let imports = imports::Graph::of_modules(modules, default_series);
         let unread_dependent = unread_dependents(modules, &by_name, &imports, default_series);
         let mut index = Self {
@@ -1875,6 +1899,7 @@ impl<'m> Index<'m> {
             js_paths: js_paths(modules, &by_name, default_series),
             bundle_names,
             js_bundles,
+            test_scripts,
             templates_loaded,
             always_installed: always_installed(modules, &by_name, default_series),
             load_rank: load_rank(modules, &by_name, default_series),
@@ -2009,7 +2034,7 @@ impl<'m> Index<'m> {
     fn template_bases(&self) -> FxHashSet<ClassKey> {
         let mut bases = FxHashSet::default();
         for (mi, module) in self.modules.iter().enumerate() {
-            for (fi, file) in module.js.iter().enumerate().filter(|(_, f)| !f.in_tests()) {
+            for (fi, file) in module.js.iter().enumerate().filter(|&(fi, _)| !self.js_test(mi, fi)) {
                 for class in file.facts.classes.iter().filter(|c| c.template.is_some()) {
                     if let Heritage::Name(parent) = &class.extends
                         && let Some((t, base)) = self.js_class(self.js_target(mi, fi), parent, 0)
@@ -2028,7 +2053,7 @@ impl<'m> Index<'m> {
         let mut owners: FxHashMap<&'m str, Vec<_>> = FxHashMap::default();
         for (mi, module) in self.modules.iter().enumerate() {
             let files = module.js.iter().enumerate();
-            for (fi, file) in files.filter(|(fi, f)| !f.in_tests() && self.js_loaded(mi, *fi)) {
+            for (fi, file) in files.filter(|&(fi, _)| !self.js_test(mi, fi) && self.js_loaded(mi, fi)) {
                 let here = self.js_target(mi, fi);
                 for class in &file.facts.classes {
                     if let Some(template) = self.rendered_template(here, class) {
@@ -2055,7 +2080,7 @@ impl<'m> Index<'m> {
     }
 
     /// A test bundle such as `web.assets_tests` loads the tours a browser test runs, so the tours of
-    /// `static/tests` count, and nothing else of it. A unit test bundle runs on its own page, which
+    /// test scripts count, and nothing else of them. A unit test bundle runs on its own page, which
     /// `start_tour()` never opens.
     fn registries(&self) -> Registries<'m> {
         let mut found = Registries::default();
@@ -2066,7 +2091,7 @@ impl<'m> Index<'m> {
                     self.js_bundles(mi, fi)
                         .any(|b| !b.contains("unit_tests") && !b.contains("qunit"))
                 };
-                let counts = |category: &str| !file.in_tests() || category == TOUR_REGISTRY && toured();
+                let counts = |category: &str| !self.js_test(mi, fi) || category == TOUR_REGISTRY && toured();
                 for (category, key) in file.facts.registrations.iter().filter(|(c, _)| counts(c)) {
                     found.keys.entry((category, key)).or_default().push(mi);
                     if category == FIELD_REGISTRY {
@@ -2088,7 +2113,7 @@ impl<'m> Index<'m> {
     fn static_writes(&self) -> FxHashSet<(ClassKey, Static)> {
         let mut written = FxHashSet::default();
         for (mi, module) in self.modules.iter().enumerate() {
-            for (fi, file) in module.js.iter().enumerate().filter(|(_, f)| !f.in_tests()) {
+            for (fi, file) in module.js.iter().enumerate().filter(|&(fi, _)| !self.js_test(mi, fi)) {
                 let here = self.js_target(mi, fi);
                 for write in &file.facts.static_writes {
                     let Some((t, class)) = self.js_class(here, &write.binding, 0) else {
@@ -2301,7 +2326,7 @@ impl<'m> Index<'m> {
     fn patched_classes(&self) -> Patched<'m> {
         let mut patched: Patched<'m> = FxHashMap::default();
         for (mi, module) in self.modules.iter().enumerate() {
-            for (fi, file) in module.js.iter().enumerate().filter(|(_, f)| !f.in_tests()) {
+            for (fi, file) in module.js.iter().enumerate().filter(|&(fi, _)| !self.js_test(mi, fi)) {
                 let here = self.js_target(mi, fi);
                 for (pi, patch) in file.facts.patches.iter().enumerate() {
                     if let Some((t, class)) = self.js_class(here, &patch.target, 0) {
@@ -2498,6 +2523,12 @@ impl<'m> Index<'m> {
             .map(Vec::as_slice)
             .unwrap_or_default();
         of_file.iter().map(|&bi| self.bundle_names[bi].as_str())
+    }
+
+    /// Whether the script is a test: by its path, as `SourceFile::in_tests` reads it, or loaded only
+    /// by test bundles, as `test_bundle` names them.
+    pub fn js_test(&self, module: usize, file: usize) -> bool {
+        self.test_scripts.contains(&(module, file))
     }
 
     pub fn template_loaded(&self, module: usize, file: usize) -> bool {
@@ -3988,13 +4019,15 @@ fn mangles_alike(method: &str, a: &str, b: &str) -> bool {
 }
 
 /// What `Index::names_hook` reads: the union of the mentions of every file of `modules` but the
-/// scripts of tests, which run on a mock server.
-fn hook_mentions(modules: &[Module]) -> (FxHashSet<&str>, Vec<&str>) {
-    let files = modules.iter().flat_map(|m| {
+/// test scripts in `tests`, which run on a mock server.
+fn hook_mentions<'m>(modules: &'m [Module], tests: &Loaded) -> (FxHashSet<&'m str>, Vec<&'m str>) {
+    let files = modules.iter().enumerate().flat_map(|(mi, m)| {
         let python = m.python.iter().map(|f| &f.mentions);
+        let shipped = move |&(fi, _): &(usize, _)| !tests.contains(&(mi, fi));
+        let scripts = m.js.iter().enumerate().filter(shipped);
         python
             .chain(m.data.iter().map(|f| &f.mentions))
-            .chain(m.js.iter().filter(|f| !f.in_tests()).map(|f| &f.mentions))
+            .chain(scripts.map(|(_, f)| &f.mentions))
             .chain(m.templates.iter().map(|f| &f.mentions))
     });
     let mut names = FxHashSet::default();
@@ -4018,8 +4051,8 @@ mod tests {
         BASE_MODEL_DUNDERS, BASE_MODEL_EXTRA, BASE_MODEL_METHODS, BASE_PRIVATE_METHODS, BASE_RPC_METHODS, Export,
         FIELD_CLASSES, FieldHolder, FieldSpelling, Index, JsSpec, OLD_BASE_METHODS, OWL_COMPONENT, OWL1_COMPONENT,
         PlacedWrite, Scope, Status, XmlIdDef, base_private_method, base_rpc_method, class_file, depends_closure,
-        field_id_prefixes, fold_writes, js_module_path, last_text, mangles_alike, old_base_method, triggers,
-        unseen_table_id,
+        field_id_prefixes, fold_writes, js_module_path, last_text, mangles_alike, old_base_method, test_bundle,
+        triggers, unseen_table_id,
     };
     use crate::mentions::{Mentions, Words};
     use crate::project::{Module, SourceFile, module};
@@ -4960,6 +4993,47 @@ mod tests {
         assert_eq!(index.js_bundles(0, 0).collect::<Vec<_>>(), ["b.pages", "z.pages"]);
         assert_eq!(index.js_bundles(0, 1).count(), 0);
         assert!(index.js_loaded(0, 0) && !index.js_loaded(0, 1));
+    }
+
+    #[test]
+    fn a_test_bundle_has_a_test_word_after_its_module() {
+        for name in [
+            "web.assets_tests",
+            "web.tests_assets",
+            "web.qunit_suite_tests",
+            "web.__assets_tests_call__",
+            "web_editor.mocha_tests",
+        ] {
+            assert!(test_bundle(name), "{name}");
+        }
+        for name in ["web.assets_backend", "x.latest", "test_x.assets_backend"] {
+            assert!(!test_bundle(name), "{name}");
+        }
+    }
+
+    #[test]
+    fn a_script_is_a_test_by_its_path_or_when_only_test_bundles_load_it() {
+        let mut a = module(
+            "a",
+            r#"{'version': '18.0.1.0', 'assets': {
+                'web.assets_backend': ['a/static/src/both.js', 'a/static/tests/shipped.js'],
+                'web.qunit_suite_tests': ['a/static/src/both.js', 'a/static/src/suite.js'],
+                'a.mocha_tests': ['a/static/src/suite.js'],
+            }}"#,
+        );
+        let rels = [
+            "static/src/both.js",
+            "static/src/none.js",
+            "static/src/suite.js",
+            "static/tests/shipped.js",
+        ];
+        a.js = rels.iter().map(|rel| script(rel, "")).collect();
+        let modules = [a];
+        let index = Index::build(&modules, None);
+        assert!(!index.js_test(0, 0), "a shipped bundle loads it too");
+        assert!(!index.js_test(0, 1), "no bundle loads it");
+        assert!(index.js_test(0, 2), "only test bundles load it");
+        assert!(index.js_test(0, 3), "its path makes it a test");
     }
 
     fn script(rel: &str, text: &str) -> SourceFile<crate::facts::JsFacts> {

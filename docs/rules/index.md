@@ -204,20 +204,23 @@ import reaches.
 ## OD6: JavaScript and Owl
 
 Scripts under `static/src` and `static/tests` that a bundle loads, checked against the scripts of
-every indexed module. A script under `static/tests` has only its imports checked, by OD601 and
-OD608: a unit test runs on a mock server whose models it defines, and its patches apply while it
-runs. A bundle holds what its entries leave in it, applied in module load order: `append`,
-`prepend`, `before` and `after` add files, `include` adds another bundle's, `replace` swaps its
-target for its path and `remove` takes files out, so a file only removed is not checked. Before
-saas~14.3 a bundle is a template, and each template extending it adds its scripts where its specs
-place them, while the manifest's `assets` key adds nothing. A script Odoo does not run as an ES
-module, every one before saas~14.3, has the dependencies of its `odoo.define()` calls checked by
-OD601 and OD608 instead of its imports, and its RPC calls as an ES module's. In an ES module from
-saas~14.5 to 16.0 a patch names itself, and OD602 reads its `this._super()` calls. OD608 reads the
-bundles of the two web client pages, backend and frontend, from 18.0 on, and on the frontend which
-of them load before the others. OD609 to OD612 read each script alone, for the HTML sinks and
-debugging leftovers of what a page runs. OD613 reads, from saas~15.3, the Owl 1 APIs that Owl 2
-dropped, following a component's parents for its `trigger()` calls. OD614 and OD615 read the
+every indexed module. A test script is one under `static/tests` or in a `tests` folder under
+`static/src`, even when a shipped bundle loads it too, or one that only test bundles load: those
+with `test`, `tests`, `qunit` or `mocha` among the `_`-separated words of their name after the
+module, such as `web.qunit_suite_tests` and `web_editor.mocha_tests`. A test script has only its
+imports checked, by OD601 and OD608: a unit test runs on a mock server whose models it defines, and
+its patches apply while it runs. A bundle holds what its entries leave in it, applied in module load
+order: `append`, `prepend`, `before` and `after` add files, `include` adds another bundle's,
+`replace` swaps its target for its path and `remove` takes files out, so a file only removed is not
+checked. Before saas~14.3 a bundle is a template, and each template extending it adds its scripts
+where its specs place them, while the manifest's `assets` key adds nothing. A script Odoo does not
+run as an ES module, every one before saas~14.3, has the dependencies of its `odoo.define()` calls
+checked by OD601 and OD608 instead of its imports, and its RPC calls as an ES module's. In an ES
+module from saas~14.5 to 16.0 a patch names itself, and OD602 reads its `this._super()` calls. OD608
+reads the bundles of the two web client pages, backend and frontend, from 18.0 on, and on the
+frontend which of them load before the others. OD609 to OD612 read each script alone, for the HTML
+sinks and debugging leftovers of what a page runs. OD613 reads, from saas~15.3, the Owl 1 APIs that
+Owl 2 dropped, following a component's parents for its `trigger()` calls. OD614 and OD615 read the
 component tags of a bundled template against the `static props` of the class that each owning
 component's `static components` maps the tag to, from 17.0 to saas~19.3, where Owl validates props.
 OD616 reads, from 17.0, the keys that scripts give `useService()` against those the loaded scripts

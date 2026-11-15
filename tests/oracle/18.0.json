@@ -3763,48 +3763,6 @@
       "count": 5
     },
     {
-      "path": "addons/web_editor/static/src/js/editor/odoo-editor/test/editor-test.js",
-      "code": "OD610",
-      "message": "assigning outerHTML renders the value as HTML unescaped; check that no user input reaches it, or set textContent",
-      "count": 1
-    },
-    {
-      "path": "addons/web_editor/static/src/js/editor/odoo-editor/test/editor-test.js",
-      "code": "OD611",
-      "message": "console.log() is a debugging leftover that writes to every user's console; remove it",
-      "count": 1
-    },
-    {
-      "path": "addons/web_editor/static/src/js/editor/odoo-editor/test/spec/collab.test.js",
-      "code": "OD610",
-      "message": "assigning innerHTML renders the value as HTML unescaped; check that no user input reaches it, or set textContent",
-      "count": 1
-    },
-    {
-      "path": "addons/web_editor/static/src/js/editor/odoo-editor/test/spec/collab.test.js",
-      "code": "OD611",
-      "message": "console.log() is a debugging leftover that writes to every user's console; remove it",
-      "count": 1
-    },
-    {
-      "path": "addons/web_editor/static/src/js/editor/odoo-editor/test/spec/editor.test.js",
-      "code": "OD610",
-      "message": "assigning innerHTML renders the value as HTML unescaped; check that no user input reaches it, or set textContent",
-      "count": 1
-    },
-    {
-      "path": "addons/web_editor/static/src/js/editor/odoo-editor/test/spec/utils.test.js",
-      "code": "OD610",
-      "message": "assigning innerHTML renders the value as HTML unescaped; check that no user input reaches it, or set textContent",
-      "count": 1
-    },
-    {
-      "path": "addons/web_editor/static/src/js/editor/odoo-editor/test/utils.js",
-      "code": "OD610",
-      "message": "assigning innerHTML renders the value as HTML unescaped; check that no user input reaches it, or set textContent",
-      "count": 1
-    },
-    {
       "path": "addons/web_editor/static/src/js/editor/snippets.editor.js",
       "code": "OD609",
       "message": "markup() of a value built at runtime makes t-out render it as HTML unescaped; check that no user input reaches it, or use markup`...`, which escapes each placeholder",

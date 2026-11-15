@@ -275,7 +275,7 @@ pub fn check_module<'m>(index: &Index<'m>, mi: usize, series: Option<Series>) ->
         }
     }
     let scripts = module.js.iter().enumerate().filter(|(fi, _)| index.js_loaded(mi, *fi));
-    for (_, file) in scripts.filter(|(_, f)| !f.in_tests()) {
+    for (_, file) in scripts.filter(|&(fi, _)| !index.js_test(mi, fi)) {
         loaded_script(&mut out, file);
     }
     let scope = index.scope(mi);
@@ -1962,7 +1962,10 @@ impl<'m> Ctx<'_, 'm> {
     /// use.
     fn unused_dependencies(&self, out: &mut Out<'m>) {
         let module = self.module;
-        if module.manifest.auto_install != manifest::AutoInstall::Off || module.lost_text || is_shell(module) {
+        if module.manifest.auto_install != manifest::AutoInstall::Off
+            || module.lost_text
+            || is_shell(self.index, self.mi)
+        {
             return;
         }
         let depends = &module.manifest.depends;
@@ -2171,7 +2174,7 @@ impl<'m> Ctx<'_, 'm> {
         self.js(out, fi, file);
         // Only the imports of a test are checked: a unit test runs on a mock server whose models it
         // defines (18.0 `addons/web/static/tests/_framework/mock_server/mock_server.js:386`).
-        if file.in_tests() {
+        if self.index.js_test(self.mi, fi) {
             return;
         }
         self.js_patches(out, self.mi, fi, file);
@@ -2197,7 +2200,7 @@ impl<'m> Ctx<'_, 'm> {
     fn js(&self, out: &mut Out<'m>, fi: usize, file: &'m SourceFile<JsFacts>) {
         let from = js_url(&self.module.name, &file.rel);
         let mut unexported: Vec<&str> = vec![];
-        let mocked = |name: &&JsName| file.in_tests() && hoot_adds(self.series, &from, name);
+        let mocked = |name: &&JsName| self.index.js_test(self.mi, fi) && hoot_adds(self.series, &from, name);
         for name in file.facts.names.iter().filter(|n| !mocked(n)) {
             if self.js_name(out, &file.path, &from, name) {
                 unexported.push(&name.specifier);
@@ -2213,7 +2216,7 @@ impl<'m> Ctx<'_, 'm> {
     /// stay unchecked: its classes come through `require`, which `js_class` does not follow.
     fn legacy_script(&self, out: &mut Out<'m>, fi: usize, file: &'m SourceFile<JsFacts>) {
         self.legacy_requires(out, fi, file);
-        if !file.in_tests() {
+        if !self.index.js_test(self.mi, fi) {
             self.owl_triggers(out, fi, file);
             self.services(out, file);
             for call in &file.facts.orm_calls {
@@ -2229,7 +2232,12 @@ impl<'m> Ctx<'_, 'm> {
         if self.partial {
             return;
         }
-        let scripts = || self.module.js.iter().filter(|f| !f.in_tests());
+        let scripts = || {
+            let files = self.module.js.iter().enumerate();
+            files
+                .filter(|&(fi, _)| !self.index.js_test(self.mi, fi))
+                .map(|(_, f)| f)
+        };
         for service in &file.facts.services {
             if !scripts().any(|f| f.facts.service_probes.contains(&service.value)) {
                 self.registry_key(out, &file.path, ("OD616", SERVICE_REGISTRY, "service"), service);
@@ -5955,10 +5963,11 @@ fn csv_label(defs: &[FieldDef], values: &FxHashSet<&str>, cell: &str, series: Op
     values.iter().any(|v| same(v)) || labels.any(|l| l.as_deref().is_none_or(same))
 }
 
-/// Whether `module` ships no file but its manifest and `__init__.py`.
-fn is_shell(module: &Module) -> bool {
+/// Whether the module ships no file but its manifest, `__init__.py` and test scripts.
+fn is_shell(index: &Index, mi: usize) -> bool {
+    let module = &index.modules[mi];
     module.data.is_empty()
-        && module.js.iter().all(SourceFile::in_tests)
+        && (0..module.js.len()).all(|fi| index.js_test(mi, fi))
         && module.templates.is_empty()
         && module
             .python
