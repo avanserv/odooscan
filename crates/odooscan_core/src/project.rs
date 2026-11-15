@@ -41,10 +41,9 @@ pub struct SourceFile<T> {
 
 impl<T> SourceFile<T> {
     /// Whether the file is a test by its path: under `static/tests`, or in a `tests` folder under
-    /// `static/src`, which `web.qunit_suite_tests` lists from the manifests of 15.0
-    /// `addons/mail/__manifest__.py:148-158` and `addons/sms/__manifest__.py:53-56`, and 16.0
-    /// `addons/base_iban/__manifest__.py:24-25`. A script is a test also by the bundles that load
-    /// it: ask `Index::js_test` for those.
+    /// `static/src`, which a test bundle lists from the manifests, as 18.0 and 20.0
+    /// `addons/barcodes_gs1_nomenclature/__manifest__.py:19-20` do. A script is a test also by the
+    /// bundles that load it: ask `Index::js_test` for those.
     pub fn in_tests(&self) -> bool {
         self.rel.starts_with("static/tests/")
             || self.rel.strip_prefix("static/src/").is_some_and(|rest| {

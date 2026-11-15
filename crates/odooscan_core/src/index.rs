@@ -565,7 +565,7 @@ pub(crate) fn base_private_method(name: &str, series: Option<Series>) -> bool {
 /// branch head: when adding a series, reread the methods of `BaseModel` and date what changed.
 /// `ids` stays out as a property and `lock_for_update` as private since it appeared.
 /// `OLD_BASE_METHODS` stays out: its public names end at 10.0, and `_rpc`, the oldest client call
-/// OD604 reads, starts on 11.0 (11.0 `addons/web/static/src/js/core/mixins.js:471`).
+/// OD604 reads, starts on 11.0.
 const BASE_RPC_METHODS: &[(&str, &[&str])] = &[
     (">=9.0", &["get_external_id", "get_metadata"]),
     (">=10.0", &["concat", "union"]),
@@ -1083,8 +1083,8 @@ const OWL_COMPONENT: &[&str] = &["setup", "render"];
 /// The first series on Owl 2: saas~15.3 replaces Owl 1 (commit `966abc39b573`).
 const OWL2: Series = Series { major: 15, minor: 3 };
 
-/// Instance members of Owl 1's `Component`, read off 15.0 `addons/web/static/lib/owl/owl.js`,
-/// whose `patch()` reaches each as `_super` along the prototype chain.
+/// Instance members of Owl 1's `Component`, read off the Owl that 15.0 ships, whose `patch()`
+/// reaches each as `_super` along the prototype chain.
 const OWL1_COMPONENT: &[&str] = &[
     "el",
     "setup",
@@ -1528,9 +1528,9 @@ fn loaded_static(
 }
 
 /// Whether only a test runner page calls the bundle: one of the words of its name after the module
-/// is `test`, `tests`, `qunit` or `mocha`. The pages are those of 15.0
-/// `addons/web/views/webclient_templates.xml:6,180,212,233`, 16.0 `:6,185,212,217,239`, 18.0
-/// `:5-12,197,217-246,265` and `web_editor/views/editor.xml:159-181`.
+/// is `test`, `tests`, `qunit` or `mocha`. The pages are those of 18.0
+/// `addons/web/views/webclient_templates.xml:5-12,197,217-246,265` and
+/// `addons/web_editor/views/editor.xml:159-181`.
 pub(crate) fn test_bundle(name: &str) -> bool {
     let mut words = name.split_once('.').map_or("", |(_, rest)| rest).split('_');
     words.any(|w| matches!(w, "test" | "tests" | "qunit" | "mocha"))

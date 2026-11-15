@@ -1511,8 +1511,8 @@ fn renamed(node: Node) -> Option<ArchElement> {
 /// Notes a spec that finds the parent's element by a name OD306 or OD325 rewrites, which keeps the
 /// tree from being fixed, and a `<tree>` the arch adds, which a `<tree>` spec may find. An
 /// `<attribute>` setting `t-esc` or `t-field` puts it beside the parent's renamed `t-out`, which
-/// 20.0 `_compile_directive_out` reads first (`ir_qweb.py:2476-2480`), so the child's value would
-/// be lost. A `t-raw` renders nothing from saas~19.1 with or without the rename.
+/// `_compile_directive_out` reads first (20.0 `odoo/addons/base/models/ir_qweb.py:2476-2480`), so
+/// the child's value would be lost. A `t-raw` renders nothing from saas~19.1 with or without the rename.
 fn old_names(node: Node, view: &mut ViewFact) {
     if node.has_tag_name("xpath") {
         let expr = node.attribute("expr").unwrap_or_default();
@@ -1538,9 +1538,9 @@ fn meets_escape(node: Node) -> bool {
     OUT_BESIDE_ESCAPE.contains(&name) || (name == "t-out" && !text)
 }
 
-/// OD325 on `node`. 19.0 `_compile_directive_out` renders the first of `t-out`, `t-field`, `t-esc`
-/// and `t-raw` the element carries (`ir_qweb.py:2363-2372`), so beside another one the rename would
-/// repeat `t-out` or change which one renders.
+/// OD325 on `node`. Through 19.0, `_compile_directive_out` renders the first of `t-out`, `t-field`,
+/// `t-esc` and `t-raw` the element carries (18.0 `odoo/addons/base/models/ir_qweb.py:1993-2003`), so
+/// beside another one the rename would repeat `t-out` or change which one renders.
 fn escape(node: Node, pos: Pos) -> RawDiag {
     let mut diag = RawDiag::new(
         "OD325",
@@ -1692,9 +1692,9 @@ pub fn t_call(node: Node, lines: &Lines) -> Option<Spanned<String>> {
 }
 
 /// The path of a script Odoo aggregates into the bundle a template renders, by its non-empty
-/// segments: a URL with no scheme nor host, outside `/web/content` (14.0
-/// `odoo/addons/base/models/ir_qweb.py:313-314`, `:349`). As werkzeug's `url_parse` reads them, a
-/// scheme is letters, digits or `+,-.` before a `:` no port number follows, and a host a non-empty
+/// segments: a URL with no scheme nor host, outside `/web/content` (18.0
+/// `odoo/addons/base/models/ir_asset.py:36-38`, 20.0 `:35-37`). As werkzeug's `url_parse` reads them,
+/// a scheme is letters, digits or `+,-.` before a `:` no port number follows, and a host a non-empty
 /// name after `//`.
 fn aggregated(src: &str) -> Option<String> {
     let scheme = src.split_once(':').is_some_and(|(scheme, rest)| {
@@ -1716,7 +1716,7 @@ fn aggregated(src: &str) -> Option<String> {
 
 /// The elements of `node` that render at the top of the output, which alone Odoo reads a bundle's
 /// scripts from: a `<t>` renders only its content, while a `<t t-call>` renders another template
-/// and any other element keeps what it holds (14.0 `odoo/addons/base/models/ir_qweb.py:328-356`).
+/// and any other element keeps what it holds, as Odoo reads a template bundle before saas~14.3.
 fn rendered<'a, 'i>(node: Node<'a, 'i>) -> Vec<Node<'a, 'i>> {
     let mut top = vec![];
     for child in node.children().filter(Node::is_element) {
