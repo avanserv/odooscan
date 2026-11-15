@@ -4,6 +4,7 @@
             <script type="text/javascript" src="/legacy_require14/static/src/js/counter.js"/>
             <script type="text/javascript" src="/legacy_require14/static/src/js/dropped.js"/>
             <script type="text/javascript" src="/legacy_require14/static/src/js/module.js"/>
+            <script type="text/javascript" src="/legacy_require14/static/src/js/rpc.js"/>
         </xpath>
     </template>
 

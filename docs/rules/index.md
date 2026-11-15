@@ -205,18 +205,19 @@ target for its path and `remove` takes files out, so a file only removed is not 
 saas~14.3 a bundle is a template, and each template extending it adds its scripts where its specs
 place them, while the manifest's `assets` key adds nothing. A script Odoo does not run as an ES
 module, every one before saas~14.3, has the dependencies of its `odoo.define()` calls checked by
-OD601 and OD608 instead of its imports. OD608 reads the bundles of the two web client pages,
-backend and frontend, from 18.0 on.
+OD601 and OD608 instead of its imports, and its RPC calls as an ES module's. In an ES module from
+saas~14.5 to 16.0 a patch names itself, and OD602 reads its `this._super()` calls. OD608 reads the
+bundles of the two web client pages, backend and frontend, from 18.0 on.
 
 | Code | Name | Reports |
 | --- | --- | --- |
 | [OD601](OD601.md) | `unresolved-js-import` | A JS import names a module or an export no indexed module provides. |
 | [OD602](OD602.md) | `orphan-patch-super` | A patch calls a super method the class it patches does not have. |
 | [OD603](OD603.md) | `unknown-rpc-model` | An ORM call from JS names a model no indexed module defines. |
-| [OD604](OD604.md) | `unknown-rpc-method` | orm.call() names a method its model does not have. |
+| [OD604](OD604.md) | `unknown-rpc-method` | An ORM call from JS names a method its model does not have. |
 | [OD605](OD605.md) | `unknown-template` | A component, a t-inherit or a t-call names a template no indexed bundle defines. |
 | [OD606](OD606.md) | `unmatched-template-locator` | A template locates an element its parent templates do not have. |
-| [OD607](OD607.md) | `private-rpc-method` | orm.call() names a private method, which Odoo refuses to call over RPC. |
+| [OD607](OD607.md) | `private-rpc-method` | An ORM call from JS names a private method, which Odoo refuses to call over RPC. |
 | [OD608](OD608.md) | `cross-bundle-js-import` | A JS import names a module the bundles of the importer's page do not load. |
 
 ## OD7: data flows

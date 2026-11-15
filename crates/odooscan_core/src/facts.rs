@@ -1319,21 +1319,25 @@ pub struct JsClass {
     pub template: Option<Spanned<String>>,
 }
 
-/// `patch(Target.prototype, { ... })`.
+/// `patch(Target.prototype, { ... })`, or `patch(Target.prototype, "name", { ... })` when `named`.
 #[derive(Debug)]
 pub struct JsPatch {
     pub target: String,
     pub members: Vec<String>,
-    /// Methods the patch calls through `super`.
+    /// Methods the patch calls through `super`, or through `this._super` when it is named.
     pub supers: Vec<Spanned<String>>,
+    /// The extension comes third, after the patch's name, as before 17.0.
+    pub named: bool,
 }
 
-/// A call of the `orm` service with a literal model or method, such as `this.orm.call("x", "m", ...)`.
+/// A call of the `orm` service, `x._rpc({...})` or `rpc.query({...})` with a literal model or
+/// method, such as `this.orm.call("x", "m", ...)`.
 #[derive(Debug)]
 pub struct OrmCall {
     /// The model when it is a literal; a call naming a private method fails whatever the model.
     pub model: Option<Spanned<String>>,
-    /// The method `call` names; the other service methods map to methods every model has.
+    /// The method `call` or the object's `method` names; the other service methods map to methods
+    /// every model has.
     pub method: Option<Spanned<String>>,
 }
 

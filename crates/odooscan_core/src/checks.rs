@@ -271,9 +271,10 @@ pub fn check_module<'m>(index: &Index<'m>, mi: usize, series: Option<Series>) ->
         if let Some(e) = &file.facts.syntax_error {
             out.push(&file.path, "OD000", e.pos, e.value.clone());
         }
-        if !file.in_tests() {
-            private_rpc(&mut out, file);
-        }
+    }
+    let scripts = module.js.iter().enumerate().filter(|(fi, _)| index.js_loaded(mi, *fi));
+    for (_, file) in scripts.filter(|(_, f)| !f.in_tests()) {
+        private_rpc(&mut out, file);
     }
     let scope = index.scope(mi);
     // Odoo's own rows are needed to tell that none grants, so without `base` nothing does.
@@ -313,7 +314,7 @@ pub fn check_module<'m>(index: &Index<'m>, mi: usize, series: Option<Series>) ->
             ctx.es_module_file(&mut out, fi, file);
         }
         for (fi, file) in legacy_scripts(index, mi, series) {
-            ctx.legacy_requires(&mut out, fi, file);
+            ctx.legacy_script(&mut out, fi, file);
         }
         ctx.templates(&mut out, mi);
     }
@@ -791,6 +792,17 @@ fn es_module(series: Option<Series>, annotation: Annotation) -> bool {
 /// series it is not assumed to.
 fn reads_requires(series: Option<Series>) -> bool {
     series.is_some_and(|s| s < LISTED_DEPS)
+}
+
+/// The first series whose `patch` takes the extension second and binds `super`; it throws on a name
+/// there (17.0 `addons/web/static/src/core/utils/patch.js:71-74`). Before, from saas~14.5, it takes
+/// a name second and binds `this._super`. Without a name, 15.0 and 16.0 throw (16.0 `:17-19`) and
+/// saas~14.5 applies nothing, as it iterates the missing third argument.
+const UNNAMED_PATCH: Series = Series { major: 17, minor: 0 };
+
+/// Whether the series runs a patch of this form. A module of unknown series may run either.
+fn patch_form(series: Option<Series>, named: bool) -> bool {
+    series.is_none_or(|s| (s >= UNNAMED_PATCH) != named)
 }
 
 /// The module's scripts that a bundle loads as ES modules, all of them under `static/src` or
@@ -2102,6 +2114,17 @@ impl<'m> Ctx<'_, 'm> {
         }
     }
 
+    /// The dependencies of a script Odoo runs as it is, and outside tests its RPC calls. Its patches
+    /// stay unchecked: its classes come through `require`, which `js_class` does not follow.
+    fn legacy_script(&self, out: &mut Out<'m>, fi: usize, file: &'m SourceFile<JsFacts>) {
+        self.legacy_requires(out, fi, file);
+        if !file.in_tests() {
+            for call in &file.facts.orm_calls {
+                self.orm_call(out, &file.path, call);
+            }
+        }
+    }
+
     /// OD601 and OD608 on the dependencies the loader waits for, as on an import: those listed, and
     /// before `LISTED_DEPS` the `require` calls of a define without a list. A relative one names no
     /// module the loader has.
@@ -2192,7 +2215,8 @@ impl<'m> Ctx<'_, 'm> {
             return;
         }
         let here = self.index.js_target(mi, fi);
-        for (pi, patch) in file.facts.patches.iter().enumerate() {
+        let patches = file.facts.patches.iter().enumerate();
+        for (pi, patch) in patches.filter(|(_, p)| patch_form(self.series, p.named)) {
             let Some((t, class)) = self.index.js_class(here, &patch.target, 0) else {
                 continue;
             };
@@ -2200,15 +2224,16 @@ impl<'m> Ctx<'_, 'm> {
                 continue;
             };
             for read in patch.supers.iter().filter(|s| !members.contains(s.value.as_str())) {
-                out.push(
-                    &file.path,
-                    "OD602",
-                    read.pos,
-                    format!(
-                        "neither {} nor its parents have '{}', so super.{}() fails",
-                        class.name, read.value, read.value
-                    ),
+                let call = if patch.named {
+                    "this._super()".to_owned()
+                } else {
+                    format!("super.{}()", read.value)
+                };
+                let message = format!(
+                    "neither {} nor its parents have '{}', so {call} fails",
+                    class.name, read.value
                 );
+                out.push(&file.path, "OD602", read.pos, message);
             }
         }
     }
@@ -6574,7 +6599,7 @@ mod tests {
 
     use super::{
         MagicEra, applies, bundle_list, cache_global, callable_attr, csv_label, derived_label, es_module,
-        fetches_own_view, field_name, has_last_update, hoot_adds, magic_era, no_access_message, page_miss,
+        fetches_own_view, field_name, has_last_update, hoot_adds, magic_era, no_access_message, page_miss, patch_form,
         public_write_message, reads_model_access, reads_requires, shadowed_member, static_only, stores_parent_path,
         tuple_checked, tuple_listed, unknown_dependency, unmatched_asset, warns_on_labels,
     };
@@ -6607,6 +6632,16 @@ mod tests {
         assert!(es_module(at("17.0"), Annotation::None));
         assert!(!es_module(at("17.0"), Annotation::Ignore));
         assert!(es_module(None, Annotation::Module));
+    }
+
+    #[test]
+    fn a_patch_is_named_before_17_0() {
+        let at = |s: &str| Series::parse(s);
+        assert!(patch_form(at("16.0"), true));
+        assert!(!patch_form(at("16.0"), false));
+        assert!(!patch_form(at("17.0"), true));
+        assert!(patch_form(at("17.0"), false));
+        assert!(patch_form(None, true) && patch_form(None, false));
     }
 
     #[test]

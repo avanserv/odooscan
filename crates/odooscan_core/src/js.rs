@@ -1,13 +1,15 @@
 use oxc_allocator::Allocator;
 use oxc_ast::ast::{
     Argument, ArrayExpressionElement, AssignmentExpression, AssignmentTarget, CallExpression, Class, ClassElement,
-    Expression, ObjectExpression, ObjectPropertyKind, Program, Statement, StringLiteral,
+    Expression, Function, ObjectExpression, ObjectPropertyKind, Program, Statement, StaticMemberExpression,
+    StringLiteral,
 };
 use oxc_ast_visit::Visit;
 use oxc_ast_visit::walk::{walk_assignment_expression, walk_call_expression, walk_class};
 use oxc_parser::Parser;
 use oxc_span::SourceType;
 use oxc_syntax::module_record::{ExportExportName, ExportImportName, ImportImportName, ModuleRecord};
+use oxc_syntax::scope::ScopeFlags;
 
 use crate::facts::{
     Annotation, Heritage, JsAlias, JsClass, JsDefine, JsFacts, JsName, JsPatch, Lines, OrmCall, Pos, Spanned,
@@ -279,7 +281,7 @@ impl<'a> Visit<'a> for Collector<'_> {
         if let Some(patch) = prototype_patch(call, self.lines) {
             self.facts.patches.push(patch);
         }
-        if let Some(orm) = orm_call(call, self.lines) {
+        if let Some(orm) = orm_call(call, self.lines).or_else(|| legacy_rpc(call, self.lines)) {
             self.facts.orm_calls.push(orm);
         }
         self.facts.view_kinds.extend(view_kind(call));
@@ -298,15 +300,23 @@ fn prototype_patch(call: &CallExpression, lines: &Lines) -> Option<JsPatch> {
         },
         _ => return None,
     };
-    let Argument::ObjectExpression(extension) = call.arguments.get(1)? else {
-        return None;
+    let (extension, named) = match (call.arguments.get(1)?, call.arguments.get(2)) {
+        (Argument::ObjectExpression(extension), _) => (extension, false),
+        (_, Some(Argument::ObjectExpression(extension))) => (extension, true),
+        _ => return None,
     };
-    let mut supers = Supers { lines, found: vec![] };
-    supers.visit_object_expression(extension);
+    let supers = if named {
+        this_supers(extension, lines)
+    } else {
+        let mut supers = Supers { lines, found: vec![] };
+        supers.visit_object_expression(extension);
+        supers.found
+    };
     Some(JsPatch {
         target,
         members: members(extension),
-        supers: supers.found,
+        supers,
+        named,
     })
 }
 
@@ -327,6 +337,51 @@ fn orm_call(call: &CallExpression, lines: &Lines) -> Option<OrmCall> {
         method: if method == "call" { literal(1) } else { None },
     };
     (call.model.is_some() || call.method.is_some()).then_some(call)
+}
+
+/// `x._rpc({...})` or `rpc.query({...})` given the `model` and `method` that `buildQuery` routes to
+/// `call_kw` (14.0 `addons/web/static/src/js/core/rpc.js:16-19`, `:37-45`, and `service_mixins.js:146`
+/// beside it).
+fn legacy_rpc(call: &CallExpression, lines: &Lines) -> Option<OrmCall> {
+    let Argument::ObjectExpression(options) = call.arguments.first().filter(|_| is_legacy_rpc(&call.callee))? else {
+        return None;
+    };
+    let (mut model, mut method) = (None, None);
+    for property in &options.properties {
+        let (key, value) = option(property, lines)?;
+        match key.as_str() {
+            "model" => model = Some(value),
+            "method" => method = Some(value),
+            _ => {}
+        }
+    }
+    let call = OrmCall {
+        model: model?,
+        method: method?,
+    };
+    (call.model.is_some() || call.method.is_some()).then_some(call)
+}
+
+fn is_legacy_rpc(callee: &Expression) -> bool {
+    let Expression::StaticMemberExpression(callee) = callee else {
+        return false;
+    };
+    callee.property.name == "_rpc"
+        || (callee.property.name == "query" && matches!(&callee.object, Expression::Identifier(i) if i.name == "rpc"))
+}
+
+/// A property's name and its value when a literal, or None for a spread, a computed key or a
+/// `route`, any of which may send the call elsewhere.
+fn option(property: &ObjectPropertyKind, lines: &Lines) -> Option<(String, Option<Spanned<String>>)> {
+    let ObjectPropertyKind::ObjectProperty(p) = property else {
+        return None;
+    };
+    let value = match &p.value {
+        Expression::StringLiteral(s) => literal(s, lines),
+        _ => None,
+    };
+    let key = p.key.static_name()?.as_str()?.to_owned();
+    (key != "route").then_some((key, value))
 }
 
 /// The kind a `view_registry.add("kind", View)` call registers.
@@ -408,6 +463,67 @@ impl<'a> Visit<'a> for Supers<'_> {
         }
         walk_call_expression(self, call);
     }
+}
+
+/// The `this._super` calls of each method or accessor of a named patch, as the member's name: the
+/// patch binds `this._super` to the member it replaces only when the target or its prototype chain
+/// has one (16.0 `addons/web/static/src/core/utils/patch.js:37-56`, `:79-107`).
+fn this_supers(extension: &ObjectExpression, lines: &Lines) -> Vec<Spanned<String>> {
+    let mut found = vec![];
+    for property in &extension.properties {
+        if let ObjectPropertyKind::ObjectProperty(p) = property
+            && let Expression::FunctionExpression(function) = &p.value
+            && let Some(name) = p.key.static_name()
+            && let Some(name) = name.as_str()
+            && let Some(body) = &function.body
+        {
+            let mut calls = ThisSupers {
+                name,
+                lines,
+                found: &mut found,
+            };
+            calls.visit_function_body(body);
+        }
+    }
+    found
+}
+
+/// `this._super(...)`, `this._super.apply(...)` and `this._super.call(...)`. An arrow function keeps
+/// the method's `this`; a nested function or class has its own.
+struct ThisSupers<'f> {
+    name: &'f str,
+    lines: &'f Lines,
+    found: &'f mut Vec<Spanned<String>>,
+}
+
+impl<'a> Visit<'a> for ThisSupers<'_> {
+    fn visit_function(&mut self, _: &Function<'a>, _: ScopeFlags) {}
+
+    fn visit_class(&mut self, _: &Class<'a>) {}
+
+    fn visit_call_expression(&mut self, call: &CallExpression<'a>) {
+        if let Expression::StaticMemberExpression(member) = &call.callee {
+            let target = match &member.object {
+                Expression::StaticMemberExpression(inner)
+                    if ["apply", "call"].contains(&member.property.name.as_str()) =>
+                {
+                    inner
+                }
+                _ => member,
+            };
+            if this_super(target) {
+                self.found.push(Spanned {
+                    value: self.name.to_owned(),
+                    pos: self.lines.pos(target.property.span.start as usize),
+                });
+            }
+        }
+        walk_call_expression(self, call);
+    }
+}
+
+fn this_super(member: &StaticMemberExpression) -> bool {
+    member.property.name == "_super" && matches!(member.object, Expression::ThisExpression(_))
 }
 
 /// The top-level `odoo.define()` calls. Odoo takes a leading string as the name, a list after it as
@@ -641,6 +757,90 @@ this.rpc.call("res.partner", "x");
                 "53:res.company:read",
                 "37::write",
                 "16:res.partner:"
+            ]
+        );
+    }
+
+    #[test]
+    fn reads_legacy_rpc_calls_routed_to_call_kw() {
+        let facts = analyze(
+            r#"this._rpc({ model: "res.partner", method: "read", args: [] });
+self._rpc({"model": "res.users", "method": "_private"});
+rpc.query({ model: this.modelName, method: "_hidden" });
+widget.parent._rpc({ model: "res.company", method: name });
+this._rpc({ route: "/web/x", model: "res.partner", method: "read" });
+this._rpc({ ...options, model: "res.partner", method: "read" });
+this._rpc({ [key]: "x", model: "res.partner", method: "read" });
+this._rpc({ model: "res.partner", args: [] });
+this._rpc({ model, method });
+this._rpc("res.partner", "read");
+other.query({ model: "res.partner", method: "read" });
+_rpc({ model: "res.partner", method: "read" });
+"#,
+        );
+        let calls: Vec<_> = facts
+            .orm_calls
+            .iter()
+            .map(|c| {
+                let show = |s: &Option<Spanned<String>>| {
+                    s.as_ref()
+                        .map_or(String::new(), |s| format!("{}@{}:{}", s.value, s.pos.line, s.pos.col))
+                };
+                format!("{}/{}", show(&c.model), show(&c.method))
+            })
+            .collect();
+        assert_eq!(
+            calls,
+            [
+                "res.partner@1:21/read@1:44",
+                "res.users@2:22/_private@2:45",
+                "/_hidden@3:45",
+                "res.company@4:30/",
+            ]
+        );
+    }
+
+    #[test]
+    fn reads_the_this_super_calls_of_a_named_patch() {
+        let facts = analyze(
+            r#"patch(A.prototype, "mod.A", {
+    setup() { this._super(...arguments); },
+    save: function () { return this._super.apply(this, arguments); },
+    get value() { return this._super.call(this); },
+    load() {
+        const run = () => this._super();
+        function nested() { return this._super(); }
+        class Inner { m() { this._super(); } }
+        return this.other._super();
+    },
+    arrow: () => this._super(),
+    plain() { return super.plain(); },
+});
+patch(A.prototype, { m() { this._super(); return super.m(); } });
+patch(A.prototype, name);
+"#,
+        );
+        let shown: Vec<_> = facts
+            .patches
+            .iter()
+            .map(|p| {
+                let supers: Vec<_> = p
+                    .supers
+                    .iter()
+                    .map(|s| format!("{}@{}:{}", s.value, s.pos.line, s.pos.col))
+                    .collect();
+                (p.named, p.members.join(","), supers.join(" "))
+            })
+            .collect();
+        assert_eq!(
+            shown,
+            [
+                (
+                    true,
+                    "setup,save,value,load,arrow,plain".to_owned(),
+                    "setup@2:20 save@3:37 value@4:31 load@6:32".to_owned()
+                ),
+                (false, "m".to_owned(), "m@14:56".to_owned()),
             ]
         );
     }
