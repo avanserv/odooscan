@@ -9,8 +9,8 @@ use crate::facts::{AccessRow, Perms};
 use crate::index::{Index, Scope, full_id, loaded_data};
 use crate::series::Series;
 
-/// The first series with `base.group_everyone`, which every user is in: saas~19.1 defines it in
-/// `odoo/addons/base/security/base_groups.xml` (`:92` on 20.0), 19.0 does not.
+/// The first series with `base.group_everyone`, which every user is in: saas~19.1 defines it (20.0
+/// `odoo/addons/base/security/base_groups.xml:92`), 19.0 does not.
 const GROUP_EVERYONE: Series = Series { major: 19, minor: 1 };
 
 /// The groups of public and portal users in every series, as full XML ids.

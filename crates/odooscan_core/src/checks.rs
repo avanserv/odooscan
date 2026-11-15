@@ -30,14 +30,15 @@ use crate::series::{self, Series};
 use crate::xml::{LOCATOR, QWEB, UNKNOWN_CONTEXT};
 use crate::{domain, flows, manifest, modifier, module_state, python};
 
-/// The directory of IoT box drivers and interfaces. The `iot` module zips `iot_handlers/*/*` of
-/// every installed module (18.0 enterprise `iot/controllers/main.py:61-65`) and the box loads each
-/// file by its path (18.0 `hw_drivers/tools/helpers.py:532-547`), so no import reaches them.
+/// The directory of IoT box drivers and interfaces. The box downloads a zip of the
+/// `iot_handlers/*/*` of every installed module from the server's `iot` module (18.0
+/// `addons/hw_drivers/tools/helpers.py:503-522`) and loads each file by its path (`:532-547`), so
+/// no import reaches them.
 const IOT_DIR: &str = "iot_handlers";
 
 /// The first series that serves a route method whose override drops `@route()`, decorating the
 /// override itself and logging a warning (347a3ccf763c, 18.0 `odoo/http.py:843-845`). Before it
-/// Odoo skips the method (15.0 `odoo/http.py:977`, 9.0 `openerp/http.py:1007`).
+/// Odoo skips the method, as far back as 9.0.
 const ROUTE_REDECORATED: Series = Series { major: 15, minor: 3 };
 
 /// The decorators that leave a hook method to run only by its name. `api.onchange` runs it by the
@@ -70,8 +71,8 @@ const ACTIVE_NAMES_UNTIL: Series = Series { major: 17, minor: 1 };
 const VIEW_FIELD_KINDS: &[&str] = &["form", "tree", "kanban"];
 
 /// The one subview with fields its `<field>` elements do not list: Odoo checks a graph on those alone
-/// (`odoo/addons/base/models/ir_ui_view.py:1407` on 17.0), and any tag it does not nest (`:1473`) on
-/// the outer view.
+/// (18.0 `odoo/addons/base/models/ir_ui_view.py:1542-1548`), and any tag it does not nest
+/// (`:1614-1621`) on the outer view.
 const ATTRIBUTE_SUBVIEW: &str = "calendar";
 
 /// View types Odoo generates for any model. `activity` is not one: `ACTIVITY_IN_MAIL` says why.
@@ -92,34 +93,30 @@ const CALENDAR_STOPS: &[&str] = &[
     "x_planned_hours",
 ];
 
-/// 19.0 refuses to generate a calendar without a stop (`odoo/addons/base/models/ir_ui_view.py:2898`),
-/// saas~19.1 does not (`:2909`).
+/// 18.0 and 19.0 refuse to generate a calendar without a stop (18.0
+/// `odoo/addons/base/models/ir_ui_view.py:2575-2582`), saas~19.1 does not (20.0 `:2957-2958`).
 const CALENDAR_STOP_OPTIONAL: Series = Series { major: 19, minor: 1 };
 
 /// The first series that loads a record nested in a one2many field (`2b80f3e5f1be`). Below it the
-/// schema refuses the file (`odoo/tools/convert.py:797` on 15.0), so a row nested in `view_ids`
-/// gives the action no view.
+/// schema refuses the file, so a row nested in `view_ids` gives the action no view.
 const NESTED_RECORDS: Series = Series { major: 15, minor: 1 };
 
 /// The first series whose `activity` default comes with `mail` (`b2de618f9ff9`), so a model outside
-/// it has none (`odoo/addons/base/models/ir_ui_view.py:2711` on 18.0), and whose client searches
-/// `activity_ids` (`addons/mail/static/src/views/web/activity/activity_model.js:10` on 18.0). From
-/// saas~11.5 up to here `BaseModel` gives the default (`odoo/models.py:1292` on 12.0), and before
-/// saas~11.2 the client drops the type. saas~11.2 to 11.4 load it with no default
-/// (`addons/web/static/src/js/chrome/action_manager_act_window.js:304` on saas~11.3), which the
-/// rule leaves unreported.
+/// it has none (18.0 `odoo/addons/base/models/ir_ui_view.py:2711`), and whose client searches
+/// `activity_ids` (18.0 `addons/mail/static/src/views/web/activity/activity_model.js:10`). From
+/// saas~11.5 up to here `BaseModel` gives the default, and before saas~11.2 the client drops the
+/// type. saas~11.2 to 11.4 load it with no default, which the rule leaves unreported.
 const ACTIVITY_IN_MAIL: Series = Series { major: 12, minor: 4 };
 
-/// The first series whose client asks the server for each view by the kind the action lists
-/// (`addons/web/static/src/js/view_manager.js:135` on 10.0), which fails on a kind with no view
-/// (`odoo/models.py:1417`). On 9.0 the view class asks for its own `view_type`
-/// (`addons/web/static/src/js/framework/view.js:53`). `9.saas~9` to `9.saas~11` read as an unknown
-/// series, so they report as this series does.
+/// The first series whose client asks the server for each view by the kind the action lists, which
+/// fails on a kind with no view (18.0 `odoo/addons/base/models/ir_ui_view.py:2710-2713`). On 9.0 the
+/// view class asks for its own `view_type`. `9.saas~9` to `9.saas~11` read as an unknown series, so
+/// they report as this series does.
 const VIEWS_BY_ACTION_KIND: Series = Series { major: 10, minor: 0 };
 
-/// The first series that validates a record rule's domain when it writes one
-/// (`odoo/addons/base/models/ir_rule.py:63` on 18.0). 14.0 evaluates it only when a query applies the
-/// rule (`:149`), so only the last write can fail.
+/// The first series that validates a record rule's domain when it writes one (18.0
+/// `odoo/addons/base/models/ir_rule.py:63-72`). 14.0 evaluates it only when a query applies the rule,
+/// so only the last write can fail.
 const RULE_DOMAIN_VALIDATED: Series = Series { major: 15, minor: 0 };
 
 /// The first series that looks the fields of a view's domains and `group_by` up on their model
@@ -128,73 +125,71 @@ const RULE_DOMAIN_VALIDATED: Series = Series { major: 15, minor: 0 };
 const VIEW_DOMAIN_VALIDATED: Series = Series { major: 13, minor: 1 };
 
 /// The first series whose access check reads the rows of a transient model (`6d8688bb124d`; saas~13.1
-/// lets every user through, `odoo/addons/base/models/ir_model.py:1500`).
+/// lets every user through).
 const TRANSIENT_ACCESS: Series = Series { major: 13, minor: 2 };
 
 /// The first series that gives a child action the model of its parent as it creates the child
-/// (`45a5562fc41b`, `odoo/addons/base/models/ir_actions.py:645` on saas~18.2). `write` leaves the
-/// model alone (`:714` on 20.0), so this says nothing of a child linked after its creation.
+/// (`45a5562fc41b`; 20.0 `odoo/addons/base/models/ir_actions.py:696-700`). `write` leaves the model
+/// alone (`:714-717`), so this says nothing of a child linked after its creation.
 const CHILD_ACTION_MODEL: Series = Series { major: 18, minor: 2 };
 
-/// The first series whose server action defaults to `object_write`, where 10.0 defaults to `code`
-/// (`odoo/addons/base/ir/ir_actions.py:495`). `c56b74622141` changed it on saas-15, which no `Series`
-/// names.
+/// The first series whose server action defaults to `object_write` (18.0
+/// `odoo/addons/base/models/ir_actions.py:548`), where 10.0 defaults to `code`. `c56b74622141`
+/// changed it on saas-15, which no `Series` names.
 const OBJECT_WRITE_DEFAULT: Series = Series { major: 11, minor: 0 };
 
 /// The first series with a constraint that compiles the `code` of a server action on each write
-/// (`odoo/addons/base/ir/ir_actions.py:608-611` on 10.0). saas-12 adds it, which no `Series` names.
-/// 9.0 has none (`openerp/addons/base/ir/ir_actions.py:706-712`): only running the action compiles
-/// it (`:919`, reached at `:1086`).
+/// (18.0 `odoo/addons/base/models/ir_actions.py:772-777`, 20.0 `:962-967`). saas-12 adds it, which
+/// no `Series` names. 9.0 has none: only running the action compiles it.
 const CODE_CONSTRAINT: Series = Series { major: 10, minor: 0 };
 
-/// The first series whose cron has `code`, through its delegated server action
-/// (`odoo/addons/base/ir/ir_cron.py:50-52` on 11.0). saas-14 delegates first, which no `Series`
-/// names. Below it Odoo drops the field (`odoo/models.py:3876` on 10.0), so nothing compiles or runs.
+/// The first series whose cron has `code`, through its delegated server action (18.0
+/// `odoo/addons/base/models/ir_cron.py:68-70`, 20.0 `:108-110`). saas-14 delegates first, which no
+/// `Series` names. Below it Odoo drops the field, so nothing compiles or runs.
 const CRON_CODE: Series = Series { major: 11, minor: 0 };
 
-/// The first series whose `Registry` has no `__call__` (`e6f99537f3aa`; saas~18.4 keeps it at
-/// `odoo/orm/registry.py:311`), so calling `model.pool` fails.
+/// The first series whose `Registry` has no `__call__` (`e6f99537f3aa`; 18.0 has it at
+/// `odoo/modules/registry.py:236`, and saas~18.4 keeps it), so calling `model.pool` fails.
 const REGISTRY_UNCALLABLE: Series = Series { major: 19, minor: 0 };
 
-/// The first series without `ir.model.access`: `odoo/addons/base/__manifest__.py:81` loads
-/// `ir.access.csv` where saas~19.3 loads `ir.model.access.csv` (`:78`). The loader calls `env[model]`
-/// on the model of the file name (`odoo/tools/convert.py:776` on saas~19.4), so loading an
-/// `ir.model.access` row fails.
+/// The first series without `ir.model.access`: base loads `ir.access.csv` (20.0
+/// `odoo/addons/base/__manifest__.py:81`) where saas~19.3 loads `ir.model.access.csv`, as 18.0 does
+/// (`:75`). The loader calls `env[model]` on the model of the file name (20.0
+/// `odoo/tools/convert.py:739-740,771`), so loading an `ir.model.access` row fails.
 const IR_ACCESS: Series = Series { major: 19, minor: 4 };
 
 /// The first series without `ir.property` (`de302c2d3630`, in no saas-17 branch).
 const IR_PROPERTY_GONE: Series = Series { major: 18, minor: 0 };
 
 /// The first series whose loader skips a `name@fr` of a record or a CSV column, which the load of a
-/// language's terms reads as a translation (`b7f05277026a`; `odoo/tools/convert.py:396,704` on
-/// saas~18.2).
-/// saas~18.1 sends the name on to `create`, or the import refuses it.
+/// language's terms reads as a translation (`b7f05277026a`; 20.0 `odoo/tools/convert.py:415-416`,
+/// `:748-752`). saas~18.1 sends the name on to `create`, or the import refuses it.
 const DATA_TRANSLATIONS: Series = Series { major: 18, minor: 2 };
 
 /// The first series with `ir.actions.report`. Through 10.0 the model is `ir.actions.report.xml`, and
-/// a `render_html` replaces the template (`addons/report/models/report.py:138` on 10.0).
+/// a `render_html` replaces the template.
 const REPORT_MODEL: Series = Series { major: 11, minor: 0 };
 
 /// The first series that asserts a `model_field` as it sets the field up (`37d701c153fe`, in no saas
 /// branch). Before, only a run reads it.
 const MODEL_FIELD_ASSERTED: Series = Series { major: 20, minor: 0 };
 
-/// The first series whose import compares a Selection cell in any case
-/// (`odoo/addons/base/models/ir_fields.py:319` on saas~14.3). saas~14.2 compares it exactly (`:266`).
+/// The first series whose import compares a Selection cell in any case (18.0
+/// `odoo/addons/base/models/ir_fields.py:489`, 20.0 `:476`). saas~14.2 compares it exactly.
 const CSV_ANY_CASE: Series = Series { major: 14, minor: 3 };
 
 /// The first series that keeps a selection's values in `_selection`, empty for a tuple, so a write
-/// checks nothing (`odoo/fields.py:2763,2883` on saas~17.2). Before, a write reads the values from
-/// the field, tuple included (`:2865` on 17.0).
+/// checks nothing (18.0 `odoo/fields.py:2932-2940`, `:3052-3053`). Before, a write reads the values
+/// from the field, tuple included.
 const TUPLE_UNCHECKED: Series = Series { major: 17, minor: 2 };
 
-/// The first series whose `selection_add` takes a tuple as its base (`odoo/orm/fields_selection.py:99`
-/// on saas~18.1). Before, `odoo/fields.py:2932` on 18.0 leaves the tuple no values, so the
-/// `selection_add` fails.
+/// The first series whose `selection_add` takes a tuple as its base (20.0
+/// `odoo/orm/fields_selection.py:110`). Before, 18.0 `odoo/fields.py:2932` leaves the tuple no
+/// values, so the `selection_add` fails (`:2948-2949`).
 const TUPLE_LISTED: Series = Series { major: 18, minor: 1 };
 
 /// The first series that reads a lone definition's tuple into `_selection`, so a write checks it
-/// (`odoo/orm/fields_selection.py:101` on saas~19.3). From `TUPLE_LISTED`, `:95` on saas~19.2 returns
+/// (20.0 `odoo/orm/fields_selection.py:102-113`, `:180`). From `TUPLE_LISTED`, saas~19.2 returns
 /// before that for a lone definition: only several definitions or a field from another model get
 /// there, which `listed_values` cannot tell apart from a lone one.
 const TUPLE_CHECKED: Series = Series { major: 19, minor: 3 };
@@ -440,8 +435,8 @@ fn refusal_message(method: &str, module: &str, parent: &Signature, refusal: &Ref
 /// OD230: whether Odoo could run `name` as the hook its prefix says, by what it passes after the
 /// records. A field's search method gets the operator and the value (18.0 `odoo/fields.py:1504`), a
 /// compute, an inverse and an `@api.onchange` method nothing (`:1500`, 20.0
-/// `odoo/orm/models.py:4453`), and a view's `on_change` attribute whatever it spells (10.0
-/// `odoo/models.py:5460`). A `def` no such call fits is a helper that only shares the prefix.
+/// `odoo/orm/models.py:4453`), and through 11.0 a view's `on_change` attribute whatever it spells.
+/// A `def` no such call fits is a helper that only shares the prefix.
 fn runs_as_hook(name: &str, signature: Option<&Signature>) -> bool {
     let Some(prefix) = HOOK_PREFIXES.iter().find(|p| name.starts_with(**p)) else {
         return false;
@@ -1029,7 +1024,7 @@ const MEMBER_SERIES: &[(&str, &[&str])] = &[
 /// The names Odoo's cache module binds at run time, by the range of series that has them, read on
 /// every series from 10.0 to saas~19.4, so no row reaches before 10.0. Before 19.0 Odoo evaluates
 /// an `ormcache` key with the globals of that module (18.0 `odoo/tools/cache.py:90,148`), so a key
-/// may read them; from 19.0 it gives the key only `method` (19.0 `odoo/tools/cache.py:136-138`).
+/// may read them; from 19.0 it gives the key only `method` (20.0 `odoo/orm/cache.py:136-138`).
 const CACHE_KEY_GLOBALS: &[(&str, &[&str])] = &[
     (
         ">=10.0,<19.0",
@@ -1642,9 +1637,9 @@ const REPEATED_ID_HINT: &str =
     "remove the copy when the two say the same thing, or rename one when both are meant to exist";
 
 /// The name a `<report>` and a `<record>` of the tag's model share. The parser, blind to the series,
-/// calls the tag's model `ir.actions.report`, but through 10.0 the tag writes `ir.actions.report.xml`
-/// (`odoo/tools/convert.py:323` on 10.0). No later series has that model, so a module of an unknown
-/// series that names it counts as one through 10.0.
+/// calls the tag's model `ir.actions.report`, but through 10.0 the tag writes `ir.actions.report.xml`.
+/// No later series has that model, so a module of an unknown series that names it counts as one
+/// through 10.0.
 fn report_tag_model(model: &str, series: Option<Series>) -> &str {
     if model == "ir.actions.report.xml" && series.is_none_or(|s| s < REPORT_MODEL) {
         "ir.actions.report"
@@ -4350,10 +4345,9 @@ fn registry_message(what: &str, name: &str, status: Status) -> Option<String> {
 }
 
 /// Whether `name` is the `value` that `create` and `write` of `ir.property` pop into the column of
-/// the property's type (`odoo/addons/base/models/ir_property.py:79,118,139` on 17.0), where the XML
-/// loader sends a record. An import refuses the column before `create` (`odoo/models.py:1353` on
-/// 17.0), and `ir.property` in the index of an unknown series means a base that pops it. A name
-/// with a language stays apart: nothing pops `value@fr`.
+/// the property's type through 17.0, where the XML loader sends a record. An import refuses the
+/// column before `create`, and `ir.property` in the index of an unknown series means a base that
+/// pops it. A name with a language stays apart: nothing pops `value@fr`.
 fn popped_value(record: &RecordFact, name: &str, series: Option<Series>) -> bool {
     !record.csv && record.model.value == "ir.property" && name == "value" && series.is_none_or(|s| s < IR_PROPERTY_GONE)
 }
@@ -4373,7 +4367,7 @@ fn subview_steps(path: &[String]) -> impl Iterator<Item = &String> {
 }
 
 /// Whether the subview the name lands on loads that field itself. Odoo checks each subview apart
-/// (`odoo/addons/base/models/ir_ui_view.py:1473` on 17.0), so this counts only on its own level. The
+/// (18.0 `odoo/addons/base/models/ir_ui_view.py:1614-1621`), so this counts only on its own level. The
 /// subview the arch shows there decides, or for a calendar an xpath only names, the calendars of the
 /// tree. A spec that reaches in unnamed may land in any subview of the level, so all must load it.
 fn takes_attribute_field(tree: &ViewTree, n: &ModifierName) -> bool {
@@ -4410,7 +4404,7 @@ const CREATE_HOOKS: [&str; 7] = [
     "_load_records_create",
 ];
 
-/// The first series whose ORM ignores `_defaults` (10.0; 9.0 merges it in `openerp/models.py:3012`).
+/// The first series whose ORM ignores `_defaults` (10.0; 9.0 still reads it).
 const DEFAULTS_GONE: Series = Series { major: 10, minor: 0 };
 
 /// Where the module may have made a record before its data asks for it.
@@ -4534,26 +4528,27 @@ const BASE_MAGIC: Series = Series { major: 18, minor: 1 };
 const REFUSED_DELEGATION: Series = Series { major: 18, minor: 3 };
 
 /// The first series that builds no company domain for a `check_company` field of a model without
-/// a company field, logging that it cannot (`18.0`, `odoo/fields.py:3177`; `saas~17.4` builds it for
-/// every model, `odoo/fields.py:3030`).
+/// a company field, logging that it cannot (18.0 `odoo/fields.py:3177-3183`, 20.0
+/// `odoo/orm/fields_relational.py:141-147`; `saas~17.4` builds it for every model).
 const COMPANY_FIELD_DOMAIN: Series = Series { major: 18, minor: 0 };
 
-/// The first series whose name search reads `_rec_names_search` (`saas~15.3`, `odoo/models.py:1924`;
-/// `saas~15.2` knows `_rec_name` alone, `odoo/models.py:1932`).
+/// The first series whose name search reads `_rec_names_search` (`saas~15.3`; 18.0
+/// `odoo/models.py:1832`, 20.0 `odoo/orm/models.py:1530`). `saas~15.2` knows `_rec_name` alone.
 const REC_NAMES_SEARCH: Series = Series { major: 15, minor: 3 };
 
 /// The first series that moves the acceptance of `tracking` to `mail.track.mixin`, so an abstract
-/// model loses it (`saas~19.3`, `addons/mail/models/mail_track_mixin.py:34`; `saas~19.2` still
-/// accepts it, `addons/mail/models/models.py:28`). No lower bound applies: `mail` accepts it from
-/// `saas~13.4`, before OD219 starts, in `addons/mail/models/ir_model.py:11` until `saas~14.3`.
+/// model loses it (`saas~19.3`, 20.0 `addons/mail/models/mail_track_mixin.py:39-41`; `saas~19.2`
+/// still accepts it, as 18.0 does in `addons/mail/models/models.py:19-24`). No lower bound applies:
+/// `mail` accepts it from `saas~13.4`, before OD219 starts.
 const MIXIN_TRACKING: Series = Series { major: 19, minor: 3 };
 
-/// The first series that keeps a hierarchy in `parent_path` (`saas~11.3`, `odoo/models.py:2308`;
-/// `saas~11.2` asks for `parent_left` and `parent_right`, `odoo/models.py:2236`).
+/// The first series that keeps a hierarchy in `parent_path` (`saas~11.3`; 18.0
+/// `odoo/models.py:3514-3519`, 20.0 `odoo/orm/models.py:2592-2597`). `saas~11.2` asks for
+/// `parent_left` and `parent_right`.
 const PARENT_PATH: Series = Series { major: 11, minor: 3 };
 
-/// The first series that warns of a repeated label as it reflects a model (`saas~11.2`,
-/// `odoo/addons/base/models/ir_model.py:807`; `saas~11.1` says nothing).
+/// The first series that warns of a repeated label as it reflects a model (`saas~11.2`; 18.0
+/// `odoo/addons/base/models/ir_model.py:1224`, 20.0 `:1376`). `saas~11.1` says nothing.
 const LABEL_WARNING: Series = Series { major: 11, minor: 2 };
 
 /// An `_inherits` entry of a class: its module, the class, the parent model and the field.

@@ -11,8 +11,8 @@ use crate::series::Series;
 use crate::xml::{PERM_FIELDS, literal, operation_perms, rule_domain_field};
 
 /// The first series that reads a data CSV from an `io.StringIO`, which splits lines at LF alone
-/// (`18.0`, 18.0 `odoo/tools/convert.py:683`). Below, from 11.0, a `codecs` reader splits them as
-/// `str.splitlines` does (17.0 `odoo/tools/convert.py:700`, `odoo/tools/pycompat.py:7,14`).
+/// (18.0 `odoo/tools/convert.py:683`, 20.0 `:741`). Below, from 11.0, a `codecs` reader splits them
+/// as `str.splitlines` does.
 const STRING_IO: Series = Series { major: 18, minor: 0 };
 
 /// The most characters Python's `csv` reads into one cell, `csv.field_size_limit()` by default.
@@ -208,9 +208,10 @@ fn database_id<'r>(row: &'r csv::StringRecord, columns: &[(&str, bool)], field: 
 }
 
 /// Odoo's import takes these as true, `0`, `false`, `no` and an empty cell as false, with their
-/// translations in the installed languages (`ir_fields.py`, `_str_to_boolean`). From saas~14.3
-/// it refuses any other word, which aborts the file. Below, that word loads as true with an
-/// `ImportWarning`, which `truthy` reads as false.
+/// translations in the installed languages (`_str_to_boolean`, 18.0
+/// `odoo/addons/base/models/ir_fields.py:319-337`). From saas~14.3 it refuses any other word, which
+/// aborts the file. Below, that word loads as true with an `ImportWarning`, which `truthy` reads as
+/// false.
 fn truthy(cell: &str) -> bool {
     ["1", "true", "yes"].iter().any(|t| cell.trim().eq_ignore_ascii_case(t))
 }

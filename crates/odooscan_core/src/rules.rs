@@ -81,17 +81,17 @@ pub const SUPERSEDED: &[(&str, &str)] = &[
 ];
 
 /// Severities that replace a rule's own from some series on, as (code, series range, severity).
-/// From saas~19.4, `odoo/addons/base/__manifest__.py:81` loads `ir.access.csv` where saas~19.3
-/// loads `ir.model.access.csv` (`:78`). An `ir.access` row grants only through its group, and one
-/// with no group restricts every user (`odoo/addons/base/models/ir_access.py:350` on saas~19.4),
-/// so a model meant for the superuser alone has no row that grants. From saas~18.3, Odoo refuses a
-/// model whose `_inherits` field is not required with ondelete 'cascade' or 'restrict' instead of
-/// fixing it. From saas~16.4, a `check_company` field gets the domain its comodel's
-/// `_check_company_domain` gives, which by default names a `company_id` the comodel may lack.
-/// saas~19.1 drops `t-raw` from QWeb's directives (`odoo/addons/base/models/ir_qweb.py:1681`), so
-/// the server logs it as unknown and renders nothing for it. From saas~18.1 a kanban arch without a
-/// `card` template fails in the browser (`addons/web/static/src/views/kanban/kanban_arch_parser.js:136`).
-/// From saas~15.3 Odoo serves an override that drops `@route()` as if it had kept it.
+/// From saas~19.4 base loads `ir.access.csv` (20.0 `odoo/addons/base/__manifest__.py:81`) where
+/// saas~19.3, as 18.0 (`:75`), loads `ir.model.access.csv`. An `ir.access` row with no group
+/// restricts every user (20.0 `odoo/addons/base/models/ir_access.py:128-131`), so a model meant for
+/// the superuser alone has no row that grants. From saas~18.3, Odoo refuses a model whose
+/// `_inherits` field is not required with ondelete 'cascade' or 'restrict' instead of fixing it.
+/// From saas~16.4, a `check_company` field gets the domain its comodel's `_check_company_domain`
+/// gives, which by default names a `company_id` the comodel may lack. saas~19.1 drops `t-raw` from
+/// QWeb's directives (20.0 `odoo/addons/base/models/ir_qweb.py:1752`, 18.0 `:1304`), so the server
+/// logs it as unknown and renders nothing. From saas~18.1 a kanban arch without a `card` template
+/// fails in the browser (20.0 `addons/web/static/src/views/card/card_arch_parser.js:48-51`). From
+/// saas~15.3 Odoo serves an override that drops `@route()` as if it had kept it.
 const SEVERITY_BY_SERIES: &[(&str, &str, Severity)] = &[
     ("OD401", ">=saas~19.4", Severity::Info),
     ("OD232", ">=saas~15.3", Severity::Info),
@@ -163,11 +163,11 @@ rules! {
     "OD114" "depends-on-id" Correctness Error None, false, "@api.depends names the field id, which Odoo refuses.";
     "OD115" "dotted-onchange-constrains" Correctness Warning None, false, "@api.onchange or @api.constrains names a dotted path, which Odoo ignores.";
     "OD116" "field-shadows-model-member" Correctness Error None, false, "A field is named like a method or an attribute every model has.";
-    // saas~15.2 warns (`odoo/api.py:404`), saas~15.1 does not (`odoo/api.py:397`); saas~18.2 batches such a create
-    // (`odoo/orm/decorators.py:286`), saas~18.1 does not (`odoo/orm/decorators.py:266`).
+    // saas~15.2 warns (18.0 `odoo/api.py:430-431`, `:484-487`), saas~15.1 does not; saas~18.2 batches such
+    // a create (20.0 `odoo/orm/decorators.py:283-284`), saas~18.1 does not.
     "OD117" "create-not-batched" Deprecation Warning Some(">=saas~15.2,<saas~18.2"), false, "create() is decorated with @api.model, so Odoo calls it once per record.";
-    // saas~18.2 hands such a create a list (`odoo/orm/decorators.py:286`), saas~18.1 one dict at a time
-    // (`odoo/orm/decorators.py:266`).
+    // saas~18.2 hands such a create a list (20.0 `odoo/orm/decorators.py:283-284`), saas~18.1 one dict at a
+    // time, as 18.0 does (`odoo/api.py:468-474`).
     "OD118" "create-reads-dict" Correctness Error Some(">=saas~18.2"), false, "create() under @api.model reads its argument as one dict, but receives a list of them.";
     "OD119" "override-drops-result" Correctness Error None, false, "A create(), write() or copy() override calls super() but returns nothing.";
     "OD120" "ormcache-unknown-name" Correctness Error None, false, "An ormcache key names something that is not a parameter of the method.";
@@ -202,14 +202,15 @@ rules! {
     "OD216" "selection-add-without-ondelete" Correctness Error Some(">=14.0"), true, "selection_add leaves a value of a required Selection with ondelete 'set null'.";
     "OD217" "parent-store-without-path" Correctness Error None, true, "A model sets _parent_store without an indexed parent_path field.";
     "OD218" "delegation-field-not-required" Correctness Warning None, true, "A field that delegates to a parent model is not required with ondelete cascade or restrict.";
-    // 14.0 validates the merged attributes and warns (`odoo/fields.py:381`, 231bdca3f26d). saas~13.5 validates
-    // `self.args` (`odoo/fields.py:360`), which a registry field built by `field.new()` lacks (`odoo/models.py:2750`),
-    // so it logs nothing.
+    // 14.0 validates the merged attributes and warns (231bdca3f26d; 18.0 `odoo/fields.py:488-493`, `:525-533`).
+    // saas~13.5 validates `self.args`, which a registry field built by `field.new()` lacks, so it logs nothing.
     "OD219" "tracking-without-mail-thread" Correctness Warning Some(">=14.0"), true, "A field sets tracking on a model that does not inherit mail.thread, which Odoo ignores.";
     "OD220" "duplicate-field-label" Correctness Warning None, true, "Two fields of a model have the same label.";
-    // saas~14.4 warns (`odoo/fields.py:713`), saas~14.3 sets `recursive` without a word (`odoo/fields.py:645`).
+    // saas~14.4 warns (18.0 `odoo/fields.py:821-823`, 20.0 `odoo/orm/fields.py:954-956`), saas~14.3 sets
+    // `recursive` without a word.
     "OD221" "self-dependency-not-recursive" Correctness Warning Some(">=saas~14.4"), true, "A computed field depends on itself through other records without recursive=True.";
-    // saas~12.5 introduces `check_company` (`odoo/fields.py:2217`), saas~12.4 has no such attribute.
+    // saas~12.5 introduces `check_company` (18.0 `odoo/fields.py:3120`, 20.0 `odoo/orm/fields_relational.py:39`),
+    // saas~12.4 has no such attribute.
     "OD222" "check-company-without-company" Correctness Warning Some(">=saas~12.5"), true, "A field sets check_company to a comodel without company_id.";
     "OD223" "compute-leaves-field-unassigned" Correctness Error Some(">=saas~13.3"), true, "A compute method leaves a non-stored readonly field unassigned on some records.";
     "OD224" "sql-unknown-column" Correctness Error None, true, "A literal SQL query names a column its model's table does not have.";
@@ -217,18 +218,18 @@ rules! {
     "OD226" "sql-view-not-created" Correctness Error None, true, "A model sets _auto = False, and nothing creates its SQL view.";
     "OD227" "sql-definition-unknown-column" Correctness Error None, true, "An SQL constraint or index names a column its model's table does not have.";
     "OD228" "delegate-without-ondelete" Correctness Error Some(">=saas~14.4,<saas~18.3"), true, "A delegate=True Many2one has no ondelete, so Odoo fails when it sets up the registry.";
-    // saas~12.4's metaclass wraps every method in `api.guess` (`odoo/api.py:112`, `:666`), which adapts
-    // old-style calls; saas~12.5's has no such wrapper (`odoo/api.py:93`-`:108`).
+    // saas~12.4's metaclass wraps every method in `api.guess`, which adapts old-style calls; from saas~12.5
+    // it only passes decorators on (18.0 `odoo/api.py:121-131`).
     "OD229" "override-signature-mismatch" Correctness Error Some(">=saas~12.5"), true, "An override refuses a call that the method it overrides takes.";
-    // Odoo runs these by the name a field option gives (18.0 `odoo/fields.py:95`-`:110`), by
-    // `@api.onchange` on the method itself (18.0 `odoo/models.py:944`-`:976`), or through 11.0 by a
-    // view's `on_change` attribute (10.0 `odoo/models.py:5424`, `:5460`).
+    // Odoo runs these by the name a field option gives (18.0 `odoo/fields.py:95-115`), by
+    // `@api.onchange` on the method itself (18.0 `odoo/models.py:944-976`), or through 11.0 by a
+    // view's `on_change` attribute.
     "OD230" "orphan-hook-method" Correctness Info None, true, "A compute, inverse, search or onchange method of a model extension is named nowhere, so Odoo never runs it.";
     // Odoo builds one controller per class with `Controller` among its own bases (18.0 `odoo/http.py:676-684`)
     // and adds each of their URLs to one map (18.0 `odoo/addons/base/models/ir_http.py:374-381`).
     "OD231" "route-path-shadowed" Correctness Warning None, true, "Two controllers declare the same route path, so one hides the other.";
-    // Through saas~15.2 Odoo skips a method whose override is not decorated (15.0 `odoo/http.py:977`); saas~15.3
-    // decorates it and logs a warning (347a3ccf763c, 18.0 `odoo/http.py:843-845`).
+    // Through saas~15.2 Odoo skips a method whose override is not decorated; saas~15.3 decorates it and logs a
+    // warning (347a3ccf763c, 18.0 `odoo/http.py:843-845`).
     "OD232" "route-override-undecorated" Correctness Error None, true, "An override of a route method has no @route(), so Odoo drops the route or, from saas~15.3, warns.";
     "OD301" "unresolved-xmlid" Correctness Error None, true, "The XML id is not defined by its module.";
     "OD302" "xmlid-not-in-depends" Correctness Error None, true, "The XML id comes from a module missing from depends.";
@@ -247,11 +248,12 @@ rules! {
     "OD312" "unknown-button-method" Correctness Error None, true, "A button calls a method its model does not have.";
     "OD313" "private-button-method" Correctness Error None, true, "A button calls a private method, which Odoo refuses.";
     "OD314" "unknown-function-method" Correctness Error None, true, "A <function> of a data file calls a method its model does not have.";
-    // saas~16.4 has no `VIEW_MODIFIERS`, and 17.0 validates them (`odoo/addons/base/models/ir_ui_view.py:1892`).
+    // saas~16.4 has no `VIEW_MODIFIERS`, and 17.0 validates them (18.0
+    // `odoo/addons/base/models/ir_ui_view.py:1812-1815`, 20.0 `:2224-2227`).
     "OD315" "invalid-modifier" Correctness Error Some(">=17.0"), true, "A view modifier is not an expression Odoo reads.";
     "OD316" "unknown-modifier-name" Correctness Error Some(">=17.0"), true, "A view modifier names a field its model does not have.";
-    // saas~17.2 refuses a field the view lacks (`odoo/addons/base/models/ir_ui_view.py:2894`), saas~17.3 adds it
-    // (`:1156`).
+    // saas~17.2 refuses a field the view lacks, saas~17.3 adds it (18.0
+    // `odoo/addons/base/models/ir_ui_view.py:1188-1225`, 20.0 `:1546-1592`).
     "OD317" "modifier-field-not-in-view" Correctness Error Some(">=17.0,<saas~17.3"), true, "A view modifier reads a field the view does not show.";
     "OD318" "view-mode-without-view" Correctness Error None, true, "A window action lists a view type its model has no view for.";
     "OD319" "python-field-syntax-error" Correctness Error None, false, "The code of a server action or a cron, or the file name of a report, is not Python that Odoo compiles.";
@@ -260,8 +262,8 @@ rules! {
     "OD322" "unknown-selection-value" Correctness Error None, true, "A data record gives a Selection field a value it does not list.";
     "OD323" "duplicate-xmlid-across-files" Correctness Warning None, false, "A data file defines an XML id another file of the module already defines, with another model, or overwriting the fields both name.";
     "OD324" "missing-required-field" Correctness Warning None, true, "A data record is created without a required field that has no default.";
-    // saas~19.1 drops `t-esc` from QWeb's directives (`odoo/addons/base/models/ir_qweb.py:1681`); 19.0 still
-    // renders it as `t-out` (`:2487`).
+    // saas~19.1 drops `t-esc` from QWeb's directives (20.0 `odoo/addons/base/models/ir_qweb.py:1752`); 19.0
+    // still renders it as `t-out`, as 18.0 does (`:2106-2114`).
     "OD325" "t-esc-removed" Deprecation Error Some(">=saas~19.1"), false, "The server no longer renders t-esc in a QWeb view; use t-out.";
     // 18.0 falls back to `kanban-box` with a warning
     // (`addons/web/static/src/views/kanban/kanban_arch_parser.js:150-154`), saas~18.1 throws without a
@@ -290,9 +292,8 @@ rules! {
     "OD403" "unsanitized-public-html" Security Error None, true, "An Html field that public or portal users can write is not sanitized.";
     "OD404" "public-secret-field" Security Warning None, true, "A field named as a secret has no groups, on a model public or portal users can read.";
     "OD405" "public-rule-always-true" Security Warning None, true, "A record rule or ir.access domain gives public or portal users every record of a model they can reach.";
-    // The CHECK of `ir.rule` refuses a rule with no permission as far back as 9.0
-    // (`openerp/addons/base/ir/ir_rule.py:81`; 18.0 `odoo/addons/base/models/ir_rule.py:29-33`);
-    // saas~19.4 replaces `ir.rule` with `ir.access`.
+    // The CHECK of `ir.rule` refuses a rule with no permission as far back as 9.0 (18.0
+    // `odoo/addons/base/models/ir_rule.py:29-33`); saas~19.4 replaces `ir.rule` with `ir.access`.
     "OD406" "rule-without-permission" Correctness Error Some("<saas~19.4"), true, "A record rule sets every perm_* false, which Odoo refuses as it loads it.";
     "OD501" "manifest-data-missing" Correctness Error None, false, "A file listed in the manifest does not exist.";
     "OD502" "data-file-not-loaded" Quality Warning None, false, "A data file is listed under no manifest key Odoo reads, so Odoo never loads it.";
@@ -317,17 +318,16 @@ rules! {
     // folder names or call `migrate` otherwise.
     "OD514" "migration-folder-skipped" Correctness Warning Some(">=18.0"), false, "Odoo never runs the scripts of a migration folder of this name.";
     "OD515" "migration-script-refused" Correctness Error Some(">=18.0"), false, "A migration script lacks the migrate(cr, version) Odoo calls, so the update fails.";
-    // Odoo imports `odoo.addons.<name>`, which runs the root `__init__.py` and what it imports (18.0
-    // `odoo/modules/module.py:370-384`, 20.0 `:536-541`, 9.0 `openerp/modules/module.py:316-331`).
+    // Odoo imports `odoo.addons.<name>`, or `openerp.addons.<name>` in 9.0, which runs the root
+    // `__init__.py` and what it imports (18.0 `odoo/modules/module.py:370-384`, 20.0 `:536-541`).
     "OD516" "python-file-not-imported" Correctness Warning None, false, "A file of models or controllers is never imported, so Odoo never loads them.";
-    // Odoo runs the submodules `tests` binds under a `test_` name (18.0 `odoo/tests/loader.py:57-67`,
-    // 20.0 `:56-66`, 9.0 `openerp/modules/module.py:387-408`).
+    // Odoo runs the submodules `tests` binds under a `test_` name, from 9.0 on (18.0
+    // `odoo/tests/loader.py:57-67`, 20.0 `:56-66`).
     "OD517" "test-file-not-imported" Quality Warning None, false, "A test file is never imported by the tests package, so Odoo never runs its tests.";
     // An addon on the addons path is importable as `odoo.addons.<name>` (18.0
     // `odoo/modules/module.py:121-140`, 20.0 `:145-155`), or `openerp.addons.<name>` in 9.0 by an
-    // import hook over `ad_paths` (`openerp/modules/module.py:49-62`), but its classes count only
-    // once installed and loaded first (18.0 `odoo/modules/registry.py:290`, 20.0
-    // `odoo/orm/registry.py:449`): a warning.
+    // import hook over `ad_paths`, but its classes count only once installed and loaded first (18.0
+    // `odoo/modules/registry.py:290`, 20.0 `odoo/orm/registry.py:449`): a warning.
     "OD518" "python-import-not-in-depends" Correctness Warning None, true, "A Python import names a module outside depends, which may be missing or load later.";
     "OD519" "unresolved-python-import" Correctness Error None, true, "A Python import names a module or a name the target module does not have.";
     // Odoo places a module by its deepest dependency (18.0 `odoo/modules/graph.py:31-41`, 20.0

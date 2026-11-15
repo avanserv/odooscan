@@ -1173,12 +1173,12 @@ fn writes_no_domain(field: Node) -> bool {
 /// The fields of an `ir.rule` that say which operations it applies to, in the order of `Perms`.
 pub const PERM_FIELDS: [&str; 4] = ["perm_read", "perm_write", "perm_create", "perm_unlink"];
 
-/// The first series that converts the string a boolean field gets from a data file
-/// (`odoo/tools/convert.py:197-198,704-705` on 10.0). 9.0 stores the string's truth.
+/// The first series that converts the string a boolean field gets from a data file (18.0
+/// `odoo/tools/convert.py:196-197,424-425`, 20.0 `:226-227,457-458`). 9.0 stores the string's truth.
 const BOOL_TEXT_CONVERTED: Series = Series { major: 10, minor: 0 };
 
-/// The first series that reads an empty field as the empty string (`pycompat.to_text`,
-/// `odoo/tools/convert.py:152` on 11.0). Before, it gives `None`, which no conversion takes.
+/// The first series that reads an empty field as the empty string (18.0
+/// `odoo/tools/convert.py:140`, 20.0 `:150`). Before, it gives `None`, which no conversion takes.
 const EMPTY_TEXT_AS_STRING: Series = Series { major: 11, minor: 0 };
 
 /// The operations an `ir.access` spells as letters of `operation`, in the order of `Perms`.
@@ -1273,7 +1273,7 @@ fn flag(field: Node, series: Option<Series>) -> Flag {
 
 /// The boolean Odoo stores for a string. From `BOOL_TEXT_CONVERTED` it tests the string untrimmed
 /// against three spellings in any case, so an empty one is true; before, the field stores the
-/// string's truth (`openerp/osv/fields.py:241` on 9.0). An unknown series reads as the newer one.
+/// string's truth. An unknown series reads as the newer one.
 /// An empty field is no string before `EMPTY_TEXT_AS_STRING`, and `flag` reads it apart.
 fn stored_bool(text: &str, series: Option<Series>) -> bool {
     if series.is_some_and(|series| series < BOOL_TEXT_CONVERTED) {
@@ -1936,8 +1936,8 @@ fn subview(path: &[String], tag: &str) -> ArchSubview {
     }
 }
 
-/// What `_validate_tag_calendar` adds to the view's fields (`odoo/addons/base/models/ir_ui_view.py:1415`
-/// on 17.0). No other subview loads a field without a `<field>`.
+/// What `_validate_tag_calendar` adds to the view's fields (18.0
+/// `odoo/addons/base/models/ir_ui_view.py:1550-1556`). No other subview loads a field without a `<field>`.
 fn attribute_fields(node: Node) -> Vec<String> {
     if !node.has_tag_name("calendar") {
         return vec![];

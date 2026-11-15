@@ -59,8 +59,7 @@ fn reads(key: &str, series: Option<Series>) -> bool {
 const VERSION_FORM: Series = Series { major: 16, minor: 3 };
 
 /// The values of `ir.module.module`'s `license` selection, which every series from 10.0 shares
-/// (18.0 `odoo/addons/base/models/ir_module.py:320-330`). 9.0 lacks `OPL-1`
-/// (`openerp/addons/base/module/module.py:284-294`).
+/// (18.0 `odoo/addons/base/models/ir_module.py:320-330`). 9.0 lacks `OPL-1`.
 const LICENSES: [&str; 10] = [
     "GPL-2",
     "GPL-2 or any later version",
@@ -78,11 +77,12 @@ const LICENSES: [&str; 10] = [
 const OPL: Series = Series { major: 10, minor: 0 };
 
 /// OD507's message on a manifest without a `license` key, which every series reads as `LGPL-3`
-/// (14.0 `odoo/modules/module.py:323`), and from `LICENSE_FALLBACK` on an empty one too.
+/// (18.0 `odoo/modules/module.py:322-324`, 20.0 `:467-469`), and from `LICENSE_FALLBACK` on an empty
+/// one too.
 const NO_LICENSE: &str = "the manifest names no license, which Odoo reads as LGPL-3";
 
 /// The first series that reads an empty `license` as `LGPL-3` (`saas~14.5`), where an earlier one
-/// stores the value as it is (14.0 `odoo/addons/base/models/ir_module.py:698`, `:748`, `:754`).
+/// stores the value as it is.
 const LICENSE_FALLBACK: Series = Series { major: 14, minor: 5 };
 
 /// The first series that sets an empty `depends` to `['base']` for every module but `base`
@@ -396,15 +396,13 @@ impl Manifest {
 
 /// Why the Odoo of `series` will not install a module of `version`, none when it does or when the
 /// series disagree. From saas~16.3 a version is two or three numbers, maybe behind the series (18.0
-/// `odoo/modules/module.py:454-466`), and from saas~18.2 also `S.x` (19.0
-/// `odoo/modules/module.py:550-566`). Every series from saas~16.3 refuses four or five numbers
+/// `odoo/modules/module.py:454-466`), and from saas~18.2 also `S.x` (20.0
+/// `odoo/modules/module.py:579-608`). Every series from saas~16.3 refuses four or five numbers
 /// not behind the series. A saas series heads a version only as `saas~M.m`, so a plain `M.m` counts
-/// as two of the version's numbers: saas~16.3 to saas~17.4 refuse four or five as invalid
-/// (`origin/saas-16.3:odoo/modules/module.py:445-456`, `origin/saas-17.4:...:415-427`), saas~18.1
-/// prefixes them again and fails on the parts (`origin/saas-18.1:...:450-476`), and later ones
-/// mark the module uninstallable (`origin/saas-18.2:...:337-343`, `:458-487`). `S` and `S.x` stay
-/// silent, since 18.0 takes only the first and saas~18.2 and later only the second. On an unknown
-/// series, only the forms every series from saas~16.3 refuses count.
+/// as two of the version's numbers: saas~16.3 to saas~17.4 refuse four or five as invalid, saas~18.1
+/// prefixes them again and fails on the parts, and later ones mark the module uninstallable (20.0
+/// `:500-502`). `S` and `S.x` stay silent, since 18.0 takes only the first and saas~18.2 and later
+/// only the second. On an unknown series, only the forms every series from saas~16.3 refuses count.
 pub fn version_refusal(version: &str, series: Option<Series>) -> Option<String> {
     if series.is_some_and(|s| s < VERSION_FORM) {
         return None;
@@ -446,8 +444,8 @@ pub fn version_refusal(version: &str, series: Option<Series>) -> Option<String> 
     })
 }
 
-/// How Odoo writes `series` at the head of a module version: its `release.major_version`, which a
-/// saas series spells `saas~M.m` (`origin/saas-*:odoo/release.py:15-17`).
+/// How Odoo writes `series` at the head of a module version: its `release.major_version` (18.0
+/// `odoo/release.py:15-17`), which a saas series spells `saas~M.m`.
 fn series_prefix(series: Series) -> String {
     let plain = format!("{}.{}", series.major, series.minor);
     if series.minor == 0 {
@@ -610,9 +608,8 @@ pub enum OdooReads {
 /// The manifest in `bytes`, or why the Odoo of `series` cannot read it. `series` is handed the
 /// manifest's own series, none when that cannot be read. From 11.0 Odoo reads the file as UTF-8
 /// with `ast.literal_eval` (18.0 `odoo/modules/module.py:312-313`, `odoo/tools/misc.py:257`). 10.0
-/// hands `literal_eval` the bytes, which Python 2 takes in any encoding
-/// (`odoo/modules/module.py:330-332`), and 9.0 hands them to `eval`
-/// (`openerp/modules/module.py:263-265`), which takes any expression.
+/// hands `literal_eval` the bytes, which Python 2 takes in any encoding, and 9.0 hands them to
+/// `eval`, which takes any expression.
 pub fn read(bytes: &[u8], series: impl FnOnce(Option<Series>) -> Option<Series>) -> Result<Manifest, Rejection> {
     let (src, not_utf8) = text(bytes);
     let body = src.trim_start_matches([' ', '\t']);
