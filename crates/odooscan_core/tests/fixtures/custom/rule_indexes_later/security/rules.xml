@@ -1,0 +1,5 @@
+<odoo>
+    <record id="rule_indexes.rule_case_amount" model="ir.rule">
+        <field name="domain_force">[('stage_id', '=', 1)]</field>
+    </record>
+</odoo>

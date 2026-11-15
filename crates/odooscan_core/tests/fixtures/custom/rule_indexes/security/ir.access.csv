@@ -1,0 +1,2 @@
+id,name,model_id:id,group_id:id,operation,domain
+access_case_team,Cases of a team,model_desk_case,base.group_user,r,"[('team_id', '=', 1)]"

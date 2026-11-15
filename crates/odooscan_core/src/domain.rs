@@ -152,6 +152,87 @@ pub fn parse(text: &str) -> Option<Vec<String>> {
     Some(fields.iter().map(|s| s.value.to_str().to_owned()).collect())
 }
 
+/// The operators whose term on a plain field an index on its column can serve.
+const SERVED_OPERATORS: [&str; 9] = ["=", "=?", "in", "<", "<=", ">", ">=", "child_of", "parent_of"];
+
+/// A field a domain filters on with a condition an index on its column can serve, by the kinds of
+/// term that name it.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct Served {
+    pub field: String,
+    /// A term on the plain field other than `child_of` and `parent_of`.
+    pub plain: bool,
+    /// A `child_of` or `parent_of` term on the plain field, which leaves the column alone when the
+    /// comodel is the model itself and keeps a `parent_path`.
+    pub hierarchy: bool,
+    /// A dotted path, whatever its operator, or `any`, which becomes an `IN` on the column unless
+    /// the field joins.
+    pub through: bool,
+}
+
+/// The first segment of each field path of a domain written as text whose condition an index on
+/// that column can serve. Empty when the domain cannot be read, or holds `'!'`, whose negation the
+/// database scans for.
+pub fn served_fields(text: &str) -> Vec<Served> {
+    let Ok(parsed) = parse_expression(text.trim()) else {
+        return vec![];
+    };
+    if fields(parsed.expr()).is_none() {
+        return vec![];
+    }
+    let mut out: Vec<Served> = vec![];
+    for term in items(parsed.expr()).unwrap_or_default() {
+        if matches!(term, Expr::StringLiteral(s) if s.value.to_str() == "!") {
+            return vec![];
+        }
+        let Some((head, kind)) = served(term) else {
+            continue;
+        };
+        let index = match out.iter().position(|s| s.field == head) {
+            Some(index) => index,
+            None => {
+                out.push(Served {
+                    field: head.to_owned(),
+                    ..Served::default()
+                });
+                out.len() - 1
+            }
+        };
+        let entry = &mut out[index];
+        match kind {
+            Term::Plain => entry.plain = true,
+            Term::Hierarchy => entry.hierarchy = true,
+            Term::Through => entry.through = true,
+        }
+    }
+    out
+}
+
+/// How a term an index serves reaches its first field, as `Served` tells them apart.
+enum Term {
+    Plain,
+    Hierarchy,
+    Through,
+}
+
+/// The first segment of the path of `term`, and how it reaches that field, when an index serves it.
+fn served(term: &Expr) -> Option<(&str, Term)> {
+    let [Expr::StringLiteral(name), op, _] = items(term)? else {
+        return None;
+    };
+    let path = name.value.to_str();
+    let (head, dotted) = path.split_once('.').map_or((path, false), |(head, _)| (head, true));
+    let op = op.as_string_literal_expr().map(|s| s.value.to_str());
+    let kind = match op {
+        _ if dotted => Term::Through,
+        Some("any") => Term::Through,
+        Some("child_of" | "parent_of") => Term::Hierarchy,
+        Some(op) if SERVED_OPERATORS.contains(&op) => Term::Plain,
+        _ => return None,
+    };
+    Some((head, kind))
+}
+
 /// The field paths of the domain a record rule writes, at that domain.
 pub fn written_fields(domain: &ActionValue) -> Vec<Spanned<String>> {
     let ActionValue::Literal(text) = domain else {
@@ -293,6 +374,69 @@ mod tests {
             "[('public', '=', False)",
         ] {
             assert!(!refuses(text, "public", true), "{text}");
+        }
+    }
+
+    /// A `Served` of `field` that a plain, a hierarchy and a through term name as given.
+    fn kinds(field: &str, plain: bool, hierarchy: bool, through: bool) -> Served {
+        let field = field.to_owned();
+        Served {
+            field,
+            plain,
+            hierarchy,
+            through,
+        }
+    }
+
+    #[test]
+    fn served_fields_keep_what_an_index_serves() {
+        assert_eq!(
+            served_fields("['|', ('a', '=', 1), ('b', 'child_of', [2]), (1, '=', 1)]"),
+            [kinds("a", true, false, false), kinds("b", false, true, false)]
+        );
+        for op in SERVED_OPERATORS {
+            let hierarchy = op == "child_of" || op == "parent_of";
+            assert_eq!(
+                served_fields(&format!("[('a', '{op}', 1)]")),
+                [kinds("a", !hierarchy, hierarchy, false)],
+                "{op}"
+            );
+        }
+        for op in ["!=", "not in", "ilike", "like", "=like", "not any", "<>", "=="] {
+            assert!(served_fields(&format!("[('a', '{op}', 1)]")).is_empty(), "{op}");
+        }
+        assert!(served_fields("[('a', op, 1)]").is_empty());
+        let through = [kinds("a", false, false, true)];
+        assert_eq!(served_fields("[('a.b', 'ilike', 'x')]"), through);
+        assert_eq!(served_fields("[('a.b', op, 1)]"), through);
+        assert_eq!(served_fields("[('a.b', 'child_of', 1)]"), through);
+        assert_eq!(served_fields("[('a', 'any', [('b', '=', 1)])]"), through);
+    }
+
+    #[test]
+    fn served_fields_merge_one_field_and_drop_unreadable_domains() {
+        assert_eq!(
+            served_fields("[('a.b', '=', 1), ('a.c', '!=', 1)]"),
+            [kinds("a", false, false, true)]
+        );
+        assert_eq!(
+            served_fields("[('a.b', '=', 1), ('a', '=', 1)]"),
+            [kinds("a", true, false, true)]
+        );
+        assert_eq!(
+            served_fields("[('a', 'child_of', 1), ('a', 'parent_of', 1), ('a.b', '=', 1)]"),
+            [kinds("a", false, true, true)]
+        );
+        for text in [
+            "",
+            "[",
+            "False",
+            "[('a', '=', 1)] + extra",
+            "[(field, '=', 1)]",
+            "['!', ('b', '=', 1), ('a', '=', 1)]",
+            "['&', ('a', '=', 1), '!', ('b', '=', 1)]",
+        ] {
+            assert!(served_fields(text).is_empty(), "{text}");
         }
     }
 

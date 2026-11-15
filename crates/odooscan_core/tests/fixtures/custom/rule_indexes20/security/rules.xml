@@ -1,0 +1,7 @@
+<odoo>
+    <record id="rule_bin_level" model="ir.rule">
+        <field name="name">Bins by level</field>
+        <field name="model_id" ref="model_shelf_bin"/>
+        <field name="domain_force">[('level', '=', 1)]</field>
+    </record>
+</odoo>
