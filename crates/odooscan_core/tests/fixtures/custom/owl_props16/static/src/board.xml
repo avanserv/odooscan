@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<templates xml:space="preserve">
+    <t t-name="owl_props16.Card"><h3 t-esc="props.title"/></t>
+    <t t-name="owl_props16.Board">
+        <Card titel="'Order'"/>
+    </t>
+</templates>

@@ -2665,6 +2665,12 @@
       "count": 1
     },
     {
+      "path": "addons/point_of_sale/static/src/app/navbar/sync_popup/sync_popup.xml",
+      "code": "OD614",
+      "message": "Dialog declares no prop 'class', so Owl throws when it renders <Dialog> in debug mode; fix the name, or declare the prop",
+      "count": 1
+    },
+    {
       "path": "addons/point_of_sale/static/src/app/pos_app.js",
       "code": "OD611",
       "message": "console.log() is a debugging leftover that writes to every user's console; remove it",

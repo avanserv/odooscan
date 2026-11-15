@@ -42,14 +42,16 @@ impl Kind {
 }
 
 /// Index rules whose finding means the modules in scope lack the model, field, column, method, id,
-/// template, element, selection value or module the code names, or no longer take or call a method
-/// it overrides or hooks: on a port, what the target core dropped, renamed or reshaped. An inherited
-/// or related field whose type the module no longer matches, a required field a data record leaves
-/// unset, or a script its page lacks, counts too.
+/// template, element, selection value, component prop or module the code names, or no longer take
+/// or call a method it overrides or hooks: on a port, what the target core dropped, renamed or
+/// reshaped. An inherited or related field whose type the module no longer matches, a required
+/// field a data record leaves unset, a required prop a template leaves out, or a script its page
+/// lacks, counts too.
 const UPSTREAM: &[&str] = &[
     "OD201", "OD202", "OD203", "OD204", "OD205", "OD206", "OD207", "OD210", "OD211", "OD212", "OD224", "OD227",
     "OD229", "OD230", "OD301", "OD302", "OD304", "OD309", "OD310", "OD311", "OD312", "OD314", "OD316", "OD320",
     "OD322", "OD324", "OD503", "OD518", "OD519", "OD601", "OD602", "OD603", "OD604", "OD605", "OD606", "OD608",
+    "OD614", "OD615",
 ];
 
 /// Info-level security rules are hotspots: code to review, not a confirmed flaw.
@@ -351,6 +353,13 @@ rules! {
     // (`:2839-2847`; 18.0 `:2839`, 20.0 `:4050`) lacks `trigger`, which 16.0
     // `addons/web/static/src/legacy/legacy_component.js:35`, `:72` adds back through saas-16.4.
     "OD613" "owl1-api-removed" Deprecation Error Some(">=saas~15.3"), true, "A script uses an Owl 1 API that Owl 2 removed: hooks, tags, QWeb or a component's trigger().";
+    // Owl validates the props a template passes a child against its `static props` in dev mode,
+    // which Odoo turns on in debug mode (18.0 `addons/web/static/src/env.js:187`), and rejects an
+    // unknown or missing key (`addons/web/static/lib/owl/owl.js:2975-3002`, `:3232-3263`,
+    // `:4846-4848`). saas~19.3 ships Owl 2.8.4 with it; saas~19.4's Owl 3.0.0-alpha.50 has no
+    // `validateProps`. The lower bound is OD605's, where the template index starts.
+    "OD614" "unknown-component-prop" Correctness Error Some(">=17.0,<saas~19.4"), true, "A template passes a component a prop its static props do not declare.";
+    "OD615" "missing-component-prop" Correctness Error Some(">=17.0,<saas~19.4"), true, "A template leaves out a prop a component's static props require.";
     "OD701" "sql-injection-flow" Security Error None, false, "Data a user controls reaches the text of an SQL query.";
     "OD702" "code-injection-flow" Security Error None, false, "Data a user controls reaches safe_eval(), eval() or exec().";
     "OD703" "markup-injection-flow" Security Warning None, false, "Data a user controls is wrapped in Markup() without escaping.";

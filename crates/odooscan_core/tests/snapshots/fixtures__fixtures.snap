@@ -952,6 +952,13 @@ custom/owl_api16/static/src/js/panel.js:17:14: OD613 Owl 2's Component has no tr
 custom/owl_api16/static/src/js/panel.js:22:26: OD613 Owl 2's Component has no trigger(), so this.trigger() in Header throws; pass a callback in props, or use the env bus
 custom/owl_api17/static/src/js/save_button.js:6:14: OD613 Owl 2's Component has no trigger(), so this.trigger() in SaveButton throws; pass a callback in props, or use the env bus
 custom/owl_api17/static/src/js/save_button.js:12:14: OD613 Owl 2's Component has no trigger(), so this.trigger() in NoteController throws; pass a callback in props, or use the env bus
+custom/owl_props/static/src/xml/board.xml:5:14: OD615 <Card> leaves out 'title', which Card requires, so Owl throws when it renders the tag in debug mode; pass it, or make it optional
+custom/owl_props/static/src/xml/board.xml:5:19: OD614 Card declares no prop 'titel', so Owl throws when it renders <Card> in debug mode; fix the name, or declare the prop
+custom/owl_props/static/src/xml/board.xml:6:39: OD614 ListCard declares no prop 'titel', so Owl throws when it renders <ListCard> in debug mode; fix the name, or declare the prop
+custom/owl_props/static/src/xml/board.xml:7:34: OD614 BigCard declares no prop 'subtitel', so Owl throws when it renders <Big> in debug mode; fix the name, or declare the prop
+custom/owl_props/static/src/xml/board.xml:8:50: OD614 FancyCard declares no prop 'colour', so Owl throws when it renders <Fancy> in debug mode; fix the name, or declare the prop
+custom/owl_props/static/src/xml/board.xml:9:14: OD615 <Pair> leaves out 'left' and 'right', which Pair requires, so Owl throws when it renders the tag in debug mode; pass them, or make them optional
+custom/owl_props/static/src/xml/board.xml:25:14: OD615 <ListCard> leaves out 'title', which ListCard requires, so Owl throws when it renders the tag in debug mode; pass it, or make it optional
 custom/partial_sites/__manifest__.py:5:25: OD503 module 'ghost_enterprise' is not on the addons path
 custom/partial_sites/models/sites.py:24:22: OD301 module base defines no XML id 'base.no_such_id'
 custom/partial_sites/models/sites.py:25:22: OD302 'mail.no_such_id' belongs to module mail; add it to depends

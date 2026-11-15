@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<templates xml:space="preserve">
+    <t t-name="owl_props.Board">
+        <div class="o_board">
+            <Card titel="'Order'"/>
+            <ListCard title="'Order'" titel="'Order'"/>
+            <Big title="'Order'" subtitel="'Draft'"/>
+            <Fancy title="'Order'" tone="'warm'" colour="'red'"/>
+            <Pair gap="2"/>
+            <Card t-props="cardProps"/>
+            <Loose anything="1"/>
+            <SpreadCard anything="1"/>
+            <Patchy title="'Order'" extra="'x'"/>
+            <Missing anything="1"/>
+            <t t-component="cardClass" titel="'Order'"/>
+            <card titel="'Order'"/>
+            <Card title="'Order'" t-if="show" t-on-click="onClick" onClose.bind="close"/>
+            <Card title.translate="Order"/>
+            <Framed><span>Framed</span></Framed>
+        </div>
+    </t>
+
+    <t t-inherit="owl_props.Board" t-inherit-mode="extension">
+        <xpath expr="//div[hasclass('o_board')]" position="inside">
+            <ListCard subtitle="'Draft'"/>
+        </xpath>
+    </t>
+
+    <t t-name="owl_props.Panel">
+        <div class="o_panel">
+            <Card subtitle="'Draft'"/>
+        </div>
+    </t>
+
+    <t t-inherit="owl_props.Panel" t-inherit-mode="extension">
+        <xpath expr="//div[hasclass('o_panel')]/Card" position="attributes">
+            <attribute name="title">'Order'</attribute>
+        </xpath>
+    </t>
+
+    <t t-name="owl_props.Shelf">
+        <div class="o_shelf">
+            <Card titel="'Order'"/>
+        </div>
+    </t>
+</templates>

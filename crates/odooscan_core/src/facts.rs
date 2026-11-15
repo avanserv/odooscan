@@ -1321,6 +1321,60 @@ pub struct JsClass {
     pub template: Option<Spanned<String>>,
     /// The `this.trigger()` calls of its instance methods, accessors and fields, at `trigger`.
     pub triggers: Vec<Pos>,
+    /// Its `static props`, or a literal `Class.props = ...` of the file; None leaves its parent's.
+    pub props: Option<JsProps>,
+    /// Its `static components`, or a literal `Class.components = ...` of the file.
+    pub components: Option<Vec<ComponentItem>>,
+}
+
+/// A literal `static props`: a list of names, or an object whose keys name the props.
+#[derive(Debug, PartialEq, Eq)]
+pub struct JsProps {
+    pub list: bool,
+    pub items: Vec<PropItem>,
+}
+
+/// What a `static props` holds, in source order.
+#[derive(Debug, PartialEq, Eq)]
+pub enum PropItem {
+    /// A prop, or `*` for any. Required unless listed as `x?`, or given an object whose `optional`
+    /// is not a literal `false`.
+    Prop { name: String, required: bool },
+    /// `...X.props`, or `...super.props` as `super`.
+    Spread(String),
+    /// A value, key or spread only a run tells.
+    Open,
+}
+
+/// What a `static components` holds, in source order.
+#[derive(Debug, PartialEq, Eq)]
+pub enum ComponentItem {
+    /// A key and the binding its value names; None for a value that is not a name.
+    Entry {
+        key: String,
+        binding: Option<String>,
+    },
+    /// `...X.components`, or `...super.components` as `super`.
+    Spread(String),
+    Open,
+}
+
+/// The static members of a component that Owl reads to render its children.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Static {
+    Props,
+    Components,
+}
+
+/// A change to the `props` or `components` of the class `binding` names, other than a literal
+/// assignment.
+#[derive(Debug, PartialEq, Eq)]
+pub struct StaticWrite {
+    pub binding: String,
+    pub member: Static,
+    /// The write changes the object the member holds, which a subclass without its own shares
+    /// with the class that declares it, rather than the member itself.
+    pub inner: bool,
 }
 
 /// `patch(Target.prototype, { ... })`, or `patch(Target.prototype, "name", { ... })` when `named`.
@@ -1366,6 +1420,10 @@ pub struct JsFacts {
     /// `const { A, B: c } = owl` anywhere in the file, as (binding, name of the Owl export).
     pub owl_bindings: Vec<(String, String)>,
     pub patches: Vec<JsPatch>,
+    /// Bindings whose `props` or `components` the file changes other than by a literal assignment:
+    /// assigning, deleting or calling their members, `Object.assign` or `patch` on them, or
+    /// `patch(X, { props })`.
+    pub static_writes: Vec<StaticWrite>,
     pub orm_calls: Vec<OrmCall>,
     /// The literal view kinds the file gives `view_registry.add`.
     pub view_kinds: Vec<String>,
@@ -1393,6 +1451,23 @@ pub struct OwlTemplate {
     pub inherit: Option<Spanned<String>>,
     /// The elements it adds and the elements its specs locate, as in a view arch.
     pub arch: ViewFact,
+    /// The component tags of its body, or of its specs' content when it inherits.
+    pub components: Vec<ComponentTag>,
+    /// A spec sets attributes, which may give a component a prop.
+    pub sets_attributes: bool,
+}
+
+/// An element Owl renders as a child component: a tag that does not start lowercase.
+#[derive(Debug)]
+pub struct ComponentTag {
+    pub name: Spanned<String>,
+    /// The props its attributes pass: those not starting `t-`, a `.bind`, `.translate` or `.alike`
+    /// suffix cut.
+    pub props: Vec<Spanned<String>>,
+    /// `t-props` passes props only a run tells.
+    pub spread: bool,
+    /// It has children, which Owl passes as the `slots` prop.
+    pub content: bool,
 }
 
 #[derive(Debug, Default)]

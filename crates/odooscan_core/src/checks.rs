@@ -8,16 +8,17 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::facts::{
     AccessRow, ActionFact, ActionValue, ActionViewId, Annotation, ArchElement, ArchModifier, ArchSubview, ClassBase,
-    ClassFact, DataFacts, DefinitionSource, DomainFact, FieldFact, FieldWrite, Flag, FunctionCall, GuardedRef, JsFacts,
-    JsName, MethodDef, Migrate, ModelKind, OptionValue, OrmCall, Pos, PyFacts, RawDiag, RecordFact, RecordWrite,
-    Refusal, ReportFact, RouteDef, RouteKey, RuleFact, ServerFact, Signature, Spanned, SqlColumn, SqlView, Subject,
-    UNREAD_TYPE, ViewFact, WrittenValue, XmlDef, XmlRef,
+    ClassFact, ComponentTag, DataFacts, DefinitionSource, DomainFact, FieldFact, FieldWrite, Flag, FunctionCall,
+    GuardedRef, JsClass, JsFacts, JsName, MethodDef, Migrate, ModelKind, OptionValue, OrmCall, OwlTemplate, Pos,
+    PyFacts, RawDiag, RecordFact, RecordWrite, Refusal, ReportFact, RouteDef, RouteKey, RuleFact, ServerFact,
+    Signature, Spanned, SqlColumn, SqlView, Subject, UNREAD_TYPE, ViewFact, WrittenValue, XmlDef, XmlRef,
 };
 use crate::grants::{self, AttachmentGrant, Grant, Grants};
 use crate::imports::{AddonImport, Fault};
 use crate::index::{
-    BASE_MODEL_METHODS, Export, FieldDef, FieldInfo, Index, JsSpec, JsTarget, PathError, Placed, RELATIONAL_TYPES,
-    Scope, Status, ViewTree, asset_glob_set, base_private_method, full_id, js_lookup, js_url, loaded_data, located,
+    BASE_MODEL_METHODS, Export, FieldDef, FieldInfo, Index, JsSpec, JsTarget, PathError, Placed, PropSchema,
+    RELATIONAL_TYPES, Scope, Status, ViewTree, asset_glob_set, base_private_method, full_id, js_lookup, js_url,
+    loaded_data, located,
 };
 use crate::mentions::HOOK_PREFIXES;
 use crate::module_state::UPGRADE_DIRS;
@@ -729,6 +730,48 @@ fn push_guarded<'m>(out: &mut Out<'m>, path: &'m Path, diags: &[RawDiag], guarde
         }
         (path, d)
     }));
+}
+
+/// OD614 on each prop a component tag passes that its component does not declare.
+fn unknown_props<'m>(out: &mut Out<'m>, path: &'m Path, tag: &ComponentTag, class: &str, schema: &PropSchema) {
+    if schema.any {
+        return;
+    }
+    for prop in tag
+        .props
+        .iter()
+        .filter(|p| !schema.props.contains_key(p.value.as_str()))
+    {
+        let message = format!(
+            "{class} declares no prop '{}', so Owl throws when it renders <{}> in debug mode; fix the name, or \
+             declare the prop",
+            prop.value, tag.name.value
+        );
+        out.push(path, "OD614", prop.pos, message);
+    }
+}
+
+/// OD615 on a component tag that leaves out props its component requires; children pass `slots`.
+fn missing_props<'m>(out: &mut Out<'m>, path: &'m Path, tag: &ComponentTag, class: &str, schema: &PropSchema) {
+    let passed = |p: &str| tag.props.iter().any(|q| q.value == p) || (tag.content && p == "slots");
+    let mut missing: Vec<_> = schema
+        .props
+        .iter()
+        .filter(|&(p, required)| *required && !passed(p))
+        .map(|(p, _)| format!("'{p}'"))
+        .collect();
+    missing.sort_unstable();
+    let (them, list) = match missing.split_last() {
+        None => return,
+        Some((only, [])) => ("it", only.clone()),
+        Some((last, rest)) => ("them", format!("{} and {last}", rest.join(", "))),
+    };
+    let message = format!(
+        "<{}> leaves out {list}, which {class} requires, so Owl throws when it renders the tag in debug mode; pass \
+         {them}, or make {them} optional",
+        tag.name.value
+    );
+    out.push(path, "OD615", tag.name.pos, message);
 }
 
 /// Whether `view` of module `mi`, or a view in its inheritance tree as far as the index holds it,
@@ -2346,8 +2389,46 @@ impl<'m> Ctx<'_, 'm> {
                 {
                     self.template_locators(out, &file.path, &parent.value, &t.arch, &mut trees);
                 }
+                if !file.in_tests() {
+                    self.component_tags(out, &file.path, t);
+                }
             }
         }
+    }
+
+    /// OD614 and OD615 on the component tags of a template, against the props of the one class
+    /// every owner of the template, its parent's for an extension, names the tag. A class or a
+    /// patch of a module outside the index, such as an Enterprise one, may render it or change them.
+    fn component_tags(&self, out: &mut Out<'m>, path: &'m Path, t: &OwlTemplate) {
+        if self.partial || t.components.is_empty() {
+            return;
+        }
+        let Some(name) = t.name.as_ref().or(t.inherit.as_ref().map(|i| &i.value)) else {
+            return;
+        };
+        let Some(owners) = self.index.template_owners(name).filter(|o| !o.is_empty()) else {
+            return;
+        };
+        let sets_attributes = self.index.template_sets_attributes(name);
+        for tag in &t.components {
+            let Some((class, schema)) = self.tag_props(owners, &tag.name.value) else {
+                continue;
+            };
+            unknown_props(out, path, tag, &class.name, &schema);
+            if !tag.spread && !sets_attributes {
+                missing_props(out, path, tag, &class.name, &schema);
+            }
+        }
+    }
+
+    /// The class every owner names `tag`, and its props, when they all name the same one.
+    fn tag_props(&self, owners: &[(JsTarget, &'m JsClass)], tag: &str) -> Option<(&'m JsClass, PropSchema<'m>)> {
+        let mut children = owners.iter().map(|(t, c)| self.index.component_child(*t, c, tag));
+        let (ct, class) = children.next()??;
+        if !children.all(|c| c.is_some_and(|(_, other)| std::ptr::eq(other, class))) {
+            return None;
+        }
+        Some((class, self.index.component_props(ct, class)?))
     }
 
     /// Specs of a template must each find their element in the tree of templates it extends.

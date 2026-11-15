@@ -210,7 +210,9 @@ saas~14.5 to 16.0 a patch names itself, and OD602 reads its `this._super()` call
 bundles of the two web client pages, backend and frontend, from 18.0 on. OD609 to OD612 read each
 script alone, for the HTML sinks and debugging leftovers of what a page runs. OD613 reads, from
 saas~15.3, the Owl 1 APIs that Owl 2 dropped, following a component's parents for its `trigger()`
-calls.
+calls. OD614 and OD615 read the component tags of a bundled template against the `static props` of
+the class that each owning component's `static components` maps the tag to, from 17.0 to
+saas~19.3, where Owl validates props.
 
 | Code | Name | Reports |
 | --- | --- | --- |
@@ -227,6 +229,8 @@ calls.
 | [OD611](OD611.md) | `console-log` | A script a page loads calls `console.log()`. |
 | [OD612](OD612.md) | `debugger-statement` | A script a page loads has a `debugger` statement. |
 | [OD613](OD613.md) | `owl1-api-removed` | A script uses an Owl 1 API that Owl 2 removed: `hooks`, `tags`, `QWeb` or a component's `trigger()`. |
+| [OD614](OD614.md) | `unknown-component-prop` | A template passes a component a prop its static props do not declare. |
+| [OD615](OD615.md) | `missing-component-prop` | A template leaves out a prop a component's static props require. |
 
 ## OD7: data flows
 

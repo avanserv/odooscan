@@ -4,9 +4,9 @@ use globset::{GlobBuilder, GlobSet, GlobSetBuilder};
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::facts::{
-    ActionFact, Annotation, ArchElement, ArchEmptied, ArchSubview, ArchValued, ClassFact, DataFacts, FieldFact,
-    FlowSummary, Heritage, JsClass, JsName, ModelKind, OptionValue, PyFacts, Receiver, RecordWrite, ReportFact,
-    RouteKey, RuleFact, ServerFact, Signature, UNREAD_TYPE, ViewFact, WrittenValue,
+    ActionFact, Annotation, ArchElement, ArchEmptied, ArchSubview, ArchValued, ClassFact, ComponentItem, DataFacts,
+    FieldFact, FlowSummary, Heritage, JsClass, JsName, ModelKind, OptionValue, PropItem, PyFacts, Receiver,
+    RecordWrite, ReportFact, RouteKey, RuleFact, ServerFact, Signature, Static, UNREAD_TYPE, ViewFact, WrittenValue,
 };
 use crate::js::OWL_MODULE;
 use crate::manifest::{AutoInstall, DEPENDS_BASE, OdooReads};
@@ -1116,6 +1116,26 @@ enum Parent<'h> {
 /// A class by the file that declares it and its name there.
 type ClassKey = (usize, usize, String);
 
+/// What a component's `components` give a tag.
+enum Lookup<'m> {
+    /// The binding of the file that names the class.
+    Found(JsTarget, &'m str),
+    Absent,
+    /// A value only a run tells.
+    Unknown,
+}
+
+/// The props a component declares, as Owl validates those a template passes it (18.0
+/// `addons/web/static/lib/owl/owl.js:2975-3002`).
+pub struct PropSchema<'m> {
+    /// Declared as a list of names, which only a list spreads into.
+    list: bool,
+    /// `*` lets any other prop through.
+    pub any: bool,
+    /// Each prop, and whether it is required.
+    pub props: FxHashMap<&'m str, bool>,
+}
+
 /// A prototype patch, as (module, file, index in the file).
 type PatchId = (usize, usize, usize);
 
@@ -1745,6 +1765,14 @@ pub struct Index<'m> {
     patched: Patched<'m>,
     /// Classes a subclass with a template of its own extends.
     template_bases: FxHashSet<ClassKey>,
+    /// The loaded classes that render each template, as `template_owners` reads them.
+    owners: FxHashMap<&'m str, Vec<(JsTarget, &'m JsClass)>>,
+    /// Classes whose `props` or `components` a script changes other than by a literal assignment.
+    static_writes: FxHashSet<(ClassKey, Static)>,
+    /// The templates that a loaded template calls.
+    templates_called: FxHashSet<&'m str>,
+    /// The loaded templates with an attributes spec, by name, or by their parent's for an extension.
+    templates_set_attributes: FxHashSet<&'m str>,
     /// Flow summaries of model methods, by model and method name.
     method_flows: MethodFlows<'m>,
     /// The models whose table each table name may be, from any module.
@@ -1826,6 +1854,10 @@ impl<'m> Index<'m> {
             by_name,
             patched: FxHashMap::default(),
             template_bases: FxHashSet::default(),
+            owners: FxHashMap::default(),
+            static_writes: FxHashSet::default(),
+            templates_called: FxHashSet::default(),
+            templates_set_attributes: FxHashSet::default(),
             method_flows: method_flows(modules),
             table_models: table_models(&models),
             members: members(&models),
@@ -1836,6 +1868,9 @@ impl<'m> Index<'m> {
         };
         index.patched = index.patched_classes();
         index.template_bases = index.template_bases();
+        index.owners = index.owners();
+        index.static_writes = index.static_writes();
+        (index.templates_called, index.templates_set_attributes) = index.template_uses();
         index.view_types = index.view_types();
         index.client_views = index.client_views();
         index.data_fields = index.data_fields(default_series);
@@ -1955,6 +1990,246 @@ impl<'m> Index<'m> {
             }
         }
         bases
+    }
+
+    /// The loaded classes outside tests by the template each renders: its own, or else the first
+    /// one up its chain of parents.
+    fn owners(&self) -> FxHashMap<&'m str, Vec<(JsTarget, &'m JsClass)>> {
+        let mut owners: FxHashMap<&'m str, Vec<_>> = FxHashMap::default();
+        for (mi, module) in self.modules.iter().enumerate() {
+            let files = module.js.iter().enumerate();
+            for (fi, file) in files.filter(|(fi, f)| !f.in_tests() && self.js_loaded(mi, *fi)) {
+                let here = self.js_target(mi, fi);
+                for class in &file.facts.classes {
+                    if let Some(template) = self.rendered_template(here, class) {
+                        owners.entry(template).or_default().push((here, class));
+                    }
+                }
+            }
+        }
+        owners
+    }
+
+    fn rendered_template(&self, t: JsTarget, class: &'m JsClass) -> Option<&'m str> {
+        let (mut t, mut class) = (t, class);
+        for _ in 0..32 {
+            if let Some(template) = &class.template {
+                return Some(&template.value);
+            }
+            let Heritage::Name(parent) = &class.extends else {
+                return None;
+            };
+            (t, class) = self.js_class(t, parent, 0)?;
+        }
+        None
+    }
+
+    /// A write in a test applies only while that test runs.
+    fn static_writes(&self) -> FxHashSet<(ClassKey, Static)> {
+        let mut written = FxHashSet::default();
+        for (mi, module) in self.modules.iter().enumerate() {
+            for (fi, file) in module.js.iter().enumerate().filter(|(_, f)| !f.in_tests()) {
+                let here = self.js_target(mi, fi);
+                for write in &file.facts.static_writes {
+                    let Some((t, class)) = self.js_class(here, &write.binding, 0) else {
+                        continue;
+                    };
+                    written.insert(((t.module, t.file, class.name.clone()), write.member));
+                    let holder = self.static_declarer(t, class, write.member).filter(|_| write.inner);
+                    if let Some((t, class)) = holder {
+                        written.insert(((t.module, t.file, class.name.clone()), write.member));
+                    }
+                }
+            }
+        }
+        written
+    }
+
+    /// The class up the chain from `class` that declares the static member, whose object a
+    /// subclass without its own reads as its own.
+    fn static_declarer(&self, t: JsTarget, class: &'m JsClass, member: Static) -> Option<(JsTarget, &'m JsClass)> {
+        let (mut t, mut class) = (t, class);
+        for _ in 0..32 {
+            let declared = match member {
+                Static::Props => class.props.is_some(),
+                Static::Components => class.components.is_some(),
+            };
+            if declared {
+                return Some((t, class));
+            }
+            match self.js_parent(t, &class.extends)? {
+                Parent::Name(parent) => (t, class) = self.js_class(t, parent, 0)?,
+                Parent::Root | Parent::Owl2 | Parent::OwlGlobal => return None,
+            }
+        }
+        None
+    }
+
+    /// The templates the loaded ones call, and those with a node that sets attributes.
+    fn template_uses(&self) -> (FxHashSet<&'m str>, FxHashSet<&'m str>) {
+        let (mut called, mut set) = (FxHashSet::default(), FxHashSet::default());
+        for &(mi, fi) in &self.templates_loaded {
+            for t in &self.modules[mi].templates[fi].facts.templates {
+                called.extend(t.arch.calls.iter().map(|c| c.value.as_str()));
+                let key = t.name.as_ref().or(t.inherit.as_ref().map(|i| &i.value));
+                set.extend(key.filter(|_| t.sets_attributes).map(String::as_str));
+            }
+        }
+        (called, set)
+    }
+
+    /// The classes that render the template `name`, or None when another template may hold its
+    /// elements: one that calls it, or a primary child. A class outside the index may render it too.
+    pub fn template_owners(&self, name: &str) -> Option<&[(JsTarget, &'m JsClass)]> {
+        if self.templates_called.contains(name) || self.templates.has_children(name) {
+            return None;
+        }
+        self.owners.get(name).map(Vec::as_slice)
+    }
+
+    /// Whether a node of the template `name` sets attributes, which may give an element any prop.
+    pub fn template_sets_attributes(&self, name: &str) -> bool {
+        self.templates_set_attributes.contains(name)
+    }
+
+    /// The class the component `owner` names `tag` in its `components`, inherited or its own, as
+    /// Owl looks it up to render the tag (18.0 `addons/web/static/lib/owl/owl.js:6119-6127`). None
+    /// when the key is missing, or a write or a value only a run tells may change it.
+    pub fn component_child(&self, t: JsTarget, owner: &'m JsClass, tag: &str) -> Option<(JsTarget, &'m JsClass)> {
+        match self.component_lookup(t, owner, tag, 0) {
+            Lookup::Found(t, binding) => self.js_class(t, binding, 0),
+            Lookup::Absent | Lookup::Unknown => None,
+        }
+    }
+
+    fn component_lookup(&self, t: JsTarget, class: &'m JsClass, tag: &str, depth: u8) -> Lookup<'m> {
+        let Some((t, class, items)) = self.static_holder(t, class, Static::Components, |c| c.components.as_deref())
+        else {
+            return Lookup::Unknown;
+        };
+        for item in items.unwrap_or_default().iter().rev() {
+            let found = match item {
+                ComponentItem::Entry { key, binding } if key == tag => {
+                    binding.as_deref().map_or(Lookup::Unknown, |b| Lookup::Found(t, b))
+                }
+                ComponentItem::Entry { .. } => Lookup::Absent,
+                ComponentItem::Spread(source) => self.spread_lookup(t, class, source, tag, depth),
+                ComponentItem::Open => Lookup::Unknown,
+            };
+            if !matches!(found, Lookup::Absent) {
+                return found;
+            }
+        }
+        Lookup::Absent
+    }
+
+    /// The tag in the `components` of the class `...source.components` reads.
+    fn spread_lookup(&self, t: JsTarget, class: &'m JsClass, source: &str, tag: &str, depth: u8) -> Lookup<'m> {
+        match self.static_source(t, class, source) {
+            _ if depth > 8 => Lookup::Unknown,
+            None => Lookup::Unknown,
+            Some(None) => Lookup::Absent,
+            Some(Some((st, sc))) => self.component_lookup(st, sc, tag, depth + 1),
+        }
+    }
+
+    /// The props the component declares, its own or inherited, folded with the props it spreads;
+    /// None when it declares none, so Owl validates nothing, or a write or a value only a run tells
+    /// may change them.
+    pub fn component_props(&self, t: JsTarget, class: &'m JsClass) -> Option<PropSchema<'m>> {
+        self.props_lookup(t, class, 0).flatten()
+    }
+
+    /// `Some(None)` for a class that declares no props, which a spread reads as none.
+    fn props_lookup(&self, t: JsTarget, class: &'m JsClass, depth: u8) -> Option<Option<PropSchema<'m>>> {
+        let (t, class, props) = self.static_holder(t, class, Static::Props, |c| c.props.as_ref())?;
+        let Some(props) = props else {
+            return Some(None);
+        };
+        let mut schema = PropSchema {
+            list: props.list,
+            any: false,
+            props: FxHashMap::default(),
+        };
+        for item in &props.items {
+            match item {
+                PropItem::Prop { name, .. } if name == "*" => schema.any = true,
+                PropItem::Prop { name, required } => {
+                    schema.props.insert(name, *required);
+                }
+                PropItem::Spread(source) => self.spread_props(t, class, source, depth, &mut schema)?,
+                PropItem::Open => return None,
+            }
+        }
+        Some(Some(schema))
+    }
+
+    /// Adds the props of the class `...source.props` reads, or None when they are unknown.
+    fn spread_props(
+        &self,
+        t: JsTarget,
+        class: &'m JsClass,
+        source: &str,
+        depth: u8,
+        schema: &mut PropSchema<'m>,
+    ) -> Option<()> {
+        if depth > 8 {
+            return None;
+        }
+        let Some((st, sc)) = self.static_source(t, class, source)? else {
+            return Some(());
+        };
+        let Some(spread) = self.props_lookup(st, sc, depth + 1)? else {
+            return Some(());
+        };
+        // An object spread of a list, or a list spread of an object, gives no props.
+        if spread.list != schema.list {
+            return None;
+        }
+        schema.any |= spread.any;
+        schema.props.extend(spread.props);
+        Some(())
+    }
+
+    /// The class up the chain from `class` whose static member `get` reads, with that member: None
+    /// for none up to Owl's `Component` or a class that extends nothing, and None as a whole when a
+    /// parent cannot be resolved or a script writes the member on the way.
+    fn static_holder<T>(
+        &self,
+        t: JsTarget,
+        class: &'m JsClass,
+        kind: Static,
+        get: impl Fn(&'m JsClass) -> Option<T>,
+    ) -> Option<(JsTarget, &'m JsClass, Option<T>)> {
+        let (mut t, mut class) = (t, class);
+        for _ in 0..32 {
+            if self
+                .static_writes
+                .contains(&((t.module, t.file, class.name.clone()), kind))
+            {
+                return None;
+            }
+            if let Some(value) = get(class) {
+                return Some((t, class, Some(value)));
+            }
+            match self.js_parent(t, &class.extends)? {
+                Parent::Name(parent) => (t, class) = self.js_class(t, parent, 0)?,
+                Parent::Root | Parent::Owl2 | Parent::OwlGlobal => return Some((t, class, None)),
+            }
+        }
+        None
+    }
+
+    /// The class `...source.props` of a static member of `class` reads: `super` is its parent.
+    /// `Some(None)` for Owl's `Component` or none, which give nothing; None when it is unresolved.
+    fn static_source(&self, t: JsTarget, class: &'m JsClass, source: &str) -> Option<Option<(JsTarget, &'m JsClass)>> {
+        if source != "super" {
+            return self.js_class(t, source, 0).map(Some);
+        }
+        match self.js_parent(t, &class.extends)? {
+            Parent::Name(parent) => self.js_class(t, parent, 0).map(Some),
+            Parent::Root | Parent::Owl2 | Parent::OwlGlobal => Some(None),
+        }
     }
 
     /// Whether every subclass of the class may replace its template, as for an abstract base.
@@ -3378,6 +3653,11 @@ impl<'m> Inheritance<'m> {
         Self { nodes, children }
     }
 
+    /// Whether a node inherits `id` and defines another id, as a primary child does.
+    pub fn has_children(&self, id: &str) -> bool {
+        self.children.contains_key(id)
+    }
+
     /// The modules whose nodes define `id`.
     pub fn definers(&self, id: &str) -> impl Iterator<Item = usize> {
         let nodes = self.nodes.get(id).map(Vec::as_slice).unwrap_or_default();
@@ -4782,6 +5062,164 @@ class Core extends Panel {}
                 assert_eq!(members.as_ref(), Some(expected), "{web} {sale} {default:?} {name}");
                 assert_eq!(index.component_members(here, class, reader).as_ref(), Some(expected));
             }
+        }
+    }
+
+    /// `web` with components that declare props, and `sale` with the owners of its templates.
+    fn props_modules() -> [Module; 2] {
+        let assets = |name: &str| format!("{{'version': '18.0.1.0', 'assets': {{'b': ['{name}/static/src/**/*']}}}}");
+        let mut web = module("web", &assets("web"));
+        web.js = vec![script(
+            "static/src/card.js",
+            r#"import { Component } from "@odoo/owl";
+export class Card extends Component {
+    static template = "web.Card";
+    static props = { title: String, body: { type: String, optional: true } };
+}
+export class BigCard extends Card {
+    static props = { ...Card.props, size: Number, body: String };
+}
+export class ListCard extends Component { static props = ["title", "body?"]; }
+export class MixCard extends Component { static props = { ...ListCard.props }; }
+export class Free extends Component { static props = ["*", ...ListCard.props]; }
+export class Bare extends Component {}
+export class Inherits extends Card {}
+export class Written extends Component { static props = { x: String }; }
+export class SuperCard extends Card { static props = { ...super.props, extra: Number }; }
+export class Shared extends Component { static props = { a: String }; }
+export class SharedSub extends Shared {}
+export class Kept extends Component { static props = { a: String }; }
+export class KeptSub extends Kept {}
+"#,
+        )];
+        let mut sale = module(
+            "sale",
+            &assets("sale").replace("'version'", "'depends': ['web'], 'version'"),
+        );
+        sale.js = vec![
+            script(
+                "static/src/order.js",
+                r#"import { Component } from "@odoo/owl";
+import { Card, BigCard, Written, SharedSub, KeptSub } from "@web/card";
+export class Order extends Component {
+    static template = "sale.Order";
+    static components = { Card, Big: BigCard, Gone: missing() };
+}
+export class SubOrder extends Order {
+    static components = { ...Order.components, Card: BigCard };
+}
+export class Lazy extends Order {}
+export class Patched extends Component {
+    static template = "sale.Patched";
+    static components = { Card };
+}
+patch(Patched, { components: {} });
+Written.props.y = String;
+SharedSub.props.extra = { optional: true };
+KeptSub.props = { b: String };
+export class Called extends Component { static template = "sale.Called"; }
+export class Parent extends Component { static template = "sale.Parent"; }
+"#,
+            ),
+            script(
+                "static/tests/order_tests.js",
+                r#"import { Order } from "@sale/order";
+class TestOrder extends Order {}
+Order.components.Card = null;
+"#,
+            ),
+        ];
+        sale.templates = vec![SourceFile {
+            path: PathBuf::new(),
+            rel: "static/src/order.xml".to_owned(),
+            rank: None,
+            demo: false,
+            facts: crate::owl::analyze(
+                r#"<templates>
+<t t-name="sale.Order"><Card title="1"/></t>
+<t t-name="sale.Called"/>
+<t t-name="sale.Caller"><t t-call="sale.Called"/></t>
+<t t-name="sale.Parent"/>
+<t t-name="sale.Child" t-inherit="sale.Parent"/>
+<t t-inherit="sale.Order" t-inherit-mode="extension">
+    <xpath expr="//Card" position="attributes"><attribute name="body">x</attribute></xpath>
+</t>
+</templates>"#,
+            ),
+            suppressions: Default::default(),
+            mentions: Mentions::default(),
+        }];
+        [web, sale]
+    }
+
+    #[test]
+    fn a_tag_resolves_through_the_components_of_each_owner() {
+        let modules = props_modules();
+        let index = Index::build(&modules, None);
+        let owners: Vec<_> = index
+            .template_owners("sale.Order")
+            .unwrap()
+            .iter()
+            .map(|(_, c)| c.name.as_str())
+            .collect();
+        assert_eq!(owners, ["Order", "SubOrder", "Lazy"]);
+        assert!(
+            index.template_owners("sale.Called").is_none(),
+            "a template another calls"
+        );
+        assert!(
+            index.template_owners("sale.Parent").is_none(),
+            "a template with a primary child"
+        );
+        assert!(
+            index.template_owners("sale.Caller").is_none(),
+            "a template no class renders"
+        );
+        assert!(index.template_sets_attributes("sale.Order"));
+        assert!(!index.template_sets_attributes("sale.Caller"));
+        let class = |name: &str| modules[1].js[0].facts.classes.iter().find(|c| c.name == name).unwrap();
+        let here = index.js_target(1, 0);
+        let child = |owner: &str, tag: &str| {
+            index
+                .component_child(here, class(owner), tag)
+                .map(|(_, c)| c.name.as_str())
+        };
+        assert_eq!(child("Order", "Card"), Some("Card"));
+        assert_eq!(child("Order", "Big"), Some("BigCard"));
+        assert_eq!(child("SubOrder", "Card"), Some("BigCard"));
+        assert_eq!(child("SubOrder", "Big"), Some("BigCard"));
+        assert_eq!(child("Lazy", "Card"), Some("Card"));
+        for (owner, tag) in [("Order", "Gone"), ("Order", "Nope"), ("Patched", "Card")] {
+            assert_eq!(child(owner, tag), None, "{owner} {tag}");
+        }
+    }
+
+    #[test]
+    fn a_component_has_the_props_it_declares_or_spreads() {
+        let modules = props_modules();
+        let index = Index::build(&modules, None);
+        let here = index.js_target(0, 0);
+        let props = |name: &str| {
+            let class = modules[0].js[0].facts.classes.iter().find(|c| c.name == name).unwrap();
+            let schema = index.component_props(here, class)?;
+            let mut props: Vec<_> = schema
+                .props
+                .iter()
+                .map(|(p, required)| format!("{p}{}", if *required { "" } else { "?" }))
+                .collect();
+            props.sort_unstable();
+            Some(format!("{}{}", if schema.any { "*," } else { "" }, props.join(",")))
+        };
+        assert_eq!(props("Card").as_deref(), Some("body?,title"));
+        assert_eq!(props("BigCard").as_deref(), Some("body,size,title"));
+        assert_eq!(props("ListCard").as_deref(), Some("body?,title"));
+        assert_eq!(props("Free").as_deref(), Some("*,body?,title"));
+        assert_eq!(props("Inherits").as_deref(), Some("body?,title"));
+        assert_eq!(props("SuperCard").as_deref(), Some("body?,extra,title"));
+        // A subclass's own `props` replaces the inherited object, which a write into it changes.
+        assert_eq!(props("Kept").as_deref(), Some("a"));
+        for name in ["MixCard", "Bare", "Written", "Shared", "SharedSub", "KeptSub"] {
+            assert_eq!(props(name), None, "{name}");
         }
     }
 

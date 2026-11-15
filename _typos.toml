@@ -10,6 +10,8 @@ _read_group_get_annoted_groupby = "_read_group_get_annoted_groupby"
 # `datas` is a field of ir.attachment before saas~19.3, and `db_datas` holds the content in every series.
 [default.extend-words]
 datas = "datas"
+# The misspelling in the OD614 page example.
+titel = "titel"
 
 # Release Please links each changelog entry to its commit, and a short hash such as ba446ab reads
 # as a word.
