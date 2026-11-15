@@ -2485,9 +2485,10 @@ impl<'m> Index<'m> {
         None
     }
 
-    /// The members of the `Component` of the `owl` global in `module`, by its series or the
-    /// default one, else the one the reader runs on, as core's `web` gives none (`'version': '1.0'`). With neither known,
-    /// Owl 1's, a superset of Owl 2's, so neither reads a member as missing.
+    /// The members of the `Component` of the `owl` global in `module`, by its series, else
+    /// `default_series`, else the reader's, as core's `web` gives `'version': '1.0'`. With no
+    /// series known, Owl 1's, a superset of Owl 2's, so neither OD602 nor OD613 reports a member
+    /// as missing.
     fn owl_global(&self, module: usize, reader: Option<Series>) -> &'static [&'static str] {
         match self.modules[module].series.or(self.default_series).or(reader) {
             Some(series) if series >= OWL2 => OWL_COMPONENT,
@@ -5287,7 +5288,10 @@ class Core extends Panel {}
 "#;
         let owl1 = OWL1_COMPONENT.iter().copied().collect::<FxHashSet<_>>();
         let owl2 = OWL_COMPONENT.iter().copied().collect::<FxHashSet<_>>();
-        // The globals of `sale`, then of `web` (`Core`), which a `'1.0'` `web` reads as of `sale`.
+        // The manifest versions of `web` and `sale`, `default_series`, the members expected of
+        // `Bound` and `Global` (the `owl` global read in `sale`), and of `Core`, which extends
+        // `web`'s `Panel` (the `owl` global read in `web`, which a `'1.0'` `web` takes from
+        // `default_series`, else `sale`).
         for (web, sale, default, global, core) in [
             ("15.0.1.0.0", "15.0.1.0.0", None, &owl1, &owl1),
             ("1.0", "1.0", None, &owl1, &owl1),
