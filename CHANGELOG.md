@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.13.0](https://github.com/avanserv/odooscan/compare/v0.12.0...v0.13.0) (2026-11-15)
+
+
+### Features
+
+* **checks:** Check legacy _rpc calls and three-argument patches ([#342](https://github.com/avanserv/odooscan/issues/342)) ([bef33b6](https://github.com/avanserv/odooscan/commit/bef33b6e7492efe766c014ba40f4300bc958c668))
+* **checks:** Check odoo.define requires and 14.0 asset templates ([#341](https://github.com/avanserv/odooscan/issues/341)) ([0856a9e](https://github.com/avanserv/odooscan/commit/0856a9eef923f18146928f3cc8e15d7129b31781))
+* **checks:** Check services and tours against registry keys ([#347](https://github.com/avanserv/odooscan/issues/347)) ([a85ce1a](https://github.com/avanserv/odooscan/commit/a85ce1a9844100775af7caf0a749e9f1cd1e25ed))
+* **checks:** Check widgets and client actions against registry keys ([#346](https://github.com/avanserv/odooscan/issues/346)) ([eda862e](https://github.com/avanserv/odooscan/commit/eda862e04b923c8ba34504c4dec504371f64d66a))
+* **checks:** Report a JS import of a module the page does not load ([#339](https://github.com/avanserv/odooscan/issues/339)) ([fd19d53](https://github.com/avanserv/odooscan/commit/fd19d53f7e7bda9e10ca430e3a4f2943f4238a2d))
+* **js:** Report HTML sinks and debug leftovers in scripts ([#343](https://github.com/avanserv/odooscan/issues/343)) ([f9968ee](https://github.com/avanserv/odooscan/commit/f9968eefb4b0daa6f7fec85cf2a6d52fed3cc4a2))
+* **js:** Report Owl 1 APIs in Owl 2 series ([#344](https://github.com/avanserv/odooscan/issues/344)) ([b20916a](https://github.com/avanserv/odooscan/commit/b20916a51bdc27de9169c6ca94adb21add107c64))
+* **owl:** Check the props templates pass to components ([#345](https://github.com/avanserv/odooscan/issues/345)) ([efbd18b](https://github.com/avanserv/odooscan/commit/efbd18b11a510c02a5abf53f92b2de879e2a6451))
+
+
+### Bug Fixes
+
+* **bundles:** Cap the includes one bundle fill expands ([#350](https://github.com/avanserv/odooscan/issues/350)) ([29aa109](https://github.com/avanserv/odooscan/commit/29aa1096d16f9fb25b95a1eb4c4aecc58f33fb38))
+* **bundles:** Keep checking an entry at an unscanned module's target ([#348](https://github.com/avanserv/odooscan/issues/348)) ([597789c](https://github.com/avanserv/odooscan/commit/597789c72fe85b8fe7d62fd7f8743c7b0baaf603))
+* **bundles:** Normalise bundle paths as Odoo's normpath does ([#363](https://github.com/avanserv/odooscan/issues/363)) ([e381073](https://github.com/avanserv/odooscan/commit/e381073a5871b6159c22a5464f886ab8f4bdd01a))
+* **checks:** Report a field widget only a module outside depends adds ([#367](https://github.com/avanserv/odooscan/issues/367)) ([26b1689](https://github.com/avanserv/odooscan/commit/26b16895a961e33e3921809ef022b9168386f9f3))
+* **checks:** Report a minimal frontend script importing a lazy module ([#351](https://github.com/avanserv/odooscan/issues/351)) ([f4e6ea8](https://github.com/avanserv/odooscan/commit/f4e6ea8b42860dd6cb4a0b0756ff3b6619231852))
+* **index:** Check the imports of JS under static/tests ([#340](https://github.com/avanserv/odooscan/issues/340)) ([334dcc6](https://github.com/avanserv/odooscan/commit/334dcc696effac21270d78ad40695879a58ae9ff))
+* **index:** Load bundle files after include, remove and replace ([#338](https://github.com/avanserv/odooscan/issues/338)) ([6545ff6](https://github.com/avanserv/odooscan/commit/6545ff6d4c7fc316f9b9245e8946cd2ff633a7e8))
+* **index:** Mark aliased props a write changes, count bad prop suffixes ([#360](https://github.com/avanserv/odooscan/issues/360)) ([6a3d105](https://github.com/avanserv/odooscan/commit/6a3d10550089c0f8a10b673b58b0b20243a7e990))
+* **index:** Treat static/src tests and test-bundle scripts as tests ([#355](https://github.com/avanserv/odooscan/issues/355)) ([e9940ae](https://github.com/avanserv/odooscan/commit/e9940ae1d7eefc35dd5a073ea8d7d41fd0c4ff89))
+* **js:** Skip Owl 1 assignment targets and presence tests in OD613 ([#358](https://github.com/avanserv/odooscan/issues/358)) ([21a1e5a](https://github.com/avanserv/odooscan/commit/21a1e5ade04255ba46fd8418f7ed124f30ecdc7e))
+
 ## [0.12.0](https://github.com/avanserv/odooscan/compare/v0.11.0...v0.12.0) (2026-11-14)
 
 
