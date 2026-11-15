@@ -17,8 +17,8 @@ use odooscan_core::series::Series;
 
 const DEFAULT_REMOTE: &str = "https://github.com/odoo/odoo";
 
-/// What `make oracle-fetch` checks out but the assets it adds for OD513, which checks only the
-/// checked modules' own, plus the file that names the checkout's series.
+/// The modules `make oracle-fetch` checks out, without the assets it adds for OD513, which checks
+/// only the checked modules' own, plus the file that names the checkout's series.
 const SPARSE: &[&str] = &[
     "/addons/",
     "/odoo/addons/",

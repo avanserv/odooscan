@@ -3885,8 +3885,8 @@ fn call_suffix(c: &ast::ExprCall, effect: Effect) -> &'static str {
 
 /// What a call of an environment does to superuser mode. `env(user=u)` clears `su`; with `su=True`
 /// too it reads as leaving here, and `call_path` puts `sudo()` back through `superuser::switch`.
-/// `env(su=False)` keeps the user (18.0 `odoo/api.py:647-649`, 20.0
-/// `odoo/orm/environments.py:145-147`).
+/// `env(su=False)` keeps the user (18.0 `odoo/api.py:646-649`, 20.0
+/// `odoo/orm/environments.py:144-147`).
 fn env_effect(c: &ast::ExprCall) -> Effect {
     let user = route_body::env_user(c).filter(|u| !u.is_none_literal_expr());
     let su = c.arguments.find_argument_value("su", 3);
@@ -4130,7 +4130,7 @@ fn runs_as_superuser(records: &[String]) -> bool {
 }
 
 /// The segment `Flows::path` puts before the `sudo()` of a call building the environment of uid
-/// 1, which Odoo keeps in superuser mode whatever `su` is (18.0 `odoo/api.py:571-572`, 20.0
+/// 1, which Odoo keeps in superuser mode whatever `su` is (18.0 `odoo/api.py:572-573`, 20.0
 /// `odoo/orm/environments.py:66-67`). No pattern names it, as it is no identifier.
 const UID_1: &str = "(uid 1)";
 

@@ -39,7 +39,7 @@ pub(crate) fn escalation(body: &[Stmt], series: Option<Series>) -> Option<Escala
 
 /// The label of a call that builds an environment, or records, for the superuser: its user is
 /// `SUPERUSER_ID` or `1`, or it passes `su=True`. `with_user()` drops superuser mode for any other
-/// user (18.0 `odoo/models.py:6341`), so only its user counts.
+/// user (18.0 `odoo/models.py:6343`), so only its user counts.
 pub(crate) fn switch(call: &ast::ExprCall) -> Option<&'static str> {
     let (label, _, su) = signature(call)?;
     let su = su

@@ -1,7 +1,7 @@
 //! The routing Odoo gives a controller method: its own `@route` merged with those of the methods it
 //! overrides, ancestors first (18.0 `odoo/http.py:831-849`, 20.0 `odoo/http/routing_map.py:296-314`).
 //! An override that leaves out a key keeps the one it overrides, and the type stays that of the
-//! first definition whatever an override says (18.0 `http.py:871-880`, 20.0 `routing_map.py:336-346`).
+//! first definition whatever an override says (18.0 `http.py:880-887`, 20.0 `routing_map.py:345-352`).
 
 use ruff_python_ast::{self as ast, Expr, Stmt};
 use ruff_text_size::{Ranged, TextSize};
