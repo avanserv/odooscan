@@ -418,7 +418,7 @@ enum AddTarget {
     Binding(String),
 }
 
-/// Files the `.add()` calls the file makes on registry categories under `registrations` and
+/// Records the `.add()` calls the file makes on registry categories under `registrations` and
 /// `open_categories`, through the bindings it declares. An unknown binding is no registry.
 fn registrations(categories: Vec<(String, String)>, adds: Vec<(AddTarget, Option<String>)>, facts: &mut JsFacts) {
     for (target, key) in adds {

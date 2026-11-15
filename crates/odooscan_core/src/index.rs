@@ -5137,9 +5137,9 @@ registry.category("actions").add("reload", C);"#,
         let index = Index::build(&modules, None);
         let scope = index.scope(2);
         let status = |category, key| match index.registry_status(category, key, &scope) {
-            super::Status::Visible => "visible".to_owned(),
-            super::Status::Hidden(m) => format!("hidden in {m}"),
-            super::Status::Missing => "missing".to_owned(),
+            Status::Visible => "visible".to_owned(),
+            Status::Hidden(m) => format!("hidden in {m}"),
+            Status::Missing => "missing".to_owned(),
         };
         assert_eq!(status("actions", "reload"), "visible");
         assert_eq!(status("fields", "reload"), "missing");
@@ -5148,14 +5148,11 @@ registry.category("actions").add("reload", C);"#,
         assert_eq!(status("view_widgets", "ribbon"), "hidden in side");
         for widget in ["list.tags", "tags", "many2one"] {
             assert!(
-                matches!(index.field_widget_status(widget, &scope), super::Status::Visible),
+                matches!(index.field_widget_status(widget, &scope), Status::Visible),
                 "{widget}"
             );
         }
-        assert!(matches!(
-            index.field_widget_status("list", &scope),
-            super::Status::Missing
-        ));
+        assert!(matches!(index.field_widget_status("list", &scope), Status::Missing));
         assert!(!index.registry_open("actions", &scope));
         assert!(index.registry_open("actions", &index.scope(1)));
     }
