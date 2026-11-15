@@ -3,14 +3,14 @@ use std::ops::Range;
 use oxc_allocator::Allocator;
 use oxc_ast::ast::{
     Argument, ArrayExpressionElement, AssignmentExpression, AssignmentOperator, AssignmentTarget, BinaryExpression,
-    BinaryOperator, BindingPattern, CallExpression, Class, ClassElement, DebuggerStatement, Expression, Function,
-    MemberExpression, ObjectExpression, ObjectProperty, ObjectPropertyKind, Program, Statement, StaticMemberExpression,
-    StringLiteral, UnaryExpression, VariableDeclarator,
+    BinaryOperator, BindingPattern, CallExpression, Class, ClassElement, ConditionalExpression, DebuggerStatement,
+    Expression, Function, IfStatement, MemberExpression, ObjectExpression, ObjectProperty, ObjectPropertyKind, Program,
+    Statement, StaticMemberExpression, StringLiteral, UnaryExpression, VariableDeclarator,
 };
 use oxc_ast_visit::Visit;
 use oxc_ast_visit::walk::{
-    walk_assignment_expression, walk_binary_expression, walk_call_expression, walk_class,
-    walk_static_member_expression, walk_unary_expression, walk_variable_declarator,
+    walk_assignment_expression, walk_binary_expression, walk_call_expression, walk_class, walk_conditional_expression,
+    walk_if_statement, walk_static_member_expression, walk_unary_expression, walk_variable_declarator,
 };
 use oxc_parser::Parser;
 use oxc_span::{GetSpan, SourceType};
@@ -73,6 +73,7 @@ pub fn analyze(text: &str) -> JsFacts {
         statics: vec![],
         categories: vec![],
         adds: vec![],
+        owl_exempt: vec![],
     };
     collector.visit_program(&parsed.program);
     let (templates, statics) = (collector.templates, collector.statics);
@@ -374,6 +375,40 @@ struct Collector<'f> {
     categories: Vec<(String, String)>,
     /// `.add()` calls on a registry category, with their key when a literal.
     adds: Vec<(AddTarget, Option<String>)>,
+    /// Span starts of `owl.<name>` members assigned to or only tested for truth, which OD613 skips
+    /// since neither reads the missing value. oxc visits the parent first, so it records them here.
+    owl_exempt: Vec<u32>,
+}
+
+impl Collector<'_> {
+    /// Exempts the `owl.<name>` members that the condition `expr` only tests for truth, through `!`
+    /// and the operands of a logical expression. Outside a condition, `owl.hooks || {}` yields
+    /// `owl.hooks` when truthy, so a logical expression in a value position exempts nothing.
+    fn tested(&mut self, expr: &Expression) {
+        match expr.without_parentheses() {
+            Expression::StaticMemberExpression(m) if is_owl(&m.object) => self.owl_exempt.push(m.span.start),
+            Expression::LogicalExpression(l) => {
+                self.tested(&l.left);
+                self.tested(&l.right);
+            }
+            Expression::UnaryExpression(u) if u.operator == UnaryOperator::LogicalNot => self.tested(&u.argument),
+            _ => {}
+        }
+    }
+
+    /// Exempts an `owl.<name>` target of a plain or logical assignment; `+=` and the like read it.
+    fn assigned(&mut self, assignment: &AssignmentExpression) {
+        if let AssignmentTarget::StaticMemberExpression(m) = &assignment.left
+            && is_owl(&m.object)
+            && (assignment.operator.is_assign() || assignment.operator.is_logical())
+        {
+            self.owl_exempt.push(m.span.start);
+        }
+    }
+}
+
+fn is_owl(expr: &Expression) -> bool {
+    matches!(expr, Expression::Identifier(o) if o.name == "owl")
 }
 
 /// What a `.add()` call adds to: a category it names, or a binding that may hold one.
@@ -462,8 +497,7 @@ impl<'a> Visit<'a> for Collector<'_> {
         {
             self.categories.push((id.name.to_string(), category));
         }
-        if let Some(Expression::Identifier(init)) = &declarator.init
-            && init.name == "owl"
+        if declarator.init.as_ref().is_some_and(is_owl)
             && let BindingPattern::ObjectPattern(pattern) = &declarator.id
         {
             for property in &pattern.properties {
@@ -482,7 +516,7 @@ impl<'a> Visit<'a> for Collector<'_> {
     }
 
     fn visit_static_member_expression(&mut self, member: &StaticMemberExpression<'a>) {
-        if matches!(&member.object, Expression::Identifier(o) if o.name == "owl") {
+        if is_owl(&member.object) && !self.owl_exempt.contains(&member.span.start) {
             let pos = self.lines.pos(member.property.span.start as usize);
             self.facts.diags.extend(owl1_api(&member.property.name, pos));
         }
@@ -508,8 +542,19 @@ impl<'a> Visit<'a> for Collector<'_> {
                 (None, _) => {}
             }
         }
+        self.assigned(assignment);
         self.facts.diags.extend(html_assignment(assignment, self.lines));
         walk_assignment_expression(self, assignment);
+    }
+
+    fn visit_if_statement(&mut self, statement: &IfStatement<'a>) {
+        self.tested(&statement.test);
+        walk_if_statement(self, statement);
+    }
+
+    fn visit_conditional_expression(&mut self, conditional: &ConditionalExpression<'a>) {
+        self.tested(&conditional.test);
+        walk_conditional_expression(self, conditional);
     }
 
     fn visit_call_expression(&mut self, call: &CallExpression<'a>) {
@@ -744,9 +789,7 @@ fn heritage(class: &Class) -> Heritage {
     match class.heritage.as_ref().map(|h| &h.expression) {
         None => Heritage::None,
         Some(Expression::Identifier(i)) => Heritage::Name(i.name.to_string()),
-        Some(Expression::StaticMemberExpression(m)) if matches!(&m.object, Expression::Identifier(o) if o.name == "owl") => {
-            Heritage::Owl(m.property.name.to_string())
-        }
+        Some(Expression::StaticMemberExpression(m)) if is_owl(&m.object) => Heritage::Owl(m.property.name.to_string()),
         Some(_) => Heritage::Other,
     }
 }
@@ -780,9 +823,7 @@ fn class_triggers(class: &Class, lines: &Lines) -> Vec<Pos> {
 fn unescaped_markup(call: &CallExpression, lines: &Lines) -> Option<RawDiag> {
     let start = match &call.callee {
         Expression::Identifier(i) if i.name == "markup" => i.span.start,
-        Expression::StaticMemberExpression(m)
-            if m.property.name == "markup" && matches!(&m.object, Expression::Identifier(o) if o.name == "owl") =>
-        {
+        Expression::StaticMemberExpression(m) if m.property.name == "markup" && is_owl(&m.object) => {
             m.property.span.start
         }
         _ => return None,
@@ -1814,6 +1855,35 @@ const { hooks: h } = other;
                 "OD613@5:20",
                 "OD613@5:26",
                 "OD613@6:5"
+            ]
+        );
+    }
+
+    #[test]
+    fn skips_owl_1_assignments_and_presence_tests() {
+        let source = r#"owl.hooks = { useState };
+owl.tags ||= {};
+if (owl.QWeb) {}
+if (!(owl.hooks)) {}
+if (owl.hooks && x) {}
+if (x || owl.hooks) {}
+const u = owl.hooks ? owl.hooks.useState : owl.useState;
+const v = cond ? a : (x && owl.tags) ? b : c;
+x || owl.hooks;
+const { useState } = owl.hooks || {};
+const h = owl.hooks && y;
+owl.hooks.useState = f;
+owl.hooks += 1;
+"#;
+        assert_eq!(
+            shown(source),
+            [
+                "OD613@7:27",
+                "OD613@9:10",
+                "OD613@10:26",
+                "OD613@11:15",
+                "OD613@12:5",
+                "OD613@13:5"
             ]
         );
     }

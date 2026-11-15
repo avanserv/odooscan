@@ -952,6 +952,8 @@ custom/owl_api16/static/src/js/panel.js:6:26: OD613 Owl 2 has no 'hooks', so the
 custom/owl_api16/static/src/js/panel.js:9:27: OD613 Owl 2 has no 'tags', so the script reads undefined; import xml from @odoo/owl
 custom/owl_api16/static/src/js/panel.js:17:14: OD613 Owl 2's Component has no trigger(), so this.trigger() in Panel throws; pass a callback in props, or use the env bus
 custom/owl_api16/static/src/js/panel.js:22:26: OD613 Owl 2's Component has no trigger(), so this.trigger() in Header throws; pass a callback in props, or use the env bus
+custom/owl_api16/static/src/js/shim.js:6:42: OD613 Owl 2 has no 'hooks', so the script reads undefined; import each hook, such as useState, from @odoo/owl
+custom/owl_api16/static/src/js/shim.js:8:24: OD613 Owl 2 has no 'hooks', so the script reads undefined; import each hook, such as useState, from @odoo/owl
 custom/owl_api17/static/src/js/save_button.js:6:14: OD613 Owl 2's Component has no trigger(), so this.trigger() in SaveButton throws; pass a callback in props, or use the env bus
 custom/owl_api17/static/src/js/save_button.js:12:14: OD613 Owl 2's Component has no trigger(), so this.trigger() in NoteController throws; pass a callback in props, or use the env bus
 custom/owl_props/static/src/xml/board.xml:5:14: OD615 <Card> leaves out 'title', which Card requires, so Owl throws when it renders the tag in debug mode; pass it, or make it optional
