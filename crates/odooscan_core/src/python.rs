@@ -14,6 +14,7 @@ use crate::facts::{
     UNREAD_TYPE, XmlRef,
 };
 use crate::fix::{self, Edit, Fix};
+use crate::placeholders::{self, Specs};
 use crate::route_body::{self, RouteBody};
 use crate::routing::{self, Routing, Scope};
 use crate::series::Series;
@@ -2187,6 +2188,57 @@ fn merged_csrf_off(call: &ast::ExprCall, routing: Option<&Routing>) -> bool {
     }
 }
 
+/// Why formatting the message `text` with `given` positional arguments, or with the `keywords`,
+/// goes wrong, if it does. Both kinds at once fail an assertion (18.0 `odoo/tools/translate.py`,
+/// `get_text_alias()`), a call with neither leaves the message unformatted, and Python ignores the
+/// keys of a mapping that no placeholder names.
+fn translation_mismatch(text: &str, given: usize, keywords: &[&str]) -> Option<String> {
+    if given == 0 && keywords.is_empty() {
+        return None;
+    }
+    if given > 0 && !keywords.is_empty() {
+        return Some("the call gives both positional and keyword arguments, which translating refuses".to_owned());
+    }
+    match placeholders::printf(text) {
+        Err(spec) => Some(format!(
+            "Python cannot read the placeholder '{spec}', so formatting the message raises"
+        )),
+        Ok(specs) if given > 0 => positional_mismatch(&specs, given),
+        Ok(specs) => keyword_mismatch(&specs, keywords),
+    }
+}
+
+fn positional_mismatch(specs: &Specs, given: usize) -> Option<String> {
+    if let Some(key) = specs.keys.first() {
+        return Some(format!(
+            "the placeholder '%({key})' takes a keyword argument, but the call gives positional ones"
+        ));
+    }
+    let takes = |n: usize| {
+        if n == 1 {
+            "1 argument".to_owned()
+        } else {
+            format!("{n} arguments")
+        }
+    };
+    (specs.positional != given).then(|| {
+        format!(
+            "the message takes {}, but the call gives {given}",
+            takes(specs.positional)
+        )
+    })
+}
+
+fn keyword_mismatch(specs: &Specs, keywords: &[&str]) -> Option<String> {
+    // A lone placeholder without a key takes the whole mapping and prints it as a dict, which is
+    // no error but never the intended text; two or more, or a `*`, raise.
+    if specs.positional > 0 {
+        return Some("the message takes positional arguments, but the call gives keyword ones".to_owned());
+    }
+    let missing = specs.keys.iter().find(|key| !keywords.contains(&key.as_str()))?;
+    Some(format!("no keyword argument gives the placeholder '%({missing})'"))
+}
+
 struct PyVisitor<'a, 'ast> {
     loc: &'a Locator<'a>,
     series: Option<Series>,
@@ -2231,8 +2283,12 @@ struct PyVisitor<'a, 'ast> {
     import_shims: usize,
     /// How many enclosing classes and functions `@skip` decorates.
     skipped: usize,
+    /// How many enclosing function and lambda bodies defer the code until a call, past import.
+    deferred: usize,
     /// The names the file's imports from `odoo` bind at import.
     odoo_names: Vec<&'ast str>,
+    /// Whether the last `odoo` import binding `_` names `_` itself, not an alias such as `_lt as _`.
+    eager_translator: bool,
     /// The names the file's imports bind to `odoo.osv.expression.AND` or `OR`.
     domain_joins: Vec<&'ast str>,
     /// The names the file binds to a collection of literals at import.
@@ -2279,7 +2335,13 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
             change_check: None,
             import_shims: 0,
             skipped: 0,
+            deferred: 0,
             odoo_names: odoo_imports.iter().map(|(local, _)| *local).collect(),
+            eager_translator: odoo_imports
+                .iter()
+                .rev()
+                .find(|(local, _)| *local == "_")
+                .is_some_and(|(_, path)| path.ends_with("._")),
             domain_joins: taint::domain_joins(&odoo_imports),
             collections: module_state::collections(&top),
             orm_names: ORM_PACKAGES
@@ -3222,6 +3284,8 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
             }
             _ => {}
         }
+        self.translation_at_import(call, expr);
+        self.translation_arguments(call, expr);
         self.api_calls(call);
         self.domain_call(call);
         self.id_refs(call, expr);
@@ -3230,6 +3294,50 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
         self.created_views(call);
         self.update_env_user(call);
         self.tour_names(call);
+    }
+
+    /// OD132 on `_()` run at import, where no context, `self` or request gives a language, so it
+    /// returns the source untranslated (18.0 `odoo/tools/translate.py`, `_get_lang()`).
+    fn translation_at_import(&mut self, call: &ast::ExprCall, expr: &Expr) {
+        let bare = matches!(&*call.func, Expr::Name(n) if n.id.as_str() == "_");
+        if bare && self.deferred == 0 && self.eager_translator {
+            self.diag(
+                "OD132",
+                expr,
+                "_() runs at import, where no language is known, so the text stays untranslated; use _lt(), or a plain string for a field attribute",
+            );
+        }
+    }
+
+    /// OD133 on `_()` or `_lt()` given arguments its literal message cannot be formatted with. The
+    /// source is formatted outside the `try` that catches a bad translation, so this raises or prints
+    /// the arguments wrong in every language, and `_lt()` does so when the text is used (18.0
+    /// `odoo/tools/translate.py`, `get_translation()`). Arguments `*` or `**` unpack are unknown.
+    fn translation_arguments(&mut self, call: &ast::ExprCall, expr: &Expr) {
+        let lazy = match tail_name(&call.func) {
+            Some("_") => false,
+            Some("_lt") => true,
+            _ => return,
+        };
+        let Some((message, given)) = call.arguments.args.split_first() else {
+            return;
+        };
+        let Some(text) = str_lit(message) else {
+            return;
+        };
+        let keywords: Option<Vec<&str>> = call
+            .arguments
+            .keywords
+            .iter()
+            .map(|k| k.arg.as_ref().map(ast::Identifier::as_str))
+            .filter(|name| !(lazy && matches!(name, Some("_module" | "_default_lang"))))
+            .collect();
+        let Some(keywords) = keywords.filter(|_| !given.iter().any(Expr::is_starred_expr)) else {
+            return;
+        };
+        if let Some(problem) = translation_mismatch(text, given.len(), &keywords) {
+            self.diag("OD133", expr, problem);
+        }
     }
 
     /// The tours a browser test runs. `start_tour()` starts its `tour_name` and waits for it to be
@@ -3880,7 +3988,9 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
         self.skipped += skip;
         self.owners.push(None);
         self.cursor_uses.push(uses);
+        self.deferred += 1;
         visitor::walk_stmt(self, stmt);
+        self.deferred -= 1;
         self.cursor_uses.pop();
         self.owners.pop();
         self.skipped -= skip;
@@ -4018,6 +4128,12 @@ impl<'ast> Visitor<'ast> for PyVisitor<'_, 'ast> {
             Expr::Attribute(a) => {
                 self.private_attr(a, expr);
                 self.request_attr(a, expr);
+            }
+            Expr::Lambda(_) => {
+                self.deferred += 1;
+                visitor::walk_expr(self, expr);
+                self.deferred -= 1;
+                return;
             }
             _ => {}
         }
@@ -6253,6 +6369,126 @@ class U(HttpCase):
 
     fn codes(src: &str, series: Option<Series>) -> Vec<&'static str> {
         analyze(src, series).diags.iter().map(|d| d.code).collect()
+    }
+
+    /// The lines of the OD132 findings of `body`, in a file importing `_` and `_lt` from `odoo`.
+    fn at_import(body: &str) -> Vec<u32> {
+        let src = format!("from odoo import _, _lt, fields, models\n{body}");
+        let facts = analyze(&src, None);
+        facts
+            .diags
+            .iter()
+            .filter(|d| d.code == "OD132")
+            .map(|d| d.pos.line)
+            .collect()
+    }
+
+    #[test]
+    fn translating_at_import_is_reported() {
+        assert_eq!(at_import("ERROR = _('Invalid')\n"), [2]);
+        assert_eq!(at_import("if X:\n    ERROR = _('Invalid')\n"), [3]);
+        let class = "class A(models.Model):\n    _name = 'a'\n    note = fields.Char(string=_('Note'))\n    \
+                     kinds = fields.Selection([(k, _(k)) for k in ('a', 'b')])\n";
+        assert_eq!(at_import(class), [4, 5]);
+    }
+
+    #[test]
+    fn translating_once_called_is_not_reported() {
+        for body in [
+            "LABEL = _lt('Label')\n",
+            "class A(models.Model):\n    _name = 'a'\n    note = fields.Char(default=lambda self: _('Note'))\n",
+            "def f():\n    return _('Note')\n",
+            "async def f():\n    return _('Note')\n",
+            "def f():\n    class B:\n        label = _('Note')\n",
+            "ERROR = self.env._('Invalid')\n",
+        ] {
+            assert_eq!(at_import(body), [] as [u32; 0], "{body}");
+        }
+        for src in [
+            "from gettext import gettext as _\nERROR = _('Invalid')\n",
+            "from odoo.tools.translate import _lt as _\nERROR = _('Invalid')\n",
+            "from odoo import _\nfrom odoo.tools.translate import _lt as _\nERROR = _('Invalid')\n",
+        ] {
+            assert_eq!(codes(src, None), [] as [&str; 0], "{src}");
+        }
+        assert_eq!(
+            codes("from odoo.tools.translate import _\nERROR = _('Invalid')\n", None),
+            ["OD132"]
+        );
+    }
+
+    /// The OD133 messages of a call to `call`, in a method.
+    fn mismatch(call: &str) -> Vec<String> {
+        let src = format!("def f(self, a, b, kw, args):\n    return {call}\n");
+        let facts = analyze(&src, None);
+        facts
+            .diags
+            .into_iter()
+            .filter(|d| d.code == "OD133")
+            .map(|d| d.message)
+            .collect()
+    }
+
+    #[test]
+    fn arguments_the_message_does_not_take_are_reported() {
+        for (call, message) in [
+            (
+                "_('%s ordered %s', a)",
+                "the message takes 2 arguments, but the call gives 1",
+            ),
+            ("_('%s', a, b)", "the message takes 1 argument, but the call gives 2"),
+            ("_('Done', a)", "the message takes 0 arguments, but the call gives 1"),
+            ("_('%*d', a)", "the message takes 2 arguments, but the call gives 1"),
+            (
+                "_('%s and %(b)s', a, b=b)",
+                "the call gives both positional and keyword arguments, which translating refuses",
+            ),
+            (
+                "_('Discount must stay below 100 (got %)', a)",
+                "Python cannot read the placeholder '%)', so formatting the message raises",
+            ),
+            (
+                "self.env._('Order (%(name)) is locked', name=a)",
+                "Python cannot read the placeholder '%(name))', so formatting the message raises",
+            ),
+            (
+                "_('Too large: %(size)s', a)",
+                "the placeholder '%(size)' takes a keyword argument, but the call gives positional ones",
+            ),
+            (
+                "_('%s ordered', name=a)",
+                "the message takes positional arguments, but the call gives keyword ones",
+            ),
+            (
+                "_('%(a)s and %(b)s', a=a)",
+                "no keyword argument gives the placeholder '%(b)'",
+            ),
+            (
+                "_lt('%s and %s', a, _module='sale')",
+                "the message takes 2 arguments, but the call gives 1",
+            ),
+        ] {
+            assert_eq!(mismatch(call), [message], "{call}");
+        }
+    }
+
+    #[test]
+    fn arguments_the_message_takes_are_not_reported() {
+        for call in [
+            "_('%s ordered %s', a, b)",
+            "_('100% sure')",
+            "_('%(a)s', a=a, b=b)",
+            "_('%(a)s and %(a)r', a=a)",
+            "_('%s at 100%%', a)",
+            "_('%s ordered %s', *args)",
+            "_('%(a)s', **kw)",
+            "_lt('Label', _module='sale', _default_lang='en_US')",
+            "_lt('%(a)s', a=a, _module='sale')",
+            "_(a, b)",
+            "_('Value %s' % a)",
+        ] {
+            assert_eq!(mismatch(call), [] as [String; 0], "{call}");
+        }
     }
 
     #[test]

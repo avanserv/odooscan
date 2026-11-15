@@ -43,6 +43,12 @@
       "count": 1
     },
     {
+      "path": "addons/account/models/account_bank_statement.py",
+      "code": "OD133",
+      "message": "Python cannot read the placeholder '%(statement_name))', so formatting the message raises",
+      "count": 1
+    },
+    {
       "path": "addons/account/models/account_code_mapping.py",
       "code": "OD105",
       "message": "create() override never calls super(), so other modules' overrides and the ORM itself are skipped",
@@ -2506,6 +2512,12 @@
       "path": "addons/marketing_card/models/card_campaign.py",
       "code": "OD103",
       "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
+      "count": 1
+    },
+    {
+      "path": "addons/marketing_card/utils/linkedin_api.py",
+      "code": "OD133",
+      "message": "the placeholder '%(image_size_human_readable)' takes a keyword argument, but the call gives positional ones",
       "count": 1
     },
     {

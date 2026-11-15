@@ -184,6 +184,8 @@ rules! {
     "OD129" "auth-none-user" Security Warning None, false, "An auth='none' route reads the user or writes records, but runs with no user.";
     "OD130" "session-user-switch" Security Info None, false, "Code switches the user a request or a session runs as.";
     "OD131" "secret-compared-with-eq" Security Warning None, false, "A token, secret or signature is compared with == rather than consteq().";
+    "OD132" "translation-at-import" Quality Warning None, false, "_() runs at import, where no language is known, so the text is never translated.";
+    "OD133" "translation-arguments-mismatch" Correctness Error None, false, "The arguments of _() or _lt() do not fit the placeholders of its message, so formatting it raises or prints them wrong.";
     "OD201" "unknown-model" Correctness Error None, true, "The model is not defined by any indexed module.";
     "OD202" "model-not-in-depends" Correctness Error None, true, "The model comes from a module missing from depends.";
     "OD203" "unresolved-field-path" Correctness Error None, true, "A field path does not resolve on its model.";

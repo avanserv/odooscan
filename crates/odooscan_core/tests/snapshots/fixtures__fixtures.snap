@@ -141,6 +141,16 @@ custom/bad_sale/models/flows.py:18:9: OD122 UPDATE on bad_order bypasses the ORM
 custom/bad_sale/models/flows.py:31:16: OD707 request.httprequest.files reaches the path of open() through 'upload', '_store_upload()', so the user picks the file the server opens; pass the name through secure_filename() or os.path.basename()
 custom/bad_sale/models/flows.py:39:9: OD701 route parameter 'term' reaches the query of cr.execute() through '_search_by()', 'query'; pass it as a query parameter or build the query with odoo.tools.SQL
 custom/bad_sale/models/ir_http.py:9:9: OD130 _auth_method_kiosk() decides which user every route with auth='kiosk' runs as; check that it sets only a user the request has proven to be
+custom/bad_sale/models/messages.py:3:8: OD132 _() runs at import, where no language is known, so the text stays untranslated; use _lt(), or a plain string for a field attribute
+custom/bad_sale/models/messages.py:11:31: OD132 _() runs at import, where no language is known, so the text stays untranslated; use _lt(), or a plain string for a field attribute
+custom/bad_sale/models/messages.py:12:37: OD132 _() runs at import, where no language is known, so the text stays untranslated; use _lt(), or a plain string for a field attribute
+custom/bad_sale/models/messages.py:16:9: OD133 the message takes 2 arguments, but the call gives 1
+custom/bad_sale/models/messages.py:17:9: OD133 the call gives both positional and keyword arguments, which translating refuses
+custom/bad_sale/models/messages.py:18:9: OD133 Python cannot read the placeholder '%)', so formatting the message raises
+custom/bad_sale/models/messages.py:19:9: OD133 the placeholder '%(size)' takes a keyword argument, but the call gives positional ones
+custom/bad_sale/models/messages.py:20:9: OD133 the message takes positional arguments, but the call gives keyword ones
+custom/bad_sale/models/messages.py:21:9: OD133 no keyword argument gives the placeholder '%(order)'
+custom/bad_sale/models/messages.py:22:9: OD133 the message takes 2 arguments, but the call gives 1
 custom/bad_sale/models/models.py:6:17: OD202 model 'mail.thread' comes from module mail; add it to depends
 custom/bad_sale/models/models.py:6:32: OD201 no indexed module defines model 'res.nothing'
 custom/bad_sale/models/models.py:9:24: OD108 group_operator is renamed aggregator
@@ -1182,6 +1192,7 @@ custom/record_values/data/unloaded.xml:1:1: OD502 'data/unloaded.xml' is not in 
 custom/record_values/demo/rewrites.xml:8:38: OD321 'record_values.other_1' is a record of rv.other, but rv.thing.parent_id takes rv.parent
 custom/record_values/demo/rewrites.xml:9:29: OD322 rv.thing.state has no value 'c'
 custom/record_values/models/things.py:124:31: OD202 model 'rv.side.only' comes from module record_values_side; add it to depends
+custom/record_values/models/things.py:130:50: OD132 _() runs at import, where no language is known, so the text stays untranslated; use _lt(), or a plain string for a field attribute
 custom/record_values_ext/data/extended.xml:12:35: OD321 'record_values.other_1' is a record of rv.other, but rv.thing.new_id takes rv.parent
 custom/record_values_ext/data/extended.xml:13:39: OD321 'record_values.other_1' is a record of rv.other, but rv.thing.retyped_id takes rv.parent
 custom/record_values_ext/data/extended.xml:14:33: OD322 rv.thing.new_state has no value 'zz'

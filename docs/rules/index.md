@@ -69,6 +69,8 @@ Python code checked on its own: security, deprecated APIs and ORM mistakes visib
 | [OD129](OD129.md) | `auth-none-user` | An auth='none' route reads the user or writes records, but runs with no user. |
 | [OD130](OD130.md) | `session-user-switch` | Code switches the user a request or a session runs as. |
 | [OD131](OD131.md) | `secret-compared-with-eq` | A token, secret or signature is compared with == rather than consteq(). |
+| [OD132](OD132.md) | `translation-at-import` | _() runs at import, where no language is known, so the text is never translated. |
+| [OD133](OD133.md) | `translation-arguments-mismatch` | The arguments of _() or_lt() do not fit the placeholders of its message, so formatting it raises or prints them wrong. |
 
 ## OD2: models and fields
 
