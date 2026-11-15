@@ -1353,7 +1353,7 @@ pub struct JsProps {
 #[derive(Debug, PartialEq, Eq)]
 pub enum PropItem {
     /// A prop, or `*` for any. Required unless listed as `x?`, or given an object whose `optional`
-    /// is not a literal `false`.
+    /// is not a literal `false` or that holds a spread.
     Prop { name: String, required: bool },
     /// `...X.props`, or `...super.props` as `super`.
     Spread(String),
