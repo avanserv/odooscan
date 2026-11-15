@@ -244,8 +244,8 @@ fn alias(text: &str) -> Option<JsAlias> {
 }
 
 /// From saas~17.2 an alias is any name and any `default=` value makes it stand for the file's
-/// exports; before, a name of word characters and dots, and `default=` one of `false`, `False` or
-/// `0` (17.0 and 18.0 `odoo/tools/js_transpiler.py`, `ODOO_MODULE_RE`, commit `3ca925b8a82e`).
+/// exports (18.0 `odoo/tools/js_transpiler.py:664-672`, 20.0 `:691-699`); before, a name of word
+/// characters and dots, and `default=` one of `false`, `False` or `0` (commit `3ca925b8a82e`).
 const PERMISSIVE_ALIAS: Series = Series { major: 17, minor: 2 };
 
 impl JsAlias {
@@ -973,9 +973,8 @@ fn orm_call(call: &CallExpression, lines: &Lines) -> Option<OrmCall> {
     (call.model.is_some() || call.method.is_some()).then_some(call)
 }
 
-/// `x._rpc({...})` or `rpc.query({...})` given the `model` and `method` that `buildQuery` routes to
-/// `call_kw` (14.0 `addons/web/static/src/js/core/rpc.js:16-19`, `:37-45`, and `service_mixins.js:146`
-/// beside it).
+/// `x._rpc({...})` or `rpc.query({...})` given the `model` and `method` that the legacy web client's
+/// `buildQuery` routes to `call_kw`. 17.0 drops that client: saas~16.4 is the last series with it.
 fn legacy_rpc(call: &CallExpression, lines: &Lines) -> Option<OrmCall> {
     if !is_legacy_rpc(&call.callee) {
         return None;
@@ -1182,7 +1181,7 @@ impl<'a> Visit<'a> for Supers<'_> {
 
 /// The `this._super` calls of each method or accessor of a named patch, as the member's name: the
 /// patch binds `this._super` to the member it replaces only when the target or its prototype chain
-/// has one (16.0 `addons/web/static/src/core/utils/patch.js:37-56`, `:79-107`).
+/// has one, as the named patch does through saas~16.4.
 fn this_supers(extension: &ObjectExpression, lines: &Lines) -> Vec<Spanned<String>> {
     let mut found = vec![];
     for property in &extension.properties {
@@ -1238,10 +1237,9 @@ impl<'a> Visit<'a> for ThisCalls<'_> {
     }
 }
 
-/// The top-level `odoo.define()` calls. Odoo takes a leading string as the name, a list after it as
-/// the dependencies, and otherwise each `require("x")` of the factory's source (14.0
-/// `addons/web/static/src/js/boot.js:38-39`, `:106-121`; 16.0 `addons/web/static/src/boot.js:39`,
-/// `:205-219`).
+/// The top-level `odoo.define()` calls. Odoo takes a leading string as the name and a list after it
+/// as the dependencies (18.0 and 20.0 `addons/web/static/src/module_loader.js:47-66`), and before
+/// `LISTED_DEPS` otherwise each `require("x")` of the factory's source.
 fn defines(program: &Program, lines: &Lines) -> Vec<JsDefine> {
     program
         .body

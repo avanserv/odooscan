@@ -7,8 +7,8 @@
 //! there.
 //!
 //! Before saas~14.3 a bundle is a template: Odoo renders it with its inheritance and reads its
-//! scripts in order (14.0 `odoo/addons/base/models/ir_qweb.py:304-355`), so each template adds
-//! the entries `ViewFact::assets` holds to the bundle of its root.
+//! scripts in order, so each template adds the entries `ViewFact::assets` holds to the bundle of
+//! its root.
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -19,8 +19,8 @@ use crate::project::{ASSET_EXTENSIONS, Module};
 use crate::series::Series;
 use crate::xml::QWEB;
 
-/// The first series that fills bundles from `ir.asset` rather than from templates (14.0 against
-/// saas~14.3 `odoo/addons/base/models/ir_qweb.py:330`).
+/// The first series that fills bundles from `ir.asset` rather than from templates (18.0
+/// `odoo/addons/base/models/ir_qweb.py:2579-2582`, 20.0 `:2957-2960`).
 const ASSET_RECORDS: Series = Series { major: 14, minor: 3 };
 
 /// How far a template's root is looked for up `inherit_id`, so that a cycle ends.
@@ -83,7 +83,7 @@ pub fn of_modules(
 struct Part<'m> {
     bundle: String,
     /// The `include` a primary extension opens with: it starts from its parent's whole tree
-    /// (14.0 `odoo/addons/base/models/ir_ui_view.py:556-608`).
+    /// (18.0 `odoo/addons/base/models/ir_ui_view.py:916-929`, 20.0 `:1033-1049`).
     opening: Option<AssetEntry>,
     entries: &'m [AssetEntry],
 }

@@ -199,22 +199,22 @@ const TUPLE_LISTED: Series = Series { major: 18, minor: 1 };
 /// there, which `listed_values` cannot tell apart from a lone one.
 const TUPLE_CHECKED: Series = Series { major: 19, minor: 3 };
 
-/// The first series that loads the XML of a bundle with its scripts
-/// (`odoo/addons/base/models/assetsbundle.py:420` on 16.0). It never loads `web.assets_qweb`,
-/// which 15.0 fetches apart (`addons/web/models/ir_http.py:72`).
+/// The first series that loads the XML of a bundle with its scripts (18.0
+/// `odoo/addons/base/models/assetsbundle.py:323-336`, 20.0 `:358-371`). It never loads
+/// `web.assets_qweb`, which 15.0 fetches apart.
 const XML_IN_BUNDLES: Series = Series { major: 16, minor: 0 };
 
 /// The first series that serves assets from `static/` alone: it globs only under `<addon>/static/`
-/// (`odoo/addons/base/models/ir_asset.py:332-334` on saas~16.3), where `:330-340` on saas~16.2
-/// serves a script or a style from anywhere in the module and XML only from `static/`.
+/// (18.0 `odoo/addons/base/models/ir_asset.py:352-353`, 20.0 `:345-346`), where saas~16.2 serves a
+/// script or a style from anywhere in the module and XML only from `static/`.
 const STATIC_ASSETS: Series = Series { major: 16, minor: 3 };
 
-/// The bundles that are templates up to saas~14.2 (`addons/web/views/webclient_templates.xml:56`),
-/// and from saas~14.3 only the manifest's `assets` declares (`addons/web/__manifest__.py:61`).
+/// The bundles that are templates up to saas~14.2, and from saas~14.3 only the manifest's `assets`
+/// declares (18.0 `addons/web/__manifest__.py:45`, `:162` for the two that 18.0 keeps).
 const BUNDLE_TEMPLATES: [&str; 3] = ["web.assets_backend", "web.assets_common", "web.assets_frontend"];
 
 /// The series whose loader reads `<report>` as a write to `ir.actions.report`. 18446f23f11e removes
-/// the tag in saas~16.1 (`_tag_report`, `odoo/tools/convert.py:275` on 16.0).
+/// the tag and its reader `_tag_report` in saas~16.1.
 const REPORT_TAG: &str = ">=11.0,<saas~16.1";
 
 /// A name a modifier reads, with the view it sits in and the field it must find on `owner`.
@@ -815,9 +815,8 @@ fn root_kind<'m>(index: &Index<'m>, module: &Module, view: &ViewFact) -> Option<
 const FIELD_WIDGET_KINDS: &[&str] = &["form", "list", "tree", "kanban", "calendar", "activity", "hierarchy"];
 
 /// The first series whose form parser reads the widgets in a `div.oe_chatter` (`351b047c3726`).
-/// Before, `addons/web/static/src/views/form/form_arch_parser.js:34-36` on 17.0 and saas~17.1
-/// skips the div's children, so a 16.0 chatter field such as `widget="mail_followers"` is never
-/// looked up.
+/// Before, the form parser of 17.0 and saas~17.1 skips the div's children, so a 16.0 chatter field
+/// such as `widget="mail_followers"` is never looked up.
 const CHATTER_WIDGETS_READ: Series = Series { major: 17, minor: 2 };
 
 /// The view types whose arch parser looks each `<widget>` up in the view widget registry (18.0
@@ -830,13 +829,13 @@ fn qweb_view(index: &Index, module: &Module, view: &ViewFact) -> bool {
     root_kind(index, module, view).or(view.kind.as_deref()) == Some(QWEB)
 }
 
-/// The first series that transpiles `@odoo-module` scripts (saas~14.3 against 14.0
-/// `odoo/addons/base/models/ir_qweb.py:304-355`, which has no transpiler).
+/// The first series that transpiles `@odoo-module` scripts (18.0 `odoo/tools/js_transpiler.py:22`,
+/// 20.0 `:20`). 14.0 has no transpiler.
 const TRANSPILER: Series = Series { major: 14, minor: 3 };
 
 /// The first series whose loader waits only for the list given to `odoo.define()`, and no longer
 /// reads the factory's `require` calls (commit `517d3258f23a`; 18.0
-/// `addons/web/static/src/module_loader.js:47-66` against 16.0 `addons/web/static/src/boot.js:205-219`).
+/// `addons/web/static/src/module_loader.js:47-66`).
 const LISTED_DEPS: Series = Series { major: 16, minor: 3 };
 
 /// Whether a bundle loads the script as an ES module: from saas~14.3, annotated, or from 17.0 on,
@@ -858,9 +857,9 @@ fn reads_requires(series: Option<Series>) -> bool {
 }
 
 /// The first series whose `patch` takes the extension second and binds `super`; it throws on a name
-/// there (17.0 `addons/web/static/src/core/utils/patch.js:71-74`). Before, from saas~14.5, it takes
-/// a name second and binds `this._super`. Without a name, 15.0 and 16.0 throw (16.0 `:17-19`) and
-/// saas~14.5 applies nothing, as it iterates the missing third argument.
+/// there (18.0 and 20.0 `addons/web/static/src/core/utils/patch.js:71-76`). Before, from saas~14.5,
+/// it takes a name second and binds `this._super`. Without a name, 15.0 and 16.0 throw and saas~14.5
+/// applies nothing, as it iterates the missing third argument.
 const UNNAMED_PATCH: Series = Series { major: 17, minor: 0 };
 
 /// Whether the series runs a patch of this form. A module of unknown series may run either.
@@ -1266,9 +1265,9 @@ fn upgrade_scripts<'m>(module: &'m Module, series: Option<Series>, out: &mut Out
 
 /// OD513 on an `assets` path of the module's own that resolves to no file, which Odoo drops with a
 /// warning when it is a glob and keeps as a URL that fails to load otherwise (18.0
-/// `odoo/addons/base/models/ir_asset.py:330-374`). From saas~16.3 Odoo serves only files under
+/// `odoo/addons/base/models/ir_asset.py:336-376`). From saas~16.3 Odoo serves only files under
 /// `static/`; before, a script or a style may sit anywhere in the module, so only an XML path
-/// outside `static/` is reported there, since Odoo refuses templates elsewhere (saas~16.2 `:330-340`).
+/// outside `static/` is reported there, since Odoo refuses templates elsewhere.
 fn unmatched_assets<'m>(module: &'m Module, series: Option<Series>, out: &mut Out<'m>) {
     for path in module.manifest.bundles.iter().flat_map(|b| &b.paths) {
         if let Some(message) = unmatched_asset(module, &path.value, static_only(series)) {
@@ -1330,10 +1329,10 @@ fn outside_static(name: &str, path: &str, parts: &[&str], static_only: bool) -> 
         .then(|| format!("'{path}' is outside {name}/static/, the only place Odoo serves XML assets from"))
 }
 
-/// OD505 on a `qweb` key, which from saas~14.3 nothing reads (`addons/web/controllers/main.py:557`),
-/// and OD506 on a `web.assets_qweb` bundle, which nothing loads from `XML_IN_BUNDLES`, when a file
-/// they name is in no bundle that gives templates in the series. A module moving to `assets` often
-/// keeps the dead list beside the bundle that loads the same files.
+/// OD505 on a `qweb` key, which from saas~14.3 nothing reads, and OD506 on a `web.assets_qweb`
+/// bundle, which nothing loads from `XML_IN_BUNDLES`, when a file they name is in no bundle that
+/// gives templates in the series. A module moving to `assets` often keeps the dead list beside the
+/// bundle that loads the same files.
 fn unread_template_lists<'m>(module: &'m Module, series: Option<Series>, out: &mut Out<'m>) {
     let manifest = &module.manifest;
     let xml_in_bundles = series.is_some_and(|s| s >= XML_IN_BUNDLES);

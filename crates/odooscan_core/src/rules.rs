@@ -263,20 +263,20 @@ rules! {
     // saas~19.1 drops `t-esc` from QWeb's directives (`odoo/addons/base/models/ir_qweb.py:1681`); 19.0 still
     // renders it as `t-out` (`:2487`).
     "OD325" "t-esc-removed" Deprecation Error Some(">=saas~19.1"), false, "The server no longer renders t-esc in a QWeb view; use t-out.";
-    // 18.0 falls back to `kanban-box` with a warning (`addons/web/static/src/views/kanban/kanban_arch_parser.js:150`),
-    // saas~18.1 throws without a `card` (`:136`).
+    // 18.0 falls back to `kanban-box` with a warning
+    // (`addons/web/static/src/views/kanban/kanban_arch_parser.js:150-154`), saas~18.1 throws without a
+    // `card`, as 20.0 does (`addons/web/static/src/views/card/card_arch_parser.js:48-51`).
     "OD326" "kanban-box-renamed-card" Deprecation Warning Some(">=18.0"), false, "The kanban-box template of a kanban view is renamed card.";
-    // saas~17.1 compiles `div.oe_chatter` into the chatter (`addons/mail/static/src/chatter/web/form_compiler.js:74`),
-    // saas~17.2 only `chatter` (`:42`).
+    // saas~17.1 compiles `div.oe_chatter` into the chatter, saas~17.2 only `chatter` (18.0
+    // `addons/mail/static/src/chatter/web/form_compiler.js:46`, 20.0 `:45`).
     "OD327" "chatter-div-replaced" Deprecation Warning Some(">=saas~17.2"), false, "A form's div with class oe_chatter no longer shows the chatter; use <chatter/>.";
-    // saas~14.2 defines the bundles as templates (`addons/web/views/webclient_templates.xml:56`), saas~14.3
-    // only in `assets` (`addons/web/__manifest__.py:61`), so a reference to one fails
-    // (`odoo/addons/base/models/ir_model.py:1923`).
+    // saas~14.2 defines the bundles as templates, saas~14.3 only in `assets`, so a reference to one fails
+    // (18.0 `odoo/addons/base/models/ir_model.py:2298`, 20.0 `:2368`).
     "OD328" "bundle-template-removed" Deprecation Error Some(">=saas~14.3"), false, "A data file inherits or references an asset bundle, which is no longer a template.";
-    // Through saas~16.4 a widget or a client action may sit in a legacy registry that 16.0 bridges to the
-    // Owl one (`addons/web/static/src/legacy/legacy_client_actions.js`, `views/legacy_utils.js:79-83`).
-    // 18.0 warns and falls back on an unknown field widget (`addons/web/static/src/views/fields/field.js:89-106`)
-    // and throws on an unknown view widget or client action (`core/registry.js:122-125`).
+    // Through saas~16.4 a widget or a client action may sit in a legacy registry that 16.0 bridges to
+    // the Owl one. 18.0 warns and falls back on an unknown field widget
+    // (`addons/web/static/src/views/fields/field.js:89-106`) and throws on an unknown view widget or
+    // client action (`core/registry.js:122-125`).
     "OD329" "unknown-field-widget" Correctness Warning Some(">=17.0"), true, "A view gives a field a widget no script registers.";
     "OD330" "unknown-view-widget" Correctness Error Some(">=17.0"), true, "A view names a widget no script registers.";
     "OD331" "unknown-client-action" Correctness Error Some(">=17.0"), true, "A client action's tag names an action no script registers.";
@@ -298,10 +298,9 @@ rules! {
     "OD502" "data-file-not-loaded" Quality Warning None, false, "A data file is listed under no manifest key Odoo reads, so Odoo never loads it.";
     "OD503" "unknown-dependency" Correctness Error None, true, "A module in depends is not on the addons path, or its manifest cannot be read.";
     "OD504" "circular-dependency" Correctness Error None, true, "A module in depends depends back on this module.";
-    // saas~14.2 globs the `qweb` key (`addons/web/controllers/main.py:231`), saas~14.3 reads only
-    // `web.assets_qweb` (`:557`).
+    // saas~14.2 globs the `qweb` key, saas~14.3 reads only `web.assets_qweb`.
     "OD505" "qweb-key-ignored" Deprecation Warning Some(">=saas~14.3"), false, "The manifest lists templates under qweb, which Odoo ignores.";
-    // saas~15.4 fetches `web.assets_qweb` (`addons/web/models/ir_http.py:121`), 16.0 never.
+    // saas~15.4 fetches `web.assets_qweb`, 16.0 never.
     "OD506" "assets-qweb-unloaded" Deprecation Warning Some(">=16.0"), false, "The manifest adds files to web.assets_qweb, which Odoo no longer loads.";
     "OD507" "license-missing" Quality Warning None, false, "The manifest names no license, which Odoo reads as LGPL-3.";
     "OD508" "license-unknown" Correctness Error None, false, "The manifest names a license Odoo does not know, which fails the module list update.";
@@ -311,7 +310,7 @@ rules! {
     // (`index.rs` `LISTED_TRIGGERS`); before, it reads only whether the value is truthy.
     "OD511" "auto-install-not-depended" Correctness Error Some(">=saas~12.4"), false, "auto_install names a module missing from depends, so Odoo fails to read the manifest.";
     "OD512" "data-file-repeated" Correctness Warning None, false, "A file is listed twice under data or demo, so Odoo loads it twice.";
-    // saas~14.3 adds the `assets` key and `ir.asset` (`odoo/addons/base/models/ir_asset.py`), which
+    // saas~14.3 adds the `assets` key and `ir.asset` (18.0 `odoo/addons/base/models/ir_asset.py`), which
     // saas~14.2 lacks.
     "OD513" "asset-path-unmatched" Correctness Warning Some(">=saas~14.3"), false, "An assets path or glob of the module matches no file Odoo serves.";
     // 18.0 `odoo/modules/migration.py` is the only series read: an earlier one may take other
@@ -359,11 +358,10 @@ rules! {
     "OD611" "console-log" Quality Info None, false, "A script a page loads calls console.log().";
     // Odoo's ESLint config makes it an error (18.0 `addons/web/tooling/_eslintrc.json:23`, 20.0 `:22`).
     "OD612" "debugger-statement" Quality Warning None, false, "A script a page loads has a debugger statement.";
-    // Owl 2 lands in saas~15.3 (commit `966abc39b573`, not in saas-15.2). 15.0
-    // `addons/web/static/lib/owl/owl.js:5587-5597` exports `QWeb`, `hooks` and `tags`, and its
-    // `Component` has `trigger` (`:4376`); 16.0 `owl.js:6343-6379` exports none, and its `Component`
-    // (`:2839-2847`; 18.0 `:2839`, 20.0 `:4050`) lacks `trigger`, which 16.0
-    // `addons/web/static/src/legacy/legacy_component.js:35`, `:72` adds back through saas-16.4.
+    // Owl 2 lands in saas~15.3 (commit `966abc39b573`, not in saas-15.2). Owl 1 exports `QWeb`, `hooks`
+    // and `tags`, and its `Component` has `trigger`; Owl 2 and later export none (18.0
+    // `addons/web/static/lib/owl/owl.js:6343-6379`, 20.0 `:23-81`), and its `Component` (18.0 `:2839`,
+    // 20.0 `:4050`) lacks `trigger`, which the legacy component of 16.0 adds back through saas-16.4.
     "OD613" "owl1-api-removed" Deprecation Error Some(">=saas~15.3"), true, "A script uses an Owl 1 API that Owl 2 removed: hooks, tags, QWeb or a component's trigger().";
     // Owl validates the props a template passes a child against its `static props` in dev mode,
     // which Odoo turns on in debug mode (18.0 `addons/web/static/src/env.js:187`), and rejects an
@@ -375,7 +373,7 @@ rules! {
     // `useService` throws on a service the web client did not start (18.0
     // `addons/web/static/src/core/utils/hooks.js:132-137`, 20.0 `:157-161`), which it starts from the
     // keys of the `services` registry (18.0 `env.js:45`, `:97-101`). 16.0 adds its legacy services
-    // to it by a name only a run tells (`addons/web/static/src/legacy/legacy_setup.js:52`).
+    // to it by a name only a run tells.
     "OD616" "unknown-service" Correctness Error Some(">=17.0"), true, "A script asks useService() for a service no script registers.";
     "OD701" "sql-injection-flow" Security Error None, false, "Data a user controls reaches the text of an SQL query.";
     "OD702" "code-injection-flow" Security Error None, false, "Data a user controls reaches safe_eval(), eval() or exec().";
