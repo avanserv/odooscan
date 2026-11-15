@@ -12,6 +12,7 @@ use crate::facts::{
     XmlDef, XmlRef,
 };
 use crate::fix::{Edit, Fix};
+use crate::manifest::{AssetEntry, Directive};
 use crate::modifier;
 use crate::record_eval;
 use crate::series::Series;
@@ -57,6 +58,9 @@ pub const LOCATOR: char = '~';
 /// An xpath step that names its element, as in `field[@name='x']` or `t[@t-call="x"]`.
 static XPATH_NAMED_STEP: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r#"([A-Za-z][\w-]*)\[@(name|id|t-call)=['"]([^'"]+)['"]\]"#).unwrap());
+/// An xpath ending on a script step that names its file, the script a spec places others against.
+static XPATH_SCRIPT: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"script\[@src=(?:'([^']*)'|"([^"]*)")\]$"#).unwrap());
 /// Attributes by which a spec names the element it locates.
 const LOCATING_ATTRS: [&str; 3] = ["name", "id", "t-call"];
 static ACTION_REF: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"%\(([\w.]+)\)d").unwrap());
@@ -324,6 +328,14 @@ impl Walker<'_> {
         view.primary = Some(!extends || node.attribute("primary") == Some("True"));
         let body = node.descendants().skip(usize::from(extends));
         view.calls.extend(body.filter_map(|n| t_call(n, self.lines)));
+        if extends {
+            extension_assets(node, &mut view.assets);
+        } else {
+            view.assets = match node.attribute("t-call") {
+                Some(_) => asset_of(node).into_iter().collect(),
+                None => rendered(node).into_iter().filter_map(asset_of).collect(),
+            };
+        }
         // That root is a `<t>` in the arch, and a spec can locate it by its call.
         if let Some(value) = node.attribute("t-call").filter(|_| !extends) {
             view.elements.push(ArchElement {
@@ -1636,6 +1648,116 @@ pub fn t_call(node: Node, lines: &Lines) -> Option<Spanned<String>> {
     literal_target(&target.value).then_some(target)
 }
 
+/// The path of a script Odoo aggregates into the bundle a template renders, by its non-empty
+/// segments: a URL with no scheme nor host, outside `/web/content` (14.0
+/// `odoo/addons/base/models/ir_qweb.py:313-314`, `:349`). As werkzeug's `url_parse` reads them, a
+/// scheme is letters, digits or `+,-.` before a `:` no port number follows, and a host a non-empty
+/// name after `//`.
+fn aggregated(src: &str) -> Option<String> {
+    let scheme = src.split_once(':').is_some_and(|(scheme, rest)| {
+        let named = !scheme.is_empty()
+            && scheme
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b"+,-.".contains(&b));
+        named && (rest.is_empty() || !rest.bytes().all(|b| b.is_ascii_digit()))
+    });
+    let host = src
+        .strip_prefix("//")
+        .is_some_and(|r| !r.is_empty() && !r.starts_with(['/', '?', '#']));
+    if scheme || host || src.starts_with("/web/content") {
+        return None;
+    }
+    let path: Vec<&str> = src.split('/').filter(|s| !s.is_empty()).collect();
+    (!path.is_empty()).then(|| path.join("/"))
+}
+
+/// The elements of `node` that render at the top of the output, which alone Odoo reads a bundle's
+/// scripts from: a `<t>` renders only its content, while a `<t t-call>` renders another template
+/// and any other element keeps what it holds (14.0 `odoo/addons/base/models/ir_qweb.py:328-356`).
+fn rendered<'a, 'i>(node: Node<'a, 'i>) -> Vec<Node<'a, 'i>> {
+    let mut top = vec![];
+    for child in node.children().filter(Node::is_element) {
+        if child.has_tag_name("t") && child.attribute("t-call").is_none() {
+            top.extend(rendered(child));
+        } else {
+            top.push(child);
+        }
+    }
+    top
+}
+
+/// What an element a template adds puts in its bundle: an aggregated script, or through a literal
+/// `t-call` what the called template renders.
+fn asset_of(node: Node) -> Option<AssetEntry> {
+    if !node.is_element() || locates(node) {
+        return None;
+    }
+    let (directive, path) = if node.has_tag_name("script") {
+        (Directive::Append, aggregated(node.attribute("src")?)?)
+    } else {
+        let call = node.attribute("t-call").filter(|c| literal_target(c))?;
+        (Directive::Include, call.to_owned())
+    };
+    Some(AssetEntry {
+        directive,
+        target: None,
+        path,
+    })
+}
+
+/// What the specs of an extending template, through `<data>`, put in its bundle. A spec placed
+/// against a script it locates chains its scripts from there, and replacing with no script removes
+/// it; any other spec appends, as the rendered order is out of reach.
+fn extension_assets(node: Node, assets: &mut Vec<AssetEntry>) {
+    for spec in node.children().filter(Node::is_element) {
+        if spec.has_tag_name("data") {
+            extension_assets(spec, assets);
+            continue;
+        }
+        let added = rendered(spec).into_iter().filter_map(asset_of);
+        let mut directive = match spec.attribute("position").unwrap_or("inside") {
+            "before" => Directive::Before,
+            "after" => Directive::After,
+            "replace" => Directive::Replace,
+            _ => Directive::Append,
+        };
+        let Some(target) = located_script(spec).filter(|_| directive != Directive::Append) else {
+            assets.extend(added);
+            continue;
+        };
+        let mut anchor = target.clone();
+        for mut entry in added {
+            if entry.directive == Directive::Append {
+                entry.directive = directive;
+                entry.target = Some(std::mem::replace(&mut anchor, entry.path.clone()));
+                directive = Directive::After;
+            }
+            assets.push(entry);
+        }
+        if directive == Directive::Replace {
+            assets.push(AssetEntry {
+                directive: Directive::Remove,
+                target: None,
+                path: target,
+            });
+        }
+    }
+}
+
+/// The aggregated script a spec locates: a `<script>` spec by its `src`, or an xpath whose last step
+/// names one by its `src`.
+fn located_script(spec: Node) -> Option<String> {
+    let src = match spec.tag_name().name() {
+        "script" => spec.attribute("src")?,
+        "xpath" => {
+            let captures = XPATH_SCRIPT.captures(spec.attribute("expr")?.trim())?;
+            captures.get(1).or_else(|| captures.get(2))?.as_str()
+        }
+        _ => return None,
+    };
+    aggregated(src)
+}
+
 /// The text of a spec as Odoo sets it, blanks included, at its first non-blank character.
 fn spec_raw(node: Node, lines: &Lines) -> Option<Spanned<String>> {
     let text = node.first_child().filter(Node::is_text)?;
@@ -2128,6 +2250,75 @@ mod tests {
         assert_eq!(located_values(&spec), ["t[t-call=a.moved]"]);
         let deeper = r#"<xpath expr="//a"><div><t t-call="a.kept" position="move"/></div></xpath>"#;
         assert_eq!(call_names(&extension(deeper)), ["a.kept"]);
+    }
+
+    /// The assets of a template as `directive:target>path`.
+    fn assets(view: &ViewFact) -> Vec<String> {
+        let shown = |a: &AssetEntry| format!("{:?}:{}>{}", a.directive, a.target.as_deref().unwrap_or(""), a.path);
+        view.assets.iter().map(shown).collect()
+    }
+
+    #[test]
+    fn a_root_template_lists_its_aggregated_scripts_and_calls_in_order() {
+        let root = view(
+            r#"<template id="x"><t t-call="web._helpers"/><script src="/a/static/src/a.js"/>
+            <script src="https://cdn.example.com/x.js"/><script src="//cdn.example.com/y.js"/>
+            <script src="/web/content/12"/><script src="a/static/src/b.js"/><script/><script src="data:x"/>
+            <t t-if="debug"><script src="/a//static/src/d.js"/></t><script src="///a/static/src/e.js"/>
+            <div><script type="text/javascript" src="/a/static/src/c.js"/></div><t t-call="{{ name }}"/>
+            <t t-call="a.layout"><script src="/a/static/src/body.js"/></t></template>"#,
+        );
+        assert_eq!(
+            assets(&root),
+            [
+                "Include:>web._helpers",
+                "Append:>a/static/src/a.js",
+                "Append:>a/static/src/b.js",
+                "Append:>a/static/src/d.js",
+                "Append:>a/static/src/e.js",
+                "Include:>a.layout",
+            ]
+        );
+        let called = view(r#"<template id="x" t-call="web.layout"/>"#);
+        assert_eq!(assets(&called), ["Include:>web.layout"]);
+    }
+
+    #[test]
+    fn an_extension_places_its_scripts_against_the_script_a_spec_locates() {
+        let spec = extension(
+            r#"<xpath expr="." position="inside"><script src="/a/static/src/in.js"/><t t-call="a.more"/></xpath>
+            <xpath expr="//script[@src='/web/static/src/x.js']" position="after">
+                <script src="/a/static/src/one.js"/><script src="/a/static/src/two.js"/>
+            </xpath>
+            <data><script src="/web/static/src/y.js" position="before"><script src="/a/static/src/b.js"/></script></data>
+            <xpath expr="//script[@src=&quot;/web/static/src/z.js&quot;]" position="replace">
+                <script src="/a/static/src/z.js"/>
+            </xpath>
+            <xpath expr="//script[@src='/web/static/src/gone.js']" position="replace"/>
+            <xpath expr="//script[last()]" position="after"><script src="/a/static/src/last.js"/></xpath>"#,
+        );
+        assert_eq!(
+            assets(&spec),
+            [
+                "Append:>a/static/src/in.js",
+                "Include:>a.more",
+                "After:web/static/src/x.js>a/static/src/one.js",
+                "After:a/static/src/one.js>a/static/src/two.js",
+                "Before:web/static/src/y.js>a/static/src/b.js",
+                "Replace:web/static/src/z.js>a/static/src/z.js",
+                "Remove:>web/static/src/gone.js",
+                "Append:>a/static/src/last.js",
+            ]
+        );
+    }
+
+    #[test]
+    fn a_located_script_or_call_adds_nothing() {
+        let spec = extension(
+            r#"<t t-call="web._helpers" position="replace"/><script src="/web/static/src/x.js" position="attributes">
+            <attribute name="src">/a/static/src/x.js</attribute></script>"#,
+        );
+        assert!(spec.assets.is_empty());
     }
 
     #[test]

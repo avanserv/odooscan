@@ -1,7 +1,7 @@
 use oxc_allocator::Allocator;
 use oxc_ast::ast::{
-    Argument, AssignmentExpression, AssignmentTarget, CallExpression, Class, ClassElement, Expression,
-    ObjectExpression, ObjectPropertyKind, Program, Statement, StringLiteral,
+    Argument, ArrayExpressionElement, AssignmentExpression, AssignmentTarget, CallExpression, Class, ClassElement,
+    Expression, ObjectExpression, ObjectPropertyKind, Program, Statement, StringLiteral,
 };
 use oxc_ast_visit::Visit;
 use oxc_ast_visit::walk::{walk_assignment_expression, walk_call_expression, walk_class};
@@ -9,7 +9,9 @@ use oxc_parser::Parser;
 use oxc_span::SourceType;
 use oxc_syntax::module_record::{ExportExportName, ExportImportName, ImportImportName, ModuleRecord};
 
-use crate::facts::{Annotation, Heritage, JsAlias, JsClass, JsFacts, JsName, JsPatch, Lines, OrmCall, Pos, Spanned};
+use crate::facts::{
+    Annotation, Heritage, JsAlias, JsClass, JsDefine, JsFacts, JsName, JsPatch, Lines, OrmCall, Pos, Spanned,
+};
 use crate::series::Series;
 
 /// Methods of the `orm` service whose first argument is a model name.
@@ -50,7 +52,7 @@ pub fn analyze(text: &str) -> JsFacts {
         }
     }
     module_record(&parsed.module_record, &lines, &mut facts);
-    facts.defines = defines(&parsed.program);
+    facts.defines = defines(&parsed.program, &lines);
     let mut collector = Collector {
         lines: &lines,
         facts: &mut facts,
@@ -408,8 +410,11 @@ impl<'a> Visit<'a> for Supers<'_> {
     }
 }
 
-/// Names given to top-level `odoo.define("name", ...)` calls.
-fn defines(program: &Program) -> Vec<String> {
+/// The top-level `odoo.define()` calls. Odoo takes a leading string as the name, a list after it as
+/// the dependencies, and otherwise each `require("x")` of the factory's source (14.0
+/// `addons/web/static/src/js/boot.js:38-39`, `:106-121`; 16.0 `addons/web/static/src/boot.js:39`,
+/// `:205-219`).
+fn defines(program: &Program, lines: &Lines) -> Vec<JsDefine> {
     program
         .body
         .iter()
@@ -426,11 +431,79 @@ fn defines(program: &Program) -> Vec<String> {
             }
             _ => false,
         })
-        .filter_map(|call| match call.arguments.first() {
-            Some(Argument::StringLiteral(s)) => s.value.as_str().map(str::to_owned),
-            _ => None,
-        })
+        .map(|call| define(call, lines))
         .collect()
+}
+
+fn define(call: &CallExpression, lines: &Lines) -> JsDefine {
+    let args = call.arguments.as_slice();
+    let (name, rest) = match args.split_first() {
+        Some((Argument::StringLiteral(s), rest)) => (s.value.as_str().map(str::to_owned), rest),
+        _ => (None, args),
+    };
+    let Some((factory, before)) = rest.split_last() else {
+        return JsDefine {
+            name,
+            ..JsDefine::default()
+        };
+    };
+    let deps = match before.first() {
+        Some(Argument::ArrayExpression(list)) => list
+            .elements
+            .iter()
+            .filter_map(|e| match e {
+                ArrayExpressionElement::StringLiteral(s) => literal(s, lines),
+                _ => None,
+            })
+            .collect(),
+        // Odoo tests `instanceof Array`, which a value read from a name or a call may pass. Its
+        // items are out of reach, but the factory's calls are then no dependencies.
+        Some(
+            Argument::Identifier(_)
+            | Argument::StaticMemberExpression(_)
+            | Argument::ComputedMemberExpression(_)
+            | Argument::CallExpression(_),
+        ) => vec![],
+        _ => return implicit(name, factory, lines),
+    };
+    JsDefine {
+        name,
+        deps,
+        listed: true,
+    }
+}
+
+/// A define whose dependencies are the `require` calls of its factory.
+fn implicit(name: Option<String>, factory: &Argument, lines: &Lines) -> JsDefine {
+    let mut requires = Requires { lines, found: vec![] };
+    requires.visit_argument(factory);
+    JsDefine {
+        name,
+        deps: requires.found,
+        listed: false,
+    }
+}
+
+/// The `require("x")` calls Odoo's pattern reads: a plain `require` given one string without a
+/// quote or a blank.
+struct Requires<'f> {
+    lines: &'f Lines,
+    found: Vec<Spanned<String>>,
+}
+
+impl<'a> Visit<'a> for Requires<'_> {
+    fn visit_call_expression(&mut self, call: &CallExpression<'a>) {
+        if let Expression::Identifier(callee) = &call.callee
+            && callee.name == "require"
+            && let [Argument::StringLiteral(s)] = call.arguments.as_slice()
+            && let Some(dep) = literal(s, self.lines)
+            && !dep.value.is_empty()
+            && !dep.value.contains(|c: char| c.is_whitespace() || c == '\'' || c == '"')
+        {
+            self.found.push(dep);
+        }
+        walk_call_expression(self, call);
+    }
 }
 
 #[cfg(test)]
@@ -527,7 +600,8 @@ odoo.define("@web/legacy", [], function () {});
         assert_eq!(names, ["@web/x:a", "@web/x:b", "./y:default", "@web/w:e"]);
         assert_eq!(facts.exports, ["f", "default", "e"]);
         assert_eq!(facts.star_exports, ["@web/v"]);
-        assert_eq!(facts.defines, ["@web/legacy"]);
+        let names: Vec<_> = facts.defines.iter().map(|d| d.name.as_deref()).collect();
+        assert_eq!(names, [Some("@web/legacy")]);
         assert_eq!(
             facts.export_locals,
             [("f".to_owned(), "f".to_owned()), ("default".to_owned(), "G".to_owned())]
@@ -604,6 +678,57 @@ C.template = "x.C";
         assert_eq!(facts.patches[0].members, ["m", "n"]);
         let supers: Vec<_> = facts.patches[0].supers.iter().map(|s| s.value.as_str()).collect();
         assert_eq!(supers, ["m"]);
+    }
+
+    #[test]
+    fn reads_the_dependencies_of_each_define() {
+        let facts = analyze(
+            r#"odoo.define("a.listed", ["web.core", "@web/x", 1], function (require) {
+    require("not.read");
+});
+odoo.define("a.implicit", function (require) {
+    "use strict";
+    var core = require("web.core");
+    x.require("member.call");
+    require("two", "args");
+    require(`template`);
+    require("with space");
+    function nested() {
+        return require('./sibling');
+    }
+});
+odoo.define(function (require) {
+    require("anonymous.dep");
+});
+odoo.define("a.variable", deps, function (require) {
+    require("not.read.either");
+});
+if (x) {
+    odoo.define("nested.statement", function (require) { require("skipped"); });
+}
+"#,
+        );
+        let shown: Vec<_> = facts
+            .defines
+            .iter()
+            .map(|d| {
+                let deps: Vec<_> = d
+                    .deps
+                    .iter()
+                    .map(|s| format!("{}@{}:{}", s.value, s.pos.line, s.pos.col))
+                    .collect();
+                (d.name.as_deref(), d.listed, deps.join(" "))
+            })
+            .collect();
+        assert_eq!(
+            shown,
+            [
+                (Some("a.listed"), true, "web.core@1:27 @web/x@1:39".to_owned()),
+                (Some("a.implicit"), false, "web.core@6:25 ./sibling@12:25".to_owned()),
+                (None, false, "anonymous.dep@16:14".to_owned()),
+                (Some("a.variable"), true, String::new()),
+            ]
+        );
     }
 
     #[test]

@@ -1134,7 +1134,7 @@ fn js_paths(
                 }
                 claim(&path, target);
             }
-            for name in &file.facts.defines {
+            for name in file.facts.defines.iter().filter_map(|d| d.name.as_ref()) {
                 claim(name, JsTarget { opaque: true, ..target });
             }
             // An alias stands for the default export, whose names only a run tells, unless it proxies:
@@ -1399,7 +1399,7 @@ fn loaded_static(
     series: Option<Series>,
 ) -> (Vec<String>, ScriptBundles, Loaded) {
     let order = load_order(modules, by_name, series);
-    let bundles = bundles::of_modules(modules, by_name, &order);
+    let bundles = bundles::of_modules(modules, by_name, &order, series);
     let mut names: Vec<String> = bundles.keys().cloned().collect();
     names.sort_unstable();
     let mut js: ScriptBundles = FxHashMap::default();

@@ -10,6 +10,7 @@
         ],
         "web.assets_frontend": [
             "bundle_pages/static/src/front.js",
+            "bundle_pages/static/src/front_legacy.js",
             "bundle_pages/static/src/both.js",
         ],
         "bundle_pages.lazy": ["bundle_pages/static/src/lazy.js"],

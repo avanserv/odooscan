@@ -201,8 +201,12 @@ every indexed module. A script under `static/tests` has only its imports checked
 OD608: a unit test runs on a mock server whose models it defines, and its patches apply while it
 runs. A bundle holds what its entries leave in it, applied in module load order: `append`,
 `prepend`, `before` and `after` add files, `include` adds another bundle's, `replace` swaps its
-target for its path and `remove` takes files out, so a file only removed is not checked. OD608
-reads the bundles of the two web client pages, backend and frontend, from 18.0 on.
+target for its path and `remove` takes files out, so a file only removed is not checked. Before
+saas~14.3 a bundle is a template, and each template extending it adds its scripts where its specs
+place them, while the manifest's `assets` key adds nothing. A script Odoo does not run as an ES
+module, every one before saas~14.3, has the dependencies of its `odoo.define()` calls checked by
+OD601 and OD608 instead of its imports. OD608 reads the bundles of the two web client pages,
+backend and frontend, from 18.0 on.
 
 | Code | Name | Reports |
 | --- | --- | --- |

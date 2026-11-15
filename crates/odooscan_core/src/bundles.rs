@@ -3,13 +3,27 @@
 //! `:381-420`). Where Odoo raises and fails the bundle, the fill goes on as described at each step,
 //! so that one faulty entry does not hide every file of the bundle. Where Odoo skips an entry
 //! without raising, so does the fill.
+//!
+//! Before saas~14.3 a bundle is a template: Odoo renders it with its inheritance and reads its
+//! scripts in order (14.0 `odoo/addons/base/models/ir_qweb.py:304-355`), so each template adds
+//! the entries `ViewFact::assets` holds to the bundle of its root.
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::checks::wildcard;
-use crate::index::asset_glob_set;
+use crate::facts::ViewFact;
+use crate::index::{asset_glob_set, full_id, loaded_data};
 use crate::manifest::{AssetEntry, Directive};
 use crate::project::{ASSET_EXTENSIONS, Module};
+use crate::series::Series;
+use crate::xml::QWEB;
+
+/// The first series that fills bundles from `ir.asset` rather than from templates (14.0 against
+/// saas~14.3 `odoo/addons/base/models/ir_qweb.py:330`).
+const ASSET_RECORDS: Series = Series { major: 14, minor: 3 };
+
+/// How far a template's root is looked for up `inherit_id`, so that a cycle ends.
+const INHERIT_STEPS: usize = 32;
 
 /// A file of an indexed module, as (module, index among the module's files of its kind).
 pub type File = (usize, usize);
@@ -21,17 +35,28 @@ pub struct Contents {
     pub templates: Vec<File>,
 }
 
-/// The contents of each bundle some manifest of `modules` names, from the modules' entries in
-/// `order`, their load order.
+/// The contents of each bundle some manifest or template of `modules` names, from the modules'
+/// entries in `order`, their load order. A module adds its manifest's entries from saas~14.3, its
+/// templates before, and both, templates last, when its series is unknown; `series` stands in for
+/// a module's own when unknown.
 pub fn of_modules(
     modules: &[Module],
     by_name: &FxHashMap<&str, usize>,
     order: &[usize],
+    series: Option<Series>,
 ) -> FxHashMap<String, Contents> {
+    let parts = template_parts(modules, order, series);
     let mut lists: FxHashMap<&str, Vec<&[AssetEntry]>> = FxHashMap::default();
     for &mi in order {
-        for bundle in &modules[mi].manifest.bundles {
+        // Only `ir.asset` reads the manifest's `assets`, so before saas~14.3 the key loads nothing.
+        let records = modules[mi].series.or(series).is_none_or(|s| s >= ASSET_RECORDS);
+        for bundle in modules[mi].manifest.bundles.iter().filter(|_| records) {
             lists.entry(&bundle.name.value).or_default().push(&bundle.entries);
+        }
+        for part in &parts[mi] {
+            let list = lists.entry(&part.bundle).or_default();
+            list.extend(part.opening.as_ref().map(std::slice::from_ref));
+            list.push(part.entries);
         }
     }
     let mut filler = Filler {
@@ -46,6 +71,99 @@ pub fn of_modules(
         contents.insert(name.to_owned(), filler.paths.contents(&filled.list));
     }
     contents
+}
+
+/// What a template adds to a bundle.
+struct Part<'m> {
+    bundle: String,
+    /// The `include` a primary extension opens with: it starts from its parent's whole tree
+    /// (14.0 `odoo/addons/base/models/ir_ui_view.py:556-608`).
+    opening: Option<AssetEntry>,
+    entries: &'m [AssetEntry],
+}
+
+/// The parts each module's templates add, in the order its data loads, for the modules whose
+/// series renders bundles from templates.
+fn template_parts<'m>(modules: &'m [Module], order: &[usize], series: Option<Series>) -> Vec<Vec<Part<'m>>> {
+    let parents = extended_parents(modules, order, series);
+    let mut parts: Vec<Vec<Part>> = modules.iter().map(|_| vec![]).collect();
+    for &mi in order {
+        let module = &modules[mi];
+        if module.series.or(series).is_none_or(|s| s < ASSET_RECORDS) {
+            parts[mi] = loaded_views(module, series)
+                .filter_map(|view| part(&module.name, view, &parents))
+                .collect();
+        }
+    }
+    parts
+}
+
+/// The views of the data files Odoo loads for `module`, in load order.
+fn loaded_views(module: &Module, series: Option<Series>) -> impl Iterator<Item = &ViewFact> {
+    let mut files: Vec<_> = loaded_data(module, module.series.or(series)).collect();
+    files.sort_by_key(|f| f.rank.unwrap_or(usize::MAX));
+    files.into_iter().flat_map(|f| &f.facts.views)
+}
+
+/// The parent each loaded view extends in place, by full id, from the first view of the id.
+fn extended_parents(modules: &[Module], order: &[usize], series: Option<Series>) -> FxHashMap<String, Option<String>> {
+    let mut parents: FxHashMap<String, Option<String>> = FxHashMap::default();
+    for &mi in order {
+        let name = &modules[mi].name;
+        for view in loaded_views(&modules[mi], series) {
+            if let Some(id) = &view.id {
+                let parent = extended(view).map(|p| full_id(name, p));
+                parents.entry(full_id(name, id)).or_insert(parent);
+            }
+        }
+    }
+    parents
+}
+
+/// The root of the tree of `id` up the parents views extend in place. An id no loaded view has is
+/// its own root.
+fn root(parents: &FxHashMap<String, Option<String>>, mut id: String) -> String {
+    for _ in 0..INHERIT_STEPS {
+        match parents.get(&id) {
+            Some(Some(parent)) => id.clone_from(parent),
+            _ => break,
+        }
+    }
+    id
+}
+
+/// What a view of `module` adds: an extension in place to its root's bundle, a primary QWeb
+/// extension and a root to their own.
+fn part<'m>(module: &str, view: &'m ViewFact, parents: &FxHashMap<String, Option<String>>) -> Option<Part<'m>> {
+    let own = view.id.as_deref().map(|id| full_id(module, id));
+    let parent = view.inherit.as_deref().filter(|p| !p.is_empty());
+    let parent = parent.map(|p| root(parents, full_id(module, p)));
+    let (bundle, opening) = match (parent, own) {
+        (Some(parent), _) if extended(view).is_some() => (parent, None),
+        (Some(parent), Some(own)) if view.kind.as_deref() == Some(QWEB) => (own, Some(parent)),
+        (None, Some(own)) => (own, None),
+        _ => return None,
+    };
+    if opening.is_none() && view.assets.is_empty() {
+        return None;
+    }
+    let opening = opening.map(|path| AssetEntry {
+        directive: Directive::Include,
+        target: None,
+        path,
+    });
+    Some(Part {
+        bundle,
+        opening,
+        entries: &view.assets,
+    })
+}
+
+/// The parent a view extends in place: any but a primary one, which starts a tree of its own.
+fn extended(view: &ViewFact) -> Option<&str> {
+    view.inherit
+        .as_deref()
+        .filter(|p| !p.is_empty() && view.primary != Some(true))
 }
 
 /// What a file of the scan is.
@@ -289,12 +407,120 @@ mod tests {
             let rel = if xml { &m.templates[fi].rel } else { &m.js[fi].rel };
             format!("{}/{}", m.name, rel.trim_start_matches("static/src/"))
         };
-        let bundles = of_modules(modules, &by_name, &order);
+        let bundles = of_modules(modules, &by_name, &order, None);
         let files = |c: &Contents| -> Vec<String> {
             let js = c.js.iter().map(|f| name(f, false));
             js.chain(c.templates.iter().map(|f| name(f, true))).collect()
         };
         bundles.iter().map(|(k, c)| (k.clone(), files(c))).collect()
+    }
+
+    /// A module of `version` with the scripts `js` under `static/src` and one data file loaded,
+    /// whose content is `templates`.
+    fn rendered(name: &str, version: &str, depends: &str, js: &[&str], templates: &str) -> Module {
+        let keys = format!("{{'version': '{version}', 'depends': [{depends}], 'data': ['views/assets.xml']}}");
+        let mut m = module(name, &keys);
+        m.js = js.iter().map(|f| file(&format!("static/src/{f}"))).collect();
+        let mut data: SourceFile<crate::facts::DataFacts> = file("views/assets.xml");
+        data.rank = Some(0);
+        data.facts = crate::xml::analyze(&format!("<odoo>{templates}</odoo>"), None);
+        m.data = vec![data];
+        m
+    }
+
+    /// A 14.0 `web` whose backend bundle is a template that calls another.
+    fn web14() -> Module {
+        rendered(
+            "web",
+            "14.0.1.0.0",
+            "",
+            &["a.js", "h.js"],
+            r#"<template id="assets_backend"><script src="/web/static/src/a.js"/><t t-call="web._helpers"/></template>
+            <template id="_helpers"><script src="/web/static/src/h.js"/></template>"#,
+        )
+    }
+
+    #[test]
+    fn a_template_extension_adds_to_the_bundle_of_its_root() {
+        let x = rendered(
+            "x",
+            "14.0.1.0.0",
+            "'web'",
+            &["b.js", "c.js", "o.js"],
+            r#"<template id="assets" inherit_id="web.assets_backend">
+                <xpath expr="//script[@src='/web/static/src/a.js']" position="before"><script src="/x/static/src/b.js"/></xpath>
+            </template>
+            <template id="more" inherit_id="x.assets"><xpath expr="." position="inside"><script src="/x/static/src/c.js"/></xpath></template>
+            <template id="other" inherit_id="other.assets"><xpath expr="."><script src="/x/static/src/o.js"/></xpath></template>"#,
+        );
+        let bundles = contents(&[web14(), x]);
+        assert_eq!(
+            bundles["web.assets_backend"],
+            ["x/b.js", "web/a.js", "web/h.js", "x/c.js"]
+        );
+        assert_eq!(bundles["other.assets"], ["x/o.js"]);
+    }
+
+    #[test]
+    fn a_primary_extension_starts_from_its_parents_tree() {
+        let x = rendered(
+            "x",
+            "14.0.1.0.0",
+            "'web'",
+            &[],
+            r#"<template id="lazy" inherit_id="web.assets_backend" primary="True">
+                <xpath expr="//script[@src='/web/static/src/a.js']" position="replace"/>
+                <xpath expr="//t[@t-call='web._helpers']" position="replace"/>
+            </template>"#,
+        );
+        let bundles = contents(&[web14(), x]);
+        assert_eq!(bundles["x.lazy"], ["web/h.js"]);
+        assert_eq!(bundles["web.assets_backend"], ["web/a.js", "web/h.js"]);
+    }
+
+    #[test]
+    fn an_inheritance_cycle_ends() {
+        let x = rendered(
+            "x",
+            "14.0.1.0.0",
+            "",
+            &["a.js", "b.js"],
+            r#"<template id="a" inherit_id="x.b"><xpath expr="."><script src="/x/static/src/a.js"/></xpath></template>
+            <template id="b" inherit_id="x.a"><xpath expr="."><script src="/x/static/src/b.js"/></xpath></template>"#,
+        );
+        let bundles = contents(&[x]);
+        assert_eq!(bundles["x.a"], ["x/b.js"]);
+        assert_eq!(bundles["x.b"], ["x/a.js"]);
+    }
+
+    #[test]
+    fn a_series_with_asset_records_reads_no_template() {
+        let later = |version: &str| {
+            let x = rendered(
+                "x",
+                version,
+                "'web'",
+                &["b.js"],
+                r#"<template id="assets" inherit_id="web.assets_backend">
+                    <xpath expr="." position="inside"><script src="/x/static/src/b.js"/></xpath>
+                </template>"#,
+            );
+            contents(&[web14(), x])["web.assets_backend"].clone()
+        };
+        assert_eq!(later("saas~14.2.1.0.0"), ["web/a.js", "web/h.js", "x/b.js"]);
+        assert_eq!(later("saas~14.3.1.0.0"), ["web/a.js", "web/h.js"]);
+    }
+
+    #[test]
+    fn a_series_without_asset_records_reads_no_manifest_assets() {
+        let listed = |version: &str| {
+            let keys = format!("{{'version': '{version}', 'assets': {{'web.assets_backend': ['x/static/src/b.js']}}}}");
+            let mut x = module("x", &keys);
+            x.js = vec![file("static/src/b.js")];
+            contents(&[web14(), x])["web.assets_backend"].clone()
+        };
+        assert_eq!(listed("saas~14.2.1.0.0"), ["web/a.js", "web/h.js"]);
+        assert_eq!(listed("saas~14.3.1.0.0"), ["web/a.js", "web/h.js", "x/b.js"]);
     }
 
     #[test]
