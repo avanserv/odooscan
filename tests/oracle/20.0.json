@@ -31,6 +31,12 @@
       "count": 1
     },
     {
+      "path": "addons/account/models/account_account.py",
+      "code": "OD134",
+      "message": "search_count() runs a query for each record of the loop, keyed on account_id; count them all at once with _read_group() grouped by account_id",
+      "count": 1
+    },
+    {
       "path": "addons/account/models/account_account_tag.py",
       "code": "OD122",
       "message": "UPDATE on account_account_tag bypasses the ORM, so records this transaction already read keep stale values; call flush_model() before the query and invalidate_model() after it (flush() and invalidate_cache() before 16.0)",
@@ -67,9 +73,21 @@
       "count": 1
     },
     {
+      "path": "addons/account/models/account_journal_dashboard.py",
+      "code": "OD135",
+      "message": "browse() of one id in a loop fetches each record on its own, a query per record; browse every id at once before the loop, or use the records the id comes from",
+      "count": 2
+    },
+    {
       "path": "addons/account/models/account_lock_exception.py",
       "code": "OD105",
       "message": "copy() override never calls super(), so other modules' overrides and the ORM itself are skipped",
+      "count": 1
+    },
+    {
+      "path": "addons/account/models/account_payment_method.py",
+      "code": "OD134",
+      "message": "search_count() runs a query for each record of the loop, keyed on payment_method_line_id; count them all at once with _read_group() grouped by payment_method_line_id",
       "count": 1
     },
     {
@@ -115,6 +133,12 @@
       "count": 1
     },
     {
+      "path": "addons/account_edi_ubl_cii/models/res_partner.py",
+      "code": "OD137",
+      "message": "write() of the same values on each record of the loop updates them one at a time; write them once on the whole recordset",
+      "count": 1
+    },
+    {
       "path": "addons/account_payment/controllers/payment.py",
       "code": "OD111",
       "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
@@ -124,6 +148,18 @@
       "path": "addons/account_payment/models/account_bank_statement_line.py",
       "code": "OD211",
       "message": "no parent class of account.bank.statement.line defines '_get_partial_amounts', so this super() call fails",
+      "count": 1
+    },
+    {
+      "path": "addons/account_payment/models/account_payment.py",
+      "code": "OD134",
+      "message": "search() runs a query for each record of the loop, keyed on source_payment_id; search once for all of them and group the result by source_payment_id",
+      "count": 1
+    },
+    {
+      "path": "addons/account_payment/wizards/payment_refund_wizard.py",
+      "code": "OD134",
+      "message": "search_count() runs a query for each record of the loop, keyed on source_transaction_id; count them all at once with _read_group() grouped by source_transaction_id",
       "count": 1
     },
     {
@@ -160,6 +196,12 @@
       "path": "addons/account_peppol/models/account_move_send.py",
       "code": "OD103",
       "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
+      "count": 1
+    },
+    {
+      "path": "addons/account_peppol/models/res_company.py",
+      "code": "OD134",
+      "message": "search() runs a query for each record of the loop, keyed on company_id; search once for all of them and group the result by company_id",
       "count": 1
     },
     {
@@ -571,6 +613,24 @@
       "count": 1
     },
     {
+      "path": "addons/crm/models/crm_team.py",
+      "code": "OD136",
+      "message": "create() in a loop inserts one record per query; collect the values in a list and create them all in one call",
+      "count": 1
+    },
+    {
+      "path": "addons/crm/models/res_config_settings.py",
+      "code": "OD134",
+      "message": "search() runs a query for each record of the loop, keyed on field_id; search once for all of them and group the result by field_id",
+      "count": 1
+    },
+    {
+      "path": "addons/crm/models/res_config_settings.py",
+      "code": "OD134",
+      "message": "search() runs a query for each record of the loop, keyed on name; search once for all of them and group the result by name",
+      "count": 1
+    },
+    {
       "path": "addons/crm_iap_enrich/__manifest__.py",
       "code": "OD520",
       "message": "module 'iap_mail' already comes with 'iap_crm', also in depends",
@@ -581,6 +641,18 @@
       "code": "OD103",
       "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
       "count": 1
+    },
+    {
+      "path": "addons/crm_iap_enrich/models/crm_lead.py",
+      "code": "OD134",
+      "message": "search() runs a query for each record of the loop, keyed on code; search once for all of them and group the result by code",
+      "count": 1
+    },
+    {
+      "path": "addons/crm_iap_enrich/models/crm_lead.py",
+      "code": "OD137",
+      "message": "write() of the same values on each record of the loop updates them one at a time; write them once on the whole recordset",
+      "count": 3
     },
     {
       "path": "addons/crm_iap_mine/__manifest__.py",
@@ -595,6 +667,12 @@
       "count": 1
     },
     {
+      "path": "addons/crm_iap_mine/models/crm_iap_lead_mining_request.py",
+      "code": "OD134",
+      "message": "search() runs a query for each record of the loop, keyed on country_id; search once for all of them and group the result by country_id",
+      "count": 1
+    },
+    {
       "path": "addons/crm_mail_plugin/controllers/mail_plugin.py",
       "code": "OD128",
       "message": "cors='*' lets a script on any site call this route and read its response; name the origin that needs it",
@@ -605,6 +683,12 @@
       "code": "OD103",
       "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
       "count": 3
+    },
+    {
+      "path": "addons/data_recycle/models/data_recycle_model.py",
+      "code": "OD134",
+      "message": "search() runs a query for each record of the loop, keyed on recycle_model_id; search once for all of them and group the result by recycle_model_id",
+      "count": 1
     },
     {
       "path": "addons/digest/__manifest__.py",
@@ -661,6 +745,18 @@
       "count": 3
     },
     {
+      "path": "addons/event/models/event_mail.py",
+      "code": "OD134",
+      "message": "search_count() runs a query for each record of the loop, keyed on event_id; count them all at once with _read_group() grouped by event_id",
+      "count": 1
+    },
+    {
+      "path": "addons/event/models/event_mail.py",
+      "code": "OD134",
+      "message": "search_count() runs the same query on each pass of the loop; run it once before the loop",
+      "count": 2
+    },
+    {
       "path": "addons/event_crm/models/event_lead_request.py",
       "code": "OD103",
       "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
@@ -691,6 +787,18 @@
       "count": 1
     },
     {
+      "path": "addons/gamification/models/gamification_challenge.py",
+      "code": "OD134",
+      "message": "search() runs a query for each record of the loop, keyed on user_id; search once for all of them and group the result by user_id",
+      "count": 2
+    },
+    {
+      "path": "addons/gamification/models/gamification_challenge.py",
+      "code": "OD136",
+      "message": "create() in a loop inserts one record per query; collect the values in a list and create them all in one call",
+      "count": 1
+    },
+    {
       "path": "addons/gamification/models/gamification_goal.py",
       "code": "OD103",
       "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
@@ -700,6 +808,12 @@
       "path": "addons/gamification/models/gamification_karma_tracking.py",
       "code": "OD122",
       "message": "INSERT on gamification_karma_tracking bypasses the ORM, so records this transaction already read keep stale values; call flush_model() before the query and invalidate_model() after it (flush() and invalidate_cache() before 16.0)",
+      "count": 1
+    },
+    {
+      "path": "addons/gamification/models/res_users.py",
+      "code": "OD137",
+      "message": "write() of the same values on each record of the loop updates them one at a time; write them once on the whole recordset",
       "count": 1
     },
     {
@@ -751,6 +865,12 @@
       "count": 1
     },
     {
+      "path": "addons/hr/models/hr_version.py",
+      "code": "OD134",
+      "message": "search() runs a query for each record of the loop, keyed on company_id; search once for all of them and group the result by company_id",
+      "count": 1
+    },
+    {
       "path": "addons/hr_address_extended/__manifest__.py",
       "code": "OD520",
       "message": "module 'base_address_extended' already comes with 'hr', also in depends",
@@ -799,15 +919,45 @@
       "count": 1
     },
     {
+      "path": "addons/hr_expense/models/hr_expense.py",
+      "code": "OD137",
+      "message": "write() of the same values on each record of the loop updates them one at a time; write them once on the whole recordset",
+      "count": 1
+    },
+    {
+      "path": "addons/hr_fleet/models/fleet_vehicle.py",
+      "code": "OD134",
+      "message": "search() runs a query for each record of the loop, keyed on vehicle_id; search once for all of them and group the result by vehicle_id",
+      "count": 1
+    },
+    {
+      "path": "addons/hr_gamification/models/hr_employee.py",
+      "code": "OD134",
+      "message": "search() runs a query for each record of the loop, keyed on user_id; search once for all of them and group the result by user_id",
+      "count": 1
+    },
+    {
       "path": "addons/hr_holidays/__manifest__.py",
       "code": "OD520",
       "message": "module 'resource' already comes with 'hr_work_entry', also in depends",
       "count": 1
     },
     {
+      "path": "addons/hr_holidays/models/hr_leave_allocation.py",
+      "code": "OD134",
+      "message": "search_count() runs a query for each record of the loop, keyed on work_entry_type_id; count them all at once with _read_group() grouped by work_entry_type_id",
+      "count": 1
+    },
+    {
       "path": "addons/hr_presence/__manifest__.py",
       "code": "OD520",
       "message": "module 'hr' already comes with 'hr_holidays', also in depends",
+      "count": 1
+    },
+    {
+      "path": "addons/hr_presence/models/hr_employee.py",
+      "code": "OD134",
+      "message": "search() runs a query for each record of the loop, keyed on create_uid; search once for all of them and group the result by create_uid",
       "count": 1
     },
     {
@@ -1051,6 +1201,12 @@
       "count": 1
     },
     {
+      "path": "addons/iap/models/iap_account.py",
+      "code": "OD134",
+      "message": "search() runs a query for each record of the loop, keyed on service_id; search once for all of them and group the result by service_id",
+      "count": 1
+    },
+    {
       "path": "addons/iap/views/iap_views.xml",
       "code": "OD329",
       "message": "field widget 'many2many_avatar_user' comes from module mail, which is not in depends",
@@ -1189,6 +1345,12 @@
       "count": 1
     },
     {
+      "path": "addons/l10n_ch/migrations/11.1/end-migrate_update_taxes.py",
+      "code": "OD134",
+      "message": "search() runs a query for each record of the loop, keyed on name; search once for all of them and group the result by name",
+      "count": 1
+    },
+    {
       "path": "addons/l10n_cl/__manifest__.py",
       "code": "OD520",
       "message": "module 'uom' already comes with 'l10n_latam_invoice_document', also in depends",
@@ -1258,6 +1420,12 @@
       "path": "addons/l10n_es/data/mod390/mod390_section7.xml",
       "code": "OD303",
       "message": "XML id 'mod_390_casilla_641_balance' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_es/migrations/5.3/end-migrate_update_taxes.py",
+      "code": "OD134",
+      "message": "search() runs a query for each record of the loop, keyed on name; search once for all of them and group the result by name",
       "count": 1
     },
     {
@@ -1795,6 +1963,18 @@
       "count": 1
     },
     {
+      "path": "addons/l10n_eu_oss/models/res_company.py",
+      "code": "OD134",
+      "message": "search() runs the same query on each pass of the loop; run it once before the loop",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_eu_oss/models/res_company.py",
+      "code": "OD136",
+      "message": "create() in a loop inserts one record per query; collect the values in a list and create them all in one call",
+      "count": 1
+    },
+    {
       "path": "addons/l10n_fi/data/account_account_tag_data.xml",
       "code": "OD303",
       "message": "XML id 'account_tag_impairment_losses_financial_assets_current_assets' is already defined earlier in this file",
@@ -1933,6 +2113,12 @@
       "count": 1
     },
     {
+      "path": "addons/l10n_hu_edi/models/account_move.py",
+      "code": "OD134",
+      "message": "search() runs a query for each record of the loop, keyed on res_id; search once for all of them and group the result by res_id",
+      "count": 2
+    },
+    {
       "path": "addons/l10n_hu_edi/models/account_move_send.py",
       "code": "OD103",
       "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
@@ -1948,6 +2134,12 @@
       "path": "addons/l10n_hu_edi/wizard/l10n_hu_edi_cancellation.py",
       "code": "OD103",
       "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_id/migrations/1.3/end-migrate_update_taxes.py",
+      "code": "OD134",
+      "message": "search() runs a query for each record of the loop, keyed on tax_id; search once for all of them and group the result by tax_id",
       "count": 1
     },
     {
@@ -2143,9 +2335,21 @@
       "count": 3
     },
     {
+      "path": "addons/l10n_ro_edi/models/account_move.py",
+      "code": "OD136",
+      "message": "create() in a loop inserts one record per query; collect the values in a list and create them all in one call",
+      "count": 1
+    },
+    {
       "path": "addons/l10n_rs_edi/models/account_move_send.py",
       "code": "OD103",
       "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_sa_edi/models/res_company.py",
+      "code": "OD134",
+      "message": "search() runs a query for each record of the loop, keyed on company_id; search once for all of them and group the result by company_id",
       "count": 1
     },
     {
@@ -2311,6 +2515,12 @@
       "count": 1
     },
     {
+      "path": "addons/mail/models/fetchmail.py",
+      "code": "OD137",
+      "message": "write() of the same values on each record of the loop updates them one at a time; write them once on the whole recordset",
+      "count": 1
+    },
+    {
       "path": "addons/mail/models/mail_mail.py",
       "code": "OD103",
       "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
@@ -2407,6 +2617,12 @@
       "count": 1
     },
     {
+      "path": "addons/mail/wizard/mail_compose_message.py",
+      "code": "OD134",
+      "message": "search() runs a query for each record of the loop, keyed on id; search once for all of them and group the result by id",
+      "count": 1
+    },
+    {
       "path": "addons/mail_group/__manifest__.py",
       "code": "OD520",
       "message": "module 'mail' already comes with 'portal', also in depends",
@@ -2440,6 +2656,12 @@
       "path": "addons/mail_group/models/mail_group.py",
       "code": "OD703",
       "message": "RPC argument 'body' reaches Markup() through '_clean_email_body()', 'tree' unescaped; escape it, or pass it as an argument of Markup's % or format()",
+      "count": 1
+    },
+    {
+      "path": "addons/mail_group/models/mail_group_message.py",
+      "code": "OD136",
+      "message": "create() in a loop inserts one record per query; collect the values in a list and create them all in one call",
       "count": 1
     },
     {
@@ -2558,6 +2780,18 @@
     },
     {
       "path": "addons/mass_mailing/models/mailing.py",
+      "code": "OD134",
+      "message": "search() runs a query for each record of the loop, keyed on mass_mailing_id; search once for all of them and group the result by mass_mailing_id",
+      "count": 1
+    },
+    {
+      "path": "addons/mass_mailing/models/mailing.py",
+      "code": "OD136",
+      "message": "create() in a loop inserts one record per query; collect the values in a list and create them all in one call",
+      "count": 1
+    },
+    {
+      "path": "addons/mass_mailing/models/mailing.py",
       "code": "OD715",
       "message": "RPC argument 'extra_domain' reaches the domain or the fields of sudo().search() through 'domain', so the user searches or groups by any field as superuser; build each condition with a field and an operator the code picks",
       "count": 2
@@ -2629,6 +2863,12 @@
       "count": 1
     },
     {
+      "path": "addons/microsoft_calendar/models/microsoft_sync.py",
+      "code": "OD137",
+      "message": "write() of the same values on each record of the loop updates them one at a time; write them once on the whole recordset",
+      "count": 1
+    },
+    {
       "path": "addons/microsoft_calendar/models/res_users.py",
       "code": "OD103",
       "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
@@ -2680,6 +2920,24 @@
       "path": "addons/mrp/data/mrp_demo.xml",
       "code": "OD303",
       "message": "XML id 'mrp_routing_workcenter_4' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/mrp/models/mrp_production.py",
+      "code": "OD137",
+      "message": "write() of the same values on each record of the loop updates them one at a time; write them once on the whole recordset",
+      "count": 2
+    },
+    {
+      "path": "addons/mrp/models/mrp_workcenter.py",
+      "code": "OD137",
+      "message": "write() of the same values on each record of the loop updates them one at a time; write them once on the whole recordset",
+      "count": 1
+    },
+    {
+      "path": "addons/mrp/models/stock_warehouse.py",
+      "code": "OD134",
+      "message": "search() runs a query for each record of the loop, keyed on warehouse_id; search once for all of them and group the result by warehouse_id",
       "count": 1
     },
     {
@@ -2743,6 +3001,12 @@
       "count": 1
     },
     {
+      "path": "addons/mrp_subcontracting_dropshipping/models/res_company.py",
+      "code": "OD134",
+      "message": "search() runs a query for each record of the loop, keyed on company_id; search once for all of them and group the result by company_id",
+      "count": 1
+    },
+    {
       "path": "addons/mysubscription/__manifest__.py",
       "code": "OD520",
       "message": "module 'base' already comes with 'web', also in depends",
@@ -2764,6 +3028,12 @@
       "path": "addons/payment/models/ir_websocket.py",
       "code": "OD131",
       "message": "== between secrets takes longer the more of the secret a guess gets right, which lets a caller find it a character at a time; compare them with consteq() or hmac.compare_digest()",
+      "count": 1
+    },
+    {
+      "path": "addons/payment/models/payment_transaction.py",
+      "code": "OD139",
+      "message": "search() without a limit fetches every matching id to keep the first; pass limit=1",
       "count": 1
     },
     {
@@ -2899,6 +3169,12 @@
       "count": 1
     },
     {
+      "path": "addons/payment_mercado_pago/models/payment_provider.py",
+      "code": "OD134",
+      "message": "search() runs the same query on each pass of the loop; run it once before the loop",
+      "count": 1
+    },
+    {
       "path": "addons/payment_mollie/controllers/main.py",
       "code": "OD112",
       "message": "csrf=False lets other sites submit this form on the user's behalf",
@@ -2926,6 +3202,12 @@
       "path": "addons/payment_paymob/controllers/main.py",
       "code": "OD112",
       "message": "csrf=False lets other sites submit this form on the user's behalf",
+      "count": 1
+    },
+    {
+      "path": "addons/payment_paymob/models/payment_provider.py",
+      "code": "OD134",
+      "message": "search() runs the same query on each pass of the loop; run it once before the loop",
       "count": 1
     },
     {
@@ -3079,6 +3361,36 @@
       "count": 1
     },
     {
+      "path": "addons/point_of_sale/models/pos_payment_method.py",
+      "code": "OD134",
+      "message": "search() runs a query for each record of the loop, keyed on config_id; search once for all of them and group the result by config_id",
+      "count": 1
+    },
+    {
+      "path": "addons/point_of_sale/models/pos_preset.py",
+      "code": "OD134",
+      "message": "search_count() runs a query for each record of the loop, keyed on preset_id; count them all at once with _read_group() grouped by preset_id",
+      "count": 1
+    },
+    {
+      "path": "addons/point_of_sale/models/pos_session.py",
+      "code": "OD134",
+      "message": "search_count() runs a query for each record of the loop, keyed on res_id; count them all at once with _read_group() grouped by res_id",
+      "count": 1
+    },
+    {
+      "path": "addons/point_of_sale/models/report_sale_details.py",
+      "code": "OD134",
+      "message": "search() runs a query for each record of the loop, keyed on pos_session_id; search once for all of them and group the result by pos_session_id",
+      "count": 1
+    },
+    {
+      "path": "addons/point_of_sale/models/res_config_settings.py",
+      "code": "OD134",
+      "message": "search() runs the same query on each pass of the loop; run it once before the loop",
+      "count": 2
+    },
+    {
       "path": "addons/point_of_sale/static/src/app/models/product_tag.js",
       "code": "OD609",
       "message": "markup() of a value built at runtime makes t-out render it as HTML unescaped; check that no user input reaches it, or use markup`...`, which escapes each placeholder",
@@ -3211,6 +3523,12 @@
       "count": 1
     },
     {
+      "path": "addons/pos_hr/wizard/pos_daily_sales_reports.py",
+      "code": "OD134",
+      "message": "search() runs the same query on each pass of the loop; run it once before the loop",
+      "count": 1
+    },
+    {
       "path": "addons/pos_mercado_pago/controllers/main.py",
       "code": "OD111",
       "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
@@ -3331,6 +3649,12 @@
       "count": 1
     },
     {
+      "path": "addons/pos_stock/models/pos_session.py",
+      "code": "OD134",
+      "message": "search_count() runs a query for each record of the loop, keyed on pos_session_id; count them all at once with _read_group() grouped by pos_session_id",
+      "count": 1
+    },
+    {
       "path": "addons/pos_sumup/controllers/webhook.py",
       "code": "OD111",
       "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
@@ -3376,6 +3700,12 @@
       "path": "addons/product/models/product_product.py",
       "code": "OD105",
       "message": "copy() override never calls super(), so other modules' overrides and the ORM itself are skipped",
+      "count": 1
+    },
+    {
+      "path": "addons/product/models/product_template.py",
+      "code": "OD134",
+      "message": "search() runs a query for each record of the loop, keyed on product_id; search once for all of them and group the result by product_id",
       "count": 1
     },
     {
@@ -3451,6 +3781,12 @@
       "count": 1
     },
     {
+      "path": "addons/project/models/project_project.py",
+      "code": "OD136",
+      "message": "create() in a loop inserts one record per query; collect the values in a list and create them all in one call",
+      "count": 1
+    },
+    {
       "path": "addons/project/models/project_task_type.py",
       "code": "OD103",
       "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
@@ -3469,6 +3805,18 @@
       "count": 1
     },
     {
+      "path": "addons/project/wizard/project_project_stage_delete.py",
+      "code": "OD134",
+      "message": "search_count() runs a query for each record of the loop, keyed on stage_id; count them all at once with _read_group() grouped by stage_id",
+      "count": 1
+    },
+    {
+      "path": "addons/project/wizard/project_task_type_delete.py",
+      "code": "OD134",
+      "message": "search_count() runs a query for each record of the loop, keyed on stage_id; count them all at once with _read_group() grouped by stage_id",
+      "count": 1
+    },
+    {
       "path": "addons/project_mail_plugin/controllers/mail_plugin.py",
       "code": "OD128",
       "message": "cors='*' lets a script on any site call this route and read its response; name the origin that needs it",
@@ -3481,9 +3829,21 @@
       "count": 1
     },
     {
+      "path": "addons/purchase/models/purchase_order.py",
+      "code": "OD137",
+      "message": "write() of the same values on each record of the loop updates them one at a time; write them once on the whole recordset",
+      "count": 1
+    },
+    {
       "path": "addons/purchase/views/purchase_views.xml",
       "code": "OD320",
       "message": "purchase.order.line has no method 'action_open_accrual_wizard'",
+      "count": 1
+    },
+    {
+      "path": "addons/purchase_stock/models/stock.py",
+      "code": "OD134",
+      "message": "search() runs a query for each record of the loop, keyed on warehouse_id; search once for all of them and group the result by warehouse_id",
       "count": 1
     },
     {
@@ -3745,6 +4105,12 @@
       "count": 2
     },
     {
+      "path": "addons/snailmail/models/snailmail_letter.py",
+      "code": "OD137",
+      "message": "write() of the same values on each record of the loop updates them one at a time; write them once on the whole recordset",
+      "count": 2
+    },
+    {
       "path": "addons/spreadsheet/__manifest__.py",
       "code": "OD520",
       "message": "module 'bus' already comes with 'portal', also in depends",
@@ -3769,6 +4135,12 @@
       "count": 1
     },
     {
+      "path": "addons/stock/models/res_company.py",
+      "code": "OD136",
+      "message": "create() in a loop inserts one record per query; collect the values in a list and create them all in one call",
+      "count": 1
+    },
+    {
       "path": "addons/stock/models/stock_move.py",
       "code": "OD301",
       "message": "module stock defines no XML id 'stock.group_stock_tracking_lot'",
@@ -3787,6 +4159,18 @@
       "count": 1
     },
     {
+      "path": "addons/stock/models/stock_warehouse.py",
+      "code": "OD134",
+      "message": "search() runs a query for each record of the loop, keyed on picking_type_id; search once for all of them and group the result by picking_type_id",
+      "count": 1
+    },
+    {
+      "path": "addons/stock/models/stock_warehouse.py",
+      "code": "OD134",
+      "message": "search() runs a query for each record of the loop, keyed on warehouse_id; search once for all of them and group the result by warehouse_id",
+      "count": 2
+    },
+    {
       "path": "addons/stock/populate/benchmarks.xml",
       "code": "OD502",
       "message": "'populate/benchmarks.xml' is not in the manifest's data or demo, so Odoo never loads it",
@@ -3796,6 +4180,12 @@
       "path": "addons/stock/populate/populate_demo.xml",
       "code": "OD502",
       "message": "'populate/populate_demo.xml' is not in the manifest's data or demo, so Odoo never loads it",
+      "count": 1
+    },
+    {
+      "path": "addons/stock/report/stock_forecasted.py",
+      "code": "OD139",
+      "message": "search() without a limit fetches every matching id to keep the first; pass limit=1",
       "count": 1
     },
     {
@@ -3829,9 +4219,27 @@
       "count": 1
     },
     {
+      "path": "addons/stock_account/models/stock_move.py",
+      "code": "OD136",
+      "message": "create() in a loop inserts one record per query; collect the values in a list and create them all in one call",
+      "count": 1
+    },
+    {
+      "path": "addons/stock_account/report/stock_avco_audit_report.py",
+      "code": "OD135",
+      "message": "browse() of one id in a loop fetches each record on its own, a query per record; browse every id at once before the loop, or use the records the id comes from",
+      "count": 1
+    },
+    {
       "path": "addons/stock_account/static/src/stock_account_forecasted/forecasted_header.js",
       "code": "OD605",
       "message": "no indexed bundle defines template 'stock_account.ForecastedHeader'",
+      "count": 1
+    },
+    {
+      "path": "addons/stock_dropshipping/models/res_company.py",
+      "code": "OD134",
+      "message": "search() runs a query for each record of the loop, keyed on company_id; search once for all of them and group the result by company_id",
       "count": 1
     },
     {
@@ -3839,6 +4247,18 @@
       "code": "OD520",
       "message": "module 'stock_account' already comes with 'purchase_stock', also in depends",
       "count": 1
+    },
+    {
+      "path": "addons/stock_landed_costs/models/product.py",
+      "code": "OD134",
+      "message": "search_count() runs a query for each record of the loop, keyed on product_id; count them all at once with _read_group() grouped by product_id",
+      "count": 1
+    },
+    {
+      "path": "addons/stock_sms/wizard/confirm_stock_sms.py",
+      "code": "OD137",
+      "message": "write() of the same values on each record of the loop updates them one at a time; write them once on the whole recordset",
+      "count": 2
     },
     {
       "path": "addons/survey/__manifest__.py",
@@ -3880,6 +4300,12 @@
       "path": "addons/survey/data/survey_demo_certification.xml",
       "code": "OD303",
       "message": "XML id 'vendor_certification_page_2_question_2_choice_5' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/test_base_automation/models/test_base_automation.py",
+      "code": "OD134",
+      "message": "search() runs the same query on each pass of the loop; run it once before the loop",
       "count": 1
     },
     {
@@ -4513,6 +4939,24 @@
       "count": 1
     },
     {
+      "path": "addons/website/models/ir_module_module.py",
+      "code": "OD134",
+      "message": "search() runs a query for each record of the loop, keyed on module; search once for all of them and group the result by module",
+      "count": 1
+    },
+    {
+      "path": "addons/website/models/ir_module_module.py",
+      "code": "OD136",
+      "message": "create() in a loop inserts one record per query; collect the values in a list and create them all in one call",
+      "count": 1
+    },
+    {
+      "path": "addons/website/models/ir_ui_view.py",
+      "code": "OD134",
+      "message": "search() runs the same query on each pass of the loop; run it once before the loop",
+      "count": 1
+    },
+    {
       "path": "addons/website/models/website.py",
       "code": "OD404",
       "message": "'google_maps_api_key' of website holds a secret and has no groups, and base.group_everyone can read website, so they can read it over RPC; give the field groups, such as base.group_system",
@@ -4522,6 +4966,12 @@
       "path": "addons/website/models/website_form.py",
       "code": "OD122",
       "message": "UPDATE on ir_model_fields bypasses the ORM, so records this transaction already read keep stale values; call flush_model() before the query and invalidate_model() after it (flush() and invalidate_cache() before 16.0)",
+      "count": 1
+    },
+    {
+      "path": "addons/website/models/website_page_properties.py",
+      "code": "OD136",
+      "message": "create() in a loop inserts one record per query; collect the values in a list and create them all in one call",
       "count": 1
     },
     {
@@ -4630,6 +5080,12 @@
       "path": "addons/website_crm_partner_assign/__manifest__.py",
       "code": "OD520",
       "message": "module 'website_partner' already comes with 'website_partnership', also in depends",
+      "count": 1
+    },
+    {
+      "path": "addons/website_crm_partner_assign/models/crm_lead.py",
+      "code": "OD136",
+      "message": "create() in a loop inserts one record per query; collect the values in a list and create them all in one call",
       "count": 1
     },
     {
@@ -4805,6 +5261,12 @@
       "code": "OD712",
       "message": "route parameter 'records' reaches the model of sudo().search() through 'ids', 'forum_records', 'model', so the user picks the model the superuser reads or writes; pick the model from those the code allows",
       "count": 1
+    },
+    {
+      "path": "addons/website_forum/models/forum_post.py",
+      "code": "OD137",
+      "message": "write() of the same values on each record of the loop updates them one at a time; write them once on the whole recordset",
+      "count": 2
     },
     {
       "path": "addons/website_forum/security/ir.access.csv",
@@ -5240,6 +5702,18 @@
     },
     {
       "path": "odoo/addons/base/models/ir_actions.py",
+      "code": "OD134",
+      "message": "search() runs the same query on each pass of the loop; run it once before the loop",
+      "count": 1
+    },
+    {
+      "path": "odoo/addons/base/models/ir_actions.py",
+      "code": "OD134",
+      "message": "search_count() runs a query for each record of the loop, keyed on path; count them all at once with _read_group() grouped by path",
+      "count": 1
+    },
+    {
+      "path": "odoo/addons/base/models/ir_actions.py",
       "code": "OD223",
       "message": "_compute_value_field_to_show() can leave 'value_field_to_show' unassigned on a record, so reading it raises ValueError; assign it on every path through the loop, False when there is no value",
       "count": 1
@@ -5288,6 +5762,12 @@
     },
     {
       "path": "odoo/addons/base/models/ir_model.py",
+      "code": "OD134",
+      "message": "search() runs a query for each record of the loop, keyed on model; search once for all of them and group the result by model",
+      "count": 2
+    },
+    {
+      "path": "odoo/addons/base/models/ir_model.py",
       "code": "OD401",
       "message": "model 'ir.model.inherit' has no ir.access rule with a group, so only the superuser can use it",
       "count": 1
@@ -5296,6 +5776,24 @@
       "path": "odoo/addons/base/models/ir_module.py",
       "code": "OD103",
       "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
+      "count": 1
+    },
+    {
+      "path": "odoo/addons/base/models/ir_module.py",
+      "code": "OD134",
+      "message": "search() runs a query for each record of the loop, keyed on name; search once for all of them and group the result by name",
+      "count": 1
+    },
+    {
+      "path": "odoo/addons/base/models/ir_module.py",
+      "code": "OD137",
+      "message": "write() of the same values on each record of the loop updates them one at a time; write them once on the whole recordset",
+      "count": 1
+    },
+    {
+      "path": "odoo/addons/base/models/ir_module.py",
+      "code": "OD139",
+      "message": "search() without a limit fetches every matching id to keep the first; pass limit=1",
       "count": 1
     },
     {
@@ -5308,6 +5806,12 @@
       "path": "odoo/addons/base/models/res_company.py",
       "code": "OD105",
       "message": "copy() override never calls super(), so other modules' overrides and the ORM itself are skipped",
+      "count": 1
+    },
+    {
+      "path": "odoo/addons/base/models/res_company.py",
+      "code": "OD134",
+      "message": "search_count() runs a query for each record of the loop, keyed on company_id; count them all at once with _read_group() grouped by company_id",
       "count": 1
     },
     {
@@ -5327,6 +5831,24 @@
       "code": "OD122",
       "message": "INSERT on res_device_log bypasses the ORM, so records this transaction already read keep stale values; call flush_model() before the query and invalidate_model() after it (flush() and invalidate_cache() before 16.0)",
       "count": 1
+    },
+    {
+      "path": "odoo/addons/base/models/res_partner.py",
+      "code": "OD134",
+      "message": "search_count() runs a query for each record of the loop, keyed on barcode; count them all at once with _read_group() grouped by barcode",
+      "count": 1
+    },
+    {
+      "path": "odoo/addons/base/models/res_users.py",
+      "code": "OD135",
+      "message": "browse() of one id in a loop fetches each record on its own, a query per record; browse every id at once before the loop, or use the records the id comes from",
+      "count": 2
+    },
+    {
+      "path": "odoo/addons/base/models/res_users.py",
+      "code": "OD137",
+      "message": "write() of the same values on each record of the loop updates them one at a time; write them once on the whole recordset",
+      "count": 2
     },
     {
       "path": "odoo/addons/base/populate/common.xml",
@@ -5389,6 +5911,12 @@
       "count": 1
     },
     {
+      "path": "odoo/addons/base/wizard/wizard_ir_model_menu_create.py",
+      "code": "OD136",
+      "message": "create() in a loop inserts one record per query; collect the values in a list and create them all in one call",
+      "count": 1
+    },
+    {
       "path": "odoo/addons/test_assetsbundle/__manifest__.py",
       "code": "OD513",
       "message": "'test_assetsbundle/static/invalid_src/xml/file_not_found.xml' does not exist, so the bundle fails to load it",
@@ -5410,6 +5938,12 @@
       "path": "odoo/addons/test_base/models/test_domain_expression.py",
       "code": "OD210",
       "message": "'is_company': test_orm.domain_expression.partner has no field 'is_company'",
+      "count": 1
+    },
+    {
+      "path": "odoo/addons/test_base/models/test_orm.py",
+      "code": "OD134",
+      "message": "search() runs a query for each record of the loop, keyed on name; search once for all of them and group the result by name",
       "count": 1
     },
     {

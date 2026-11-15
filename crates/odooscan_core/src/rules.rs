@@ -17,6 +17,7 @@ pub enum Category {
     Security,
     Deprecation,
     Quality,
+    Performance,
 }
 
 /// What a finding asks of a port to another series, in the order an upgrade summary lists them.
@@ -186,6 +187,12 @@ rules! {
     "OD131" "secret-compared-with-eq" Security Warning None, false, "A token, secret or signature is compared with == rather than consteq().";
     "OD132" "translation-at-import" Quality Warning None, false, "_() runs at import, where no language is known, so the text is never translated.";
     "OD133" "translation-arguments-mismatch" Correctness Error None, false, "The arguments of _() or _lt() do not fit the placeholders of its message, so formatting it raises or prints them wrong.";
+    "OD134" "search-in-loop" Performance Info None, false, "A search runs on each pass of a loop over records where one search for them all would do.";
+    "OD135" "browse-in-loop" Performance Info None, false, "A loop over records browses one id at a time, so each record is fetched on its own.";
+    "OD136" "create-in-loop" Performance Info None, false, "A loop over records creates one record per pass where one create() of a list would do.";
+    "OD137" "write-in-loop" Performance Info None, false, "A loop over records writes the same values to each record where one write() would do.";
+    "OD138" "len-of-search" Performance Warning None, false, "len() counts the result of search() where search_count() would count in the database.";
+    "OD139" "search-first-without-limit" Performance Warning None, false, "search() without a limit fetches every match to keep the first.";
     "OD201" "unknown-model" Correctness Error None, true, "The model is not defined by any indexed module.";
     "OD202" "model-not-in-depends" Correctness Error None, true, "The model comes from a module missing from depends.";
     "OD203" "unresolved-field-path" Correctness Error None, true, "A field path does not resolve on its model.";

@@ -34,7 +34,8 @@ A file that does not parse. Nothing else is checked in it.
 
 ## OD1: Python, one file at a time
 
-Python code checked on its own: security, deprecated APIs and ORM mistakes visible in one file.
+Python code checked on its own: security, deprecated APIs, ORM mistakes and wasted queries visible
+in one file.
 
 | Code | Name | Reports |
 | --- | --- | --- |
@@ -71,6 +72,12 @@ Python code checked on its own: security, deprecated APIs and ORM mistakes visib
 | [OD131](OD131.md) | `secret-compared-with-eq` | A token, secret or signature is compared with == rather than consteq(). |
 | [OD132](OD132.md) | `translation-at-import` | _() runs at import, where no language is known, so the text is never translated. |
 | [OD133](OD133.md) | `translation-arguments-mismatch` | The arguments of _() or_lt() do not fit the placeholders of its message, so formatting it raises or prints them wrong. |
+| [OD134](OD134.md) | `search-in-loop` | A search runs on each pass of a loop over records where one search for them all would do. |
+| [OD135](OD135.md) | `browse-in-loop` | A loop over records browses one id at a time, so each record is fetched on its own. |
+| [OD136](OD136.md) | `create-in-loop` | A loop over records creates one record per pass where one create() of a list would do. |
+| [OD137](OD137.md) | `write-in-loop` | A loop over records writes the same values to each record where one write() would do. |
+| [OD138](OD138.md) | `len-of-search` | len() counts the result of search() where search_count() would count in the database. |
+| [OD139](OD139.md) | `search-first-without-limit` | search() without a limit fetches every match to keep the first. |
 
 ## OD2: models and fields
 
