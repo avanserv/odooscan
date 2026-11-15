@@ -89,10 +89,10 @@ const fn row(
     }
 }
 
-/// Each bound is the first series whose source shows the stage, and the comments cite that source.
+/// Each bound is the first series whose source shows the stage. The comments cite the 18.0 or 20.0
+/// source that still shows it, or state the bound alone.
 pub(crate) static ROWS: &[Row] = &[
-    // saas~12.5 logs that the parameter is no longer supported and renames no column
-    // (`odoo/fields.py:37`, `:453`).
+    // saas~12.5 logs that the parameter is no longer supported and renames no column.
     Row {
         ignored: at(12, 5),
         ..row(
@@ -103,9 +103,9 @@ pub(crate) static ROWS: &[Row] = &[
             "use an upgrade script that renames the column",
         )
     },
-    // saas~13.4 warns of an unknown parameter (`odoo/fields.py:357`), as mail.thread accepts only
-    // `tracking` (`addons/mail/models/mail_thread.py:115`), and saas~18.1 mail.thread no longer
-    // reads it where 18.0 does (`addons/mail/models/mail_thread.py:591`).
+    // saas~13.4 warns of an unknown parameter (18.0 `odoo/fields.py:525-533`), as mail.thread accepts
+    // only `tracking` (18.0 `addons/mail/models/mail_thread.py:480-482`), and saas~18.1 mail.thread no
+    // longer reads it where 18.0 does (`:591`).
     Row {
         ignored: at(18, 1),
         ..row(
@@ -116,7 +116,8 @@ pub(crate) static ROWS: &[Row] = &[
             "use tracking=",
         )
     },
-    // saas~12.5 warns (`odoo/models.py:4921`), saas~15.3 asserts a bool (`odoo/models.py:5327`).
+    // saas~12.5 warns, saas~15.3 asserts a bool (18.0 `odoo/models.py:6328`, 20.0
+    // `odoo/orm/models.py:5458`).
     row(
         Kind::SudoUser,
         "sudo(user)",
@@ -124,7 +125,7 @@ pub(crate) static ROWS: &[Row] = &[
         at(15, 3),
         "use with_user(user)",
     ),
-    // saas~13.1 raises on it (`addons/mail/models/mail_thread.py:1835`).
+    // saas~13.1 raises on it (18.0 `addons/mail/models/mail_thread.py:2204-2207`, 20.0 `:2325-2328`).
     row(
         Kind::Keywords("message_post", &["subtype"]),
         "message_post(subtype=)",
@@ -132,8 +133,8 @@ pub(crate) static ROWS: &[Row] = &[
         at(13, 1),
         "use subtype_xmlid=",
     ),
-    // saas~13.1 logs that the key is no longer supported (`odoo/models.py:5101`) and adds
-    // with_company() (`:5047`), and nothing under `odoo/` reads the key any more.
+    // saas~13.1 logs that the key is no longer supported (18.0 `odoo/models.py:6401-6406`) and adds
+    // with_company() (`:6346`), and nothing under `odoo/` reads the key any more.
     Row {
         ignored: at(13, 1),
         ..row(
@@ -144,8 +145,8 @@ pub(crate) static ROWS: &[Row] = &[
             "use with_company(company)",
         )
     },
-    // saas~13.2 logs a domain an onchange returns as deprecated (`odoo/models.py:5923`), and from
-    // saas~16.3 `_onchange_eval` reads only its value and warning (`odoo/models.py:6507`).
+    // saas~13.2 logs a domain an onchange returns as deprecated, and from saas~16.3 Odoo reads only
+    // its value and warning (18.0 `odoo/models.py:7403-7412`).
     Row {
         ignored: at(16, 3),
         ..row(
@@ -156,11 +157,9 @@ pub(crate) static ROWS: &[Row] = &[
             "set the domain on the field or in the view",
         )
     },
-    // saas~15.4 warns (`odoo/models.py:5790`, `:6331`, `:6151`), saas~15.2 for refresh()
-    // (`odoo/models.py:6028`), and saas~16.2 has none of the four. Which replacement fits hangs on
-    // the arguments: without any the call acts on the whole environment, with fields on the model,
-    // with records or ids on those (saas~15.4 `odoo/models.py:5794`, `:6154`), so the advice names
-    // each.
+    // saas~15.4 warns, saas~15.2 for refresh(), and saas~16.2 has none of the four. Which replacement
+    // fits hangs on the arguments: without any the call acts on the whole environment, with fields on
+    // the model, with records or ids on those, so the advice names each.
     row(
         Kind::RecordsetMethod("flush"),
         "flush()",
@@ -182,8 +181,8 @@ pub(crate) static ROWS: &[Row] = &[
         at(16, 2),
         "use invalidate_model(), invalidate_recordset() or self.env.invalidate_all()",
     ),
-    // refresh() invalidates the whole cache: through invalidate_cache() in saas~15.2 and saas~15.3
-    // (`odoo/models.py:6028`), through env.invalidate_all() from saas~15.4 (`odoo/models.py:6141`).
+    // refresh() invalidates the whole cache: through invalidate_cache() in saas~15.2 and saas~15.3,
+    // through env.invalidate_all() from saas~15.4.
     Row {
         instead_before: Some((Series { major: 15, minor: 4 }, "use invalidate_cache()")),
         ..row(
@@ -194,7 +193,7 @@ pub(crate) static ROWS: &[Row] = &[
             "use self.env.invalidate_all()",
         )
     },
-    // saas~17.1 has it (`odoo/models.py:1563`), saas~17.2 not.
+    // saas~17.1 has it, saas~17.2 not.
     row(
         Kind::Method("user_has_groups"),
         "user_has_groups()",
@@ -202,10 +201,10 @@ pub(crate) static ROWS: &[Row] = &[
         at(17, 2),
         "use self.env.user.has_groups()",
     ),
-    // saas~17.2 ir.cron has both fields (`odoo/addons/base/models/ir_cron.py:67`), a negative
-    // numbercall meaning no limit, and from saas~17.3 create() and write() raise on a field the
-    // model lacks (`odoo/models.py:4437`, `:4683`), while _trigger() schedules a run
-    // (`ir_cron.py:636`) and a run reschedules the cron with no count (`ir_cron.py:508`).
+    // saas~17.2 ir.cron has both fields, a negative numbercall meaning no limit, and from saas~17.3
+    // create() and write() raise on a field the model lacks (18.0 `odoo/models.py:5018`, `:4760`),
+    // while _trigger() schedules a run (18.0 `odoo/addons/base/models/ir_cron.py:644`) and a run
+    // reschedules the cron with no count (`:511-534`).
     Row {
         if_negative: Some("remove it, as a cron repeats until deactivated"),
         ..row(
@@ -223,8 +222,8 @@ pub(crate) static ROWS: &[Row] = &[
         at(17, 3),
         "remove it",
     ),
-    // saas~17.4 name_search() calls it (`odoo/models.py:1733`), and 18.0 searches through
-    // _search_display_name() instead (`odoo/models.py:1885`, `:1823`), so an override never runs.
+    // saas~17.4 name_search() calls it, and 18.0 searches through _search_display_name() instead
+    // (`odoo/models.py:1885`, `:1823`), so an override never runs.
     Row {
         ignored: at(18, 0),
         ..row(
@@ -258,8 +257,8 @@ pub(crate) static ROWS: &[Row] = &[
         at(19, 1),
         "use check_access()",
     ),
-    // saas~18.2 warns (`odoo/orm/models.py:2410`), saas~19.1 drops it, and 20.0 brings back the
-    // name with the signature of the next row (`odoo/orm/models.py:1932`).
+    // saas~18.2 warns, saas~19.1 drops it, and 20.0 brings back the name with the signature of the
+    // next row (`odoo/orm/models.py:1932`).
     Row {
         reused: at(20, 0),
         ..row(
@@ -278,9 +277,8 @@ pub(crate) static ROWS: &[Row] = &[
         "use read_group(domain, groupby, aggregates, order=)",
     ),
     // 18.0 web reads groups through read_group() (`addons/web/models/models.py:311`), saas~18.2
-    // through formatted_read_group() (`:300`, `:335`) as read_group() warns
-    // (`odoo/orm/models.py:2410`), and 20.0 declares the new one final (`odoo/orm/models.py:1930`),
-    // which its lint test holds every override to (`test_lint/tests/test_override_signatures.py:146`).
+    // through formatted_read_group() (20.0 `:736`) as read_group() warns, and 20.0 declares the new
+    // one final (`odoo/orm/models.py:1930`), which its lint test holds every override to.
     row(
         Kind::Override("read_group"),
         "overriding read_group()",
@@ -288,7 +286,7 @@ pub(crate) static ROWS: &[Row] = &[
         at(19, 1),
         "override _read_group() or formatted_read_group()",
     ),
-    // 19.0 warns on import (`odoo/osv/__init__.py:4`), saas~19.1 has no such package.
+    // 19.0 warns on import, saas~19.1 has no such package.
     row(
         Kind::Import("odoo.osv"),
         "importing odoo.osv",
@@ -296,8 +294,8 @@ pub(crate) static ROWS: &[Row] = &[
         at(19, 1),
         "use odoo.fields.Domain",
     ),
-    // saas~15.3's Request has no such attribute (`odoo/http.py:964`) and keeps the body on its
-    // dispatcher (`odoo/http.py:1598`), and saas~15.4 adds get_json_data() (`odoo/http.py:1287`).
+    // saas~15.3's Request has no such attribute and keeps the body on its dispatcher (18.0
+    // `odoo/http.py:2332`, `:2370`), and saas~15.4 adds get_json_data() (18.0 `:1853`).
     Row {
         instead_before: Some((Series { major: 15, minor: 4 }, "use request.dispatcher.jsonrequest")),
         ..row(
@@ -308,7 +306,7 @@ pub(crate) static ROWS: &[Row] = &[
             "use request.get_json_data()",
         )
     },
-    // saas~18.1 warns that the type is an alias (`odoo/http.py:746`).
+    // saas~18.1 warns that the type is an alias (20.0 `odoo/http/routing_map.py:189-195`).
     row(
         Kind::RouteType("json"),
         "type='json'",

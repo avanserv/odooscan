@@ -28,7 +28,7 @@ const MAGIC_FIELDS: &[&str] = &[
 ];
 
 /// The first series that spells a field's XML id `field_<model>__<field>`, where earlier ones spell
-/// it `field_<table>_<field>` (saas-11.1 `base/models/ir_model.py:760`, `0c261df33d14`).
+/// it `field_<table>_<field>` (`0c261df33d14`; 18.0 `odoo/addons/base/models/ir_model.py:70`).
 const FIELD_ID_BY_NAME: Series = Series { major: 11, minor: 2 };
 
 /// The fields of `MAGIC_FIELDS` Odoo creates a column for when the model logs access: the ORM
