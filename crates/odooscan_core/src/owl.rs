@@ -107,36 +107,39 @@ fn component_tag(node: Node, lines: &Lines) -> Option<ComponentTag> {
     if !node.is_element() || tag.starts_with(char::is_lowercase) || node.has_attribute("t-component") {
         return None;
     }
-    let props = node
+    let (mut props, mut rejected) = (vec![], vec![]);
+    for a in node
         .attributes()
         .filter(|a| a.namespace().is_none() && !a.name().starts_with("t-"))
-        .filter_map(|a| {
-            Some(Spanned {
-                value: prop_name(a.name())?.to_owned(),
+    {
+        match prop_name(a.name()) {
+            (name, true) => props.push(Spanned {
+                value: name.to_owned(),
                 pos: lines.pos(a.range_qname().start),
-            })
-        })
-        .collect();
+            }),
+            (name, false) => rejected.push(name.to_owned()),
+        }
+    }
     Some(ComponentTag {
         name: Spanned {
             value: tag.to_owned(),
             pos: lines.pos(node.range().start + 1),
         },
         props,
+        rejected,
         spread: node.has_attribute("t-props"),
         content: node.has_children(),
     })
 }
 
 /// The prop an attribute passes: the text before its first dot, as Owl reads only the next part
-/// as the suffix (`owl.js:4751-4771`). None for a suffix Owl rejects when compiling the template.
-fn prop_name(attr: &str) -> Option<&str> {
+/// as the suffix (`owl.js:4751-4771`), and whether Owl accepts that suffix when compiling the
+/// template.
+fn prop_name(attr: &str) -> (&str, bool) {
     let mut parts = attr.split('.');
-    let name = parts.next()?;
-    match parts.next() {
-        None | Some("bind" | "translate" | "alike") => Some(name),
-        Some(_) => None,
-    }
+    let name = parts.next().unwrap_or_default();
+    let valid = matches!(parts.next(), None | Some("bind" | "translate" | "alike"));
+    (name, valid)
 }
 
 /// What a spec locates, and the elements its content adds.
@@ -353,12 +356,14 @@ mod tests {
                 .iter()
                 .map(|c| {
                     let props: Vec<_> = c.props.iter().map(|p| format!("{}@{}", p.value, p.pos.col)).collect();
+                    let rejected: Vec<_> = c.rejected.iter().map(|p| format!(" !{p}")).collect();
                     format!(
-                        "{}@{}:{} [{}]{}{}",
+                        "{}@{}:{} [{}{}]{}{}",
                         c.name.value,
                         c.name.pos.line,
                         c.name.pos.col,
                         props.join(" "),
+                        rejected.concat(),
                         if c.spread { " spread" } else { "" },
                         if c.content { " content" } else { "" }
                     )
@@ -371,7 +376,7 @@ mod tests {
             [
                 "Card@3:15 [named@20 onClose@32 label@53]",
                 "Card@4:10 [] spread content",
-                "Panel_x.Item@7:10 [extra@38]"
+                "Panel_x.Item@7:10 [extra@38 !size]"
             ]
         );
         assert!(!t[0].sets_attributes);

@@ -1,5 +1,5 @@
 import { Component } from "@odoo/owl";
-import { BigCard, Card, FancyCard, Framed, ListCard, Loose, Pair, Patchy } from "@owl_props/js/card";
+import { Badge, BigCard, Card, Chip, FancyCard, Framed, ListCard, Loose, Pair, Patchy, Tile } from "@owl_props/js/card";
 import { SpreadCard } from "@owl_props/js/spread_card";
 
 export class Board extends Component {
@@ -17,4 +17,9 @@ export class Panel extends Component {
 export class Shelf extends Component {
     static template = "owl_props.Shelf";
     static components = { Card };
+}
+
+export class Desk extends Component {
+    static template = "owl_props.Desk";
+    static components = { Tile, Badge, Chip, Card };
 }

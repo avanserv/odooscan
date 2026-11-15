@@ -40,3 +40,33 @@ export class Patchy extends Component {
     static template = "owl_props.Card";
     static props = { title: String };
 }
+
+export class Tile extends Component {
+    static template = "owl_props.Card";
+    static props = { title: String };
+}
+
+export class TileAlias extends Component {
+    static template = "owl_props.Card";
+    static props = Tile.props;
+}
+
+export class Badge extends Component {
+    static template = "owl_props.Card";
+    static props = { title: String };
+}
+
+export class BadgeCopy extends Component {
+    static template = "owl_props.Card";
+    static props = { ...Badge.props };
+}
+
+export class Chip extends Component {
+    static template = "owl_props.Card";
+    static props = { title: String };
+}
+
+export class ChipCopy extends Component {
+    static template = "owl_props.Card";
+    static props = { ...Chip.props };
+}

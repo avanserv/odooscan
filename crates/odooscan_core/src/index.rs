@@ -6,7 +6,8 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use crate::facts::{
     ActionFact, Annotation, ArchElement, ArchEmptied, ArchSubview, ArchValued, ClassFact, ComponentItem, DataFacts,
     FieldFact, FlowSummary, Heritage, JsClass, JsName, ModelKind, OptionValue, PropItem, PyFacts, Receiver,
-    RecordWrite, ReportFact, RouteKey, RuleFact, ServerFact, Signature, Static, UNREAD_TYPE, ViewFact, WrittenValue,
+    RecordWrite, ReportFact, RouteKey, RuleFact, ServerFact, Signature, Static, StaticWrite, UNREAD_TYPE, ViewFact,
+    WrittenValue,
 };
 use crate::js::OWL_MODULE;
 use crate::manifest::{AutoInstall, DEPENDS_BASE, OdooReads};
@@ -2120,14 +2121,69 @@ impl<'m> Index<'m> {
                         continue;
                     };
                     written.insert(((t.module, t.file, class.name.clone()), write.member));
-                    let holder = self.static_declarer(t, class, write.member).filter(|_| write.inner);
-                    if let Some((t, class)) = holder {
-                        written.insert(((t.module, t.file, class.name.clone()), write.member));
+                    if write.inner {
+                        self.shared_writes(t, class, write, &mut written);
                     }
                 }
             }
         }
         written
+    }
+
+    /// Marks what a write into the member of `class` changes: the object of the class up the chain
+    /// that declares it, and the objects that one shares, through `X.props` or `X.components` and,
+    /// for a write that reaches into a description, through `{ ...X.props }`, as a spread copies
+    /// only the keys. Each class is visited once, so a cycle of aliases or spreads ends.
+    fn shared_writes(
+        &self,
+        t: JsTarget,
+        class: &'m JsClass,
+        write: &StaticWrite,
+        written: &mut FxHashSet<(ClassKey, Static)>,
+    ) {
+        let mut seen = FxHashSet::default();
+        let mut todo = vec![(t, class)];
+        while let Some((t, class)) = todo.pop() {
+            let Some((t, class)) = self.static_declarer(t, class, write.member) else {
+                continue;
+            };
+            if !seen.insert((t.module, t.file, class.name.as_str())) {
+                continue;
+            }
+            written.insert(((t.module, t.file, class.name.clone()), write.member));
+            for source in Self::shared_sources(class, write) {
+                if let Some(Some(found)) = self.static_source(t, class, source) {
+                    todo.push(found);
+                }
+            }
+        }
+    }
+
+    /// The classes, `super` among them, whose object the member of `class` shares as far as `write`
+    /// reaches into it. A `{ ...X.components }` copy shares only class references, so a write past
+    /// it changes a class, not X's mapping.
+    fn shared_sources<'c>(class: &'c JsClass, write: &StaticWrite) -> Vec<&'c str> {
+        match write.member {
+            Static::Props => class
+                .props
+                .iter()
+                .flat_map(|p| &p.items)
+                .filter_map(|item| match item {
+                    PropItem::Alias(source) => Some(source.as_str()),
+                    PropItem::Spread(source) if write.deep => Some(source.as_str()),
+                    _ => None,
+                })
+                .collect(),
+            Static::Components => class
+                .components
+                .iter()
+                .flatten()
+                .filter_map(|item| match item {
+                    ComponentItem::Alias(source) => Some(source.as_str()),
+                    _ => None,
+                })
+                .collect(),
+        }
     }
 
     /// The class up the chain from `class` that declares the static member, whose object a
@@ -2199,7 +2255,7 @@ impl<'m> Index<'m> {
                 }
                 ComponentItem::Entry { .. } => Lookup::Absent,
                 ComponentItem::Spread(source) => self.spread_lookup(t, class, source, tag, depth),
-                ComponentItem::Open => Lookup::Unknown,
+                ComponentItem::Alias(_) | ComponentItem::Open => Lookup::Unknown,
             };
             if !matches!(found, Lookup::Absent) {
                 return found;
@@ -2243,7 +2299,7 @@ impl<'m> Index<'m> {
                     schema.props.insert(name, *required);
                 }
                 PropItem::Spread(source) => self.spread_props(t, class, source, depth, &mut schema)?,
-                PropItem::Open => return None,
+                PropItem::Alias(_) | PropItem::Open => return None,
             }
         }
         Some(Some(schema))
@@ -5340,6 +5396,29 @@ export class Shared extends Component { static props = { a: String }; }
 export class SharedSub extends Shared {}
 export class Kept extends Component { static props = { a: String }; }
 export class KeptSub extends Kept {}
+export class Tile extends Component { static props = { title: String }; }
+export class TileAlias extends Component { static props = Tile.props; }
+export class Badge extends Component { static props = { title: String }; }
+export class BadgeCopy extends Component { static props = { ...Badge.props }; }
+export class Chip extends Component { static props = { title: String }; }
+export class ChipCopy extends Component { static props = { ...Chip.props }; }
+export class Link0 extends Component { static props = { title: String }; }
+export class Link1 extends Component { static props = Link0.props; }
+export class Link2 extends Component { static props = Link1.props; }
+export class Link3 extends Component { static props = Link2.props; }
+export class Link4 extends Component { static props = Link3.props; }
+export class Link5 extends Component { static props = Link4.props; }
+export class Link6 extends Component { static props = Link5.props; }
+export class Link7 extends Component { static props = Link6.props; }
+export class Link8 extends Component { static props = Link7.props; }
+export class Link9 extends Component { static props = Link8.props; }
+Link9.props.extra = {};
+export class Loop extends Component { static props = Ring.props; }
+export class Ring extends Component { static props = Loop.props; }
+Loop.props.extra = {};
+export class Knot extends Component { static props = { ...Bow.props, title: String }; }
+export class Bow extends Component { static props = { ...Knot.props }; }
+Knot.props.title.optional = true;
 "#,
         )];
         let mut sale = module(
@@ -5350,7 +5429,7 @@ export class KeptSub extends Kept {}
             script(
                 "static/src/order.js",
                 r#"import { Component } from "@odoo/owl";
-import { Card, BigCard, Written, SharedSub, KeptSub } from "@web/card";
+import { Card, BigCard, Written, SharedSub, KeptSub, TileAlias, BadgeCopy, ChipCopy } from "@web/card";
 export class Order extends Component {
     static template = "sale.Order";
     static components = { Card, Big: BigCard, Gone: missing() };
@@ -5367,6 +5446,15 @@ patch(Patched, { components: {} });
 Written.props.y = String;
 SharedSub.props.extra = { optional: true };
 KeptSub.props = { b: String };
+TileAlias.props.extra = {};
+BadgeCopy.props.title.optional = true;
+ChipCopy.props.extra = {};
+export class Desk extends Component { static components = { Card }; }
+export class DeskAlias extends Component { static components = Desk.components; }
+DeskAlias.components.Extra = Card;
+export class Shelf extends Component { static components = { Card }; }
+export class ShelfCopy extends Component { static components = { ...Shelf.components }; }
+ShelfCopy.components.Card.reset();
 export class Called extends Component { static template = "sale.Called"; }
 export class Parent extends Component { static template = "sale.Parent"; }
 "#,
@@ -5439,7 +5527,15 @@ Order.components.Card = null;
         assert_eq!(child("SubOrder", "Card"), Some("BigCard"));
         assert_eq!(child("SubOrder", "Big"), Some("BigCard"));
         assert_eq!(child("Lazy", "Card"), Some("Card"));
-        for (owner, tag) in [("Order", "Gone"), ("Order", "Nope"), ("Patched", "Card")] {
+        // A spread copies the class references, so a write into one changes the class, not Shelf's.
+        assert_eq!(child("Shelf", "Card"), Some("Card"));
+        // A write through a class that shares the object changes the source's too.
+        for (owner, tag) in [
+            ("Order", "Gone"),
+            ("Order", "Nope"),
+            ("Patched", "Card"),
+            ("Desk", "Card"),
+        ] {
             assert_eq!(child(owner, tag), None, "{owner} {tag}");
         }
     }
@@ -5468,7 +5564,28 @@ Order.components.Card = null;
         assert_eq!(props("SuperCard").as_deref(), Some("body?,extra,title"));
         // A subclass's own `props` replaces the inherited object, which a write into it changes.
         assert_eq!(props("Kept").as_deref(), Some("a"));
-        for name in ["MixCard", "Bare", "Written", "Shared", "SharedSub", "KeptSub"] {
+        // A spread copies the keys, so a key write into a copy leaves the source alone; a write
+        // into a description, or any through the source's own object, reaches the source, however
+        // long the chain of aliases and through a cycle.
+        assert_eq!(props("Chip").as_deref(), Some("title"));
+        for name in [
+            "MixCard",
+            "Bare",
+            "Written",
+            "Shared",
+            "SharedSub",
+            "KeptSub",
+            "Tile",
+            "TileAlias",
+            "Badge",
+            "BadgeCopy",
+            "ChipCopy",
+            "Link0",
+            "Loop",
+            "Ring",
+            "Knot",
+            "Bow",
+        ] {
             assert_eq!(props(name), None, "{name}");
         }
     }
