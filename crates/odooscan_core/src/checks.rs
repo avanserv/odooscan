@@ -2466,9 +2466,10 @@ impl<'m> Ctx<'_, 'm> {
         }
     }
 
-    /// OD614 and OD615 on the component tags of a template, against the props of the one class
-    /// every owner of the template, its parent's for an extension, names the tag. A class or a
-    /// patch of a module outside the index, such as an Enterprise one, may render it or change them.
+    /// OD614 and OD615 on the component tags of a template. Each tag is checked against the props
+    /// of the class that the `static components` of every owning component maps it to, the owners
+    /// of its parent for an extension, when they all map it to the same class. A class or a patch
+    /// of a module outside the index, such as an Enterprise one, may render it or change them.
     fn component_tags(&self, out: &mut Out<'m>, path: &'m Path, t: &OwlTemplate) {
         if self.partial || t.components.is_empty() {
             return;
