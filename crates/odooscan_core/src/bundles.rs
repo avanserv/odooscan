@@ -24,6 +24,11 @@ const ASSET_RECORDS: Series = Series { major: 14, minor: 3 };
 /// How far a template's root is looked for up `inherit_id`, so that a cycle ends.
 const INHERIT_STEPS: usize = 32;
 
+/// How many bundles one fill expands, itself and each include, so that a fill whose includes repeat
+/// ends: a chain of N bundles each including the next twice expands 2^N times. It bounds the depth
+/// of the fill's recursion too.
+const INCLUDES: usize = 1_000;
+
 /// A file of an indexed module, as (module, index among the module's files of its kind).
 pub type File = (usize, usize);
 
@@ -288,11 +293,12 @@ impl<'m> Paths<'m> {
     }
 }
 
-/// A bundle being filled: its paths in order, and the same as a set.
+/// A bundle being filled: its paths in order, the same as a set, and how many bundles it expanded.
 #[derive(Default)]
 struct Filled {
     list: Vec<usize>,
     memo: FxHashSet<usize>,
+    expanded: usize,
 }
 
 impl Filled {
@@ -327,7 +333,9 @@ struct Filler<'m> {
 
 impl<'m> Filler<'m> {
     /// Applies every entry for `bundle` to `filled`. A bundle already on the include path is
-    /// skipped, where Odoo raises (`:172`).
+    /// skipped, where Odoo raises (`:172`). Past `INCLUDES` expansions an include adds nothing and
+    /// the fill keeps what it has, where Odoo expands every one (18.0 `:207-209`, 20.0 `:203-205`)
+    /// and caches only the top-level bundle (18.0 `:124`, 20.0 `:117`).
     fn fill(&mut self, bundle: &'m str, filled: &mut Filled, seen: &mut Vec<&'m str>) {
         if seen.contains(&bundle) {
             return;
@@ -335,6 +343,10 @@ impl<'m> Filler<'m> {
         let Some(lists) = self.lists.get(bundle).cloned() else {
             return;
         };
+        if filled.expanded == INCLUDES {
+            return;
+        }
+        filled.expanded += 1;
         // `prepend` inserts at the start of the bundle being filled, an included one too (`:177`).
         let start = filled.list.len();
         seen.push(bundle);
@@ -583,6 +595,42 @@ mod tests {
         let bundles = contents(&[a]);
         assert_eq!(bundles["one"], ["a/one.js", "a/two.js"]);
         assert_eq!(bundles["two"], ["a/two.js", "a/one.js"]);
+    }
+
+    /// Module `a` whose bundles `b0` to `b39` each list their own file and include the next twice,
+    /// so that filling `b0` without a cap expands 2^40 bundles; `b0` ends with `last`, and `tail`
+    /// lists `t.js`.
+    fn diamond(last: &str) -> Module {
+        let mut bundles: Vec<String> = (0..39)
+            .map(|i| {
+                format!(
+                    r#""b{i}": ["a/static/src/{i}.js", ("include", "b{n}"), ("include", "b{n}"){last}]"#,
+                    n = i + 1,
+                    last = if i == 0 { last } else { "" }
+                )
+            })
+            .collect();
+        bundles.push(r#""b39": ["a/static/src/39.js"], "tail": ["a/static/src/t.js"]"#.to_owned());
+        let js: Vec<String> = (0..40).map(|i| format!("{i}.js")).chain(["t.js".to_owned()]).collect();
+        let js: Vec<&str> = js.iter().map(String::as_str).collect();
+        addon("a", &format!(r#""assets": {{{}}}"#, bundles.join(", ")), &js, &[])
+    }
+
+    fn chain() -> Vec<String> {
+        (0..40).map(|i| format!("a/{i}.js")).collect()
+    }
+
+    #[test]
+    fn a_diamond_chain_of_includes_fills_at_once() {
+        // The first descent lists every file within 40 expansions, so the cap changes nothing.
+        assert_eq!(contents(&[diamond("")])["b0"], chain());
+    }
+
+    #[test]
+    fn stops_expanding_includes_past_the_budget() {
+        let bundles = contents(&[diamond(r#", ("include", "tail")"#)]);
+        assert_eq!(bundles["b0"], chain());
+        assert_eq!(bundles["tail"], ["a/t.js"]);
     }
 
     #[test]
