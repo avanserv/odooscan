@@ -6,7 +6,7 @@ use rayon::iter::Either;
 use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use crate::facts::{DataFacts, JsFacts, PoFacts, Pos, PyFacts, RawDiag, TemplateFacts};
+use crate::facts::{DataFacts, JsFacts, PoFacts, Pos, PyFacts, RawDiag, TemplateEntry, TemplateFacts};
 use crate::manifest::{self, Manifest, OdooReads, Rejection, normalize};
 use crate::mentions::{Mentions, Words};
 use crate::series::Series;
@@ -86,6 +86,8 @@ pub struct Module {
     /// The `.po` files directly in `i18n/` and `i18n_extra/` of a checked module, where Odoo looks
     /// for a language's catalog (18.0 `odoo/tools/translate.py:1788-1790`).
     pub translations: Vec<SourceFile<PoFacts>>,
+    /// The messages of `i18n/<module>.pot` of a checked module, the template Odoo's export writes.
+    pub template: Option<SourceFile<Vec<TemplateEntry>>>,
     /// The views the SQL files the manifest loads in the module's series create.
     pub sql_views: Vec<String>,
     /// The files under `static/` Odoo may serve as assets, as `<module>/<path>`, for a checked
@@ -157,6 +159,7 @@ pub(crate) fn module(name: &str, manifest: &str) -> Module {
         js: vec![],
         templates: vec![],
         translations: vec![],
+        template: None,
         sql_views: vec![],
         static_assets: vec![],
         lost_text: false,
@@ -576,6 +579,7 @@ fn read_module(
             js: vec![],
             templates: vec![],
             translations: vec![],
+            template: None,
             sql_views: vec![],
             static_assets: vec![],
             lost_text: false,
@@ -783,7 +787,12 @@ fn parse_module_files(module: &mut Module, default_series: Option<Series>, taint
     }
     module.words = Words::merge(&words);
     if checked {
-        module.translations = translations(&module.dir, &module.name);
+        let (translations, template) = translations(&module.dir, &module.name);
+        module.translations = translations;
+        module.template = template.map(|mut template| {
+            mark_unread(&mut template.facts, &module.python, &module.dir, &module.name);
+            template
+        });
     }
     module.sql_views = sql_views(module, series);
     if module.reads_static_assets() {
@@ -801,40 +810,84 @@ fn sql_views(module: &Module, series: Option<Series>) -> Vec<String> {
 }
 
 /// The `.po` catalogs of the module `name` in `dir` that decode as UTF-8, each merged with the
-/// `<name>.pot` of its folder as Odoo merges them. Odoo names the template after the module's
-/// folder (18.0 `odoo/tools/translate.py:807-809`), which `dir` does not name when it is `.`.
-/// Their words name no hook, so they add none.
-fn translations(dir: &Path, name: &str) -> Vec<SourceFile<PoFacts>> {
-    let mut files: Vec<_> = ["i18n", "i18n_extra"]
+/// `<name>.pot` of its folder as Odoo merges them, and the template of `i18n/`. Odoo names the
+/// template after the module's folder (18.0 `odoo/tools/translate.py:807-809`), which `dir` does
+/// not name when it is `.`. Their words name no hook, so they add none.
+fn translations(dir: &Path, name: &str) -> (Vec<SourceFile<PoFacts>>, Option<SourceFile<Vec<TemplateEntry>>>) {
+    let read: Vec<_> = ["i18n", "i18n_extra"]
         .par_iter()
-        .flat_map_iter(|folder| {
+        .map(|&folder| {
+            let messages = folder == "i18n";
             let folder = dir.join(folder);
-            let template = std::fs::read_to_string(folder.join(format!("{name}.pot")))
-                .ok()
-                .map(|text| po::Template::parse(&text));
-            let paths: Vec<PathBuf> = std::fs::read_dir(&folder)
-                .into_iter()
-                .flatten()
-                .filter_map(|e| Some(e.ok()?.path()))
-                .filter(|p| p.is_file() && p.extension().is_some_and(|e| e == "po"))
-                .collect();
-            paths.into_iter().filter_map(move |path| {
-                let text = std::fs::read_to_string(&path).ok()?;
-                let (facts, suppressions) = po::analyze(&text, template.as_ref());
-                Some(SourceFile {
-                    rel: normalize(&path.strip_prefix(dir).ok()?.to_string_lossy()),
-                    rank: None,
-                    demo: false,
-                    suppressions,
-                    facts,
-                    mentions: Mentions::default(),
-                    path,
-                })
-            })
+            let path = folder.join(format!("{name}.pot"));
+            let template = std::fs::read_to_string(&path).ok().map(|text| po::template(&text));
+            let (merge, template) = match template {
+                Some((merge, entries, suppressions)) => (Some(merge), Some((path, entries, suppressions))),
+                None => (None, None),
+            };
+            (catalogs(dir, &folder, merge.as_ref()), template.filter(|_| messages))
         })
         .collect();
+    let mut files = vec![];
+    let mut template = None;
+    for (catalogs, pot) in read {
+        files.extend(catalogs);
+        template = template.or(pot);
+    }
     files.sort_by(|a, b| a.rel.cmp(&b.rel));
-    files
+    let template = template.and_then(|(path, entries, suppressions)| {
+        Some(SourceFile {
+            rel: normalize(&path.strip_prefix(dir).ok()?.to_string_lossy()),
+            rank: None,
+            demo: false,
+            suppressions,
+            facts: entries,
+            mentions: Mentions::default(),
+            path,
+        })
+    });
+    (files, template)
+}
+
+/// The `.po` files directly in `folder` of the module in `dir`, merged with `template`.
+fn catalogs(dir: &Path, folder: &Path, template: Option<&po::Template>) -> Vec<SourceFile<PoFacts>> {
+    let paths = std::fs::read_dir(folder)
+        .into_iter()
+        .flatten()
+        .filter_map(|e| Some(e.ok()?.path()))
+        .filter(|p| p.is_file() && p.extension().is_some_and(|e| e == "po"));
+    paths
+        .filter_map(|path| {
+            let text = std::fs::read_to_string(&path).ok()?;
+            let (facts, suppressions) = po::analyze(&text, template);
+            Some(SourceFile {
+                rel: normalize(&path.strip_prefix(dir).ok()?.to_string_lossy()),
+                rank: None,
+                demo: false,
+                suppressions,
+                facts,
+                mentions: Mentions::default(),
+                path,
+            })
+        })
+        .collect()
+}
+
+/// Marks each entry of the template of the module `name` in `dir` with a reference to one of its
+/// `.py` files that exists outside `python`: one under `static/`, in a nested module, ignored by
+/// git, or not UTF-8. Odoo's export reads every `.py` file of the module (18.0
+/// `odoo/tools/translate.py:1443-1447`), so such a file may hold the message.
+fn mark_unread(entries: &mut [TemplateEntry], python: &[SourceFile<PyFacts>], dir: &Path, name: &str) {
+    let read: FxHashSet<&str> = python.iter().map(|f| f.rel.as_str()).collect();
+    let prefix = format!("code:addons/{name}/");
+    for entry in entries {
+        entry.unread = entry.references.iter().any(|reference| {
+            let Some(rel) = reference.strip_prefix(&prefix).map(po::reference_path) else {
+                return false;
+            };
+            rel.ends_with(".py") && !read.contains(rel) && dir.join(rel).is_file()
+        });
+    }
 }
 
 /// The files of `extension` under `static/<folder>`, whether one of them could not be read, and
@@ -964,6 +1017,21 @@ mod tests {
         let dotted = findings(dir.join("i18n/.."));
         assert!(dotted.iter().all(|(line, _)| *line != 110), "{dotted:?}");
         assert_eq!(dotted, findings(dir));
+    }
+
+    #[test]
+    fn a_template_entry_of_a_python_file_the_scan_does_not_read_is_unread() {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/custom/exported_stall");
+        let modules = load(&[dir], &[], None, None, &TaintTable::default()).modules;
+        let template = modules[0].template.as_ref().unwrap();
+        assert_eq!(template.rel, "i18n/exported_stall.pot");
+        let unread: Vec<_> = template
+            .facts
+            .iter()
+            .filter(|e| e.unread)
+            .map(|e| e.msgid.as_str())
+            .collect();
+        assert_eq!(unread, ["Stall tool"]);
     }
 
     #[test]

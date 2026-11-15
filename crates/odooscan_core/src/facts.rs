@@ -811,6 +811,39 @@ pub struct PyFacts {
     pub migrate: Migrate,
     /// None when the file does not parse.
     pub imports: Option<FileImports>,
+    /// The messages Odoo's export may take from the file's `_()` and `_lt()` calls.
+    pub messages: Vec<Message>,
+    /// The file was read for `messages`: it decodes and parses, and its module does not run on
+    /// Python 2.
+    pub extracted: bool,
+}
+
+/// A message of a module's `i18n/<module>.pot` template.
+#[derive(Debug, PartialEq, Eq)]
+pub struct TemplateEntry {
+    pub msgid: String,
+    /// The line of `msgid`.
+    pub line: u32,
+    /// Each reference of the `#:` comments, such as `code:addons/sale/models/sale_order.py:0`.
+    pub references: Vec<String>,
+    /// The text of each `#.` comment, such as `odoo-python`.
+    pub comments: Vec<String>,
+    /// A `.py` file of the module a reference names exists but was not read, being under
+    /// `static/`, in a nested module, ignored by git or not UTF-8, so its messages are not known.
+    pub unread: bool,
+}
+
+/// A message the export of a module's template may take from a `_()` or `_lt()` call, or from a
+/// parenthesis one of Odoo's extractors reads as such a call.
+#[derive(Debug, PartialEq, Eq)]
+pub struct Message {
+    pub text: String,
+    /// The name of the call, or the parenthesis.
+    pub pos: Pos,
+    /// Given to `_lt()`.
+    pub lazy: bool,
+    /// Every extractor takes it: a call whose first argument is plain strings alone.
+    pub certain: bool,
 }
 
 /// What a Python file binds to `migrate` at import, which Odoo requires of an upgrade script and

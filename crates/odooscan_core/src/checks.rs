@@ -2,8 +2,10 @@
 
 use std::path::Path;
 use std::rc::Rc;
+use std::sync::LazyLock;
 
 use globset::GlobSet;
+use regex::Regex;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::facts::{
@@ -11,7 +13,8 @@ use crate::facts::{
     ClassBase, ClassFact, ComponentTag, DataFacts, DefinitionSource, DomainFact, FieldFact, FieldWrite, Flag,
     FunctionCall, GuardedRef, JsClass, JsFacts, JsName, MethodDef, Migrate, ModelKind, OptionValue, OrmCall,
     OwlTemplate, Pos, PyFacts, RawDiag, RecordFact, RecordWrite, Refusal, ReportFact, RouteDef, RouteKey, RuleFact,
-    ServerFact, Signature, Spanned, SqlColumn, SqlView, Subject, UNREAD_TYPE, ViewFact, WrittenValue, XmlDef, XmlRef,
+    ServerFact, Signature, Spanned, SqlColumn, SqlView, Subject, TemplateEntry, UNREAD_TYPE, ViewFact, WrittenValue,
+    XmlDef, XmlRef,
 };
 use crate::grants::{self, AttachmentGrant, Grant, Grants};
 use crate::imports::{AddonImport, Fault};
@@ -28,7 +31,7 @@ use crate::routing::{ClassAt, Endpoint, Origin};
 use crate::rules::rule;
 use crate::series::{self, Series};
 use crate::xml::{LOCATOR, QWEB, UNKNOWN_CONTEXT};
-use crate::{domain, flows, manifest, modifier, module_state, python};
+use crate::{domain, flows, manifest, modifier, module_state, po, python};
 
 /// The directory of IoT box drivers and interfaces. The box downloads a zip of the
 /// `iot_handlers/*/*` of every installed module from the server's `iot` module (18.0
@@ -264,6 +267,7 @@ pub fn check_module<'m>(index: &Index<'m>, mi: usize, series: Option<Series>) ->
     removed_escapes(index, mi, &mut out);
     renamed_lists(index, mi, &mut out);
     dropped_markup(index, mi, &mut out);
+    template_messages(module, series, &mut out);
     for (_, file) in es_modules(index, mi, series) {
         if let Some(e) = &file.facts.syntax_error {
             out.push(&file.path, "OD000", e.pos, e.value.clone());
@@ -1113,6 +1117,118 @@ fn granted_attachments<'m>(module: &'m Module, grant: AttachmentGrant, out: &mut
             .iter()
             .filter(|(signed_in, _)| grant.reaches(*signed_in));
         out.diags.extend(found.map(|(_, d)| (file.path.as_path(), d.clone())));
+    }
+}
+
+/// The first series whose export takes the messages of `_lt()` as well as `_()` (f4319580e576).
+const LAZY_EXPORTED: Series = Series { major: 12, minor: 5 };
+
+/// OD804 and OD805: the `_()` and `_lt()` messages the module's template lacks, and those it keeps
+/// that no call has. The export writes one entry per message, with a `code:` reference and the
+/// `odoo-python` comment `_()` reads translations by (18.0 `odoo/tools/translate.py:965-990`,
+/// `:1835-1837`).
+fn template_messages<'m>(module: &'m Module, series: Option<Series>, out: &mut Out<'m>) {
+    let Some(template) = &module.template else {
+        return;
+    };
+    missing_messages(module, &template.facts, series, out);
+    if module.python.iter().all(|f| f.facts.extracted) {
+        stale_messages(module, template, out);
+    }
+}
+
+/// OD804, once per message at its first call. Only a message every extractor takes and every series
+/// exports counts (18.0 `odoo/tools/translate.py:1180`), and `_lt()` once the series is known to
+/// export it.
+fn missing_messages<'m>(module: &'m Module, entries: &[TemplateEntry], series: Option<Series>, out: &mut Out<'m>) {
+    let lazy_exported = series.is_some_and(|s| s >= LAZY_EXPORTED);
+    let mut first: FxHashMap<&str, (&'m Path, Pos)> = FxHashMap::default();
+    for file in &module.python {
+        let messages = file
+            .facts
+            .messages
+            .iter()
+            .filter(|m| m.certain && (lazy_exported || !m.lazy));
+        for message in messages.filter(|m| exported_text(&m.text)) {
+            let at = (file.path.as_path(), message.pos);
+            first
+                .entry(message.text.as_str())
+                .and_modify(|seen| *seen = (*seen).min(at))
+                .or_insert(at);
+        }
+    }
+    let mut by_msgid: FxHashMap<&str, Vec<&TemplateEntry>> = FxHashMap::default();
+    for entry in entries {
+        by_msgid.entry(entry.msgid.as_str()).or_default().push(entry);
+    }
+    let mut found: Vec<_> = first.into_iter().collect();
+    found.sort_by_key(|(_, at)| *at);
+    for (text, (path, pos)) in found {
+        let same = by_msgid.get(text).map_or(&[][..], Vec::as_slice);
+        let held = !same.is_empty();
+        if same.iter().any(|e| read_by_python(e)) {
+            continue;
+        }
+        let pot = format!("i18n/{}.pot", module.name);
+        let message = if held {
+            format!(
+                "{pot} holds this message only for records or the web client, so _() finds no translation of it; export the template again"
+            )
+        } else {
+            format!(
+                "{pot} lacks this message, so no translation file offers it to translators; export the template again"
+            )
+        };
+        out.push(path, "OD804", pos, message);
+    }
+}
+
+/// Whether every series exports `text`: Odoo exports a message with a letter (18.0
+/// `odoo/tools/translate.py:1180`), and before 6c56ede86c808896f5517693ce04fc1881241cd9, one with
+/// two letters, digits or underscores.
+fn exported_text(text: &str) -> bool {
+    static LETTER: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\p{L}").expect("valid regex"));
+    static WORD: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"[\p{L}\p{N}_]").expect("valid regex"));
+    LETTER.is_match(text) && WORD.find_iter(text).nth(1).is_some()
+}
+
+/// Whether `_()` may read the translations of `entry`: it has a `code:` reference and the
+/// `odoo-python` comment, or no comment that tells Python from the web client, as older exports
+/// write it.
+fn read_by_python(entry: &TemplateEntry) -> bool {
+    let commented = |what: &str| entry.comments.iter().any(|c| c == what);
+    entry.references.iter().any(|r| r.starts_with("code:"))
+        && (commented("odoo-python") || !commented("odoo-javascript"))
+}
+
+/// OD805 on each entry whose references are all `.py` files of the module, and whose message no
+/// call or parenthesis of the module may give any extractor.
+fn stale_messages<'m>(module: &'m Module, template: &'m SourceFile<Vec<TemplateEntry>>, out: &mut Out<'m>) {
+    let known: FxHashSet<&str> = module
+        .python
+        .iter()
+        .flat_map(|f| &f.facts.messages)
+        .map(|m| m.text.as_str())
+        .collect();
+    let prefix = format!("code:addons/{}/", module.name);
+    let own_python = |r: &String| {
+        r.strip_prefix(&prefix)
+            .is_some_and(|rel| po::reference_path(rel).ends_with(".py"))
+    };
+    let stale = template.facts.iter().filter(|e| {
+        !e.references.is_empty()
+            && e.references.iter().all(own_python)
+            && !e.comments.iter().any(|c| c == "odoo-javascript")
+            && !e.unread
+            && !known.contains(e.msgid.as_str())
+    });
+    for entry in stale {
+        let pos = Pos {
+            line: entry.line,
+            col: 1,
+        };
+        let message = "no _() or _lt() call of the module has this message, so translators work on text no one sees; export the template again";
+        out.push(&template.path, "OD805", pos, message);
     }
 }
 
@@ -7030,9 +7146,9 @@ mod tests {
 
     use super::{
         MagicEra, applies, bundle_list, cache_global, callable_attr, csv_label, derived_label, es_module,
-        fetches_own_view, field_name, has_last_update, hoot_adds, magic_era, no_access_message, page_miss, patch_form,
-        public_write_message, reads_model_access, reads_requires, shadowed_member, static_only, stores_parent_path,
-        tuple_checked, tuple_listed, unknown_dependency, unmatched_asset, warns_on_labels,
+        exported_text, fetches_own_view, field_name, has_last_update, hoot_adds, magic_era, no_access_message,
+        page_miss, patch_form, public_write_message, reads_model_access, reads_requires, shadowed_member, static_only,
+        stores_parent_path, tuple_checked, tuple_listed, unknown_dependency, unmatched_asset, warns_on_labels,
     };
     use crate::facts::{AccessRow, Annotation, DefinitionSource, JsName, Perms, Pos, Spanned};
     use crate::manifest::OdooReads;
@@ -7431,5 +7547,15 @@ mod tests {
         assert_eq!(bundle_list(&["a"]), "a");
         assert_eq!(bundle_list(&["a", "b", "c"]), "a, b and c");
         assert_eq!(bundle_list(&["a", "b", "c", "d", "e"]), "a, b, c and 2 more");
+    }
+
+    #[test]
+    fn every_series_exports_a_message_with_a_letter_and_two_word_characters() {
+        for text in ["Ok", "é1", "a_", "Total: %s"] {
+            assert!(exported_text(text), "{text}");
+        }
+        for text in ["%s", "12", "m", "a %", "..."] {
+            assert!(!exported_text(text), "{text}");
+        }
     }
 }

@@ -71,7 +71,7 @@ in one file.
 | [OD130](OD130.md) | `session-user-switch` | Code switches the user a request or a session runs as. |
 | [OD131](OD131.md) | `secret-compared-with-eq` | A token, secret or signature is compared with == rather than consteq(). |
 | [OD132](OD132.md) | `translation-at-import` | _() runs at import, where no language is known, so the text is never translated. |
-| [OD133](OD133.md) | `translation-arguments-mismatch` | The arguments of _() or_lt() do not fit the placeholders of its message, so formatting it raises or prints them wrong. |
+| [OD133](OD133.md) | `translation-arguments-mismatch` | The arguments of a translation call do not fit the placeholders of its message, so formatting it raises or prints them wrong. |
 | [OD134](OD134.md) | `search-in-loop` | A search runs on each pass of a loop over records where one search for them all would do. |
 | [OD135](OD135.md) | `browse-in-loop` | A loop over records browses one id at a time, so each record is fetched on its own. |
 | [OD136](OD136.md) | `create-in-loop` | A loop over records creates one record per pass where one create() of a list would do. |
@@ -369,10 +369,13 @@ catalog of a language, read as UTF-8. A file in a subfolder, such as `i18n/old/`
 Each is merged first with the `<module>.pot` template of its folder, when there is one, as Odoo
 merges them: an entry the template lacks is obsolete and not reported. A message of the template
 that the file lacks is not counted as untranslated, as Odoo may fill it from the file of a parent
-language.
+language. OD804 and OD805 hold the `i18n/<module>.pot` template to the `_()` and `_lt()` calls of
+the module's Python.
 
 | Code | Name | Reports |
 | --- | --- | --- |
 | [OD801](OD801.md) | `translation-placeholder-mismatch` | A translation's placeholders differ from those of its message, so formatting it fails or loses a value. |
 | [OD802](OD802.md) | `translation-fuzzy` | A translation is marked fuzzy, yet Odoo loads it as a reviewed one. |
 | [OD803](OD803.md) | `translation-empty` | A translation file leaves messages untranslated, which Odoo shows in the source language. |
+| [OD804](OD804.md) | `template-missing-message` | A message a module's Python marks for translation is missing from its .pot template. |
+| [OD805](OD805.md) | `template-stale-message` | A module's .pot template keeps a Python message no call of the module has. |

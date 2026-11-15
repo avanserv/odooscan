@@ -14,6 +14,7 @@ mod index;
 mod js;
 mod manifest;
 mod mentions;
+mod messages;
 mod method_body;
 mod modifier;
 mod module_state;
@@ -197,6 +198,8 @@ pub fn scan(opts: &ScanOptions) -> Report {
                     .chain(module.data.iter().map(|f| (&f.path, &f.suppressions)))
                     .chain(module.js.iter().map(|f| (&f.path, &f.suppressions)))
                     .chain(module.templates.iter().map(|f| (&f.path, &f.suppressions)))
+                    .chain(module.translations.iter().map(|f| (&f.path, &f.suppressions)))
+                    .chain(module.template.iter().map(|f| (&f.path, &f.suppressions)))
                     .find(|(fp, _)| fp.as_path() == p)
                     .is_none_or(|(_, s)| s.allows(d.pos.line, d.code));
                 (p.to_path_buf(), allowed, d)

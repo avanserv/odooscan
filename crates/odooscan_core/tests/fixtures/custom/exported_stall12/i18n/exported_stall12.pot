@@ -1,0 +1,11 @@
+# Template catalog of Exported stall 12, made up for OD804.
+msgid ""
+msgstr ""
+"Project-Id-Version: Exported stall 12\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+
+#. module: exported_stall12
+#. odoo-python
+#: code:addons/exported_stall12/models/stall.py:0
+msgid "Stall opened"
+msgstr ""

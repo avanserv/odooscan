@@ -1,0 +1,17 @@
+# Template catalog of Exported broken, made up for OD805.
+msgid ""
+msgstr ""
+"Project-Id-Version: Exported broken\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+
+#. module: exported_broken
+#. odoo-python
+#: code:addons/exported_broken/models/booth.py:0
+msgid "Booth sold"
+msgstr ""
+
+#. module: exported_broken
+#. odoo-python
+#: code:addons/exported_broken/models/booth.py:0
+msgid "Booth razed"
+msgstr ""

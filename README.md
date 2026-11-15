@@ -37,7 +37,7 @@ page in the terminal.
   per-file facts.
   - `python.rs`, `xml.rs`, `csvdata.rs`, `js.rs` and `manifest.rs` extract those facts and raise
     the single-file rules, and `po.rs` reads the translation catalogs of `i18n/` and
-    `i18n_extra/` and raises the OD8 rules.
+    `i18n_extra/` and raises the OD8 rules of a single catalog.
 - `index.rs` merges the facts. It resolves fields through `_inherit`, `_inherits` and
   `delegate=True`, related comodels, view inheritance, JS module paths and the scripts bundles
   load, and the dependency scope of each module.

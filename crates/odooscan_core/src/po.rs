@@ -3,7 +3,7 @@
 
 use rustc_hash::FxHashMap;
 
-use crate::facts::{PoFacts, Pos, RawDiag};
+use crate::facts::{PoFacts, Pos, RawDiag, TemplateEntry};
 use crate::placeholders::{self, Fields, Specs};
 use crate::suppress::Suppressions;
 
@@ -208,9 +208,14 @@ fn unquote(text: &str) -> String {
 pub(crate) struct Template(FxHashMap<String, bool>);
 
 impl Template {
-    pub(crate) fn parse(text: &str) -> Self {
+    #[cfg(test)]
+    fn parse(text: &str) -> Self {
+        Self::of(&entries(text))
+    }
+
+    fn of(entries: &[Entry]) -> Self {
         // The last entry of a message wins, as polib merges the template's entries in order.
-        Self(entries(text).into_iter().map(|e| (e.key(), e.obsolete)).collect())
+        Self(entries.iter().map(|e| (e.key(), e.obsolete)).collect())
     }
 
     fn loads(&self, entry: &Entry) -> bool {
@@ -239,11 +244,43 @@ pub(crate) fn analyze(text: &str, template: Option<&Template>) -> (PoFacts, Supp
         )
     }));
     diags.extend(untranslated(&entries));
-    let suppressions = Suppressions::parse(text).moved(|line| {
-        let at = all.partition_point(|e| e.lines.1 < line);
-        all.get(at).filter(|e| e.lines.0 <= line).map_or(line, |e| e.line)
-    });
-    (PoFacts { diags }, suppressions)
+    (PoFacts { diags }, suppressions(text, &all))
+}
+
+/// The template `text` of a folder: what it merges into each `.po` file beside it, its messages,
+/// obsolete ones left out, and its suppressions, which `analyze` reads alike.
+pub(crate) fn template(text: &str) -> (Template, Vec<TemplateEntry>, Suppressions) {
+    let all = entries(text);
+    let messages = all
+        .iter()
+        .filter(|e| !e.obsolete)
+        .map(|e| TemplateEntry {
+            msgid: e.msgid.clone(),
+            line: e.line,
+            references: e.references.clone(),
+            comments: e.extracted.clone(),
+            unread: false,
+        })
+        .collect();
+    (Template::of(&all), messages, suppressions(text, &all))
+}
+
+/// The path of a `#:` reference such as `code:addons/sale/models/sale_order.py:0`, without the line
+/// number polib reads after its last colon.
+pub(crate) fn reference_path(reference: &str) -> &str {
+    match reference.rsplit_once(':') {
+        Some((path, line)) if !line.is_empty() && line.bytes().all(|b| b.is_ascii_digit()) => path,
+        _ => reference,
+    }
+}
+
+/// The suppressions of the catalog `text` of `entries`, each moved to the msgid of the entry whose
+/// comments hold it.
+fn suppressions(text: &str, entries: &[Entry]) -> Suppressions {
+    Suppressions::parse(text).moved(|line| {
+        let at = entries.partition_point(|e| e.lines.1 < line);
+        entries.get(at).filter(|e| e.lines.0 <= line).map_or(line, |e| e.line)
+    })
 }
 
 fn pos(entry: &Entry) -> Pos {
@@ -666,6 +703,32 @@ msgstr "a""#;
         let message = |template| analyze(text, template).0.diags.pop().map(|d| d.message);
         assert!(message(Some(&template)).is_some_and(|m| m.starts_with("2 of 3 ")));
         assert!(message(None).is_some_and(|m| m.starts_with("3 of 4 ")));
+    }
+
+    #[test]
+    fn a_template_keeps_its_live_messages_and_its_suppressions() {
+        let text = "msgid \"\"\nmsgstr \"\"\n\n# odooscan: ignore[OD805]\n#. odoo-python\n\
+            #: code:addons/kiosk/a.py:0\nmsgid \"Stand\"\nmsgstr \"\"\n\n#~ msgid \"Gone\"\n#~ msgstr \"\"\n";
+        let (_, messages, suppressions) = template(text);
+        let entry = TemplateEntry {
+            msgid: "Stand".to_owned(),
+            line: 7,
+            references: vec!["code:addons/kiosk/a.py:0".to_owned()],
+            comments: vec!["odoo-python".to_owned()],
+            unread: false,
+        };
+        assert_eq!(messages, [entry]);
+        assert!(!suppressions.allows(7, "OD805"));
+    }
+
+    #[test]
+    fn a_reference_path_drops_its_line_number() {
+        assert_eq!(reference_path("code:addons/kiosk/a.py:0"), "code:addons/kiosk/a.py");
+        assert_eq!(reference_path("code:addons/kiosk/a.py"), "code:addons/kiosk/a.py");
+        assert_eq!(
+            reference_path("model:ir.model,name:kiosk.model_stand"),
+            "model:ir.model,name:kiosk.model_stand"
+        );
     }
 
     #[test]
