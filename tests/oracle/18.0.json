@@ -975,24 +975,6 @@
     {
       "path": "addons/hr_expense/security/ir_rule.xml",
       "code": "OD407",
-      "message": "hr.expense.employee_id has no index, yet record rule hr_expense.ir_rule_hr_expense_approver filters reads of hr.expense on it; add index=True to the field",
-      "count": 1
-    },
-    {
-      "path": "addons/hr_expense/security/ir_rule.xml",
-      "code": "OD407",
-      "message": "hr.expense.employee_id has no index, yet record rule hr_expense.ir_rule_hr_expense_employee filters reads of hr.expense on it; add index=True to the field",
-      "count": 1
-    },
-    {
-      "path": "addons/hr_expense/security/ir_rule.xml",
-      "code": "OD407",
-      "message": "hr.expense.employee_id has no index, yet record rule hr_expense.ir_rule_hr_expense_employee_not_draft filters reads of hr.expense on it; add index=True to the field",
-      "count": 1
-    },
-    {
-      "path": "addons/hr_expense/security/ir_rule.xml",
-      "code": "OD407",
       "message": "hr.expense.sheet.employee_id has no index, yet record rule hr_expense.ir_rule_hr_expense_sheet_approver filters reads of hr.expense.sheet on it; add index=True to the field",
       "count": 1
     },
@@ -3664,12 +3646,6 @@
       "path": "addons/sale/data/sale_demo.xml",
       "code": "OD303",
       "message": "XML id 'sale_order_9' is already defined earlier in this file",
-      "count": 1
-    },
-    {
-      "path": "addons/sale/security/ir_rules.xml",
-      "code": "OD407",
-      "message": "sale.order.line.salesman_id has no index, yet record rule sale.sale_order_line_personal_rule filters reads of sale.order.line on it; add index=True to the field",
       "count": 1
     },
     {

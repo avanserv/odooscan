@@ -99,6 +99,41 @@
     <record id="rule_zone_tree" model="ir.rule">
         <field name="name">Zones under mine</field>
         <field name="model_id" ref="model_desk_zone"/>
-        <field name="domain_force">['|', '|', ('parent_id', 'child_of', [1]), ('parent_id', 'parent_of', [1]), ('team_id', 'child_of', [1])]</field>
+        <field name="domain_force">['|', '|', '|', ('parent_id', 'child_of', [1]), ('parent_id', 'parent_of', [1]), ('team_id', 'child_of', [1]), ('owner_zone_id', 'child_of', [1])]</field>
+    </record>
+    <record id="rule_floor_tree" model="ir.rule">
+        <field name="name">Floors under mine</field>
+        <field name="model_id" ref="model_desk_floor"/>
+        <field name="domain_force">[('parent_id', 'child_of', [1])]</field>
+    </record>
+    <record id="rule_floor_up" model="ir.rule">
+        <field name="name">Floors above mine</field>
+        <field name="model_id" ref="model_desk_floor"/>
+        <field name="domain_force">[('parent_id', 'parent_of', [1])]</field>
+    </record>
+    <record id="rule_stamp_team" model="ir.rule">
+        <field name="name">Stamps of my team</field>
+        <field name="model_id" ref="model_desk_stamp"/>
+        <field name="domain_force">[('team_id', '=', 1), ('stamp_id', '=', 1)]</field>
+    </record>
+    <record id="rule_badge_code" model="ir.rule">
+        <field name="name">Badges by code</field>
+        <field name="model_id" ref="model_desk_badge"/>
+        <field name="domain_force">[('badge', '=', 'a'), ('holder_id', '=', 1)]</field>
+    </record>
+    <record id="rule_pass_badge" model="ir.rule">
+        <field name="name">Passes by badge</field>
+        <field name="model_id" ref="model_desk_pass"/>
+        <field name="domain_force">[('badge', '=', 'a')]</field>
+    </record>
+    <record id="rule_card_badge" model="ir.rule">
+        <field name="name">Cards by badge</field>
+        <field name="model_id" ref="model_desk_card"/>
+        <field name="domain_force">[('badge', '=', 'a')]</field>
+    </record>
+    <record id="rule_token_unread_keys_neither_replace_nor_are_replaced" model="ir.rule">
+        <field name="name">Tokens by badge and serial</field>
+        <field name="model_id" ref="model_desk_token"/>
+        <field name="domain_force">[('badge', '=', 'a'), ('serial', '=', 'a')]</field>
     </record>
 </odoo>

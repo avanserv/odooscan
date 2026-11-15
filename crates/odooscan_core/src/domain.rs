@@ -162,9 +162,12 @@ pub struct Served {
     pub field: String,
     /// A term on the plain field other than `child_of` and `parent_of`.
     pub plain: bool,
-    /// A `child_of` or `parent_of` term on the plain field, which leaves the column alone when the
-    /// comodel is the model itself and keeps a `parent_path`.
-    pub hierarchy: bool,
+    /// A `child_of` term on the plain field, which may match `parent_path` instead of the column
+    /// when the comodel is the model itself.
+    pub children: bool,
+    /// A `parent_of` term on the plain field, which leaves the column alone when the comodel is the
+    /// model itself, as Odoo reads the field to walk up.
+    pub parents: bool,
     /// A dotted path, whatever its operator, or `any`, which becomes an `IN` on the column unless
     /// the field joins.
     pub through: bool,
@@ -201,7 +204,8 @@ pub fn served_fields(text: &str) -> Vec<Served> {
         let entry = &mut out[index];
         match kind {
             Term::Plain => entry.plain = true,
-            Term::Hierarchy => entry.hierarchy = true,
+            Term::Children => entry.children = true,
+            Term::Parents => entry.parents = true,
             Term::Through => entry.through = true,
         }
     }
@@ -211,7 +215,8 @@ pub fn served_fields(text: &str) -> Vec<Served> {
 /// How a term an index serves reaches its first field, as `Served` tells them apart.
 enum Term {
     Plain,
-    Hierarchy,
+    Children,
+    Parents,
     Through,
 }
 
@@ -226,7 +231,8 @@ fn served(term: &Expr) -> Option<(&str, Term)> {
     let kind = match op {
         _ if dotted => Term::Through,
         Some("any") => Term::Through,
-        Some("child_of" | "parent_of") => Term::Hierarchy,
+        Some("child_of") => Term::Children,
+        Some("parent_of") => Term::Parents,
         Some(op) if SERVED_OPERATORS.contains(&op) => Term::Plain,
         _ => return None,
     };
@@ -377,13 +383,15 @@ mod tests {
         }
     }
 
-    /// A `Served` of `field` that a plain, a hierarchy and a through term name as given.
-    fn kinds(field: &str, plain: bool, hierarchy: bool, through: bool) -> Served {
+    /// A `Served` of `field` that a plain, a `child_of`, a `parent_of` and a through term name as
+    /// given.
+    fn kinds(field: &str, plain: bool, children: bool, parents: bool, through: bool) -> Served {
         let field = field.to_owned();
         Served {
             field,
             plain,
-            hierarchy,
+            children,
+            parents,
             through,
         }
     }
@@ -392,13 +400,16 @@ mod tests {
     fn served_fields_keep_what_an_index_serves() {
         assert_eq!(
             served_fields("['|', ('a', '=', 1), ('b', 'child_of', [2]), (1, '=', 1)]"),
-            [kinds("a", true, false, false), kinds("b", false, true, false)]
+            [
+                kinds("a", true, false, false, false),
+                kinds("b", false, true, false, false)
+            ]
         );
         for op in SERVED_OPERATORS {
-            let hierarchy = op == "child_of" || op == "parent_of";
+            let (children, parents) = (op == "child_of", op == "parent_of");
             assert_eq!(
                 served_fields(&format!("[('a', '{op}', 1)]")),
-                [kinds("a", !hierarchy, hierarchy, false)],
+                [kinds("a", !children && !parents, children, parents, false)],
                 "{op}"
             );
         }
@@ -406,7 +417,7 @@ mod tests {
             assert!(served_fields(&format!("[('a', '{op}', 1)]")).is_empty(), "{op}");
         }
         assert!(served_fields("[('a', op, 1)]").is_empty());
-        let through = [kinds("a", false, false, true)];
+        let through = [kinds("a", false, false, false, true)];
         assert_eq!(served_fields("[('a.b', 'ilike', 'x')]"), through);
         assert_eq!(served_fields("[('a.b', op, 1)]"), through);
         assert_eq!(served_fields("[('a.b', 'child_of', 1)]"), through);
@@ -417,15 +428,22 @@ mod tests {
     fn served_fields_merge_one_field_and_drop_unreadable_domains() {
         assert_eq!(
             served_fields("[('a.b', '=', 1), ('a.c', '!=', 1)]"),
-            [kinds("a", false, false, true)]
+            [kinds("a", false, false, false, true)]
         );
         assert_eq!(
             served_fields("[('a.b', '=', 1), ('a', '=', 1)]"),
-            [kinds("a", true, false, true)]
+            [kinds("a", true, false, false, true)]
         );
         assert_eq!(
             served_fields("[('a', 'child_of', 1), ('a', 'parent_of', 1), ('a.b', '=', 1)]"),
-            [kinds("a", false, true, true)]
+            [kinds("a", false, true, true, true)]
+        );
+        assert_eq!(
+            served_fields("[('a', 'parent_of', 1), ('b', 'child_of', 1)]"),
+            [
+                kinds("a", false, false, true, false),
+                kinds("b", false, true, false, false)
+            ]
         );
         for text in [
             "",

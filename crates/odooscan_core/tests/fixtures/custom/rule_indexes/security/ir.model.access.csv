@@ -10,3 +10,9 @@ access_desk_case_draft,desk.case.draft,model_desk_case_draft,base.group_user,1,0
 access_desk_seat,desk.seat,model_desk_seat,base.group_user,1,0,0,0
 access_desk_slot,desk.slot,model_desk_slot,base.group_user,1,0,0,0
 access_desk_zone,desk.zone,model_desk_zone,base.group_user,1,0,0,0
+access_desk_floor,desk.floor,model_desk_floor,base.group_user,1,0,0,0
+access_desk_stamp,desk.stamp,model_desk_stamp,base.group_user,1,0,0,0
+access_desk_badge,desk.badge,model_desk_badge,base.group_user,1,0,0,0
+access_desk_pass,desk.pass,model_desk_pass,base.group_user,1,0,0,0
+access_desk_card,desk.card,model_desk_card,base.group_user,1,0,0,0
+access_desk_token,desk.token,model_desk_token,base.group_user,1,0,0,0
