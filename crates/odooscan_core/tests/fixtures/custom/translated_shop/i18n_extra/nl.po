@@ -1,0 +1,17 @@
+# Dutch catalog of Translated shop, made up for the OD8 rules.
+msgid ""
+msgstr ""
+"Project-Id-Version: Translated shop\n"
+"Language: nl\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+
+#. module: translated_shop
+#. odoo-python
+#: code:addons/translated_shop/models/shelf.py:0
+msgid "%(shelf)s holds %(count)s crates"
+msgstr "%(shelf)s is vol"
+
+#. module: translated_shop
+#: model:ir.model,name:translated_shop.model_translated_shop_crate
+msgid "Crate"
+msgstr "Krat"

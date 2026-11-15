@@ -361,3 +361,18 @@ A project adds its own sources, sinks and sanitizers in the
 | [OD715](OD715.md) | `sudo-domain-injection` | Data a user controls picks the fields of a domain or a grouping searched as superuser. |
 | [OD716](OD716.md) | `sudo-record-exposure` | A route returns records read as superuser by an id a user controls. |
 | [OD717](OD717.md) | `sudo-public-attachment` | Data a user controls is stored in an attachment anyone may download. |
+
+## OD8: translations
+
+The `.po` files directly in a module's `i18n/` and `i18n_extra/` folders, where Odoo looks for the
+catalog of a language, read as UTF-8. A file in a subfolder, such as `i18n/old/`, is not read.
+Each is merged first with the `<module>.pot` template of its folder, when there is one, as Odoo
+merges them: an entry the template lacks is obsolete and not reported. A message of the template
+that the file lacks is not counted as untranslated, as Odoo may fill it from the file of a parent
+language.
+
+| Code | Name | Reports |
+| --- | --- | --- |
+| [OD801](OD801.md) | `translation-placeholder-mismatch` | A translation's placeholders differ from those of its message, so formatting it fails or loses a value. |
+| [OD802](OD802.md) | `translation-fuzzy` | A translation is marked fuzzy, yet Odoo loads it as a reviewed one. |
+| [OD803](OD803.md) | `translation-empty` | A translation file leaves messages untranslated, which Odoo shows in the source language. |

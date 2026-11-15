@@ -1,0 +1,11 @@
+# Not named after the module, so Odoo does not merge it; merged, it would revive fr.po:110.
+msgid ""
+msgstr ""
+"Project-Id-Version: Translated shop\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+
+#. module: translated_shop
+#. odoo-python
+#: code:addons/translated_shop/models/shelf.py:0
+msgid "%(count)s crates sold today"
+msgstr ""

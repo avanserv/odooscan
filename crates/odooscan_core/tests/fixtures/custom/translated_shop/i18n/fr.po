@@ -1,0 +1,114 @@
+# French catalog of Translated shop, made up for the OD8 rules.
+#, fuzzy
+msgid ""
+msgstr ""
+"Project-Id-Version: Translated shop\n"
+"Language: fr\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+
+#. module: translated_shop
+#. odoo-python
+#: code:addons/translated_shop/models/shelf.py:0
+msgid "%(count)s orders"
+msgstr "%(nombre)s commandes"
+
+#. module: translated_shop
+#. odoo-python
+#: code:addons/translated_shop/models/shelf.py:0
+msgid "%s crates on %s shelves"
+msgstr "%s caisses"
+
+#. module: translated_shop
+#. odoo-python
+#: code:addons/translated_shop/models/shelf.py:0
+msgid "Shelf %s is full"
+msgstr "L'étagère %s est pleine (100%)"
+
+#. module: translated_shop
+#. odoo-javascript
+#: code:addons/translated_shop/static/src/shelf_panel.js:0
+msgid "%(count)s crates left"
+msgstr "%(reste)s caisses restantes"
+
+#. module: translated_shop
+#. odoo-python
+#: code:addons/translated_shop/models/shelf.py:0
+msgid "{shelf} was restocked"
+msgstr "{etagere} a été réapprovisionnée"
+
+#. module: translated_shop
+#: model:ir.model.fields,field_description:translated_shop.field_translated_shop_shelf__name
+#, fuzzy
+msgid "Shelf name"
+msgstr "Nom du rayon"
+
+#. module: translated_shop
+#: model:ir.model,name:translated_shop.model_translated_shop_crate
+msgid "Crate"
+msgstr ""
+
+#. module: translated_shop
+#: model:ir.model.fields,help:translated_shop.field_translated_shop_shelf__crate_count
+msgid "%(count)s crates fit"
+msgstr "%(nombre)s caisses tiennent"
+
+#. module: translated_shop
+#. odoo-python
+#: code:addons/translated_shop/models/shelf.py:0
+msgid "10% off every crate"
+msgstr "10 % de remise sur chaque caisse"
+
+#. module: translated_shop
+#. odoo-python
+#: code:addons/translated_shop/models/shelf.py:0
+msgid "Crates below 5 (got %)"
+msgstr "Caisses sous 5 (reçu %s)"
+
+#. module: translated_shop
+#. odoo-python
+#: code:addons/translated_shop/models/shelf.py:0
+msgid "%(crate)s moved to %(shelf)s"
+msgstr "%(shelf)s reçoit %(crate)s"
+
+#. module: translated_shop
+#. odoo-javascript
+#: code:addons/translated_shop/static/src/shelf_panel.js:0
+msgid "%s crates at 100%%"
+msgstr "%s caisses à 100%%"
+
+#. module: translated_shop
+#: code:addons/translated_shop/models/shelf.py:0
+msgid "%s crate"
+msgid_plural "%s crates"
+msgstr[0] "%d caisse"
+msgstr[1] ""
+
+#. module: translated_shop
+#: model:ir.model.fields,field_description:translated_shop.field_translated_shop_crate__label
+#, fuzzy
+msgid "Crate label"
+msgstr ""
+
+# odooscan: ignore[OD801]
+#. module: translated_shop
+#. odoo-python
+#: code:addons/translated_shop/models/shelf.py:0
+msgid "%(count)s shelves"
+msgstr "%(nombre)s rayons"
+
+# Not in translated_shop.pot, so Odoo marks it obsolete when it merges the two.
+#. module: translated_shop
+#. odoo-python
+#: code:addons/translated_shop/models/shelf.py:0
+msgid "%(count)s crates sold"
+msgstr ""
+
+# Not in translated_shop.pot either.
+#. module: translated_shop
+#. odoo-python
+#: code:addons/translated_shop/models/shelf.py:0
+msgid "%(count)s crates sold today"
+msgstr "%(nombre)s caisses vendues aujourd'hui"
+
+#~ msgid "%(count)s boxes"
+#~ msgstr "%(nombre)s boîtes"

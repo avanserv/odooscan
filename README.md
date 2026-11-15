@@ -7,7 +7,8 @@
 [![Conventional Commits](https://img.shields.io/badge/Conventional%20Commits-1.0.0-fe5196?logo=conventionalcommits&logoColor=white)](https://www.conventionalcommits.org)
 
 A quality and security scanner for Odoo modules, written in Rust. It parses Python with ruff's
-parser, and XML and CSV natively. It then builds one index of every model, field, method, XML id,
+parser, JS with oxc, and XML, CSV and the translation catalogs of `i18n/` and `i18n_extra/`
+natively. It then builds one index of every model, field, method, XML id,
 view and access rule across the modules it is given, so rules can check what a single-file linter
 cannot. For example, it can tell you that a view names a field its model lacks, or that an XML id
 belongs to a module missing from `depends`.
@@ -35,7 +36,8 @@ page in the terminal.
 - `crates/odooscan_core/src/project.rs` finds modules, parses every file in parallel, and keeps
   per-file facts.
   - `python.rs`, `xml.rs`, `csvdata.rs`, `js.rs` and `manifest.rs` extract those facts and raise
-    the single-file rules.
+    the single-file rules, and `po.rs` reads the translation catalogs of `i18n/` and
+    `i18n_extra/` and raises the OD8 rules.
 - `index.rs` merges the facts. It resolves fields through `_inherit`, `_inherits` and
   `delegate=True`, related comodels, view inheritance, JS module paths and the scripts bundles
   load, and the dependency scope of each module.

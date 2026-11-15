@@ -404,6 +404,14 @@ rules! {
     "OD715" "sudo-domain-injection" Security Error None, false, "Data a user controls picks the fields of a domain or a grouping searched as superuser.";
     "OD716" "sudo-record-exposure" Security Warning None, false, "A route returns records read as superuser by an id a user controls.";
     "OD717" "sudo-public-attachment" Security Warning None, false, "Data a user controls is stored in an attachment anyone may download.";
+    // `_()` formats the translation and falls back to the source when that raises (18.0
+    // `odoo/tools/translate.py:495-501`, 20.0 `:1011-1017`).
+    "OD801" "translation-placeholder-mismatch" Correctness Warning None, false, "A translation's placeholders differ from those of its message, so formatting it fails or loses a value.";
+    // Odoo drops only obsolete entries, so a fuzzy one loads (18.0 `odoo/tools/translate.py:830`,
+    // 20.0 `:1411`).
+    "OD802" "translation-fuzzy" Quality Info None, false, "A translation is marked fuzzy, yet Odoo loads it as a reviewed one.";
+    // Odoo skips an empty translation (18.0 `odoo/tools/translate.py:1527`, 20.0 `:2178`).
+    "OD803" "translation-empty" Quality Info None, false, "A translation file leaves messages untranslated, which Odoo shows in the source language.";
 }
 
 pub fn rule(code: &str) -> &'static Rule {

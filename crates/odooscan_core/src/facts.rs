@@ -1508,6 +1508,12 @@ pub struct TemplateFacts {
     pub templates: Vec<OwlTemplate>,
 }
 
+/// A translation catalog yields findings alone: nothing in it is indexed.
+#[derive(Debug, Default)]
+pub struct PoFacts {
+    pub diags: Vec<RawDiag>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
