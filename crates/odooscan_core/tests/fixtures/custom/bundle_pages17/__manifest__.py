@@ -5,6 +5,7 @@
     "assets": {
         "web.assets_backend": ["bundle_pages17/static/src/backend.js"],
         "web.assets_frontend": ["bundle_pages17/static/src/front.js"],
+        "web.assets_frontend_minimal": ["bundle_pages17/static/src/minimal.js"],
     },
     "license": "LGPL-3",
 }

@@ -910,29 +910,43 @@ fn hoot_adds(series: Option<Series>, from: &str, name: &JsName) -> bool {
         .any(|&(m, added, since)| m == lookup.name && added == name.name.value && series.is_none_or(|s| s >= since))
 }
 
-/// The bundles of each web client page. The backend page loads `web.assets_web`, which includes
-/// `web.assets_backend`; the frontend page loads `web.assets_frontend_minimal` and
-/// `web.assets_frontend_lazy`, which includes `web.assets_frontend` (18.0
-/// `addons/web/views/webclient_templates.xml:54`, `:58`, `:304`, `addons/web/__manifest__.py:147-148`,
-/// `:249-250`). A bundle that code loads lazily is on no page: it joins one that holds others.
-const PAGES: &[&[&str]] = &[
-    &["web.assets_backend", "web.assets_web"],
+/// The loads of each web client page in order, a load being the bundles whose scripts arrive
+/// together; the paths below are under Odoo's `addons/web`. The backend page loads `web.assets_web`,
+/// which includes `web.assets_backend` (18.0 `__manifest__.py:147-148`, `views/webclient_templates.xml:304`).
+/// The frontend page loads `web.assets_frontend_minimal` deferred, then `web.assets_frontend_lazy`,
+/// which includes `web.assets_frontend`, once the window has loaded (18.0
+/// `views/webclient_templates.xml:54`, `:58`, `__manifest__.py:249-250`,
+/// `static/src/legacy/js/public/lazyloader.js:144-171`; 20.0 `views/webclient_templates.xml:55`, `:57`,
+/// `static/src/public/lazyloader.js:144-171`). In the microtask after a module is defined, the loader
+/// reports any dependency still undefined (18.0 and 20.0 `static/src/module_loader.js:67-73`), so a
+/// minimal script cannot import from the lazy bundle, while a lazy one sees minimal, which
+/// `web.assets_frontend` includes (18.0 `__manifest__.py:193`, 20.0 `__manifest__.py:186`). A bundle
+/// that code loads lazily is on no page.
+const PAGES: &[&[&[&str]]] = &[
+    &[&["web.assets_backend", "web.assets_web"]],
     &[
-        "web.assets_frontend",
-        "web.assets_frontend_minimal",
-        "web.assets_frontend_lazy",
+        &["web.assets_frontend_minimal"],
+        &["web.assets_frontend", "web.assets_frontend_lazy"],
     ],
 ];
 
-/// The first bundle of a page that loads the importer but none of the target's bundles. A target in
-/// no bundle is left alone, since an `ir.asset` record may load it.
+/// The first bundle of a page's earliest load holding the importer when neither that load nor an
+/// earlier one holds the target. A target in no bundle is left alone, since an `ir.asset` record
+/// may load it.
 fn page_miss(importer: &[&str], target: &[&str]) -> Option<&'static str> {
     if target.is_empty() {
         return None;
     }
     PAGES.iter().find_map(|page| {
-        let loads = page.iter().find(|b| importer.contains(b))?;
-        (!target.iter().any(|b| page.contains(b))).then_some(*loads)
+        let (at, first) = page
+            .iter()
+            .enumerate()
+            .find_map(|(at, load)| Some((at, *load.iter().find(|b| importer.contains(b))?)))?;
+        (!page[..=at]
+            .iter()
+            .flat_map(|load| load.iter())
+            .any(|b| target.contains(b)))
+        .then_some(first)
     })
 }
 
@@ -7174,6 +7188,28 @@ mod tests {
         assert_eq!(page_miss(&lazy, &["web.assets_frontend_minimal"]), None);
         let both = ["web.assets_backend", "web.assets_frontend"];
         assert_eq!(page_miss(&both, &["web.assets_backend"]), Some("web.assets_frontend"));
+    }
+
+    #[test]
+    fn a_minimal_frontend_script_runs_before_the_lazy_bundle_loads() {
+        let minimal = Some("web.assets_frontend_minimal");
+        let front_minimal = ["web.assets_frontend", "web.assets_frontend_minimal"];
+        let front_lazy = ["web.assets_frontend", "web.assets_frontend_lazy"];
+        assert_eq!(page_miss(&front_minimal, &front_lazy), minimal);
+        assert_eq!(
+            page_miss(&["web.assets_frontend_minimal"], &["web.assets_frontend_lazy"]),
+            minimal
+        );
+        // A module's minimal file that the lazy bundle keeps still runs with the minimal bundle.
+        let kept = [
+            "web.assets_frontend",
+            "web.assets_frontend_lazy",
+            "web.assets_frontend_minimal",
+        ];
+        assert_eq!(page_miss(&kept, &front_lazy), minimal);
+        assert_eq!(page_miss(&front_minimal, &front_minimal), None);
+        assert_eq!(page_miss(&front_lazy, &front_minimal), None);
+        assert_eq!(page_miss(&front_minimal, &[]), None);
     }
 
     #[test]
