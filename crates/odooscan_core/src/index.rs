@@ -1063,8 +1063,9 @@ pub fn js_url(module: &str, rel: &str) -> String {
     format!("{module}/{rel}")
 }
 
-/// The module name of the URL `segments`, `module/static/...` with `.js` or without, when Odoo
-/// names a script there: `static/lib` holds libraries, and the rest is no module.
+/// The module name of the URL `segments`, `module/static/...` with `.js` or without, when the scan
+/// reads a script there: odooscan skips the libraries under `static/lib`, which Odoo names
+/// `@module/../lib/...`, and the rest is no module.
 fn url_module_path(segments: &[&str]) -> Option<String> {
     let (module, folder, rest) = match segments {
         [module, "static", folder @ ("src" | "tests"), rest @ ..] if !rest.is_empty() => (module, folder, rest),
@@ -2569,7 +2570,8 @@ impl<'m> Index<'m> {
         let Some((module, folder)) = home else {
             return JsSpec::Outside;
         };
-        // A core fetched without its tests has none of their scripts, so a test path names no file there.
+        // A core cached by an earlier odooscan or a sparse checkout made without tests has none of
+        // their scripts, so a test path names no file there.
         let folder = format!("static/{folder}/");
         match self.by_name.get(module) {
             Some(&mi) if self.modules[mi].js.iter().any(|f| f.rel.starts_with(&folder)) => JsSpec::Missing(mi),
@@ -5077,7 +5079,7 @@ registry.category("actions").add(tag, {});"#,
     }
 
     #[test]
-    fn a_specifier_resolves_through_the_url_it_stands_for() {
+    fn specifiers_resolve_as_odoo_names_them() {
         let mut web = module("web", "{'version': '18.0.1.0'}");
         web.js = vec![
             script("static/src/core/hooks.js", "export const useService = 1;"),
@@ -5120,7 +5122,8 @@ registry.category("actions").add(tag, {});"#,
         assert_eq!(resolve(test, "@web/../../base/x"), "outside");
         assert_eq!(resolve(test, "@web/../tests/gone"), "missing in web");
         assert_eq!(resolve(test, "@sale/gone"), "missing in sale");
-        // Sale has no test script, as in a core fetched without tests.
+        // Sale has no test script, as in a core cached by an earlier odooscan or a sparse checkout
+        // made without tests.
         assert_eq!(resolve(test, "@sale/../tests/gone"), "outside");
         assert_eq!(resolve(test, "@web/../tests/utils"), "static/tests/legacy/utils.js");
         assert_eq!(resolve(test, "web.views"), "static/tests/legacy/views.js");
