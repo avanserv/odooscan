@@ -834,6 +834,8 @@ fn html_call(call: &CallExpression, lines: &Lines) -> Option<RawDiag> {
         .then(|| RawDiag::new("OD610", lines.pos(m.property.span.start as usize), message))
 }
 
+/// OD611 on `console.log(...)` called on the bare name `console`; `window.console` and other
+/// receivers are left alone.
 fn console_log(call: &CallExpression, lines: &Lines) -> Option<RawDiag> {
     let Expression::StaticMemberExpression(m) = &call.callee else {
         return None;
