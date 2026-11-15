@@ -18,8 +18,8 @@ use crate::imports::{AddonImport, Fault};
 use crate::index::{
     ACTION_REGISTRY, BASE_MODEL_METHODS, Export, FIELD_REGISTRY, FieldDef, FieldInfo, Index, JsSpec, JsTarget,
     PathError, Placed, PropSchema, RELATIONAL_TYPES, SERVICE_REGISTRY, Scope, Status, TOUR_REGISTRY,
-    VIEW_WIDGET_REGISTRY, ViewTree, asset_glob_set, base_private_method, full_id, js_lookup, js_url, loaded_data,
-    located, wildcard,
+    VIEW_WIDGET_REGISTRY, ViewTree, asset_glob_set, base_private_method, full_id, in_static, js_lookup, js_url,
+    loaded_data, located, normal_parts, wildcard,
 };
 use crate::mentions::HOOK_PREFIXES;
 use crate::module_state::UPGRADE_DIRS;
@@ -1290,7 +1290,7 @@ fn unmatched_asset(module: &Module, path: &str, static_only: bool) -> Option<Str
         return None;
     }
     let parts = normal_parts(path);
-    if !(parts.len() > 2 && parts[0] == name && parts[1] == "static") {
+    if !in_static(name, &parts) {
         return outside_static(name, path, &parts, static_only);
     }
     let rel = parts.join("/");
@@ -1328,20 +1328,6 @@ fn outside_static(name: &str, path: &str, parts: &[&str], static_only: bool) -> 
     let may_reach_static = parts.len() > 2 && parts[0] == name && wildcard(parts[1]);
     (xml && !may_reach_static)
         .then(|| format!("'{path}' is outside {name}/static/, the only place Odoo serves XML assets from"))
-}
-
-/// The parts of `path` as `os.path.normpath` leaves them: without empty ones or `.`, and with each
-/// `..` taking the part before it away.
-fn normal_parts(path: &str) -> Vec<&str> {
-    let mut parts = vec![];
-    for part in path.split('/').filter(|p| !p.is_empty() && *p != ".") {
-        if part == ".." {
-            parts.pop();
-        } else {
-            parts.push(part);
-        }
-    }
-    parts
 }
 
 /// OD505 on a `qweb` key, which from saas~14.3 nothing reads (`addons/web/controllers/main.py:557`),

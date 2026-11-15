@@ -2,7 +2,9 @@
 //! modules (18.0 `odoo/addons/base/models/ir_asset.py:158-241`, `:391-430`; 20.0 `:151-237`,
 //! `:381-420`). Where Odoo raises and fails the bundle, the fill goes on as described at each step,
 //! so that one faulty entry does not hide every file of the bundle. Where Odoo skips an entry
-//! without raising, so does the fill.
+//! without raising, so does the fill, except for a target in a module the scan does not index or
+//! whose static files it does not list, which is kept: the fill cannot see what Odoo would match
+//! there.
 //!
 //! Before saas~14.3 a bundle is a template: Odoo renders it with its inheritance and reads its
 //! scripts in order (14.0 `odoo/addons/base/models/ir_qweb.py:304-355`), so each template adds
@@ -11,7 +13,7 @@
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::facts::ViewFact;
-use crate::index::{asset_glob_set, full_id, loaded_data, wildcard};
+use crate::index::{asset_glob_set, full_id, in_static, loaded_data, normal_parts, wildcard};
 use crate::manifest::{AssetEntry, Directive};
 use crate::project::{ASSET_EXTENSIONS, Module};
 use crate::series::Series;
@@ -228,7 +230,9 @@ impl<'m> Paths<'m> {
 
     /// The paths `path` stands for: a glob stands for the files it matches in the module its first
     /// segment names, sorted; any other path stands for itself, whether a file of the scan or not
-    /// (`:47-49`, `:367`).
+    /// (`:47-49`, `:367`), normalized when it stays under its module's `static/`. Odoo keeps the raw
+    /// text of a path naming no file (18.0 `:367-368`, 20.0 `:357-358`), so two spellings of a
+    /// missing file are one path here and two there.
     fn resolve(&mut self, path: &'m str) -> Vec<usize> {
         if let Some(ids) = self.resolved.get(path) {
             return ids.clone();
@@ -236,16 +240,19 @@ impl<'m> Paths<'m> {
         let ids = if wildcard(path) {
             self.matches(path)
         } else {
-            vec![self.intern(path)]
+            let normal = static_path(path);
+            vec![self.intern(normal.as_deref().unwrap_or(path))]
         };
         self.resolved.insert(path, ids.clone());
         ids
     }
 
-    /// Odoo drops the empty segments of a glob before it expands it (18.0 `:338`, 20.0 `:331`), so
-    /// `x/static/**/` loads the files `x/static/**` does.
+    /// The files `glob` matches once normalized, so `x/static/./src/**/` loads the files
+    /// `x/static/src/**` does, and none when it leaves its module's `static/`.
     fn matches(&self, glob: &str) -> Vec<usize> {
-        let glob = glob.split('/').filter(|p| !p.is_empty()).collect::<Vec<_>>().join("/");
+        let Some(glob) = static_path(glob) else {
+            return vec![];
+        };
         let module = glob.split('/').next().and_then(|name| self.by_name.get(name));
         let Some(&mi) = module else {
             return vec![];
@@ -260,23 +267,29 @@ impl<'m> Paths<'m> {
         ids
     }
 
-    /// Whether Odoo skips an entry placed at `target`: a glob whose extension is no asset's and
-    /// that matches no file under `static` of its module (`:217-221`); any other target stands for
-    /// itself when nothing matches (`:367-368`). `static_assets` holds the styles too, which
-    /// `files` leaves out. A module whose `static_assets` the scan does not read keeps the entry,
-    /// and so does a module the scan does not index, where Odoo skips it: the module may be on the
-    /// server's addons path, and the entry then loads.
+    /// Whether Odoo skips an entry placed at `target`: a glob whose raw extension is no asset's and
+    /// that, normalized, leaves `static` of its module or matches no file there (`:217-221`); any
+    /// other target stands for itself when nothing matches (`:367-368`). `static_assets` holds the
+    /// styles too, which `files` leaves out. A module whose `static_assets` the scan does not read
+    /// keeps the entry, and so does a module the scan does not index, where Odoo skips it: the
+    /// module may be on the server's addons path, and the entry then loads.
     fn skips(&self, target: &str) -> bool {
         let extension = target.rsplit('.').next().unwrap_or_default();
         if !wildcard(target) || ASSET_EXTENSIONS.contains(&extension) {
             return false;
         }
-        let module = target.split('/').next().and_then(|name| self.by_name.get(name));
+        let module = target
+            .split('/')
+            .find(|p| !p.is_empty())
+            .and_then(|name| self.by_name.get(name));
         let Some(&mi) = module else {
             return false;
         };
+        let Some(glob) = static_path(target) else {
+            return true;
+        };
         let module = &self.modules[mi];
-        let set = asset_glob_set([&target.to_owned()]);
+        let set = asset_glob_set([&glob]);
         // A glob globset cannot read may match files, so the entry stays.
         module.reads_static_assets() && !set.is_empty() && !module.static_assets.iter().any(|f| set.is_match(f))
     }
@@ -291,6 +304,15 @@ impl<'m> Paths<'m> {
         }
         contents
     }
+}
+
+/// `path` normalized as `os.path.normpath` does, none when the result is not under `static/` of
+/// the module its first non-empty segment names, so `a/static/../../b/static/x.js` loads no file
+/// of `b`.
+fn static_path(path: &str) -> Option<String> {
+    let module = path.split('/').find(|p| !p.is_empty())?;
+    let parts = normal_parts(path);
+    in_static(module, &parts).then(|| parts.join("/"))
 }
 
 /// A bundle being filled: its paths in order, the same as a set, and how many bundles it expanded.
@@ -634,6 +656,7 @@ mod tests {
         addon("a", &format!(r#""assets": {{{}}}"#, bundles.join(", ")), &js, &[])
     }
 
+    /// The files of `b0` to `b39` in order, as `contents` names them, without `a/t.js`.
     fn chain() -> Vec<String> {
         (0..40).map(|i| format!("a/{i}.js")).collect()
     }
@@ -675,6 +698,101 @@ mod tests {
     fn a_glob_ending_in_a_slash_loads_the_files() {
         let a = addon("a", r#""assets": {"b": ["a/static//src/**/"]}"#, &["a.js"], &[]);
         assert_eq!(contents(&[a])["b"], ["a/a.js"]);
+    }
+
+    #[test]
+    fn a_glob_with_dot_segments_loads_the_files_of_its_normal_form() {
+        let a = addon(
+            "a",
+            r#""assets": {"dot": ["a/static/./src/*.js"], "up": ["a/static/lib/../src/*.js"]}"#,
+            &["a.js", "b.js"],
+            &[],
+        );
+        let bundles = contents(&[a]);
+        assert_eq!(bundles["dot"], ["a/a.js", "a/b.js"]);
+        assert_eq!(bundles["up"], ["a/a.js", "a/b.js"]);
+    }
+
+    #[test]
+    fn a_file_named_with_dot_or_empty_segments_is_the_file() {
+        let a = addon(
+            "a",
+            r#""assets": {
+                "b": ["a/static//src/a.js", "a/static/./src/b.js"],
+                "twice": ["a/static/src/a.js", "a/static/./src/a.js"],
+            }"#,
+            &["a.js", "b.js"],
+            &[],
+        );
+        let bundles = contents(&[a]);
+        assert_eq!(bundles["b"], ["a/a.js", "a/b.js"]);
+        assert_eq!(bundles["twice"], ["a/a.js"]);
+    }
+
+    #[test]
+    fn a_glob_leaving_static_of_its_first_module_loads_nothing() {
+        let a = addon(
+            "a",
+            r#""assets": {"out": ["a/static/../../b/static/src/*.js"], "back": ["a/../a/static/src/*.js"]}"#,
+            &["a.js"],
+            &[],
+        );
+        let b = addon("b", "", &["b.js"], &[]);
+        let bundles = contents(&[a, b]);
+        assert!(bundles["out"].is_empty());
+        assert_eq!(bundles["back"], ["a/a.js"]);
+    }
+
+    #[test]
+    fn a_glob_outside_static_of_its_module_loads_nothing() {
+        let a = addon(
+            "a",
+            r#""assets": {"deep": ["a/**/*.js"], "up": ["a/static/../**/*.js"], "top": ["a/*/.."]}"#,
+            &["a.js"],
+            &[],
+        );
+        let bundles = contents(&[a]);
+        assert!(bundles["deep"].is_empty());
+        assert!(bundles["up"].is_empty());
+        assert!(bundles["top"].is_empty());
+    }
+
+    #[test]
+    fn a_file_outside_static_of_its_module_keeps_its_raw_text() {
+        let modules = [addon("a", "", &["a.js"], &[])];
+        let by_name = modules.iter().enumerate().map(|(i, m)| (m.name.as_str(), i)).collect();
+        let mut paths = Paths::of_modules(&modules, &by_name);
+        for path in ["a/static/src/..", "a/./lib/x.js"] {
+            let ids = paths.resolve(path);
+            assert_eq!(paths.text[ids[0]], path);
+        }
+    }
+
+    #[test]
+    fn places_at_a_target_named_with_dot_segments() {
+        let a = addon(
+            "a",
+            r#""assets": {"b": [
+                "a/static/src/a.js",
+                "a/static/src/z.js",
+                ("after", "a/static/./src/a.js", "a/static/src/m.js"),
+            ]}"#,
+            &["a.js", "z.js", "m.js"],
+            &[],
+        );
+        assert_eq!(contents(&[a])["b"], ["a/a.js", "a/m.js", "a/z.js"]);
+    }
+
+    #[test]
+    fn skips_a_target_by_its_normal_form() {
+        let mut x = addon("x", r#""assets": {"b": ["x/static/src/a.js"]}"#, &["a.js"], &[]);
+        x.static_assets = vec!["x/static/src/styles/s.scss".to_owned()];
+        let modules = [x];
+        let by_name = modules.iter().enumerate().map(|(i, m)| (m.name.as_str(), i)).collect();
+        let paths = Paths::of_modules(&modules, &by_name);
+        assert!(paths.skips("/x/static/src/none/*"));
+        assert!(!paths.skips("x/static//src/styles/*"));
+        assert!(paths.skips("x/static/../src/styles/*"));
     }
 
     #[test]
