@@ -1705,6 +1705,7 @@ custom/web_keys/views/views.xml:10:31: OD330 view widget 'web_keys_side_seal' co
 custom/web_keys/views/views.xml:13:49: OD329 no indexed bundle registers field widget 'many2many_tagz'
 custom/web_keys/views/views.xml:14:49: OD329 no indexed bundle registers field widget 'web_keys_mocked'
 custom/web_keys/views/views.xml:15:50: OD329 no indexed bundle registers field widget 'web_keys_stray'
+custom/web_keys/views/views.xml:16:44: OD329 field widget 'web_keys_side_dial' comes from module web_keys_side, which is not in depends
 custom/web_keys/views/views.xml:19:17: OD327 a div with class oe_chatter renders as a plain div, without the chatter; write <chatter/>
 custom/web_keys/views/views.xml:20:53: OD329 no indexed bundle registers field widget 'mail_followers'
 custom/web_keys/views/views.xml:40:42: OD329 no indexed bundle registers field widget 'web_keys_starz'
