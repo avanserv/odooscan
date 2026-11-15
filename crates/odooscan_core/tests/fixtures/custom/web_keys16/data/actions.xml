@@ -1,0 +1,6 @@
+<odoo>
+    <record id="action_legacy" model="ir.actions.client">
+        <field name="name">Legacy</field>
+        <field name="tag">web_keys16.legacy</field>
+    </record>
+</odoo>

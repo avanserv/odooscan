@@ -7,18 +7,18 @@ use globset::GlobSet;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::facts::{
-    AccessRow, ActionFact, ActionValue, ActionViewId, Annotation, ArchElement, ArchModifier, ArchSubview, ClassBase,
-    ClassFact, ComponentTag, DataFacts, DefinitionSource, DomainFact, FieldFact, FieldWrite, Flag, FunctionCall,
-    GuardedRef, JsClass, JsFacts, JsName, MethodDef, Migrate, ModelKind, OptionValue, OrmCall, OwlTemplate, Pos,
-    PyFacts, RawDiag, RecordFact, RecordWrite, Refusal, ReportFact, RouteDef, RouteKey, RuleFact, ServerFact,
-    Signature, Spanned, SqlColumn, SqlView, Subject, UNREAD_TYPE, ViewFact, WrittenValue, XmlDef, XmlRef,
+    AccessRow, ActionFact, ActionValue, ActionViewId, Annotation, ArchElement, ArchModifier, ArchSubview, ArchWidget,
+    ClassBase, ClassFact, ComponentTag, DataFacts, DefinitionSource, DomainFact, FieldFact, FieldWrite, Flag,
+    FunctionCall, GuardedRef, JsClass, JsFacts, JsName, MethodDef, Migrate, ModelKind, OptionValue, OrmCall,
+    OwlTemplate, Pos, PyFacts, RawDiag, RecordFact, RecordWrite, Refusal, ReportFact, RouteDef, RouteKey, RuleFact,
+    ServerFact, Signature, Spanned, SqlColumn, SqlView, Subject, UNREAD_TYPE, ViewFact, WrittenValue, XmlDef, XmlRef,
 };
 use crate::grants::{self, AttachmentGrant, Grant, Grants};
 use crate::imports::{AddonImport, Fault};
 use crate::index::{
-    BASE_MODEL_METHODS, Export, FieldDef, FieldInfo, Index, JsSpec, JsTarget, PathError, Placed, PropSchema,
-    RELATIONAL_TYPES, Scope, Status, ViewTree, asset_glob_set, base_private_method, full_id, js_lookup, js_url,
-    loaded_data, located,
+    ACTION_REGISTRY, BASE_MODEL_METHODS, Export, FIELD_REGISTRY, FieldDef, FieldInfo, Index, JsSpec, JsTarget,
+    PathError, Placed, PropSchema, RELATIONAL_TYPES, Scope, Status, VIEW_WIDGET_REGISTRY, ViewTree, asset_glob_set,
+    base_private_method, full_id, js_lookup, js_url, loaded_data, located,
 };
 use crate::mentions::HOOK_PREFIXES;
 use crate::module_state::UPGRADE_DIRS;
@@ -803,6 +803,22 @@ fn root_kind<'m>(index: &Index<'m>, module: &Module, view: &ViewFact) -> Option<
     let start = view.inherit.as_deref().or(view.id.as_deref())?;
     index.view_kind(full_id(&module.name, start))
 }
+
+/// The view types whose arch parser looks each field's `widget` up in the field registry (18.0
+/// `addons/web/static/src/views/*/*_arch_parser.js` of form, list, kanban and calendar, and those of
+/// `mail`'s activity and `web_hierarchy`). Pivot and graph read a formatter instead, and search a
+/// field's type.
+const FIELD_WIDGET_KINDS: &[&str] = &["form", "list", "tree", "kanban", "calendar", "activity", "hierarchy"];
+
+/// The first series whose form parser reads the widgets in a `div.oe_chatter` (`351b047c3726`).
+/// Before, `addons/web/static/src/views/form/form_arch_parser.js:34-36` on 17.0 and saas~17.1
+/// skips the div's children, so a 16.0 chatter field such as `widget="mail_followers"` is never
+/// looked up.
+const CHATTER_WIDGETS_READ: Series = Series { major: 17, minor: 2 };
+
+/// The view types whose arch parser looks each `<widget>` up in the view widget registry (18.0
+/// `addons/web/static/src/views/*/*_arch_parser.js` of form, list and kanban).
+const VIEW_WIDGET_KINDS: &[&str] = &["form", "list", "tree", "kanban"];
 
 /// Whether the view renders on the server. The tree's root decides, since a kanban arch runs
 /// `t-call` in the client whatever the type of a view extending it.
@@ -2854,12 +2870,14 @@ impl<'m> Ctx<'_, 'm> {
             self.view(out, path, view, trees);
             self.locators(out, path, view, trees);
             self.qweb_calls(out, path, view);
+            self.widgets(out, path, view);
         }
         for record in &file.facts.records {
             self.record(out, path, record);
         }
         for write in &file.facts.writes {
             self.record_write(out, path, write);
+            self.client_action(out, path, write);
         }
         self.created_records(out, file, loaded, required);
         for call in &file.facts.functions {
@@ -2879,6 +2897,75 @@ impl<'m> Ctx<'_, 'm> {
         self.domains(out, path, &file.facts.action_domains);
         self.actions(out, path, &file.facts.actions);
         self.exposing_rows(out, file);
+    }
+
+    /// OD329 and OD330 on the widgets of a view whose type reads them. A module outside the index,
+    /// such as an Enterprise one, may register any key.
+    fn widgets(&self, out: &mut Out<'m>, path: &'m Path, view: &ViewFact) {
+        if view.widgets.is_empty() || self.partial {
+            return;
+        }
+        let Some(kind) = root_kind(self.index, self.module, view) else {
+            return;
+        };
+        let chatter_read = kind != "form" || self.series.is_some_and(|s| s >= CHATTER_WIDGETS_READ);
+        for widget in view.widgets.iter().filter(|w| chatter_read || !w.in_chatter) {
+            self.widget(out, path, kind, widget);
+        }
+    }
+
+    fn widget(&self, out: &mut Out<'m>, path: &'m Path, kind: &str, widget: &ArchWidget) {
+        if !widget.view && FIELD_WIDGET_KINDS.contains(&kind) {
+            self.field_widget(out, path, &widget.name);
+        } else if widget.view && VIEW_WIDGET_KINDS.contains(&kind) {
+            self.registry_key(out, path, ("OD330", VIEW_WIDGET_REGISTRY, "view widget"), &widget.name);
+        }
+    }
+
+    /// OD329 on a field widget no script registers. One registered only outside the scope is
+    /// silent: Odoo then falls back to the widget of the field's type, and core relies on that.
+    fn field_widget(&self, out: &mut Out<'m>, path: &'m Path, name: &Spanned<String>) {
+        if self.index.registry_open(FIELD_REGISTRY, self.installs) {
+            return;
+        }
+        if let Status::Missing = self.index.field_widget_status(&name.value, self.installs) {
+            let message = format!("no indexed bundle registers field widget '{}'", name.value);
+            out.push(path, "OD329", name.pos, message);
+        }
+    }
+
+    /// OD331 on the `tag` of an `ir.actions.client` record, which Odoo stores as written.
+    fn client_action(&self, out: &mut Out<'m>, path: &'m Path, write: &RecordWrite) {
+        if write.model != "ir.actions.client" || self.partial {
+            return;
+        }
+        let tag = write.fields.iter().find(|f| f.name == "tag").map(|f| &f.value);
+        if let Some(WrittenValue::Text(tag)) = tag
+            && !tag.value.is_empty()
+        {
+            self.registry_key(out, path, ("OD331", ACTION_REGISTRY, "client action"), tag);
+        }
+    }
+
+    /// `code` on `name` unless a script of the scope adds it to `category`, where the web client
+    /// looks it up and throws without it. `what` names the key in the message.
+    fn registry_key(
+        &self,
+        out: &mut Out<'m>,
+        path: &'m Path,
+        rule: (&'static str, &str, &str),
+        name: &Spanned<String>,
+    ) {
+        let (code, category, what) = rule;
+        if self.index.registry_open(category, self.installs) {
+            return;
+        }
+        let message = match self.index.registry_status(category, &name.value, self.installs) {
+            Status::Visible => return,
+            Status::Hidden(m) => format!("{what} '{}' comes from module {m}, which is not in depends", name.value),
+            Status::Missing => format!("no indexed bundle registers {what} '{}'", name.value),
+        };
+        out.push(path, code, name.pos, message);
     }
 
     /// OD324 on the records of a loaded `file` that Odoo creates.

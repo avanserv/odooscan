@@ -42,16 +42,16 @@ impl Kind {
 }
 
 /// Index rules whose finding means the modules in scope lack the model, field, column, method, id,
-/// template, element, selection value, component prop or module the code names, or no longer take
-/// or call a method it overrides or hooks: on a port, what the target core dropped, renamed or
-/// reshaped. An inherited or related field whose type the module no longer matches, a required
-/// field a data record leaves unset, a required prop a template leaves out, or a script its page
-/// lacks, counts too.
+/// template, element, selection value, component prop, widget, client action or module the code
+/// names, or no longer take or call a method it overrides or hooks: on a port, what the target core
+/// dropped, renamed or reshaped. An inherited or related field whose type the module no longer
+/// matches, a required field a data record leaves unset, a required prop a template leaves out, or
+/// a script its page lacks, counts too.
 const UPSTREAM: &[&str] = &[
     "OD201", "OD202", "OD203", "OD204", "OD205", "OD206", "OD207", "OD210", "OD211", "OD212", "OD224", "OD227",
     "OD229", "OD230", "OD301", "OD302", "OD304", "OD309", "OD310", "OD311", "OD312", "OD314", "OD316", "OD320",
-    "OD322", "OD324", "OD503", "OD518", "OD519", "OD601", "OD602", "OD603", "OD604", "OD605", "OD606", "OD608",
-    "OD614", "OD615",
+    "OD322", "OD324", "OD329", "OD330", "OD331", "OD503", "OD518", "OD519", "OD601", "OD602", "OD603", "OD604",
+    "OD605", "OD606", "OD608", "OD614", "OD615",
 ];
 
 /// Info-level security rules are hotspots: code to review, not a confirmed flaw.
@@ -273,6 +273,13 @@ rules! {
     // only in `assets` (`addons/web/__manifest__.py:61`), so a reference to one fails
     // (`odoo/addons/base/models/ir_model.py:1923`).
     "OD328" "bundle-template-removed" Deprecation Error Some(">=saas~14.3"), false, "A data file inherits or references an asset bundle, which is no longer a template.";
+    // Through saas~16.4 a widget or a client action may sit in a legacy registry that 16.0 bridges to the
+    // Owl one (`addons/web/static/src/legacy/legacy_client_actions.js`, `views/legacy_utils.js:79-83`).
+    // 18.0 warns and falls back on an unknown field widget (`addons/web/static/src/views/fields/field.js:89-106`)
+    // and throws on an unknown view widget or client action (`core/registry.js:122-125`).
+    "OD329" "unknown-field-widget" Correctness Warning Some(">=17.0"), true, "A view gives a field a widget no script registers.";
+    "OD330" "unknown-view-widget" Correctness Error Some(">=17.0"), true, "A view names a widget no script registers.";
+    "OD331" "unknown-client-action" Correctness Error Some(">=17.0"), true, "A client action's tag names an action no script registers.";
     "OD401" "model-without-access" Security Warning None, true, "A new model has no ir.model.access rule, or from saas~19.4 no ir.access rule with a group.";
     "OD402" "public-write-access" Security Warning None, false, "An access row gives public or portal users write, create or unlink, through their group or no group.";
     "OD403" "unsanitized-public-html" Security Error None, true, "An Html field that public or portal users can write is not sanitized.";
@@ -517,7 +524,7 @@ mod tests {
 
     #[test]
     fn series_gates_follow_source() {
-        let gates: [(&str, &[&str], &[&str]); 22] = [
+        let gates: [(&str, &[&str], &[&str]); 25] = [
             ("OD117", &["saas~15.1", "saas~18.2"], &["saas~15.2", "saas~18.1"]),
             ("OD118", &["saas~18.1"], &["saas~18.2"]),
             ("OD125", &["saas~12.4"], &["saas~12.5", "20.0"]),
@@ -534,6 +541,9 @@ mod tests {
             ("OD326", &["saas~17.4"], &["18.0", "20.0"]),
             ("OD327", &["saas~17.1"], &["saas~17.2", "20.0"]),
             ("OD328", &["saas~14.2"], &["saas~14.3", "20.0"]),
+            ("OD329", &["saas~16.4"], &["17.0", "20.0"]),
+            ("OD330", &["saas~16.4"], &["17.0", "20.0"]),
+            ("OD331", &["saas~16.4"], &["17.0", "20.0"]),
             ("OD505", &["saas~14.2"], &["saas~14.3", "20.0"]),
             ("OD506", &["saas~15.4"], &["16.0", "20.0"]),
             ("OD511", &["saas~12.3"], &["saas~12.4", "20.0"]),

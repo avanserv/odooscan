@@ -1,0 +1,77 @@
+<odoo>
+    <record id="partner_form" model="ir.ui.view">
+        <field name="model">res.partner</field>
+        <field name="arch" type="xml">
+            <form>
+                <widget name="web_ribbon" title="Archived"/>
+                <widget name="web_keys_banner"/>
+                <widget name="web_keys_banerr"/>
+                <widget name="web_keys_mocked"/>
+                <widget name="web_keys_side_seal"/>
+                <field name="name" widget="web_keys_stars"/>
+                <field name="short_name" widget="web_keys_badge"/>
+                <field name="child_ids" widget="many2many_tagz"/>
+                <field name="parent_id" widget="web_keys_mocked"/>
+                <field name="country_id" widget="web_keys_stray"/>
+                <field name="type" widget="web_keys_side_dial"/>
+                <field name="child_ids" widget="many2many_tags"/>
+                <field name="name" widget=""/>
+                <div class="oe_chatter">
+                    <field name="child_ids" widget="mail_followers"/>
+                </div>
+            </form>
+        </field>
+    </record>
+
+    <record id="partner_list" model="ir.ui.view">
+        <field name="model">res.partner</field>
+        <field name="arch" type="xml">
+            <list>
+                <field name="name" widget="handle"/>
+            </list>
+        </field>
+    </record>
+
+    <record id="partner_form_inherit" model="ir.ui.view">
+        <field name="model">res.partner</field>
+        <field name="inherit_id" ref="partner_form"/>
+        <field name="arch" type="xml">
+            <field name="name" widget="web_keys_located" position="attributes">
+                <attribute name="widget">web_keys_starz</attribute>
+            </field>
+            <widget name="web_keys_banner" position="after">
+                <widget name="web_keys_shield"/>
+            </widget>
+            <field name="short_name" position="attributes">
+                <attribute name="widget" add="web_keys_ignored" separator=" "/>
+            </field>
+        </field>
+    </record>
+
+    <record id="partner_graph" model="ir.ui.view">
+        <field name="model">res.partner</field>
+        <field name="arch" type="xml">
+            <graph>
+                <field name="name" widget="web_keys_graphed"/>
+            </graph>
+        </field>
+    </record>
+
+    <record id="partner_pivot" model="ir.ui.view">
+        <field name="model">res.partner</field>
+        <field name="arch" type="xml">
+            <pivot>
+                <field name="name" widget="web_keys_pivoted"/>
+            </pivot>
+        </field>
+    </record>
+
+    <record id="partner_search" model="ir.ui.view">
+        <field name="model">res.partner</field>
+        <field name="arch" type="xml">
+            <search>
+                <field name="name" widget="web_keys_searched"/>
+            </search>
+        </field>
+    </record>
+</odoo>

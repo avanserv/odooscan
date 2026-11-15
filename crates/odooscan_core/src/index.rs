@@ -34,6 +34,13 @@ const FIELD_ID_BY_NAME: Series = Series { major: 11, minor: 2 };
 /// computes the others.
 const LOG_COLUMNS: &[&str] = &["create_uid", "create_date", "write_uid", "write_date"];
 
+/// The registry categories the web client looks field widgets, view widgets and client actions up
+/// in (18.0 `addons/web/static/src/views/fields/field.js:15`, `views/widgets/widget.js:5`,
+/// `webclient/actions/action_service.js:54`).
+pub const FIELD_REGISTRY: &str = "fields";
+pub const VIEW_WIDGET_REGISTRY: &str = "view_widgets";
+pub const ACTION_REGISTRY: &str = "actions";
+
 pub const RELATIONAL_TYPES: &[&str] = &["Many2one", "One2many", "Many2many"];
 
 /// Types a path cannot be followed through: the value is not a record of a fixed comodel, or, for
@@ -1136,6 +1143,16 @@ pub struct PropSchema<'m> {
     pub props: FxHashMap<&'m str, bool>,
 }
 
+/// The keys the loaded scripts outside tests add to registry categories, each with the modules that
+/// add it: by (category, key), by every dot suffix of a key of `fields`, which the web client tries
+/// after a view type or a `js_class` and a dot, and by category for keys only a run tells.
+#[derive(Default)]
+struct Registries<'m> {
+    keys: FxHashMap<(&'m str, &'m str), Vec<usize>>,
+    field_widgets: FxHashMap<&'m str, Vec<usize>>,
+    open: FxHashMap<&'m str, Vec<usize>>,
+}
+
 /// A prototype patch, as (module, file, index in the file).
 type PatchId = (usize, usize, usize);
 
@@ -1769,6 +1786,7 @@ pub struct Index<'m> {
     owners: FxHashMap<&'m str, Vec<(JsTarget, &'m JsClass)>>,
     /// Classes whose `props` or `components` a script changes other than by a literal assignment.
     static_writes: FxHashSet<(ClassKey, Static)>,
+    registries: Registries<'m>,
     /// The templates that a loaded template calls.
     templates_called: FxHashSet<&'m str>,
     /// The loaded templates with an attributes spec, by name, or by their parent's for an extension.
@@ -1856,6 +1874,7 @@ impl<'m> Index<'m> {
             template_bases: FxHashSet::default(),
             owners: FxHashMap::default(),
             static_writes: FxHashSet::default(),
+            registries: Registries::default(),
             templates_called: FxHashSet::default(),
             templates_set_attributes: FxHashSet::default(),
             method_flows: method_flows(modules),
@@ -1870,6 +1889,7 @@ impl<'m> Index<'m> {
         index.template_bases = index.template_bases();
         index.owners = index.owners();
         index.static_writes = index.static_writes();
+        index.registries = index.registries();
         (index.templates_called, index.templates_set_attributes) = index.template_uses();
         index.view_types = index.view_types();
         index.client_views = index.client_views();
@@ -2022,6 +2042,28 @@ impl<'m> Index<'m> {
             (t, class) = self.js_class(t, parent, 0)?;
         }
         None
+    }
+
+    fn registries(&self) -> Registries<'m> {
+        let mut found = Registries::default();
+        for (mi, module) in self.modules.iter().enumerate() {
+            let files = module.js.iter().enumerate();
+            for (_, file) in files.filter(|(fi, f)| !f.in_tests() && self.js_loaded(mi, *fi)) {
+                for (category, key) in &file.facts.registrations {
+                    found.keys.entry((category, key)).or_default().push(mi);
+                    if category == FIELD_REGISTRY {
+                        let suffixes = key.match_indices('.').map(|(at, _)| &key[at + 1..]);
+                        for suffix in std::iter::once(key.as_str()).chain(suffixes) {
+                            found.field_widgets.entry(suffix).or_default().push(mi);
+                        }
+                    }
+                }
+                for category in &file.facts.open_categories {
+                    found.open.entry(category).or_default().push(mi);
+                }
+            }
+        }
+        found
     }
 
     /// A write in a test applies only while that test runs.
@@ -2460,6 +2502,24 @@ impl<'m> Index<'m> {
     pub fn qweb_definers(&self, name: &str) -> impl Iterator<Item = usize> {
         let keys = self.view_keys.get(name).map(Vec::as_slice).unwrap_or_default();
         self.views.definers(name).chain(keys.iter().copied())
+    }
+
+    /// Whether a loaded script outside tests adds `key` to the registry `category` in scope.
+    pub fn registry_status(&self, category: &str, key: &str, scope: &Scope) -> Status<'m> {
+        let definers = self.registries.keys.get(&(category, key));
+        self.definer_status(definers.into_iter().flatten().copied(), scope)
+    }
+
+    /// Whether the field registry holds `widget` in scope, alone or after any prefix and a dot.
+    pub fn field_widget_status(&self, widget: &str, scope: &Scope) -> Status<'m> {
+        let definers = self.registries.field_widgets.get(widget);
+        self.definer_status(definers.into_iter().flatten().copied(), scope)
+    }
+
+    /// Whether a module in scope adds a key only a run tells to the registry `category`.
+    pub fn registry_open(&self, category: &str, scope: &Scope) -> bool {
+        let openers = self.registries.open.get(category);
+        openers.into_iter().flatten().any(|&m| scope.sees(m))
     }
 
     fn definer_status(&self, definers: impl Iterator<Item = usize>, scope: &Scope) -> Status<'m> {
@@ -4892,6 +4952,61 @@ mod tests {
             suppressions: Default::default(),
             mentions: Mentions::default(),
         }
+    }
+
+    #[test]
+    fn a_registry_holds_the_keys_of_loaded_scripts_outside_tests() {
+        let assets = |name: &str| format!("{{'version': '18.0.1.0', 'assets': {{'b': ['{name}/static/src/**/*']}}}}");
+        let mut web = module("web", &assets("web"));
+        web.js = vec![
+            script(
+                "static/src/fields.js",
+                r#"registry.category("fields").add("list.tags", A).add("many2one", B);
+registry.category("actions").add("reload", C);"#,
+            ),
+            script(
+                "static/tests/mock.js",
+                r#"registry.category("actions").add("mocked", D);"#,
+            ),
+        ];
+        let mut side = module("side", &assets("side"));
+        side.js = vec![script(
+            "static/src/side.js",
+            r#"registry.category("view_widgets").add("ribbon", E); registry.category("actions").add(name, F);"#,
+        )];
+        let mut sale = module(
+            "sale",
+            &assets("sale").replace("'version'", "'depends': ['web'], 'version'"),
+        );
+        sale.js = vec![script(
+            "static/unbundled/x.js",
+            r#"registry.category("actions").add("stray", G);"#,
+        )];
+        let modules = [web, side, sale];
+        let index = Index::build(&modules, None);
+        let scope = index.scope(2);
+        let status = |category, key| match index.registry_status(category, key, &scope) {
+            super::Status::Visible => "visible".to_owned(),
+            super::Status::Hidden(m) => format!("hidden in {m}"),
+            super::Status::Missing => "missing".to_owned(),
+        };
+        assert_eq!(status("actions", "reload"), "visible");
+        assert_eq!(status("fields", "reload"), "missing");
+        assert_eq!(status("actions", "mocked"), "missing");
+        assert_eq!(status("actions", "stray"), "missing");
+        assert_eq!(status("view_widgets", "ribbon"), "hidden in side");
+        for widget in ["list.tags", "tags", "many2one"] {
+            assert!(
+                matches!(index.field_widget_status(widget, &scope), super::Status::Visible),
+                "{widget}"
+            );
+        }
+        assert!(matches!(
+            index.field_widget_status("list", &scope),
+            super::Status::Missing
+        ));
+        assert!(!index.registry_open("actions", &scope));
+        assert!(index.registry_open("actions", &index.scope(1)));
     }
 
     #[test]

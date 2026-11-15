@@ -7,9 +7,9 @@ use roxmltree::{Document, Node, ParsingOptions};
 use crate::domain;
 use crate::facts::{
     AccessRow, ActionFact, ActionValue, ActionViewId, ArchButton, ArchDomain, ArchElement, ArchEmptied, ArchField,
-    ArchModifier, ArchSubview, ArchValued, DataFacts, DomainFact, FieldWrite, Flag, FunctionCall, Lines, Perms, Pos,
-    RawDiag, RecordFact, RecordWrite, ReportFact, RuleFact, RuleGroups, ServerFact, Spanned, ViewFact, WrittenValue,
-    XmlDef, XmlRef,
+    ArchModifier, ArchSubview, ArchValued, ArchWidget, DataFacts, DomainFact, FieldWrite, Flag, FunctionCall, Lines,
+    Perms, Pos, RawDiag, RecordFact, RecordWrite, ReportFact, RuleFact, RuleGroups, ServerFact, Spanned, ViewFact,
+    WrittenValue, XmlDef, XmlRef,
 };
 use crate::fix::{Edit, Fix};
 use crate::manifest::{AssetEntry, Directive};
@@ -747,6 +747,7 @@ impl Walker<'_> {
         }
         path.extend(opened.into_iter().flatten().skip(depth));
         view.calls.extend(t_call(node, self.lines));
+        view.widgets.extend(arch_widget(node, self.lines));
         self.arch_button(node, path, view);
         self.arch_modifiers(node, path, view);
         self.arch_attrs(node, pos);
@@ -1329,6 +1330,48 @@ fn attr_value(node: Node, name: &str, lines: &Lines) -> Option<Spanned<String>> 
 
 fn filled(node: Node, attr: &str) -> bool {
     node.attribute(attr).is_some_and(|v| !v.is_empty())
+}
+
+/// The widget `node` names. An `<attribute>` spec with an `add` or a `remove` ignores its text, and
+/// a spec without text unsets the widget. A spec that locates an element adds no widget.
+fn arch_widget(node: Node, lines: &Lines) -> Option<ArchWidget> {
+    let (name, view) = widget_name(node, lines)?;
+    let in_chatter = in_chatter(node);
+    Some(ArchWidget { name, view, in_chatter })
+}
+
+/// The widget `node` names, and whether it is a `<widget>`.
+fn widget_name(node: Node, lines: &Lines) -> Option<(Spanned<String>, bool)> {
+    let attr = |attr| attr_value(node, attr, lines).filter(|v| !v.value.is_empty());
+    match node.tag_name().name() {
+        "attribute" if node.attribute("name") == Some("widget") => {
+            let joined = filled(node, "add") || filled(node, "remove");
+            let text = spec_raw(node, lines).filter(|t| !joined && !t.value.is_empty());
+            text.map(|t| (t, false))
+        }
+        _ if locates(node) => None,
+        "field" => attr("widget").map(|w| (w, false)),
+        "widget" => attr("name").map(|w| (w, true)),
+        _ => None,
+    }
+}
+
+/// Whether `node` lands in a `div.oe_chatter`: one the arch adds, or one a spec locates, or an
+/// element in it. A spec that puts its children before, after or in place of the chatter itself
+/// leaves them out of it. A spec that locates a chatter field by its name alone goes unseen.
+fn in_chatter(node: Node) -> bool {
+    node.ancestors().skip(1).any(|a| {
+        let around = matches!(a.attribute("position"), Some("before" | "after" | "replace"));
+        if a.has_tag_name("div") && has_class(a, "oe_chatter") {
+            return !(around && locates(a));
+        }
+        let expr = a
+            .attribute("expr")
+            .filter(|_| a.has_tag_name("xpath"))
+            .unwrap_or_default();
+        let target = expr.rsplit('/').next().unwrap_or_default();
+        expr.contains("oe_chatter") && !(around && target.contains("oe_chatter"))
+    })
 }
 
 /// The modifier the `<attribute>` spec `node` may leave empty: a `remove` may take its whole value,
@@ -2688,6 +2731,61 @@ mod tests {
         view(&format!(
             r#"<record id="x" model="ir.ui.view"><field name="arch" type="xml">{arch}</field></record>"#
         ))
+    }
+
+    fn widgets(view: &ViewFact) -> Vec<String> {
+        let shown = |w: &ArchWidget| {
+            let kind = if w.view { "view" } else { "field" };
+            let chatter = if w.in_chatter { " in chatter" } else { "" };
+            format!("{kind}:{}@{}{chatter}", w.name.value, w.name.pos.col)
+        };
+        view.widgets.iter().map(shown).collect()
+    }
+
+    #[test]
+    fn reads_the_widgets_an_arch_adds_or_sets() {
+        let arch = arch_view(
+            r#"<form><field name="a" widget="tags"/><widget name="ribbon"/><field name="b" widget=""/><widget/></form>"#,
+        );
+        assert_eq!(widgets(&arch), ["field:tags@101", "view:ribbon@122"]);
+        let inheriting = |arch: &str| {
+            view(&format!(
+                r#"<record id="x" model="ir.ui.view"><field name="inherit_id" ref="y"/><field name="arch" type="xml"><data>{arch}</data></field></record>"#
+            ))
+        };
+        let specs = inheriting(concat!(
+            r#"<field name="a" widget="old" position="attributes"><attribute name="widget">new</attribute></field>"#,
+            r#"<widget name="old" position="after"><widget name="added"/><field name="c" widget="w"/></widget>"#,
+            r#"<xpath expr="//field[@name='d']" position="attributes">"#,
+            r#"<attribute name="widget" add="x"/><attribute name="widget"></attribute><attribute name="widget"> s </attribute>"#,
+            r#"</xpath>"#,
+        ));
+        let names: Vec<_> = widgets(&specs)
+            .iter()
+            .map(|w| w.split('@').next().unwrap().to_owned())
+            .collect();
+        assert_eq!(names, ["field:new", "view:added", "field:w", "field: s "]);
+    }
+
+    #[test]
+    fn tells_the_widgets_that_land_in_a_chatter_div() {
+        let in_chatter = |view: &ViewFact| -> Vec<bool> { view.widgets.iter().map(|w| w.in_chatter).collect() };
+        let arch = arch_view(concat!(
+            r#"<form><div class="o_x oe_chatter"><field name="a" widget="w"/><widget name="v"/></div>"#,
+            r#"<div class="oe_chatter_box"><field name="b" widget="w"/></div></form>"#,
+        ));
+        assert_eq!(in_chatter(&arch), [true, true, false]);
+        let specs = view(concat!(
+            r#"<record id="x" model="ir.ui.view"><field name="inherit_id" ref="y"/><field name="arch" type="xml"><data>"#,
+            r#"<xpath expr="//div[hasclass('oe_chatter')]" position="inside"><field name="a" widget="w"/></xpath>"#,
+            r#"<xpath expr="//div[hasclass('oe_chatter')]/field[@name='m']" position="after"><field name="b" widget="w"/></xpath>"#,
+            r#"<xpath expr="//div[hasclass('oe_chatter')]" position="before"><field name="c" widget="w"/></xpath>"#,
+            r#"<div class="oe_chatter" position="inside"><field name="d" widget="w"/></div>"#,
+            r#"<div class="oe_chatter" position="replace"><field name="e" widget="w"/></div>"#,
+            r#"<field name="m" position="attributes"><attribute name="widget">w</attribute></field>"#,
+            r#"</data></field></record>"#,
+        ));
+        assert_eq!(in_chatter(&specs), [true, true, false, true, false, false]);
     }
 
     fn subviews(arch: &str) -> Vec<Vec<String>> {

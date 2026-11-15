@@ -1,0 +1,23 @@
+<odoo>
+    <record id="partner_tree" model="ir.ui.view">
+        <field name="model">res.partner</field>
+        <field name="arch" type="xml">
+            <tree>
+                <field name="name" widget="web_keys17_badge"/>
+                <widget name="web_keys17_banner"/>
+            </tree>
+        </field>
+    </record>
+
+    <record id="partner_form" model="ir.ui.view">
+        <field name="model">res.partner</field>
+        <field name="arch" type="xml">
+            <form>
+                <field name="name"/>
+                <div class="oe_chatter">
+                    <field name="child_ids" widget="mail_followers"/>
+                </div>
+            </form>
+        </field>
+    </record>
+</odoo>

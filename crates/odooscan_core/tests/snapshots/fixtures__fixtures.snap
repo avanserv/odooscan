@@ -1677,6 +1677,22 @@ custom/view_modifiers/views/tickets.xml:20:62: OD316 column_invisible names 'par
 custom/view_modifiers/views/tickets.xml:21:62: OD316 column_invisible names 'parent.state.x': Odoo refuses a composed field
 custom/view_modifiers/views/tickets.xml:23:54: OD316 readonly names 'state': modifier.line has no field 'state'
 custom/view_modifiers/views/unlisted.xml:1:1: OD502 'views/unlisted.xml' is not in the manifest's data or demo, so Odoo never loads it
+custom/web_keys/data/actions.xml:19:27: OD331 no indexed bundle registers client action 'web_keys.dashboard'
+custom/web_keys/data/actions.xml:24:27: OD331 no indexed bundle registers client action 'web_keys.stray'
+custom/web_keys/data/actions.xml:29:28: OD331 no indexed bundle registers client action ' web_keys.board '
+custom/web_keys/data/actions.xml:34:27: OD331 client action 'web_keys_side.panel' comes from module web_keys_side, which is not in depends
+custom/web_keys/views/views.xml:8:31: OD330 no indexed bundle registers view widget 'web_keys_banerr'
+custom/web_keys/views/views.xml:9:31: OD330 no indexed bundle registers view widget 'web_keys_mocked'
+custom/web_keys/views/views.xml:10:31: OD330 view widget 'web_keys_side_seal' comes from module web_keys_side, which is not in depends
+custom/web_keys/views/views.xml:13:49: OD329 no indexed bundle registers field widget 'many2many_tagz'
+custom/web_keys/views/views.xml:14:49: OD329 no indexed bundle registers field widget 'web_keys_mocked'
+custom/web_keys/views/views.xml:15:50: OD329 no indexed bundle registers field widget 'web_keys_stray'
+custom/web_keys/views/views.xml:19:17: OD327 a div with class oe_chatter renders as a plain div, without the chatter; write <chatter/>
+custom/web_keys/views/views.xml:20:53: OD329 no indexed bundle registers field widget 'mail_followers'
+custom/web_keys/views/views.xml:40:42: OD329 no indexed bundle registers field widget 'web_keys_starz'
+custom/web_keys/views/views.xml:43:31: OD330 no indexed bundle registers view widget 'web_keys_shield'
+custom/web_keys17/views/views.xml:6:44: OD329 no indexed bundle registers field widget 'web_keys17_badge'
+custom/web_keys17/views/views.xml:7:31: OD330 no indexed bundle registers view widget 'web_keys17_banner'
 custom/window_actions/views/actions.xml:4:33: OD201 no indexed module defines model 'sale.ordr'
 custom/window_actions/views/actions.xml:11:33: OD318 window.plain has no primary gantt view, and nothing generates one
 custom/window_actions/views/actions.xml:11:33: OD318 window.plain has no primary map view, and nothing generates one

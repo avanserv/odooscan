@@ -117,7 +117,9 @@ cannot tell which model it names.
 
 ## OD3: XML ids, views and data
 
-XML ids, views and data records, within a file and across the dependency graph.
+XML ids, views and data records, within a file and across the dependency graph. From 17.0, OD329
+to OD331 read the widgets of views and the tags of client actions against the keys that the loaded
+scripts add to the registry of each.
 
 | Code | Name | Reports |
 | --- | --- | --- |
@@ -149,6 +151,9 @@ XML ids, views and data records, within a file and across the dependency graph.
 | [OD326](OD326.md) | `kanban-box-renamed-card` | The kanban-box template of a kanban view is renamed card. |
 | [OD327](OD327.md) | `chatter-div-replaced` | A form's div with class oe_chatter no longer shows the chatter; use `<chatter/>`. |
 | [OD328](OD328.md) | `bundle-template-removed` | A data file inherits or references an asset bundle, which is no longer a template. |
+| [OD329](OD329.md) | `unknown-field-widget` | A view gives a field a widget no script registers. |
+| [OD330](OD330.md) | `unknown-view-widget` | A view names a widget no script registers. |
+| [OD331](OD331.md) | `unknown-client-action` | A client action's tag names an action no script registers. |
 
 ## OD4: access
 
