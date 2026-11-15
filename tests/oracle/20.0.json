@@ -1045,6 +1045,12 @@
       "count": 1
     },
     {
+      "path": "addons/iap/views/iap_views.xml",
+      "code": "OD329",
+      "message": "field widget 'many2many_avatar_user' comes from module mail, which is not in depends",
+      "count": 1
+    },
+    {
       "path": "addons/im_livechat/__manifest__.py",
       "code": "OD520",
       "message": "module 'mail' already comes with 'digest', also in depends",
@@ -2671,6 +2677,12 @@
       "count": 2
     },
     {
+      "path": "addons/mrp/views/mrp_workorder_views.xml",
+      "code": "OD329",
+      "message": "field widget 'float_without_trailing_zeros' comes from module hr, which is not in depends",
+      "count": 1
+    },
+    {
       "path": "addons/mrp_subcontracting/security/ir.access.csv",
       "code": "OD402",
       "message": "base.group_portal gets write, create or unlink on mrp.consumption.warning.line; public and portal access should be read-only and go through controllers",
@@ -3082,6 +3094,12 @@
       "path": "addons/point_of_sale/static/tests/unit/tools/lazy_getter.test.js",
       "code": "OD601",
       "message": "'@point_of_sale/lazy_getter' does not export 'clearGettersCache'",
+      "count": 1
+    },
+    {
+      "path": "addons/point_of_sale/views/pos_payment_views.xml",
+      "code": "OD329",
+      "message": "field widget 'many2one_avatar_employee' comes from module hr, which is not in depends",
       "count": 1
     },
     {
@@ -3787,6 +3805,18 @@
       "count": 1
     },
     {
+      "path": "addons/stock/wizard/stock_orderpoint_suggest.xml",
+      "code": "OD329",
+      "message": "field widget 'time_period_selection' comes from module purchase_stock, which is not in depends",
+      "count": 1
+    },
+    {
+      "path": "addons/stock/wizard/stock_replenishment_info.xml",
+      "code": "OD329",
+      "message": "field widget 'time_period_selection' comes from module purchase_stock, which is not in depends",
+      "count": 1
+    },
+    {
       "path": "addons/stock_account/static/src/stock_account_forecasted/forecasted_header.js",
       "code": "OD605",
       "message": "no indexed bundle defines template 'stock_account.ForecastedHeader'",
@@ -4181,6 +4211,12 @@
       "code": "OD520",
       "message": "module 'base' already comes with 'web', also in depends",
       "count": 1
+    },
+    {
+      "path": "addons/utm/views/utm_campaign_views.xml",
+      "code": "OD329",
+      "message": "field widget 'many2one_avatar_user' comes from module mail, which is not in depends",
+      "count": 4
     },
     {
       "path": "addons/web/__manifest__.py",
@@ -5303,6 +5339,18 @@
       "code": "OD402",
       "message": "base.group_portal gets write, create or unlink on res.users.identitycheck; public and portal access should be read-only and go through controllers",
       "count": 1
+    },
+    {
+      "path": "odoo/addons/base/views/res_partner_views.xml",
+      "code": "OD329",
+      "message": "field widget 'many2one_avatar_user' comes from module mail, which is not in depends",
+      "count": 2
+    },
+    {
+      "path": "odoo/addons/base/views/res_partner_views.xml",
+      "code": "OD329",
+      "message": "field widget 'res_partner_many2one' comes from module partner_autocomplete, which is not in depends",
+      "count": 2
     },
     {
       "path": "odoo/addons/base/wizard/base_module_upgrade.py",

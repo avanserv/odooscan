@@ -2963,14 +2963,16 @@ impl<'m> Ctx<'_, 'm> {
         }
     }
 
-    /// OD329 on a field widget no script registers. One registered only outside the scope is
-    /// silent: Odoo then falls back to the widget of the field's type, and core relies on that.
+    /// OD329 on a field widget that no script of the scope registers. Odoo then draws the field
+    /// with the widget of its type (18.0 `addons/web/static/src/views/fields/field.js:89-106`), so
+    /// one that only a module outside `depends` adds is missing wherever nothing installed that
+    /// module.
     fn field_widget(&self, out: &mut Out<'m>, path: &'m Path, name: &Spanned<String>) {
         if self.index.registry_open(FIELD_REGISTRY, self.installs) {
             return;
         }
-        if let Status::Missing = self.index.field_widget_status(&name.value, self.installs) {
-            let message = format!("no indexed bundle registers field widget '{}'", name.value);
+        let status = self.index.field_widget_status(&name.value, self.installs);
+        if let Some(message) = registry_message("field widget", &name.value, status) {
             out.push(path, "OD329", name.pos, message);
         }
     }
@@ -3001,12 +3003,10 @@ impl<'m> Ctx<'_, 'm> {
         if self.index.registry_open(category, self.installs) {
             return;
         }
-        let message = match self.index.registry_status(category, &name.value, self.installs) {
-            Status::Visible => return,
-            Status::Hidden(m) => format!("{what} '{}' comes from module {m}, which is not in depends", name.value),
-            Status::Missing => format!("no indexed bundle registers {what} '{}'", name.value),
-        };
-        out.push(path, code, name.pos, message);
+        let status = self.index.registry_status(category, &name.value, self.installs);
+        if let Some(message) = registry_message(what, &name.value, status) {
+            out.push(path, code, name.pos, message);
+        }
     }
 
     /// OD324 on the records of a loaded `file` that Odoo creates.
@@ -4335,6 +4335,18 @@ impl<'m> Ctx<'_, 'm> {
                 ),
             }
         }
+    }
+}
+
+/// The finding on a registry key of `status`, `what` naming the kind of key, or none when the scope
+/// registers it.
+fn registry_message(what: &str, name: &str, status: Status) -> Option<String> {
+    match status {
+        Status::Visible => None,
+        Status::Hidden(m) => Some(format!(
+            "{what} '{name}' comes from module {m}, which is not in depends"
+        )),
+        Status::Missing => Some(format!("no indexed bundle registers {what} '{name}'")),
     }
 }
 

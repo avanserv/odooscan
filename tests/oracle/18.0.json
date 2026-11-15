@@ -2713,6 +2713,12 @@
       "count": 1
     },
     {
+      "path": "addons/point_of_sale/views/pos_payment_views.xml",
+      "code": "OD329",
+      "message": "field widget 'many2one_avatar_employee' comes from module hr, which is not in depends",
+      "count": 1
+    },
+    {
       "path": "addons/portal/__manifest__.py",
       "code": "OD520",
       "message": "module 'mail' already comes with 'auth_signup', also in depends",
@@ -3563,6 +3569,12 @@
       "code": "OD520",
       "message": "module 'base' already comes with 'web', also in depends",
       "count": 1
+    },
+    {
+      "path": "addons/utm/views/utm_campaign_views.xml",
+      "code": "OD329",
+      "message": "field widget 'many2one_avatar_user' comes from module mail, which is not in depends",
+      "count": 4
     },
     {
       "path": "addons/web/__manifest__.py",
@@ -4835,6 +4847,18 @@
       "code": "OD402",
       "message": "group_public gets write, create or unlink on model_ir_filters; public and portal access should be read-only and go through controllers",
       "count": 1
+    },
+    {
+      "path": "odoo/addons/base/views/res_partner_views.xml",
+      "code": "OD329",
+      "message": "field widget 'many2one_avatar_user' comes from module mail, which is not in depends",
+      "count": 2
+    },
+    {
+      "path": "odoo/addons/base/views/res_partner_views.xml",
+      "code": "OD329",
+      "message": "field widget 'res_partner_many2one' comes from module partner_autocomplete, which is not in depends",
+      "count": 2
     },
     {
       "path": "odoo/addons/base/wizard/base_module_upgrade.py",
