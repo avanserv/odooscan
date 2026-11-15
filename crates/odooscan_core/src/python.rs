@@ -192,8 +192,8 @@ fn renamed_keyword(call: &ast::ExprCall, k: &ast::Keyword, to: &str) -> Option<T
 }
 
 /// Whether `track_visibility=` can become `tracking=True`: 13.0 tracks a field whose `tracking` or
-/// `track_visibility` is truthy (`addons/mail/models/mail_thread.py:549`), which a non-empty string
-/// is, and the call sets neither `tracking=` nor `track_sequence=`, nor may through `**`.
+/// `track_visibility` is truthy, which a non-empty string is, and the call sets neither `tracking=`
+/// nor `track_sequence=`, nor may through `**`.
 fn tracked(call: &ast::ExprCall, k: &ast::Keyword) -> bool {
     let truthy = str_lit(&k.value).is_some_and(|v| !v.is_empty());
     let unpacked = call.arguments.keywords.iter().any(|k| k.arg.is_none());
@@ -1849,7 +1849,7 @@ fn conditional_methods(stmt: &Stmt, fact: &mut ClassFact) {
 /// `_inherit` is not one string (`saas~18.1`).
 const DOTTED_CLASS_NAME: Series = Series { major: 18, minor: 1 };
 
-/// The first series whose metaclass makes no fields of `_columns` (9.0 `openerp/models.py:255`).
+/// The first series whose metaclass makes no fields of `_columns`, which 9.0's still does.
 const COLUMNS_END: Series = Series { major: 10, minor: 0 };
 
 /// What a class body says about the name of its model.
@@ -3304,10 +3304,9 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
 
     /// OD130 on `request.session.uid = ...`, the `uid` key of the session (18.0
     /// `odoo/http.py:1058-1062`), which later requests of the browser run as, and on `request.uid =
-    /// ...`, which runs the rest of the request as that user before `REQUEST_UID_END` (15.0
-    /// `odoo/http.py:223-226,241-244`). Putting back a `request.uid` the body saved switches to no
-    /// other user, as the web login does after a failed one (15.0
-    /// `addons/web/controllers/main.py:870,876`).
+    /// ...`, which runs the rest of the request as that user before `REQUEST_UID_END`. Putting back
+    /// a `request.uid` the body saved switches to no other user, as 15.0's web login does after a
+    /// failed one.
     fn session_uid(&mut self, assign: &'ast ast::StmtAssign) {
         if self.in_user_setter || !switches_user(&assign.value) {
             return;

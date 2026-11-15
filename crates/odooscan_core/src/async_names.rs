@@ -12,8 +12,8 @@ use ruff_text_size::{Ranged, TextRange};
 
 use crate::series::Series;
 
-/// The first series whose floor is Python 3.7, which reserves `async` and `await`: `setup.py:58` on
-/// 15.0 asks for `>=3.7` where `setup.py:59` on saas~14.5 asks for `>=3.6`.
+/// The first series whose floor is Python 3.7, which reserves `async` and `await`: 15.0 asks for
+/// `>=3.7` where saas~14.5 asks for `>=3.6`.
 pub(crate) const ASYNC_RESERVED: Series = Series { major: 15, minor: 0 };
 
 /// `src` as a module of `series`, with both words spelled as `src` spells them wherever

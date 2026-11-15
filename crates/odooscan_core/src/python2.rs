@@ -14,8 +14,7 @@ use crate::facts::Pos;
 use crate::python::{Locator, opens_statement};
 use crate::series::Series;
 
-/// The first series on Python 3: `debian/control:7` on 9.0 and 10.0 names
-/// `X-Python-Version: 2.7`, where `setup.py:60` on 11.0 asks for `>=3.5`.
+/// The first series on Python 3: 9.0 and 10.0 run on Python 2.7, where 11.0 asks for `>=3.5`.
 const PYTHON3: Series = Series { major: 11, minor: 0 };
 
 /// Whether a module of `series` runs on Python 2. An unknown series does not, so a file that only

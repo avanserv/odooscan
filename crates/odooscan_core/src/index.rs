@@ -37,7 +37,9 @@ const LOG_COLUMNS: &[&str] = &["create_uid", "create_date", "write_uid", "write_
 
 /// The registry categories the web client looks field widgets, view widgets, client actions,
 /// services and tours up in (18.0 `addons/web/static/src/views/fields/field.js:15`,
-/// `views/widgets/widget.js:5`, `webclient/actions/action_service.js:54`, `env.js:45`,
+/// `addons/web/static/src/views/widgets/widget.js:5`,
+/// `addons/web/static/src/webclient/actions/action_service.js:54`,
+/// `addons/web/static/src/env.js:45`,
 /// `addons/web_tour/static/src/tour_service/tour_service.js:62`).
 pub const FIELD_REGISTRY: &str = "fields";
 pub const VIEW_WIDGET_REGISTRY: &str = "view_widgets";

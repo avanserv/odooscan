@@ -133,8 +133,8 @@ fn component_tag(node: Node, lines: &Lines) -> Option<ComponentTag> {
 }
 
 /// The prop an attribute passes: the text before its first dot, as Owl reads only the next part
-/// as the suffix (`owl.js:4751-4771`), and whether Owl accepts that suffix when compiling the
-/// template.
+/// as the suffix (18.0 `addons/web/static/lib/owl/owl.js:4751-4771`), and whether Owl accepts that
+/// suffix when compiling the template.
 fn prop_name(attr: &str) -> (&str, bool) {
     let mut parts = attr.split('.');
     let name = parts.next().unwrap_or_default();
