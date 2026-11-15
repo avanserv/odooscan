@@ -1357,6 +1357,8 @@ pub enum PropItem {
     Prop { name: String, required: bool },
     /// `...X.props`, or `...super.props` as `super`.
     Spread(String),
+    /// A whole value `X.props`, or `super.props` as `super`: the class shares X's object.
+    Alias(String),
     /// A value, key or spread only a run tells.
     Open,
 }
@@ -1371,6 +1373,8 @@ pub enum ComponentItem {
     },
     /// `...X.components`, or `...super.components` as `super`.
     Spread(String),
+    /// A whole value `X.components`, or `super.components` as `super`: the class shares X's object.
+    Alias(String),
     Open,
 }
 
@@ -1390,6 +1394,9 @@ pub struct StaticWrite {
     /// The write changes the object the member holds, which a subclass without its own shares
     /// with the class that declares it, rather than the member itself.
     pub inner: bool,
+    /// The write reaches into an object a key of the member holds, as `X.props.title.optional = 1`
+    /// does, which a shallow copy `{ ...X.props }` shares with X.
+    pub deep: bool,
 }
 
 /// `patch(Target.prototype, { ... })`, or `patch(Target.prototype, "name", { ... })` when `named`.
@@ -1485,9 +1492,11 @@ pub struct OwlTemplate {
 #[derive(Debug)]
 pub struct ComponentTag {
     pub name: Spanned<String>,
-    /// The props its attributes pass: those not starting `t-`, a `.bind`, `.translate` or `.alike`
-    /// suffix cut.
+    /// The props its attributes not starting `t-` pass when they have no suffix or one Owl accepts,
+    /// `bind`, `translate` or `alike`, each name cut at the first dot, where Owl reads the suffix.
     pub props: Vec<Spanned<String>>,
+    /// The props of attributes with another suffix, for which Owl refuses the template.
+    pub rejected: Vec<String>,
     /// `t-props` passes props only a run tells.
     pub spread: bool,
     /// It has children, which Owl passes as the `slots` prop.

@@ -89,6 +89,7 @@ pub fn analyze(text: &str) -> JsFacts {
                 binding,
                 member: value.kind(),
                 inner: false,
+                deep: false,
             });
             continue;
         };
@@ -534,7 +535,7 @@ impl<'a> Visit<'a> for Collector<'_> {
         }
         if let Some(m) = assignment.left.as_member_expression() {
             match (static_of(m), assignment.operator) {
-                (Some((binding, kind)), AssignmentOperator::Assign) if is_static(m) => {
+                (Some((binding, kind, 0)), AssignmentOperator::Assign) => {
                     let value = StaticValue::read(kind, Some(&assignment.right));
                     self.statics.push((binding, value));
                 }
@@ -611,10 +612,13 @@ fn static_member<'c, 'a>(class: &'c Class<'a>, name: &str) -> Option<Option<&'c 
 
 /// `static props` as Owl reads it (18.0 `addons/web/static/lib/owl/owl.js:2935-2937`, `:2959-2961`).
 fn props(value: Option<&Expression>) -> JsProps {
-    let open = || JsProps {
+    let only = |item| JsProps {
         list: false,
-        items: vec![PropItem::Open],
+        items: vec![item],
     };
+    if let Some(source) = value.and_then(|v| spread_of(v, "props")) {
+        return only(PropItem::Alias(source));
+    }
     match value {
         Some(Expression::ArrayExpression(list)) => JsProps {
             list: true,
@@ -624,7 +628,7 @@ fn props(value: Option<&Expression>) -> JsProps {
             list: false,
             items: object.properties.iter().map(object_prop).collect(),
         },
-        _ => open(),
+        _ => only(PropItem::Open),
     }
 }
 
@@ -681,6 +685,9 @@ fn optional(value: &Expression) -> bool {
 }
 
 fn components(value: Option<&Expression>) -> Vec<ComponentItem> {
+    if let Some(source) = value.and_then(|v| spread_of(v, "components")) {
+        return vec![ComponentItem::Alias(source)];
+    }
     let Some(Expression::ObjectExpression(object)) = value else {
         return vec![ComponentItem::Open];
     };
@@ -715,12 +722,6 @@ fn spread_of(e: &Expression, member: &str) -> Option<String> {
     }
 }
 
-/// `X.props` or `X.components` itself.
-fn is_static(m: &MemberExpression) -> bool {
-    matches!(m, MemberExpression::StaticMemberExpression(s) if static_kind(&s.property.name).is_some())
-        && matches!(m.object(), Expression::Identifier(_))
-}
-
 fn static_kind(name: &str) -> Option<Static> {
     match name {
         "props" => Some(Static::Props),
@@ -730,32 +731,40 @@ fn static_kind(name: &str) -> Option<Static> {
 }
 
 /// The binding and member of `X.props` or `X.components` that `m` is or reaches into, as in
-/// `X.props.title.optional`.
-fn static_of(m: &MemberExpression) -> Option<(String, Static)> {
+/// `X.props.title.optional`, and how many members past it `m` reaches: 0 for the member itself.
+fn static_of(m: &MemberExpression) -> Option<(String, Static, usize)> {
     if let MemberExpression::StaticMemberExpression(s) = m
         && let Expression::Identifier(i) = &s.object
         && let Some(kind) = static_kind(&s.property.name)
     {
-        return Some((i.name.to_string(), kind));
+        return Some((i.name.to_string(), kind, 0));
     }
-    static_of(m.object().as_member_expression()?)
+    let (binding, kind, depth) = static_of(m.object().as_member_expression()?)?;
+    Some((binding, kind, depth + 1))
 }
 
 /// The write that assigning or deleting `m` makes when it is or reaches into `X.props` or
 /// `X.components`.
 fn static_write(m: &MemberExpression) -> Option<StaticWrite> {
-    let (binding, member) = static_of(m)?;
-    let inner = !is_static(m);
-    Some(StaticWrite { binding, member, inner })
+    let (binding, member, depth) = static_of(m)?;
+    Some(StaticWrite {
+        binding,
+        member,
+        inner: depth > 0,
+        deep: depth > 1,
+    })
 }
 
 /// What a call changes of a class's `props` or `components`: through a method of their own, as
 /// `X.props.push()`, `Object.assign` or `patch` given them, or `patch(X, { props })`.
 fn static_calls(call: &CallExpression) -> Vec<StaticWrite> {
-    let inner = |(binding, member)| StaticWrite {
+    // A call changes the object it is given or is called on, so past `X.props` itself it reaches
+    // into one a key holds.
+    let inner = |(binding, member, depth)| StaticWrite {
         binding,
         member,
         inner: true,
+        deep: depth > 0,
     };
     if let Some(callee) = call.callee.as_member_expression()
         && let Some(written) = callee.object().as_member_expression().and_then(static_of)
@@ -778,6 +787,7 @@ fn static_calls(call: &CallExpression) -> Vec<StaticWrite> {
                     binding: class.name.to_string(),
                     member: static_kind(m)?,
                     inner: false,
+                    deep: false,
                 })
             })
             .collect(),
@@ -1909,6 +1919,10 @@ class D extends Component {}
 D.props = ["x"];
 D.components = { Card };
 Imported.props = { x: String };
+class E extends D {
+    static props = B.props;
+    static components = super.components;
+}
 "#,
         );
         let props = |c: &JsClass| -> Option<(bool, Vec<String>)> {
@@ -1916,6 +1930,7 @@ Imported.props = { x: String };
             let items = p.items.iter().map(|i| match i {
                 PropItem::Prop { name, required } => format!("{name}{}", if *required { "" } else { "?" }),
                 PropItem::Spread(s) => format!("...{s}"),
+                PropItem::Alias(s) => format!("={s}"),
                 PropItem::Open => "open".to_owned(),
             });
             Some((p.list, items.collect()))
@@ -1924,6 +1939,7 @@ Imported.props = { x: String };
             let items = c.components.as_ref()?.iter().map(|i| match i {
                 ComponentItem::Entry { key, binding } => format!("{key}={}", binding.as_deref().unwrap_or("?")),
                 ComponentItem::Spread(s) => format!("...{s}"),
+                ComponentItem::Alias(s) => format!("={s}"),
                 ComponentItem::Open => "open".to_owned(),
             });
             Some(items.collect())
@@ -1940,10 +1956,13 @@ Imported.props = { x: String };
         assert_eq!(components(&c[2]), None);
         assert_eq!(props(&c[3]), Some((true, vec!["x".to_owned()])));
         assert_eq!(components(&c[3]), Some(vec!["Card=Card".to_owned()]));
+        assert_eq!(props(&c[4]), Some((false, vec!["=B".to_owned()])));
+        assert_eq!(components(&c[4]), Some(vec!["=super".to_owned()]));
         let own = StaticWrite {
             binding: "Imported".to_owned(),
             member: Static::Props,
             inner: false,
+            deep: false,
         };
         assert_eq!(facts.static_writes, [own]);
     }
@@ -1966,6 +1985,7 @@ K.props.title;
 Object.keys(L.props);
 delete M.other.x;
 delete N.props;
+Object.assign(O.props.title, { optional: true });
 "#,
         );
         let writes: Vec<_> = facts
@@ -1977,7 +1997,8 @@ delete N.props;
                 } else {
                     "components"
                 };
-                format!("{}.{member}{}", w.binding, if w.inner { " inner" } else { "" })
+                let inner = if w.inner { " inner" } else { "" };
+                format!("{}.{member}{inner}{}", w.binding, if w.deep { " deep" } else { "" })
             })
             .collect();
         assert_eq!(
@@ -1985,7 +2006,7 @@ delete N.props;
             [
                 "A.props inner",
                 "B.components inner",
-                "C.props inner",
+                "C.props inner deep",
                 "D.props inner",
                 "E.props inner",
                 "F.components inner",
@@ -1993,7 +2014,8 @@ delete N.props;
                 "H.props",
                 "H.components",
                 "I.props",
-                "N.props"
+                "N.props",
+                "O.props inner deep"
             ]
         );
     }

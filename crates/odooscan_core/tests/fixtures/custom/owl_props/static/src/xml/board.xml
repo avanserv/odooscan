@@ -43,4 +43,13 @@
             <Card titel="'Order'"/>
         </div>
     </t>
+
+    <t t-name="owl_props.Desk">
+        <div class="o_desk">
+            <Tile title="'Order'" extra="'x'"/>
+            <Badge/>
+            <Chip title="'Order'" extra="'x'"/>
+            <Card title.weird="'Order'"/>
+        </div>
+    </t>
 </templates>

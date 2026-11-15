@@ -753,8 +753,11 @@ fn unknown_props<'m>(out: &mut Out<'m>, path: &'m Path, tag: &ComponentTag, clas
 }
 
 /// OD615 on a component tag that leaves out props its component requires; children pass `slots`.
+/// A prop with a suffix Owl refuses counts as passed, as the template fails before any check.
 fn missing_props<'m>(out: &mut Out<'m>, path: &'m Path, tag: &ComponentTag, class: &str, schema: &PropSchema) {
-    let passed = |p: &str| tag.props.iter().any(|q| q.value == p) || (tag.content && p == "slots");
+    let passed = |p: &str| {
+        tag.props.iter().any(|q| q.value == p) || tag.rejected.iter().any(|q| q == p) || (tag.content && p == "slots")
+    };
     let mut missing: Vec<_> = schema
         .props
         .iter()
