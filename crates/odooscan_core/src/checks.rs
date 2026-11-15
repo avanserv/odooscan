@@ -19,7 +19,7 @@ use crate::index::{
     ACTION_REGISTRY, BASE_MODEL_METHODS, Export, FIELD_REGISTRY, FieldDef, FieldInfo, Index, JsSpec, JsTarget,
     PathError, Placed, PropSchema, RELATIONAL_TYPES, SERVICE_REGISTRY, Scope, Status, TOUR_REGISTRY,
     VIEW_WIDGET_REGISTRY, ViewTree, asset_glob_set, base_private_method, full_id, js_lookup, js_url, loaded_data,
-    located,
+    located, wildcard,
 };
 use crate::mentions::HOOK_PREFIXES;
 use crate::module_state::UPGRADE_DIRS;
@@ -1311,11 +1311,6 @@ fn outside_static(name: &str, path: &str, parts: &[&str], static_only: bool) -> 
     let may_reach_static = parts.len() > 2 && parts[0] == name && wildcard(parts[1]);
     (xml && !may_reach_static)
         .then(|| format!("'{path}' is outside {name}/static/, the only place Odoo serves XML assets from"))
-}
-
-/// Whether `path` holds one of the characters Odoo reads as a glob (`WILDCARD_CHARACTERS`).
-pub(crate) fn wildcard(path: &str) -> bool {
-    path.contains(['*', '?', '[', ']'])
 }
 
 /// The parts of `path` as `os.path.normpath` leaves them: without empty ones or `.`, and with each
