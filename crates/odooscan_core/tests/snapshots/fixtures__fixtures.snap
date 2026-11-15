@@ -568,6 +568,16 @@ custom/form_patches/static/src/quick_form_card.js:8:24: OD605 no indexed bundle 
 custom/form_patches/static/src/quick_form_card.xml:14:9: OD606 no <div> with class 'o_form_status' in template web.FormController or the templates that extend it
 custom/form_patches/static/src/quick_form_card.xml:15:9: OD606 <div> with class 'o_mail_chatter' is added by module mail, which is not in depends
 custom/form_patches/static/src/quick_form_card.xml:18:19: OD605 no indexed bundle defines template 'web.FormCompiler'
+custom/html_sinks/static/src/debug.js:2:5: OD611 console.log() is a debugging leftover that writes to every user's console; remove it
+custom/html_sinks/static/src/debug.js:3:5: OD612 debugger pauses the script in every browser with the developer tools open; remove it
+custom/html_sinks/static/src/debug.js:13:5: OD611 console.log() is a debugging leftover that writes to every user's console; remove it
+custom/html_sinks/static/src/debug.js:18:5: OD611 console.log() is a debugging leftover that writes to every user's console; remove it
+custom/html_sinks/static/src/note_field.js:8:13: OD609 markup() of a value built at runtime makes t-out render it as HTML unescaped; check that no user input reaches it, or use markup`...`, which escapes each placeholder
+custom/html_sinks/static/src/note_field.js:9:13: OD609 markup() of a value built at runtime makes t-out render it as HTML unescaped; check that no user input reaches it, or use markup`...`, which escapes each placeholder
+custom/html_sinks/static/src/note_field.js:10:17: OD609 markup() of a value built at runtime makes t-out render it as HTML unescaped; check that no user input reaches it, or use markup`...`, which escapes each placeholder
+custom/html_sinks/static/src/note_field.js:25:12: OD610 assigning innerHTML renders the value as HTML unescaped; check that no user input reaches it, or set textContent
+custom/html_sinks/static/src/note_field.js:26:12: OD610 assigning outerHTML renders the value as HTML unescaped; check that no user input reaches it, or set textContent
+custom/html_sinks/static/src/note_field.js:27:18: OD610 html() renders its argument as HTML unescaped; check that no user input reaches it, or use text()
 custom/imports_old/__init__.py:1:53: OD519 'openerp.addons.base.models' does not define 'res_users'
 custom/imports_partial/__manifest__.py:5:25: OD503 module 'ghost_enterprise' is not on the addons path
 custom/imports_user/models/guarded.py:22:47: OD519 'odoo.addons.imports_lib.tools' does not define 'shelf_height'
@@ -746,7 +756,8 @@ custom/legacy_patch16/static/src/js/form_patch.js:15:21: OD602 neither FormContr
 custom/legacy_patch16/static/src/js/form_patch.js:19:21: OD602 neither FormController nor its parents have 'discardLegacy', so this._super() fails
 custom/legacy_require14/static/src/js/counter.js:6:25: OD601 no file of module web provides '@web/gone'
 custom/legacy_require14/static/src/js/counter.js:7:26: OD601 'legacy_require_lib.tools' comes from module legacy_require_lib, which is not in depends
-custom/legacy_require14/static/src/js/rpc.js:8:39: OD603 no indexed module defines model 'x.gone14'
+custom/legacy_require14/static/src/js/rpc.js:8:22: OD610 html() renders its argument as HTML unescaped; check that no user input reaches it, or use text()
+custom/legacy_require14/static/src/js/rpc.js:9:39: OD603 no indexed module defines model 'x.gone14'
 custom/legacy_require16/static/src/js/counter.js:8:27: OD601 no file of module web provides '@web/gone'
 custom/legacy_require16/static/src/js/counter.js:9:28: OD601 'legacy_require_lib.tools' comes from module legacy_require_lib, which is not in depends
 custom/legacy_require17/static/src/js/counter.js:8:42: OD601 no file of module web provides '@web/listed_gone'

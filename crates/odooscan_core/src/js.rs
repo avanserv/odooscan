@@ -1,8 +1,10 @@
+use std::ops::Range;
+
 use oxc_allocator::Allocator;
 use oxc_ast::ast::{
-    Argument, ArrayExpressionElement, AssignmentExpression, AssignmentTarget, CallExpression, Class, ClassElement,
-    Expression, Function, ObjectExpression, ObjectPropertyKind, Program, Statement, StaticMemberExpression,
-    StringLiteral,
+    Argument, ArrayExpressionElement, AssignmentExpression, AssignmentOperator, AssignmentTarget, BinaryOperator,
+    CallExpression, Class, ClassElement, DebuggerStatement, Expression, Function, ObjectExpression, ObjectPropertyKind,
+    Program, Statement, StaticMemberExpression, StringLiteral,
 };
 use oxc_ast_visit::Visit;
 use oxc_ast_visit::walk::{walk_assignment_expression, walk_call_expression, walk_class};
@@ -12,7 +14,7 @@ use oxc_syntax::module_record::{ExportExportName, ExportImportName, ImportImport
 use oxc_syntax::scope::ScopeFlags;
 
 use crate::facts::{
-    Annotation, Heritage, JsAlias, JsClass, JsDefine, JsFacts, JsName, JsPatch, Lines, OrmCall, Pos, Spanned,
+    Annotation, Heritage, JsAlias, JsClass, JsDefine, JsFacts, JsName, JsPatch, Lines, OrmCall, Pos, RawDiag, Spanned,
 };
 use crate::series::Series;
 
@@ -66,7 +68,104 @@ pub fn analyze(text: &str) -> JsFacts {
             c.template = Some(template);
         }
     }
+    let disabled = eslint_disabled(&parsed.program, text, &lines);
+    facts.diags.retain(|d| {
+        !disabled
+            .iter()
+            .any(|(code, range)| *code == d.code && range.contains(&d.pos))
+    });
     facts
+}
+
+/// The ESLint rule that reports what each leftover rule does, so a comment that turns it off
+/// silences ours too.
+const ESLINT_RULES: &[(&str, &str)] = &[("OD611", "no-console"), ("OD612", "no-debugger")];
+
+/// Where ESLint's comments turn off a rule of `ESLINT_RULES`, as (code, positions). A comment
+/// naming no rule turns them all off. `eslint-disable` and `eslint-enable` count only in a block
+/// comment, and an open `eslint-disable` runs to the end of the file; the two line forms count
+/// only in a comment on a single line.
+fn eslint_disabled(program: &Program, text: &str, lines: &Lines) -> Vec<(&'static str, Range<Pos>)> {
+    let mut ranges = EslintRanges {
+        open: [None; ESLINT_RULES.len()],
+        disabled: vec![],
+    };
+    for comment in &program.comments {
+        let span = comment.content_span();
+        let (kind, names) = eslint_directive(&text[span.start as usize..span.end as usize]);
+        let start = lines.pos(comment.span.start as usize);
+        let last = lines.pos(comment.span.end as usize).line;
+        let line = match kind {
+            "eslint-disable" | "eslint-enable" if comment.is_block() => {
+                ranges.toggle(kind == "eslint-disable", &names, start);
+                continue;
+            }
+            "eslint-disable-line" if start.line == last => last,
+            "eslint-disable-next-line" if start.line == last => last + 1,
+            _ => continue,
+        };
+        let whole = Pos { line, col: 0 }..Pos { line: line + 1, col: 0 };
+        ranges
+            .disabled
+            .extend(eslint_rules(&names).map(|(_, code)| (code, whole.clone())));
+    }
+    let end = Pos {
+        line: u32::MAX,
+        col: u32::MAX,
+    };
+    for ((code, _), from) in ESLINT_RULES.iter().zip(ranges.open) {
+        ranges.disabled.extend(from.map(|from| (*code, from..end)));
+    }
+    ranges.disabled
+}
+
+/// The rules of `ESLINT_RULES` a directive naming `names` covers, as (index, code).
+fn eslint_rules<'n>(names: &'n [&str]) -> impl Iterator<Item = (usize, &'static str)> + 'n {
+    ESLINT_RULES
+        .iter()
+        .enumerate()
+        .filter(|(_, (_, rule))| names.is_empty() || names.contains(rule))
+        .map(|(i, (code, _))| (i, *code))
+}
+
+/// The `eslint-disable` blocks read so far: where each rule's open one started, and those closed.
+struct EslintRanges {
+    open: [Option<Pos>; ESLINT_RULES.len()],
+    disabled: Vec<(&'static str, Range<Pos>)>,
+}
+
+impl EslintRanges {
+    fn toggle(&mut self, disable: bool, names: &[&str], at: Pos) {
+        for (i, code) in eslint_rules(names) {
+            match (disable, self.open[i]) {
+                (true, None) => self.open[i] = Some(at),
+                (false, Some(from)) => {
+                    self.disabled.push((code, from..at));
+                    self.open[i] = None;
+                }
+                _ => {}
+            }
+        }
+    }
+}
+
+/// The directive of a comment's text and the rules it names. ESLint ends the directive at a run
+/// of two or more dashes between spaces, the start of a description, and splits the names on
+/// commas.
+fn eslint_directive(content: &str) -> (&str, Vec<&str>) {
+    let description = content.char_indices().find_map(|(i, c)| {
+        let rest = &content[i + c.len_utf8()..];
+        let dashes = rest.len() - rest.trim_start_matches('-').len();
+        (c.is_whitespace() && dashes >= 2 && rest[dashes..].starts_with(char::is_whitespace)).then_some(i)
+    });
+    let directive = content[..description.unwrap_or(content.len())].trim();
+    let (kind, names) = directive.split_once(char::is_whitespace).unwrap_or((directive, ""));
+    let names = names
+        .split(',')
+        .map(|n| n.trim().trim_matches(|c| c == '"' || c == '\''))
+        .filter(|n| !n.is_empty())
+        .collect();
+    (kind, names)
 }
 
 /// The text after `@odoo-module` in the comments that open the file, where Odoo reads it.
@@ -274,6 +373,7 @@ impl<'a> Visit<'a> for Collector<'_> {
         {
             self.templates.push((class.name.to_string(), template));
         }
+        self.facts.diags.extend(html_assignment(assignment, self.lines));
         walk_assignment_expression(self, assignment);
     }
 
@@ -285,8 +385,112 @@ impl<'a> Visit<'a> for Collector<'_> {
             self.facts.orm_calls.push(orm);
         }
         self.facts.view_kinds.extend(view_kind(call));
+        self.facts.diags.extend(unescaped_markup(call, self.lines));
+        self.facts.diags.extend(html_call(call, self.lines));
+        self.facts.diags.extend(console_log(call, self.lines));
         walk_call_expression(self, call);
     }
+
+    fn visit_debugger_statement(&mut self, statement: &DebuggerStatement) {
+        let message = "debugger pauses the script in every browser with the developer tools open; remove it";
+        let pos = self.lines.pos(statement.span.start as usize);
+        self.facts.diags.push(RawDiag::new("OD612", pos, message));
+    }
+}
+
+/// OD609 on `markup(x)` or `owl.markup(x)` given a value built at runtime. Owl wraps it as is, and
+/// `t-out` renders the result as HTML; the tagged form escapes each placeholder instead.
+fn unescaped_markup(call: &CallExpression, lines: &Lines) -> Option<RawDiag> {
+    let start = match &call.callee {
+        Expression::Identifier(i) if i.name == "markup" => i.span.start,
+        Expression::StaticMemberExpression(m)
+            if m.property.name == "markup" && matches!(&m.object, Expression::Identifier(o) if o.name == "owl") =>
+        {
+            m.property.span.start
+        }
+        _ => return None,
+    };
+    let message = "markup() of a value built at runtime makes t-out render it as HTML unescaped; check that no user \
+                   input reaches it, or use markup`...`, which escapes each placeholder";
+    let first = call.arguments.first()?;
+    (!first.as_expression().is_some_and(constant)).then(|| RawDiag::new("OD609", lines.pos(start as usize), message))
+}
+
+/// OD610 on `x.innerHTML = value` or `x.outerHTML += value` given a value built at runtime.
+fn html_assignment(assignment: &AssignmentExpression, lines: &Lines) -> Option<RawDiag> {
+    let AssignmentTarget::StaticMemberExpression(m) = &assignment.left else {
+        return None;
+    };
+    let property = m.property.name.as_str();
+    let sink = matches!(property, "innerHTML" | "outerHTML")
+        && matches!(
+            assignment.operator,
+            AssignmentOperator::Assign | AssignmentOperator::Addition
+        );
+    if !sink || constant(&assignment.right) {
+        return None;
+    }
+    let message = format!(
+        "assigning {property} renders the value as HTML unescaped; check that no user input reaches it, or set \
+         textContent"
+    );
+    Some(RawDiag::new(
+        "OD610",
+        lines.pos(m.property.span.start as usize),
+        message,
+    ))
+}
+
+/// OD610 on `x.html(value)` given a value built at runtime: jQuery sets it as the `innerHTML` of
+/// each element, whatever the receiver, as a module may ship jQuery where `web` does not. A
+/// PascalCase name is a library namespace such as `Diff2Html`, whose `html()` returns a string.
+fn html_call(call: &CallExpression, lines: &Lines) -> Option<RawDiag> {
+    let Expression::StaticMemberExpression(m) = &call.callee else {
+        return None;
+    };
+    if matches!(&m.object, Expression::Identifier(i) if i.name.starts_with(|c: char| c.is_ascii_uppercase())) {
+        return None;
+    }
+    let first = call.arguments.first().filter(|_| m.property.name == "html")?;
+    let message = "html() renders its argument as HTML unescaped; check that no user input reaches it, or use text()";
+    (!first.as_expression().is_some_and(constant))
+        .then(|| RawDiag::new("OD610", lines.pos(m.property.span.start as usize), message))
+}
+
+fn console_log(call: &CallExpression, lines: &Lines) -> Option<RawDiag> {
+    let Expression::StaticMemberExpression(m) = &call.callee else {
+        return None;
+    };
+    let console = matches!(&m.object, Expression::Identifier(i) if i.name == "console");
+    let message = "console.log() is a debugging leftover that writes to every user's console; remove it";
+    (console && m.property.name == "log").then(|| RawDiag::new("OD611", lines.pos(m.span.start as usize), message))
+}
+
+/// Whether a value is fixed in the source: a string, a template or `+` of those, a conditional
+/// choosing between two of those whatever its test, or `_t()` of those, whose translation comes
+/// from the translation files, not a user.
+fn constant(e: &Expression) -> bool {
+    match e {
+        Expression::StringLiteral(_) => true,
+        Expression::TemplateLiteral(t) => t.expressions.iter().all(constant),
+        Expression::ConditionalExpression(c) => constant(&c.consequent) && constant(&c.alternate),
+        Expression::ParenthesizedExpression(p) => constant(&p.expression),
+        Expression::BinaryExpression(b) => {
+            b.operator == BinaryOperator::Addition && constant(&b.left) && constant(&b.right)
+        }
+        Expression::CallExpression(c) => translated(c),
+        _ => false,
+    }
+}
+
+/// `_t("...")` or `x._t("...")`, every argument a constant.
+fn translated(call: &CallExpression) -> bool {
+    let named = match &call.callee {
+        Expression::Identifier(i) => i.name == "_t",
+        Expression::StaticMemberExpression(m) => m.property.name == "_t",
+        _ => false,
+    };
+    named && !call.arguments.is_empty() && call.arguments.iter().all(|a| a.as_expression().is_some_and(constant))
 }
 
 fn prototype_patch(call: &CallExpression, lines: &Lines) -> Option<JsPatch> {
@@ -927,6 +1131,121 @@ if (x) {
                 (Some("a.implicit"), false, "web.core@6:25 ./sibling@12:25".to_owned()),
                 (None, false, "anonymous.dep@16:14".to_owned()),
                 (Some("a.variable"), true, String::new()),
+            ]
+        );
+    }
+
+    fn shown(source: &str) -> Vec<String> {
+        analyze(source)
+            .diags
+            .iter()
+            .map(|d| format!("{}@{}:{}", d.code, d.pos.line, d.pos.col))
+            .collect()
+    }
+
+    #[test]
+    fn reports_markup_of_a_value_built_at_runtime() {
+        let source = r#"markup(this.props.record.data.note);
+markup(`<b>${name}</b>`);
+owl.markup(x);
+markup(...parts);
+markup("<b>x</b>");
+markup(_t("<b>Hi</b>"));
+markup(this.env._t("<b>Hi</b>", "<i>there</i>"));
+markup(_t("<b>%s</b>", name));
+markup(_t());
+markup(`<b>x</b>`);
+markup(("<b>" + "x") + "</b>");
+markup("<b>" + name + "</b>");
+markup`<b>${name}</b>`;
+markup();
+other.markup(x);
+markup(`<b>${_t("x")}</b>`);
+markup(`<input ${value ? "checked" : ""}/>`);
+markup(value ? "<b>x</b>" : name);
+"#;
+        assert_eq!(
+            shown(source),
+            [
+                "OD609@1:1",
+                "OD609@2:1",
+                "OD609@3:5",
+                "OD609@4:1",
+                "OD609@8:1",
+                "OD609@9:1",
+                "OD609@12:1",
+                "OD609@18:1"
+            ]
+        );
+    }
+
+    #[test]
+    fn reports_html_set_from_a_value_built_at_runtime() {
+        let source = r#"el.innerHTML = html;
+el.outerHTML += row;
+this.$el.html(data);
+el.innerHTML = "";
+el.innerHTML = "<p>" + "</p>";
+el.innerHTML = _t("Hi");
+el.innerHTML ||= html;
+el.textContent = html;
+const read = el.innerHTML;
+this.$el.html();
+this.$el.html("");
+el["innerHTML"] = html;
+Diff2Html.html(diff, {});
+$(el).html(data);
+"#;
+        assert_eq!(shown(source), ["OD610@1:4", "OD610@2:4", "OD610@3:10", "OD610@14:7"]);
+    }
+
+    #[test]
+    fn reports_leftovers_unless_eslint_is_told_they_are_meant() {
+        let source = r#"console.log(x);
+debugger;
+console.warn(x);
+logger.log(x);
+// eslint-disable-next-line no-console
+console.log(x);
+console.log(x); // eslint-disable-line no-console -- kept
+/* eslint-disable-next-line no-debugger */
+debugger;
+debugger; // eslint-disable-line no-alert, no-debugger
+// eslint-disable-next-line no-debugger
+console.log(x);
+// eslint-disable-next-line -- no-console
+console.log(x);
+// eslint-disable-next-line no-console-x
+console.log(x);
+console.log(x); // eslint-disable-line
+// eslint-disable-next-line no-alert no-console
+console.log(x);
+/* eslint-disable
+   no-debugger */
+console.log(x); debugger;
+/* eslint-disable */
+console.log(x);
+/* eslint-enable no-console */
+console.log(x); debugger;
+// eslint-enable
+console.log(x); debugger;
+/* eslint-enable */
+debugger;
+console.log(x); /* eslint-disable "no-console" -- the rest */ console.log(x);
+"#;
+        assert_eq!(
+            shown(source),
+            [
+                "OD611@1:1",
+                "OD612@2:1",
+                "OD611@12:1",
+                "OD611@16:1",
+                "OD611@19:1",
+                "OD611@22:1",
+                "OD611@26:1",
+                "OD611@28:1",
+                "OD612@30:1",
+                "OD611@31:1"
             ]
         );
     }
