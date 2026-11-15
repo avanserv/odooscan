@@ -190,6 +190,7 @@ custom/bad_sale/models/queries.py:49:17: OD139 search() without a limit fetches 
 custom/bad_sale/models/queries.py:50:16: OD139 search() without a limit fetches every matching id to keep the first; pass limit=1
 custom/bad_sale/models/queries.py:80:13: OD134 search() runs a query for each record of the loop, keyed on name; search once for all of them and group the result by name
 custom/bad_sale/models/queries.py:81:29: OD134 search_count() runs the same query on each pass of the loop; run it once before the loop
+custom/bad_sale/models/queries.py:94:13: OD134 search() runs a query for each record of the loop, keyed on name; search once for all of them and group the result by name
 custom/bad_sale/models/quiet.py:30:22: OD302 'encoded_lost.no_such_id' belongs to module encoded_lost; add it to depends
 custom/bad_sale/models/registry.py:6:14: OD203 'stat': bad.registry has no field 'stat'
 custom/bad_sale/models/registry.py:7:17: OD203 'titel': bad.registry has no field 'titel'

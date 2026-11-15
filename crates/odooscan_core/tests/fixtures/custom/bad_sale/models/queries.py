@@ -7,7 +7,7 @@ from odoo import models
 class SaleOrderQueries(models.Model):
     _inherit = "bad.order"
 
-    MAIL_PATTERN = re.compile(r"[^@\s]+@[^@\s]+")
+    mail_pattern = re.compile(r"[^@\s]+@[^@\s]+")
 
     def action_close_lines(self):
         lines = self.line_ids
@@ -82,5 +82,13 @@ class SaleOrderQueries(models.Model):
             if partner is None:
                 partner = self.env["res.partner"].browse(order.partner_id.id)
             order.write({"name": partner.name})
-        pattern = self.MAIL_PATTERN
+        pattern = self.mail_pattern
         return total, pattern.search(text)[0]
+
+    ORDER_CODES = ("a", "b")
+
+    def action_coded(self):
+        for code in self.ORDER_CODES:
+            self.env["res.partner"].search([("name", "=", code)])
+        for line in self.line_ids:
+            self.env["res.partner"].search([("name", "=", line.name)])

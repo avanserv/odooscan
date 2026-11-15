@@ -120,8 +120,8 @@ struct Walk<'a, 'l> {
     records: FxHashSet<&'a str>,
     /// The names last bound to a dict literal or a `dict()` call.
     dicts: FxHashSet<&'a str>,
-    /// The names last bound to an attribute of records, which `is_model` leaves out as it leaves out
-    /// the attribute, while a loop over one still counts as one over records.
+    /// The names last bound to a field of records, which `is_model` leaves out as it leaves out the
+    /// attribute, while a loop over one still counts as one over records.
     attrs: FxHashSet<&'a str>,
     /// The names the function has bound so far, its parameters among them.
     bound: FxHashSet<&'a str>,
@@ -149,9 +149,9 @@ impl<'a> Walk<'a, '_> {
         self.loops.last().filter(|_| self.loops.len() > self.isolated)
     }
 
-    /// Records a query is called on. An attribute of records, or a name last bound to one, is left out:
-    /// it may be a field, or a class constant such as a compiled pattern, whose `search()` is not
-    /// the ORM's.
+    /// Records a query is called on. A field of records, or a name last bound to one, is left out:
+    /// it may be a lowercase class constant such as a compiled pattern, whose `search()` is not the
+    /// ORM's. An all-caps constant is no records at all, by `holds_records`.
     fn is_model(&self, expr: &Expr) -> bool {
         let attr = match expr {
             Expr::Attribute(_) => true,
@@ -780,10 +780,11 @@ fn on_target(expr: &Expr, target: &str, frame: &Loop) -> bool {
     }
 }
 
-/// The attributes of records that may hold records: the public ones, but the ids and the
-/// environment.
+/// The attributes of records that may hold records: the public ones with a lowercase letter, but
+/// the ids and the environment. The check runs before the index exists, so a field is told from a
+/// class constant such as `CODES` by its name alone.
 fn holds_records(attr: &str) -> bool {
-    !attr.starts_with('_') && !matches!(attr, "id" | "ids" | "env")
+    !attr.starts_with('_') && !matches!(attr, "id" | "ids" | "env") && attr.bytes().any(|b| b.is_ascii_lowercase())
 }
 
 /// `env`, or an `env` attribute, such as `self.env` or `request.env`.
@@ -1207,6 +1208,25 @@ mod tests {
         assert_eq!(codes(rebound), ["OD139"]);
         let looped = "    lines = self.line_ids\n    for line in lines:\n        self.env['a'].search([])\n";
         assert_eq!(codes(looped), ["OD134"]);
+    }
+
+    #[test]
+    fn an_all_caps_class_constant_holds_no_records() {
+        for body in [
+            "    for c in self.CODES:\n        self.env['a'].search([('code', '=', c)])\n",
+            "    for rec in self:\n        for c in rec.CODES:\n            c.write({'a': 1})\n",
+            "    x = self.env['a']\n    for c in x.CODES:\n        self.env['b'].search([('code', '=', c)])\n",
+            "    codes = self.CODES\n    for c in codes:\n        self.env['a'].search([('code', '=', c)])\n",
+            "    return self.CODES[0].search([])[0]\n",
+        ] {
+            assert_eq!(codes(body), NONE, "{body}");
+        }
+        for body in [
+            "    for c in self.x_codes:\n        self.env['a'].search([])\n",
+            "    for l in self.line_ids:\n        self.env['a'].search([])\n",
+        ] {
+            assert_eq!(codes(body), ["OD134"], "{body}");
+        }
     }
 
     #[test]
