@@ -39,6 +39,13 @@ pub struct SourceFile<T> {
     pub mentions: Mentions,
 }
 
+impl<T> SourceFile<T> {
+    /// Whether the file is under `static/tests`, which only the test bundles load.
+    pub fn in_tests(&self) -> bool {
+        self.rel.starts_with("static/tests/")
+    }
+}
+
 impl SourceFile<()> {
     fn with<T>(self, facts: T) -> SourceFile<T> {
         SourceFile {
@@ -63,7 +70,8 @@ pub struct Module {
     pub checked: bool,
     pub python: Vec<SourceFile<PyFacts>>,
     pub data: Vec<SourceFile<DataFacts>>,
-    /// Scripts under `static/src`, the only JS the web client loads as Odoo modules.
+    /// Scripts under `static/src`, then those under `static/tests`: the JS Odoo names as modules,
+    /// but for the libraries under `static/lib`.
     pub js: Vec<SourceFile<JsFacts>>,
     /// Owl templates: the XML files under `static/src`.
     pub templates: Vec<SourceFile<TemplateFacts>>,
@@ -267,12 +275,12 @@ fn module_files(dir: &Path) -> Vec<PathBuf> {
         .collect()
 }
 
-fn static_files(dir: &Path, extension: &str) -> Vec<PathBuf> {
-    let src = dir.join("static/src");
-    if !src.is_dir() {
+fn static_files(dir: &Path, folder: &str, extension: &str) -> Vec<PathBuf> {
+    let root = dir.join("static").join(folder);
+    if !root.is_dir() {
         return vec![];
     }
-    WalkBuilder::new(src)
+    WalkBuilder::new(root)
         .filter_entry(|e| e.file_name() != "node_modules")
         .build()
         .filter_map(Result::ok)
@@ -746,9 +754,14 @@ fn parse_module_files(module: &mut Module, default_series: Option<Series>, taint
     module
         .data
         .sort_by_key(|f| (f.rank.unwrap_or(usize::MAX), f.rel.clone()));
-    let (js, lost_js, js_words) = parse_static_files(&module.dir, "js", checked, js::analyze);
+    let (mut js, lost_js, js_words) = parse_static_files(&module.dir, "src", "js", checked, js::analyze);
+    // `static_words` reads the words of tests already, and a test that does not decode hides no hook
+    // name, as `hook_mentions` takes no name from a test.
+    let (tests, _, _) = parse_static_files(&module.dir, "tests", "js", checked, js::analyze);
+    js.extend(tests);
     module.js = js;
-    let (templates, lost_templates, template_words) = parse_static_files(&module.dir, "xml", checked, owl::analyze);
+    let (templates, lost_templates, template_words) =
+        parse_static_files(&module.dir, "src", "xml", checked, owl::analyze);
     module.templates = templates;
     module.lost_text |= lost_js || lost_templates;
     words.extend([js_words, template_words]);
@@ -771,15 +784,16 @@ fn sql_views(module: &Module, series: Option<Series>) -> Vec<String> {
     texts.flat_map(|text| sql::file_views(&text)).collect()
 }
 
-/// The files of `extension` under `static/src`, whether one of them could not be read, and their
-/// words when the module is checked.
+/// The files of `extension` under `static/<folder>`, whether one of them could not be read, and
+/// their words when the module is checked.
 fn parse_static_files<T: Send>(
     dir: &Path,
+    folder: &str,
     extension: &str,
     checked: bool,
     analyze: fn(&str) -> T,
 ) -> (Vec<SourceFile<T>>, bool, Words) {
-    let paths = static_files(dir, extension);
+    let paths = static_files(dir, folder, extension);
     let count = paths.len();
     let (mut files, words): (Vec<_>, Vec<_>) = paths
         .into_par_iter()

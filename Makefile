@@ -48,15 +48,15 @@ site-serve: ## Serve the documentation site locally, rebuilding on change
 	uv sync --locked --only-group docs --no-install-project
 	uv run --no-sync zensical serve
 
-# SPARSE in crates/odooscan/src/fetch.rs repeats the patterns up to '!**/tests/' for the core of
-# --target-series. The oracle adds every asset, tests' included, since OD513 matches core's bundles
-# against the files under static/.
+# SPARSE in crates/odooscan/src/fetch.rs repeats the patterns up to '**/static/tests/**/*.js' for
+# the core of --target-series. The oracle adds every asset, tests' included, since OD513 matches
+# core's bundles against the files under static/.
 oracle-fetch: ## Fetch the pinned Odoo core of SERIES (default 18.0) into .oracle/, without tests but their assets
 	rm -rf $(ORACLE)
 	git init -q $(ORACLE)
 	git -C $(ORACLE) fetch -q --depth 1 --filter=blob:none https://github.com/odoo/odoo $(ODOO_$(SERIES))
 	git -C $(ORACLE) sparse-checkout set --no-cone '/addons/' '/odoo/addons/' '!**/i18n/' '!**/static/**' \
-		'**/static/src/**/*.js' '**/static/src/**/*.xml' '!**/tests/' \
+		'**/static/src/**/*.js' '**/static/src/**/*.xml' '!**/tests/' '**/static/tests/**/*.js' \
 		'**/static/**/*.js' '**/static/**/*.css' '**/static/**/*.scss' '**/static/**/*.sass' \
 		'**/static/**/*.less' '**/static/**/*.xml'
 	git -C $(ORACLE) checkout -q FETCH_HEAD

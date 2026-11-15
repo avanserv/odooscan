@@ -4,5 +4,8 @@
     "depends": ["base"],
     "auto_install": True,
     "data": ["views/webclient_templates.xml"],
-    "assets": {"web.assets_backend": ["web/static/src/**/*"]},
+    "assets": {
+        "web.assets_backend": ["web/static/src/**/*"],
+        "web.assets_unit_tests": ["web/static/tests/**/*"],
+    },
 }

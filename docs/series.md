@@ -44,12 +44,13 @@ follows the findings, and `--statistics` prints it alone; with any other format 
 When no addons path entry is an Odoo checkout and no `base` module is found on the addons path or
 among the checked paths, `oscn` fetches the target's core with `git`, which must be on `PATH`. It
 asks odoo/odoo for the head of the series' branch on each run, `18.0` for 18.0 and `saas-18.1` for
-saas~18.1, and fetches that commit unless the cache holds it, without tests, translations and
-assets other than scripts and templates. Each commit is a directory of `core/` in the cache. The
-branch keeps its newest commit and the one before it, so that a run still reading the one before
-keeps it. A run that brings the cache up to the head then removes leftovers untouched for a day:
-what an interrupted run left, and commit directories no branch records. A run that falls back to
-the cache removes nothing. The cache is `$ODOOSCAN_CACHE_DIR`, else
+saas~18.1, and fetches that commit unless the cache holds it, without translations, without tests
+but the scripts under `static/tests`, and without assets other than scripts and templates. Each
+commit is a directory of `core/` in the cache. The branch keeps its newest commit and the one
+before it, so that a run still reading the one before keeps it. A run that brings the cache up to
+the head then removes leftovers untouched for a day: what an interrupted run left, and commit
+directories no branch records. A run that falls back to the cache removes nothing. The cache is
+`$ODOOSCAN_CACHE_DIR`, else
 `$XDG_CACHE_HOME/odooscan` for an absolute `XDG_CACHE_HOME`, `%LOCALAPPDATA%\odooscan` on Windows,
 or `~/.cache/odooscan`. On Windows, a cache in a deep directory may need `git config --global
 core.longpaths true`. `ODOOSCAN_ODOO_REMOTE` replaces `https://github.com/odoo/odoo`, for a mirror

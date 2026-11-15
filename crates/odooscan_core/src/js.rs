@@ -9,7 +9,8 @@ use oxc_parser::Parser;
 use oxc_span::SourceType;
 use oxc_syntax::module_record::{ExportExportName, ExportImportName, ImportImportName, ModuleRecord};
 
-use crate::facts::{Annotation, Heritage, JsClass, JsFacts, JsName, JsPatch, Lines, OrmCall, Pos, Spanned};
+use crate::facts::{Annotation, Heritage, JsAlias, JsClass, JsFacts, JsName, JsPatch, Lines, OrmCall, Pos, Spanned};
+use crate::series::Series;
 
 /// Methods of the `orm` service whose first argument is a model name.
 const ORM_METHODS: &[&str] = &[
@@ -33,6 +34,7 @@ pub fn analyze(text: &str) -> JsFacts {
     let lines = Lines::new(text);
     let mut facts = JsFacts {
         annotation: annotation(text),
+        alias: alias(text),
         ..JsFacts::default()
     };
     let allocator = Allocator::default();
@@ -63,22 +65,71 @@ pub fn analyze(text: &str) -> JsFacts {
     facts
 }
 
-/// The `@odoo-module` annotation, which Odoo reads in the comments that open the file.
-fn annotation(text: &str) -> Annotation {
+/// The text after `@odoo-module` in the comments that open the file, where Odoo reads it.
+fn module_tag(text: &str) -> Option<&str> {
     let mut rest = text.trim_start();
     loop {
         let (comment, after) = if let Some(r) = rest.strip_prefix("//") {
             r.split_once('\n').unwrap_or((r, ""))
-        } else if let Some(r) = rest.strip_prefix("/*") {
-            r.split_once("*/").unwrap_or((r, ""))
         } else {
-            return Annotation::None;
+            let r = rest.strip_prefix("/*")?;
+            r.split_once("*/").unwrap_or((r, ""))
         };
         if let Some((_, tail)) = comment.split_once("@odoo-module") {
-            let ignore = tail.starts_with(char::is_whitespace) && tail.split_whitespace().next() == Some("ignore");
-            return if ignore { Annotation::Ignore } else { Annotation::Module };
+            return Some(tail);
         }
         rest = after.trim_start();
+    }
+}
+
+fn annotation(text: &str) -> Annotation {
+    let Some(tail) = module_tag(text) else {
+        return Annotation::None;
+    };
+    let ignore = tail.starts_with(char::is_whitespace) && tail.split_whitespace().next() == Some("ignore");
+    if ignore { Annotation::Ignore } else { Annotation::Module }
+}
+
+/// `alias=<name>` right after `@odoo-module`, then optionally `default=<value>`, each up to a space
+/// or a `*`. An ignored file has none.
+fn alias(text: &str) -> Option<JsAlias> {
+    let token = |s: &str| -> (String, usize) {
+        let end = s.find(|c: char| c.is_whitespace() || c == '*').unwrap_or(s.len());
+        (s[..end].to_owned(), end)
+    };
+    let tail = module_tag(text)?;
+    let rest = tail
+        .strip_prefix(char::is_whitespace)?
+        .trim_start()
+        .strip_prefix("alias=")?;
+    let (name, end) = token(rest);
+    let default = rest[end..]
+        .strip_prefix(char::is_whitespace)
+        .and_then(|a| a.trim_start().strip_prefix("default="))
+        .map(|d| token(d).0);
+    (!name.is_empty()).then_some(JsAlias { name, default })
+}
+
+/// From saas~17.2 an alias is any name and any `default=` value makes it stand for the file's
+/// exports; before, a name of word characters and dots, and `default=` one of `false`, `False` or
+/// `0` (17.0 and 18.0 `odoo/tools/js_transpiler.py`, `ODOO_MODULE_RE`, commit `3ca925b8a82e`).
+const PERMISSIVE_ALIAS: Series = Series { major: 17, minor: 2 };
+
+impl JsAlias {
+    /// The name the series registers and whether it returns the file's exports rather than its
+    /// default export. Odoo's pattern has no end anchor, so it takes the longest prefix it accepts.
+    pub fn registered(&self, series: Option<Series>) -> Option<(&str, bool)> {
+        let word = |c: char| c.is_alphanumeric() || c == '_';
+        let default = self.default.as_deref();
+        if series.is_none_or(|s| s >= PERMISSIVE_ALIAS) {
+            let proxies = default.is_some_and(|d| d.starts_with(|c| word(c) || c == '$'));
+            return Some((&self.name, proxies));
+        }
+        let end = self.name.find(|c| !(word(c) || c == '.')).unwrap_or(self.name.len());
+        // A name cut short leaves no space before `default=`.
+        let proxies =
+            end == self.name.len() && default.is_some_and(|d| ["false", "False", "0"].iter().any(|v| d.starts_with(v)));
+        (end > 0).then_some((&self.name[..end], proxies))
     }
 }
 
@@ -411,6 +462,46 @@ mod tests {
             Annotation::Module
         );
         assert_eq!(annotation("import x from 'y'; // @odoo-module"), Annotation::None);
+    }
+
+    #[test]
+    fn reads_the_alias_after_the_annotation() {
+        let read = |text: &str| alias(text).map(|a| (a.name, a.default));
+        let some = |name: &str, default: Option<&str>| Some((name.to_owned(), default.map(str::to_owned)));
+        assert_eq!(
+            read("/** @odoo-module alias=@web/../tests/utils default=false */"),
+            some("@web/../tests/utils", Some("false"))
+        );
+        assert_eq!(read("// @odoo-module alias=web.Widget"), some("web.Widget", None));
+        assert_eq!(read("/** @odoo-module alias=a.b**/"), some("a.b", None));
+        assert_eq!(read("/* @odoo-module alias=a.b default=0*/"), some("a.b", Some("0")));
+        assert_eq!(read("/** @odoo-module ignore alias=a.b */"), None);
+        assert_eq!(read("/** @odoo-module default=false alias=a.b */"), None);
+        assert_eq!(read("/** @odoo-module alias= */"), None);
+        assert_eq!(read("/** @odoo-module **/"), None);
+    }
+
+    #[test]
+    fn a_series_reads_its_own_part_of_the_alias() {
+        let registered = |text: &str, series: &str| {
+            let alias = alias(text).unwrap();
+            alias.registered(Series::parse(series)).map(|(n, p)| (n.to_owned(), p))
+        };
+        let tests = "/** @odoo-module alias=@web/../tests/utils default=false */";
+        assert_eq!(registered(tests, "17.0"), None);
+        assert_eq!(
+            registered(tests, "saas~17.2"),
+            Some(("@web/../tests/utils".to_owned(), true))
+        );
+        let widget = "/** @odoo-module alias=web.Widget default=true */";
+        assert_eq!(registered(widget, "17.0"), Some(("web.Widget".to_owned(), false)));
+        assert_eq!(registered(widget, "18.0"), Some(("web.Widget".to_owned(), true)));
+        let zero = "/** @odoo-module alias=web.Widget default=0 */";
+        assert_eq!(registered(zero, "16.0"), Some(("web.Widget".to_owned(), true)));
+        let cut = "/** @odoo-module alias=web.Widget/x default=0 */";
+        assert_eq!(registered(cut, "16.0"), Some(("web.Widget".to_owned(), false)));
+        let bare = "/** @odoo-module alias=web.Widget */";
+        assert_eq!(registered(bare, "20.0"), Some(("web.Widget".to_owned(), false)));
     }
 
     #[test]
