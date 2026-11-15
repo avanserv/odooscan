@@ -2663,8 +2663,9 @@ impl<'m> Index<'m> {
     }
 
     /// The file a specifier imported by the script at the URL `from` names, as `js_lookup` reads it.
-    /// A name two files claim goes to the one loaded first, opaque since a page that loads only the
-    /// other gets that one.
+    /// A name two files claim goes to the first `js_paths` lists: the file of the module loaded
+    /// first, or of one module the one whose path sorts first. Opaque since a page that loads only
+    /// the other gets that one.
     pub fn js_resolve(&self, from: &str, specifier: &str) -> JsSpec {
         let Some(JsLookup { name, home }) = js_lookup(from, specifier) else {
             return JsSpec::Outside;
