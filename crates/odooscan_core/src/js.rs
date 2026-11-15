@@ -2,15 +2,15 @@ use std::ops::Range;
 
 use oxc_allocator::Allocator;
 use oxc_ast::ast::{
-    Argument, ArrayExpressionElement, AssignmentExpression, AssignmentOperator, AssignmentTarget, BinaryOperator,
-    BindingPattern, CallExpression, Class, ClassElement, DebuggerStatement, Expression, Function, MemberExpression,
-    ObjectExpression, ObjectProperty, ObjectPropertyKind, Program, Statement, StaticMemberExpression, StringLiteral,
-    UnaryExpression, VariableDeclarator,
+    Argument, ArrayExpressionElement, AssignmentExpression, AssignmentOperator, AssignmentTarget, BinaryExpression,
+    BinaryOperator, BindingPattern, CallExpression, Class, ClassElement, DebuggerStatement, Expression, Function,
+    MemberExpression, ObjectExpression, ObjectProperty, ObjectPropertyKind, Program, Statement, StaticMemberExpression,
+    StringLiteral, UnaryExpression, VariableDeclarator,
 };
 use oxc_ast_visit::Visit;
 use oxc_ast_visit::walk::{
-    walk_assignment_expression, walk_call_expression, walk_class, walk_static_member_expression, walk_unary_expression,
-    walk_variable_declarator,
+    walk_assignment_expression, walk_binary_expression, walk_call_expression, walk_class,
+    walk_static_member_expression, walk_unary_expression, walk_variable_declarator,
 };
 use oxc_parser::Parser;
 use oxc_span::{GetSpan, SourceType};
@@ -522,10 +522,16 @@ impl<'a> Visit<'a> for Collector<'_> {
         }
         self.facts.view_kinds.extend(view_kind(call));
         self.adds.extend(registry_add(call));
+        self.facts.services.extend(use_service(call, self.lines));
         self.facts.diags.extend(unescaped_markup(call, self.lines));
         self.facts.diags.extend(html_call(call, self.lines));
         self.facts.diags.extend(console_log(call, self.lines));
         walk_call_expression(self, call);
+    }
+
+    fn visit_binary_expression(&mut self, binary: &BinaryExpression<'a>) {
+        self.facts.service_probes.extend(service_probe(binary));
+        walk_binary_expression(self, binary);
     }
 
     fn visit_unary_expression(&mut self, unary: &UnaryExpression<'a>) {
@@ -996,12 +1002,40 @@ fn registry_add(call: &CallExpression) -> Option<(AddTarget, Option<String>)> {
         return None;
     }
     let target = add_target(&callee.object)?;
-    let key = match call.arguments.first() {
-        Some(Argument::StringLiteral(s)) => s.value.as_str().map(str::to_owned),
-        Some(Argument::TemplateLiteral(t)) => t.single_quasi().and_then(|s| s.as_str().map(str::to_owned)),
-        _ => None,
-    };
+    let key = call.arguments.first().and_then(registry_key).map(|(k, _)| k);
     Some((target, key))
+}
+
+/// The text of a registry key given as a string or as a template without substitutions, with the
+/// offset after its opening quote.
+fn registry_key(arg: &Argument) -> Option<(String, usize)> {
+    match arg {
+        Argument::StringLiteral(s) => Some((s.value.as_str()?.to_owned(), s.span.start as usize + 1)),
+        Argument::TemplateLiteral(t) => Some((t.single_quasi()?.as_str()?.to_owned(), t.span.start as usize + 1)),
+        _ => None,
+    }
+}
+
+/// The literal key of a `useService()` call.
+fn use_service(call: &CallExpression, lines: &Lines) -> Option<Spanned<String>> {
+    if !matches!(&call.callee, Expression::Identifier(i) if i.name == "useService") {
+        return None;
+    }
+    let (value, at) = registry_key(call.arguments.first()?)?;
+    Some(Spanned {
+        value,
+        pos: lines.pos(at),
+    })
+}
+
+/// The key of `"key" in x.services`, which tells whether the web client started that service.
+fn service_probe(binary: &BinaryExpression) -> Option<String> {
+    let (Expression::StringLiteral(key), Expression::StaticMemberExpression(services)) = (&binary.left, &binary.right)
+    else {
+        return None;
+    };
+    let probes = binary.operator == BinaryOperator::In && services.property.name == "services";
+    probes.then(|| key.value.as_str().map(str::to_owned)).flatten()
 }
 
 fn add_target(e: &Expression) -> Option<AddTarget> {
@@ -1280,6 +1314,26 @@ mod tests {
             ["fields:b", "fields:a", "actions:c", "view_widgets:d", "fields:g"]
         );
         assert_eq!(facts.open_categories, ["actions", "fields"]);
+    }
+
+    #[test]
+    fn reads_the_services_a_script_uses_and_probes() {
+        let source = r#"
+            this.orm = useService("orm");
+            this.ui = useService(`ui`);
+            this.x = useService(name);
+            this.y = env.useService("bus");
+            const live = "mail.store" in this.env.services && "a" in services;
+            const not = "b" in env.services.orm || "c" < env.services;
+        "#;
+        let facts = analyze(source);
+        let shown: Vec<_> = facts
+            .services
+            .iter()
+            .map(|s| format!("{}@{}:{}", s.value, s.pos.line, s.pos.col))
+            .collect();
+        assert_eq!(shown, ["orm@2:36", "ui@3:35"]);
+        assert_eq!(facts.service_probes, ["mail.store"]);
     }
 
     #[test]

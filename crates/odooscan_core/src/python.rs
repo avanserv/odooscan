@@ -135,6 +135,32 @@ pub(crate) fn tail_name(expr: &Expr) -> Option<&str> {
     }
 }
 
+/// The quoted names that `odoo.startTour()` and `odoo.isTourReady()` receive in the JS `code`, with
+/// the offset of each in it. A name with an escape or a substitution, or a literal the argument
+/// adds to, is only known at run time.
+fn tour_calls(code: &str) -> Vec<(String, usize)> {
+    let mut names = vec![];
+    for opener in ["odoo.startTour(", "odoo.isTourReady("] {
+        for (start, _) in code.match_indices(opener) {
+            let after = &code[start + opener.len()..];
+            let rest = after.trim_start();
+            let Some(quote) = rest.chars().next().filter(|c| matches!(c, '\'' | '"' | '`')) else {
+                continue;
+            };
+            let Some((name, tail)) = rest[1..].split_once(quote) else {
+                continue;
+            };
+            let whole = tail.trim_start().starts_with([',', ')']);
+            if whole && !name.is_empty() && !name.contains(['\\', '\n']) && !name.contains("${") {
+                let at = start + opener.len() + (after.len() - rest.len()) + 1;
+                names.push((name.to_owned(), at));
+            }
+        }
+    }
+    names.sort_by_key(|&(_, at)| at);
+    names
+}
+
 /// The name a `match` pattern node itself captures, not those of the patterns it holds.
 pub(crate) fn capture(pattern: &ast::Pattern) -> Option<&ast::Identifier> {
     match pattern {
@@ -912,6 +938,16 @@ fn skips(body: &[Stmt]) -> bool {
         return false;
     };
     matches!(&*last.value, Expr::Call(c) if tail_name(&c.func) == Some("skipTest"))
+}
+
+/// Whether a decorator is `unittest.skip`, which never runs what it decorates, given a reason or
+/// not.
+fn always_skips(decorator: &ast::Decorator) -> bool {
+    let skip = match &decorator.expression {
+        Expr::Call(c) => &*c.func,
+        expr => expr,
+    };
+    tail_name(skip) == Some("skip")
 }
 
 /// The module of `self.ensure_installed('m')`, a test helper that raises `SkipTest` unless the
@@ -2193,6 +2229,8 @@ struct PyVisitor<'a, 'ast> {
     change_check: Option<ChangeCheck<'ast>>,
     /// How many enclosing `try` bodies have a handler that catches a failed import.
     import_shims: usize,
+    /// How many enclosing classes and functions `@skip` decorates.
+    skipped: usize,
     /// The names the file's imports from `odoo` bind at import.
     odoo_names: Vec<&'ast str>,
     /// The names the file's imports bind to `odoo.osv.expression.AND` or `OR`.
@@ -2240,6 +2278,7 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
             in_user_setter: false,
             change_check: None,
             import_shims: 0,
+            skipped: 0,
             odoo_names: odoo_imports.iter().map(|(local, _)| *local).collect(),
             domain_joins: taint::domain_joins(&odoo_imports),
             collections: module_state::collections(&top),
@@ -3190,6 +3229,61 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
         self.added_columns(call);
         self.created_views(call);
         self.update_env_user(call);
+        self.tour_names(call);
+    }
+
+    /// The tours a browser test runs. `start_tour()` starts its `tour_name` and waits for it to be
+    /// ready unless both `code=` and `ready=` replace that (18.0 `odoo/tests/common.py:2496-2509`),
+    /// and the code and ready check given to `browser_js()` name theirs in calls to `odoo`. A test
+    /// that `@skip` decorates never runs.
+    fn tour_names(&mut self, call: &ast::ExprCall) {
+        let Expr::Attribute(method) = &*call.func else {
+            return;
+        };
+        if self.skipped > 0 {
+            return;
+        }
+        match method.attr.as_str() {
+            "start_tour" => {
+                let unpacked = call.arguments.keywords.iter().any(|k| k.arg.is_none());
+                let replaced = keyword(call, "code").is_some() && keyword(call, "ready").is_some();
+                let name = call.arguments.find_argument_value("tour_name", 1);
+                if let Some(name) = name.and_then(Expr::as_string_literal_expr)
+                    && !unpacked
+                    && !replaced
+                {
+                    let name = self.spanned(name);
+                    self.facts.tour_names.push(name);
+                }
+            }
+            "browser_js" => self.browser_js_tours(call),
+            _ => {}
+        }
+    }
+
+    /// The tours that the code and the ready check of a `browser_js()` call start or wait for, each
+    /// once.
+    fn browser_js_tours(&mut self, call: &ast::ExprCall) {
+        let mut names: Vec<Spanned<String>> = vec![];
+        let args = &call.arguments;
+        for literal in [
+            args.find_argument_value("code", 1),
+            args.find_argument_value("ready", 2),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            let Some(text) = str_lit(literal) else {
+                continue;
+            };
+            for (name, at) in tour_calls(text) {
+                if names.iter().all(|n| n.value != name) {
+                    let pos = source_offset(literal, at).map_or_else(|| self.loc.at(literal), |o| self.loc.pos(o));
+                    names.push(Spanned { value: name, pos });
+                }
+            }
+        }
+        self.facts.tour_names.extend(names);
     }
 
     /// OD130 on `update_env()` with a user, which runs the rest of the request as that user (18.0
@@ -3783,11 +3877,14 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
         self.in_user_setter |= func.name.starts_with("_auth_method_") || func.name.as_str() == "update_env";
         let model = matches!(self.owners.last(), Some(Some(Receiver::Model(_))));
         let change_check = std::mem::replace(&mut self.change_check, checks_change(func).filter(|_| model));
+        let skip = usize::from(func.decorator_list.iter().any(always_skips));
+        self.skipped += skip;
         self.owners.push(None);
         self.cursor_uses.push(uses);
         visitor::walk_stmt(self, stmt);
         self.cursor_uses.pop();
         self.owners.pop();
+        self.skipped -= skip;
         self.in_view_maker = in_view_maker;
         self.in_user_setter = in_user_setter;
         self.change_check = change_check;
@@ -3879,7 +3976,10 @@ impl<'ast> Visitor<'ast> for PyVisitor<'_, 'ast> {
                 self.class_models.push(model);
                 self.self_cursors.push(self_cursor(class));
                 let attrs = std::mem::replace(&mut self.holders.attrs, GuardHolders::attrs_of(class));
+                let skip = usize::from(class.decorator_list.iter().any(always_skips));
+                self.skipped += skip;
                 visitor::walk_stmt(self, stmt);
+                self.skipped -= skip;
                 self.holders.attrs = attrs;
                 self.self_cursors.pop();
                 self.class_models.pop();
@@ -4777,6 +4877,52 @@ mod tests {
         ] {
             assert!(looks_up(reported), "{reported}");
         }
+    }
+
+    #[test]
+    fn reads_the_tours_a_test_runs() {
+        let src = r#"class T(HttpCase):
+    def test(self):
+        self.start_tour("/odoo", "a")
+        self.start_tour("/odoo", tour_name='b', login="admin")
+        self.start_tour("/odoo", "c", code="x")
+        self.start_tour("/odoo", "d", code="x", ready="y")
+        self.start_tour("/odoo", "e", **kw)
+        self.start_tour("/odoo", f"f_{n}")
+        self.browser_js("/", "odoo.startTour('g', {}); odoo.startTour( 'h')", "odoo.isTourReady('g')")
+        self.browser_js("/", code="odoo.startTour(`i${n}`)", ready="odoo.isTourReady(`j`)")
+        self.browser_js("/", "odoo.startTour(name)", "")
+        self.browser_js("/", "odoo.startTour('k_' + n)", "odoo.isTourReady( 'l' )")
+
+    @unittest.skip("flaky")
+    def test_skipped(self):
+        self.start_tour("/odoo", "m")
+
+    @unittest.skip
+    def test_bare_skip(self):
+        self.start_tour("/odoo", "o")
+
+
+@skip("gone")
+class U(HttpCase):
+    def test(self):
+        self.start_tour("/odoo", "n")
+"#;
+        let shown: Vec<_> = analyze(src, None)
+            .tour_names
+            .iter()
+            .map(|n| format!("{}@{}:{}", n.value, n.pos.line, n.pos.col))
+            .collect();
+        assert_eq!(
+            shown,
+            ["a@3:34", "b@4:44", "c@5:34", "g@9:47", "h@9:73", "j@10:87", "l@12:78"]
+        );
+    }
+
+    #[test]
+    fn tells_the_names_a_tour_call_quotes() {
+        let code = "odoo.isTourReady('b') && odoo.startTour(\"a\", {}); odoo.startTour('x\\'y')";
+        assert_eq!(tour_calls(code), [("b".to_owned(), 18), ("a".to_owned(), 41)]);
     }
 
     #[test]

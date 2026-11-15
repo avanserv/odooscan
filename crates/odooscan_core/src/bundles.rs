@@ -238,12 +238,15 @@ impl<'m> Paths<'m> {
         ids
     }
 
+    /// Odoo drops the empty segments of a glob before it expands it (18.0 `:338`, 20.0 `:331`), so
+    /// `x/static/**/` loads the files `x/static/**` does.
     fn matches(&self, glob: &str) -> Vec<usize> {
+        let glob = glob.split('/').filter(|p| !p.is_empty()).collect::<Vec<_>>().join("/");
         let module = glob.split('/').next().and_then(|name| self.by_name.get(name));
         let Some(&mi) = module else {
             return vec![];
         };
-        let set = asset_glob_set([&glob.to_owned()]);
+        let set = asset_glob_set([&glob]);
         let mut ids: Vec<usize> = self.by_module[mi]
             .iter()
             .copied()
@@ -599,6 +602,12 @@ mod tests {
             &[],
         );
         assert_eq!(contents(&[web, x])["b"], ["x/a.js"]);
+    }
+
+    #[test]
+    fn a_glob_ending_in_a_slash_loads_the_files() {
+        let a = addon("a", r#""assets": {"b": ["a/static//src/**/"]}"#, &["a.js"], &[]);
+        assert_eq!(contents(&[a])["b"], ["a/a.js"]);
     }
 
     #[test]

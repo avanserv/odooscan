@@ -34,12 +34,15 @@ const FIELD_ID_BY_NAME: Series = Series { major: 11, minor: 2 };
 /// computes the others.
 const LOG_COLUMNS: &[&str] = &["create_uid", "create_date", "write_uid", "write_date"];
 
-/// The registry categories the web client looks field widgets, view widgets and client actions up
-/// in (18.0 `addons/web/static/src/views/fields/field.js:15`, `views/widgets/widget.js:5`,
-/// `webclient/actions/action_service.js:54`).
+/// The registry categories the web client looks field widgets, view widgets, client actions,
+/// services and tours up in (18.0 `addons/web/static/src/views/fields/field.js:15`,
+/// `views/widgets/widget.js:5`, `webclient/actions/action_service.js:54`, `env.js:45`,
+/// `addons/web_tour/static/src/tour_service/tour_service.js:62`).
 pub const FIELD_REGISTRY: &str = "fields";
 pub const VIEW_WIDGET_REGISTRY: &str = "view_widgets";
 pub const ACTION_REGISTRY: &str = "actions";
+pub const SERVICE_REGISTRY: &str = "services";
+pub const TOUR_REGISTRY: &str = "web_tour.tours";
 
 pub const RELATIONAL_TYPES: &[&str] = &["Many2one", "One2many", "Many2many"];
 
@@ -1143,9 +1146,10 @@ pub struct PropSchema<'m> {
     pub props: FxHashMap<&'m str, bool>,
 }
 
-/// The keys the loaded scripts outside tests add to registry categories, each with the modules that
-/// add it: by (category, key), by every dot suffix of a key of `fields`, which the web client tries
-/// after a view type or a `js_class` and a dot, and by category for keys only a run tells.
+/// The keys the loaded scripts outside tests, and for tours those of browser tests too, add to
+/// registry categories, each with the modules that add it: by (category, key), by every dot suffix
+/// of a key of `fields`, which the web client tries after a view type or a `js_class` and a dot,
+/// and by category for keys only a run tells.
 #[derive(Default)]
 struct Registries<'m> {
     keys: FxHashMap<(&'m str, &'m str), Vec<usize>>,
@@ -2044,12 +2048,20 @@ impl<'m> Index<'m> {
         None
     }
 
+    /// A test bundle such as `web.assets_tests` loads the tours a browser test runs, so the tours of
+    /// `static/tests` count, and nothing else of it. A unit test bundle runs on its own page, which
+    /// `start_tour()` never opens.
     fn registries(&self) -> Registries<'m> {
         let mut found = Registries::default();
         for (mi, module) in self.modules.iter().enumerate() {
             let files = module.js.iter().enumerate();
-            for (_, file) in files.filter(|(fi, f)| !f.in_tests() && self.js_loaded(mi, *fi)) {
-                for (category, key) in &file.facts.registrations {
+            for (fi, file) in files.filter(|(fi, _)| self.js_loaded(mi, *fi)) {
+                let toured = || {
+                    self.js_bundles(mi, fi)
+                        .any(|b| !b.contains("unit_tests") && !b.contains("qunit"))
+                };
+                let counts = |category: &str| !file.in_tests() || category == TOUR_REGISTRY && toured();
+                for (category, key) in file.facts.registrations.iter().filter(|(c, _)| counts(c)) {
                     found.keys.entry((category, key)).or_default().push(mi);
                     if category == FIELD_REGISTRY {
                         let suffixes = key.match_indices('.').map(|(at, _)| &key[at + 1..]);
@@ -2058,7 +2070,7 @@ impl<'m> Index<'m> {
                         }
                     }
                 }
-                for category in &file.facts.open_categories {
+                for category in file.facts.open_categories.iter().filter(|c| counts(c)) {
                     found.open.entry(category).or_default().push(mi);
                 }
             }
@@ -2504,7 +2516,8 @@ impl<'m> Index<'m> {
         self.views.definers(name).chain(keys.iter().copied())
     }
 
-    /// Whether a loaded script outside tests adds `key` to the registry `category` in scope.
+    /// Whether a loaded script adds `key` to the registry `category` in scope, as `registries` counts
+    /// them.
     pub fn registry_status(&self, category: &str, key: &str, scope: &Scope) -> Status<'m> {
         let definers = self.registries.keys.get(&(category, key));
         self.definer_status(definers.into_iter().flatten().copied(), scope)
@@ -3997,7 +4010,7 @@ mod tests {
     use super::{
         BASE_MODEL_DUNDERS, BASE_MODEL_EXTRA, BASE_MODEL_METHODS, BASE_PRIVATE_METHODS, BASE_RPC_METHODS, Export,
         FIELD_CLASSES, FieldHolder, FieldSpelling, Index, JsSpec, OLD_BASE_METHODS, OWL_COMPONENT, OWL1_COMPONENT,
-        PlacedWrite, Scope, XmlIdDef, base_private_method, base_rpc_method, class_file, depends_closure,
+        PlacedWrite, Scope, Status, XmlIdDef, base_private_method, base_rpc_method, class_file, depends_closure,
         field_id_prefixes, fold_writes, js_module_path, last_text, mangles_alike, old_base_method, triggers,
         unseen_table_id,
     };
@@ -5007,6 +5020,42 @@ registry.category("actions").add("reload", C);"#,
         ));
         assert!(!index.registry_open("actions", &scope));
         assert!(index.registry_open("actions", &index.scope(1)));
+    }
+
+    #[test]
+    fn a_test_bundle_adds_only_its_tours() {
+        let mut web = module(
+            "web",
+            "{'version': '18.0.1.0', 'assets': {'web.assets_tests': ['web/static/tests/t*.js', 'web/static/tests/o*.js'], \
+             'web.assets_unit_tests': ['web/static/tests/unit/*']}}",
+        );
+        web.js = vec![
+            script(
+                "static/tests/tours.js",
+                r#"registry.category("web_tour.tours").add("checkout", {}); registry.category("services").add("mock", {});"#,
+            ),
+            script(
+                "static/tests/unit/tour.test.js",
+                r#"registry.category("web_tour.tours").add("unit", {});"#,
+            ),
+            script(
+                "static/tests/open.js",
+                r#"const tours = registry.category("web_tour.tours"); tours.add(name, {});
+registry.category("actions").add(tag, {});"#,
+            ),
+        ];
+        let modules = [web];
+        let index = Index::build(&modules, None);
+        let scope = index.scope(0);
+        let visible = |category, key| matches!(index.registry_status(category, key, &scope), Status::Visible);
+        assert!(visible(super::TOUR_REGISTRY, "checkout"));
+        assert!(matches!(
+            index.registry_status(super::TOUR_REGISTRY, "unit", &scope),
+            Status::Missing
+        ));
+        assert!(!visible(super::SERVICE_REGISTRY, "mock"));
+        assert!(index.registry_open(super::TOUR_REGISTRY, &scope));
+        assert!(!index.registry_open("actions", &scope));
     }
 
     #[test]

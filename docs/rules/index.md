@@ -119,7 +119,8 @@ cannot tell which model it names.
 
 XML ids, views and data records, within a file and across the dependency graph. From 17.0, OD329
 to OD331 read the widgets of views and the tags of client actions against the keys that the loaded
-scripts add to the registry of each.
+scripts add to the registry of each, and OD332 the tours that Python tests run against those of the
+tours registry, browser test bundles included.
 
 | Code | Name | Reports |
 | --- | --- | --- |
@@ -154,6 +155,7 @@ scripts add to the registry of each.
 | [OD329](OD329.md) | `unknown-field-widget` | A view gives a field a widget no script registers. |
 | [OD330](OD330.md) | `unknown-view-widget` | A view names a widget no script registers. |
 | [OD331](OD331.md) | `unknown-client-action` | A client action's tag names an action no script registers. |
+| [OD332](OD332.md) | `unknown-tour` | A test runs a tour no script registers. |
 
 ## OD4: access
 
@@ -217,7 +219,8 @@ script alone, for the HTML sinks and debugging leftovers of what a page runs. OD
 saas~15.3, the Owl 1 APIs that Owl 2 dropped, following a component's parents for its `trigger()`
 calls. OD614 and OD615 read the component tags of a bundled template against the `static props` of
 the class that each owning component's `static components` maps the tag to, from 17.0 to
-saas~19.3, where Owl validates props.
+saas~19.3, where Owl validates props. OD616 reads, from 17.0, the keys that scripts give
+`useService()` against those the loaded scripts add to the services registry.
 
 | Code | Name | Reports |
 | --- | --- | --- |
@@ -236,6 +239,7 @@ saas~19.3, where Owl validates props.
 | [OD613](OD613.md) | `owl1-api-removed` | A script uses an Owl 1 API that Owl 2 removed: `hooks`, `tags`, `QWeb` or a component's `trigger()`. |
 | [OD614](OD614.md) | `unknown-component-prop` | A template passes a component a prop its static props do not declare. |
 | [OD615](OD615.md) | `missing-component-prop` | A template leaves out a prop a component's static props require. |
+| [OD616](OD616.md) | `unknown-service` | A script asks `useService()` for a service no script registers. |
 
 ## OD7: data flows
 

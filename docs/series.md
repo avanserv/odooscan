@@ -33,9 +33,9 @@ The flag conflicts with `--odoo-version` and has no configuration key.
 A summary then counts the findings per kind and per rule. A deprecation rule reporting at error
 severity counts as a removed API, below it as a deprecated API. The index rules OD201-OD207,
 OD210-OD212, OD224, OD227, OD229, OD230, OD301, OD302, OD304, OD309-OD312, OD314, OD316, OD320,
-OD322, OD324, OD329-OD331, OD503, OD601-OD606, OD608, OD614 and OD615 count as missing upstream:
-each reports a model, field, column, method, XML id, template, view element, selection value,
-component prop, widget, client action or module that the code names and nothing it depends on
+OD322, OD324, OD329-OD332, OD503, OD601-OD606, OD608 and OD614-OD616 count as missing upstream: each
+reports a model, field, column, method, XML id, template, view element, selection value, component
+prop, widget, client action, service, tour or module that the code names and nothing it depends on
 defines, an override or hook that no longer fits its parent, an inherited or related field whose
 type it no longer matches, a required field a data record leaves unset, a required prop a template
 leaves out, or a script its page lacks. Every other finding counts as other. With `--format text`
