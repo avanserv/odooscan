@@ -71,6 +71,9 @@ file. Read every changed entry and explain each new one in the pull request: an 
 on core is a false positive until shown otherwise. To bump a pinned commit, change it in the
 `Makefile`, then fetch and update the same way.
 
+A comment or doc that cites Odoo source cites a path, with or without a line, in an
+`.oracle/<series>` checkout the `Makefile` pins. An odoo/odoo commit hash may date a series bound.
+
 ## Commits and pull requests
 
 Commits follow [Conventional Commits](https://www.conventionalcommits.org):

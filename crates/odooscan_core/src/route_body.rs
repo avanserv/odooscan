@@ -21,7 +21,7 @@ const TOKEN_CHECKS: &[&str] = &["validate_csrf", "consteq", "compare_digest", "c
 
 /// Calls whose result runs as the user they name, whatever the environment they start from, unless
 /// it is `None`: `with_user(None)` returns its records unchanged (18.0 `odoo/models.py:6341-6342`,
-/// 20.0 `odoo/orm/models.py:5472-5473`), and `Environment(cr, None, ...)` has no user.
+/// 20.0 `odoo/orm/models.py:5469-5470`), and `Environment(cr, None, ...)` has no user.
 const USER_ENVS: &[&str] = &["with_user", "Environment"];
 
 /// The methods Odoo checks no CSRF token on (18.0 `odoo/http.py:219`, 20.0
@@ -240,7 +240,7 @@ pub(crate) fn env_user(call: &ast::ExprCall) -> Option<&Expr> {
     call.arguments.find_argument_value("user", 1)
 }
 
-/// `update_env()` passes its user to `env()` (18.0 `odoo/http.py:1779-1788`, 20.0
+/// `update_env()` passes its user to `env()` (18.0 `odoo/http.py:1702-1711`, 20.0
 /// `odoo/http/requestlib.py:142-151`), and `_auth_method_none()` clears the user (18.0
 /// `odoo/addons/base/models/ir_http.py:251-252`, 20.0 `:369-370`).
 fn sets_user(call: &ast::ExprCall, name: &str) -> bool {

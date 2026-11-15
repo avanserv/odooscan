@@ -328,15 +328,15 @@ rules! {
     // `odoo/modules/module.py:121-140`, 20.0 `:145-155`), or `openerp.addons.<name>` in 9.0 by an
     // import hook over `ad_paths` (`openerp/modules/module.py:49-62`), but its classes count only
     // once installed and loaded first (18.0 `odoo/modules/registry.py:290`, 20.0
-    // `odoo/orm/registry.py:459`): a warning.
+    // `odoo/orm/registry.py:449`): a warning.
     "OD518" "python-import-not-in-depends" Correctness Warning None, true, "A Python import names a module outside depends, which may be missing or load later.";
     "OD519" "unresolved-python-import" Correctness Error None, true, "A Python import names a module or a name the target module does not have.";
-    // Odoo places a module by its deepest dependency (18.0 `odoo/modules/graph.py:30-40`, 20.0
+    // Odoo places a module by its deepest dependency (18.0 `odoo/modules/graph.py:31-41`, 20.0
     // `odoo/modules/module_graph.py:174-199`), and auto-install reads trigger states shared down a
     // chain (18.0 `odoo/addons/base/models/ir_module.py:425-429`), so an implied entry changes nothing.
     "OD520" "implied-dependency" Quality Info None, true, "A module in depends already comes with another one in depends.";
     // A dependency installs its own (18.0 `odoo/addons/base/models/ir_module.py:377-400`) and loads
-    // first (18.0 `odoo/modules/graph.py:30-40`), which a module that uses nothing of it does not need.
+    // first (18.0 `odoo/modules/graph.py:31-41`), which a module that uses nothing of it does not need.
     "OD521" "unused-dependency" Quality Info None, true, "The module uses nothing of a module in depends, nor of what only that one brings.";
     "OD601" "unresolved-js-import" Correctness Error None, true, "A JS import names a module or an export no indexed module provides.";
     // `@web/core/utils/patch` comes with the Owl web client in saas~14.5 (commit `0573acae2306`).

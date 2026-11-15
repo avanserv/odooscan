@@ -151,7 +151,7 @@ pub struct Linked {
 }
 
 /// What an `eval` of x2many commands links. A false `eval` other than a list clears the field, and
-/// an empty list of commands changes nothing (18.0 `odoo/fields.py:4577-4590`). None when an item
+/// an empty list of commands changes nothing (18.0 `odoo/fields.py:4585-4596`). None when an item
 /// is no command, names an id only a run tells, or removes a row, which may be one linked before.
 pub fn linked(eval: &str) -> Option<Linked> {
     let parsed = parse_expression(eval.trim()).ok()?;
