@@ -197,7 +197,9 @@ import reaches.
 ## OD6: JavaScript and Owl
 
 Scripts under `static/src` that a bundle loads, checked against the scripts of every indexed
-module.
+module. A bundle holds what its entries leave in it, applied in module load order: `append`,
+`prepend`, `before` and `after` add files, `include` adds another bundle's, `replace` swaps its
+target for its path and `remove` takes files out, so a file only removed is not checked.
 
 | Code | Name | Reports |
 | --- | --- | --- |

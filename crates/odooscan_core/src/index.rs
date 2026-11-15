@@ -10,7 +10,7 @@ use crate::manifest::{AutoInstall, DEPENDS_BASE, OdooReads};
 use crate::mentions::{HOOK_PREFIXES, Words};
 use crate::project::{Module, SourceFile, code_loaded};
 use crate::series::{self, Series};
-use crate::{imports, routing};
+use crate::{bundles, imports, routing};
 
 /// Fields every model has without declaring them.
 const MAGIC_FIELDS: &[&str] = &[
@@ -1335,25 +1335,14 @@ pub(crate) fn asset_glob_set<'g>(globs: impl IntoIterator<Item = &'g String>) ->
 /// Files of a kind, as (module, index among the module's files of that kind).
 type Loaded = FxHashSet<(usize, usize)>;
 
-/// The scripts and the template files some bundle of an indexed manifest adds, as (module, file).
-/// Odoo expands the globs against the addons directories, so a module may add another module's files.
-fn loaded_static(modules: &[Module]) -> (Loaded, Loaded) {
-    let set = asset_glob_set(modules.iter().flat_map(|m| &m.manifest.assets));
-    let loaded = |files: fn(&Module) -> Vec<&str>| {
-        let mut loaded = FxHashSet::default();
-        for (mi, module) in modules.iter().enumerate() {
-            for (fi, rel) in files(module).into_iter().enumerate() {
-                if set.is_match(format!("{}/{rel}", module.name)) {
-                    loaded.insert((mi, fi));
-                }
-            }
-        }
-        loaded
-    };
-    (
-        loaded(|m| m.js.iter().map(|f| f.rel.as_str()).collect()),
-        loaded(|m| m.templates.iter().map(|f| f.rel.as_str()).collect()),
-    )
+/// The scripts and the template files some bundle of an indexed manifest loads, as (module, file).
+/// A bundle may load another module's files, and a file only removed from bundles is not loaded.
+fn loaded_static(modules: &[Module], by_name: &FxHashMap<&str, usize>, series: Option<Series>) -> (Loaded, Loaded) {
+    let order = load_order(modules, by_name, series);
+    let bundles = bundles::of_modules(modules, by_name, &order);
+    let js = bundles.values().flat_map(|c| &c.js).copied().collect();
+    let templates = bundles.values().flat_map(|c| &c.templates).copied().collect();
+    (js, templates)
 }
 
 /// The templates of the loaded template files: a registered one under its name, and an extension
@@ -1650,7 +1639,7 @@ impl<'m> Index<'m> {
             });
         }
         let models_with_access = access_models(modules, &model_by_xmlid, default_series);
-        let (js_loaded, templates_loaded) = loaded_static(modules);
+        let (js_loaded, templates_loaded) = loaded_static(modules, &by_name, default_series);
         let (hook_names, hook_prefixes) = hook_mentions(modules);
         let imports = imports::Graph::of_modules(modules, default_series);
         let unread_dependent = unread_dependents(modules, &by_name, &imports, default_series);

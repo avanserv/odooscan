@@ -1154,7 +1154,7 @@ fn outside_static(name: &str, path: &str, parts: &[&str], static_only: bool) -> 
 }
 
 /// Whether `path` holds one of the characters Odoo reads as a glob (`WILDCARD_CHARACTERS`).
-fn wildcard(path: &str) -> bool {
+pub(crate) fn wildcard(path: &str) -> bool {
     path.contains(['*', '?', '[', ']'])
 }
 

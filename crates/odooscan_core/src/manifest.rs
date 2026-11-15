@@ -121,10 +121,34 @@ impl AutoInstall {
     }
 }
 
+/// What an entry of a bundle's list does to the bundle, as Odoo's asset loader names it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Directive {
+    Append,
+    Prepend,
+    Before,
+    After,
+    Replace,
+    Remove,
+    Include,
+}
+
+/// An entry of a bundle's list, its path and target without a leading `/`.
+#[derive(Debug, PartialEq, Eq)]
+pub struct AssetEntry {
+    pub directive: Directive,
+    /// The file `before`, `after` and `replace` place the path relative to.
+    pub target: Option<String>,
+    /// A path or glob, or for `include` the name of a bundle.
+    pub path: String,
+}
+
 /// A bundle of the manifest's `assets`, at its key.
 #[derive(Debug)]
 pub struct Bundle {
     pub name: Spanned<String>,
+    /// The entries Odoo applies, in list order.
+    pub entries: Vec<AssetEntry>,
     /// What `asset_globs` reads from its list.
     pub globs: Vec<String>,
     /// The path or glob of each entry but an `include`, as written, at the string.
@@ -158,8 +182,6 @@ pub struct Manifest {
     pub auto_install: AutoInstall,
     /// The `countries` key lists a name.
     pub countries: bool,
-    /// Globs the `assets` bundles add, relative to the addons directory.
-    pub assets: Vec<String>,
     /// Each bundle `assets` gives a non-empty list.
     pub bundles: Vec<Bundle>,
     /// The entries of the `qweb` key, normalized, at the key, when its list names a file.
@@ -338,8 +360,6 @@ impl Manifest {
             let Expr::List(list) = &item.value else {
                 continue;
             };
-            let globs = asset_globs(&list.elts);
-            self.assets.extend(globs.iter().cloned());
             let Some(key) = item.key.as_ref().filter(|_| !list.elts.is_empty()) else {
                 continue;
             };
@@ -348,8 +368,12 @@ impl Manifest {
                     value: name.to_owned(),
                     pos: loc.at(key),
                 };
-                let paths = asset_paths(loc, &list.elts);
-                self.bundles.push(Bundle { name, globs, paths });
+                self.bundles.push(Bundle {
+                    name,
+                    entries: list.elts.iter().filter_map(asset_entry).collect(),
+                    globs: asset_globs(&list.elts),
+                    paths: asset_paths(loc, &list.elts),
+                });
             }
         }
     }
@@ -1077,6 +1101,46 @@ fn asset_paths(loc: &Source, entries: &[Expr]) -> Vec<Spanned<String>> {
         .collect()
 }
 
+/// An entry of a bundle's list as Odoo reads one: a string appends, and a tuple or list names its
+/// directive first, then the target for those that take one, then the path. Odoo raises on any
+/// other shape, and a URL is no file of a module, so neither gives an entry.
+fn asset_entry(entry: &Expr) -> Option<AssetEntry> {
+    let items = match entry {
+        Expr::Tuple(t) => &t.elts[..],
+        Expr::List(l) => &l.elts[..],
+        e => std::slice::from_ref(e),
+    };
+    let items: Vec<&str> = items.iter().map(str_lit).collect::<Option<_>>()?;
+    let (directive, target, path) = match items[..] {
+        [path] if matches!(entry, Expr::StringLiteral(_)) => (Directive::Append, None, path),
+        [op, path] => (directive(op, false)?, None, path),
+        [op, target, path] => (directive(op, true)?, Some(target), path),
+        _ => return None,
+    };
+    let trim = |p: &str| p.trim_start_matches('/').to_owned();
+    (!path.contains("://")).then(|| AssetEntry {
+        directive,
+        target: target.map(trim),
+        path: trim(path),
+    })
+}
+
+/// The directive `op` names, when its entry has a target exactly if it takes one.
+fn directive(op: &str, targeted: bool) -> Option<Directive> {
+    let directive = match op {
+        "append" => Directive::Append,
+        "prepend" => Directive::Prepend,
+        "remove" => Directive::Remove,
+        "include" => Directive::Include,
+        "before" => Directive::Before,
+        "after" => Directive::After,
+        "replace" => Directive::Replace,
+        _ => return None,
+    };
+    let takes = matches!(directive, Directive::Before | Directive::After | Directive::Replace);
+    (takes == targeted).then_some(directive)
+}
+
 /// The globs of a bundle's list, whether a plain entry or the last item of an `(op, ..., glob)` one.
 /// `include` names a bundle and `remove` takes files out, so neither adds anything.
 fn asset_globs(entries: &[Expr]) -> Vec<String> {
@@ -1099,18 +1163,44 @@ mod tests {
     use super::*;
 
     #[test]
-    fn reads_the_globs_bundles_add() {
+    fn reads_each_entry_of_a_bundle_as_odoo_does() {
         let m = parse(
             r#"{"assets": {"web.assets_backend": [
                 "x/static/src/**/*",
                 ("include", "web._assets_core"),
                 ("remove", "x/static/src/old.js"),
                 ("after", "web/static/src/a.js", "/x/static/src/b.js"),
+                ["replace", "/web/static/src/c.js", "x/static/src/c.js"],
+                ("append", "x/static/src/d.js"),
+                ("prepend", "x/static/src/e.js"),
                 "https://cdn.example.com/lib.js",
+                ("before", "x/static/src/f.js"),
+                ("remove", "web/static/src/a.js", "x/static/src/g.js"),
+                ("move", "x/static/src/h.js"),
+                ("x/static/src/i.js",),
+                ("remove", 3),
             ]}}"#,
         )
         .unwrap();
-        assert_eq!(m.assets, ["x/static/src/**/*", "x/static/src/b.js"]);
+        let entry = |directive, target: Option<&str>, path: &str| AssetEntry {
+            directive,
+            target: target.map(str::to_owned),
+            path: path.to_owned(),
+        };
+        assert_eq!(
+            m.bundles[0].entries,
+            [
+                entry(Directive::Append, None, "x/static/src/**/*"),
+                entry(Directive::Include, None, "web._assets_core"),
+                entry(Directive::Remove, None, "x/static/src/old.js"),
+                entry(Directive::After, Some("web/static/src/a.js"), "x/static/src/b.js"),
+                entry(Directive::Replace, Some("web/static/src/c.js"), "x/static/src/c.js"),
+                entry(Directive::Append, None, "x/static/src/d.js"),
+                entry(Directive::Prepend, None, "x/static/src/e.js"),
+            ]
+        );
+        let globs = &m.bundles[0].globs;
+        assert_eq!(globs[..2], ["x/static/src/**/*", "x/static/src/b.js"]);
     }
 
     #[test]
