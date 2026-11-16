@@ -7,6 +7,8 @@ from odoo import models
 class SaleOrderQueries(models.Model):
     _inherit = "bad.order"
 
+    MAIL_PATTERN = re.compile(r"[^@\s]+@[^@\s]+")
+
     def action_close_lines(self):
         lines = self.line_ids
         for line in lines:
@@ -69,3 +71,16 @@ class SaleOrderQueries(models.Model):
             order.write({"name": str(uuid.uuid4())})
             order.partner_id = self.env["res.partner"].browse(order.partner_id.id)
             self.env["bad.order.line"].search_count([("order_id.partner_id", "=", order.partner_id.id)])
+
+    def action_sequenced(self, text):
+        total = 0
+        partner = None
+        for order in self:
+            code = self.env["ir.sequence"].next_by_code("bad.order")
+            self.env["res.partner"].search([("name", "=", code)])
+            total = total + self.env["bad.order.line"].search_count([])
+            if partner is None:
+                partner = self.env["res.partner"].browse(order.partner_id.id)
+            order.write({"name": partner.name})
+        pattern = self.MAIL_PATTERN
+        return total, pattern.search(text)[0]

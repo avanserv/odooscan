@@ -29,6 +29,11 @@ const RECORD_METHODS: &[&str] = &[
     "with_prefetch",
 ];
 
+/// The calls that give a new value each time they run: a sequence's next number (18.0 and 20.0
+/// `odoo/addons/base/models/ir_sequence.py`, `_next_do()`), and the records `create()` inserts. Not
+/// `copy()`, which a dict has too.
+const NEW_VALUE_CALLS: &[&str] = &["create", "next_by_code", "next_by_id"];
+
 /// The domain operators that join the terms of a domain.
 const DOMAIN_OPERATORS: &[&str] = &["&", "|", "!"];
 
@@ -39,6 +44,7 @@ pub(crate) fn check(func: &ast::StmtFunctionDef, model: bool, loc: &Locator) -> 
         loc,
         records: FxHashSet::default(),
         dicts: FxHashSet::default(),
+        attrs: FxHashSet::default(),
         bound: func.parameters.iter().map(|p| p.name().as_str()).collect(),
         loops: vec![],
         isolated: 0,
@@ -68,8 +74,9 @@ struct Loop<'a> {
     /// The names the function had bound when the loop started.
     before: FxHashSet<&'a str>,
     /// The `varying` names the statement only assigns values that do not vary, which a query may
-    /// take as the same on each pass. A write may not: a call among them, such as a sequence's next
-    /// number, may give each pass a new value.
+    /// take as the same on each pass: none holds one of the `NEW_VALUE_CALLS`. A write may not take
+    /// them as the same: any other call among them, such as one that makes a token, may give each
+    /// pass a new value.
     steady: FxHashSet<&'a str>,
     /// The names the statement reads an attribute of, which fetches the record a name holds.
     read: FxHashSet<&'a str>,
@@ -113,6 +120,9 @@ struct Walk<'a, 'l> {
     records: FxHashSet<&'a str>,
     /// The names last bound to a dict literal or a `dict()` call.
     dicts: FxHashSet<&'a str>,
+    /// The names last bound to an attribute of records, which `is_model` leaves out as it leaves out
+    /// the attribute, while a loop over one still counts as one over records.
+    attrs: FxHashSet<&'a str>,
     /// The names the function has bound so far, its parameters among them.
     bound: FxHashSet<&'a str>,
     loops: Vec<Loop<'a>>,
@@ -139,10 +149,16 @@ impl<'a> Walk<'a, '_> {
         self.loops.last().filter(|_| self.loops.len() > self.isolated)
     }
 
-    /// Records a query is called on. An attribute of records is left out: it may be a field, or a
-    /// class constant such as a compiled pattern, whose `search()` is not the ORM's.
+    /// Records a query is called on. An attribute of records, or a name last bound to one, is left out:
+    /// it may be a field, or a class constant such as a compiled pattern, whose `search()` is not
+    /// the ORM's.
     fn is_model(&self, expr: &Expr) -> bool {
-        !expr.is_attribute_expr() && self.is_records(expr)
+        let attr = match expr {
+            Expr::Attribute(_) => true,
+            Expr::Name(n) => self.attrs.contains(n.id.as_str()),
+            _ => false,
+        };
+        !attr && self.is_records(expr)
     }
 
     fn is_records(&self, expr: &Expr) -> bool {
@@ -181,7 +197,20 @@ impl<'a> Walk<'a, '_> {
         for name in names.0 {
             toggle(&mut self.records, name, single && records);
             toggle(&mut self.dicts, name, single && dict);
+            self.attrs.remove(name);
             self.bound.insert(name);
+        }
+    }
+
+    /// Binds the names of `target` to `value` by an assignment or `:=`.
+    fn bind_value(&mut self, target: &'a Expr, value: &Expr) {
+        let records = self.is_records(value);
+        self.bind(target, records, is_dict(value));
+        if let Expr::Name(n) = target
+            && records
+            && value.is_attribute_expr()
+        {
+            self.attrs.insert(n.id.as_str());
         }
     }
 
@@ -189,10 +218,9 @@ impl<'a> Walk<'a, '_> {
         let outer = self.assigned.replace((targets, value));
         self.visit_expr(value);
         self.assigned = outer;
-        let (records, dict) = (self.is_records(value), is_dict(value));
         for target in targets {
             self.visit_expr(target);
-            self.bind(target, records, dict);
+            self.bind_value(target, value);
         }
     }
 
@@ -271,21 +299,27 @@ impl<'a> Walk<'a, '_> {
 
     /// Whether the test of an `if` the walk is in, inside the innermost records loop, names `name`.
     fn guards(&self, name: &str) -> bool {
-        self.guards
-            .iter()
-            .any(|test| any_over_expr(test, |e| matches!(e, Expr::Name(n) if n.id.as_str() == name)))
+        self.guards.iter().any(|test| reads_name(test, name))
     }
 
-    /// Whether the assignment the walk is in stores its value in a cache the loop fills once: a
-    /// name bound before the loop, when the query does not vary, or under an `if` that tests it,
-    /// and an item of a collection under an `if` that tests the collection, once per key.
-    fn caches(&self, frame: &Loop, varies: bool) -> bool {
-        let Some((targets, _)) = self.assigned else {
+    /// Whether the assignment the walk is in stores the result of `call` in a cache the loop fills
+    /// once: a name bound before the loop, when the query does not vary, or under an `if` that tests
+    /// it, and an item of a collection bound before the loop under an `if` that tests the collection,
+    /// once per key. Under such an `if`, any value fills the cache but one that reads it without
+    /// being the result itself, such as a running sum.
+    fn caches(&self, call: &ast::ExprCall, frame: &Loop, varies: bool) -> bool {
+        let Some((targets, value)) = self.assigned else {
             return false;
         };
+        let result = result_of(value, call);
+        let fills =
+            |name: &str| frame.before.contains(name) && self.guards(name) && (result || !reads_name(value, name));
         targets.iter().any(|target| match target {
-            Expr::Name(n) => frame.before.contains(n.id.as_str()) && (!varies || self.guards(n.id.as_str())),
-            Expr::Subscript(s) => root_name(&s.value).is_some_and(|name| self.guards(name)),
+            Expr::Name(n) => {
+                let name = n.id.as_str();
+                fills(name) || (frame.before.contains(name) && !varies && result)
+            }
+            Expr::Subscript(s) => root_name(&s.value).is_some_and(fills),
             _ => false,
         })
     }
@@ -376,7 +410,7 @@ impl<'a> Walk<'a, '_> {
             return None;
         }
         let varies = frame.any_differs(arguments(call));
-        if self.caches(frame, varies) {
+        if self.caches(call, frame, varies) {
             return None;
         }
         if !varies {
@@ -408,9 +442,12 @@ impl<'a> Walk<'a, '_> {
     /// OD135 on a browse of one id that differs on each pass, whose record the pass then reads:
     /// it prefetches that record alone (18.0 `odoo/models.py`, 20.0 `odoo/orm/models.py`,
     /// `browse()`). A record browsed and only stored, or browsed by the same id each time, costs no
-    /// query per pass.
+    /// query per pass; unless its result goes to a cache.
     fn browse_in_loop(&self, call: &ast::ExprCall, receiver: &Expr, frame: &Loop) -> Option<(&'static str, String)> {
         let ids = call.arguments.find_argument_value("ids", 0)?;
+        if self.caches(call, frame, frame.differs(ids)) {
+            return None;
+        }
         let read = self.fetched == Some(call.range())
             || self.assigned.is_some_and(|(targets, value)| {
                 gives(value, call)
@@ -505,8 +542,7 @@ impl<'a> Visitor<'a> for Walk<'a, '_> {
             }
             Expr::Named(n) => {
                 self.visit_expr(&n.value);
-                let (records, dict) = (self.is_records(&n.value), is_dict(&n.value));
-                self.bind(&n.target, records, dict);
+                self.bind_value(&n.target, &n.value);
                 return;
             }
             _ => {}
@@ -577,8 +613,9 @@ impl<'a> Visitor<'a> for Assigns<'a> {
 }
 
 /// The names of `frame` the loop statement `stmt` binds with one plain assignment alone, of a value
-/// that names nothing else that varies, so that each pass gives them the same value. A name bound
-/// before the loop, or assigned in two branches, may hold either value depending on the record.
+/// that names nothing else that varies and holds none of the `NEW_VALUE_CALLS`, so that each pass
+/// gives them the same value. A name bound before the loop, or assigned in two branches, may hold
+/// either value depending on the record.
 /// `bound` holds a name once per binding, and `changed` the names the statement changes in place.
 fn steady<'a>(stmt: &'a Stmt, bound: &[&'a str], changed: &FxHashSet<&str>, frame: &Loop) -> FxHashSet<&'a str> {
     let mut assigns = Assigns::default();
@@ -592,7 +629,11 @@ fn steady<'a>(stmt: &'a Stmt, bound: &[&'a str], changed: &FxHashSet<&str>, fram
         values.entry(name).or_default().push(value);
     }
     values.retain(|name, v| {
-        v.len() == 1 && bindings.get(name) == Some(&1) && !changed.contains(name) && !frame.before.contains(name)
+        v.len() == 1
+            && bindings.get(name) == Some(&1)
+            && !changed.contains(name)
+            && !frame.before.contains(name)
+            && !v.iter().any(|value| new_value(value))
     });
     let mut steady: FxHashSet<&'a str> = values.keys().copied().collect();
     loop {
@@ -617,6 +658,14 @@ fn steady<'a>(stmt: &'a Stmt, bound: &[&'a str], changed: &FxHashSet<&str>, fram
     }
 }
 
+/// Whether `value` holds one of the `NEW_VALUE_CALLS`.
+fn new_value(value: &Expr) -> bool {
+    any_over_expr(
+        value,
+        |e| matches!(e, Expr::Call(c) if tail_name(&c.func).is_some_and(|name| NEW_VALUE_CALLS.contains(&name))),
+    )
+}
+
 /// The names a statement reads an attribute of, but its id, ids or environment.
 #[derive(Default)]
 struct Read<'a>(FxHashSet<&'a str>);
@@ -639,6 +688,27 @@ fn gives(value: &Expr, call: &ast::ExprCall) -> bool {
         Expr::BoolOp(b) => b.values.iter().any(|v| gives(v, call)),
         v => v.range() == call.range(),
     }
+}
+
+/// Whether `value` is the result of `call`: `call`, an operand of `or` or `and` or a branch of
+/// `if`-`else` that is, or an attribute, an item or a method call of one. Without an `if` that tests
+/// the cache, a value computed from it, such as a running sum, is no cache: each pass runs the query
+/// again to compute the next one.
+fn result_of(value: &Expr, call: &ast::ExprCall) -> bool {
+    match value {
+        _ if value.range() == call.range() => true,
+        Expr::BoolOp(b) => b.values.iter().any(|v| result_of(v, call)),
+        Expr::If(i) => result_of(&i.body, call) || result_of(&i.orelse, call),
+        Expr::Attribute(a) => result_of(&a.value, call),
+        Expr::Subscript(s) => result_of(&s.value, call),
+        Expr::Call(c) => matches!(&*c.func, Expr::Attribute(a) if result_of(&a.value, call)),
+        _ => false,
+    }
+}
+
+/// Whether `expr` reads the name `name`.
+fn reads_name(expr: &Expr, name: &str) -> bool {
+    any_over_expr(expr, |e| matches!(e, Expr::Name(n) if n.id.as_str() == name))
 }
 
 /// The name an item of a name, at any depth, belongs to, such as `vals` in `vals[k][0]`.
@@ -1013,6 +1083,7 @@ mod tests {
             "    found = None\n    for rec in self:\n        if rec.y:\n            found = self.env['a'].search([('x', '=', rec.x)])\n",
             "    cache = {}\n    if not cache:\n        for rec in self:\n            cache[rec.x] = self.env['a'].search([('x', '=', rec.x)])\n",
             "    for rec in self:\n        found = None\n        if found is None:\n            found = self.env['a'].search([('x', '=', rec.x)])\n",
+            "    for rec in self:\n        vals = rec.vals()\n        if vals.get('x'):\n            vals['y'] = self.env['a'].search([('x', '=', rec.x)])\n",
         ] {
             assert_eq!(codes(body), ["OD134"], "{body}");
         }
@@ -1036,6 +1107,106 @@ mod tests {
             let found = messages(body);
             assert!(found.iter().all(|m| !m.contains("same query")), "{body}");
         }
+    }
+
+    #[test]
+    fn a_name_holding_a_new_value_on_each_pass_keys_a_search() {
+        for (body, field) in [
+            (
+                "    for rec in self:\n        code = self.env['ir.sequence'].next_by_code('x')\n        self.env['a'].search([('name', '=', code)])\n",
+                "name",
+            ),
+            (
+                "    for rec in self:\n        line = self.env['l'].create({})\n        self.env['a'].search([('line_id', '=', line.id)])\n",
+                "line_id",
+            ),
+            (
+                "    for rec in self:\n        number = self.env['ir.sequence'].browse(1).next_by_id()\n        ref = 'R' + number\n        self.env['a'].search_count([('ref', '=', ref)])\n",
+                "ref",
+            ),
+        ] {
+            let found = messages(body);
+            assert_eq!(found.len(), 1, "{body}");
+            assert!(found[0].contains(&format!("keyed on {field};")), "{}", found[0]);
+        }
+    }
+
+    #[test]
+    fn a_copied_dict_is_no_new_value() {
+        let body = "    for rec in self:\n        v = vals.copy()\n        self.env['a'].search([('name', '=', v)])\n";
+        let found = messages(body);
+        assert_eq!(found.len(), 1);
+        assert!(found[0].contains("same query"), "{}", found[0]);
+    }
+
+    #[test]
+    fn a_value_computed_from_a_search_without_a_guard_is_not_a_cache() {
+        for body in [
+            "    total = 0\n    for rec in self:\n        total = total + self.env['a'].search_count([])\n",
+            "    total = 0\n    for rec in self:\n        total = self.env['a'].search_count([]) + total\n",
+            "    total = 0\n    for rec in self:\n        if total < 10:\n            total = total + self.env['a'].search_count([('x', '=', rec.x)])\n",
+            "    found = None\n    for rec in self:\n        found = key(self.env['a'].search([]))\n",
+        ] {
+            assert_eq!(codes(body), ["OD134"], "{body}");
+        }
+    }
+
+    #[test]
+    fn a_search_result_or_a_guarded_value_from_it_is_a_cache() {
+        for value in [
+            "sum(self.env['a'].search([('x', '=', rec.x)]).mapped('y'))",
+            "bool(self.env['a'].search_count([('x', '=', rec.x)]))",
+            "set(self.env['a'].search([('x', '=', rec.x)]).ids)",
+            "self.env['a'].search_count([('x', '=', rec.x)]) > 0",
+            "{r.id: r for r in self.env['a'].search([('x', '=', rec.x)])}",
+        ] {
+            let body = format!(
+                "    cache = {{}}\n    for rec in self:\n        if rec.x not in cache:\n            cache[rec.x] = {value}\n"
+            );
+            assert_eq!(codes(&body), NONE, "{body}");
+        }
+        let guarded = "    found = None\n    for rec in self:\n        if found is None:\n            found = key(self.env['a'].search([('x', '=', rec.x)]))\n";
+        assert_eq!(codes(guarded), NONE);
+        for value in [
+            "self.env['a'].search([]).ids",
+            "self.env['a'].search([], limit=2)[:1]",
+            "self.env['a'].search([]).filtered('x')",
+            "found or self.env['a'].search([])",
+            "found if found else self.env['a'].search([], limit=1)",
+            "self.env['a'].search([], limit=1) if not found else found",
+        ] {
+            let body = format!("    found = None\n    for rec in self:\n        found = {value}\n");
+            assert_eq!(codes(&body), NONE, "{body}");
+        }
+    }
+
+    #[test]
+    fn a_browse_a_cache_holds_is_not_reported() {
+        for body in [
+            "    partner = None\n    for rec in self:\n        if partner is None:\n            partner = self.env['a'].browse(rec.x.id)\n        key.append(partner.name)\n",
+            "    names = {}\n    for rec in self:\n        if rec.x.id not in names:\n            names[rec.x.id] = self.env['a'].browse(rec.x.id).name\n",
+        ] {
+            assert_eq!(codes(body), NONE, "{body}");
+        }
+        let unguarded = "    partner = None\n    for rec in self:\n        partner = self.env['a'].browse(rec.x.id)\n        key.append(partner.name)\n";
+        assert_eq!(codes(unguarded), ["OD135"]);
+        let rebuilt = "    for rec in self:\n        vals = rec.vals()\n        if vals.get('x'):\n            vals['y'] = self.env['a'].browse(int(vals['x'])).name\n";
+        assert_eq!(codes(rebuilt), ["OD135"]);
+    }
+
+    #[test]
+    fn a_name_bound_to_an_attribute_is_no_model_but_still_records() {
+        for body in [
+            "    pattern = self.x_mail_pattern\n    return pattern.search(text)[0]\n",
+            "    if (pattern := self.x_mail_pattern):\n        return len(pattern.search(text))\n",
+            "    partner = self.partner_id\n    for rec in self:\n        partner.search([])\n",
+        ] {
+            assert_eq!(codes(body), NONE, "{body}");
+        }
+        let rebound = "    x = self.partner_id\n    x = self.env['a']\n    return x.search([])[0]\n";
+        assert_eq!(codes(rebound), ["OD139"]);
+        let looped = "    lines = self.line_ids\n    for line in lines:\n        self.env['a'].search([])\n";
+        assert_eq!(codes(looped), ["OD134"]);
     }
 
     #[test]

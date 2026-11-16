@@ -235,3 +235,10 @@ class IrActionsClient(models.Model):
 
     name = fields.Char()
     tag = fields.Char()
+
+
+class IrSequence(models.Model):
+    _name = "ir.sequence"
+
+    def next_by_code(self, sequence_code):
+        return sequence_code
