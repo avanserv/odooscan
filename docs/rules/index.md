@@ -18,18 +18,14 @@ that apply to every series.
 
 ## Load failures
 
-Rule pages say a failure stops the install: that holds for a file of `data`. From saas~11.5, except
-as below, a failure while loading a file of `demo` stops neither the install nor the update: Odoo
-logs a warning and installs the module without its demo data. That covers the load alone: an update
-validates a view of that file again after it, so a view that no longer validates stops the update.
-Before saas~11.5 any failure in a `demo` file stops them like a data file.
+Rule pages say a failure stops the install, which holds for a file of `data`. Before saas~11.5 a
+`demo` file stops the install and the update the same way. From saas~11.5 a failure in a `demo` file
+only logs a warning, and Odoo installs the module without its demo data, with two exceptions:
 
-From saas~12.5 to 19.0, Odoo holds a write to an existing record and sends it after the step that
-logs that warning (18.0 `odoo/modules/loading.py:89`, `:255`). A value the database refuses there,
-such as a number no record holds on a foreign key, still stops the install, unless the same demo
-load flushes it earlier, as a later CSV file or a `<delete>` that removes a record does. From
-saas~19.1 each demo file's writes are sent inside that step (20.0 `odoo/modules/loading.py:57`). A
-created record is inserted at once on every series.
+- An update validates the views of a `demo` file again after loading it, so a view that no longer
+  validates stops the update.
+- From saas~12.5 to 19.0 a write to an existing record that the database refuses stops the install,
+  as [OD321](OD321.md) explains.
 
 ## OD0: parsing
 
@@ -88,13 +84,10 @@ in one file.
 
 ## OD2: models and fields
 
-Models, fields and methods checked against every module in the dependency graph. A model class has
-`Model`, `TransientModel`, `AbstractModel`, their aliases `osv`, `osv_memory` and `osv_abstract` or,
-from 20.0, `CachedModel` among its bases, and any other base is a plain Python base class, which the
-rules whose page says so skip, since only Python knows its fields and methods. As each page says,
-they also skip a model when a class of it, or of a model it inherits or, for a rule reading fields,
-delegates to, has an `_inherit` element that is not a literal, such as a variable, since the scan
-cannot tell which model it names.
+Models, fields and methods, checked against every module in the dependency graph. A class is a
+model when its bases include `Model`, `TransientModel` or `AbstractModel`, their aliases `osv`,
+`osv_memory` and `osv_abstract`, or from 20.0 `CachedModel`. Any other base is a plain Python base
+class: only Python knows its fields and methods, so a rule whose page says so skips the model.
 
 | Code | Name | Reports |
 | --- | --- | --- |
@@ -133,10 +126,9 @@ cannot tell which model it names.
 
 ## OD3: XML ids, views and data
 
-XML ids, views and data records, within a file and across the dependency graph. From 17.0, OD329
-to OD331 read the widgets of views and the tags of client actions against the keys that the loaded
-scripts add to the registry of each, and OD332 the tours that Python tests run against those of the
-tours registry, browser test bundles included.
+XML ids, views and data records, within a file and across the dependency graph. From 17.0, some
+rules read the names that views, client actions and tests use against the keys that the loaded
+scripts add to a registry.
 
 | Code | Name | Reports |
 | --- | --- | --- |
@@ -192,9 +184,9 @@ field without an index.
 
 ## OD5: manifest and module graph
 
-The manifest and the dependency graph: its keys, listed files, unlisted files, assets,
-dependencies, migration scripts, the Python imports between modules, and Python files and tests no
-import reaches.
+The manifest and the dependency graph. The rules read the manifest's keys, the files it lists and
+those it leaves out, its assets and dependencies, migration scripts, the Python imports between
+modules, and the Python files and tests no import reaches.
 
 | Code | Name | Reports |
 | --- | --- | --- |
@@ -223,27 +215,14 @@ import reaches.
 ## OD6: JavaScript and Owl
 
 Scripts under `static/src` and `static/tests` that a bundle loads, checked against the scripts of
-every indexed module. A test script is one under `static/tests` or in a `tests` folder under
-`static/src`, even when a shipped bundle loads it too, or one that only test bundles load: those
-with `test`, `tests`, `qunit` or `mocha` among the `_`-separated words of their name after the
-module, such as `web.qunit_suite_tests` and `web_editor.mocha_tests`. A test script has only its
-imports checked, by OD601 and OD608: a unit test runs on a mock server whose models it defines, and
-its patches apply while it runs. A bundle holds what its entries leave in it, applied in module load
-order: `append`, `prepend`, `before` and `after` add files, `include` adds another bundle's,
-`replace` swaps its target for its path and `remove` takes files out, so a file only removed is not
-checked. Before saas~14.3 a bundle is a template, and each template extending it adds its scripts
-where its specs place them, while the manifest's `assets` key adds nothing. A script Odoo does not
-run as an ES module, every one before saas~14.3, has the dependencies of its `odoo.define()` calls
-checked by OD601 and OD608 instead of its imports, and its RPC calls as an ES module's. In an ES
-module from saas~14.5 to 16.0 a patch names itself, and OD602 reads its `this._super()` calls. OD608
-reads the bundles of the two web client pages, backend and frontend, from 18.0 on, and on the
-frontend which of them load before the others. OD609 to OD612 read each script alone, for the HTML
-sinks and debugging leftovers of what a page runs. OD613 reads, from saas~15.3, the Owl 1 APIs that
-Owl 2 dropped, following a component's parents for its `trigger()` calls. OD614 and OD615 read the
-component tags of a bundled template against the `static props` of the class that each owning
-component's `static components` maps the tag to, from 17.0 to saas~19.3, where Owl validates props.
-OD616 reads, from 17.0, the keys that scripts give `useService()` against those the loaded scripts
-add to the services registry.
+every indexed module. [OD601](OD601.md) says which scripts Odoo runs as ES modules, how a bundle is
+built on each series, and which scripts are test scripts.
+
+- Bundles: a bundle holds the files its entries leave in it, applied in module load order, so a
+  file that `remove` entries take out of every bundle is not checked.
+- Test scripts: those under `static/tests` or a `tests` folder of `static/src`, and those only test
+  bundles load, whose names have `test`, `tests`, `qunit` or `mocha` as a word. Only their imports
+  are checked, by OD601 and OD608.
 
 | Code | Name | Reports |
 | --- | --- | --- |
@@ -267,87 +246,9 @@ add to the services registry.
 ## OD7: data flows
 
 Values a user controls, followed through one function to the calls that must not receive them or,
-for OD716, to what a route returns.
-
-The sources are the parameters of a controller method behind `@route`; the parameters of a public
-model method (no leading `_`, no `@api.private`), which any user with access to the model can call
-over RPC; and the request: `request.params`, `request.get_json_data()`,
-`request.get_http_params()`, and the `args`, `form`, `values`, `files`, `cookies`, `headers`, `data`
-and JSON of `request.httprequest`. A route parameter that a `model` or `models` converter fills in
-every URL of the route, those an override inherits included, holds records, whose ids alone the
-user picks, and is no source. A URL that leaves it out lets the query string give any value.
-
-A value stays tainted through assignments, attributes of `self` set in the same method, formatting,
-concatenation, f-strings, string methods, items, attributes, collections, comprehensions and module
-functions such as `json.loads()`. A value set on an attribute reaches the whole object: a read of
-the object or of any of its attributes carries it. The exception is a parameter's or a call's value
-set on a local or an attribute of `self` bound to another such value and holding no user value: it
-reaches only reads of that attribute, as `stream.etag` does not reach `open(stream.path)`, and a
-read of the whole object, as `return stream`, `self._z(stream)`, `getattr()`, `vars()` and
-`__dict__` do, misses it. A read through `sudo()`, `with_context()` and the other methods that
-change only the environment, as `m.sudo().body_html`, or through the target of a `for` loop over the
-object, is a read of that attribute. A user value set on any object reaches the whole object.
-Binding that local or attribute again drops what its attributes kept, unless it is bound to the same
-records in another environment, as `x = x.sudo()` does. `getattr()` keeps its object and its default
-but not the name it reads, and `match()` and `fullmatch()` on an untainted pattern keep the string
-they match. What a recordset method such as `browse()` or `search()` returns is not tainted, but for
-OD712, which follows the records of `env[t]` or `env.get(t)` through locals, `sudo()`, `browse()`,
-`exists()` and `filtered()`, and OD716, which follows the records `browse()` reads by an id the user
-picks into what a route returns, until a check of them. OD717 follows the `public` flag and the
-content of the values for `ir.attachment` through dict literals, `dict()`, lists, locals and their
-items, and reports a create without superuser mode only where the scanned modules grant portal or
-public users create on `ir.attachment`. Both branches of an `if` are followed and a loop body is
-read twice, its `for` target bound again from the iterable before each reading. A branch that
-returns or raises adds nothing after it, and one ending in `continue` adds its state only to the
-next pass and the code after the loop.
-
-A value passed to a method of `self`, of `env["x"]` or of a local bound to one is followed into
-every definition of that method the module's dependencies hold, overrides included, up to four calls
-deep; so is a value such a method returns, or returns from a method it calls. A value built from
-several parameters or calls, such as `a + b`, `x or self._y()` or the two arms of an `if`, is
-followed from each. The finding is at the sink when the module holds it, otherwise at the call that
-leaves the module. Records run as superuser after `sudo()`, `sudo(SUPERUSER_ID)` before saas~15.3,
-`with_user(SUPERUSER_ID)` or `with_user(1)`, and so do those of an environment built by
-`env(su=True)`, `env(user=SUPERUSER_ID)` or `Environment(cr, SUPERUSER_ID, ...)`, until
-`with_user()` or `env(user=u)` for another user. `sudo(False)`, `env(su=False)` and a `sudo(flag)`
-whose flag the code computes end it too, except from saas~12.5 on the records of the superuser,
-which Odoo runs in superuser mode whatever `su` is. Before saas~15.3, a `sudo(x)` whose `x` is no
-bool literal, comparison, `not`, `None` or the superuser switches to the user `x`, which ends
-superuser mode for those records too ([OD704](OD704.md)). From 13.0, `with_user(False)` and
-`with_user(None)` return the records as they are and end nothing. A method called as superuser runs
-so, and so do the methods it calls on `self`. For OD704, a mapping such a method is passed and
-writes on `self`, or on the records of a call on `self`, is a superuser write; a mapping the method
-reads from the request itself is not followed.
-
-The flow ends at a sanitizer: `int()`, `float()`, `bool()`, `len()`, `SQL.identifier()`, `escape()`,
-`html_escape()`, `html_sanitize()`, `plaintext2html()`, `urlencode()`, `url_encode()`,
-`secure_filename()`, `content_disposition()`, `file_open()` and `Manifest.for_addon()`; at the
-`name` of a file read from `request.httprequest.files` by a field the code names with `get()`,
-`getlist()` or an item, which werkzeug sets to that field, in the method or a method it is passed
-to; and at an intersection with values the code chose, such as `set(vals) & allowed`, but not `&`
-with an operand written as a domain (`Domain(...)`, `Domain.TRUE`, `Domain.AND()` or a `&`, `|` or
-`~` of these), which joins two domains.
-It ends too after `assert x in allowed` or `if x not in allowed: raise`, and in a comprehension at
-its `if x in allowed`, whatever `allowed` holds. In the arm of `if x in allowed`, the `else` and
-`elif` after `if x not in allowed` and after `if x not in allowed: x = default`, it ends only where
-the code chose `allowed`: a list, tuple, set or dict literal whose items the code chose too, or a
-list or set comprehension over a container the code chose; a module constant bound to such a
-literal; `self._x` or `cls._x`, but `_fields`, `_context`, `_ids` and the other attributes the ORM
-sets; what a private `_get_*` method of `self` whose name does not end in `fields` returns for
-arguments the code chose too; or a local bound to any of these that no rebinding, item set or call
-such as `append()` changed since. Anything else confines nothing there, such as a string, a
-parameter, a record's field, a list of a model's fields or what another method of `self` returns,
-such as `sudo()` or `filtered()`.
-A test that `x` is in `env`, `registry`, `pool` or `_fields` proves only that the model or the
-field exists, so it ends every flow but those of OD712, OD714 and OD715. Some steps make a value
-harmless for some rules only: `os.path.basename()`, `io.BytesIO()`, `io.StringIO()`, a normalized
-`os.path.join()` kept under a prefix the code picks and an `os.path.join()` only `file_open()` opens
-for OD707, `shlex.quote()` and `shlex.join()` for OD708, a start the code picks for OD705 and OD706,
-a name built with text of the code's for OD713, and a condition whose field and operator the code
-picks for OD715, as their pages say. An id stays the user's for OD716 through `int()` and
-`float()`, and ends at the access checks its page lists.
-
-A project adds its own sources, sinks and sanitizers in the
+for OD716, to what a route returns. Below the table: [sources](#sources), [how a value is
+followed](#how-a-value-is-followed), [what runs as superuser](#what-runs-as-superuser) and [where a
+flow ends](#where-a-flow-ends). A project adds its own sources, sinks and sanitizers in the
 [`[taint]` table of its configuration](../configuration.md#taint-table).
 
 | Code | Name | Reports |
@@ -370,15 +271,121 @@ A project adds its own sources, sinks and sanitizers in the
 | [OD716](OD716.md) | `sudo-record-exposure` | A route returns records read as superuser by an id a user controls. |
 | [OD717](OD717.md) | `sudo-public-attachment` | Data a user controls is stored in an attachment anyone may download. |
 
+### Sources
+
+The sources are:
+
+- the parameters of a controller method behind `@route`;
+- the parameters of a public model method (no leading `_`, no `@api.private`), which any user with
+  access to the model can call over RPC;
+- the request: `request.params`, `request.get_json_data()`, `request.get_http_params()`, and the
+  `args`, `form`, `values`, `files`, `cookies`, `headers`, `data` and JSON of `request.httprequest`.
+
+A route parameter that a `model` or `models` converter fills in every URL of the route, those an
+override inherits included, holds records, whose ids alone the user picks, and is no source. A URL
+that leaves it out lets the query string give any value.
+
+### How a value is followed
+
+A value stays tainted through assignments, attributes of `self` set in the same method, formatting,
+concatenation, f-strings, string methods, items, attributes, collections, comprehensions and module
+functions such as `json.loads()`. `getattr()` keeps its object and its default but not the name it
+reads, and `match()` and `fullmatch()` on an untainted pattern keep the string they match.
+
+A value set on an attribute reaches the whole object: a read of the object or of any of its
+attributes carries it. That always holds for a user value, on any object.
+
+`stream.etag = etag` does not reach `open(stream.path)` when `stream` and `etag` each hold a
+parameter's or a call's value and `stream` holds no user value. A value set this way on a local or
+an attribute of `self` reaches only reads of that attribute:
+
+- a read of the whole object misses it, as `return stream`, `self._z(stream)`, `getattr()`,
+  `vars()` and `__dict__` do;
+- a read of the attribute through `sudo()`, `with_context()` and the other methods that change only
+  the environment, as `m.sudo().body_html`, or through the target of a `for` loop over the object,
+  still carries it.
+
+Binding the local or attribute again drops what its attributes kept, unless it is bound to the same
+records in another environment, as `x = x.sudo()` does.
+
+What a recordset method such as `browse()` or `search()` returns is not tainted. OD712 and OD716
+follow some records further, and OD717 the values of an attachment, as their pages say.
+
+Both branches of an `if` are followed, and a loop body is read twice, its `for` target bound again
+from the iterable before each reading. A branch that returns or raises adds nothing after it, and
+one ending in `continue` adds its state only to the next pass and the code after the loop.
+
+A value passed to a method of `self`, of `env["x"]` or of a local bound to one is followed into
+every definition of that method the module's dependencies hold, overrides included, up to four calls
+deep. So is a value such a method returns, or returns from a method it calls. A value built from
+several parameters or calls, such as `a + b`, `x or self._y()` or the two arms of an `if`, is
+followed from each. The finding is at the sink when the module holds it, otherwise at the call that
+leaves the module.
+
+### What runs as superuser
+
+Records run as superuser after `sudo()`, `sudo(SUPERUSER_ID)` before saas~15.3,
+`with_user(SUPERUSER_ID)` or `with_user(1)`, and so do those of an environment built by
+`env(su=True)`, `env(user=SUPERUSER_ID)` or `Environment(cr, SUPERUSER_ID, ...)`. A method called
+as superuser runs so, and so do the methods it calls on `self`.
+
+Superuser mode ends at:
+
+- `with_user()` or `env(user=u)` for another user;
+- `sudo(False)`, `env(su=False)` and a `sudo(flag)` whose flag the code computes;
+- before saas~15.3, a `sudo(x)` whose `x` is no bool literal, comparison, `not`, `None` or the
+  superuser, which switches to the user `x` ([OD704](OD704.md)).
+
+Two exceptions:
+
+- From saas~12.5 Odoo runs the records of the superuser in superuser mode whatever `su` is, so
+  `sudo(False)`, `env(su=False)` and `sudo(flag)` do not end it for them.
+- From 13.0 `with_user(False)` and `with_user(None)` return the records as they are and end nothing.
+
+### Where a flow ends
+
+A flow ends at:
+
+- a sanitizer: `int()`, `float()`, `bool()`, `len()`, `SQL.identifier()`, `escape()`,
+  `html_escape()`, `html_sanitize()`, `plaintext2html()`, `urlencode()`, `url_encode()`,
+  `secure_filename()`, `content_disposition()`, `file_open()` and `Manifest.for_addon()`;
+- the `name` of a file read from `request.httprequest.files` by a field the code names with `get()`,
+  `getlist()` or an item, in the method or a method it is passed to, as werkzeug sets it to that
+  field;
+- an intersection with values the code chose, such as `set(vals) & allowed`, but not `&` with an
+  operand written as a domain (`Domain(...)`, `Domain.TRUE`, `Domain.AND()` or a `&`, `|` or `~` of
+  these), which joins two domains;
+- `assert x in allowed`, `if x not in allowed: raise`, and the `if x in allowed` of a
+  comprehension, whatever `allowed` holds.
+
+In the arm of `if x in allowed`, and in the `else` and `elif` after `if x not in allowed` and after
+`if x not in allowed: x = default`, a flow ends only where the code chose `allowed`:
+
+- a list, tuple, set or dict literal whose items the code chose too, or a list or set comprehension
+  over a container the code chose;
+- a module constant bound to such a literal;
+- `self._x` or `cls._x`, except `_fields`, `_context`, `_ids` and the other attributes the ORM sets;
+- what a private `_get_*` method of `self` whose name does not end in `fields` returns for
+  arguments the code chose too;
+- a local bound to any of these that no rebinding, item set or call such as `append()` changed
+  since.
+
+Anything else confines nothing there, such as a string, a parameter, a record's field, a list of a
+model's fields or what another method of `self` returns, such as `sudo()` or `filtered()`.
+
+Some rules differ:
+
+- A test that `x` is in `env`, `registry`, `pool` or `_fields` proves only that the model or the
+  field exists, so it ends every flow but those of OD712, OD714 and OD715.
+- Some steps make a value harmless for OD705 to OD708, OD713 and OD715 only, as their pages say.
+- For OD716 an id stays the user's through `int()` and `float()`.
+
 ## OD8: translations
 
 The `.po` files directly in a module's `i18n/` and `i18n_extra/` folders, where Odoo looks for the
 catalog of a language, read as UTF-8. A file in a subfolder, such as `i18n/old/`, is not read.
-Each is merged first with the `<module>.pot` template of its folder, when there is one, as Odoo
-merges them: an entry the template lacks is obsolete and not reported. A message of the template
-that the file lacks is not counted as untranslated, as Odoo may fill it from the file of a parent
-language. OD804 and OD805 hold the `i18n/<module>.pot` template to the `_()` and `_lt()` calls of
-the module's Python.
+OD804 and OD805 hold the `i18n/<module>.pot` template to the `_()` and `_lt()` calls of the module's
+Python.
 
 | Code | Name | Reports |
 | --- | --- | --- |

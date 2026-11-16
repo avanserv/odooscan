@@ -21,8 +21,9 @@ Excluded files are still indexed: they only go unreported. An `addons-path` entr
 
 ## Taint table
 
-The `[taint]` table (`[tool.odooscan.taint]` in `pyproject.toml`) adds sources, sinks and
-sanitizers to those the [OD7 rules](rules/index.md#od7-data-flows) follow. No flag sets it.
+The `[taint]` table (`[tool.odooscan.taint]` in `pyproject.toml`) adds
+[sources](rules/index.md#sources), sinks and [sanitizers](rules/index.md#where-a-flow-ends) to those
+the [OD7 rules](rules/index.md#od7-data-flows) follow. No flag sets it.
 
 ```toml
 [taint]
@@ -46,12 +47,12 @@ leaves `request.httprequest.data` untainted.
 a call. A last `[]` matches only a call of an item, so the sink `handlers.[]` matches
 `handlers[k](x)`, and a source `forms.data.[]` never matches the read `forms.data['x']`.
 
-`sudo()` in a pattern stands for running as superuser, as the [OD7
-rules](rules/index.md#od7-data-flows) read it, rather than for the call: a call that builds a
-superuser environment adds it, and `with_user()` for another user removes it, as `sudo(False)` does
-except from saas~12.5 on the records of the superuser. So `sudo().write` matches
-`x.with_user(SUPERUSER_ID).write(vals)` but not `x.sudo().with_user(user).write(vals)`, and
-`sudo().with_user().write` matches only a `with_user()` for the superuser.
+`sudo()` in a pattern stands for [running as superuser](rules/index.md#what-runs-as-superuser), as
+the OD7 rules read it, rather than for the call: a call that builds a superuser environment adds it,
+and `with_user()` for another user removes it, as `sudo(False)` does except from saas~12.5 on the
+records of the superuser. So `sudo().write` matches `x.with_user(SUPERUSER_ID).write(vals)` but not
+`x.sudo().with_user(user).write(vals)`, and `sudo().with_user().write` matches only a `with_user()`
+for the superuser.
 
 Configured rows match before the built-in ones, so the sanitizer `sandbox.safe_eval` silences
 `sandbox.safe_eval(x)` while `safe_eval(x)` still reports OD702. Among themselves, sources match
