@@ -131,6 +131,15 @@ expression: diff
      </template>
  
      <template id="lamp_title_coded" inherit_id="lamp_title">
+@@ -74,7 +74,7 @@
+ 
+     <template id="lamp_icon">
+         <svg xmlns="http://www.w3.org/2000/svg">
+-            <text t-esc="lamp.code"/>
++            <text t-out="lamp.code"/>
+         </svg>
+     </template>
+ </odoo>
 --- a/custom/saas125/models/upgrade.py
 +++ b/custom/saas125/models/upgrade.py
 @@ -8,10 +8,10 @@
