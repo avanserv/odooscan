@@ -231,6 +231,26 @@ fn a_lone_cr_waits_for_a_known_series() {
 }
 
 #[test]
+fn dropped_csv_cells_wait_for_a_series_from_11() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+    let reported = |default_series| {
+        scan(&ScanOptions {
+            paths: vec![root.join("custom")],
+            addons_paths: vec![root.join("core")],
+            default_series,
+            target_series: None,
+            ..Default::default()
+        })
+        .diagnostics
+        .iter()
+        .any(|d| d.code == "OD333" && d.path.ends_with("csv_rows_any/data/res.partner-long.csv"))
+    };
+    assert!(!reported(None));
+    assert!(reported(Series::parse("18.0")));
+    assert!(!reported(Series::parse("10.0")));
+}
+
+#[test]
 fn a_csv_feeds_other_rules_where_it_loads() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
     let codes = |default_series| {

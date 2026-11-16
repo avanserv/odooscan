@@ -7,7 +7,10 @@
         "data/res.partner-quote.csv",
         "data/res.partner-cr.csv",
         "data/res.partner-empty.csv",
-        "data/res.partner-quiet.csv",
+        "data/res.partner-loads.csv",
+        "data/res.partner-long.csv",
+        "data/res.partner-open.csv",
+        "data/res.partner-loose.csv",
     ],
     "license": "LGPL-3",
 }
