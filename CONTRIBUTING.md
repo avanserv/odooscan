@@ -6,7 +6,7 @@ You need rustup, `make`, `git` and [prek](https://github.com/j178/prek) (or pre-
 installs the toolchain `rust-toolchain.toml` pins on the first cargo call.
 
 ```bash
-make tools    # cargo-deny and cargo-machete, at the versions CI uses
+make tools    # cargo-deny and cargo-machete at the versions CI uses, and cargo-insta
 make hooks    # installs the git hooks and runs them over the whole tree
 git config commit.template .gitmessage
 ```
@@ -48,9 +48,9 @@ Every rule fires at least once in `crates/odooscan_core/tests/fixtures/custom`, 
 by series also has a module of an earlier series where it stays silent.
 
 After changing what a rule reports, accept the snapshot change and read every changed line before
-the commit, whichever route you take. `cargo insta review`, from cargo-insta, is the interactive
-route. Without it, `INSTA_UPDATE=always` makes insta write each changed `.snap` in place and pass
-the test, with or without `CI` set; git then shows the change:
+the commit, whichever route you take. `cargo insta review`, from the cargo-insta that `make tools`
+installs, is the interactive route. Without it, `INSTA_UPDATE=always` makes insta write each
+changed `.snap` in place and pass the test, with or without `CI` set; git then shows the change:
 
 ```bash
 INSTA_UPDATE=always cargo test --workspace --locked
