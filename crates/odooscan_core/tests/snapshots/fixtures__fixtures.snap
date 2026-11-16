@@ -477,6 +477,15 @@ custom/encoded_lost_stranger/models/visit.py:4:7: OD401 model 'encoded.visit' ha
 custom/encoded_ok/data/latin1.xml:5:9: OD309 res.country has no field 'no_such_field'
 custom/encoded_ok/data/refs.xml:12:9: OD301 module encoded_ok defines no XML id 'encoded_ok.country_gone'
 custom/encoded_python/models/memo.py:8:34: OD000 the file is not UTF-8, and no coding comment names another encoding
+custom/exported_broken/models/broken.py:4:17: OD000 Expected a parameter or the end of the parameter list
+custom/exported_stall/i18n/exported_stall.pot:68:1: OD805 no _() or _lt() call of the module has this message, so translators work on text no one sees; export the template again
+custom/exported_stall/i18n/exported_stall.pot:74:1: OD805 no _() or _lt() call of the module has this message, so translators work on text no one sees; export the template again
+custom/exported_stall/models/stall.py:3:8: OD804 i18n/exported_stall.pot lacks this message, so no translation file offers it to translators; export the template again
+custom/exported_stall/models/stall.py:16:13: OD804 i18n/exported_stall.pot lacks this message, so no translation file offers it to translators; export the template again
+custom/exported_stall/models/stall.py:17:13: OD804 i18n/exported_stall.pot holds this message only for records or the web client, so _() finds no translation of it; export the template again
+custom/exported_stall/models/stall.py:18:13: OD804 i18n/exported_stall.pot holds this message only for records or the web client, so _() finds no translation of it; export the template again
+custom/exported_stall/models/stall.py:19:22: OD804 i18n/exported_stall.pot lacks this message, so no translation file offers it to translators; export the template again
+custom/exported_stall/models/stall.py:20:13: OD804 i18n/exported_stall.pot lacks this message, so no translation file offers it to translators; export the template again
 custom/exposure/models/portal.py:19:33: OD403 Html field 'body' of exposure.ticket is not sanitized (sanitize=False) and base.group_portal can write exposure.ticket, so they can store script that runs for whoever opens the record; keep the sanitizer on, or give the field groups
 custom/exposure/models/portal.py:20:34: OD403 Html field 'reply' of exposure.ticket is not sanitized (sanitize='email_outgoing') and base.group_portal can write exposure.ticket, so they can store style, base and SVG markup that restyles the page or redirects its links for whoever opens the record; keep the sanitizer on, or give the field groups
 custom/exposure/models/portal.py:21:47: OD403 Html field 'summary' of exposure.ticket is not sanitized (sanitize_attributes=False) and base.group_portal can write exposure.ticket, so they can store attributes the sanitizer would strip (not event handlers) for whoever opens the record; keep the sanitizer on, or give the field groups

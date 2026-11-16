@@ -1,0 +1,97 @@
+# Template catalog of Exported stall, made up for OD804 and OD805.
+msgid ""
+msgstr ""
+"Project-Id-Version: Exported stall\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+
+#. module: exported_stall
+#: model:ir.model.fields,field_description:exported_stall.field_exported_stall_stall__keeper
+msgid "Stall keeper"
+msgstr ""
+
+#. module: exported_stall
+#. odoo-javascript
+#: code:addons/exported_stall/static/src/stall_panel.js:0
+msgid "Stall closed"
+msgstr ""
+
+#. module: exported_stall
+#. odoo-python
+#: code:addons/exported_stall/models/stall.py:0
+msgid "Stall swept"
+msgstr ""
+
+#. module: exported_stall
+#: code:addons/exported_stall/models/stall.py:0
+msgid "Stall painted"
+msgstr ""
+
+#. module: exported_stall
+#. odoo-python
+#: code:addons/exported_stall/models/stall.py:0
+msgid "Stall lit"
+msgstr ""
+
+#. module: exported_stall
+#. odoo-python
+#: code:addons/exported_stall/models/stall.py:0
+msgid "Stall dusted"
+msgstr ""
+
+#. module: exported_stall
+#. odoo-python
+#: code:addons/exported_stall/models/stall.py:0
+msgid "Stall %s"
+msgstr ""
+
+#. module: exported_stall
+#. odoo-python
+#: code:addons/exported_stall/models/stall.py:0
+msgid "Stall nested"
+msgstr ""
+
+#. module: exported_stall
+#. odoo-python
+#: code:addons/exported_stall/models/stall.py:0
+msgid "Stall tidied"
+msgstr ""
+
+#. module: exported_stall
+#. odoo-python
+#: code:addons/exported_stall/models/stall.py:0
+msgid "Stall shelf"
+msgstr ""
+
+#. module: exported_stall
+#. odoo-python
+#: code:addons/exported_stall/models/stall.py:0
+msgid "Stall demolished"
+msgstr ""
+
+#. module: exported_stall
+#. odoo-python
+#: code:addons/exported_stall/models/gone.py:0
+msgid "Stall in a deleted file"
+msgstr ""
+
+# odooscan: ignore[OD805]
+#. module: exported_stall
+#. odoo-python
+#: code:addons/exported_stall/models/stall.py:0
+msgid "Stall forgotten"
+msgstr ""
+
+#. module: exported_stall
+#. odoo-python
+#: code:addons/other_stall/models/stall.py:0
+msgid "Stall abroad"
+msgstr ""
+
+#. module: exported_stall
+#. odoo-python
+#: code:addons/exported_stall/static/lib/tool.py:0
+msgid "Stall tool"
+msgstr ""
+
+#~ msgid "Stall razed"
+#~ msgstr ""

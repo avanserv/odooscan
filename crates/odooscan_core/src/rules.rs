@@ -186,7 +186,7 @@ rules! {
     "OD130" "session-user-switch" Security Info None, false, "Code switches the user a request or a session runs as.";
     "OD131" "secret-compared-with-eq" Security Warning None, false, "A token, secret or signature is compared with == rather than consteq().";
     "OD132" "translation-at-import" Quality Warning None, false, "_() runs at import, where no language is known, so the text is never translated.";
-    "OD133" "translation-arguments-mismatch" Correctness Error None, false, "The arguments of _() or _lt() do not fit the placeholders of its message, so formatting it raises or prints them wrong.";
+    "OD133" "translation-arguments-mismatch" Correctness Error None, false, "The arguments of a translation call do not fit the placeholders of its message, so formatting it raises or prints them wrong.";
     "OD134" "search-in-loop" Performance Info None, false, "A search runs on each pass of a loop over records where one search for them all would do.";
     "OD135" "browse-in-loop" Performance Info None, false, "A loop over records browses one id at a time, so each record is fetched on its own.";
     "OD136" "create-in-loop" Performance Info None, false, "A loop over records creates one record per pass where one create() of a list would do.";
@@ -412,6 +412,10 @@ rules! {
     "OD802" "translation-fuzzy" Quality Info None, false, "A translation is marked fuzzy, yet Odoo loads it as a reviewed one.";
     // Odoo skips an empty translation (18.0 `odoo/tools/translate.py:1527`, 20.0 `:2178`).
     "OD803" "translation-empty" Quality Info None, false, "A translation file leaves messages untranslated, which Odoo shows in the source language.";
+    // The export writes the `_()` and `_lt()` messages of every `.py` file of a module into
+    // `i18n/<module>.pot` (18.0 `odoo/tools/translate.py:1443-1447`, 20.0 `odoo/cli/i18n.py:220-227`).
+    "OD804" "template-missing-message" Quality Info None, false, "A message a module's Python marks for translation is missing from its .pot template.";
+    "OD805" "template-stale-message" Quality Info None, false, "A module's .pot template keeps a Python message no call of the module has.";
 }
 
 pub fn rule(code: &str) -> &'static Rule {

@@ -24,7 +24,7 @@ use crate::sql::{
 };
 use crate::superuser::{self, Escalation};
 use crate::taint::{self, Params, TaintTable};
-use crate::{async_names, domain, imports, method_body, module_state, orm_queries, python2};
+use crate::{async_names, domain, imports, messages, method_body, module_state, orm_queries, python2};
 
 const FIELD_TYPES: &[&str] = &[
     "Boolean",
@@ -1758,8 +1758,8 @@ pub fn analyze_with(
 ) -> PyFacts {
     let stage = module_state::stage_script(scope.rel).is_some();
     let loc = Locator::new(src);
-    let module = match async_names::parse(src, series) {
-        Ok(module) => module,
+    let parsed = match async_names::parse(src, series) {
+        Ok(parsed) => parsed,
         Err(e) => {
             let mut visitor = PyVisitor::new(&loc, series, known, taint, scope, &[]);
             let error = if python2::runs_on(series) {
@@ -1774,7 +1774,7 @@ pub fn analyze_with(
             return unread_facts(src, visitor);
         }
     };
-    let body = &module.body;
+    let body = &parsed.module.body;
     let mut v = PyVisitor::new(&loc, series, known, taint, scope, body);
     v.facts.controllers = routing::controllers(body, &loc);
     v.facts.inherits_routes = routing::inherits_routes(&v.facts.controllers);
@@ -1786,6 +1786,11 @@ pub fn analyze_with(
         v.facts.migrate = module_state::migrate(body, &loc);
     }
     v.facts.imports = Some(imports::file_imports(body, &loc));
+    // Python 2 reads string literals as bytes, which the export decodes as it sees fit.
+    if !python2::runs_on(series) {
+        v.facts.messages = messages::extract(&parsed, &loc, series);
+        v.facts.extracted = true;
+    }
     v.facts
 }
 
@@ -5781,6 +5786,19 @@ class U(HttpCase):
             let facts = analyze(src, Series::parse("10.0"));
             assert_eq!(facts.classes[0].model, model, "{src}");
         }
+    }
+
+    #[test]
+    fn only_a_python_3_file_that_decodes_and_parses_is_extracted() {
+        let src = "_(\"Stall rented\")\n";
+        let extracted = |facts: PyFacts| (facts.extracted, facts.messages.len());
+        assert_eq!(extracted(analyze(src, Series::parse("12.0"))), (true, 1));
+        assert_eq!(extracted(analyze(src, None)), (true, 1));
+        assert_eq!(extracted(analyze(src, Series::parse("10.0"))), (false, 0));
+        assert_eq!(extracted(analyze("_(\"Stall rented\"\n", None)), (false, 0));
+        let pos = Pos { line: 1, col: 1 };
+        let undecoded = undecoded(src, pos, None, &TaintTable::default());
+        assert_eq!(extracted(undecoded), (false, 0));
     }
 
     #[test]

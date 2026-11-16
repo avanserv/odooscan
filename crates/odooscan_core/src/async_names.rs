@@ -4,7 +4,7 @@
 use std::borrow::Cow;
 
 use ruff_python_ast::name::Name;
-use ruff_python_ast::token::{Token, TokenKind};
+use ruff_python_ast::token::{Token, TokenKind, Tokens};
 use ruff_python_ast::visitor::transformer::{self, Transformer};
 use ruff_python_ast::{self as ast, ExceptHandler, Expr, ModModule, Stmt};
 use ruff_python_parser::{Mode, ParseError, parse_module, parse_unchecked};
@@ -16,15 +16,25 @@ use crate::series::Series;
 /// `>=3.7` where saas~14.5 asks for `>=3.6`.
 pub(crate) const ASYNC_RESERVED: Series = Series { major: 15, minor: 0 };
 
+/// A module and the tokens it was parsed from.
+pub struct Parsed {
+    pub module: ModModule,
+    /// The tokens of the text the parser read, whose `async` and `await` names `names_async` may
+    /// have uppercased: read a name back from the source by its range.
+    pub tokens: Tokens,
+}
+
 /// `src` as a module of `series`, with both words spelled as `src` spells them wherever
 /// `names_async` renamed them, so that no fact holds a name the file does not.
-pub fn parse(src: &str, series: Option<Series>) -> Result<ModModule, ParseError> {
+pub fn parse(src: &str, series: Option<Series>) -> Result<Parsed, ParseError> {
     let named = names_async(src, series);
-    let mut module = parse_module(&named)?.into_syntax();
+    let parsed = parse_module(&named)?;
+    let tokens = parsed.tokens().clone();
+    let mut module = parsed.into_syntax();
     if named != src {
         Spelling { src }.visit_body(&mut module.body);
     }
-    Ok(module)
+    Ok(Parsed { module, tokens })
 }
 
 /// `code` as a module of `series` reads it. Where both words are names their tokens are renamed
@@ -157,7 +167,10 @@ mod tests {
     const NAMES: Option<Series> = Some(Series { major: 13, minor: 0 });
 
     fn tree(code: &str, series: Option<Series>) -> String {
-        format!("{:?}", parse(code, series).unwrap_or_else(|e| panic!("{code}: {e}")))
+        format!(
+            "{:?}",
+            parse(code, series).unwrap_or_else(|e| panic!("{code}: {e}")).module
+        )
     }
 
     #[test]
@@ -210,7 +223,7 @@ mod tests {
 
     #[test]
     fn an_async_def_stays_async() {
-        let module = parse("async def f():\n    await a\n", NAMES).unwrap();
+        let module = parse("async def f():\n    await a\n", NAMES).unwrap().module;
         let Stmt::FunctionDef(def) = &module.body[0] else {
             panic!("{module:?}");
         };
@@ -221,7 +234,7 @@ mod tests {
     #[test]
     fn a_coroutine_keeps_its_loops_and_contexts_on_an_unknown_series() {
         let code = "async def f():\n    async for a in b:\n        await a\n    async with c as d:\n        await d\n";
-        let module = parse(code, None).unwrap();
+        let module = parse(code, None).unwrap().module;
         let Stmt::FunctionDef(def) = &module.body[0] else {
             panic!("{module:?}");
         };
