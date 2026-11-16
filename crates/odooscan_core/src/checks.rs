@@ -113,10 +113,10 @@ const NESTED_RECORDS: Series = Series { major: 15, minor: 1 };
 const ACTIVITY_IN_MAIL: Series = Series { major: 12, minor: 4 };
 
 /// The first series whose client asks the server for each view by the kind the action lists, which
-/// fails on a kind with no view (18.0 `odoo/addons/base/models/ir_ui_view.py:2710-2713`). On 9.0 the
-/// view class asks for its own `view_type`. `9.saas~9` to `9.saas~11` read as an unknown series, so
-/// they report as this series does.
-const VIEWS_BY_ACTION_KIND: Series = Series { major: 10, minor: 0 };
+/// fails on a kind with no view (18.0 `odoo/addons/base/models/ir_ui_view.py:2710-2713`), since
+/// `6c57935443d2` and `002660a9b05c`. Through 9.saas~10 the view class asks for its own
+/// `view_type`.
+const VIEWS_BY_ACTION_KIND: Series = Series { major: 9, minor: 11 };
 
 /// The first series that validates a record rule's domain when it writes one (18.0
 /// `odoo/addons/base/models/ir_rule.py:63-72`). 14.0 evaluates it only when a query applies the rule,
@@ -4610,7 +4610,7 @@ const CREATE_HOOKS: [&str; 7] = [
     "_load_records_create",
 ];
 
-/// The first series whose ORM ignores `_defaults` (10.0; 9.0 still reads it).
+/// The first series whose ORM ignores `_defaults` (10.0; 9.0 to 9.saas~11 still read it).
 const DEFAULTS_GONE: Series = Series { major: 10, minor: 0 };
 
 /// Where the module may have made a record before its data asks for it.
@@ -7433,9 +7433,10 @@ mod tests {
     }
 
     #[test]
-    fn only_9_0_fetches_the_view_type_of_the_class() {
+    fn only_9_0_to_9_saas_10_fetch_the_view_type_of_the_class() {
         let fetches = |series: &str| fetches_own_view(Series::parse(series));
-        assert!(fetches("9.0"));
+        assert!(fetches("9.0") && fetches("9.saas~10"));
+        assert!(!fetches("9.saas~11"));
         assert!(!fetches("10.0") && !fetches("12.0") && !fetches("18.0"));
         assert!(!fetches_own_view(None));
     }

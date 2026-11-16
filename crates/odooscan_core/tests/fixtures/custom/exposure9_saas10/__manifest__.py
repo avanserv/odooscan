@@ -1,0 +1,10 @@
+{
+    "name": "Exposure 9.saas~10",
+    "version": "9.saas~10.1.0.0",
+    "depends": ["base"],
+    "data": [
+        "security/ir.model.access.csv",
+        "security/rules.xml",
+    ],
+    "license": "LGPL-3",
+}

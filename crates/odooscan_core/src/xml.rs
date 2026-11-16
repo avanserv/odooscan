@@ -1174,7 +1174,9 @@ fn writes_no_domain(field: Node) -> bool {
 pub const PERM_FIELDS: [&str; 4] = ["perm_read", "perm_write", "perm_create", "perm_unlink"];
 
 /// The first series that converts the string a boolean field gets from a data file (18.0
-/// `odoo/tools/convert.py:196-197,424-425`, 20.0 `:226-227,457-458`). 9.0 stores the string's truth.
+/// `odoo/tools/convert.py:196-197,424-425`, 20.0 `:226-227,457-458`). The conversion
+/// (`dc18056fd018`) reaches 9.saas~13 but no earlier SaaS release, so 9.0 to 9.saas~11 store the
+/// string's truth.
 const BOOL_TEXT_CONVERTED: Series = Series { major: 10, minor: 0 };
 
 /// The first series that reads an empty field as the empty string (18.0
@@ -3402,19 +3404,21 @@ mod tests {
 
     #[test]
     fn reads_text_before_10_0_as_the_string_stored() {
-        let rule = |fields: &str| {
-            let record = format!(r#"<odoo><record id="r" model="ir.rule">{fields}</record></odoo>"#);
-            super::analyze(&record, Series::parse("9.0")).rules.remove(0)
-        };
-        for text in ["0", "false", "OFF", " "] {
-            let fields = format!(r#"<field name="perm_read">{text}</field><field name="active">{text}</field>"#);
-            let read = rule(&fields);
-            assert_eq!(read.perms[0], Flag::Set(true), "{text:?}");
-            assert_eq!(read.active, Some(true), "{text:?}");
+        for series in ["9.0", "9.saas~10"] {
+            let rule = |fields: &str| {
+                let record = format!(r#"<odoo><record id="r" model="ir.rule">{fields}</record></odoo>"#);
+                super::analyze(&record, Series::parse(series)).rules.remove(0)
+            };
+            for text in ["0", "false", "OFF", " "] {
+                let fields = format!(r#"<field name="perm_read">{text}</field><field name="active">{text}</field>"#);
+                let read = rule(&fields);
+                assert_eq!(read.perms[0], Flag::Set(true), "{text:?} {series}");
+                assert_eq!(read.active, Some(true), "{text:?} {series}");
+            }
+            let empty = rule(r#"<field name="perm_read"/><field name="active"></field>"#);
+            assert_eq!(empty.perms[0], Flag::Set(false), "{series}");
+            assert_eq!(empty.active, Some(false), "{series}");
         }
-        let empty = rule(r#"<field name="perm_read"/><field name="active"></field>"#);
-        assert_eq!(empty.perms[0], Flag::Set(false));
-        assert_eq!(empty.active, Some(false));
     }
 
     #[test]

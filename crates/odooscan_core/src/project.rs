@@ -1395,9 +1395,11 @@ mod tests {
             "RELEASE_LEVELS = [ALPHA]\nversion_info = (18, 0, 0, FINAL, 0, '')\n",
         );
         let saas = checkout("saas", "version_info = ('saas~18', 1, 0, ALPHA, 1, '')\n");
+        let nine = checkout("nine", "version_info = (9, 'saas~10', 0, FINAL, 0, 'c')\n");
         let release = |dir: &Path| checkout_series(&dir.join("odoo/release.py"));
         assert_eq!(release(&stable), Series::parse("18.0"));
         assert_eq!(release(&saas), Series::parse("saas~18.1"));
+        assert_eq!(release(&nine), Some(Series { major: 9, minor: 10 }));
         let entries = [
             stable.clone(),
             saas.clone(),
@@ -1411,7 +1413,7 @@ mod tests {
             saas.display()
         );
         assert_eq!(notices, [differing]);
-        for dir in [stable, saas] {
+        for dir in [stable, saas, nine] {
             let _ = std::fs::remove_dir_all(dir);
         }
     }

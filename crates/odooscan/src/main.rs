@@ -181,7 +181,12 @@ fn addons_paths(entries: &[PathBuf]) -> Result<Vec<PathBuf>, String> {
 }
 
 fn parse_series(s: &str) -> Result<Series, String> {
-    Series::parse(s).ok_or_else(|| format!("'{s}' is not a series such as 18.0"))
+    Series::parse(s).ok_or_else(|| {
+        format!(
+            "'{s}' is not a known series such as 18.0, saas~18.1 or 9.saas~7 to 9.saas~11; \
+         for another SaaS release, give the nearest of these"
+        )
+    })
 }
 
 fn main() -> ExitCode {

@@ -391,19 +391,20 @@ const BASE_MODEL_EXTRA: &[&str] = &[
 ];
 
 /// The methods of `BaseModel` gone by saas~11.5, by the range of series that has them, read off the
-/// heads 9.0 to saas~11.4, but for the undotted saas branches, which `Series` cannot name. Not in
+/// heads 9.0 to saas~11.4, but for the saas branches `Series` cannot name. `16c26525a725` renames
+/// `_set_default_value_on_column` and `bc4d10f48d54` drops `_read_group_get_domain`. Not in
 /// `BASE_MODEL_EXTRA`, since a call to one fails on any later series and must stay a report.
 /// `_all_columns` stays out: a property on 9.0, not a method.
 const OLD_BASE_METHODS: &[(&str, &[&str])] = &[
+    ("<=9.saas~9", &["_set_default_value_on_column"]),
+    ("<=9.saas~10", &["_read_group_get_domain"]),
     (
-        "<=9.0",
+        "<=9.saas~11",
         &[
             "_inherits_reload",
             "_init_function_fields",
             "_m2m_raise_or_create_relation",
             "_o2m_raise_on_missing_reference",
-            "_read_group_get_domain",
-            "_set_default_value_on_column",
             "_store_get_values",
             "_store_set_values",
             "_update_store",
@@ -500,7 +501,7 @@ const BASE_MODEL_DUNDERS: &[&str] = &[
 /// `BASE_PRIVATE_METHODS`.
 const API_PRIVATE: &str = ">=16.0,!=16.1,!=16.2,!=16.3,!=16.4,!=17.1,!=17.2,!=17.3";
 
-/// Series that refuse a button on `init`: 9.0 refuses only a leading `_`.
+/// Series that refuse a button on `init`: 9.0 to 9.saas~11 refuse only a leading `_`.
 const INIT_REFUSED: &str = ">=10.0";
 
 /// The `@api.private` methods of `BaseModel`, by the range of series that decorates them, `init`
@@ -593,7 +594,7 @@ const BASE_RPC_METHODS: &[(&str, &[&str])] = &[
             "view_header_get",
         ],
     ),
-    (">=10.0,<=15.4", &["load_views"]),
+    (">=9.saas~11,<=15.4", &["load_views"]),
     (
         "<=16.1",
         &[
@@ -1663,13 +1664,14 @@ enum FieldHolder {
 }
 
 impl FieldHolder {
-    /// 9.0 takes the module that creates the row. 10.0 to saas~11.2 prefer the module of the class
-    /// that declares the field, which a delegated field lacks. saas~11.3 and 11.4 take the one that
-    /// creates the row or declares the field. From saas~11.5 it is the model's original module or one
-    /// that declares the field, joined from saas~13.4 by each module that adds the parent. A declarer
-    /// that does not take the parent is taken to load before the model, so to write nothing for it.
+    /// 9.0 to 9.saas~9 take the module that creates the row. 9.saas~10 (`408330a65509`) to
+    /// saas~11.2 prefer the module of the class that declares the field, which a delegated field
+    /// lacks. saas~11.3 and 11.4 take the one that creates the row or declares the field. From
+    /// saas~11.5 it is the model's original module or one that declares the field, joined from
+    /// saas~13.4 by each module that adds the parent. A declarer that does not take the parent is
+    /// taken to load before the model, so to write nothing for it.
     fn holds_in(self, series: Series) -> bool {
-        let by_declarer = series::matches(">=10.0,<11.3", series);
+        let by_declarer = series::matches(">=9.saas~10,<11.3", series);
         let by_original = series::matches(">=11.5,<13.4", series);
         match self {
             Self::Introducer => !by_declarer,
@@ -4254,6 +4256,8 @@ mod tests {
         // Series, then whether the introducer, the mixin module, an extender and a delegator hold it.
         let bands = [
             ("9.0", true, false, true, true),
+            ("9.saas~9", true, false, true, true),
+            ("9.saas~10", false, true, false, true),
             ("10.0", false, true, false, true),
             ("saas~11.2", false, true, false, true),
             ("saas~11.3", true, false, true, true),
@@ -4385,7 +4389,7 @@ mod tests {
             ("get_metadata", "8.0", "9.0"),
             ("concat", "9.0", "10.0"),
             ("union", "9.0", "10.0"),
-            ("load_views", "9.0", "10.0"),
+            ("load_views", "9.saas~10", "9.saas~11"),
             ("flush", "12.4", "12.5"),
             ("get_property_definition", "16.4", "17.0"),
             ("try_lock_for_update", "18.2", "18.3"),
@@ -4464,7 +4468,11 @@ mod tests {
     #[test]
     fn old_base_methods_stop_at_their_last_series() {
         let has = |name: &str, series: &str| old_base_method(name, Series::parse(series));
-        assert!(has("import_data", "9.0") && !has("import_data", "10.0"));
+        assert!(has("import_data", "9.saas~11") && !has("import_data", "10.0"));
+        let renamed = "_set_default_value_on_column";
+        assert!(has(renamed, "9.0") && has(renamed, "9.saas~9") && !has(renamed, "9.saas~10"));
+        let domain = "_read_group_get_domain";
+        assert!(has(domain, "9.saas~10") && !has(domain, "9.saas~11"));
         assert!(has("create_workflow", "10.0") && !has("create_workflow", "11.0"));
         let selection = "_check_selection_field_value";
         assert!(has(selection, "saas~11.1") && !has(selection, "saas~11.2"));
