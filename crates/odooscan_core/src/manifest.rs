@@ -18,6 +18,13 @@ use crate::series::Series;
 /// `eval`.
 const LITERAL_EVAL: Series = Series { major: 10, minor: 0 };
 
+/// The first series that refuses to start on Python 2 (`12.0`, odoo/odoo `2824efee4be0`), where
+/// `ast.literal_eval` refuses a U+FEFF ahead of the manifest's text.
+const PYTHON3_ONLY: Series = Series { major: 12, minor: 0 };
+
+/// OD000's message on a manifest starting with a byte order mark.
+const BOM: &str = "a byte order mark: Odoo reads the manifest as text, where ast.literal_eval refuses U+FEFF";
+
 /// OD000's message on a node of the manifest `ast.literal_eval` refuses.
 const NOT_LITERAL: &str = "not a literal: Odoo reads the manifest with ast.literal_eval";
 
@@ -609,7 +616,8 @@ pub enum OdooReads {
 /// manifest's own series, none when that cannot be read. From 11.0 Odoo reads the file as UTF-8
 /// with `ast.literal_eval` (18.0 `odoo/modules/module.py:312-313`, `odoo/tools/misc.py:257`). 10.0
 /// hands `literal_eval` the bytes, which Python 2 takes in any encoding, and 9.0 hands them to
-/// `eval`, which takes any expression.
+/// `eval`, which takes any expression. Odoo opens the file as `utf-8`, not `utf-8-sig`, so from
+/// 12.0 a byte order mark reaches `literal_eval`, which refuses it.
 pub fn read(bytes: &[u8], series: impl FnOnce(Option<Series>) -> Option<Series>) -> Result<Manifest, Rejection> {
     let (src, not_utf8) = text(bytes);
     let body = src.trim_start_matches([' ', '\t']);
@@ -630,14 +638,25 @@ pub fn read(bytes: &[u8], series: impl FnOnce(Option<Series>) -> Option<Series>)
         m.diags = m.findings(loc.at(e), series);
     }
     let reject = |(error, odoo)| Rejection { error, series, odoo };
-    if let Some(pos) = not_utf8.filter(|_| !python2::runs_on(series)) {
-        return Err(reject((error(pos, "the manifest is not UTF-8"), OdooReads::No)));
+    if let Some(e) = unreadable(body, &loc, not_utf8, series) {
+        return Err(reject((e, OdooReads::No)));
     }
     let top = top.map_err(|(e, syntax)| {
         let python2 = syntax && python2::runs_on(series) && python2::remaining_error(body, series).is_none();
         reject((e, if python2 { OdooReads::AsPython2 } else { OdooReads::No }))
     })?;
     literal_manifest(&loc, top, manifest, series).map_err(reject)
+}
+
+/// Why the Odoo of `series` cannot read the manifest as text, ahead of any syntax error, as in
+/// Python. Python 3 refuses a U+FEFF opening `body`, after the spaces and tabs `literal_eval`
+/// strips, where Ruff skips it. The check starts at 12.0, the first series that refuses to start on
+/// Python 2, so below 12.0 it is not reported.
+fn unreadable(body: &str, loc: &Source, not_utf8: Option<Pos>, series: Option<Series>) -> Option<Spanned<String>> {
+    if let Some(pos) = not_utf8.filter(|_| !python2::runs_on(series)) {
+        return Some(error(pos, "the manifest is not UTF-8"));
+    }
+    (body.starts_with('\u{feff}') && series.is_none_or(|s| s >= PYTHON3_ONLY)).then(|| error(loc.pos(0.into()), BOM))
 }
 
 /// `bytes` as text, each byte one character when they are not UTF-8, with the position of the
@@ -710,7 +729,7 @@ fn refused_item<'a>(top: &'a Expr, python2: Option<&Source>) -> Option<(&'a Expr
     ))
 }
 
-/// The manifest `src` holds as a series from 11.0 reads it, or the first place it refuses: one
+/// The manifest `src` holds as a series from 12.0 reads it, or the first place it refuses: one
 /// expression of literals, the spaces and tabs ahead of the first line stripped.
 #[cfg(test)]
 pub fn parse(src: &str) -> Result<Manifest, Spanned<String>> {
@@ -1782,6 +1801,24 @@ mod tests {
         let error = parse_bytes(b"{'name': 'r\xe9sum\xe9'}", "11.0").unwrap_err();
         assert_eq!(error.pos, Pos { line: 1, col: 12 });
         assert!(parse_bytes("{'name': 'r\u{e9}sum\u{e9}'}".as_bytes(), "11.0").is_ok());
+    }
+
+    #[test]
+    fn refuses_a_manifest_starting_with_a_byte_order_mark() {
+        let bom = b"\xef\xbb\xbf{'name': 'x'}";
+        for series in ["12.0", "18.0"] {
+            assert_eq!(parse_bytes(bom, series).unwrap_err().pos, Pos { line: 1, col: 1 });
+            assert_eq!(odoo_reads(bom, series), Some(OdooReads::No));
+        }
+        assert_eq!(parse("\u{feff}{'name': 'x'}").unwrap_err().value, BOM);
+        for series in ["9.0", "10.0", "11.0", "saas~11.5"] {
+            assert!(parse_bytes(bom, series).is_ok(), "{series}");
+        }
+        let error = parse_bytes(" \u{feff}{'name': 'x'}".as_bytes(), "12.0").unwrap_err();
+        assert_eq!(error.pos, Pos { line: 1, col: 2 });
+        assert!(parse_bytes("{'name': '\u{feff}x'}".as_bytes(), "12.0").is_ok());
+        let error = parse_bytes(b"\xef\xbb\xbf{'name': 'r\xe9'}", "12.0").unwrap_err();
+        assert_eq!(error.value, "the manifest is not UTF-8");
     }
 
     /// The manifest in `bytes` as `series` reads it, the error alone.

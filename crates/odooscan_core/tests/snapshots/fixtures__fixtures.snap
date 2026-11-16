@@ -816,6 +816,7 @@ custom/manifest_assets_unmatched_163/__manifest__.py:8:13: OD513 'manifest_asset
 custom/manifest_auto_install_bare/__manifest__.py:4:22: OD511 auto_install names 'base', which is not in depends, so Odoo fails to read the manifest
 custom/manifest_auto_install_bare_20/__manifest__.py:4:30: OD511 auto_install names 'web', which is not in depends, so Odoo fails to read the manifest
 custom/manifest_auto_install_extra/__manifest__.py:5:30: OD511 auto_install names 'web', which is not in depends, so Odoo fails to read the manifest
+custom/manifest_bom/__manifest__.py:1:1: OD000 a byte order mark: Odoo reads the manifest as text, where ast.literal_eval refuses U+FEFF
 custom/manifest_data_repeated/__manifest__.py:7:34: OD512 './data/shelves.xml' is listed again under data, so Odoo loads it twice
 custom/manifest_depends_implied/__manifest__.py:4:17: OD520 module 'base' already comes with 'mail_digest', also in depends
 custom/manifest_depends_implied/__manifest__.py:4:25: OD520 module 'mail' already comes with 'mail_digest', also in depends
