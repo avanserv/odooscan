@@ -4751,20 +4751,7 @@ mod tests {
     #[test]
     fn records_the_path_with_positions() {
         let src = "def f(self):\n    data = request.get_json_data()\n    safe_eval(data['x'])\n";
-        let parsed = parse_module(src).unwrap();
-        let Some(Stmt::FunctionDef(func)) = parsed.syntax().body.first() else {
-            panic!()
-        };
-        let diags = function(
-            func,
-            Params::None,
-            None,
-            None,
-            &NAMES,
-            &Locator::new(src),
-            &TaintTable::default(),
-        )
-        .diags;
+        let diags = model_method(Params::None, None, src).0;
         let flow: Vec<_> = diags[0].flow.iter().map(|s| (s.pos.line, s.label.as_str())).collect();
         assert_eq!(flow, [(2, "request.get_json_data()"), (2, "data"), (3, "safe_eval()")]);
     }
@@ -4854,14 +4841,13 @@ mod tests {
         );
     }
 
-    /// The findings and the summary of the first function of `src`, a method of `x.y` in a module
-    /// of no series.
-    fn model_method(params: Params, src: &str) -> (Vec<RawDiag>, Option<FlowSummary>) {
+    /// The findings and the summary of the first function of `src`, a method of `owner` in a
+    /// module of no series.
+    fn model_method(params: Params, owner: Option<Receiver>, src: &str) -> (Vec<RawDiag>, Option<FlowSummary>) {
         let parsed = parse_module(src).expect("valid Python");
         let Some(Stmt::FunctionDef(func)) = parsed.syntax().body.first() else {
             panic!("no function");
         };
-        let owner = Some(Receiver::Model("x.y".to_owned()));
         let found = function(
             func,
             params,
@@ -4874,8 +4860,21 @@ mod tests {
         (found.diags, found.summary)
     }
 
+    /// The `x.y` model, as the owner of a method.
+    fn x_y() -> Option<Receiver> {
+        Some(Receiver::Model("x.y".to_owned()))
+    }
+
     fn summary(params: Params, src: &str) -> FlowSummary {
-        model_method(params, src).1.expect("a summary")
+        model_method(params, x_y(), src).1.expect("a summary")
+    }
+
+    /// The origins, in edge order, of the edges to the sink of rule `code` in the summary of the
+    /// first function of `src`.
+    fn sink_origins(code: &'static str, src: &str) -> Vec<FlowOrigin> {
+        let found = summary(Params::None, src);
+        let edges = found.edges.iter().filter(|e| e.target == FlowTarget::Sink(code));
+        edges.map(|e| e.origin).collect()
     }
 
     #[test]
@@ -5108,20 +5107,7 @@ mod tests {
     /// Whether the first function of `src`, a method of `owner` taking `params`, writes a parameter
     /// on its records.
     fn self_writes(params: Params, owner: Receiver, src: &str) -> bool {
-        let parsed = parse_module(src).expect("valid Python");
-        let Some(Stmt::FunctionDef(func)) = parsed.syntax().body.first() else {
-            panic!("no function");
-        };
-        let summary = function(
-            func,
-            params,
-            Some(owner),
-            None,
-            &NAMES,
-            &Locator::new(src),
-            &TaintTable::default(),
-        )
-        .summary;
+        let summary = model_method(params, Some(owner), src).1;
         summary.is_some_and(|s| s.edges.iter().any(|e| e.target == FlowTarget::SelfWrite))
     }
 
@@ -5626,21 +5612,7 @@ mod tests {
     fn only_a_file_name_header_asks_for_content_disposition() {
         let message = |call: &str| {
             let src = format!("def f(self, t):\n    {call}\n");
-            let parsed = parse_module(&src).expect("valid Python");
-            let Some(Stmt::FunctionDef(func)) = parsed.syntax().body.first() else {
-                panic!("no function");
-            };
-            let loc = Locator::new(&src);
-            let diags = function(
-                func,
-                Params::Route(&[]),
-                None,
-                None,
-                &NAMES,
-                &loc,
-                &TaintTable::default(),
-            )
-            .diags;
+            let diags = model_method(Params::Route(&[]), None, &src).0;
             diags.into_iter().map(|d| d.message).collect::<Vec<_>>().join("\n")
         };
         assert_eq!(
@@ -6209,21 +6181,16 @@ mod tests {
 
     #[test]
     fn a_condition_blames_its_field_and_not_its_value() {
-        let sinks = |src: &str| -> Vec<FlowOrigin> {
-            let found = summary(Params::None, src);
-            let sinks = found.edges.iter().filter(|e| e.target == FlowTarget::Sink("OD715"));
-            sinks.map(|e| e.origin).collect()
-        };
         let condition = "def _s(self, field, value):\n    self.env['x.y'].sudo().search([(field, '=', value)])\n";
-        assert_eq!(sinks(condition), [FlowOrigin::Param(0)]);
+        assert_eq!(sink_origins("OD715", condition), [FlowOrigin::Param(0)]);
         let joined = "def _s(self, emails, extra):\n    d = expression.AND([[('email', 'in', emails)], extra])\n    self.env['x.y'].sudo().search(d)\n";
-        assert_eq!(sinks(joined), [FlowOrigin::Param(1)]);
+        assert_eq!(sink_origins("OD715", joined), [FlowOrigin::Param(1)]);
         let returned = "def _s(self, ids):\n    d = Domain('id', 'in', ids) | Domain(self._base())\n    self.env['x.y'].sudo().search(d)\n";
-        assert_eq!(sinks(returned), [FlowOrigin::Return(0)]);
+        assert_eq!(sink_origins("OD715", returned), [FlowOrigin::Return(0)]);
         let and_returned = "def _s(self, ids):\n    d = Domain('id', 'in', ids) & Domain(self._base())\n    self.env['x.y'].sudo().search(d)\n";
-        assert_eq!(sinks(and_returned), [FlowOrigin::Return(0)]);
+        assert_eq!(sink_origins("OD715", and_returned), [FlowOrigin::Return(0)]);
         let and_param = "def _s(self, emails, extra):\n    d = Domain(extra) & Domain('email', 'in', emails)\n    self.env['x.y'].sudo().search(d)\n";
-        assert_eq!(sinks(and_param), [FlowOrigin::Param(1)]);
+        assert_eq!(sink_origins("OD715", and_param), [FlowOrigin::Param(1)]);
     }
 
     #[test]
@@ -6329,9 +6296,7 @@ mod tests {
     #[test]
     fn a_join_keeps_the_value_harmless_for_fewer_rules() {
         let src = "def _set(self, field, value):\n    if field not in self._fields:\n        raise ValueError()\n    self.env.cr.execute(\"UPDATE t SET %s = '%s'\" % (field, value))\n";
-        let found = summary(Params::None, src);
-        let sinks = found.edges.iter().filter(|e| e.target == FlowTarget::Sink("OD701"));
-        assert_eq!(sinks.map(|e| e.origin).collect::<Vec<_>>(), [FlowOrigin::Param(1)]);
+        assert_eq!(sink_origins("OD701", src), [FlowOrigin::Param(1)]);
     }
 
     #[test]
@@ -6965,7 +6930,7 @@ mod tests {
         assert_eq!(origins, [FlowOrigin::Param(0)]);
         // An RPC client that may create the attachment may as well call create() itself, so the
         // argument reports nothing, but keeps the edge for the Python callers.
-        let (found, rpc) = model_method(Params::Rpc, &format!("def store(self, data):\n    {create}\n"));
+        let (found, rpc) = model_method(Params::Rpc, x_y(), &format!("def store(self, data):\n    {create}\n"));
         assert!(found.is_empty(), "{found:?}");
         let edges = rpc.expect("a summary").edges;
         let origins: Vec<_> = edges.iter().filter(|e| granted(e)).map(|e| e.origin).collect();
@@ -7048,13 +7013,16 @@ mod tests {
         for publish in ["vals['public'] = True", "vals |= {'public': True}"] {
             let src =
                 format!("def _store(self, vals):\n    {publish}\n    self.env['ir.attachment'].sudo().create(vals)\n");
-            let edges = model_method(Params::None, &src).1.map(|s| s.edges).unwrap_or_default();
+            let edges = model_method(Params::None, x_y(), &src)
+                .1
+                .map(|s| s.edges)
+                .unwrap_or_default();
             assert!(
                 !edges.iter().any(|e| e.target == FlowTarget::Sink("OD717")),
                 "{publish}"
             );
             // A public method's own RPC argument is the user's mapping, so it reports there.
-            let (found, _) = model_method(Params::Rpc, &src.replace("_store", "store"));
+            let (found, _) = model_method(Params::Rpc, x_y(), &src.replace("_store", "store"));
             assert!(found.iter().any(|d| d.code == "OD717"), "RPC {publish}");
         }
     }
@@ -7161,24 +7129,9 @@ mod tests {
     /// module's constant.
     fn opened(body: &str) -> Vec<String> {
         let src = format!("def f(self, t):\n{body}\n");
-        let parsed = parse_module(&src).expect("valid Python");
-        let Some(Stmt::FunctionDef(func)) = parsed.syntax().body.first() else {
-            panic!("no function");
-        };
         let owner = Some(Receiver::Class("Main".to_owned()));
-        let loc = Locator::new(&src);
-        let found = function(
-            func,
-            Params::Route(&[]),
-            owner,
-            None,
-            &NAMES,
-            &loc,
-            &TaintTable::default(),
-        )
-        .diags;
-        let message = |d: RawDiag| format!("{} {}", d.code, d.message.split(';').next().unwrap_or_default());
-        found.into_iter().map(message).collect()
+        let diags = model_method(Params::Route(&[]), owner, &src).0;
+        diags.into_iter().map(shown).collect()
     }
 
     #[test]
@@ -7352,7 +7305,7 @@ mod tests {
     /// The findings and the summary of the first function of `src`, a method of `x.y`, as codes
     /// and as the origins of the edges to each target.
     fn flows_of(params: Params, src: &str) -> (Vec<&'static str>, Vec<(FlowTarget, FlowOrigin)>) {
-        let (diags, summary) = model_method(params, src);
+        let (diags, summary) = model_method(params, x_y(), src);
         let edges = summary.map_or_else(Vec::new, |s| {
             s.edges.iter().map(|e| (e.target.clone(), e.origin)).collect()
         });
@@ -7641,19 +7594,12 @@ mod tests {
 
     #[test]
     fn a_held_join_a_helper_never_checks_keeps_the_edge_for_its_callers() {
-        let sinks = |body: &str| {
-            let helper = summary(Params::None, &format!("def _open(self, name):\n{body}\n"));
-            let edges = helper.edges.iter().filter(|e| e.target == FlowTarget::Sink("OD707"));
-            edges.map(|e| e.origin).collect::<Vec<_>>()
-        };
         let p = "    p = os.path.normpath(os.path.join('/srv', name))\n";
-        assert_eq!(sinks(&format!("{p}    open(p)")), [FlowOrigin::Param(0)]);
-        assert!(
-            sinks(&format!(
-                "{p}    if p.startswith('/srv/'):\n        open(p)\n    return name"
-            ))
-            .is_empty()
-        );
+        let src = format!("def _open(self, name):\n{p}    open(p)\n");
+        assert_eq!(sink_origins("OD707", &src), [FlowOrigin::Param(0)]);
+        let src =
+            format!("def _open(self, name):\n{p}    if p.startswith('/srv/'):\n        open(p)\n    return name\n");
+        assert!(sink_origins("OD707", &src).is_empty());
         let helper = summary(
             Params::None,
             "def _open(self, name):\n    p = os.path.join('/srv', name)\n    open(name)\n",
