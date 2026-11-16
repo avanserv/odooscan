@@ -1537,12 +1537,6 @@
       "count": 1
     },
     {
-      "path": "addons/l10n_eg/i18n_extra/ar_001.po",
-      "code": "OD803",
-      "message": "106 of 196 messages are untranslated, so Odoo shows them in the source language",
-      "count": 1
-    },
-    {
       "path": "addons/l10n_es/data/mod390/mod390_section7.xml",
       "code": "OD303",
       "message": "XML id 'mod_390_casilla_641' is already defined earlier in this file",

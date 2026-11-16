@@ -23,6 +23,7 @@ const SPARSE: &[&str] = &[
     "/addons/",
     "/odoo/addons/",
     "!**/i18n/",
+    "!**/i18n_extra/",
     "!**/static/**",
     "**/static/src/**/*.js",
     "**/static/src/**/*.xml",
