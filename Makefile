@@ -37,8 +37,8 @@ hooks: ## Install the git hooks, then run them over the whole tree (prek)
 	prek install
 	prek run --all-files
 
-tools: ## Install the cargo tools `deps` runs
-	cargo install --locked cargo-deny@0.20.2 cargo-machete@0.9.2
+tools: ## Install the cargo tools `deps` runs, and cargo-insta for reviewing snapshots
+	cargo install --locked cargo-deny@0.20.2 cargo-machete@0.9.2 cargo-insta@1.49.0
 
 site: ## Build the documentation site into site/, failing on any warning or broken link
 	uv sync --locked --only-group docs --no-install-project
