@@ -4214,6 +4214,20 @@ mod tests {
         ))
     }
 
+    /// The facts of the last of `files`, read in a module of `series` with the routes of all of
+    /// them, each entry an addon, a path in it and a source.
+    fn analyze_routed(series: Option<Series>, files: &[(&str, &str, &str)]) -> PyFacts {
+        let facts: Vec<PyFacts> = files.iter().map(|(_, _, src)| analyze(src, series)).collect();
+        let table = routing::Table::of(files.iter().zip(&facts).map(|((addon, rel, _), f)| (*addon, *rel, f)));
+        let (addon, rel, src) = files.last().expect("a file to read");
+        let scope = Scope {
+            table: &table,
+            addon,
+            rel,
+        };
+        analyze_with(src, series, &FieldClasses::default(), &TaintTable::default(), scope)
+    }
+
     #[test]
     fn a_handler_catches_an_error_named_in_a_nested_tuple() {
         let parsed = parse_module("try:\n    pass\nexcept ((KeyError, ImportError), X):\n    pass\n").unwrap();
@@ -4268,19 +4282,13 @@ mod tests {
         let leaf = format!(
             "from odoo import http\nfrom odoo.addons.shop.controllers.main import Shop\nfrom odoo.http import request\n\nclass Ext({bases}):\n    {decorator}\n{PUBLIC_CREATE}"
         );
-        let files = [
-            ("shop", "controllers/main.py", shop.as_str()),
-            ("ext", "controllers/main.py", leaf.as_str()),
-        ];
-        let facts: Vec<PyFacts> = files.iter().map(|(_, _, src)| analyze(src, None)).collect();
-        let table = routing::Table::of(files.iter().zip(&facts).map(|((addon, rel, _), f)| (*addon, *rel, f)));
-        let scope = Scope {
-            table: &table,
-            addon: "ext",
-            rel: "controllers/main.py",
-        };
-        let taint = TaintTable::default();
-        signed_in_of(&analyze_with(&leaf, None, &FieldClasses::default(), &taint, scope))
+        signed_in_of(&analyze_routed(
+            None,
+            &[
+                ("shop", "controllers/main.py", &shop),
+                ("ext", "controllers/main.py", &leaf),
+            ],
+        ))
     }
 
     #[test]
@@ -6944,18 +6952,14 @@ class U(HttpCase):
         let leaf = format!(
             "from odoo import http\nfrom odoo.addons.shop.controllers.main import Shop\nfrom odoo.http import request\n\nclass Ext({bases}):\n    {decorator}\n    def {method}(self, order=None):\n        {body}\n"
         );
-        let files = [
-            ("shop", "controllers/main.py", SHOP_ROUTES),
-            ("ext", "controllers/main.py", leaf.as_str()),
-        ];
-        let facts: Vec<PyFacts> = files.iter().map(|(_, _, src)| analyze(src, series)).collect();
-        let table = routing::Table::of(files.iter().zip(&facts).map(|((addon, rel, _), f)| (*addon, *rel, f)));
-        let scope = Scope {
-            table: &table,
-            addon: "ext",
-            rel: "controllers/main.py",
-        };
-        analyze_with(&leaf, series, &FieldClasses::default(), &TaintTable::default(), scope).diags
+        analyze_routed(
+            series,
+            &[
+                ("shop", "controllers/main.py", SHOP_ROUTES),
+                ("ext", "controllers/main.py", &leaf),
+            ],
+        )
+        .diags
     }
 
     fn override_codes(decorator: &str, method: &str, body: &str) -> Vec<&'static str> {
@@ -7052,14 +7056,7 @@ class U(HttpCase):
             class("public"),
             class("user")
         );
-        let facts = analyze(&src, None);
-        let table = routing::Table::of([("shop", "main.py", &facts)].into_iter());
-        let scope = Scope {
-            table: &table,
-            addon: "shop",
-            rel: "main.py",
-        };
-        let diags = analyze_with(&src, None, &FieldClasses::default(), &TaintTable::default(), scope).diags;
+        let diags = analyze_routed(None, &[("shop", "main.py", &src)]).diags;
         let found: Vec<_> = diags.iter().map(|d| (d.code, d.pos.line)).collect();
         assert_eq!(found, [("OD111", 6)]);
     }
