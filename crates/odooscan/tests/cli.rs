@@ -1230,3 +1230,29 @@ fn a_manifest_that_does_not_parse_fails_the_check() {
         "{stdout}"
     );
 }
+
+#[test]
+fn untranslated_entries_are_one_finding_naming_each_line() {
+    let dir = scratch("untranslated_lines");
+    let models = module(&dir, "kiosk", "18.0", &[]);
+    let i18n = models.parent().unwrap().join("i18n");
+    fs::create_dir_all(&i18n).unwrap();
+    let catalog = "msgid \"Stand\"\nmsgstr \"\"\n\nmsgid \"Booth\"\nmsgstr \"Cabine\"\n\n\
+        msgid \"Desk\"\nmsgstr \"\"\n\nmsgid \"Shelf\"\nmsgstr \"\"\n";
+    fs::write(i18n.join("fr.po"), catalog).unwrap();
+    let (code, stdout, stderr) = run(check_in(&dir, &["mods", "--select", "OD803"]));
+    assert_eq!(code, Some(1), "{stderr}");
+    assert_eq!(
+        stdout,
+        "mods/kiosk/i18n/fr.po:1:1: OD803 3 of 4 messages are untranslated, so Odoo shows them in the source language (lines 1, 7, 10)\n"
+    );
+    let (_, stdout, stderr) = run(check_in(&dir, &["mods", "--select", "OD803", "--format", "json"]));
+    let report: serde_json::Value = serde_json::from_str(&stdout).expect(&stderr);
+    let lines: Vec<_> = report[0]["related"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|s| s["line"].clone())
+        .collect();
+    assert_eq!(lines, [1, 7, 10]);
+}
