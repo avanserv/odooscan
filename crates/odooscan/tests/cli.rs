@@ -354,9 +354,14 @@ fn odoo_remote(dir: &Path, branch: &str, version_info: &str) -> PathBuf {
     fs::create_dir_all(&remote).unwrap();
     git(&remote, &["init", "-q", "-b", branch]);
     copy_dir(&fixtures().join("core"), &remote.join("odoo/addons"));
-    // The sparse patterns leave tests out.
+    // The sparse patterns leave tests and catalogs out.
     fs::create_dir_all(remote.join("odoo/addons/base/tests")).unwrap();
     fs::write(remote.join("odoo/addons/base/tests/__init__.py"), "").unwrap();
+    for catalogs in ["i18n", "i18n_extra"] {
+        let folder = remote.join("odoo/addons/base").join(catalogs);
+        fs::create_dir_all(&folder).unwrap();
+        fs::write(folder.join("fr.po"), "# A synthetic catalog.\n").unwrap();
+    }
     fs::write(
         remote.join("odoo/release.py"),
         format!("version_info = {version_info}\n"),
@@ -376,11 +381,14 @@ fn port_fetched(remote: &Path, cache: &Path, target: &str) -> Command {
     command
 }
 
-/// The fetched commit holds the modules and `release.py`, without tests but their scripts.
+/// The fetched commit holds the modules and `release.py`, without tests but their scripts and
+/// without catalogs.
 fn assert_fetched(cache: &Path, sha: &str) {
     let dir = cache.join("core").join(sha);
     assert!(dir.join("odoo/addons/base").is_dir() && dir.join("odoo/release.py").is_file());
     assert!(!dir.join("odoo/addons/base/tests").exists());
+    assert!(!dir.join("odoo/addons/base/i18n").exists());
+    assert!(!dir.join("odoo/addons/base/i18n_extra").exists());
     assert!(dir.join("odoo/addons/web/static/tests/web_test_helpers.js").is_file());
 }
 

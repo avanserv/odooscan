@@ -56,8 +56,8 @@ oracle-fetch: ## Fetch the pinned Odoo core of SERIES (default 18.0) into .oracl
 	rm -rf $(ORACLE)
 	git init -q $(ORACLE)
 	git -C $(ORACLE) fetch -q --depth 1 --filter=blob:none https://github.com/odoo/odoo $(ODOO_$(SERIES))
-	git -C $(ORACLE) sparse-checkout set --no-cone '/addons/' '/odoo/' '!**/i18n/' '!**/static/**' \
-		'**/static/src/**/*.js' '**/static/src/**/*.xml' '!**/tests/' '/odoo/tests/' \
+	git -C $(ORACLE) sparse-checkout set --no-cone '/addons/' '/odoo/' '!**/i18n/' '!**/i18n_extra/' \
+		'!**/static/**' '**/static/src/**/*.js' '**/static/src/**/*.xml' '!**/tests/' '/odoo/tests/' \
 		'**/static/tests/**/*.js' '**/static/**/*.js' '**/static/**/*.css' '**/static/**/*.scss' \
 		'**/static/**/*.sass' '**/static/**/*.less' '**/static/**/*.xml'
 	git -C $(ORACLE) checkout -q FETCH_HEAD
