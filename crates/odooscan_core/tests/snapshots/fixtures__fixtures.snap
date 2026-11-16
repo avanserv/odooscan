@@ -281,6 +281,7 @@ custom/button_delegate/views/delegate.xml:20:34: OD320 res.users has no method '
 custom/button_mixin/models/hooks.py:19:17: OD201 no indexed module defines model 'ghost.mixin'
 custom/button_partial/__manifest__.py:4:25: OD503 module 'ghost_enterprise' is not on the addons path
 custom/button_partial/views/partial.xml:8:45: OD313 method '_from_enterprise' of button.visit is private, so Odoo refuses to call it from a button
+custom/button_partial/views/partial.xml:23:36: OD210 'no_partial': button.visit has no field 'no_partial'
 custom/button_private/views/desks.xml:7:45: OD313 method 'ensure_one' of button.desk is private, so Odoo refuses to call it from a button
 custom/button_private/views/desks.xml:8:45: OD313 method 'init' of button.desk is private, so Odoo refuses to call it from a button
 custom/button_private/views/desks.xml:9:45: OD313 method 'with_context' of button.desk is private, so Odoo refuses to call it from a button
@@ -1014,6 +1015,7 @@ custom/partial_sites/models/sites.py:55:18: OD203 'nmae': site.visit has no fiel
 custom/partial_sites/models/sites.py:55:26: OD203 'line_ids.nmae': site.visit.line has no field 'nmae'
 custom/partial_sites/models/sites.py:55:63: OD203 'name.x': site.visit.name is not a relational field, so the path cannot continue
 custom/partial_sites/models/sites.py:60:41: OD210 'nmae': site.visit has no field 'nmae'
+custom/partial_sites/security/rules.xml:5:36: OD210 'nmae': site.visit has no field 'nmae'
 custom/partial_sites/static/src/sites.js:2:22: OD601 no file of module web provides '@web/core/gone'
 custom/partial_sites/static/src/sites.js:3:26: OD601 '@web/views/form/form_controller' does not export 'Missing'
 custom/partial_sites/views/sites.xml:37:9: OD302 'mail.no_such_id' belongs to module mail; add it to depends

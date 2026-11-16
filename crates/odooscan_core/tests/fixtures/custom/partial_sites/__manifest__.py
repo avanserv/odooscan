@@ -3,6 +3,6 @@
     "version": "18.0.1.0.0",
     "license": "LGPL-3",
     "depends": ["base", "ghost_enterprise"],
-    "data": ["security/ir.model.access.csv", "views/sites.xml"],
+    "data": ["security/ir.model.access.csv", "views/sites.xml", "security/rules.xml"],
     "assets": {"web.assets_backend": ["partial_sites/static/src/**/*"]},
 }
