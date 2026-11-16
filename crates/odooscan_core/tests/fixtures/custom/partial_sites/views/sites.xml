@@ -86,4 +86,16 @@
         <field name="model">res.partner</field>
         <field name="report_name">partial_sites_dependent.block</field>
     </record>
+
+    <record id="view_enterprise_form" model="ir.ui.view">
+        <field name="model">ghost.enterprise</field>
+        <field name="arch" type="xml">
+            <form/>
+        </field>
+    </record>
+
+    <record id="action_enterprise" model="ir.actions.act_window">
+        <field name="name">Enterprise</field>
+        <field name="res_model">ghost.enterprise</field>
+    </record>
 </odoo>
