@@ -97,6 +97,8 @@ on core is a false positive until shown otherwise. To bump a pinned commit, chan
 
 A comment or doc that cites Odoo source cites a path, with or without a line, in an
 `.oracle/<series>` checkout the `Makefile` pins. An odoo/odoo commit hash may date a series bound.
+`crates/odooscan_core/tests/conventions.rs` fails `make check` on such a citation in a file under
+`crates/` or `docs/` whose series the `Makefile` does not pin.
 
 ## Commits and pull requests
 
