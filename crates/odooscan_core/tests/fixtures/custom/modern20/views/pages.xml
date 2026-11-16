@@ -67,4 +67,14 @@
             <attribute name="t-out">lamp.code</attribute>
         </xpath>
     </template>
+
+    <template id="lamp_prefixed">
+        <span xmlns:x="urn:x" x:t-esc="lamp.name"/>
+    </template>
+
+    <template id="lamp_icon">
+        <svg xmlns="http://www.w3.org/2000/svg">
+            <text t-esc="lamp.code"/>
+        </svg>
+    </template>
 </odoo>

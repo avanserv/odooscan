@@ -2,7 +2,7 @@ use std::ops::Range;
 use std::sync::LazyLock;
 
 use regex::{Captures, Regex};
-use roxmltree::{Document, Node, ParsingOptions};
+use roxmltree::{Attribute, Document, ExpandedName, Node, ParsingOptions};
 
 use crate::domain;
 use crate::facts::{
@@ -347,7 +347,7 @@ impl Walker<'_> {
         for n in node.descendants().skip(1).filter(Node::is_element) {
             let pos = self.pos(n);
             arch_element(n, pos, &mut view);
-            if n.has_attribute("t-esc") && !locates(n) {
+            if bare_attr(n, "t-esc").is_some() && !locates(n) {
                 view.escapes.push(escape(n, pos));
             }
         }
@@ -866,7 +866,7 @@ impl Walker<'_> {
 
     fn arch_tag(&mut self, node: Node, tag: &str, pos: Pos, view: &mut ViewFact) {
         match tag {
-            "tree" => {
+            "tree" if bare_tag(node, "tree") => {
                 let mut diag = RawDiag::new("OD306", pos, "the <tree> view is renamed <list>");
                 diag.fix = rename_tag(node, "list");
                 view.renamed.push(diag);
@@ -885,7 +885,7 @@ impl Walker<'_> {
         if locates(node) {
             return;
         }
-        if node.has_attribute("t-esc") {
+        if bare_attr(node, "t-esc").is_some() {
             view.escapes.push(escape(node, pos));
         }
         if node.attribute("t-name") == Some("kanban-box") && !beside_card(node) {
@@ -1522,10 +1522,10 @@ fn old_names(node: Node, view: &mut ViewFact) {
     } else if node.has_tag_name("attribute") {
         view.escape_specs |= meets_escape(node);
     } else if locates(node) {
-        view.tree_specs |= node.has_tag_name("tree");
-        view.escape_specs |= node.has_attribute("t-esc");
+        view.tree_specs |= bare_tag(node, "tree");
+        view.escape_specs |= bare_attr(node, "t-esc").is_some();
     } else {
-        view.tree_elements |= node.has_tag_name("tree");
+        view.tree_elements |= bare_tag(node, "tree");
     }
 }
 
@@ -1548,7 +1548,9 @@ fn escape(node: Node, pos: Pos) -> RawDiag {
         pos,
         "the server no longer knows t-esc and renders nothing for it; write t-out",
     );
-    let alone = !["t-out", "t-field", "t-raw"].iter().any(|a| node.has_attribute(*a));
+    let alone = !["t-out", "t-field", "t-raw"]
+        .iter()
+        .any(|a| bare_attr(node, a).is_some());
     diag.fix = alone.then(|| rename_attr(node, "t-esc", "t-out")).flatten();
     diag
 }
@@ -1569,8 +1571,7 @@ fn renaming(text: &str, start: usize, from: &str, to: &str) -> Option<Edit> {
     })
 }
 
-/// The fix renaming element `node` to `to`, in its opening tag and its closing one if any. A
-/// prefixed name stays, since the text holds the prefix where the bare name is looked for.
+/// The fix renaming element `node` to `to`, in its opening tag and its closing one if any.
 fn rename_tag(node: Node, to: &str) -> Option<Fix> {
     let text = node.document().input_text();
     let (range, name) = (node.range(), node.tag_name().name());
@@ -1589,11 +1590,24 @@ fn rename_tag(node: Node, to: &str) -> Option<Fix> {
     Some(Fix { edits })
 }
 
+/// Whether element `node` is named `name` in no namespace. lxml names a prefixed or default-namespaced
+/// `tree` `{urn}tree`, which Odoo refuses as a view root and never opens as a subview (18.0
+/// `odoo/addons/base/models/ir_ui_view.py:506-513`, `:1343`; 20.0 `:621-628`, `:1714`).
+fn bare_tag(node: Node, name: &str) -> bool {
+    node.tag_name() == ExpandedName::from(name)
+}
+
+/// The attribute `name` of `node` in no namespace. QWeb reads a directive only from a key starting
+/// with `t-`, and lxml keys a prefixed one `{urn}t-esc`, so it is written out as is (18.0
+/// `odoo/addons/base/models/ir_qweb.py:1043-1046`, `:1394-1398`; 20.0 `:1465-1468`, `:1850-1854`).
+/// A default namespace never applies to an attribute.
+fn bare_attr<'a, 'i>(node: Node<'a, 'i>, name: &str) -> Option<Attribute<'a, 'i>> {
+    node.attributes().find(|a| a.name() == name && a.namespace().is_none())
+}
+
 /// The fix renaming attribute `from` of `node` to `to`.
 fn rename_attr(node: Node, from: &str, to: &str) -> Option<Fix> {
-    let attr = node
-        .attributes()
-        .find(|a| a.name() == from && a.namespace().is_none())?;
+    let attr = bare_attr(node, from)?;
     let start = attr.range_qname().start;
     in_body(node)
         .then(|| renaming(node.document().input_text(), start, from, to))
@@ -4114,18 +4128,37 @@ mod tests {
     }
 
     #[test]
-    fn a_prefixed_name_or_one_from_an_entity_stays() {
-        unfixed(&arch_record(r#"<x:tree xmlns:x="urn:x"><field name="a"/></x:tree>"#));
+    fn a_name_from_an_entity_stays() {
         let entity = r#"<!DOCTYPE odoo [<!ENTITY t "<tree/>">]>"#;
         unfixed(&format!(
             "{entity}{}",
             arch_record(r#"<form><field name="l">&t;</field></form>"#)
         ));
-        unfixed(r#"<odoo><template id="t"><span xmlns:x="urn:x" x:t-esc="a"/></template></odoo>"#);
         let entity = r#"<!DOCTYPE odoo [<!ENTITY s "<span t-esc='a'/>">]>"#;
         unfixed(&format!(
             "{entity}<odoo><template id=\"t\"><div>&s;</div></template></odoo>"
         ));
+    }
+
+    #[test]
+    fn a_namespaced_tree_or_t_esc_is_not_reported() {
+        for text in [
+            arch_record(r#"<x:tree xmlns:x="urn:x"><field name="a"/></x:tree>"#),
+            arch_record(r#"<tree xmlns="urn:x"><field name="a"/></tree>"#),
+            arch_record(r#"<form><field name="l"><x:tree xmlns:x="urn:x"/></field></form>"#),
+            arch_record(r#"<div><span xmlns:x="urn:x" x:t-esc="a"/></div>"#),
+            r#"<odoo><template id="t"><span xmlns:x="urn:x" x:t-esc="a"/></template></odoo>"#.to_owned(),
+        ] {
+            assert!(renames(&analyze(&text)).is_empty(), "{text}");
+        }
+        // A default namespace never applies to an attribute, and a prefixed t-out is plain markup.
+        for markup in [
+            r#"<svg xmlns="urn:s"><text t-esc="a"/></svg>"#,
+            r#"<span xmlns:x="urn:x" t-esc="a" x:t-out="b"/>"#,
+        ] {
+            let template = format!(r#"<odoo><template id="t">{markup}</template></odoo>"#);
+            assert_eq!(rewrites(&template), template.replace(" t-esc", " t-out"), "{markup}");
+        }
     }
 
     #[test]
@@ -4232,5 +4265,12 @@ mod tests {
             (false, false, false, true)
         );
         assert_eq!(noted(r#"<xpath expr="//p" position="after"><list/></xpath>"#), none);
+        for arch in [
+            r#"<x:tree xmlns:x="urn:x" position="attributes"/>"#,
+            r#"<span xmlns:x="urn:x" x:t-esc="a" position="replace"/>"#,
+            r#"<xpath expr="//p" position="after"><x:tree xmlns:x="urn:x"/></xpath>"#,
+        ] {
+            assert_eq!(noted(arch), none, "{arch}");
+        }
     }
 }
