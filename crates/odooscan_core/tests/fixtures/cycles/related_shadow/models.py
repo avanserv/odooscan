@@ -1,8 +1,9 @@
 from odoo import api, fields, models
 
 
-# The shape of Odoo core: product.product delegates to product.template, whose barcode is related
-# to product_variant_ids.barcode, and its own barcode shadows that one, so no cycle exists.
+# The shape of Odoo core from 9.0 to saas~13.2: product.product delegates to product.template,
+# whose barcode is related to product_variant_ids.barcode, and its own barcode shadows that one, so
+# no cycle exists. From saas~13.3 product.template computes its barcode instead.
 class Crate(models.Model):
     _name = "shadow.crate"
 

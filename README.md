@@ -50,8 +50,14 @@ page in the terminal.
 
 ## Testing
 
-`cargo test` runs a snapshot over `crates/odooscan_core/tests/fixtures`. That fixture holds custom
-modules written to trigger every rule, and a stand-in for Odoo core that they depend on, whose
+`cargo test` runs a snapshot that scans `crates/odooscan_core/tests/fixtures/custom`, modules
+written to trigger every rule, against `core/` beside it, a stand-in for Odoo core whose
 auto-install modules pin down which modules count as always installed; review changes with
-`cargo insta review`. The false-positive oracle is Odoo itself: a scan of core must report exactly
-the findings recorded in `tests/oracle/`, as CONTRIBUTING.md describes.
+`cargo insta review`. A case that cannot join that scan gets its own root beside `custom/` and
+`core/`. Each module of `cycles/` is scanned alone, by
+`oscn check cycles/<module> --addons-path core` in a child process: a cycle the index fails to end
+overflows the stack and aborts the whole process, which in `custom/` would kill the test binary
+with every test in it, while spawned it fails one test. `bootstrap/` holds a module named `base`,
+scanned in process with no addons path, because in `custom/` it would shadow `core/base`, which
+every custom module depends on. The false-positive oracle is Odoo itself: a scan of core must
+report exactly the findings recorded in `tests/oracle/`, as CONTRIBUTING.md describes.

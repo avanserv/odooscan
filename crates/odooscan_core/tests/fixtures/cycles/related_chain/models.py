@@ -1,5 +1,6 @@
 from odoo import api, fields, models
 
+
 class Link1(models.Model):
     _name = "chain.link1"
 

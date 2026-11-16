@@ -48,6 +48,16 @@ Every rule fires at least once in `crates/odooscan_core/tests/fixtures/custom`, 
 by series also has a module of an earlier series where it stays silent. After changing what a rule
 reports, run `cargo insta review` and read every changed line.
 
+The snapshot scans `custom/` against `core/`; a case that cannot join that scan gets its own root
+beside them. A case that could send the index round a cycle goes under `cycles/`, never `custom/`,
+with its test in `crates/odooscan/tests/cli.rs`. There `cycle_paths` spawns
+`oscn check cycles/<module> --addons-path core` through `check_in`. A cycle the index fails to end
+overflows the stack and aborts the process; in `custom/` it would take the snapshot test binary
+down with every test in it. `bootstrap/` holds a module named `base`, scanned in process with no
+addons path by `base_creates_none_of_its_ids`: in `custom/` it would shadow `core/base`, which
+every custom module depends on, since a checked module wins over a same-named indexed one. It must
+be called `base` because OD324 exempts base's bootstrap records by that name.
+
 A rule with a fix attaches it where it raises the finding, guarded against every form the rewrite
 could change the meaning of. The fix gets a row in the table of `docs/fixing.md`, a Fixing section
 on the rule's page, and tests that rewrite each fixed form, re-analyze it clean, and leave each
