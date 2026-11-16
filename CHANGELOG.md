@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.14.0](https://github.com/avanserv/odooscan/compare/v0.13.0...v0.14.0) (2026-11-16)
+
+
+### Features
+
+* **checks:** Report .pot templates that lack or keep _() messages ([#377](https://github.com/avanserv/odooscan/issues/377)) ([974a2f5](https://github.com/avanserv/odooscan/commit/974a2f56c6921defc1967dfbf5e8051091539b49))
+* **checks:** Report fields record rules filter on without an index ([#375](https://github.com/avanserv/odooscan/issues/375)) ([0679dd3](https://github.com/avanserv/odooscan/commit/0679dd3591e27eb65042f0cbd658a4d264118609))
+* **checks:** Report Many2one fields to res.company in OD407 ([#385](https://github.com/avanserv/odooscan/issues/385)) ([a2fd361](https://github.com/avanserv/odooscan/commit/a2fd361e765b89634b6e23455fee5518c673836a))
+* **po:** Report .po placeholder, fuzzy and untranslated entries ([#376](https://github.com/avanserv/odooscan/issues/376)) ([3d87849](https://github.com/avanserv/odooscan/commit/3d878496d12d9662517b2852c6e5921fe35c87fd))
+* **python:** Report _() run at import and arguments its placeholders do not take ([#373](https://github.com/avanserv/odooscan/issues/373)) ([8d6c1b5](https://github.com/avanserv/odooscan/commit/8d6c1b5ec5bddeaedeba246a4efeac4e861893bd))
+* **python:** Report ORM calls repeated per record and searches that fetch every match ([#374](https://github.com/avanserv/odooscan/issues/374)) ([debb0d7](https://github.com/avanserv/odooscan/commit/debb0d7d70ff85b86a8ce9b7bc16731179c3b2cd))
+
+
+### Bug Fixes
+
+* **checks:** Read inherited indexes and the parent field in OD407 ([#379](https://github.com/avanserv/odooscan/issues/379)) ([f1459c5](https://github.com/avanserv/odooscan/commit/f1459c5e7346a299fec919f3a811f09247fce5ba))
+* **messages:** Read the remaining f-string forms of _() messages ([#380](https://github.com/avanserv/odooscan/issues/380)) ([d446b99](https://github.com/avanserv/odooscan/commit/d446b99e6af6aeb829efa3955424c6ce7987126f))
+* **orm_queries:** Stop four OD134, OD135, OD139 misreports ([#378](https://github.com/avanserv/odooscan/issues/378)) ([15981aa](https://github.com/avanserv/odooscan/commit/15981aad077c8a0df7d0c49c035e9aa86df91c57))
+* **orm_queries:** Stop reading a class constant loop as records ([#381](https://github.com/avanserv/odooscan/issues/381)) ([605f344](https://github.com/avanserv/odooscan/commit/605f3445fa2009ba346b10590e3e301dd22f6a00))
+* **po:** List the line of each untranslated message in OD803 ([#384](https://github.com/avanserv/odooscan/issues/384)) ([649bcdc](https://github.com/avanserv/odooscan/commit/649bcdcba8ef7eb4b9934c0e0f5c6a20a988b295))
+
 ## [0.13.0](https://github.com/avanserv/odooscan/compare/v0.12.0...v0.13.0) (2026-11-15)
 
 
