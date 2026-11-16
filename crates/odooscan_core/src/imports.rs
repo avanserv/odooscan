@@ -437,8 +437,8 @@ pub enum Fault {
 #[derive(Debug, Default)]
 pub struct Graph {
     addons: FxHashMap<String, Addon>,
-    /// The files of each addon that a file of another addon imports.
-    elsewhere: FxHashMap<String, FxHashSet<String>>,
+    /// The files of each addon that a file of another addon imports, each with that other addon.
+    elsewhere: FxHashMap<String, FxHashSet<(String, String)>>,
     /// The addons with a file the scan cannot read the imports of, which may import any file of
     /// any addon.
     unread: FxHashSet<String>,
@@ -469,13 +469,13 @@ impl Graph {
             elsewhere: FxHashMap::default(),
             addons,
         };
-        let mut elsewhere: FxHashMap<String, FxHashSet<String>> = FxHashMap::default();
+        let mut elsewhere: FxHashMap<String, FxHashSet<(String, String)>> = FxHashMap::default();
         for (name, addon) in &graph.addons {
             for (rel, imports) in &addon.files {
                 let list = imports.iter().flat_map(|i| &i.list);
                 for (target, file) in list.flat_map(|fact| graph.targets(name, rel, fact)) {
                     if target != *name {
-                        elsewhere.entry(target).or_default().insert(file);
+                        elsewhere.entry(target).or_default().insert((file, name.clone()));
                     }
                 }
             }
@@ -484,9 +484,10 @@ impl Graph {
         graph
     }
 
-    /// The files of `addon` that a file of another addon imports.
-    pub fn elsewhere(&self, addon: &str) -> impl Iterator<Item = &str> {
-        self.elsewhere.get(addon).into_iter().flatten().map(String::as_str)
+    /// The files of `addon` that a file of another addon imports, as (file, importing addon).
+    pub fn elsewhere(&self, addon: &str) -> impl Iterator<Item = (&str, &str)> {
+        let pairs = self.elsewhere.get(addon).into_iter().flatten();
+        pairs.map(|(file, importer)| (file.as_str(), importer.as_str()))
     }
 
     /// Whether a file of `addon` may import a file of another addon that `elsewhere` lacks: one
@@ -1088,6 +1089,7 @@ mod tests {
             elsewhere,
             ["__init__.py", "models/__init__.py", "models/move.py"]
                 .into_iter()
+                .map(|file| (file, "shop"))
                 .collect()
         );
         assert_eq!(g.elsewhere("shop").count(), 0);
