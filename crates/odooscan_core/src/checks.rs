@@ -5181,8 +5181,8 @@ impl<'m> Ctx<'_, 'm> {
         if a.1.model == model || b.1.model == model {
             return self.merges_before(model, a, b);
         }
-        let listed = self.listed(model);
-        let (Some(pa), Some(pb)) = (listed.through(a.1), listed.through(b.1)) else {
+        let parents = self.parents_of(model);
+        let (Some(pa), Some(pb)) = (parents.through(a.1), parents.through(b.1)) else {
             return false;
         };
         if pa.model == pb.model {
@@ -5197,7 +5197,7 @@ impl<'m> Ctx<'_, 'm> {
     }
 
     /// The models the in-scope classes of `model` list in `_inherit`, with what each merges.
-    fn listed(&self, model: &str) -> Listed<'m> {
+    fn parents_of(&self, model: &str) -> Listed<'m> {
         let classes = self.index.classes(model).iter().filter(|(mi, _)| self.scope.sees(*mi));
         let parents = classes.flat_map(|&(_, class)| {
             let listed = class.inherit.iter().enumerate().filter(|(_, p)| p.value != model);
