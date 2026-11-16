@@ -1635,17 +1635,6 @@ fn loaded_class(facts: &PyFacts) -> Option<String> {
         .map(|(_, what)| what)
 }
 
-/// OD519's position and message for what `import` lacks.
-fn unresolved_import(import: &AddonImport, fault: &Fault) -> (Pos, String) {
-    match fault {
-        Fault::Missing => (
-            import.pos,
-            format!("no file of module {} provides '{}'", import.addon, import.text),
-        ),
-        Fault::Undefined(name) => (name.pos, format!("'{}' does not define '{}'", import.text, name.value)),
-    }
-}
-
 fn same_module_xmlids<'m>(index: &Index<'m>, mi: usize, series: Option<Series>, out: &mut Out<'m>) {
     let module = &index.modules[mi];
     let scope = index.scope(mi);
@@ -4447,6 +4436,17 @@ impl<'m> Ctx<'_, 'm> {
                 ),
             }
         }
+    }
+}
+
+/// OD519's position and message for what `import` lacks.
+fn unresolved_import(import: &AddonImport, fault: &Fault) -> (Pos, String) {
+    match fault {
+        Fault::Missing => (
+            import.pos,
+            format!("no file of module {} provides '{}'", import.addon, import.text),
+        ),
+        Fault::Undefined(name) => (name.pos, format!("'{}' does not define '{}'", import.text, name.value)),
     }
 }
 
