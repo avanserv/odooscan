@@ -13,7 +13,7 @@
         <field name="name">Cases on indexed or unindexable fields</field>
         <field name="model_id" ref="model_desk_case"/>
         <field name="domain_force">[
-            ('stage_id', '=', 1), ('queue_ref', '=', 'a'), ('company_id', 'in', company_ids),
+            ('stage_id', '=', 1), ('queue_ref', '=', 'a'), ('home_company_id', 'in', company_ids),
             ('state', '=', 'open'), ('urgent', '=', True), ('title', '=', 'a'), ('total', '>', 1),
             ('tag_ids', 'in', [1]), ('priority', '!=', 0), ('code', '=', 'a'), ('parent_case_id.name', '=', 'a'),
         ]</field>
@@ -135,5 +135,10 @@
         <field name="name">Tokens by badge and serial</field>
         <field name="model_id" ref="model_desk_token"/>
         <field name="domain_force">[('badge', '=', 'a'), ('serial', '=', 'a')]</field>
+    </record>
+    <record id="rule_case_company" model="ir.rule">
+        <field name="name">Cases of my companies</field>
+        <field name="model_id" ref="model_desk_case"/>
+        <field name="domain_force">['|', ('company_id', '=', False), ('company_id', 'in', company_ids)]</field>
     </record>
 </odoo>

@@ -68,6 +68,7 @@ class ShelfBox(models.Model):
     _code_index = models.Index("(name)")
 
     name = fields.Char()
+    company_id = fields.Many2one("res.company")
 
 
 class ShelfTier(models.Model):
