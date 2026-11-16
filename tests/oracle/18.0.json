@@ -4153,6 +4153,12 @@
       "count": 1
     },
     {
+      "path": "addons/website_event/models/event_event.py",
+      "code": "OD133",
+      "message": "Python cannot read the placeholder '%)', so formatting the message raises",
+      "count": 2
+    },
+    {
       "path": "addons/website_event/views/snippets/snippets.xml",
       "code": "OD323",
       "message": "XML id 'snippet_options' is already defined in views/event_snippets.xml, and this definition overwrites the fields both name; remove the copy when the two say the same thing, or rename one when both are meant to exist",
