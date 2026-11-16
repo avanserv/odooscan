@@ -15,7 +15,9 @@ git config commit.template .gitmessage
 
 `make check` runs everything CI runs but the git hooks: formatting (rustfmt), lints with warnings
 as errors (clippy), unused dependencies (cargo-machete), advisories, licenses and sources
-(cargo-deny, configured in `deny.toml`), and the tests. `make help` lists the individual targets.
+(cargo-deny, configured in `deny.toml`), and the tests. Among them,
+`crates/odooscan_core/tests/conventions.rs` also runs as the `conventions` git hook, so a commit
+learns of a broken convention before CI does. `make help` lists the individual targets.
 
 The git hooks add what only makes sense there: secrets (gitleaks), spelling (typos), Markdown
 (markdownlint), function complexity of at most 10 (polyscan) and the workflow audits (actionlint,

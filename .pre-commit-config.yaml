@@ -117,6 +117,16 @@ repos:
         files: (\.rs|Cargo\.toml)$
         pass_filenames: false
 
+      # The same test `make test` runs, here so a commit learns of a broken convention before CI
+      # does. The Makefile is in `files:` because the test reads the series it pins.
+      - id: conventions
+        name: rust     | repository conventions
+        entry: cargo test --locked -p odooscan_core --test conventions
+        language: system
+        files: ^((crates|docs)/|Makefile$)
+        exclude: ^crates/odooscan_core/tests/fixtures/
+        pass_filenames: false
+
       # The whole tree rather than the staged files: the dependency-cycle check needs every module.
       # Fixtures are scanned code, broken on purpose, not code of this repository.
       - id: polyscan

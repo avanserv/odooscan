@@ -138,17 +138,17 @@ const CHILD_ACTION_MODEL: Series = Series { major: 18, minor: 2 };
 
 /// The first series whose server action defaults to `object_write` (18.0
 /// `odoo/addons/base/models/ir_actions.py:548`), where 10.0 defaults to `code`. `c56b74622141`
-/// changed it on saas-15, which no `Series` names.
+/// changed it on 10.saas~15, which no `Series` names.
 const OBJECT_WRITE_DEFAULT: Series = Series { major: 11, minor: 0 };
 
 /// The first series with a constraint that compiles the `code` of a server action on each write
-/// (18.0 `odoo/addons/base/models/ir_actions.py:772-777`, 20.0 `:962-967`). saas-12 adds it, which
-/// no `Series` names. 9.0 has none: only running the action compiles it.
+/// (18.0 `odoo/addons/base/models/ir_actions.py:772-777`, 20.0 `:962-967`). 9.saas~12 adds it,
+/// which no `Series` names. 9.0 has none: only running the action compiles it.
 const CODE_CONSTRAINT: Series = Series { major: 10, minor: 0 };
 
 /// The first series whose cron has `code`, through its delegated server action (18.0
-/// `odoo/addons/base/models/ir_cron.py:68-70`, 20.0 `:108-110`). saas-14 delegates first, which no
-/// `Series` names. Below it Odoo drops the field, so nothing compiles or runs.
+/// `odoo/addons/base/models/ir_cron.py:68-70`, 20.0 `:108-110`). 10.saas~14 delegates first, which
+/// no `Series` names. Below it Odoo drops the field, so nothing compiles or runs.
 const CRON_CODE: Series = Series { major: 11, minor: 0 };
 
 /// The first series whose `Registry` has no `__call__` (`e6f99537f3aa`; 18.0 has it at
@@ -161,7 +161,7 @@ const REGISTRY_UNCALLABLE: Series = Series { major: 19, minor: 0 };
 /// `odoo/tools/convert.py:739-740,771`), so loading an `ir.model.access` row fails.
 const IR_ACCESS: Series = Series { major: 19, minor: 4 };
 
-/// The first series without `ir.property` (`de302c2d3630`, in no saas-17 branch).
+/// The first series without `ir.property` (`de302c2d3630`, in none of saas~17.1 to saas~17.4).
 const IR_PROPERTY_GONE: Series = Series { major: 18, minor: 0 };
 
 /// The first series whose loader skips a `name@fr` of a record or a CSV column, which the load of a
@@ -1022,8 +1022,8 @@ const MEMBER_SERIES: &[(&str, &[&str])] = &[
             "_add_inherited_fields",
         ],
     ),
-    (">=13.5,<20.0", &["_table_query"]),
-    (">=17.1,<18.4", &["_condition_to_sql"]),
+    (">=saas~13.5,<20.0", &["_table_query"]),
+    (">=saas~17.1,<saas~18.4", &["_condition_to_sql"]),
 ];
 
 /// The names Odoo's cache module binds at run time, by the range of series that has them, read on
@@ -1047,20 +1047,20 @@ const CACHE_KEY_GLOBALS: &[(&str, &[&str])] = &[
             "get_cache_key_counter",
         ],
     ),
-    (">=10.0,<13.1", &["formatargspec", "getargspec"]),
-    (">=10.0,<16.4", &["ormcache_multi", "dummy_cache"]),
-    (">=10.0,<18.2", &["cache"]),
-    (">=11.0,<12.1", &["pycompat"]),
-    (">=13.1,<19.0", &["signature"]),
-    (">=13.4,<18.3", &["Counter"]),
-    (">=16.2,<19.0", &["Parameter"]),
-    (">=16.4,<18.1", &["warnings"]),
-    (">=17.2,<19.0", &["time"]),
-    (">=18.1,<19.0", &["annotations", "typing"]),
+    (">=10.0,<saas~13.1", &["formatargspec", "getargspec"]),
+    (">=10.0,<saas~16.4", &["ormcache_multi", "dummy_cache"]),
+    (">=10.0,<saas~18.2", &["cache"]),
+    (">=11.0,<saas~12.1", &["pycompat"]),
+    (">=saas~13.1,<19.0", &["signature"]),
+    (">=saas~13.4,<saas~18.3", &["Counter"]),
+    (">=saas~16.2,<19.0", &["Parameter"]),
+    (">=saas~16.4,<saas~18.1", &["warnings"]),
+    (">=saas~17.2,<19.0", &["time"]),
+    (">=saas~18.1,<19.0", &["annotations", "typing"]),
     // saas~18.1 drops the import of `warnings`, and saas~18.2 brings it back to deprecate `skiparg`.
-    (">=18.2,<19.0", &["warnings"]),
+    (">=saas~18.2,<19.0", &["warnings"]),
     (
-        ">=18.3,<19.0",
+        ">=saas~18.3,<19.0",
         &[
             "Mapping",
             "Collection",
@@ -7221,11 +7221,11 @@ mod tests {
     use rustc_hash::FxHashSet;
 
     use super::{
-        MagicEra, applies, bundle_list, cache_global, callable_attr, csv_label, derived_label, es_module,
-        exported_text, fetches_own_view, field_name, has_last_update, hoot_adds, magic_era, no_access_message,
-        page_miss, parent_path_children, patch_form, public_write_message, reads_model_access, reads_requires,
-        shadowed_member, static_only, stores_parent_path, tuple_checked, tuple_listed, unknown_dependency,
-        unmatched_asset, warns_on_labels,
+        CACHE_KEY_GLOBALS, MEMBER_SERIES, MagicEra, REPORT_TAG, applies, bundle_list, cache_global, callable_attr,
+        csv_label, derived_label, es_module, exported_text, fetches_own_view, field_name, has_last_update, hoot_adds,
+        magic_era, no_access_message, page_miss, parent_path_children, patch_form, public_write_message,
+        reads_model_access, reads_requires, shadowed_member, static_only, stores_parent_path, tuple_checked,
+        tuple_listed, unknown_dependency, unmatched_asset, warns_on_labels,
     };
     use crate::facts::{AccessRow, Annotation, DefinitionSource, JsName, Perms, Pos, Spanned};
     use crate::manifest::OdooReads;
@@ -7469,6 +7469,20 @@ mod tests {
         assert!(global("threading", "saas~18.4") && !global("threading", "19.0"));
         assert!(!global("_logger", "9.0") && global("_logger", "10.0") && !global("getargspec", "9.0"));
         assert!(cache_global("time", None) && cache_global("method", None) && !cache_global("lang", None));
+    }
+
+    /// `Series::parse` reads a bare `13.5` as well, so nothing else keeps a SaaS bound of the
+    /// `REPORT_TAG`, `MEMBER_SERIES` and `CACHE_KEY_GLOBALS` tables spelled `saas~X.Y`.
+    #[test]
+    fn bounds_spell_a_saas_series_with_the_tilde() {
+        let specs = MEMBER_SERIES.iter().chain(CACHE_KEY_GLOBALS).map(|(spec, _)| *spec);
+        for spec in std::iter::once(REPORT_TAG).chain(specs) {
+            for clause in spec.split(',') {
+                let bound = clause.trim_start_matches(['<', '>', '=', '!']);
+                let minor = Series::parse(bound).expect("a bound parses").minor;
+                assert!(minor == 0 || bound.starts_with("saas~"), "{spec}: {bound}");
+            }
+        }
     }
 
     #[test]
