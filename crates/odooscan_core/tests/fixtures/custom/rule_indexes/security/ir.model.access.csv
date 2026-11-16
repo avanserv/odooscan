@@ -1,0 +1,12 @@
+id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
+access_desk_team,desk.team,model_desk_team,base.group_user,1,0,0,0
+access_desk_case,desk.case,model_desk_case,base.group_user,1,1,1,0
+access_desk_case_wizard,desk.case.wizard,model_desk_case_wizard,base.group_user,1,1,1,0
+access_desk_case_digest,desk.case.digest,model_desk_case_digest,base.group_user,1,0,0,0
+access_desk_case_log,desk.case.log,model_desk_case_log,base.group_user,1,0,0,0
+access_desk_case_report,desk.case.report,model_desk_case_report,base.group_user,1,0,0,0
+access_desk_case_shared,desk.case.shared,model_desk_case_shared,base.group_user,1,0,0,0
+access_desk_case_draft,desk.case.draft,model_desk_case_draft,base.group_user,1,0,0,0
+access_desk_seat,desk.seat,model_desk_seat,base.group_user,1,0,0,0
+access_desk_slot,desk.slot,model_desk_slot,base.group_user,1,0,0,0
+access_desk_zone,desk.zone,model_desk_zone,base.group_user,1,0,0,0

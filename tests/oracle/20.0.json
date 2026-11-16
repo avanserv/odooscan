@@ -871,6 +871,18 @@
       "count": 1
     },
     {
+      "path": "addons/hr/security/ir.access.csv",
+      "code": "OD407",
+      "message": "hr.employee.type.country_id has no index, yet ir.access record hr.ir_rule_hr_contract_type_multi_company filters reads of hr.employee.type on it; add index=True to the field",
+      "count": 1
+    },
+    {
+      "path": "addons/hr/security/ir.access.csv",
+      "code": "OD407",
+      "message": "hr.payroll.structure.type.country_id has no index, yet ir.access record hr.ir_rule_hr_payroll_structure_type_multi_company filters reads of hr.payroll.structure.type on it; add index=True to the field",
+      "count": 1
+    },
+    {
       "path": "addons/hr_address_extended/__manifest__.py",
       "code": "OD520",
       "message": "module 'base_address_extended' already comes with 'hr', also in depends",
@@ -922,6 +934,12 @@
       "path": "addons/hr_expense/models/hr_expense.py",
       "code": "OD137",
       "message": "write() of the same values on each record of the loop updates them one at a time; write them once on the whole recordset",
+      "count": 1
+    },
+    {
+      "path": "addons/hr_expense/security/ir.access.csv",
+      "code": "OD407",
+      "message": "hr.expense.manager_id has no index, yet ir.access record hr_expense.ir_rule_hr_expense_approver filters reads of hr.expense on it; add index=True to the field",
       "count": 1
     },
     {
@@ -991,6 +1009,18 @@
       "count": 1
     },
     {
+      "path": "addons/hr_recruitment_survey/security/ir.access.csv",
+      "code": "OD407",
+      "message": "survey.user_input.line.survey_id has no index, yet ir.access record hr_recruitment_survey.survey_user_input_line_rule_recruitment_manager filters reads of survey.user_input.line on it; add index=True to the field",
+      "count": 1
+    },
+    {
+      "path": "addons/hr_recruitment_survey/security/ir.access.csv",
+      "code": "OD407",
+      "message": "survey.user_input.line.survey_id has no index, yet ir.access record hr_recruitment_survey.survey_user_input_line_rule_recruitment_user filters reads of survey.user_input.line on it; add index=True to the field",
+      "count": 1
+    },
+    {
       "path": "addons/hr_skills/data/hr_skill_demo.xml",
       "code": "OD303",
       "message": "XML id 'hr_skill_nosql' is already defined earlier in this file",
@@ -1012,6 +1042,24 @@
       "path": "addons/hr_timesheet/__manifest__.py",
       "code": "OD520",
       "message": "module 'uom' already comes with 'project', also in depends",
+      "count": 1
+    },
+    {
+      "path": "addons/hr_timesheet/security/ir.access.csv",
+      "code": "OD407",
+      "message": "account.analytic.line.partner_id has no index, yet ir.access record hr_timesheet.timesheet_line_rule_approver filters reads of account.analytic.line on it; add index=True to the field",
+      "count": 1
+    },
+    {
+      "path": "addons/hr_timesheet/security/ir.access.csv",
+      "code": "OD407",
+      "message": "account.analytic.line.partner_id has no index, yet ir.access record hr_timesheet.timesheet_line_rule_user filters reads of account.analytic.line on it; add index=True to the field",
+      "count": 1
+    },
+    {
+      "path": "addons/hr_work_entry/security/ir.access.csv",
+      "code": "OD407",
+      "message": "hr.work.entry.type.country_id has no index, yet ir.access record hr_work_entry.ir_rule_hr_work_entry_type_multi_company filters reads of hr.work.entry.type on it; add index=True to the field",
       "count": 1
     },
     {
@@ -2431,6 +2479,12 @@
       "count": 1
     },
     {
+      "path": "addons/lunch/security/ir.access.csv",
+      "code": "OD407",
+      "message": "lunch.cashmove.user_id has no index, yet ir.access record lunch.lunch_mind_your_own_food_money filters reads of lunch.cashmove on it; add index=True to the field",
+      "count": 1
+    },
+    {
       "path": "addons/lunch/static/src/components/lunch_dashboard.js",
       "code": "OD609",
       "message": "markup() of a value built at runtime makes t-out render it as HTML unescaped; check that no user input reaches it, or use markup`...`, which escapes each placeholder",
@@ -2665,6 +2719,12 @@
       "count": 1
     },
     {
+      "path": "addons/mail_group/security/ir.access.csv",
+      "code": "OD407",
+      "message": "mail.group.access_group_id has no index, yet ir.access record mail_group.mail_group_rule_read_all filters reads of mail.group on it; add index=True to the field",
+      "count": 1
+    },
+    {
       "path": "addons/mail_plugin/__manifest__.py",
       "code": "OD520",
       "message": "module 'web' already comes with 'digest', also in depends",
@@ -2710,6 +2770,12 @@
       "path": "addons/mail_plugin/models/ir_http.py",
       "code": "OD130",
       "message": "_auth_method_outlook() decides which user every route with auth='outlook' runs as; check that it sets only a user the request has proven to be",
+      "count": 1
+    },
+    {
+      "path": "addons/maintenance/security/ir.access.csv",
+      "code": "OD407",
+      "message": "maintenance.request.owner_user_id has no index, yet ir.access record maintenance.equipment_request_rule_user filters reads of maintenance.request on it; add index=True to the field",
       "count": 1
     },
     {
@@ -2992,6 +3058,12 @@
       "path": "addons/mrp_subcontracting/security/ir.access.csv",
       "code": "OD402",
       "message": "base.group_portal gets write, create or unlink on stock.move; public and portal access should be read-only and go through controllers",
+      "count": 1
+    },
+    {
+      "path": "addons/mrp_subcontracting/security/ir.access.csv",
+      "code": "OD407",
+      "message": "mrp.production.subcontractor_id has no index, yet ir.access record mrp_subcontracting.production_subcontractor_rule filters reads of mrp.production on it; add index=True to the field",
       "count": 1
     },
     {
@@ -3805,6 +3877,18 @@
       "count": 1
     },
     {
+      "path": "addons/project/security/ir.access.csv",
+      "code": "OD407",
+      "message": "project.update.user_id has no index, yet ir.access record project.update_visibility_rule filters reads of project.update on it; add index=True to the field",
+      "count": 1
+    },
+    {
+      "path": "addons/project/security/ir.access.csv",
+      "code": "OD407",
+      "message": "project.update.user_id has no index, yet ir.access record project.update_visibility_rule_1 filters reads of project.update on it; add index=True to the field",
+      "count": 1
+    },
+    {
       "path": "addons/project/wizard/project_project_stage_delete.py",
       "code": "OD134",
       "message": "search_count() runs a query for each record of the loop, keyed on stage_id; count them all at once with _read_group() grouped by stage_id",
@@ -3922,6 +4006,18 @@
       "path": "addons/sale/populate/populate_demo.xml",
       "code": "OD502",
       "message": "'populate/populate_demo.xml' is not in the manifest's data or demo, so Odoo never loads it",
+      "count": 1
+    },
+    {
+      "path": "addons/sale/security/ir.access.csv",
+      "code": "OD407",
+      "message": "account.move.invoice_user_id has no index, yet ir.access record sale.account_invoice_rule_see_personal filters reads of account.move on it; add index=True to the field",
+      "count": 1
+    },
+    {
+      "path": "addons/sale/security/ir.access.csv",
+      "code": "OD407",
+      "message": "sale.order.line.salesman_id has no index, yet ir.access record sale.sale_order_line_personal_rule filters reads of sale.order.line on it; add index=True to the field",
       "count": 1
     },
     {
@@ -4300,6 +4396,24 @@
       "path": "addons/survey/data/survey_demo_certification.xml",
       "code": "OD303",
       "message": "XML id 'vendor_certification_page_2_question_2_choice_5' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/survey/security/ir.access.csv",
+      "code": "OD407",
+      "message": "survey.user_input.line.survey_id has no index, yet ir.access record survey.survey_user_input_line_rule_survey_manager filters reads of survey.user_input.line on it; add index=True to the field",
+      "count": 1
+    },
+    {
+      "path": "addons/survey/security/ir.access.csv",
+      "code": "OD407",
+      "message": "survey.user_input.line.survey_id has no index, yet ir.access record survey.survey_user_input_line_rule_survey_user filters reads of survey.user_input.line on it; add index=True to the field",
+      "count": 1
+    },
+    {
+      "path": "addons/survey/security/ir.access.csv",
+      "code": "OD407",
+      "message": "survey.user_input.line.survey_id has no index, yet ir.access record survey.survey_user_input_line_rule_survey_user_1 filters reads of survey.user_input.line on it; add index=True to the field",
       "count": 1
     },
     {
@@ -5053,6 +5167,12 @@
       "count": 1
     },
     {
+      "path": "addons/website_crm_iap_reveal/security/ir.access.csv",
+      "code": "OD407",
+      "message": "crm.reveal.rule.user_id has no index, yet ir.access record website_crm_iap_reveal.ir_rule_crm_reveal_rule_salesman filters reads of crm.reveal.rule on it; add index=True to the field",
+      "count": 1
+    },
+    {
       "path": "addons/website_crm_partner_assign/__manifest__.py",
       "code": "OD520",
       "message": "module 'account' already comes with 'website_partnership', also in depends",
@@ -5677,6 +5797,18 @@
       "count": 1
     },
     {
+      "path": "addons/website_slides/security/ir.access.csv",
+      "code": "OD407",
+      "message": "slide.slide.user_id has no index, yet ir.access record website_slides.rule_slide_slide_signed_in_user filters reads of slide.slide on it; add index=True to the field",
+      "count": 1
+    },
+    {
+      "path": "addons/website_slides/security/ir.access.csv",
+      "code": "OD407",
+      "message": "slide.slide.user_id has no index, yet ir.access record website_slides.rule_slide_slide_signed_in_user_1 filters reads of slide.slide on it; add index=True to the field",
+      "count": 1
+    },
+    {
       "path": "addons/website_slides/static/src/interactions/slides_course_fullscreen.js",
       "code": "OD609",
       "message": "markup() of a value built at runtime makes t-out render it as HTML unescaped; check that no user input reaches it, or use markup`...`, which escapes each placeholder",
@@ -5692,6 +5824,12 @@
       "path": "addons/website_slides/static/src/js/slides_course_service.js",
       "code": "OD609",
       "message": "markup() of a value built at runtime makes t-out render it as HTML unescaped; check that no user input reaches it, or use markup`...`, which escapes each placeholder",
+      "count": 1
+    },
+    {
+      "path": "addons/website_slides_survey/security/ir.access.csv",
+      "code": "OD407",
+      "message": "survey.user_input.line.survey_id has no index, yet ir.access record website_slides_survey.survey_user_input_line_rule_slide_channel_officer filters reads of survey.user_input.line on it; add index=True to the field",
       "count": 1
     },
     {
@@ -5998,6 +6136,12 @@
       "path": "odoo/addons/test_base/security/ir.access.csv",
       "code": "OD402",
       "message": "base.group_everyone, public and portal users included, gets write, create or unlink on test_access_right.some_obj; public and portal access should be read-only and go through controllers",
+      "count": 1
+    },
+    {
+      "path": "odoo/addons/test_base/security/ir.access.csv",
+      "code": "OD407",
+      "message": "test_orm.model_shared_cache_compute_line.user_id has no index, yet ir.access record test_base.ir_rule_test_orm_model_shared_cache_compute_line filters reads of test_orm.model_shared_cache_compute_line on it; add index=True to the field",
       "count": 1
     },
     {

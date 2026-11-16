@@ -304,6 +304,9 @@ rules! {
     // The CHECK of `ir.rule` refuses a rule with no permission as far back as 9.0 (18.0
     // `odoo/addons/base/models/ir_rule.py:29-33`); saas~19.4 replaces `ir.rule` with `ir.access`.
     "OD406" "rule-without-permission" Correctness Error Some("<saas~19.4"), true, "A record rule sets every perm_* false, which Odoo refuses as it loads it.";
+    // Only read rules join the query (18.0 `odoo/models.py:5597-5609`, 20.0
+    // `odoo/orm/models.py:4885-4893`); the `ir.access` half is gated in `checks.rs`.
+    "OD407" "rule-field-without-index" Performance Info None, true, "A record rule or ir.access domain filters reads on a stored field without an index.";
     "OD501" "manifest-data-missing" Correctness Error None, false, "A file listed in the manifest does not exist.";
     "OD502" "data-file-not-loaded" Quality Warning None, false, "A data file is listed under no manifest key Odoo reads, so Odoo never loads it.";
     "OD503" "unknown-dependency" Correctness Error None, true, "A module in depends is not on the addons path, or its manifest cannot be read.";

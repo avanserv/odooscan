@@ -169,7 +169,8 @@ tours registry, browser test bundles included.
 ## OD4: access
 
 Access rights: models no one can reach, rights granted too widely, fields and records they expose
-to public and portal users, and record rules Odoo refuses to load.
+to public and portal users, record rules Odoo refuses to load, and rule domains that filter on a
+field without an index.
 
 | Code | Name | Reports |
 | --- | --- | --- |
@@ -179,6 +180,7 @@ to public and portal users, and record rules Odoo refuses to load.
 | [OD404](OD404.md) | `public-secret-field` | A field named as a secret has no groups, on a model public or portal users can read. |
 | [OD405](OD405.md) | `public-rule-always-true` | A record rule or ir.access domain gives public or portal users every record of a model they can reach. |
 | [OD406](OD406.md) | `rule-without-permission` | A record rule sets every perm_* false, which Odoo refuses as it loads it. |
+| [OD407](OD407.md) | `rule-field-without-index` | A record rule or ir.access domain filters reads on a stored field without an index. |
 
 ## OD5: manifest and module graph
 

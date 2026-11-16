@@ -1,0 +1,6 @@
+id,name,model_id:id,group_id:id,operation,domain
+access_bin_zone,Bins of a zone,model_shelf_bin,base.group_user,r,"[('zone', '=', 'north')]"
+access_bin_row,Bins written by row,model_shelf_bin,base.group_user,w,"[('row', '=', 1)]"
+access_bin_aisle,Bins of an aisle,model_shelf_bin,base.group_user,r,"[('aisle', '=', 'a')]"
+access_bin_area,Bins of a named zone,model_shelf_bin,base.group_user,r,"[('area_id.name', '=', 'north')]"
+access_zone,Zones,model_shelf_zone,base.group_user,r,

@@ -1,0 +1,104 @@
+<odoo>
+    <record id="rule_case_team" model="ir.rule">
+        <field name="name">Cases of my team</field>
+        <field name="model_id" ref="model_desk_case"/>
+        <field name="domain_force">[('team_id', '=', user.id)]</field>
+    </record>
+    <record id="rule_case_team_name" model="ir.rule">
+        <field name="name">Cases of a named team</field>
+        <field name="model_id" ref="model_desk_case"/>
+        <field name="domain_force">[('team_id.name', 'ilike', 'desk')]</field>
+    </record>
+    <record id="rule_case_kept" model="ir.rule">
+        <field name="name">Cases on indexed or unindexable fields</field>
+        <field name="model_id" ref="model_desk_case"/>
+        <field name="domain_force">[
+            ('stage_id', '=', 1), ('queue_ref', '=', 'a'), ('company_id', 'in', company_ids),
+            ('state', '=', 'open'), ('urgent', '=', True), ('title', '=', 'a'), ('total', '>', 1),
+            ('tag_ids', 'in', [1]), ('priority', '!=', 0), ('code', '=', 'a'), ('parent_case_id.name', '=', 'a'),
+        ]</field>
+    </record>
+    <record id="rule_case_negated" model="ir.rule">
+        <field name="name">Cases not at a level</field>
+        <field name="model_id" ref="model_desk_case"/>
+        <field name="domain_force">['!', ('level', '=', 1)]</field>
+    </record>
+    <record id="rule_case_joined" model="ir.rule">
+        <field name="name">Cases with a score</field>
+        <field name="model_id" ref="model_desk_case"/>
+        <field name="domain_force">[('score', '>', 1)] + extra</field>
+    </record>
+    <record id="rule_case_written" model="ir.rule">
+        <field name="name">Cases written in sequence</field>
+        <field name="model_id" ref="model_desk_case"/>
+        <field name="domain_force">[('sequence', '=', 1)]</field>
+        <field name="perm_read" eval="False"/>
+    </record>
+    <record id="rule_case_inactive" model="ir.rule">
+        <field name="name">Cases by deadline</field>
+        <field name="model_id" ref="model_desk_case"/>
+        <field name="domain_force">[('deadline', '&lt;', '2030-01-01')]</field>
+        <field name="active" eval="False"/>
+    </record>
+    <record id="rule_case_amount" model="ir.rule">
+        <field name="name">Cases by amount</field>
+        <field name="model_id" ref="model_desk_case"/>
+        <field name="domain_force">[('amount', '&gt;', 0)]</field>
+    </record>
+    <record id="rule_case_wizard" model="ir.rule">
+        <field name="name">Wizards of my team</field>
+        <field name="model_id" ref="model_desk_case_wizard"/>
+        <field name="domain_force">[('team_id', '=', 1)]</field>
+    </record>
+    <record id="rule_case_digest" model="ir.rule">
+        <field name="name">Digests of my team</field>
+        <field name="model_id" ref="model_desk_case_digest"/>
+        <field name="domain_force">[('team_id', '=', 1)]</field>
+    </record>
+    <record id="rule_case_log" model="ir.rule">
+        <field name="name">Logs of my team</field>
+        <field name="model_id" ref="model_desk_case_log"/>
+        <field name="domain_force">[('team_id', '=', 1)]</field>
+    </record>
+    <record id="rule_case_kinds" model="ir.rule">
+        <field name="name">Cases by each kind of column</field>
+        <field name="model_id" ref="model_desk_case"/>
+        <field name="domain_force">[
+            ('hours', '=', 1), ('weight', '&gt;=', 1), ('opened_on', '&lt;=', '2030-01-01'),
+            ('closed_at', '&gt;', '2030-01-01'), ('fee', '&lt;', 1), ('origin', '=', 'desk.team,1'),
+            ('res_id', 'in', [1]), ('team_name', '=', 'a'), ('parent_title', '=', 'a'),
+            ('owner_name', '=', 'a'), ('owner_id', '=', 1), ('parent_case_id', 'any', [('name', '=', 'a')]),
+            ('owner_team_id', '=', 1), ('parent_team_name', '=', 'a'),
+        ]</field>
+    </record>
+    <record id="rule_case_report" model="ir.rule">
+        <field name="name">Reports of my team</field>
+        <field name="model_id" ref="model_desk_case_report"/>
+        <field name="domain_force">[('team_id', '=', 1)]</field>
+    </record>
+    <record id="rule_case_shared" model="ir.rule">
+        <field name="name">Shared cases of my team</field>
+        <field name="model_id" ref="model_desk_case_shared"/>
+        <field name="domain_force">[('team_id', '=', 1)]</field>
+    </record>
+    <record id="rule_case_draft" model="ir.rule">
+        <field name="name">Drafts of my team</field>
+        <field name="model_id" ref="model_desk_case_draft"/>
+        <field name="domain_force">[('team_id', '=', 1)]</field>
+    </record>
+    <record id="rule_seat_team" model="ir.rule">
+        <field name="name">Seats of a named team</field>
+        <field name="model_id" ref="model_desk_seat"/>
+        <field name="domain_force">[('team_id.name', '=', 'a')]</field>
+    </record>
+    <record id="rule_slot_team" model="ir.rule">
+        <field name="name">Slots of a named team</field>
+        <field name="model_id" ref="model_desk_slot"/>
+        <field name="domain_force">[('team_id.name', '=', 'a')]</field>
+    </record>
+    <record id="rule_zone_tree" model="ir.rule">
+        <field name="name">Zones under mine</field>
+        <field name="model_id" ref="model_desk_zone"/>
+        <field name="domain_force">['|', '|', ('parent_id', 'child_of', [1]), ('parent_id', 'parent_of', [1]), ('team_id', 'child_of', [1])]</field>
+    </record>
+</odoo>

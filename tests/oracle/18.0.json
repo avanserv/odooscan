@@ -727,6 +727,12 @@
       "count": 2
     },
     {
+      "path": "addons/event/security/event_security.xml",
+      "code": "OD407",
+      "message": "event.event.ticket.event_id has no index, yet record rule event.ir_rule_event_event_ticket_company filters reads of event.event.ticket on it; add index=True to the field",
+      "count": 1
+    },
+    {
       "path": "addons/event/static/src/client_action/event_registration_summary_dialog.js",
       "code": "OD604",
       "message": "model 'ir.actions.report' has no method 'render_and_send'",
@@ -763,6 +769,36 @@
       "count": 1
     },
     {
+      "path": "addons/fleet/security/fleet_security.xml",
+      "code": "OD407",
+      "message": "fleet.vehicle.driver_id has no index, yet record rule fleet.fleet_rule_vehicle_visibility_user filters reads of fleet.vehicle on it; add index=True to the field",
+      "count": 1
+    },
+    {
+      "path": "addons/fleet/security/fleet_security.xml",
+      "code": "OD407",
+      "message": "fleet.vehicle.log.contract.vehicle_id has no index, yet record rule fleet.fleet_rule_contract_visibility_user filters reads of fleet.vehicle.log.contract on it; add index=True to the field",
+      "count": 1
+    },
+    {
+      "path": "addons/fleet/security/fleet_security.xml",
+      "code": "OD407",
+      "message": "fleet.vehicle.log.services.vehicle_id has no index, yet record rule fleet.fleet_rule_service_visibility_user filters reads of fleet.vehicle.log.services on it; add index=True to the field",
+      "count": 1
+    },
+    {
+      "path": "addons/fleet/security/fleet_security.xml",
+      "code": "OD407",
+      "message": "fleet.vehicle.odometer.vehicle_id has no index, yet record rule fleet.fleet_rule_odometer_visibility_user filters reads of fleet.vehicle.odometer on it; add index=True to the field",
+      "count": 1
+    },
+    {
+      "path": "addons/fleet/security/fleet_security.xml",
+      "code": "OD407",
+      "message": "fleet.vehicle.odometer.vehicle_id has no index, yet record rule fleet.ir_rule_fleet_odometer filters reads of fleet.vehicle.odometer on it; add index=True to the field",
+      "count": 1
+    },
+    {
       "path": "addons/gamification/models/gamification_challenge.py",
       "code": "OD103",
       "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
@@ -796,6 +832,12 @@
       "path": "addons/gamification/models/res_users.py",
       "code": "OD137",
       "message": "write() of the same values on each record of the loop updates them one at a time; write them once on the whole recordset",
+      "count": 1
+    },
+    {
+      "path": "addons/gamification/security/gamification_security.xml",
+      "code": "OD407",
+      "message": "gamification.goal.user_id has no index, yet record rule gamification.goal_user_visibility filters reads of gamification.goal on it; add index=True to the field",
       "count": 1
     },
     {
@@ -847,6 +889,18 @@
       "count": 1
     },
     {
+      "path": "addons/hr/security/hr_security.xml",
+      "code": "OD407",
+      "message": "hr.contract.type.country_id has no index, yet record rule hr.ir_rule_hr_contract_type_multi_company filters reads of hr.contract.type on it; add index=True to the field",
+      "count": 1
+    },
+    {
+      "path": "addons/hr/security/hr_security.xml",
+      "code": "OD407",
+      "message": "hr.employee.parent_id has no index, yet record rule hr.hr_employee_comp_rule filters reads of hr.employee on it; add index=True to the field",
+      "count": 1
+    },
+    {
       "path": "addons/hr_attendance/controllers/main.py",
       "code": "OD111",
       "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
@@ -895,6 +949,12 @@
       "count": 1
     },
     {
+      "path": "addons/hr_contract/security/security.xml",
+      "code": "OD407",
+      "message": "hr.payroll.structure.type.country_id has no index, yet record rule hr_contract.ir_rule_hr_payroll_structure_type_multi_company filters reads of hr.payroll.structure.type on it; add index=True to the field",
+      "count": 1
+    },
+    {
       "path": "addons/hr_contract/views/hr_employee_views.xml",
       "code": "OD323",
       "message": "XML id 'hr_employee_view_search' is already defined in views/hr_contract_views.xml, and this definition overwrites the fields both name; remove the copy when the two say the same thing, or rename one when both are meant to exist",
@@ -910,6 +970,72 @@
       "path": "addons/hr_expense/models/ir_actions_report.py",
       "code": "OD134",
       "message": "search() runs a query for each record of the loop, keyed on res_id; search once for all of them and group the result by res_id",
+      "count": 1
+    },
+    {
+      "path": "addons/hr_expense/security/ir_rule.xml",
+      "code": "OD407",
+      "message": "hr.expense.employee_id has no index, yet record rule hr_expense.ir_rule_hr_expense_approver filters reads of hr.expense on it; add index=True to the field",
+      "count": 1
+    },
+    {
+      "path": "addons/hr_expense/security/ir_rule.xml",
+      "code": "OD407",
+      "message": "hr.expense.employee_id has no index, yet record rule hr_expense.ir_rule_hr_expense_employee filters reads of hr.expense on it; add index=True to the field",
+      "count": 1
+    },
+    {
+      "path": "addons/hr_expense/security/ir_rule.xml",
+      "code": "OD407",
+      "message": "hr.expense.employee_id has no index, yet record rule hr_expense.ir_rule_hr_expense_employee_not_draft filters reads of hr.expense on it; add index=True to the field",
+      "count": 1
+    },
+    {
+      "path": "addons/hr_expense/security/ir_rule.xml",
+      "code": "OD407",
+      "message": "hr.expense.sheet.employee_id has no index, yet record rule hr_expense.ir_rule_hr_expense_sheet_approver filters reads of hr.expense.sheet on it; add index=True to the field",
+      "count": 1
+    },
+    {
+      "path": "addons/hr_expense/security/ir_rule.xml",
+      "code": "OD407",
+      "message": "hr.expense.sheet.employee_id has no index, yet record rule hr_expense.ir_rule_hr_expense_sheet_employee filters reads of hr.expense.sheet on it; add index=True to the field",
+      "count": 1
+    },
+    {
+      "path": "addons/hr_expense/security/ir_rule.xml",
+      "code": "OD407",
+      "message": "hr.expense.sheet.employee_id has no index, yet record rule hr_expense.ir_rule_hr_expense_sheet_employee_not_draft filters reads of hr.expense.sheet on it; add index=True to the field",
+      "count": 1
+    },
+    {
+      "path": "addons/hr_expense/security/ir_rule.xml",
+      "code": "OD407",
+      "message": "hr.expense.sheet.user_id has no index, yet record rule hr_expense.ir_rule_hr_expense_sheet_approver filters reads of hr.expense.sheet on it; add index=True to the field",
+      "count": 1
+    },
+    {
+      "path": "addons/hr_fleet/security/hr_fleet_security.xml",
+      "code": "OD407",
+      "message": "fleet.vehicle.driver_employee_id has no index, yet record rule hr_fleet.fleet_rule_vehicle_visibility_user filters reads of fleet.vehicle on it; add index=True to the field",
+      "count": 1
+    },
+    {
+      "path": "addons/hr_fleet/security/hr_fleet_security.xml",
+      "code": "OD407",
+      "message": "fleet.vehicle.log.contract.vehicle_id has no index, yet record rule hr_fleet.fleet_rule_contract_visibility_user filters reads of fleet.vehicle.log.contract on it; add index=True to the field",
+      "count": 1
+    },
+    {
+      "path": "addons/hr_fleet/security/hr_fleet_security.xml",
+      "code": "OD407",
+      "message": "fleet.vehicle.log.services.vehicle_id has no index, yet record rule hr_fleet.fleet_rule_service_visibility_user filters reads of fleet.vehicle.log.services on it; add index=True to the field",
+      "count": 1
+    },
+    {
+      "path": "addons/hr_fleet/security/hr_fleet_security.xml",
+      "code": "OD407",
+      "message": "fleet.vehicle.odometer.vehicle_id has no index, yet record rule hr_fleet.fleet_rule_odometer_visibility_user filters reads of fleet.vehicle.odometer on it; add index=True to the field",
       "count": 1
     },
     {
@@ -946,6 +1072,12 @@
       "path": "addons/hr_holidays/models/res_users.py",
       "code": "OD101",
       "message": "query built by string formatting; pass parameters separately or build it with odoo.tools.SQL",
+      "count": 1
+    },
+    {
+      "path": "addons/hr_holidays/security/hr_holidays_security.xml",
+      "code": "OD407",
+      "message": "hr.leave.allocation.holiday_status_id has no index, yet record rule hr_holidays.hr_leave_allocation_rule_multicompany filters reads of hr.leave.allocation on it; add index=True to the field",
       "count": 1
     },
     {
@@ -997,6 +1129,30 @@
       "count": 1
     },
     {
+      "path": "addons/hr_recruitment_survey/security/hr_recruitment_survey_security.xml",
+      "code": "OD407",
+      "message": "survey.question.survey_id has no index, yet record rule hr_recruitment_survey.survey_question_recruitment_interviewer filters reads of survey.question on it; add index=True to the field",
+      "count": 1
+    },
+    {
+      "path": "addons/hr_recruitment_survey/security/hr_recruitment_survey_security.xml",
+      "code": "OD407",
+      "message": "survey.question.survey_id has no index, yet record rule hr_recruitment_survey.survey_question_rule_recruitment_manager filters reads of survey.question on it; add index=True to the field",
+      "count": 1
+    },
+    {
+      "path": "addons/hr_recruitment_survey/security/hr_recruitment_survey_security.xml",
+      "code": "OD407",
+      "message": "survey.user_input.line.survey_id has no index, yet record rule hr_recruitment_survey.survey_user_input_line_rule_recruitment_manager filters reads of survey.user_input.line on it; add index=True to the field",
+      "count": 1
+    },
+    {
+      "path": "addons/hr_recruitment_survey/security/hr_recruitment_survey_security.xml",
+      "code": "OD407",
+      "message": "survey.user_input.line.survey_id has no index, yet record rule hr_recruitment_survey.survey_user_input_line_rule_recruitment_user filters reads of survey.user_input.line on it; add index=True to the field",
+      "count": 1
+    },
+    {
       "path": "addons/hr_skills/data/hr_skill_demo.xml",
       "code": "OD303",
       "message": "XML id 'hr_skill_nosql' is already defined earlier in this file",
@@ -1030,6 +1186,12 @@
       "path": "addons/hr_timesheet/__manifest__.py",
       "code": "OD520",
       "message": "module 'uom' already comes with 'project', also in depends",
+      "count": 1
+    },
+    {
+      "path": "addons/hr_work_entry/security/hr_work_entry_security.xml",
+      "code": "OD407",
+      "message": "hr.work.entry.type.country_id has no index, yet record rule hr_work_entry.ir_rule_hr_work_entry_type_multi_company filters reads of hr.work.entry.type on it; add index=True to the field",
       "count": 1
     },
     {
@@ -2011,6 +2173,12 @@
       "count": 1
     },
     {
+      "path": "addons/lunch/security/lunch_security.xml",
+      "code": "OD407",
+      "message": "lunch.cashmove.user_id has no index, yet record rule lunch.lunch_mind_your_own_food_money filters reads of lunch.cashmove on it; add index=True to the field",
+      "count": 1
+    },
+    {
       "path": "addons/lunch/static/src/components/lunch_dashboard.js",
       "code": "OD609",
       "message": "markup() of a value built at runtime makes t-out render it as HTML unescaped; check that no user input reaches it, or use markup`...`, which escapes each placeholder",
@@ -2323,6 +2491,24 @@
       "count": 1
     },
     {
+      "path": "addons/mail_group/security/mail_group_security.xml",
+      "code": "OD407",
+      "message": "mail.group.access_group_id has no index, yet record rule mail_group.mail_group_rule_read_all filters reads of mail.group on it; add index=True to the field",
+      "count": 1
+    },
+    {
+      "path": "addons/mail_group/security/mail_group_security.xml",
+      "code": "OD407",
+      "message": "mail.group.message.mail_group_id has no index, yet record rule mail_group.mail_group_message_rule_public filters reads of mail.group.message on it; add index=True to the field",
+      "count": 1
+    },
+    {
+      "path": "addons/mail_group/security/mail_group_security.xml",
+      "code": "OD407",
+      "message": "mail.group.message.mail_group_id has no index, yet record rule mail_group.mail_group_message_rule_user filters reads of mail.group.message on it; add index=True to the field",
+      "count": 1
+    },
+    {
       "path": "addons/mail_group/static/src/js/mail_group.js",
       "code": "OD610",
       "message": "html() renders its argument as HTML unescaped; check that no user input reaches it, or use text()",
@@ -2380,6 +2566,18 @@
       "path": "addons/maintenance/models/maintenance.py",
       "code": "OD134",
       "message": "search() runs a query for each record of the loop, keyed on maintenance_team_id; search once for all of them and group the result by maintenance_team_id",
+      "count": 1
+    },
+    {
+      "path": "addons/maintenance/security/maintenance.xml",
+      "code": "OD407",
+      "message": "maintenance.request.owner_user_id has no index, yet record rule maintenance.equipment_request_rule_user filters reads of maintenance.request on it; add index=True to the field",
+      "count": 1
+    },
+    {
+      "path": "addons/maintenance/security/maintenance.xml",
+      "code": "OD407",
+      "message": "maintenance.request.user_id has no index, yet record rule maintenance.equipment_request_rule_user filters reads of maintenance.request on it; add index=True to the field",
       "count": 1
     },
     {
@@ -2671,6 +2869,18 @@
       "count": 1
     },
     {
+      "path": "addons/mrp_subcontracting/security/mrp_subcontracting_security.xml",
+      "code": "OD407",
+      "message": "mrp.production.subcontractor_id has no index, yet record rule mrp_subcontracting.production_subcontractor_rule filters reads of mrp.production on it; add index=True to the field",
+      "count": 1
+    },
+    {
+      "path": "addons/mrp_subcontracting/security/mrp_subcontracting_security.xml",
+      "code": "OD407",
+      "message": "uom.uom.category_id has no index, yet record rule mrp_subcontracting.uom_subcontracting_rule filters reads of uom.uom on it; add index=True to the field",
+      "count": 1
+    },
+    {
       "path": "addons/mrp_subcontracting_account/security/ir.model.access.csv",
       "code": "OD402",
       "message": "base.group_portal gets write, create or unlink on mrp_account.model_account_analytic_line; public and portal access should be read-only and go through controllers",
@@ -2710,6 +2920,12 @@
       "path": "addons/payment/models/payment_transaction.py",
       "code": "OD139",
       "message": "search() without a limit fetches every matching id to keep the first; pass limit=1",
+      "count": 1
+    },
+    {
+      "path": "addons/payment/security/payment_security.xml",
+      "code": "OD407",
+      "message": "payment.token.partner_id has no index, yet record rule payment.payment_token_user_rule filters reads of payment.token on it; add index=True to the field",
       "count": 1
     },
     {
@@ -3277,6 +3493,42 @@
       "count": 2
     },
     {
+      "path": "addons/project/security/project_security.xml",
+      "code": "OD407",
+      "message": "project.milestone.project_id has no index, yet record rule project.milestone_comp_rule filters reads of project.milestone on it; add index=True to the field",
+      "count": 1
+    },
+    {
+      "path": "addons/project/security/project_security.xml",
+      "code": "OD407",
+      "message": "project.milestone.project_id has no index, yet record rule project.milestone_visibility_rule filters reads of project.milestone on it; add index=True to the field",
+      "count": 1
+    },
+    {
+      "path": "addons/project/security/project_security.xml",
+      "code": "OD407",
+      "message": "project.milestone.project_id has no index, yet record rule project.project_milestone_rule_portal_project_sharing filters reads of project.milestone on it; add index=True to the field",
+      "count": 1
+    },
+    {
+      "path": "addons/project/security/project_security.xml",
+      "code": "OD407",
+      "message": "project.update.project_id has no index, yet record rule project.update_comp_rule filters reads of project.update on it; add index=True to the field",
+      "count": 1
+    },
+    {
+      "path": "addons/project/security/project_security.xml",
+      "code": "OD407",
+      "message": "project.update.project_id has no index, yet record rule project.update_visibility_rule filters reads of project.update on it; add index=True to the field",
+      "count": 1
+    },
+    {
+      "path": "addons/project/security/project_security.xml",
+      "code": "OD407",
+      "message": "project.update.user_id has no index, yet record rule project.update_visibility_rule filters reads of project.update on it; add index=True to the field",
+      "count": 1
+    },
+    {
       "path": "addons/project/static/src/project_sharing/components/chatter/chatter_container.js",
       "code": "OD609",
       "message": "markup() of a value built at runtime makes t-out render it as HTML unescaped; check that no user input reaches it, or use markup`...`, which escapes each placeholder",
@@ -3406,6 +3658,12 @@
       "path": "addons/sale/data/sale_demo.xml",
       "code": "OD303",
       "message": "XML id 'sale_order_9' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/sale/security/ir_rules.xml",
+      "code": "OD407",
+      "message": "sale.order.line.salesman_id has no index, yet record rule sale.sale_order_line_personal_rule filters reads of sale.order.line on it; add index=True to the field",
       "count": 1
     },
     {
@@ -3700,6 +3958,24 @@
       "path": "addons/survey/data/survey_demo_certification.xml",
       "code": "OD303",
       "message": "XML id 'vendor_certification_page_2_question_2_choice_5' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/survey/security/survey_security.xml",
+      "code": "OD407",
+      "message": "survey.question.survey_id has no index, yet record rule survey.survey_question_rule_survey_user filters reads of survey.question on it; add index=True to the field",
+      "count": 1
+    },
+    {
+      "path": "addons/survey/security/survey_security.xml",
+      "code": "OD407",
+      "message": "survey.user_input.line.survey_id has no index, yet record rule survey.survey_user_input_line_rule_survey_manager filters reads of survey.user_input.line on it; add index=True to the field",
+      "count": 1
+    },
+    {
+      "path": "addons/survey/security/survey_security.xml",
+      "code": "OD407",
+      "message": "survey.user_input.line.survey_id has no index, yet record rule survey.survey_user_input_line_rule_survey_user filters reads of survey.user_input.line on it; add index=True to the field",
       "count": 1
     },
     {
@@ -4525,6 +4801,12 @@
       "count": 1
     },
     {
+      "path": "addons/website_crm_iap_reveal/security/ir_rules.xml",
+      "code": "OD407",
+      "message": "crm.reveal.rule.user_id has no index, yet record rule website_crm_iap_reveal.ir_rule_crm_reveal_rule_salesman filters reads of crm.reveal.rule on it; add index=True to the field",
+      "count": 1
+    },
+    {
       "path": "addons/website_crm_iap_reveal/views/crm_reveal_views.xml",
       "code": "OD329",
       "message": "no indexed bundle registers field widget 'website_urls'",
@@ -4615,6 +4897,30 @@
       "count": 2
     },
     {
+      "path": "addons/website_event/security/event_security.xml",
+      "code": "OD407",
+      "message": "event.event.ticket.event_id has no index, yet record rule website_event.ir_rule_event_event_ticket_public filters reads of event.event.ticket on it; add index=True to the field",
+      "count": 1
+    },
+    {
+      "path": "addons/website_event/security/event_security.xml",
+      "code": "OD407",
+      "message": "event.question.answer.question_id has no index, yet record rule website_event.ir_rule_event_question_answer_published filters reads of event.question.answer on it; add index=True to the field",
+      "count": 1
+    },
+    {
+      "path": "addons/website_event/security/event_security.xml",
+      "code": "OD407",
+      "message": "event.question.event_id has no index, yet record rule website_event.ir_rule_event_question_published filters reads of event.question on it; add index=True to the field",
+      "count": 1
+    },
+    {
+      "path": "addons/website_event/security/event_security.xml",
+      "code": "OD407",
+      "message": "event.tag.category_id has no index, yet record rule website_event.ir_rule_event_tag_public filters reads of event.tag on it; add index=True to the field",
+      "count": 1
+    },
+    {
       "path": "addons/website_event/views/snippets/snippets.xml",
       "code": "OD323",
       "message": "XML id 'snippet_options' is already defined in views/event_snippets.xml, and this definition overwrites the fields both name; remove the copy when the two say the same thing, or rename one when both are meant to exist",
@@ -4636,6 +4942,12 @@
       "path": "addons/website_event_booth/controllers/event_booth.py",
       "code": "OD716",
       "message": "route parameter 'event_booth_ids' reaches the id of browse() through 'booths', whose records the route returns read as superuser; check them with _document_check_access(), consteq(), check_access() from 18.0 or check_access_rule() before 18.0",
+      "count": 1
+    },
+    {
+      "path": "addons/website_event_booth/security/event_booth_security.xml",
+      "code": "OD407",
+      "message": "event.booth.event_id has no index, yet record rule website_event_booth.ir_rule_event_booth_public filters reads of event.booth on it; add index=True to the field",
       "count": 1
     },
     {
@@ -4756,6 +5068,24 @@
       "path": "addons/website_forum/security/ir.model.access.csv",
       "code": "OD402",
       "message": "base.group_public gets write, create or unlink on model_forum_tag; public and portal access should be read-only and go through controllers",
+      "count": 1
+    },
+    {
+      "path": "addons/website_forum/security/ir_rule_data.xml",
+      "code": "OD407",
+      "message": "forum.forum.authorized_group_id has no index, yet record rule website_forum.website_forum_connected filters reads of forum.forum on it; add index=True to the field",
+      "count": 1
+    },
+    {
+      "path": "addons/website_forum/security/ir_rule_data.xml",
+      "code": "OD407",
+      "message": "forum.post.forum_id has no index, yet record rule website_forum.website_forum_connected_post filters reads of forum.post on it; add index=True to the field",
+      "count": 1
+    },
+    {
+      "path": "addons/website_forum/security/ir_rule_data.xml",
+      "code": "OD407",
+      "message": "forum.post.forum_id has no index, yet record rule website_forum.website_forum_public_post filters reads of forum.post on it; add index=True to the field",
       "count": 1
     },
     {
@@ -5173,6 +5503,36 @@
       "count": 1
     },
     {
+      "path": "addons/website_slides/security/website_slides_security.xml",
+      "code": "OD407",
+      "message": "slide.slide.channel_id has no index, yet record rule website_slides.rule_slide_slide_public_user filters reads of slide.slide on it; add index=True to the field",
+      "count": 1
+    },
+    {
+      "path": "addons/website_slides/security/website_slides_security.xml",
+      "code": "OD407",
+      "message": "slide.slide.channel_id has no index, yet record rule website_slides.rule_slide_slide_signed_in_user filters reads of slide.slide on it; add index=True to the field",
+      "count": 1
+    },
+    {
+      "path": "addons/website_slides/security/website_slides_security.xml",
+      "code": "OD407",
+      "message": "slide.slide.resource.slide_id has no index, yet record rule website_slides.rule_slide_slide_resource_downloadable filters reads of slide.slide.resource on it; add index=True to the field",
+      "count": 1
+    },
+    {
+      "path": "addons/website_slides/security/website_slides_security.xml",
+      "code": "OD407",
+      "message": "slide.slide.resource.slide_id has no index, yet record rule website_slides.rule_slide_slide_resource_officer_crud filters reads of slide.slide.resource on it; add index=True to the field",
+      "count": 1
+    },
+    {
+      "path": "addons/website_slides/security/website_slides_security.xml",
+      "code": "OD407",
+      "message": "slide.slide.user_id has no index, yet record rule website_slides.rule_slide_slide_signed_in_user filters reads of slide.slide on it; add index=True to the field",
+      "count": 1
+    },
+    {
       "path": "addons/website_slides/static/src/js/slides_course_fullscreen_player.js",
       "code": "OD609",
       "message": "markup() of a value built at runtime makes t-out render it as HTML unescaped; check that no user input reaches it, or use markup`...`, which escapes each placeholder",
@@ -5189,6 +5549,30 @@
       "code": "OD609",
       "message": "markup() of a value built at runtime makes t-out render it as HTML unescaped; check that no user input reaches it, or use markup`...`, which escapes each placeholder",
       "count": 5
+    },
+    {
+      "path": "addons/website_slides_forum/security/website_slides_forum_security.xml",
+      "code": "OD407",
+      "message": "forum.post.forum_id has no index, yet record rule website_slides_forum.website_slides_forum_post_signed_in_user filters reads of forum.post on it; add index=True to the field",
+      "count": 1
+    },
+    {
+      "path": "addons/website_slides_forum/security/website_slides_forum_security.xml",
+      "code": "OD407",
+      "message": "forum.post.forum_id has no index, yet record rule website_slides_forum.website_slides_forum_public_post filters reads of forum.post on it; add index=True to the field",
+      "count": 1
+    },
+    {
+      "path": "addons/website_slides_survey/security/website_slides_survey_security.xml",
+      "code": "OD407",
+      "message": "survey.question.survey_id has no index, yet record rule website_slides_survey.survey_question_rule_slide_channel_officer filters reads of survey.question on it; add index=True to the field",
+      "count": 1
+    },
+    {
+      "path": "addons/website_slides_survey/security/website_slides_survey_security.xml",
+      "code": "OD407",
+      "message": "survey.user_input.line.survey_id has no index, yet record rule website_slides_survey.survey_user_input_line_rule_slide_channel_officer filters reads of survey.user_input.line on it; add index=True to the field",
+      "count": 1
     },
     {
       "path": "odoo/addons/base/controllers/rpc.py",
@@ -5542,6 +5926,12 @@
       "path": "odoo/addons/test_new_api/models/test_new_api.py",
       "code": "OD223",
       "message": "_compute_bar() can leave 'bar' unassigned on a record, so reading it raises ValueError; assign it on every path through the loop, False when there is no value",
+      "count": 1
+    },
+    {
+      "path": "odoo/addons/test_new_api/security/test_new_api_security.xml",
+      "code": "OD407",
+      "message": "test_new_api.model_shared_cache_compute_line.user_id has no index, yet record rule test_new_api.ir_rule_test_new_api_model_shared_cache_compute_line filters reads of test_new_api.model_shared_cache_compute_line on it; add index=True to the field",
       "count": 1
     },
     {

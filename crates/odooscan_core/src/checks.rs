@@ -2923,6 +2923,7 @@ impl<'m> Ctx<'_, 'm> {
             self.rule_domain(out, path, rule);
             self.public_rule(out, path, rule);
             self.rule_without_permission(out, path, rule);
+            self.rule_index(out, path, rule);
         }
         for server in &file.facts.servers {
             self.server_code(out, path, server);
@@ -6756,7 +6757,7 @@ const OPERATIONS: [(&str, grants::Kind); 4] = [
     ("unlink", |p| p.unlink),
 ];
 
-/// OD405 and OD406, on what the records of `ir.rule` and `ir.access` hold.
+/// OD405, OD406 and OD407, on what the records of `ir.rule` and `ir.access` hold.
 impl<'m> Ctx<'_, 'm> {
     /// OD405 on the last write of this module to a rule for public or portal users whose domain
     /// holds every record, naming the first of its public groups that reaches an operation. A later
@@ -6843,7 +6844,185 @@ impl<'m> Ctx<'_, 'm> {
             out.push(path, "OD406", rule.pos, message);
         }
     }
+
+    /// OD407 on each field the domain of `rule` filters reads on that no index serves. Only a read
+    /// rule joins the query; the others filter fetched ids in Python (18.0 `odoo/models.py:4494-4497`).
+    fn rule_index(&self, out: &mut Out<'m>, path: &'m Path, rule: &'m RuleFact) {
+        let ActionValue::Literal(text) = &rule.domain else {
+            return;
+        };
+        let Some(model) = self.read_rule_model(rule).filter(|m| self.indexed_table(m)) else {
+            return;
+        };
+        let who = match (&rule.id, rule.access) {
+            (Some(id), false) => format!("record rule {}", full_id(&self.module.name, id)),
+            (Some(id), true) => format!("ir.access record {}", full_id(&self.module.name, id)),
+            (None, false) => "a record rule".to_owned(),
+            (None, true) => "an ir.access record".to_owned(),
+        };
+        for terms in domain::served_fields(&text.value) {
+            if self.unindexed_field(model, &terms) {
+                let field = &terms.field;
+                let message = format!(
+                    "{model}.{field} has no index, yet {who} filters reads of {model} on it; add index=True to the field"
+                );
+                out.push(path, "OD407", text.pos, message);
+            }
+        }
+    }
+
+    /// The model whose reads `rule` filters with its own domain, as every write the scope loads
+    /// leaves it, whichever module makes it: an active record that applies to reads, in a series
+    /// that reads its model, whose last domain is the one `rule` writes.
+    fn read_rule_model(&self, rule: &'m RuleFact) -> Option<&'m str> {
+        let read = if rule.access {
+            self.series.is_none_or(|s| s >= IR_ACCESS)
+        } else {
+            reads_model_access(self.series)
+        };
+        let writes: Vec<_> = match self.record_rule_writes(rule) {
+            Some(writes) => writes.iter().filter(|w| self.scope.loads(w)).copied().collect(),
+            None => vec![self.own(rule)],
+        };
+        let last = writes
+            .iter()
+            .rev()
+            .find(|w| !matches!(w.fact.domain, ActionValue::Unset));
+        let state = RuleState::of(self.index, &writes);
+        let live = state.active != Some(false) && state.perms[0] != Flag::Set(false);
+        let holds = last.is_some_and(|w| std::ptr::eq(w.fact, rule));
+        (read && live && holds).then(|| self.rule_model(&writes)).flatten()
+    }
+
+    /// Whether the registry builds the table of `model` from its fields and keeps its rows: no
+    /// table query, transient vacuum or `init()` that may index it by hand, and no parent the scan
+    /// cannot read that may give the field. A class from a file that does not parse counts as
+    /// such a parent, as its `_inherit` is unknown.
+    fn indexed_table(&self, model: &str) -> bool {
+        let hand_made = |c: &ClassFact| c.kind == ModelKind::Transient || c.methods.iter().any(|m| m == "init");
+        self.has_table(model)
+            && !self.table_query(model)
+            && !self.some_class(model, hand_made)
+            && !self.index.hidden_field_parents(model, self.scope)
+    }
+
+    /// Whether `name` of `model` is a stored column of a type an index serves, which neither the
+    /// field nor a definition of the model indexes. Odoo skips the btree of a translated field
+    /// (18.0 `odoo/modules/registry.py:625-659`).
+    fn unindexed_field(&self, model: &'m str, terms: &domain::Served) -> bool {
+        let name = terms.field.as_str();
+        let Some(field) = self.merged(model, name) else {
+            return false;
+        };
+        let ftype = field.defs.first().map_or("", |d| d.2.ftype.as_str());
+        let unindexed = has_certain_column(&field)
+            && INDEX_SERVED_TYPES.contains(&ftype)
+            && self.untranslated(model, &field, ftype)
+            && truth(field.get("index")) == Some(false);
+        unindexed && self.served_path(model, &field, ftype, terms) && !self.defined_index(model, name)
+    }
+
+    /// Whether the field certainly holds no translations: its `translate` is false, or unset on a
+    /// field other than a Char, or on a Char related to one that holds none, as only a string
+    /// field takes its target's (18.0 `odoo/fields.py:1814`).
+    fn untranslated(&self, model: &str, field: &Field<'m>, ftype: &str) -> bool {
+        match field.get("translate") {
+            Merged::Unset if ftype != "Char" => true,
+            Merged::Unset => match field.get("related") {
+                Merged::Unset => true,
+                Merged::Known(OptionValue::Str(path)) => self.untranslated_target(model, path, RELATED_HOPS),
+                _ => false,
+            },
+            own => truth(own) == Some(false),
+        }
+    }
+
+    /// Whether every definition of the field `path` of `model` ends on holds no translations,
+    /// following a related one at most `hops` more times. False when the path does not resolve.
+    fn untranslated_target(&self, model: &str, path: &str, hops: usize) -> bool {
+        let (target, last) = match path.rsplit_once('.') {
+            Some((head, last)) => (self.index.path_comodel(model, head, self.scope), last),
+            None => (Some(model.to_owned()), path),
+        };
+        let Some(target) = target else {
+            return false;
+        };
+        let defs = self.index.field_defs(&target, last, Some(self.scope));
+        let own = |def: &FieldFact| match (def.option("translate"), def.option("related")) {
+            (Some(o), _) => matches!(o.value, OptionValue::Bool(false) | OptionValue::Falsy),
+            (None, None) => true,
+            (None, Some(r)) => match &r.value {
+                OptionValue::Str(next) if hops > 0 => self.untranslated_target(&target, next, hops - 1),
+                _ => false,
+            },
+        };
+        !defs.is_empty() && defs.iter().all(|(_, _, d)| !d.splat && own(d))
+    }
+
+    /// Whether a term of `terms` filters the column, on a Many2one only with its comodel known and
+    /// other than `res.company`. A hierarchy term on a Many2one to the model itself becomes a
+    /// `parent_path` match under `_parent_store` (18.0 `odoo/osv/expression.py:889-896,1363-1368`).
+    /// Only a relational field takes a dotted path (`:387-390`), which reaches the column through
+    /// an `IN` unless the field joins, as `any` on a Many2one does under `auto_join` (`:1137-1150`).
+    fn served_path(&self, model: &'m str, field: &Field<'m>, ftype: &str, terms: &domain::Served) -> bool {
+        let name = field.defs.first().map_or("", |d| d.2.name.as_str());
+        let comodel = self
+            .index
+            .field(model, name, self.scope)
+            .ok()
+            .flatten()
+            .and_then(|i| i.comodel);
+        if ftype == "Many2one" && comodel.as_deref().is_none_or(|c| c == "res.company") {
+            return false;
+        }
+        let tree = comodel.as_deref() == Some(model) && self.some_class(model, sets_parent_store);
+        terms.plain
+            || terms.hierarchy && !tree
+            || terms.through && ftype == "Many2one" && !self.joins(model, field, name)
+    }
+
+    /// Whether a term through the Many2one `name` may join its comodel: `auto_join`,
+    /// `bypass_search_access` or `delegate` may be true, or an `_inherits` entry may name it,
+    /// which implies them (20.0 `odoo/orm/fields_relational.py:250-254`).
+    fn joins(&self, model: &str, field: &Field<'m>, name: &str) -> bool {
+        let options = ["auto_join", "bypass_search_access", "delegate"];
+        let entry = |c: &&ClassFact| c.inherits_unknown || c.inherits.iter().any(|(_, f)| f == name);
+        options.iter().any(|o| truth(field.get(o)) != Some(false))
+            || self
+                .index
+                .merged_classes(model, self.scope)
+                .iter()
+                .any(|(_, c)| entry(c))
+    }
+
+    /// Whether a constraint or index definition Odoo applies in this series names column `name`
+    /// of `model`.
+    fn defined_index(&self, model: &str, name: &str) -> bool {
+        let names = |c: &ClassFact| {
+            c.definitions
+                .iter()
+                .any(|(source, column)| applies(*source, self.series) && column.value == name)
+        };
+        self.some_class(model, names)
+    }
 }
+
+/// How many related fields `Ctx::untranslated` follows before it gives up on a chain.
+const RELATED_HOPS: usize = 8;
+
+/// The field types whose column a btree index serves for the operators `domain::served_fields`
+/// keeps. Boolean and Selection hold too few values for one to pay.
+const INDEX_SERVED_TYPES: [&str; 9] = [
+    "Many2one",
+    "Many2oneReference",
+    "Integer",
+    "Float",
+    "Monetary",
+    "Char",
+    "Date",
+    "Datetime",
+    "Reference",
+];
 
 #[cfg(test)]
 mod tests {

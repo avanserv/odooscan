@@ -1,0 +1,2 @@
+id,name,model_id:id,domain_force
+rule_case_ref,Cases by reference,model_desk_case,"[('ref', '=', 'desk')]"
