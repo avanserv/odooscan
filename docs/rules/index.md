@@ -18,11 +18,18 @@ that apply to every series.
 
 ## Load failures
 
-Rule pages say a failure stops the install: that holds for a file of `data`. From saas~11.5 a
-failure while loading a file of `demo` stops neither the install nor the update: Odoo logs a
-warning and installs the module without its demo data. That covers the load alone: an update
-validates a view of that file again after it, so a view that no longer validates stops the
-update. Before saas~11.5 any failure in a `demo` file stops them like a data file.
+Rule pages say a failure stops the install: that holds for a file of `data`. From saas~11.5, except
+as below, a failure while loading a file of `demo` stops neither the install nor the update: Odoo
+logs a warning and installs the module without its demo data. That covers the load alone: an update
+validates a view of that file again after it, so a view that no longer validates stops the update.
+Before saas~11.5 any failure in a `demo` file stops them like a data file.
+
+From saas~12.5 to 19.0, Odoo holds a write to an existing record and sends it after the step that
+logs that warning (18.0 `odoo/modules/loading.py:89`, `:255`). A value the database refuses there,
+such as a number no record holds on a foreign key, still stops the install, unless the same demo
+load flushes it earlier, as a later CSV file or a `<delete>` that removes a record does. From
+saas~19.1 each demo file's writes are sent inside that step (20.0 `odoo/modules/loading.py:57`). A
+created record is inserted at once on every series.
 
 ## OD0: parsing
 
