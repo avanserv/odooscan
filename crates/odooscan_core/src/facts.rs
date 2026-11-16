@@ -23,7 +23,8 @@ pub struct Spanned<T> {
     pub pos: Pos,
 }
 
-/// A point on the path of a data flow. `path` is none for a point in the finding's own file.
+/// A place a finding points to besides its own position, such as a point on the path of a data
+/// flow or an entry a per-file count covers. `path` is none for a place in the finding's own file.
 #[derive(Clone, Debug)]
 pub struct Step {
     pub path: Option<PathBuf>,
@@ -38,6 +39,8 @@ pub struct RawDiag {
     pub message: String,
     /// The path a data flow takes from its source to the finding.
     pub flow: Vec<Step>,
+    /// Further places the finding stands for, such as each entry a per-file count covers.
+    pub related: Vec<Step>,
     pub fix: Option<Fix>,
 }
 
@@ -48,12 +51,18 @@ impl RawDiag {
             pos,
             message: message.into(),
             flow: vec![],
+            related: vec![],
             fix: None,
         }
     }
 
     pub fn with_flow(mut self, flow: Vec<Step>) -> Self {
         self.flow = flow;
+        self
+    }
+
+    pub fn with_related(mut self, related: Vec<Step>) -> Self {
+        self.related = related;
         self
     }
 }

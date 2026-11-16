@@ -25,7 +25,10 @@ notice says so.
 Other options:
 
 - `--format github` and `--format gitlab` are for [CI](ci.md); `json` and `sarif` for other
-  tools.
+  tools. A finding that stands for several places, such as each untranslated entry of
+  [OD803](rules/OD803.md), names their first 20 lines in text, `github` and `gitlab`, lists them
+  all in `json`, and lists the first 1,000 in `sarif`, following GitHub code scanning's limit of
+  1,000 locations per result, past which it rejects the whole file.
 - `--select OD3` and `--ignore OD111` filter by code prefix.
 - `--exclude migrations/,tests/` hides findings in files matching gitignore-style patterns.
 - `--statistics` prints counts per rule.

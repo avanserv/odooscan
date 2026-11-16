@@ -37,12 +37,13 @@ mod suppress;
 mod taint;
 mod xml;
 
+use std::borrow::Cow;
 use std::path::{Path, PathBuf};
 
 use rayon::prelude::*;
 use serde::Serialize;
 
-use crate::facts::RawDiag;
+use crate::facts::{RawDiag, Step};
 use crate::fix::Fix;
 use crate::rules::{SUPERSEDED, Severity, rule};
 use crate::series::Series;
@@ -74,6 +75,9 @@ pub struct Diagnostic {
     /// The path a data flow takes from its source to the finding.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub flow: Vec<FlowStep>,
+    /// Further places the finding stands for, such as each untranslated entry of an OD803 count.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub related: Vec<FlowStep>,
     /// The rewrite `oscn check --fix` applies, which no report format carries.
     #[serde(skip)]
     pub fix: Option<Fix>,
@@ -88,26 +92,54 @@ pub struct FlowStep {
 }
 
 impl Diagnostic {
-    fn new(path: PathBuf, d: RawDiag, series: Option<Series>) -> Self {
-        let flow = d
-            .flow
-            .into_iter()
-            .map(|s| FlowStep {
-                path: s.path.unwrap_or_else(|| path.clone()),
-                line: s.pos.line,
-                column: s.pos.col,
-                label: s.label,
-            })
-            .collect();
+    /// Borrows `d`, as a per-file finding such as OD803 can carry thousands of related steps and
+    /// cloning it first would hold them a third time.
+    fn new(path: PathBuf, d: &RawDiag, series: Option<Series>) -> Self {
+        let steps = |steps: &[Step]| {
+            steps
+                .iter()
+                .map(|s| FlowStep {
+                    path: s.path.clone().unwrap_or_else(|| path.clone()),
+                    line: s.pos.line,
+                    column: s.pos.col,
+                    label: s.label.clone(),
+                })
+                .collect()
+        };
+        let flow = steps(&d.flow);
+        let related = steps(&d.related);
         Self {
             code: d.code,
             severity: rule(d.code).severity_for(series),
             path,
             line: d.pos.line,
             column: d.pos.col,
-            message: d.message,
+            message: d.message.clone(),
             flow,
-            fix: d.fix,
+            related,
+            fix: d.fix.clone(),
+        }
+    }
+
+    /// The lines of the related locations, the first `cap` of them named, for a report that
+    /// cannot list them all. Lines alone name a place only in the finding's file, so a rule that
+    /// gives related locations must keep them there.
+    pub fn related_lines(&self, cap: usize) -> Option<String> {
+        debug_assert!(
+            self.related.iter().all(|s| s.path == self.path),
+            "{} gives a related location outside {}",
+            self.code,
+            self.path.display()
+        );
+        let shown: Vec<String> = self.related.iter().take(cap).map(|s| s.line.to_string()).collect();
+        match (shown.as_slice(), self.related.len() - shown.len()) {
+            ([], _) => None,
+            ([one], 0) => Some(format!("line {one}")),
+            (lines, 0) => Some(format!("lines {}", lines.join(", "))),
+            (lines, rest) => Some(format!(
+                "lines {} and {rest} more, which --format json lists",
+                lines.join(", ")
+            )),
         }
     }
 }
@@ -189,7 +221,9 @@ pub fn scan(opts: &ScanOptions) -> Report {
                         .iter()
                         .map(move |d| (f.path.as_path(), &f.suppressions, d))
                 }))
-                .map(|(p, s, d): (&Path, _, &RawDiag)| (p.to_path_buf(), s.allows(d.pos.line, d.code), d.clone()));
+                .map(|(p, s, d): (&Path, _, &RawDiag)| {
+                    (p.to_path_buf(), s.allows(d.pos.line, d.code), Cow::Borrowed(d))
+                });
             let cross = checks::check_module(&index, mi, series).into_iter().map(|(p, d)| {
                 let allowed = module
                     .python
@@ -202,12 +236,12 @@ pub fn scan(opts: &ScanOptions) -> Report {
                     .chain(module.template.iter().map(|f| (&f.path, &f.suppressions)))
                     .find(|(fp, _)| fp.as_path() == p)
                     .is_none_or(|(_, s)| s.allows(d.pos.line, d.code));
-                (p.to_path_buf(), allowed, d)
+                (p.to_path_buf(), allowed, Cow::Owned(d))
             });
             let mut diags: Vec<_> = local
                 .chain(cross)
                 .filter(move |(_, allowed, d)| *allowed && rule(d.code).applies_to(series))
-                .map(|(path, _, d)| Diagnostic::new(path, d, series))
+                .map(|(path, _, d)| Diagnostic::new(path, &d, series))
                 .collect();
             drop_superseded(&mut diags);
             diags
@@ -217,7 +251,7 @@ pub fn scan(opts: &ScanOptions) -> Report {
     let broken_diags = broken
         .iter()
         .filter(|b| b.suppressions.allows(b.diag.pos.line, b.diag.code) && rule(b.diag.code).applies_to(default_series))
-        .map(|b| Diagnostic::new(b.path.clone(), b.diag.clone(), default_series));
+        .map(|b| Diagnostic::new(b.path.clone(), &b.diag, default_series));
     diagnostics.extend(broken_diags);
     diagnostics.sort_by(|a, b| (&a.path, a.line, a.column, a.code).cmp(&(&b.path, b.line, b.column, b.code)));
     Report {
@@ -245,8 +279,37 @@ mod tests {
             column: 5,
             message: String::new(),
             flow: vec![],
+            related: vec![],
             fix: None,
         }
+    }
+
+    fn related(count: u32) -> Diagnostic {
+        let mut d = diag("OD803", 3);
+        d.related = (1..=count)
+            .map(|n| FlowStep {
+                path: d.path.clone(),
+                line: n * 10,
+                column: 1,
+                label: String::new(),
+            })
+            .collect();
+        d
+    }
+
+    #[test]
+    fn related_lines_name_each_line_up_to_the_cap() {
+        assert_eq!(related(0).related_lines(3), None);
+        assert_eq!(related(1).related_lines(3).as_deref(), Some("line 10"));
+        assert_eq!(related(3).related_lines(3).as_deref(), Some("lines 10, 20, 30"));
+        assert_eq!(
+            related(5).related_lines(3).as_deref(),
+            Some("lines 10, 20, 30 and 2 more, which --format json lists")
+        );
+        assert_eq!(
+            related(5).related_lines(usize::MAX).as_deref(),
+            Some("lines 10, 20, 30, 40, 50")
+        );
     }
 
     #[test]

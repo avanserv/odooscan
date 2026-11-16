@@ -306,6 +306,7 @@ mod tests {
             column: 1,
             message: String::new(),
             flow: vec![],
+            related: vec![],
             fix: Some(Fix::single(Edit {
                 start,
                 end: start + expected.len(),

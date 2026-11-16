@@ -1688,14 +1688,16 @@ custom/test_scripts15/static/src/js/partner.js:7:39: OD603 no indexed module def
 custom/test_scripts15/static/src/js/partner.js:7:60: OD607 method '_secret' is private, so the server refuses to call it over RPC
 custom/test_scripts15/static/src/js/shared.js:6:13: OD611 console.log() is a debugging leftover that writes to every user's console; remove it
 custom/test_scripts18/static/src/services.js:5:24: OD616 no indexed bundle registers service 'test_scripts18_beacon'
+custom/translated_shop/i18n/es.po:10:1: OD803 3 of 4 messages are untranslated, so Odoo shows them in the source language (lines 10, 15, 26)
 custom/translated_shop/i18n/fr.po:12:1: OD801 the translation's placeholder '%(nombre)s' is not in the message, so _() shows the source text instead
 custom/translated_shop/i18n/fr.po:18:1: OD801 the translation takes 1 argument by position where the message takes 2, so _() shows the source text instead
 custom/translated_shop/i18n/fr.po:24:1: OD801 Python cannot read the placeholder '%)' of the translation, so _() shows the source text instead
 custom/translated_shop/i18n/fr.po:30:1: OD801 the translation's placeholder '%(reste)s' is not in the message, so the web client fills it with undefined or nothing
 custom/translated_shop/i18n/fr.po:36:1: OD801 the translation's placeholder '{etagere}' is not in the message, so formatting it raises or shows another value
 custom/translated_shop/i18n/fr.po:42:1: OD802 the translation is marked fuzzy, but Odoo loads it as a reviewed one; check it and remove the flag
-custom/translated_shop/i18n/fr.po:47:1: OD803 2 of 14 messages are untranslated, so Odoo shows them in the source language
+custom/translated_shop/i18n/fr.po:47:1: OD803 2 of 14 messages are untranslated, so Odoo shows them in the source language (lines 47, 89)
 custom/translated_shop/i18n_extra/nl.po:11:1: OD801 the translation leaves out the placeholder '%(count)s' of the message, so its value never shows
+custom/translated_shop/i18n_extra/nl.po:21:1: OD803 1 of 3 messages are untranslated, so Odoo shows them in the source language (line 21)
 custom/tree_paths/views/partner.xml:8:21: OD306 the <tree> view is renamed <list>
 custom/tree_paths/views/partner.xml:29:13: OD306 the <tree> view is renamed <list>
 custom/tree_paths/views/partner.xml:48:13: OD306 the <tree> view is renamed <list>

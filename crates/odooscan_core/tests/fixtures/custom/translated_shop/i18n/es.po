@@ -1,0 +1,33 @@
+# Spanish catalog of Translated shop, made up for OD803: the lines of its empty entries.
+msgid ""
+msgstr ""
+"Project-Id-Version: Translated shop\n"
+"Language: es\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+
+#. module: translated_shop
+#: model:ir.model.fields,field_description:translated_shop.field_translated_shop_shelf__name
+msgid "Shelf name"
+msgstr ""
+
+#. module: translated_shop
+#: model:ir.model,name:translated_shop.model_translated_shop_crate
+msgid "Crate"
+msgstr ""
+
+#. module: translated_shop
+#: model:ir.model.fields,field_description:translated_shop.field_translated_shop_crate__label
+msgid "Crate label"
+msgstr "Etiqueta de la caja"
+
+#. module: translated_shop
+#. odoo-python
+#: code:addons/translated_shop/models/shelf.py:0
+msgid "10% off every crate"
+msgstr ""
+
+# Not in translated_shop.pot, so Odoo marks it obsolete when it merges the two.
+#. module: translated_shop
+#: model:ir.model.fields,field_description:translated_shop.field_translated_shop_crate__weight
+msgid "Crate weight"
+msgstr ""

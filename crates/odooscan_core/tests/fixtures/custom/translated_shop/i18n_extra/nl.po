@@ -15,3 +15,8 @@ msgstr "%(shelf)s is vol"
 #: model:ir.model,name:translated_shop.model_translated_shop_crate
 msgid "Crate"
 msgstr "Krat"
+
+#. module: translated_shop
+#: model:ir.model.fields,field_description:translated_shop.field_translated_shop_shelf__name
+msgid "Shelf name"
+msgstr ""

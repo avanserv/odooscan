@@ -23,13 +23,15 @@ fn fixtures() {
         .diagnostics
         .iter()
         .map(|d| {
+            let related = d.related_lines(usize::MAX).map(|l| format!(" ({l})"));
             format!(
-                "{}:{}:{}: {} {}",
+                "{}:{}:{}: {} {}{}",
                 d.path.strip_prefix(&root).unwrap().display(),
                 d.line,
                 d.column,
                 d.code,
-                d.message
+                d.message,
+                related.unwrap_or_default()
             )
         })
         .collect();

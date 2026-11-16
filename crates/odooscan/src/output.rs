@@ -10,6 +10,13 @@ use serde_json::json;
 /// Where the release workflow publishes `docs/`.
 const DOCS: &str = "https://avanserv.github.io/odooscan/";
 
+/// How many related lines the text, GitHub and GitLab reports name. JSON lists them all.
+const RELATED_SHOWN: usize = 20;
+
+/// How many related locations a SARIF result lists. The cap follows GitHub code scanning's limit
+/// of 1,000 locations per result, past which it rejects the whole file.
+const SARIF_RELATED: usize = 1000;
+
 /// A rule's page on the site, derived from its code. Every report written links here, so the path
 /// never changes.
 pub fn help_url(code: &str) -> String {
@@ -58,7 +65,18 @@ pub fn print_text(out: &mut impl Write, diags: &[&Diagnostic], rel: &dyn Fn(&Pat
         } else {
             d.code.to_owned()
         };
-        let _ = writeln!(out, "{}:{}:{}: {code} {}", rel(&d.path), d.line, d.column, d.message);
+        let related = d
+            .related_lines(RELATED_SHOWN)
+            .map(|l| format!(" ({l})"))
+            .unwrap_or_default();
+        let _ = writeln!(
+            out,
+            "{}:{}:{}: {code} {}{related}",
+            rel(&d.path),
+            d.line,
+            d.column,
+            d.message
+        );
     }
 }
 
@@ -98,6 +116,26 @@ pub fn sarif(diags: &[&Diagnostic], rel: &dyn Fn(&Path) -> String) -> serde_json
                 "message": {"text": d.message},
                 "locations": [{"physicalLocation": physical(rel(&d.path), d.line, d.column)}],
             });
+            if !d.related.is_empty() {
+                let related: Vec<_> = d
+                    .related
+                    .iter()
+                    .take(SARIF_RELATED)
+                    .enumerate()
+                    .map(|(id, s)| {
+                        json!({
+                            "id": id,
+                            "physicalLocation": physical(rel(&s.path), s.line, s.column),
+                            "message": {"text": s.label},
+                        })
+                    })
+                    .collect();
+                result["relatedLocations"] = json!(related);
+                let omitted = d.related.len() - related.len();
+                if omitted > 0 {
+                    result["properties"] = json!({"relatedLocationsOmitted": omitted});
+                }
+            }
             if !d.flow.is_empty() {
                 let steps: Vec<_> = d
                     .flow
@@ -136,6 +174,15 @@ fn flow_lines(d: &Diagnostic, rel: &dyn Fn(&Path) -> String, bullet: &str) -> St
         .fold("\n".to_owned(), |acc, l| acc + &l)
 }
 
+/// The related lines, as a paragraph after a blank line.
+fn related_paragraph(d: &Diagnostic) -> String {
+    d.related_lines(RELATED_SHOWN).map_or_else(String::new, |l| {
+        let mut chars = l.chars();
+        let first = chars.next().map(|c| c.to_ascii_uppercase()).unwrap_or_default();
+        format!("\n\n{first}{}", chars.as_str())
+    })
+}
+
 /// Workflow commands, which GitHub turns into annotations on the pull request without the
 /// Advanced Security that SARIF upload needs on a private repository.
 pub fn print_github(out: &mut impl Write, diags: &[&Diagnostic], rel: &dyn Fn(&Path) -> String) {
@@ -154,9 +201,10 @@ pub fn print_github(out: &mut impl Write, diags: &[&Diagnostic], rel: &dyn Fn(&P
             d.column,
             escape_property(&title),
             escape_data(&format!(
-                "{}{}\n\nSee {}",
+                "{}{}{}\n\nSee {}",
                 d.message,
                 flow_lines(d, rel, "  "),
+                related_paragraph(d),
                 help_url(d.code)
             ))
         );
@@ -195,7 +243,7 @@ pub fn gitlab(diags: &[&Diagnostic], rel: &dyn Fn(&Path) -> String) -> serde_jso
                 "fingerprint": format!("{:016x}", fnv1a(&[&base.to_string(), &nth.to_string()])),
                 "severity": severity,
                 "location": {"path": path, "lines": {"begin": d.line}},
-                "content": {"body": format!("[{} {}]({}){}", d.code, rule(d.code).name, help_url(d.code), flow_lines(d, rel, "- "))},
+                "content": {"body": format!("[{} {}]({}){}{}", d.code, rule(d.code).name, help_url(d.code), flow_lines(d, rel, "- "), related_paragraph(d))},
             })
         })
         .collect();
@@ -228,6 +276,7 @@ mod tests {
             column: 5,
             message: message.to_owned(),
             flow: vec![],
+            related: vec![],
             fix: None,
         };
         let step = |line, label: &str| FlowStep {
@@ -313,6 +362,7 @@ mod tests {
                 column: 1,
                 message: String::new(),
                 flow: vec![],
+                related: vec![],
                 fix: None,
             })
             .collect();
@@ -371,6 +421,106 @@ mod tests {
         *rules = json!([od203]);
         report["runs"][0]["tool"]["driver"]["version"] = json!("<version>");
         insta::assert_snapshot!(serde_json::to_string_pretty(&report).unwrap());
+    }
+
+    /// An OD803 finding on `fr.po` whose `count` untranslated entries are at lines 10, 20 and on.
+    fn untranslated(count: u32) -> Diagnostic {
+        let path = PathBuf::from("bad_sale/i18n/fr.po");
+        let related = (1..=count)
+            .map(|n| FlowStep {
+                path: path.clone(),
+                line: n * 10,
+                column: 1,
+                label: format!("untranslated: Message {n}"),
+            })
+            .collect();
+        Diagnostic {
+            code: "OD803",
+            severity: Severity::Info,
+            path,
+            line: 10,
+            column: 1,
+            message: format!("{count} of 40 messages are untranslated, so Odoo shows them in the source language"),
+            flow: vec![],
+            related,
+            fix: None,
+        }
+    }
+
+    #[test]
+    fn text_github_and_gitlab_name_related_lines_up_to_the_cap() {
+        let diags = [untranslated(2), untranslated(22)];
+        let diags: Vec<_> = diags.iter().collect();
+        let mut out = vec![];
+        print_text(&mut out, &diags, &rel, false);
+        let shown: Vec<String> = (1..=20).map(|n| (n * 10).to_string()).collect();
+        let capped = format!("lines {} and 2 more, which --format json lists", shown.join(", "));
+        let expected = format!(
+            "bad_sale/i18n/fr.po:10:1: OD803 2 of 40 messages are untranslated, so Odoo shows them in the source language (lines 10, 20)
+bad_sale/i18n/fr.po:10:1: OD803 22 of 40 messages are untranslated, so Odoo shows them in the source language ({capped})
+"
+        );
+        assert_eq!(String::from_utf8(out).unwrap(), expected);
+        let mut out = vec![];
+        print_github(&mut out, &diags[..1], &rel);
+        assert!(
+            String::from_utf8(out)
+                .unwrap()
+                .contains("source language%0A%0ALines 10, 20%0A%0ASee ")
+        );
+        let report = gitlab(&diags, &rel);
+        assert_eq!(
+            report[0]["content"]["body"],
+            "[OD803 translation-empty](https://avanserv.github.io/odooscan/rules/OD803/)\n\nLines 10, 20"
+        );
+        assert!(
+            report[1]["content"]["body"]
+                .as_str()
+                .unwrap()
+                .ends_with("and 2 more, which --format json lists")
+        );
+    }
+
+    #[test]
+    fn sarif_and_json_list_every_related_line_under_the_cap() {
+        let diags = [untranslated(22), untranslated(0)];
+        let report = sarif(&diags.iter().collect::<Vec<_>>(), &rel);
+        let results = &report["runs"][0]["results"];
+        let related = results[0]["relatedLocations"].as_array().unwrap();
+        assert_eq!(related.len(), 22);
+        assert_eq!(
+            related[21],
+            json!({
+                "id": 21,
+                "physicalLocation": physical("bad_sale/i18n/fr.po".to_owned(), 220, 1),
+                "message": {"text": "untranslated: Message 22"},
+            })
+        );
+        assert!(results[0].get("properties").is_none());
+        assert!(results[1].get("relatedLocations").is_none());
+        let json = serde_json::to_value(&diags).unwrap();
+        assert_eq!(json[0]["related"].as_array().unwrap().len(), 22);
+        assert_eq!(json[0]["related"][0]["line"], 10);
+        assert!(json[1].get("related").is_none());
+    }
+
+    #[test]
+    fn sarif_lists_the_first_thousand_related_lines_and_counts_the_rest() {
+        let diags = [untranslated(1000), untranslated(1003)];
+        let report = sarif(&diags.iter().collect::<Vec<_>>(), &rel);
+        let results = &report["runs"][0]["results"];
+        assert_eq!(results[0]["relatedLocations"].as_array().unwrap().len(), 1000);
+        assert!(results[0].get("properties").is_none());
+        let capped = &results[1];
+        assert_eq!(capped["relatedLocations"].as_array().unwrap().len(), 1000);
+        assert_eq!(
+            capped["relatedLocations"][999]["physicalLocation"]["region"]["startLine"],
+            10_000
+        );
+        assert_eq!(capped["properties"], json!({"relatedLocationsOmitted": 3}));
+        assert_eq!(capped["message"]["text"], diags[1].message);
+        let json = serde_json::to_value(&diags).unwrap();
+        assert_eq!(json[1]["related"].as_array().unwrap().len(), 1003);
     }
 
     #[test]

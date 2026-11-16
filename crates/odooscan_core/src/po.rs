@@ -3,7 +3,7 @@
 
 use rustc_hash::FxHashMap;
 
-use crate::facts::{PoFacts, Pos, RawDiag, TemplateEntry};
+use crate::facts::{PoFacts, Pos, RawDiag, Step, TemplateEntry};
 use crate::placeholders::{self, Fields, Specs};
 use crate::suppress::Suppressions;
 
@@ -290,25 +290,42 @@ fn pos(entry: &Entry) -> Pos {
     }
 }
 
-/// OD803, once per catalog at its first message without a translation.
+/// OD803, once per catalog at its first message without a translation, each of them a related
+/// location. The lines stay out of the message, which the baseline keys on.
 fn untranslated(entries: &[&Entry]) -> Option<RawDiag> {
-    let (mut first, mut empty, mut messages) = (None, 0, 0);
+    let (mut empty, mut messages) = (vec![], 0);
     for entry in entries {
         match entry.msgstr.as_deref() {
-            Some("") => {
-                first = first.or(Some(*entry));
-                empty += 1;
-            }
+            Some("") => empty.push(*entry),
             Some(_) => {}
             None => continue,
         }
         messages += 1;
     }
-    Some(RawDiag::new(
-        "OD803",
-        pos(first?),
-        format!("{empty} of {messages} messages are untranslated, so Odoo shows them in the source language"),
-    ))
+    let first = pos(empty.first()?);
+    let message = format!(
+        "{} of {messages} messages are untranslated, so Odoo shows them in the source language",
+        empty.len()
+    );
+    let related = empty.iter().map(|e| Step {
+        path: None,
+        pos: pos(e),
+        label: format!("untranslated: {}", excerpt(&e.msgid)),
+    });
+    Some(RawDiag::new("OD803", first, message).with_related(related.collect()))
+}
+
+/// The first non-empty line of `msgid`, cut to 60 characters, so that a long message keeps a label
+/// short. The "..." marks dropped text, never a dropped newline or space.
+fn excerpt(msgid: &str) -> String {
+    let text = msgid.trim_start();
+    let line = text.lines().next().unwrap_or_default();
+    let shown: String = line.chars().take(60).collect();
+    if text[shown.len()..].trim().is_empty() {
+        shown
+    } else {
+        format!("{shown}...")
+    }
 }
 
 /// OD801 on an entry of code Odoo loads: one with a translation, a `code:` reference and the
@@ -689,6 +706,59 @@ msgstr "a""#;
                 "2 of 3 messages are untranslated, so Odoo shows them in the source language".to_owned()
             )]
         );
+    }
+
+    fn related(text: &str) -> Vec<(u32, String)> {
+        let mut diags = analyze(text, None).0.diags;
+        let od803 = diags.pop().filter(|d| d.code == "OD803").unwrap();
+        od803.related.into_iter().map(|s| (s.pos.line, s.label)).collect()
+    }
+
+    #[test]
+    fn each_counted_empty_entry_is_a_related_line() {
+        let text = "msgid \"Stand\"\nmsgstr \"\"\n\nmsgid \"Booth\"\nmsgstr \"Cabine\"\n\n\
+            msgid \"%s desk\"\nmsgid_plural \"%s desks\"\nmsgstr[0] \"\"\nmsgstr[1] \"\"\n\n\
+            #~ msgid \"Gone\"\n#~ msgstr \"\"\n\nmsgid \"Shelf\"\nmsgstr \"\"\n";
+        let expected = [(1, "untranslated: Stand"), (15, "untranslated: Shelf")];
+        assert_eq!(related(text), expected.map(|(l, s)| (l, s.to_owned())));
+    }
+
+    #[test]
+    fn an_entry_the_template_lacks_is_not_a_related_line() {
+        let template = Template::parse("msgid \"Stand\"\nmsgstr \"\"\n");
+        let text = "msgid \"Stand\"\nmsgstr \"\"\n\nmsgid \"Booth\"\nmsgstr \"\"\n";
+        let od803 = analyze(text, Some(&template)).0.diags.pop().unwrap();
+        let lines: Vec<_> = od803.related.iter().map(|s| s.pos.line).collect();
+        assert_eq!(lines, [1]);
+    }
+
+    #[test]
+    fn a_long_or_multi_line_msgid_is_cut_in_its_label() {
+        let long = "a".repeat(61);
+        let text = format!(
+            "msgid \"{long}\"\nmsgstr \"\"\n\nmsgid \"\"\n\"First\\n\"\n\"Second\"\nmsgstr \"\"\n\n\
+             msgid \"{}\"\nmsgstr \"\"\n",
+            &long[1..]
+        );
+        let labels: Vec<_> = related(&text).into_iter().map(|(_, l)| l).collect();
+        assert_eq!(
+            labels,
+            [
+                format!("untranslated: {}...", &long[1..]),
+                "untranslated: First...".to_owned(),
+                format!("untranslated: {}", &long[1..]),
+            ]
+        );
+    }
+
+    #[test]
+    fn an_excerpt_marks_only_dropped_text() {
+        assert_eq!(excerpt("Hello\n"), "Hello");
+        assert_eq!(excerpt("Hello\n\n  "), "Hello");
+        assert_eq!(excerpt("\nHello"), "Hello");
+        assert_eq!(excerpt("\n\nFirst\nSecond"), "First...");
+        assert_eq!(excerpt(&format!("{}\n", "é".repeat(60))), "é".repeat(60));
+        assert_eq!(excerpt(&"é".repeat(61)), format!("{}...", "é".repeat(60)));
     }
 
     #[test]
