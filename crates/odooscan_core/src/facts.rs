@@ -235,8 +235,8 @@ pub struct ClassFact {
     pub base_methods: Vec<String>,
     /// The value of `_table`, when the class sets it.
     pub table: Option<OptionValue>,
-    /// `_parent_store`, `_parent_name`, `_auto`, `_log_access`, `_register`, `_date_name` and
-    /// `_defaults`, when the class sets them.
+    /// Each top-level assignment of `_parent_store`, `_parent_name`, `_auto`, `_log_access`,
+    /// `_register`, `_date_name` and `_defaults`, in body order.
     pub attrs: Vec<(String, Spanned<OptionValue>)>,
     /// Compute methods, at their name, with the fields of the class they compute and can leave
     /// unassigned on a record.
@@ -322,8 +322,9 @@ impl ClassFact {
         }
     }
 
+    /// The last assignment of attribute `name` in the class body, the one Python binds.
     pub fn attr(&self, name: &str) -> Option<&Spanned<OptionValue>> {
-        self.attrs.iter().find(|(n, _)| n == name).map(|(_, v)| v)
+        self.attrs.iter().rev().find(|(n, _)| n == name).map(|(_, v)| v)
     }
 
     /// Whether Odoo adds the class to the registry. Odoo tests the truth of `_register` in the
