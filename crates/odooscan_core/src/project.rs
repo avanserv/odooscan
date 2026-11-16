@@ -6,13 +6,13 @@ use rayon::iter::Either;
 use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use crate::facts::{DataFacts, JsFacts, Pos, PyFacts, RawDiag, TemplateFacts};
+use crate::facts::{DataFacts, JsFacts, PoFacts, Pos, PyFacts, RawDiag, TemplateFacts};
 use crate::manifest::{self, Manifest, OdooReads, Rejection, normalize};
 use crate::mentions::{Mentions, Words};
 use crate::series::Series;
 use crate::suppress::Suppressions;
 use crate::taint::TaintTable;
-use crate::{csvdata, decode, js, owl, python, routing, sql, xml};
+use crate::{csvdata, decode, js, owl, po, python, routing, sql, xml};
 
 const MANIFESTS: &[&str] = &["__manifest__.py", "__openerp__.py"];
 
@@ -83,6 +83,9 @@ pub struct Module {
     pub js: Vec<SourceFile<JsFacts>>,
     /// Owl templates: the XML files under `static/src`.
     pub templates: Vec<SourceFile<TemplateFacts>>,
+    /// The `.po` files directly in `i18n/` and `i18n_extra/` of a checked module, where Odoo looks
+    /// for a language's catalog (18.0 `odoo/tools/translate.py:1788-1790`).
+    pub translations: Vec<SourceFile<PoFacts>>,
     /// The views the SQL files the manifest loads in the module's series create.
     pub sql_views: Vec<String>,
     /// The files under `static/` Odoo may serve as assets, as `<module>/<path>`, for a checked
@@ -153,6 +156,7 @@ pub(crate) fn module(name: &str, manifest: &str) -> Module {
         data: vec![],
         js: vec![],
         templates: vec![],
+        translations: vec![],
         sql_views: vec![],
         static_assets: vec![],
         lost_text: false,
@@ -571,6 +575,7 @@ fn read_module(
             data: vec![],
             js: vec![],
             templates: vec![],
+            translations: vec![],
             sql_views: vec![],
             static_assets: vec![],
             lost_text: false,
@@ -777,6 +782,9 @@ fn parse_module_files(module: &mut Module, default_series: Option<Series>, taint
         words.push(static_words(&module.dir));
     }
     module.words = Words::merge(&words);
+    if checked {
+        module.translations = translations(&module.dir, &module.name);
+    }
     module.sql_views = sql_views(module, series);
     if module.reads_static_assets() {
         module.static_assets = static_assets(&module.dir, &module.name);
@@ -790,6 +798,43 @@ fn sql_views(module: &Module, series: Option<Series>) -> Vec<String> {
         .sql_files(series)
         .filter_map(|file| std::fs::read_to_string(module.dir.join(normalize(file))).ok());
     texts.flat_map(|text| sql::file_views(&text)).collect()
+}
+
+/// The `.po` catalogs of the module `name` in `dir` that decode as UTF-8, each merged with the
+/// `<name>.pot` of its folder as Odoo merges them. Odoo names the template after the module's
+/// folder (18.0 `odoo/tools/translate.py:807-809`), which `dir` does not name when it is `.`.
+/// Their words name no hook, so they add none.
+fn translations(dir: &Path, name: &str) -> Vec<SourceFile<PoFacts>> {
+    let mut files: Vec<_> = ["i18n", "i18n_extra"]
+        .par_iter()
+        .flat_map_iter(|folder| {
+            let folder = dir.join(folder);
+            let template = std::fs::read_to_string(folder.join(format!("{name}.pot")))
+                .ok()
+                .map(|text| po::Template::parse(&text));
+            let paths: Vec<PathBuf> = std::fs::read_dir(&folder)
+                .into_iter()
+                .flatten()
+                .filter_map(|e| Some(e.ok()?.path()))
+                .filter(|p| p.is_file() && p.extension().is_some_and(|e| e == "po"))
+                .collect();
+            paths.into_iter().filter_map(move |path| {
+                let text = std::fs::read_to_string(&path).ok()?;
+                let (facts, suppressions) = po::analyze(&text, template.as_ref());
+                Some(SourceFile {
+                    rel: normalize(&path.strip_prefix(dir).ok()?.to_string_lossy()),
+                    rank: None,
+                    demo: false,
+                    suppressions,
+                    facts,
+                    mentions: Mentions::default(),
+                    path,
+                })
+            })
+        })
+        .collect();
+    files.sort_by(|a, b| a.rel.cmp(&b.rel));
+    files
 }
 
 /// The files of `extension` under `static/<folder>`, whether one of them could not be read, and
@@ -905,6 +950,20 @@ mod tests {
         };
         assert!(!lost("encoded_broken"));
         assert!(lost("orphan_hooks_lost"));
+    }
+
+    #[test]
+    fn a_module_given_by_a_path_ending_in_dots_keeps_its_template() {
+        let findings = |dir: PathBuf| {
+            let modules = load(&[dir], &[], None, None, &TaintTable::default()).modules;
+            let module = modules.iter().find(|m| m.name == "translated_shop").unwrap();
+            let diags = module.translations.iter().flat_map(|f| &f.facts.diags);
+            diags.map(|d| (d.pos.line, d.message.clone())).collect::<Vec<_>>()
+        };
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/custom/translated_shop");
+        let dotted = findings(dir.join("i18n/.."));
+        assert!(dotted.iter().all(|(line, _)| *line != 110), "{dotted:?}");
+        assert_eq!(dotted, findings(dir));
     }
 
     #[test]

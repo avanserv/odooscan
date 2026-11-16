@@ -20,6 +20,7 @@ mod module_state;
 mod orm_queries;
 mod owl;
 mod placeholders;
+mod po;
 mod project;
 mod python;
 mod python2;
@@ -181,6 +182,12 @@ pub fn scan(opts: &ScanOptions) -> Report {
                         .iter()
                         .map(move |d| (f.path.as_path(), &f.suppressions, d))
                 }))
+                .chain(module.translations.iter().flat_map(|f| {
+                    f.facts
+                        .diags
+                        .iter()
+                        .map(move |d| (f.path.as_path(), &f.suppressions, d))
+                }))
                 .map(|(p, s, d): (&Path, _, &RawDiag)| (p.to_path_buf(), s.allows(d.pos.line, d.code), d.clone()));
             let cross = checks::check_module(&index, mi, series).into_iter().map(|(p, d)| {
                 let allowed = module
@@ -216,7 +223,7 @@ pub fn scan(opts: &ScanOptions) -> Report {
         modules_indexed: modules.len(),
         files: modules
             .iter()
-            .map(|m| m.python.len() + m.data.len() + m.js.len() + m.templates.len())
+            .map(|m| m.python.len() + m.data.len() + m.js.len() + m.templates.len() + m.translations.len())
             .sum(),
         notices,
     }

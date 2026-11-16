@@ -1,0 +1,11 @@
+# A German catalog Odoo never reads, in a folder below i18n/, made up for the OD8 rules.
+#. module: translated_shop
+#. odoo-python
+#: code:addons/translated_shop/models/shelf.py:0
+msgid "%(count)s orders"
+msgstr "%(anzahl)s Bestellungen"
+
+#. module: translated_shop
+#: model:ir.model,name:translated_shop.model_translated_shop_crate
+msgid "Crate"
+msgstr ""

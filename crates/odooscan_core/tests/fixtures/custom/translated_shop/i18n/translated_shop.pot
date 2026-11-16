@@ -1,0 +1,92 @@
+# Template catalog of Translated shop, made up for the OD8 rules.
+msgid ""
+msgstr ""
+"Project-Id-Version: Translated shop\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+
+#. module: translated_shop
+#. odoo-python
+#: code:addons/translated_shop/models/shelf.py:0
+msgid "%(count)s orders"
+msgstr ""
+
+#. module: translated_shop
+#. odoo-python
+#: code:addons/translated_shop/models/shelf.py:0
+msgid "%s crates on %s shelves"
+msgstr ""
+
+#. module: translated_shop
+#. odoo-python
+#: code:addons/translated_shop/models/shelf.py:0
+msgid "Shelf %s is full"
+msgstr ""
+
+#. module: translated_shop
+#. odoo-javascript
+#: code:addons/translated_shop/static/src/shelf_panel.js:0
+msgid "%(count)s crates left"
+msgstr ""
+
+#. module: translated_shop
+#. odoo-python
+#: code:addons/translated_shop/models/shelf.py:0
+msgid "{shelf} was restocked"
+msgstr ""
+
+#. module: translated_shop
+#: model:ir.model.fields,field_description:translated_shop.field_translated_shop_shelf__name
+msgid "Shelf name"
+msgstr ""
+
+#. module: translated_shop
+#: model:ir.model,name:translated_shop.model_translated_shop_crate
+msgid "Crate"
+msgstr ""
+
+#. module: translated_shop
+#: model:ir.model.fields,help:translated_shop.field_translated_shop_shelf__crate_count
+msgid "%(count)s crates fit"
+msgstr ""
+
+#. module: translated_shop
+#. odoo-python
+#: code:addons/translated_shop/models/shelf.py:0
+msgid "10% off every crate"
+msgstr ""
+
+#. module: translated_shop
+#. odoo-python
+#: code:addons/translated_shop/models/shelf.py:0
+msgid "Crates below 5 (got %)"
+msgstr ""
+
+#. module: translated_shop
+#. odoo-python
+#: code:addons/translated_shop/models/shelf.py:0
+msgid "%(crate)s moved to %(shelf)s"
+msgstr ""
+
+#. module: translated_shop
+#. odoo-javascript
+#: code:addons/translated_shop/static/src/shelf_panel.js:0
+msgid "%s crates at 100%%"
+msgstr ""
+
+#. module: translated_shop
+#: code:addons/translated_shop/models/shelf.py:0
+msgid "%s crate"
+msgid_plural "%s crates"
+msgstr[0] ""
+msgstr[1] ""
+
+#. module: translated_shop
+#: model:ir.model.fields,field_description:translated_shop.field_translated_shop_crate__label
+msgid "Crate label"
+msgstr ""
+
+#. module: translated_shop
+#. odoo-python
+#: code:addons/translated_shop/models/shelf.py:0
+msgid "%(count)s shelves"
+msgstr ""
