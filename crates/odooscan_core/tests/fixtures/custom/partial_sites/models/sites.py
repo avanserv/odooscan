@@ -80,3 +80,6 @@ class SiteSheet(Layout, models.Model):
     _name = "site.sheet"
     _description = "Site sheet"
     _order = "x_ent"
+
+    def action_enterprise(self):
+        return self.env["ghost.enterprise"].search([])

@@ -1978,7 +1978,8 @@ impl<'m> Ctx<'_, 'm> {
             if self.lost && (self.module.lost_data() || self.may_add_field(model)))
     }
 
-    /// A dependency outside the index may load a model the scope does not reach.
+    /// A dependency outside the index may load a model the scope does not reach, or define one no
+    /// indexed module does.
     fn model_ref(&self, out: &mut Out<'m>, path: &'m Path, model: &Spanned<String>, except: Option<&ClassFact>) {
         match self.index.model_status(&model.value, self.scope, except) {
             Status::Visible => {}
@@ -1989,7 +1990,7 @@ impl<'m> Ctx<'_, 'm> {
                 model.pos,
                 format!("model '{}' comes from module {m}; add it to depends", model.value),
             ),
-            Status::Missing if self.dynamic => {}
+            Status::Missing if self.dynamic || self.partial => {}
             Status::Missing => out.push(
                 path,
                 "OD201",
@@ -2181,23 +2182,26 @@ impl<'m> Ctx<'_, 'm> {
                 self.tours(out, path, &file.facts.tour_names);
                 self.domains(out, path, &file.facts.domains);
             }
-            // env['x'] for a model outside depends is usually guarded by `if 'x' in self.env`, a
-            // dotless name is as likely a key of some other mapping called env, and a name that
-            // fits what the module builds may exist once its code has run.
-            for model in file
-                .facts
-                .env_models
-                .iter()
-                .filter(|m| m.value.contains('.') && !self.built.fit(&m.value))
-            {
-                if matches!(self.index.model_status(&model.value, self.scope, None), Status::Missing) {
-                    out.push(
-                        path,
-                        "OD206",
-                        model.pos,
-                        format!("no indexed module defines model '{}'", model.value),
-                    );
-                }
+            self.env_models(out, path, &file.facts.env_models);
+        }
+    }
+
+    /// OD206 on the `env['x']` lookups of a model no indexed module defines.
+    fn env_models(&self, out: &mut Out<'m>, path: &'m Path, models: &[Spanned<String>]) {
+        // A dependency outside the index may define any model, so a partial scope reports none.
+        if self.partial {
+            return;
+        }
+        // env['x'] for a model outside depends is usually guarded by `if 'x' in self.env`, a
+        // dotless name is as likely a key of some other mapping called env, and a name that fits
+        // what the module builds may exist once its code has run.
+        for model in models
+            .iter()
+            .filter(|m| m.value.contains('.') && !self.built.fit(&m.value))
+        {
+            if matches!(self.index.model_status(&model.value, self.scope, None), Status::Missing) {
+                let message = format!("no indexed module defines model '{}'", model.value);
+                out.push(path, "OD206", model.pos, message);
             }
         }
     }
