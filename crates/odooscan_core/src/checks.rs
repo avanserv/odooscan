@@ -1638,7 +1638,7 @@ fn loaded_class(facts: &PyFacts) -> Option<String> {
 fn same_module_xmlids<'m>(index: &Index<'m>, mi: usize, series: Option<Series>, out: &mut Out<'m>) {
     let module = &index.modules[mi];
     let scope = index.scope(mi);
-    let partial = index.partial_scope(&scope);
+    let outside = index.partial_scope(&scope).then_some(&scope);
     // base_data.sql creates base's bootstrap records before any data file loads.
     let bootstrapped = module.name == "base";
     let first_def = first_defs(module);
@@ -1649,7 +1649,7 @@ fn same_module_xmlids<'m>(index: &Index<'m>, mi: usize, series: Option<Series>, 
             if let Some(&(def_rank, def_line)) = first_def.get(&id)
                 && (def_rank, def_line) > (rank, r.pos.line)
                 && !bootstrapped
-                && !registry_id(index, module, series, &scope, partial, &id)
+                && !registry_id(index, module, series, outside, &id)
             {
                 let place = load_place(module, series, def_rank, rank);
                 out.push(
@@ -1836,15 +1836,17 @@ fn types_differ(a: &str, b: &str) -> bool {
 }
 
 /// The registry creates the `ir.model` and `ir.model.fields` ids of a module's models before any of
-/// its data files load, so a record with such an id only updates it. On a `partial` `scope` the id
-/// may be spelled from a table outside the index.
-fn registry_id(index: &Index, module: &Module, series: Option<Series>, scope: &Scope, partial: bool, id: &str) -> bool {
+/// its data files load, so a record with such an id only updates it. Pass `module`'s scope as
+/// `outside` when that scope is partial, since the id may then be spelled from a table outside the
+/// index, or `None` when the caller needs no such guard. `module` defines the id and Odoo creates
+/// registry ids under the module it loads, so `module`'s own scope is the one to ask.
+fn registry_id(index: &Index, module: &Module, series: Option<Series>, outside: Option<&Scope>, id: &str) -> bool {
     let local = id.split_once('.').map_or(id, |(_, l)| l);
     module.python.iter().flat_map(|f| &f.facts.classes).any(|c| {
         let mut prefixes = index.field_prefixes(&c.model, series).into_iter();
         local == format!("model_{}", c.model.replace('.', "_"))
             || prefixes.any(|p| local.starts_with(&p))
-            || (partial && index.unseen_table_id(c, local, series, scope))
+            || outside.is_some_and(|scope| index.unseen_table_id(c, local, series, scope))
     })
 }
 
@@ -3139,7 +3141,9 @@ impl<'m> Ctx<'_, 'm> {
         self.module.name != "base"
             && at.is_some_and(|at| loaded.ids.get(&full) == Some(&at) && loaded.first_call.is_none_or(|c| at < c))
             && first.is_some_and(|w| std::ptr::eq(w.fact, write))
-            && !registry_id(self.index, self.module, self.series, self.scope, self.partial, &full)
+            // On a partial scope `read_required` returns nothing, through `sees_classes`, so the
+            // registry needs no guard against ids spelled from a table outside the index.
+            && !registry_id(self.index, self.module, self.series, None, &full)
             && !self.index.derived.contains(&full)
     }
 
@@ -3836,6 +3840,10 @@ impl<'m> Ctx<'_, 'm> {
         classes.any(|c| {
             let mut prefixes = self.index.field_prefixes(&c.model, series).into_iter();
             (self.index.unread_fields(c, self.scope) && prefixes.any(|p| local.starts_with(&p)))
+                // `self.partial` belongs to the module under check, not `owner`. They differ only when
+                // all of `owner`'s depends are indexed, so none of them introduces the model. `owner`
+                // then installs only when a module outside its depends loads first and introduces it,
+                // and then the id exists, so staying silent misses no broken reference.
                 || (self.partial && self.index.unseen_table_id(c, local, series, self.scope))
         })
     }
