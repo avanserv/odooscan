@@ -1,0 +1,12 @@
+<odoo>
+    <record id="rule_visit_typo" model="ir.rule">
+        <field name="name">by a field site.visit lacks</field>
+        <field name="model_id" ref="model_site_visit"/>
+        <field name="domain_force">[('nmae', '=', 1)]</field>
+    </record>
+    <record id="rule_partner_enterprise" model="ir.rule">
+        <field name="name">by a field ghost_enterprise may add</field>
+        <field name="model_id" ref="base.model_res_partner"/>
+        <field name="domain_force">[('x_ent', '=', 1)]</field>
+    </record>
+</odoo>

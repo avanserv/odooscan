@@ -3445,7 +3445,8 @@ impl<'m> Ctx<'_, 'm> {
         defs.iter().any(|d| d.2.option("selection").is_some()).then_some(values)
     }
 
-    /// Checks the domain `rule` writes, if the record still holds it when Odoo reads it.
+    /// Checks the domain `rule` writes, if the record still holds it when Odoo reads it. `domain_path`
+    /// weighs an unindexed dependency through `may_hide`, as it does for the other domains.
     fn rule_domain(&self, out: &mut Out<'m>, path: &'m Path, rule: &'m RuleFact) {
         if rule.fields.is_empty() {
             return;
@@ -3461,7 +3462,7 @@ impl<'m> Ctx<'_, 'm> {
         let Some(model) = self.rule_model(&writes).filter(|_| holds && active != Some(false)) else {
             return;
         };
-        if self.sees_classes(model) {
+        if self.indexes_classes(model) {
             let reach = self.checked_reach(RULE_DOMAIN_VALIDATED);
             for field in &rule.fields {
                 self.domain_path(out, path, model, field, reach);
@@ -4084,8 +4085,13 @@ impl<'m> Ctx<'_, 'm> {
 
     /// Whether the scan reaches every class of `model`, short of the parents a class hides from it.
     fn sees_classes(&self, model: &str) -> bool {
-        !self.partial
-            && !self.dynamic
+        !self.partial && self.indexes_classes(model)
+    }
+
+    /// What `sees_classes` asks, short of a dependency outside the index, for a caller that weighs
+    /// one on the model where a path fails.
+    fn indexes_classes(&self, model: &str) -> bool {
+        !self.dynamic
             && matches!(self.index.model_status(model, self.scope, None), Status::Visible)
             && !self.index.unindexed_parent(model, self.scope)
     }
