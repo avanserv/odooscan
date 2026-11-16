@@ -1,5 +1,6 @@
 //! Conventions of the repository's own text that no linter knows: a cited Odoo path names a
-//! series the `Makefile` pins, so whoever checks the claim has that checkout in `.oracle/`.
+//! series the `Makefile` pins, so whoever checks the claim has that checkout in `.oracle/`, and a
+//! series is spelled as Odoo's `release.py` spells it, since `saas-X.Y` names the git branch.
 
 use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
@@ -216,5 +217,63 @@ fn passes_a_version_that_is_no_series() {
         "`odoo/sql_db.py` on 16.4.",
     ] {
         assert_eq!(reported(text), [], "{text}");
+    }
+}
+
+/// A hyphen names the branch, not the series.
+static HYPHENATED: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\bsaas-\d+(?:\.\d+)?").unwrap());
+
+/// Each series of `text` spelled as its git branch, as its line and the spelling. A ref right after
+/// `origin/`, a backtick or a quote names the branch on purpose, so it passes; one quoted further
+/// back in the span does not.
+fn hyphenated(text: &str) -> Vec<(usize, String)> {
+    HYPHENATED
+        .find_iter(text)
+        .filter(|m| {
+            let before = &text[..m.start()];
+            !(before.ends_with("origin/") || before.ends_with(['"', '`']))
+        })
+        .map(|m| (text[..m.start()].matches('\n').count() + 1, m.as_str().to_owned()))
+        .collect()
+}
+
+#[test]
+fn series_are_spelled_with_the_tilde() {
+    let errors: Vec<String> = tree()
+        .iter()
+        .flat_map(|(file, text)| hyphenated(text).into_iter().map(move |hit| (file, hit)))
+        .map(|(file, (line, series))| {
+            format!(
+                "{}:{line}: {series} names a git branch; spell the series saas~X.Y (N.saas~M before 11.0), or put origin/, a backtick or a quote right before a ref",
+                file.display()
+            )
+        })
+        .collect();
+    assert!(errors.is_empty(), "{}", errors.join("\n"));
+}
+
+#[test]
+fn reports_a_series_spelled_as_its_branch() {
+    let text = ["x\n/// not in saas", "-15.2)"].concat();
+    assert_eq!(hyphenated(&text), [(2, "saas-15.2".to_owned())]);
+    let text = ["saas", "-12 adds it"].concat();
+    assert_eq!(hyphenated(&text), [(1, "saas-12".to_owned())]);
+    let text = ["\"before saas", "-15.3\""].concat();
+    assert_eq!(hyphenated(&text), [(1, "saas-15.3".to_owned())]);
+}
+
+#[test]
+fn passes_a_quoted_ref_and_the_series_spellings() {
+    for text in [
+        "origin/saas-15.2",
+        "`saas-18.1`",
+        "\"saas-18.1\"",
+        "saas~15.2",
+        "10.saas~15",
+        "custom/saas153",
+        "saas_15_2",
+        "format!(\"saas-{series}\")",
+    ] {
+        assert_eq!(hyphenated(text), [], "{text}");
     }
 }

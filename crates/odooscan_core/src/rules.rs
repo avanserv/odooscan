@@ -370,10 +370,10 @@ rules! {
     "OD611" "console-log" Quality Info None, false, "A script a page loads calls console.log().";
     // Odoo's ESLint config makes it an error (18.0 `addons/web/tooling/_eslintrc.json:23`, 20.0 `:22`).
     "OD612" "debugger-statement" Quality Warning None, false, "A script a page loads has a debugger statement.";
-    // Owl 2 lands in saas~15.3 (commit `966abc39b573`, not in saas-15.2). Owl 1 exports `QWeb`, `hooks`
+    // Owl 2 lands in saas~15.3 (commit `966abc39b573`, not in saas~15.2). Owl 1 exports `QWeb`, `hooks`
     // and `tags`, and its `Component` has `trigger`; Owl 2 and later export none (18.0
     // `addons/web/static/lib/owl/owl.js:6343-6379`, 20.0 `:23-81`), and its `Component` (18.0 `:2839`,
-    // 20.0 `:4050`) lacks `trigger`, which the legacy component of 16.0 adds back through saas-16.4.
+    // 20.0 `:4050`) lacks `trigger`, which the legacy component of 16.0 adds back through saas~16.4.
     "OD613" "owl1-api-removed" Deprecation Error Some(">=saas~15.3"), true, "A script uses an Owl 1 API that Owl 2 removed: hooks, tags, QWeb or a component's trigger().";
     // Owl validates the props a template passes a child against its `static props` in dev mode,
     // which Odoo turns on in debug mode (18.0 `addons/web/static/src/env.js:187`), and rejects an
