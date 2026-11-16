@@ -14,8 +14,8 @@ use crate::python::{Locator, str_lit};
 use crate::python2;
 use crate::series::Series;
 
-/// The first series that reads the manifest with `ast.literal_eval` (`10.0`), where 9.0 calls
-/// `eval`.
+/// The first series that reads the manifest with `ast.literal_eval` (`10.0`), where 9.0 to
+/// 9.saas~11 call `eval`.
 const LITERAL_EVAL: Series = Series { major: 10, minor: 0 };
 
 /// The first series that refuses to start on Python 2 (`12.0`, odoo/odoo `2824efee4be0`), where
@@ -66,7 +66,7 @@ fn reads(key: &str, series: Option<Series>) -> bool {
 const VERSION_FORM: Series = Series { major: 16, minor: 3 };
 
 /// The values of `ir.module.module`'s `license` selection, which every series from 10.0 shares
-/// (18.0 `odoo/addons/base/models/ir_module.py:320-330`). 9.0 lacks `OPL-1`.
+/// (18.0 `odoo/addons/base/models/ir_module.py:320-330`). 9.0 to 9.saas~11 lack `OPL-1`.
 const LICENSES: [&str; 10] = [
     "GPL-2",
     "GPL-2 or any later version",
@@ -416,7 +416,7 @@ pub fn version_refusal(version: &str, series: Option<Series>) -> Option<String> 
     }
     let number = |p: &str| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit());
     let behind = series
-        .map(series_prefix)
+        .map(Series::name)
         .filter(|p| version.starts_with(&format!("{p}.")));
     let taken = match behind {
         Some(prefix) => {
@@ -440,7 +440,7 @@ pub fn version_refusal(version: &str, series: Option<Series>) -> Option<String> 
     }
     Some(match series {
         Some(s) => {
-            let own = series_prefix(s);
+            let own = s.name();
             format!(
                 "version '{version}' is not of the form x.y, x.y.z, {own}.x.y or {own}.x.y.z, so Odoo {own} will not install the module"
             )
@@ -449,17 +449,6 @@ pub fn version_refusal(version: &str, series: Option<Series>) -> Option<String> 
             "version '{version}' is not of the form x.y or x.y.z, behind the series or not, so Odoo will not install the module"
         ),
     })
-}
-
-/// How Odoo writes `series` at the head of a module version: its `release.major_version` (18.0
-/// `odoo/release.py:15-17`), which a saas series spells `saas~M.m`.
-fn series_prefix(series: Series) -> String {
-    let plain = format!("{}.{}", series.major, series.minor);
-    if series.minor == 0 {
-        plain
-    } else {
-        format!("saas~{plain}")
-    }
 }
 
 /// The names Odoo takes for a folder of upgrade scripts: two or three numbers, maybe behind a
@@ -494,7 +483,7 @@ pub fn upgrade_folder_refusal(name: &str, version: &str, series: Series) -> Opti
     if name == "0.0.0" {
         return None;
     }
-    let own = &series_prefix(series);
+    let own = &series.name();
     let adapted = if version.starts_with(&format!("{own}.")) {
         version.to_owned()
     } else {
@@ -711,10 +700,10 @@ fn literal_manifest(
 }
 
 /// The first item of a list, tuple or set `top` that Odoo cannot load, with why. Python builds a
-/// set before Odoo hands it to `dict.update`, so an item it cannot hash fails first; only 9.0
-/// reaches that branch, as `unliteral` refuses such an item on every other series. An item that
-/// is no literal, which 9.0 evaluates, is not judged, nor is a set or dict inside an item. When
-/// `python2` holds the manifest's source, a string is judged as Python 2 takes it.
+/// set before Odoo hands it to `dict.update`, so an item it cannot hash fails first; only 9.0 to
+/// 9.saas~11 reach that branch, as `unliteral` refuses such an item on every other series. An item
+/// that is no literal, which 9.0 to 9.saas~11 evaluate, is not judged, nor is a set or dict inside
+/// an item. When `python2` holds the manifest's source, a string is judged as Python 2 takes it.
 fn refused_item<'a>(top: &'a Expr, python2: Option<&Source>) -> Option<(&'a Expr, &'static str)> {
     let mut items = sequence(top)?;
     items.retain(|i| unliteral(i, Reading::Unhashed).is_none());

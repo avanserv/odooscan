@@ -1850,7 +1850,8 @@ fn conditional_methods(stmt: &Stmt, fact: &mut ClassFact) {
 /// `_inherit` is not one string (`saas~18.1`).
 const DOTTED_CLASS_NAME: Series = Series { major: 18, minor: 1 };
 
-/// The first series whose metaclass makes no fields of `_columns`, which 9.0's still does.
+/// The first series whose metaclass makes no fields of `_columns`, which that of 9.0 to 9.saas~11
+/// still does.
 const COLUMNS_END: Series = Series { major: 10, minor: 0 };
 
 /// What a class body says about the name of its model.
@@ -5561,7 +5562,7 @@ class U(HttpCase):
         };
         for (series, want) in [
             (Some("9.0"), 1),
-            (Some("saas~9.3"), 1),
+            (Some("9.saas~10"), 1),
             (None, 1),
             (Some("10.0"), 0),
             (Some("18.0"), 0),

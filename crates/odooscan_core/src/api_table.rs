@@ -323,15 +323,6 @@ pub(crate) fn row_of(kind: Kind) -> &'static Row {
         .unwrap_or_else(|| panic!("no API row for {kind:?}"))
 }
 
-/// The series as Odoo names its branch.
-fn label(series: Series) -> String {
-    if series.minor == 0 {
-        series.to_string()
-    } else {
-        format!("saas~{series}")
-    }
-}
-
 /// The code and the message of a use of the row's form in a module of `series`, or None while the
 /// form works without a warning, and in a module of unknown series.
 pub(crate) fn stage(row: &Row, series: Option<Series>) -> Option<(&'static str, String)> {
@@ -358,7 +349,7 @@ fn staged(row: &Row, series: Option<Series>, advice: Option<&'static str>) -> Op
         Some((bound, earlier)) if series < bound => earlier,
         _ => advice.unwrap_or(row.instead),
     };
-    Some((code, format!("{} {verb} {}; {instead}", row.form, label(from))))
+    Some((code, format!("{} {verb} {}; {instead}", row.form, from.name())))
 }
 
 /// The code, the verb and the bound of the latest stage of the row that `series` has reached.

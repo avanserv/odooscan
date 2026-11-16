@@ -9,6 +9,13 @@ page says. [OD509](rules/OD509.md) and [OD514](rules/OD514.md) read the flag for
 under it, OD509 reports a version that names another series, since that Odoo will not install it,
 and OD514 compares migration folders with the version as that Odoo reads it.
 
+A series is spelled as Odoo names it, in a manifest version, in `--odoo-version` and in
+`--target-series` below: `18.0`, `saas~18.1`, or `9.saas~10` for a SaaS release before 11.0, so
+`9.saas~10.1.0.0` means 9.saas~10. Of those early SaaS releases, only 9.saas~7 to 9.saas~11 name a
+series, ordered between 9.0 and 10.0. 9.saas~12, 9.saas~13, the SaaS releases of 8.0 and 10.0, and
+a spelling such as `9.10` or `10.1` stay unknown: a module whose version names one gets only the
+rules that carry no range, and both flags refuse them.
+
 The series also decides the model of a class without `_name` whose `_inherit` is a list or tuple,
 which saas~18.1 names after the class as [OD209](rules/OD209.md) describes. A module of unknown
 series reads it as before saas~18.1, and where the two readings differ, the module's models count as
@@ -45,14 +52,14 @@ describes.
 
 When no addons path entry is an Odoo checkout and no `base` module is found on the addons path or
 among the checked paths, `oscn` fetches the target's core with `git`, which must be on `PATH`. It
-asks odoo/odoo for the head of the series' branch on each run, `18.0` for 18.0 and `saas-18.1` for
-saas~18.1, and fetches that commit unless the cache holds it, without translations, without tests
-but the scripts under `static/tests`, and without assets other than scripts and templates. Each
-commit is a directory of `core/` in the cache. The branch keeps its newest commit and the one
-before it, so that a run still reading the one before keeps it. A run that brings the cache up to
-the head then removes leftovers untouched for a day: what an interrupted run left, and commit
-directories no branch records. A run that falls back to the cache removes nothing. The cache is
-`$ODOOSCAN_CACHE_DIR`, else
+asks odoo/odoo for the head of the series' branch on each run, `18.0` for 18.0, `saas-18.1` for
+saas~18.1 and `saas-10` for 9.saas~10, and fetches that commit unless the cache holds it, without
+translations, without tests but the scripts under `static/tests`, and without assets other than
+scripts and templates. Each commit is a directory of `core/` in the cache. The branch keeps its
+newest commit and the one before it, so that a run still reading the one before keeps it. A run
+that brings the cache up to the head then removes leftovers untouched for a day: what an
+interrupted run left, and commit directories no branch records. A run that falls back to the cache
+removes nothing. The cache is `$ODOOSCAN_CACHE_DIR`, else
 `$XDG_CACHE_HOME/odooscan` for an absolute `XDG_CACHE_HOME`, `%LOCALAPPDATA%\odooscan` on Windows,
 or `~/.cache/odooscan`. On Windows, a cache in a deep directory may need `git config --global
 core.longpaths true`. `ODOOSCAN_ODOO_REMOTE` replaces `https://github.com/odoo/odoo`, for a mirror

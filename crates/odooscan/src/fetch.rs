@@ -79,24 +79,6 @@ const LINGER: Duration = Duration::from_secs(2);
 /// fetch run, so that a sweep never takes one from under a concurrent run.
 const STALE: Duration = Duration::from_secs(24 * 60 * 60);
 
-/// The odoo/odoo branch of a series: `18.0`, or `saas-18.1` for a SaaS release.
-pub fn branch(series: Series) -> String {
-    if series.minor == 0 {
-        series.to_string()
-    } else {
-        format!("saas-{series}")
-    }
-}
-
-/// The series as a user names it: `18.0`, or `saas~18.1`.
-fn name(series: Series) -> String {
-    if series.minor == 0 {
-        series.to_string()
-    } else {
-        format!("saas~{series}")
-    }
-}
-
 /// The odooscan cache directory, from the environment `var` reads and the home directory.
 pub fn cache_root_from(var: impl Fn(&str) -> Option<String>, home: Option<PathBuf>) -> Option<PathBuf> {
     let set = |name: &str| var(name).filter(|v| !v.is_empty()).map(PathBuf::from);
@@ -135,8 +117,8 @@ fn remote_from(var: Option<String>) -> Result<String, String> {
 /// commit last fetched for the branch stands in for the head.
 pub fn core(series: Series) -> Result<PathBuf, String> {
     let var = std::env::var("ODOOSCAN_ODOO_REMOTE").ok();
-    let branch = branch(series);
-    let series = name(series);
+    let branch = series.branch();
+    let series = series.name();
     let fail = |remote: &str, why: &str| {
         format!(
             "could not fetch the {series} core of {remote} ({why}); pass --addons-path with an Odoo checkout of {series}"
@@ -629,13 +611,6 @@ fn is_commit(text: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn a_stable_series_has_its_own_branch_and_a_saas_one_is_prefixed() {
-        assert_eq!(branch(Series::parse("18.0").unwrap()), "18.0");
-        assert_eq!(branch(Series::parse("saas~18.1").unwrap()), "saas-18.1");
-        assert_eq!(name(Series::parse("saas~18.1").unwrap()), "saas~18.1");
-    }
 
     #[test]
     fn the_cache_root_follows_the_environment() {
