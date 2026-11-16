@@ -2317,6 +2317,12 @@
       "count": 1
     },
     {
+      "path": "addons/l10n_in/data/l10n_in.port.code.csv",
+      "code": "OD333",
+      "message": "a cell past the 4 columns of the header, which Odoo's import drops without a message",
+      "count": 1
+    },
+    {
       "path": "addons/l10n_in/models/l10n_in_report_handler.py",
       "code": "OD211",
       "message": "no parent class of account.report defines '_init_options_buttons', so this super() call fails",

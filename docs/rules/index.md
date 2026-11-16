@@ -165,6 +165,7 @@ tours registry, browser test bundles included.
 | [OD330](OD330.md) | `unknown-view-widget` | A view names a widget no script registers. |
 | [OD331](OD331.md) | `unknown-client-action` | A client action's tag names an action no script registers. |
 | [OD332](OD332.md) | `unknown-tour` | A test runs a tour no script registers. |
+| [OD333](OD333.md) | `csv-data-dropped` | A data CSV loses data without a message: a cell past its header, or a quote never closed. |
 
 ## OD4: access
 

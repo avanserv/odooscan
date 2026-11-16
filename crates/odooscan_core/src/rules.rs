@@ -296,6 +296,11 @@ rules! {
     // `:265`) or from 20.0 never comes (`addons/web_tour/static/src/tour_plugin.js:189-191`). The
     // lower bound is the other registry rules'.
     "OD332" "unknown-tour" Correctness Error Some(">=17.0"), true, "A test runs a tour no script registers.";
+    // The import zips each row with the header, which drops the cells past it (18.0
+    // `odoo/models.py:1524`, 20.0 `odoo/orm/models.py:1194`), and Python's `csv` reads a quote never
+    // closed to the end of the file. Below 11.0 the scan does not read a CSV as the import does
+    // (`decode::csv_strict`).
+    "OD333" "csv-data-dropped" Correctness Warning Some(">=11.0"), false, "A data CSV loses data without a message: a cell past its header, or a quote never closed.";
     "OD401" "model-without-access" Security Warning None, true, "A new model has no ir.model.access rule, or from saas~19.4 no ir.access rule with a group.";
     "OD402" "public-write-access" Security Warning None, false, "An access row gives public or portal users write, create or unlink, through their group or no group.";
     "OD403" "unsanitized-public-html" Security Error None, true, "An Html field that public or portal users can write is not sanitized.";
@@ -556,7 +561,7 @@ mod tests {
 
     #[test]
     fn series_gates_follow_source() {
-        let gates: [(&str, &[&str], &[&str]); 27] = [
+        let gates: [(&str, &[&str], &[&str]); 28] = [
             ("OD117", &["saas~15.1", "saas~18.2"], &["saas~15.2", "saas~18.1"]),
             ("OD118", &["saas~18.1"], &["saas~18.2"]),
             ("OD125", &["saas~12.4"], &["saas~12.5", "20.0"]),
@@ -577,6 +582,7 @@ mod tests {
             ("OD330", &["saas~16.4"], &["17.0", "20.0"]),
             ("OD331", &["saas~16.4"], &["17.0", "20.0"]),
             ("OD332", &["saas~16.4"], &["17.0", "20.0"]),
+            ("OD333", &["10.0"], &["11.0", "20.0"]),
             ("OD505", &["saas~14.2"], &["saas~14.3", "20.0"]),
             ("OD506", &["saas~15.4"], &["16.0", "20.0"]),
             ("OD511", &["saas~12.3"], &["saas~12.4", "20.0"]),

@@ -61,7 +61,7 @@ pub fn undecoded(pos: Pos) -> DataFacts {
 /// a file it does not load. The import fails only when every one refuses, so a module that may
 /// target a series that loads the file is not told it fails; the first gives the place and the
 /// reason. A refused file is `unreadable` and holds no other fact: Odoo stops the install on it and
-/// keeps no row.
+/// keeps no row. One it loads may still lose data, as the newest series' reader reads it.
 pub fn analyze(text: &str, model: &str, strict: &[LineBreaks]) -> DataFacts {
     let mut facts = DataFacts {
         is_data: true,
@@ -73,6 +73,10 @@ pub fn analyze(text: &str, model: &str, strict: &[LineBreaks]) -> DataFacts {
         facts.unreadable = true;
         return facts;
     }
+    let lost = strict.first().and_then(|&breaks| dropped(text, breaks));
+    facts
+        .diags
+        .extend(lost.map(|(pos, message)| RawDiag::new("OD333", pos, message)));
     let mut reader = csv::ReaderBuilder::new().flexible(true).from_reader(text.as_bytes());
     let header = match reader.headers() {
         Ok(h) => h.clone(),
@@ -368,7 +372,7 @@ fn refused(text: &str, breaks: LineBreaks) -> Option<(Pos, String)> {
     }
     let loc = Locator::new(text);
     let at = |offset: usize| loc.pos(TextSize::try_from(offset).unwrap_or_default());
-    let (header, rows) = match Reader::default().read(text, breaks) {
+    let Read { header, rows } = match Reader::default().read(text, breaks) {
         Ok(read) => read,
         Err((offset, message)) => return Some((at(offset), message.to_owned())),
     };
@@ -386,6 +390,28 @@ fn refused(text: &str, breaks: LineBreaks) -> Option<(Pos, String)> {
         Some(quote) => (at(quote), format!("this quote runs to the end of the file, so {short}")),
         None => (at(row.start), short),
     })
+}
+
+/// Where Odoo's import of the CSV `text` first loses data without a message: a cell past the header
+/// that holds anything, which it drops, or a quote never closed, which takes the rest of the file
+/// into one cell. A row's open quote comes before its dropped cell, since the quote is the cause.
+/// A quote open in the header is not one: the header then holds a line break, which `load` refuses
+/// as a field name and stops the install.
+fn dropped(text: &str, breaks: LineBreaks) -> Option<(Pos, String)> {
+    let read = Reader::default().read(text, breaks).ok()?;
+    let loc = Locator::new(text);
+    let at = |offset: usize| loc.pos(TextSize::try_from(offset).unwrap_or_default());
+    let row = read
+        .rows
+        .iter()
+        .find(|r| r.open_quote.is_some() || r.dropped.is_some())?;
+    if let Some(quote) = row.open_quote {
+        let message = "this quote is never closed, so Odoo's import reads the rest of the file into one cell";
+        return Some((at(quote), message.to_owned()));
+    }
+    let n = read.header.len();
+    let message = format!("a cell past the {n} columns of the header, which Odoo's import drops without a message");
+    Some((at(row.dropped?), message))
 }
 
 /// Whether Odoo's import reads `column` as a path into a relational field: a reference, a database
@@ -428,13 +454,21 @@ fn line_end(c: char, breaks: LineBreaks) -> bool {
 }
 
 /// A record of Python's `csv` reader: where it starts, how many cells it has, whether one holds
-/// anything, and the quote it leaves open at the end of the file.
+/// anything, the quote it leaves open at the end of the file, and its first cell past the header
+/// that holds anything.
 #[derive(Debug, Default)]
 struct Record {
     start: usize,
     cells: usize,
     filled: bool,
     open_quote: Option<usize>,
+    dropped: Option<usize>,
+}
+
+/// What the reader reads of a file: the header and the records below it.
+struct Read {
+    header: Vec<String>,
+    rows: Vec<Record>,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -470,8 +504,7 @@ struct Reader {
 }
 
 impl Reader {
-    /// The header and the records below it.
-    fn read(mut self, text: &str, breaks: LineBreaks) -> Result<(Vec<String>, Vec<Record>), Stop> {
+    fn read(mut self, text: &str, breaks: LineBreaks) -> Result<Read, Stop> {
         for (start, line) in split_lines(text, breaks) {
             for (i, c) in line.char_indices() {
                 self.char(Some(c), start + i)?;
@@ -487,7 +520,10 @@ impl Reader {
             self.save();
             self.end_record();
         }
-        Ok((self.header.unwrap_or_default(), self.rows))
+        Ok(Read {
+            header: self.header.unwrap_or_default(),
+            rows: self.rows,
+        })
     }
 
     /// Reads `c` at `at`, none for the end of a line.
@@ -613,6 +649,10 @@ impl Reader {
     }
 
     fn save(&mut self) {
+        let past = self.header.as_ref().is_some_and(|h| self.record.cells >= h.len());
+        if past && self.cell_len > 0 {
+            self.record.dropped.get_or_insert(self.cell_start);
+        }
         self.record.cells += 1;
         self.record.filled |= self.cell_len > 0;
         self.cell_len = 0;
@@ -889,22 +929,103 @@ mod tests {
         assert_eq!(access.perms, [set(true), set(true), set(false), set(false)]);
     }
 
+    /// The first finding of `code` on `text` as the reader for `breaks` reads it, as `(line, col, message)`.
+    fn first(text: &str, code: &str, breaks: LineBreaks) -> Option<(u32, u32, String)> {
+        let facts = analyze(text, "res.partner", &[breaks]);
+        let mut found = facts.diags.into_iter().filter(|d| d.code == code);
+        found.next().map(|d| (d.pos.line, d.pos.col, d.message))
+    }
+
     /// Where and why the import of `text` fails on 18.0, as `(line, col, message)`.
     fn import(text: &str) -> Option<(u32, u32, String)> {
-        let lf = analyze(text, "res.partner", &[LineBreaks::Lf]);
-        let universal = analyze(text, "res.partner", &[LineBreaks::Universal]);
-        let lf = lf.diags.into_iter().next().map(|d| (d.pos.line, d.pos.col, d.message));
+        let lf = first(text, "OD000", LineBreaks::Lf);
         if !text.contains('\r') {
-            assert_eq!(
-                lf,
-                universal
-                    .diags
-                    .into_iter()
-                    .next()
-                    .map(|d| (d.pos.line, d.pos.col, d.message))
-            );
+            assert_eq!(lf, first(text, "OD000", LineBreaks::Universal));
         }
         lf
+    }
+
+    /// Where and why the import of `text` loses data on 18.0, as `(line, col, message)`.
+    fn lost(text: &str) -> Option<(u32, u32, String)> {
+        first(text, "OD333", LineBreaks::Lf)
+    }
+
+    fn lost_at(text: &str) -> Option<(u32, u32)> {
+        lost(text).map(|(line, col, _)| (line, col))
+    }
+
+    #[test]
+    fn a_cell_past_the_header_is_dropped() {
+        let text = "id,name\na,A\nb,B,x\nc,C,y\n";
+        let facts = analyze(text, "res.partner", &[LineBreaks::Lf]);
+        assert_eq!(facts.diags.len(), 1);
+        assert_eq!(
+            lost(text),
+            Some((
+                3,
+                5,
+                "a cell past the 2 columns of the header, which Odoo's import drops without a message".to_owned()
+            ))
+        );
+        assert_eq!(lost_at("id,name\na,\"A\nB\",x\n"), Some((3, 4)));
+        assert_eq!(lost_at("id,name\na,A,,\"\",\"x\"\n"), Some((2, 9)));
+        assert!(!facts.unreadable && facts.writes.len() == 3);
+    }
+
+    #[test]
+    fn an_empty_cell_past_the_header_loses_nothing() {
+        assert_eq!(lost("id,name\na,A,\nb,B,,\nc,C,\"\"\n"), None);
+        assert_eq!(lost("id,name\na,A\"\nb,B\n"), None);
+        assert_eq!(lost("id,name,comment\na,A\n"), None);
+    }
+
+    #[test]
+    fn a_quote_never_closed_takes_the_rest_of_the_file() {
+        let (line, col, message) = lost("id,name\na,A\nb,\"B\nc,C\n").unwrap();
+        assert_eq!((line, col), (3, 3));
+        assert_eq!(
+            message,
+            "this quote is never closed, so Odoo's import reads the rest of the file into one cell"
+        );
+        assert_eq!(lost_at("id,name\na,A,x,\"B\nc,C\n"), Some((2, 7)));
+    }
+
+    #[test]
+    fn a_quote_open_in_the_header_is_left_to_the_import_error() {
+        assert_eq!(lost("id,\"name\na,A\n"), None);
+    }
+
+    #[test]
+    fn a_blank_first_line_is_a_header_without_columns() {
+        let (line, col, message) = lost("\nid,name\na,A\n").unwrap();
+        assert_eq!((line, col), (2, 1));
+        assert!(message.starts_with("a cell past the 0 columns"));
+    }
+
+    #[test]
+    fn a_refused_or_unloaded_file_loses_nothing() {
+        let short = analyze(
+            "id,name,parent_id:id\na,\"A,p,x\nb,B,p\n",
+            "res.partner",
+            &[LineBreaks::Lf],
+        );
+        let codes: Vec<&str> = short.diags.iter().map(|d| d.code).collect();
+        assert_eq!(codes, ["OD000"]);
+        assert!(analyze("id,name\na,A,x\nb,\"B\n", "res.partner", &[]).diags.is_empty());
+    }
+
+    #[test]
+    fn the_reader_of_11_to_17_finds_its_own_dropped_cell() {
+        let text = "id,name\na,A\x0bb,B,x\n";
+        assert_eq!(
+            first(text, "OD333", LineBreaks::Universal).map(|(l, c, _)| (l, c)),
+            Some((2, 9))
+        );
+        assert_eq!(lost_at(text), Some((2, 7)));
+        assert_eq!(
+            first("id,name\na,\"A\x0b", "OD333", LineBreaks::Universal).map(|(l, c, _)| (l, c)),
+            Some((2, 3))
+        );
     }
 
     fn failing_line(text: &str) -> Option<u32> {

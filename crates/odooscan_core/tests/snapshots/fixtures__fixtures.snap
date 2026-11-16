@@ -290,6 +290,9 @@ custom/csv_refused/data/refs.xml:9:9: OD301 module base defines no XML id 'base.
 custom/csv_refused/data/res.partner.csv:2:1: OD000 the row ends before column 'parent_id:id', where Odoo's import reads a relational field
 custom/csv_rows/data/res.partner-cr.csv:2:21: OD000 a carriage return outside quotes that ends no line, which Python's csv reader refuses
 custom/csv_rows/data/res.partner-empty.csv:1:1: OD000 the file is empty, and Odoo's import reads its first row as the header
+custom/csv_rows/data/res.partner-loads.csv:2:26: OD333 a cell past the 4 columns of the header, which Odoo's import drops without a message
+custom/csv_rows/data/res.partner-long.csv:3:24: OD333 a cell past the 2 columns of the header, which Odoo's import drops without a message
+custom/csv_rows/data/res.partner-open.csv:3:17: OD333 this quote is never closed, so Odoo's import reads the rest of the file into one cell
 custom/csv_rows/data/res.partner-quote.csv:3:18: OD000 this quote runs to the end of the file, so the row ends before column 'parent_id:id', where Odoo's import reads a relational field
 custom/csv_rows/security/ir.model.access.csv:3:1: OD000 the row ends before column 'group_id:id', where Odoo's import reads a relational field
 custom/csv_rows_any/data/res.partner-feed.csv:2:1: OD301 module base defines no XML id 'base.no_such_partner'

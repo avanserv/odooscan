@@ -6,6 +6,7 @@
         "data/res.partner-cr.csv",
         "data/res.partner-feed.csv",
         "data/res.partner-short.csv",
+        "data/res.partner-long.csv",
     ],
     "license": "LGPL-3",
 }
