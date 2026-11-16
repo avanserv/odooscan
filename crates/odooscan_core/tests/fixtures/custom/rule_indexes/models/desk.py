@@ -2,6 +2,8 @@ from odoo import fields, models
 
 OWNER_MODEL = "desk.team"
 DELEGATED = True
+BADGE_KEY = "badge_unique"
+SERIAL_KEY = "serial_unique"
 
 
 class DeskTeam(models.Model):
@@ -133,3 +135,77 @@ class DeskZone(models.Model):
     parent_id = fields.Many2one("desk.zone")
     parent_path = fields.Char(index=True)
     team_id = fields.Many2one("desk.team")
+    owner_zone_id = fields.Many2one("desk.zone")
+
+
+class DeskFloor(models.Model):
+    _name = "desk.floor"
+    _description = "Desk floor"
+
+    parent_id = fields.Many2one("desk.floor")
+
+
+class DeskStampMixin(models.AbstractModel):
+    _name = "desk.stamp.mixin"
+    _description = "Desk stamp mixin"
+
+    stamp_id = fields.Many2one("desk.team")
+
+    def init(self):
+        return None
+
+
+class DeskStamp(models.Model):
+    _name = "desk.stamp"
+    _description = "Desk stamp"
+    _inherit = ["desk.stamp.mixin"]
+
+    team_id = fields.Many2one("desk.team")
+
+
+class DeskCodeMixin(models.AbstractModel):
+    _name = "desk.code.mixin"
+    _description = "Desk code mixin"
+    _sql_constraints = [("badge_unique", "unique(badge)", "One record per badge.")]
+
+    badge = fields.Char()
+
+
+class DeskBadge(models.Model):
+    _name = "desk.badge"
+    _description = "Desk badge"
+    _inherit = ["desk.code.mixin"]
+
+    holder_id = fields.Many2one("desk.team")
+
+
+class DeskPass(models.Model):
+    _name = "desk.pass"
+    _description = "Desk pass"
+    _inherit = ["desk.code.mixin"]
+    _sql_constraints = [("badge_unique", "check(level > 0)", "Passes start at level one.")]
+
+    level = fields.Integer()
+
+
+class DeskCard(models.Model):
+    _name = "desk.card"
+    _description = "Desk card"
+    _inherit = ["desk.code.mixin"]
+    _sql_constraints = [("badge_unique", "check(true)", "Any card.")]
+
+
+class DeskToken(models.Model):
+    _name = "desk.token"
+    _description = "Desk token"
+    _inherit = ["desk.code.mixin"]
+    # The scan cannot read a key named by a constant: Odoo replaces by key and drops the badge and
+    # serial indexes, but the scan keeps both, so a rule on either stays silent.
+    _sql_constraints = [
+        (BADGE_KEY, "check(level > 0)", ""),
+        (SERIAL_KEY, "unique(serial)", ""),
+        ("serial_unique", "check(true)", ""),
+    ]
+
+    level = fields.Integer()
+    serial = fields.Char()

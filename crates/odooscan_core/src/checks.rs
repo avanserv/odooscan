@@ -10,8 +10,8 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::facts::{
     AccessRow, ActionFact, ActionValue, ActionViewId, Annotation, ArchElement, ArchModifier, ArchSubview, ArchWidget,
-    ClassBase, ClassFact, ComponentTag, DataFacts, DefinitionSource, DomainFact, FieldFact, FieldWrite, Flag,
-    FunctionCall, GuardedRef, JsClass, JsFacts, JsName, MethodDef, Migrate, ModelKind, OptionValue, OrmCall,
+    ClassBase, ClassFact, ComponentTag, DataFacts, Definition, DefinitionSource, DomainFact, FieldFact, FieldWrite,
+    Flag, FunctionCall, GuardedRef, JsClass, JsFacts, JsName, MethodDef, Migrate, ModelKind, OptionValue, OrmCall,
     OwlTemplate, Pos, PyFacts, RawDiag, RecordFact, RecordWrite, Refusal, ReportFact, RouteDef, RouteKey, RuleFact,
     ServerFact, Signature, Spanned, SqlColumn, SqlView, Subject, TemplateEntry, UNREAD_TYPE, ViewFact, WrittenValue,
     XmlDef, XmlRef,
@@ -5511,6 +5511,15 @@ impl<'m> Ctx<'_, 'm> {
         !self.every_class(model, |c| !picks(c))
     }
 
+    /// Whether a class in scope that the registry merges into `model`, its own or one of a model it
+    /// inherits by `_inherit`, picks.
+    fn some_merged_class(&self, model: &str, picks: impl Fn(&ClassFact) -> bool) -> bool {
+        self.index
+            .merged_classes(model, self.scope)
+            .iter()
+            .any(|(_, c)| picks(c))
+    }
+
     /// The table Odoo names a Many2many's relation after when it gives none: both tables, sorted.
     /// None when a table is unknown, or both are the same, which Odoo refuses on its own.
     fn implicit_relation(&self, field: &Field<'m>) -> Option<String> {
@@ -6514,10 +6523,11 @@ impl<'m> Ctx<'_, 'm> {
         let Some(table) = self.index.table(model, self.scope) else {
             return;
         };
-        for (_, column) in class
+        for column in class
             .definitions
             .iter()
-            .filter(|(source, _)| applies(*source, self.series))
+            .filter(|d| applies(d.source, self.series))
+            .filter_map(|d| d.column.as_ref())
         {
             if let Some(reason) = self.definition_reason(model, &table, &column.value) {
                 let message = format!("{}: {table} has no such column, since {reason}", column.value);
@@ -7013,12 +7023,14 @@ impl<'m> Ctx<'_, 'm> {
     /// Whether the registry builds the table of `model` from its fields and keeps its rows: no
     /// table query, transient vacuum or `init()` that may index it by hand, and no parent the scan
     /// cannot read that may give the field. A class from a file that does not parse counts as
-    /// such a parent, as its `_inherit` is unknown.
+    /// such a parent, as its `_inherit` is unknown. Odoo calls `init()` through the MRO, so a
+    /// mixin's counts (18.0 `odoo/modules/registry.py:598`).
     fn indexed_table(&self, model: &str) -> bool {
-        let hand_made = |c: &ClassFact| c.kind == ModelKind::Transient || c.methods.iter().any(|m| m == "init");
+        let init = |c: &ClassFact| c.methods.iter().any(|m| m == "init");
         self.has_table(model)
             && !self.table_query(model)
-            && !self.some_class(model, hand_made)
+            && !self.some_class(model, |c| c.kind == ModelKind::Transient)
+            && !self.some_merged_class(model, init)
             && !self.index.hidden_field_parents(model, self.scope)
     }
 
@@ -7076,10 +7088,9 @@ impl<'m> Ctx<'_, 'm> {
     }
 
     /// Whether a term of `terms` filters the column, on a Many2one only with its comodel known and
-    /// other than `res.company`. A hierarchy term on a Many2one to the model itself becomes a
-    /// `parent_path` match under `_parent_store` (18.0 `odoo/osv/expression.py:889-896,1363-1368`).
-    /// Only a relational field takes a dotted path (`:387-390`), which reaches the column through
-    /// an `IN` unless the field joins, as `any` on a Many2one does under `auto_join` (`:1137-1150`).
+    /// other than `res.company`. Only a relational field takes a dotted path (18.0
+    /// `odoo/osv/expression.py:387-390`), which reaches the column through an `IN` unless the field
+    /// joins, as `any` on a Many2one does under `auto_join` (`:1137-1150`).
     fn served_path(&self, model: &'m str, field: &Field<'m>, ftype: &str, terms: &domain::Served) -> bool {
         let name = field.defs.first().map_or("", |d| d.2.name.as_str());
         let comodel = self
@@ -7091,10 +7102,54 @@ impl<'m> Ctx<'_, 'm> {
         if ftype == "Many2one" && comodel.as_deref().is_none_or(|c| c == "res.company") {
             return false;
         }
-        let tree = comodel.as_deref() == Some(model) && self.some_class(model, sets_parent_store);
+        let own = comodel.as_deref() == Some(model);
         terms.plain
-            || terms.hierarchy && !tree
+            || self.hierarchy_column(model, name, own, terms)
             || terms.through && ftype == "Many2one" && !self.joins(model, field, name)
+    }
+
+    /// Whether a `child_of` or `parent_of` term of `terms` on `name` filters its column. On a
+    /// Many2one to the model itself (`own`), `parent_of` reads the field to walk up (18.0
+    /// `odoo/osv/expression.py:947,1366-1368`), and `child_of` may match `parent_path` (`:889-896`).
+    fn hierarchy_column(&self, model: &str, name: &str, own: bool, terms: &domain::Served) -> bool {
+        terms.children && !(own && self.matches_parent_path(model, name)) || terms.parents && !own
+    }
+
+    /// Whether `child_of` on `name`, a Many2one to `model` itself, matches `parent_path` rather
+    /// than the column: `_parent_store` may be true, and the series matches it on `name`.
+    fn matches_parent_path(&self, model: &str, name: &str) -> bool {
+        let is_parent = || self.parent_names(model).is_none_or(|names| names.contains(&name));
+        let stores = self.last_attrs(model, "_parent_store");
+        stores.iter().any(|a| a.value != OptionValue::Bool(false)) && parent_path_children(self.series, is_parent())
+    }
+
+    /// The fields `_parent_name` may name on `model`, `parent_id` when no class sets it. None when
+    /// one of the values `last_attrs` gives is one the scan cannot read.
+    fn parent_names(&self, model: &str) -> Option<Vec<&'m str>> {
+        let mut names = vec![];
+        for attr in self.last_attrs(model, "_parent_name") {
+            match &attr.value {
+                OptionValue::Str(name) => names.push(name.as_str()),
+                _ => return None,
+            }
+        }
+        if names.is_empty() {
+            names.push("parent_id");
+        }
+        Some(names)
+    }
+
+    /// The values of class attribute `attr` that `model` may end with: that of each class merged
+    /// into it that sets the attribute and no class merged after it overrides.
+    fn last_attrs(&self, model: &str, attr: &str) -> Vec<&'m Spanned<OptionValue>> {
+        let merged = self.index.merged_classes(model, self.scope);
+        let sets = |&(mi, c): &(usize, &'m ClassFact)| c.attr(attr).map(|a| (mi, c, a));
+        let set: Vec<_> = merged.iter().filter_map(sets).collect();
+        let overridden = |&(mi, class, at): &(usize, &ClassFact, &Spanned<OptionValue>)| {
+            set.iter()
+                .any(|&(mj, other, by)| self.merges_before(model, (mi, class, at.pos), (mj, other, by.pos)))
+        };
+        set.iter().filter(|t| !overridden(t)).map(|&(_, _, a)| a).collect()
     }
 
     /// Whether a term through the Many2one `name` may join its comodel: `auto_join`,
@@ -7112,19 +7167,40 @@ impl<'m> Ctx<'_, 'm> {
     }
 
     /// Whether a constraint or index definition Odoo applies in this series names column `name`
-    /// of `model`.
+    /// of `model`, on the model or a model it inherits. Odoo merges those of every base by key, a
+    /// later one replacing an earlier one of its key (18.0 `odoo/models.py:826-843`, 20.0
+    /// `odoo/orm/model_classes.py:489-494`), so one counts unless one of its key certainly follows.
     fn defined_index(&self, model: &str, name: &str) -> bool {
-        let names = |c: &ClassFact| {
-            c.definitions
-                .iter()
-                .any(|(source, column)| applies(*source, self.series) && column.value == name)
+        let merged = self.index.merged_classes(model, self.scope);
+        let applied = |&(mi, c): &(usize, &'m ClassFact)| {
+            let applies = |d: &&'m Definition| applies(d.source, self.series);
+            c.definitions.iter().filter(applies).map(move |d| (mi, c, d))
         };
-        self.some_class(model, names)
+        let defs: Vec<_> = merged.iter().flat_map(applied).collect();
+        let replaced = |(mi, c, d): (usize, &ClassFact, &Definition)| {
+            let same = |e: &Definition| e.source == d.source && e.key.is_some() && e.key == d.key;
+            defs.iter()
+                .any(|&(mj, other, e)| same(e) && self.merges_before(model, (mi, c, d.at), (mj, other, e.at)))
+        };
+        let names = |d: &Definition| d.column.as_ref().is_some_and(|c| c.value == name);
+        defs.iter().any(|&t| names(t.2) && !replaced(t))
     }
 }
 
 /// How many related fields `Ctx::untranslated` follows before it gives up on a chain.
 const RELATED_HOPS: usize = 8;
+
+/// The first series whose `child_of` matches `parent_path` only on the `_parent_name` field, and
+/// searches the column of any other (`5ef007a2116e`, in saas~18.1; 20.0
+/// `odoo/orm/domains.py:1874,1893`). 18.0 matches it on any Many2one to the model itself
+/// (`odoo/osv/expression.py:889-896`).
+const CHILD_OF_PARENT_NAME: Series = Series { major: 18, minor: 1 };
+
+/// Whether `child_of` on a Many2one to a `_parent_store` model itself matches `parent_path` in
+/// `series` rather than the column: an unknown series may.
+fn parent_path_children(series: Option<Series>, is_parent: bool) -> bool {
+    is_parent || series.is_none_or(|s| s < CHILD_OF_PARENT_NAME)
+}
 
 /// The field types whose column a btree index serves for the operators `domain::served_fields`
 /// keeps. Boolean and Selection hold too few values for one to pay.
@@ -7147,8 +7223,9 @@ mod tests {
     use super::{
         MagicEra, applies, bundle_list, cache_global, callable_attr, csv_label, derived_label, es_module,
         exported_text, fetches_own_view, field_name, has_last_update, hoot_adds, magic_era, no_access_message,
-        page_miss, patch_form, public_write_message, reads_model_access, reads_requires, shadowed_member, static_only,
-        stores_parent_path, tuple_checked, tuple_listed, unknown_dependency, unmatched_asset, warns_on_labels,
+        page_miss, parent_path_children, patch_form, public_write_message, reads_model_access, reads_requires,
+        shadowed_member, static_only, stores_parent_path, tuple_checked, tuple_listed, unknown_dependency,
+        unmatched_asset, warns_on_labels,
     };
     use crate::facts::{AccessRow, Annotation, DefinitionSource, JsName, Perms, Pos, Spanned};
     use crate::manifest::OdooReads;
@@ -7248,6 +7325,15 @@ mod tests {
         assert!(stores_parent_path(None));
         assert!(!stores("9.0") && !stores("10.0") && !stores("11.0") && !stores("saas~11.2"));
         assert!(stores("saas~11.3") && stores("saas~11.4") && stores("12.0"));
+    }
+
+    #[test]
+    fn child_of_matches_parent_path_on_any_field_before_saas_18_1() {
+        let children = |series: &str, is_parent| parent_path_children(Series::parse(series), is_parent);
+        assert!(parent_path_children(None, false));
+        assert!(children("18.0", false));
+        assert!(!children("saas~18.1", false) && !children("20.0", false));
+        assert!(children("saas~18.1", true) && children("20.0", true));
     }
 
     #[test]

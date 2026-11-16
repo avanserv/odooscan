@@ -4,3 +4,12 @@ access_bin_row,Bins written by row,model_shelf_bin,base.group_user,w,"[('row', '
 access_bin_aisle,Bins of an aisle,model_shelf_bin,base.group_user,r,"[('aisle', '=', 'a')]"
 access_bin_area,Bins of a named zone,model_shelf_bin,base.group_user,r,"[('area_id.name', '=', 'north')]"
 access_zone,Zones,model_shelf_zone,base.group_user,r,
+access_crate_code,Crates by code,model_shelf_crate,base.group_user,r,"[('code', '=', 'a')]"
+access_rack_tree,Racks under mine,model_shelf_rack,base.group_user,r,"['|', ('parent_id', 'child_of', [1]), ('twin_id', 'child_of', [1])]"
+access_rack_up,Racks above mine,model_shelf_rack,base.group_user,r,"[('twin_id', 'parent_of', [1])]"
+access_bay_tree,Bays under mine,model_shelf_bay,base.group_user,r,"['|', ('up_id', 'child_of', [1]), ('parent_id', 'child_of', [1])]"
+access_box_code,Boxes by code,model_shelf_box,base.group_user,r,"[('code', '=', 'a')]"
+access_tier_tree,Tiers under mine,model_shelf_tier,base.group_user,r,"[('side_id', 'child_of', [1])]"
+access_lane_tree,Lanes under mine,model_shelf_lane,base.group_user,r,"['|', ('up_id', 'child_of', [1]), ('parent_id', 'child_of', [1])]"
+access_stack_tree,Stacks under mine,model_shelf_stack,base.group_user,r,"['|', ('up_id', 'child_of', [1]), ('parent_id', 'child_of', [1])]"
+access_pile_tree,Piles under mine,model_shelf_pile,base.group_user,r,"[('up_id', 'child_of', [1])]"

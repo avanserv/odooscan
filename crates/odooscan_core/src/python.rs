@@ -9,9 +9,9 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::api_table::{self, Kind};
 use crate::facts::{
-    ClassBase, ClassFact, DefinitionSource, DomainFact, FieldClass, FieldFact, FlowSummary, GuardedRef, MethodDef,
-    ModelKind, OptionValue, Param, Pos, PyFacts, RawDiag, Receiver, Signature, Spanned, SqlColumn, SqlView, Subject,
-    UNREAD_TYPE, XmlRef,
+    ClassBase, ClassFact, Definition, DefinitionSource, DomainFact, FieldClass, FieldFact, FlowSummary, GuardedRef,
+    MethodDef, ModelKind, OptionValue, Param, Pos, PyFacts, RawDiag, Receiver, Signature, Spanned, SqlColumn, SqlView,
+    Subject, UNREAD_TYPE, XmlRef,
 };
 use crate::fix::{self, Edit, Fix};
 use crate::placeholders::{self, Specs};
@@ -2563,7 +2563,7 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
                     self.facts.dynamic_models |= naming.name.is_none();
                 }
                 "_inherit" => naming.inherit = self.inherit(value, fact, naming.name.as_deref()),
-                "_order" | "_parent_name" | "_fold_name" => fact.order_fields.extend(self.term_fields(value)),
+                "_order" | "_fold_name" => fact.order_fields.extend(self.term_fields(value)),
                 "_rec_name" | "_active_name" => fact.setup_fields.extend(self.term_fields(value)),
                 "_rec_names_search" => {
                     fact.rec_names_search = strings(value).into_iter().map(|s| self.spanned(s)).collect();
@@ -2616,11 +2616,13 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
         match target.id.as_str() {
             "_table" => fact.table = Some(option_value(value)),
             "_parent_store" | "_auto" | "_log_access" | "_register" | "_date_name" | "_defaults" => {
-                let attr = Spanned {
-                    value: option_value(value),
-                    pos: self.loc.at(target),
-                };
-                fact.attrs.push((target.id.to_string(), attr));
+                self.kept_attr(target, value, fact);
+            }
+            // A field that must exist, as `_order` names, and the one `child_of` matches by
+            // `parent_path` from saas~18.1.
+            "_parent_name" => {
+                fact.order_fields.extend(self.term_fields(value));
+                self.kept_attr(target, value, fact);
             }
             // Odoo registers a field under any attribute name, so a field so named replaces the
             // attribute or method and gives the model no table: `_auto_init` reads `_auto` alone.
@@ -2639,12 +2641,28 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
         }
     }
 
+    /// Keeps a class attribute in `attrs`, with its value as far as the scan reads it.
+    fn kept_attr(&self, target: &ast::ExprName, value: &Expr, fact: &mut ClassFact) {
+        let attr = Spanned {
+            value: option_value(value),
+            pos: self.loc.at(target),
+        };
+        fact.attrs.push((target.id.to_string(), attr));
+    }
+
     /// A class attribute whose name means nothing to Odoo: its value tells a constraint or an index
     /// from an alias of a method and from a field.
     fn value_attr(&mut self, target: &ast::ExprName, value: &Expr, fact: &mut ClassFact) {
         if is_table_object(value) {
             if let Some(definition) = value.as_call_expr().and_then(|c| c.arguments.args.first()) {
-                self.definition(DefinitionSource::TableObject, definition, fact);
+                let key = Some(target.id.to_string());
+                self.definition(
+                    DefinitionSource::TableObject,
+                    key,
+                    self.loc.at(target),
+                    definition,
+                    fact,
+                );
             }
         } else if may_be_method(value, self.known) {
             self.method_attr(target, value, fact);
@@ -2672,19 +2690,48 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
             if let Expr::Tuple(t) = entry
                 && let Some(definition) = t.elts.get(1)
             {
-                self.definition(DefinitionSource::SqlConstraints, definition, fact);
+                let key = t.elts.first().and_then(str_lit).map(str::to_owned);
+                self.definition(
+                    DefinitionSource::SqlConstraints,
+                    key,
+                    self.loc.at(entry),
+                    definition,
+                    fact,
+                );
             }
         }
     }
 
-    /// The columns a literal constraint or index definition names, each where the source spells it.
-    fn definition(&self, source: DefinitionSource, definition: &Expr, fact: &mut ClassFact) {
+    /// The columns a literal constraint or index definition names, each where the source spells it,
+    /// or the definition alone when it has a key and names none.
+    fn definition(
+        &self,
+        source: DefinitionSource,
+        key: Option<String>,
+        at: Pos,
+        definition: &Expr,
+        fact: &mut ClassFact,
+    ) {
         let Some(columns) = str_lit(definition).and_then(sql::definition_columns) else {
             return;
         };
-        for (name, at) in columns {
-            let pos = source_offset(definition, at).map_or_else(|| self.loc.at(definition), |o| self.loc.pos(o));
-            fact.definitions.push((source, Spanned { value: name, pos }));
+        if columns.is_empty() && key.is_some() {
+            fact.definitions.push(Definition {
+                source,
+                key,
+                at,
+                column: None,
+            });
+            return;
+        }
+        for (name, offset) in columns {
+            let pos = source_offset(definition, offset).map_or_else(|| self.loc.at(definition), |o| self.loc.pos(o));
+            fact.definitions.push(Definition {
+                source,
+                key: key.clone(),
+                at,
+                column: Some(Spanned { value: name, pos }),
+            });
         }
     }
 
@@ -4376,6 +4423,8 @@ mod tests {
         assert_eq!(values(&class.order_fields), ["sequence", "id", "up_id", "folded"]);
         assert_eq!(values(&class.setup_fields), ["code", "x_active"]);
         assert_eq!(values(&class.rec_names_search), ["name", "partner_id.ref"]);
+        let parent = class.attr("_parent_name").map(|a| &a.value);
+        assert_eq!(parent, Some(&OptionValue::Str("up_id".to_owned())));
     }
 
     /// The method names of a model class with the body `body`.
@@ -6307,22 +6356,31 @@ class U(HttpCase):
                    ('b_check', 'CHECK (b > %s)' % LIMIT, 'B is large'),\n        ('c_check', \"CHECK(c\\n > 0)\", ''),\n    ]\n    \
                    _d_uniq = models.UniqueIndex('(d) WHERE e IS NOT NULL')\n    \
                    _f_check = models.Constraint('CHECK (f > 0)', 'F is positive')\n    \
-                   _g_index = models.Index(lambda registry: '(g)')\n    _h_index = Index('(h)')\n";
+                   _g_index = models.Index(lambda registry: '(g)')\n    _h_index = Index('(h)')\n    \
+                   _t_check = models.Constraint('CHECK (TRUE)')\n";
         let facts = analyze(src, None);
         let found: Vec<String> = facts.classes[0]
             .definitions
             .iter()
-            .map(|(source, c)| format!("{source:?} {} {}:{}", c.value, c.pos.line, c.pos.col))
+            .map(|d| {
+                let key = d.key.as_deref().unwrap_or("?");
+                let column = d.column.as_ref().map_or_else(
+                    || "-".to_owned(),
+                    |c| format!("{}:{}:{}", c.value, c.pos.line, c.pos.col),
+                );
+                format!("{:?} {key} {} {column}", d.source, d.at.line)
+            })
             .collect();
         assert_eq!(
             found,
             [
-                "SqlConstraints a 4:28",
-                "SqlConstraints c 6:21",
-                "TableObject d 8:36",
-                "TableObject e 8:45",
-                "TableObject f 9:42",
-                "TableObject h 11:24",
+                "SqlConstraints a_uniq 4 a:4:28",
+                "SqlConstraints c_check 6 c:6:21",
+                "TableObject _d_uniq 8 d:8:36",
+                "TableObject _d_uniq 8 e:8:45",
+                "TableObject _f_check 9 f:9:42",
+                "TableObject _h_index 11 h:11:24",
+                "TableObject _t_check 12 -",
             ]
         );
         assert!(facts.classes[0].fields.is_empty());

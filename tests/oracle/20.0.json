@@ -937,12 +937,6 @@
       "count": 1
     },
     {
-      "path": "addons/hr_expense/security/ir.access.csv",
-      "code": "OD407",
-      "message": "hr.expense.manager_id has no index, yet ir.access record hr_expense.ir_rule_hr_expense_approver filters reads of hr.expense on it; add index=True to the field",
-      "count": 1
-    },
-    {
       "path": "addons/hr_fleet/models/fleet_vehicle.py",
       "code": "OD134",
       "message": "search() runs a query for each record of the loop, keyed on vehicle_id; search once for all of them and group the result by vehicle_id",
@@ -4006,18 +4000,6 @@
       "path": "addons/sale/populate/populate_demo.xml",
       "code": "OD502",
       "message": "'populate/populate_demo.xml' is not in the manifest's data or demo, so Odoo never loads it",
-      "count": 1
-    },
-    {
-      "path": "addons/sale/security/ir.access.csv",
-      "code": "OD407",
-      "message": "account.move.invoice_user_id has no index, yet ir.access record sale.account_invoice_rule_see_personal filters reads of account.move on it; add index=True to the field",
-      "count": 1
-    },
-    {
-      "path": "addons/sale/security/ir.access.csv",
-      "code": "OD407",
-      "message": "sale.order.line.salesman_id has no index, yet ir.access record sale.sale_order_line_personal_rule filters reads of sale.order.line on it; add index=True to the field",
       "count": 1
     },
     {

@@ -226,8 +226,8 @@ pub struct ClassFact {
     pub base_methods: Vec<String>,
     /// The value of `_table`, when the class sets it.
     pub table: Option<OptionValue>,
-    /// `_parent_store`, `_auto`, `_log_access`, `_register`, `_date_name` and `_defaults`, when the
-    /// class sets them.
+    /// `_parent_store`, `_parent_name`, `_auto`, `_log_access`, `_register`, `_date_name` and
+    /// `_defaults`, when the class sets them.
     pub attrs: Vec<(String, Spanned<OptionValue>)>,
     /// Compute methods, at their name, with the fields of the class they compute and can leave
     /// unassigned on a record.
@@ -237,8 +237,22 @@ pub struct ClassFact {
     /// A method of the class creates a view whose whole name is `self._table`, the model's own.
     pub own_view: bool,
     /// The columns each literal definition of `_sql_constraints`, or of a call of `Constraint`,
-    /// `Index` or `UniqueIndex` such as `models.Index(...)`, names, by where Odoo reads it.
-    pub definitions: Vec<(DefinitionSource, Spanned<String>)>,
+    /// `Index` or `UniqueIndex` such as `models.Index(...)`, names.
+    pub definitions: Vec<Definition>,
+}
+
+/// A column a literal constraint or index definition names, or a keyed definition that names none.
+#[derive(Debug)]
+pub struct Definition {
+    pub source: DefinitionSource,
+    /// The name Odoo keys the definition by, so that a later one of that name on the model replaces
+    /// it: the first item of the `_sql_constraints` entry, or the attribute. None when unread.
+    pub key: Option<String>,
+    /// Where the definition sits, which orders two of one class.
+    pub at: Pos,
+    /// None for a keyed definition naming no column, such as `CHECK (TRUE)`, which still replaces
+    /// a definition of its key.
+    pub column: Option<Spanned<String>>,
 }
 
 /// A view a literal `CREATE VIEW` creates.
