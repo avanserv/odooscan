@@ -523,11 +523,23 @@ mod tests {
         module
     }
 
+    /// A finding as `file:line code text`.
+    fn located((path, d): &(&Path, RawDiag), text: &str) -> String {
+        format!("{}:{} {} {text}", path.display(), d.pos.line, d.code)
+    }
+
     /// A finding as `file:line code message` up to the advice.
-    fn shown((path, d): &(&Path, RawDiag)) -> String {
+    fn shown(f: &(&Path, RawDiag)) -> String {
+        let (_, d) = f;
         let message = d.message.split(';').next().unwrap_or_default();
         let message = message.split(", so ").next().unwrap_or_default();
-        format!("{}:{} {} {message}", path.display(), d.pos.line, d.code)
+        located(f, message)
+    }
+
+    /// A finding as `file:line code origin`, the origin being its message up to what it reaches.
+    fn origin(f: &(&Path, RawDiag)) -> String {
+        let (_, d) = f;
+        located(f, d.message.split(" reaches ").next().unwrap_or_default())
     }
 
     /// Each cross-method finding of `module(route, methods)`, mapped by `each`.
@@ -554,9 +566,14 @@ mod tests {
     ) -> Vec<T> {
         let modules = [routed(keywords, route, methods)];
         let index = Index::build(&modules, None);
+        checked(&index, 0, grant).iter().map(each).collect()
+    }
+
+    /// The cross-method findings of the module `mi` of `index`.
+    fn checked<'m>(index: &Index<'m>, mi: usize, grant: AttachmentGrant) -> Vec<(&'m Path, RawDiag)> {
         let mut out = Out { diags: vec![] };
-        check(&index, 0, &index.scope(0), grant, &mut out);
-        out.diags.iter().map(each).collect()
+        check(index, mi, &index.scope(mi), grant, &mut out);
+        out.diags
     }
 
     /// The cross-method findings of `module(route, methods)`.
@@ -574,9 +591,10 @@ mod tests {
         let index = Index::build(&modules, None);
         (0..modules.len())
             .map(|mi| {
-                let mut out = Out { diags: vec![] };
-                check(&index, mi, &index.scope(mi), AttachmentGrant::default(), &mut out);
-                out.diags.iter().map(|d| origin(&shown(d))).collect()
+                checked(&index, mi, AttachmentGrant::default())
+                    .iter()
+                    .map(origin)
+                    .collect()
             })
             .collect()
     }
@@ -1108,13 +1126,7 @@ mod tests {
     #[test]
     fn a_callee_reading_the_name_of_a_file_picked_by_its_field_reads_no_user_data() {
         let route = "    def r(self):\n        for f in request.httprequest.files.getlist('ufile'):\n            request.env['x.y']._a(f)\n";
-        let codes = |methods: &str| {
-            let found = scan_messages(route, methods);
-            found
-                .iter()
-                .map(|f| f.split(' ').nth(1).unwrap_or_default().to_owned())
-                .collect::<Vec<_>>()
-        };
+        let codes = |methods: &str| scanned(route, methods, |(_, d)| d.code);
         for (code, sink) in METHOD_SINK_OF {
             let direct = |value: &str| format!("    def _a(self, file):\n        {}\n", sink.replace('#', value));
             let deeper = |value: &str| {
@@ -1242,14 +1254,9 @@ mod tests {
         )
     }
 
-    /// A finding `shown` gives, up to its origin.
-    fn origin(finding: &str) -> String {
-        finding.split(" reaches ").next().unwrap_or_default().to_owned()
-    }
-
     /// The findings of `module(route, methods)` as `file:line code origin`.
     fn origins(route: &str, methods: &str) -> Vec<String> {
-        scan_messages(route, methods).iter().map(|f| origin(f)).collect()
+        scanned(route, methods, origin)
     }
 
     #[test]
