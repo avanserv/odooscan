@@ -52,8 +52,8 @@ page in the terminal.
 
 `cargo test` runs a snapshot that scans `crates/odooscan_core/tests/fixtures/custom`, modules
 written to trigger every rule, against `core/` beside it, a stand-in for Odoo core whose
-auto-install modules pin down which modules count as always installed; review changes with
-`cargo insta review`. A case that cannot join that scan gets its own root beside `custom/` and
+auto-install modules pin down which modules count as always installed; accept changes as
+CONTRIBUTING.md describes. A case that cannot join that scan gets its own root beside `custom/` and
 `core/`. Each module of `cycles/` is scanned alone, by
 `oscn check cycles/<module> --addons-path core` in a child process: a cycle the index fails to end
 overflows the stack and aborts the whole process, which in `custom/` would kill the test binary

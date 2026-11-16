@@ -45,8 +45,22 @@ fire the rule and its fixed one must not: check both on a scratch module before 
 request. A code is never renumbered or reused: a retired rule's code stays a gap.
 
 Every rule fires at least once in `crates/odooscan_core/tests/fixtures/custom`, and a rule gated
-by series also has a module of an earlier series where it stays silent. After changing what a rule
-reports, run `cargo insta review` and read every changed line.
+by series also has a module of an earlier series where it stays silent.
+
+After changing what a rule reports, accept the snapshot change and read every changed line before
+the commit, whichever route you take. `cargo insta review`, from cargo-insta, is the interactive
+route. Without it, `INSTA_UPDATE=always` makes insta write each changed `.snap` in place and pass
+the test, with or without `CI` set; git then shows the change:
+
+```bash
+INSTA_UPDATE=always cargo test --workspace --locked
+git status --short -- '*.snap'
+git diff -- '*.snap'
+```
+
+A new snapshot is an untracked file that `git diff` does not list, so read it from `git status`
+too. Insta never deletes a snapshot: a renamed or removed test leaves its old `.snap`, which you
+remove by hand.
 
 The snapshot scans `custom/` against `core/`; a case that cannot join that scan gets its own root
 beside them. A case that could send the index round a cycle goes under `cycles/`, never `custom/`,
