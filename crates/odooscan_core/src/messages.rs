@@ -5,7 +5,7 @@
 
 use ruff_python_ast::token::{Token, TokenKind};
 use ruff_python_ast::visitor::{self, Visitor};
-use ruff_python_ast::{Expr, FString, InterpolatedStringElement, StringLiteral};
+use ruff_python_ast::{ConversionFlag, Expr, FString, FStringPartRef, InterpolatedStringElement, StringLiteral};
 use ruff_python_parser::parse_expression;
 use ruff_text_size::{Ranged, TextSize};
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -26,12 +26,14 @@ pub(crate) fn extract(parsed: &Parsed, loc: &Locator, series: Option<Series>) ->
     let mut values = Values {
         loc,
         values: FxHashMap::default(),
+        evaluated: FxHashMap::default(),
         unreadable: FxHashSet::default(),
     };
     values.visit_body(&parsed.module.body);
     let mut reader = Reader {
         loc,
         values: &values.values,
+        evaluated: &values.evaluated,
         unreadable: &values.unreadable,
         evaluates_fstrings: series.is_none_or(|s| s < OWN_EXTRACTOR),
         reads_fstring_tokens: series.is_none_or(|s| s >= OWN_EXTRACTOR),
@@ -47,21 +49,15 @@ pub(crate) fn extract(parsed: &Parsed, loc: &Locator, series: Option<Series>) ->
     for token in parsed.tokens.iter() {
         reader.read(token);
     }
-    let Reader { out, halts, .. } = reader;
-    // The export logs the error and drops the rest of the file (18.0 `odoo/tools/translate.py:1416`).
-    // Holding no message of the file certain keeps OD804 off each one it dropped.
-    out.into_iter()
-        .map(|m| Message {
-            certain: m.certain && !halts,
-            ..m
-        })
-        .collect()
+    reader.out
 }
 
 /// The value of each string and f-string by its start, none for an f-string that interpolates.
 struct Values<'a, 'l> {
     loc: &'l Locator<'a>,
     values: FxHashMap<TextSize, Option<String>>,
+    /// Babel's value of each f-string it evaluates before 3.12, where it is one string token.
+    evaluated: FxHashMap<TextSize, String>,
     /// The start of each constant f-string Odoo's extractor fails to read from 3.12.
     unreadable: FxHashSet<TextSize>,
 }
@@ -99,6 +95,32 @@ fn fstring_value(fstring: &FString) -> Option<String> {
     fstring.elements.iter().map(literal).collect()
 }
 
+/// The text Babel 2.9.1 and 2.10.3 evaluate `fstring` to before 3.12, when each replacement field
+/// is a string or such an f-string, bare. They evaluate more, such as `f"{1}"`, but reading a field
+/// as failing only halts the file early, which keeps OD804 off more calls.
+fn babel_value(fstring: &FString) -> Option<String> {
+    let element = |e: &InterpolatedStringElement| match e {
+        InterpolatedStringElement::Literal(l) => Some(l.value.to_string()),
+        InterpolatedStringElement::Interpolation(i) => {
+            let bare = i.conversion == ConversionFlag::None && i.format_spec.is_none() && i.debug_text.is_none();
+            bare.then(|| field_value(&i.expression)).flatten()
+        }
+    };
+    fstring.elements.iter().map(element).collect()
+}
+
+fn field_value(expr: &Expr) -> Option<String> {
+    let part = |p: FStringPartRef| match p {
+        FStringPartRef::Literal(l) => Some(l.value.to_string()),
+        FStringPartRef::FString(f) => babel_value(f),
+    };
+    match expr {
+        Expr::StringLiteral(s) => Some(s.value.to_string()),
+        Expr::FString(f) => f.value.iter().map(part).collect(),
+        _ => None,
+    }
+}
+
 impl<'a> Visitor<'a> for Values<'_, '_> {
     fn visit_string_literal(&mut self, literal: &'a StringLiteral) {
         let value = match self.newlines_read(literal) {
@@ -109,10 +131,15 @@ impl<'a> Visitor<'a> for Values<'_, '_> {
     }
 
     fn visit_f_string(&mut self, fstring: &'a FString) {
-        let value = match self.newlines_read(fstring) {
-            Some(Expr::FString(read)) => read.value.f_strings().next().and_then(fstring_value),
-            _ => fstring_value(fstring),
+        let read = match self.newlines_read(fstring) {
+            Some(Expr::FString(read)) => read.value.f_strings().next().cloned(),
+            _ => None,
         };
+        let read = read.as_ref().unwrap_or(fstring);
+        let value = fstring_value(read);
+        if let Some(evaluated) = babel_value(read) {
+            self.evaluated.insert(fstring.start(), evaluated);
+        }
         if value.is_some() && collapse_breaks(self.loc.text(fstring)) {
             self.unreadable.insert(fstring.start());
         }
@@ -150,15 +177,26 @@ struct Argument {
     fstrings: usize,
 }
 
+/// The values of a string or f-string token.
+struct Text {
+    /// Its value, none for bytes or an f-string that interpolates.
+    value: Option<String>,
+    /// Babel's value of an f-string it evaluates.
+    evaluated: Option<String>,
+}
+
 impl Argument {
     /// Reads a token directly in the argument.
-    fn direct(&mut self, token: &Token, value: Option<String>, translate: bool) {
+    fn direct(&mut self, token: &Token, text: Text, translate: bool) {
         match token.kind() {
-            TokenKind::String => self.string(value),
+            TokenKind::String => self.string(text.value),
             TokenKind::FStringStart => {
                 self.plain = false;
-                if let Some(value) = value {
+                if let Some(value) = text.value {
                     self.readings.constant(&value);
+                }
+                if let Some(evaluated) = text.evaluated {
+                    self.readings.evaluated_fstring(&evaluated);
                 }
             }
             TokenKind::Comma => self.done = true,
@@ -193,6 +231,11 @@ impl Argument {
     fn replaced(&mut self, kind: TokenKind, value: Option<String>, translate: bool) {
         match kind {
             TokenKind::String => self.readings.replaced(&value.unwrap_or_default()),
+            TokenKind::FStringStart => {
+                if let Some(value) = value {
+                    self.readings.nested_constant(&value);
+                }
+            }
             TokenKind::Lpar => self.readings.split_tail.clear(),
             // From 3.12 the comma ends the argument for both extractors, though not for Python.
             TokenKind::Comma => self.readings.split_done = true,
@@ -201,22 +244,28 @@ impl Argument {
     }
 }
 
-/// The message each extractor makes of the strings of an argument. Python before 3.12 gives an
-/// f-string as one token, which newer Babel and Odoo's extractor take when it interpolates
-/// nothing; from 3.12 its tokens show the strings of its replacement fields, which both take too.
-/// Odoo's extractor empties its buffer at each parenthesis.
+/// The message each extractor makes of the strings of an argument. Before Python 3.12 an f-string
+/// is one token, which Babel evaluates and Odoo's extractor takes when it interpolates nothing; from
+/// 3.12 its tokens show the strings of its replacement fields, which both take, and Odoo's extractor
+/// takes each f-string that interpolates nothing. Babel stops at a `_` or `_lt` name, and Odoo's
+/// extractor empties its buffer at each parenthesis. No reading models Babel 2.17.0 on Python
+/// 3.13, where series 17.0 to 19.0 pin it, so OD805 may report an entry only that export writes
+/// (Icebox task 3272).
 #[derive(Default)]
 struct Readings {
-    /// Older Babel: plain strings, up to a `_` or `_lt` name.
-    plain: String,
+    /// Babel 2.9.1 and 2.10.3 before 3.12: plain strings and the f-strings they evaluate, up to a
+    /// `_` or `_lt` name.
+    evaluated: String,
     stopped: bool,
-    /// Older Babel from 3.12: plain strings and those of replacement fields, up to a `_` or `_lt`
+    /// Babel 2.10.3 from 3.12: plain strings and those of replacement fields, up to a `_` or `_lt`
     /// name.
     babel_split: String,
     babel_stopped: bool,
-    /// Newer Babel before 3.12: plain strings and constant f-strings.
+    /// Plain strings and constant f-strings, across parentheses and `_` names: Odoo's extractor
+    /// before 3.12 on an argument without a parenthesis.
     whole: String,
-    /// Newer Babel from 3.12: those and the strings of replacement fields.
+    /// Those, the strings of replacement fields and the constant f-strings there: Odoo's extractor
+    /// from 3.12 on an argument without a parenthesis.
     split: String,
     /// Odoo's extractor before 3.12: `whole` from the last parenthesis.
     whole_tail: String,
@@ -229,7 +278,7 @@ struct Readings {
 impl Readings {
     fn string(&mut self, value: &str) {
         if !self.stopped {
-            self.plain.push_str(value);
+            self.evaluated.push_str(value);
         }
         if !self.babel_stopped && !self.split_done {
             self.babel_split.push_str(value);
@@ -237,9 +286,21 @@ impl Readings {
         self.constant(value);
     }
 
+    /// An f-string Babel evaluates before 3.12.
+    fn evaluated_fstring(&mut self, value: &str) {
+        if !self.stopped {
+            self.evaluated.push_str(value);
+        }
+    }
+
     fn constant(&mut self, value: &str) {
         self.whole.push_str(value);
         self.whole_tail.push_str(value);
+        self.nested_constant(value);
+    }
+
+    /// A constant f-string in a replacement field, which Odoo's extractor compiles from 3.12.
+    fn nested_constant(&mut self, value: &str) {
         if !self.split_done {
             self.split.push_str(value);
             self.split_tail.push_str(value);
@@ -262,7 +323,7 @@ impl Readings {
         let mut texts: Vec<String> = vec![];
         let all = [
             self.whole,
-            self.plain,
+            self.evaluated,
             self.split,
             self.whole_tail,
             self.split_tail,
@@ -291,6 +352,7 @@ struct Open {
 struct Reader<'a, 'l> {
     loc: &'l Locator<'a>,
     values: &'l FxHashMap<TextSize, Option<String>>,
+    evaluated: &'l FxHashMap<TextSize, String>,
     unreadable: &'l FxHashSet<TextSize>,
     open: Vec<Open>,
     last_name: Option<Name>,
@@ -305,7 +367,8 @@ struct Reader<'a, 'l> {
     /// Odoo's extractor reads an f-string of a call by its tokens, as the module's series may run
     /// it on Python 3.12 or later.
     reads_fstring_tokens: bool,
-    /// A token stops the export of the file.
+    /// A token has stopped the export of the file, which keeps the messages of the calls closed
+    /// before it (18.0 `odoo/tools/translate.py:1409-1417`).
     halts: bool,
     out: Vec<Message>,
 }
@@ -395,12 +458,13 @@ impl Reader<'_, '_> {
     /// Reads `token` as a part of the first argument of the innermost parenthesis, when it is one
     /// whose argument is being read and the token sits directly in it, or in an f-string there.
     /// Any argument halts the export on a token the extractor cannot join with text: a bytes
-    /// string, an f-string Babel evaluates and that interpolates, or one whose doubled braces
-    /// Odoo's extractor cannot read.
+    /// string, an f-string Babel fails to evaluate, or one whose doubled braces Odoo's extractor
+    /// cannot read.
     fn argument_token(&mut self, token: &Token) {
         let fstrings = self.fstrings;
         let translate = matches!(self.name(token), Some(Name::Translate { .. }));
         let value = self.values.get(&token.start()).cloned().flatten();
+        let evaluated = self.evaluated.get(&token.start()).cloned();
         let halts = self.halts_on(token);
         let Some(Open { argument: Some(a) }) = self.open.last_mut() else {
             return;
@@ -411,7 +475,7 @@ impl Reader<'_, '_> {
             return;
         }
         if direct {
-            a.direct(token, value, translate);
+            a.direct(token, Text { value, evaluated }, translate);
         } else {
             a.replaced(token.kind(), value, translate);
         }
@@ -420,21 +484,20 @@ impl Reader<'_, '_> {
     /// Whether `token` in an argument halts the export there, and whether it does in one Babel
     /// reads, directly in it.
     fn halts_on(&self, token: &Token) -> Halts {
-        let entry = self.values.get(&token.start());
-        let interpolates = token.kind() == TokenKind::FStringStart && matches!(entry, Some(None));
+        let fails = token.kind() == TokenKind::FStringStart && !self.evaluated.contains_key(&token.start());
         let bytes = token.string_flags().is_some_and(|f| f.is_byte_string());
         let unreadable = self.reads_fstring_tokens && self.unreadable.contains(&token.start());
         Halts {
             any: bytes || unreadable,
-            babel: interpolates && self.evaluates_fstrings,
+            babel: fails && self.evaluates_fstrings,
         }
     }
 
     /// Babel and Odoo's extractor skip an empty message. A certain call has one text, as its
-    /// strings are plain and its parenthesis opens none.
+    /// strings are plain and its parenthesis opens none, and closes before any halt.
     fn finish(&mut self, a: Argument) {
         let pos = self.loc.pos(a.start);
-        let certain = a.call && a.plain && a.strings > 0;
+        let certain = a.call && a.plain && a.strings > 0 && !self.halts;
         self.out.extend(a.readings.texts().into_iter().map(|text| Message {
             text,
             pos,
@@ -535,30 +598,74 @@ mod tests {
     }
 
     #[test]
-    fn a_call_of_bytes_leaves_nothing_certain() {
+    fn a_call_of_bytes_leaves_the_calls_closing_after_it_uncertain() {
         let src = "_(\"Before\")\n_(b\"raw\")\n_(\"After\")\n";
-        assert_eq!(read(src), [known("Before"), known("After")]);
+        assert_eq!(read(src), [certain("Before"), known("After")]);
         let src = "_(\"Before\")\n_(\"x %s\", b\"y\")\n_(\"After\")\n";
-        assert_eq!(read(src), [known("Before"), known("x %s"), known("After")]);
+        assert_eq!(read(src), [certain("Before"), known("x %s"), known("After")]);
         let src = "_(\"Before\")\n_(\"x %s\", f\"{b'y'}\")\n";
-        assert_eq!(read(src), [known("Before"), known("x %s")]);
+        assert_eq!(read(src), [certain("Before"), known("x %s")]);
     }
 
     #[test]
-    fn an_interpolating_f_string_babel_evaluates_leaves_nothing_certain() {
-        let first = "_(f\"Bad {x}\")\n_(\"Done\")\n";
+    fn an_f_string_babel_fails_to_evaluate_leaves_the_calls_closing_after_it_uncertain() {
+        let first = "_(\"Before\")\n_(f\"Bad {x}\")\n_(\"After\")\n";
         let later = "_(\"Bad %s\", f\"{x}\")\n_(\"Done\")\n";
         for series in [None, Series::parse("16.0"), Series::parse("saas~18.1")] {
-            assert_eq!(read_in(first, series), [known("Done")], "{series:?}");
+            assert_eq!(
+                read_in(first, series),
+                [certain("Before"), known("After")],
+                "{series:?}"
+            );
             assert_eq!(read_in(later, series), [known("Bad %s"), known("Done")], "{series:?}");
         }
         let own = Series::parse("saas~18.2");
-        assert_eq!(read_in(first, own), [certain("Done")]);
+        assert_eq!(read_in(first, own), [certain("Before"), certain("After")]);
         assert_eq!(read_in(later, own), [certain("Bad %s"), certain("Done")]);
     }
 
     #[test]
-    fn a_doubled_brace_odoo_cannot_read_leaves_nothing_certain() {
+    fn an_f_string_of_string_fields_is_read_as_babel_evaluates_it() {
+        let src = "_(f\"a{'b'}c\")\n_(\"Next\")\n";
+        assert_eq!(
+            read_in(src, Series::parse("16.0")),
+            [known("abc"), known("b"), certain("Next")]
+        );
+        for (field, value) in [
+            ("{f'b'}", "ab"),
+            ("{f'{\"b\"}'}", "ab"),
+            ("{'b' 'c'}", "abc"),
+            ("{f'b' 'c'}", "abc"),
+        ] {
+            let src = format!("_(f\"\"\"a{field}\"\"\")\n_(\"Next\")\n");
+            let found = read_in(&src, Series::parse("16.0"));
+            assert!(found.contains(&known(value)), "{src}: {found:?}");
+            assert_eq!(found.last(), Some(&certain("Next")), "{src}: {found:?}");
+        }
+        for field in ["{'b'!r}", "{'b':>3}", "{'b'=}", "{f'{x}'}", "{1}"] {
+            let src = format!("_(f\"a{field}\")\n_(\"Next\")\n");
+            let found = read_in(&src, Series::parse("16.0"));
+            assert_eq!(found.last(), Some(&known("Next")), "{src}: {found:?}");
+        }
+    }
+
+    #[test]
+    fn babel_stops_at_a_nested_name_after_the_f_strings_it_evaluates() {
+        let found = read("_(\"x\" f\"a\" + _(\"b\") + \"d\")");
+        assert!(found.contains(&known("xa")), "{found:?}");
+    }
+
+    #[test]
+    fn a_constant_f_string_in_a_replacement_field_is_read_as_odoo_compiles_it() {
+        let found = read("_(f\"x{f'Nested'}y\")");
+        assert!(found.contains(&known("Nested")), "{found:?}");
+        assert!(found.contains(&known("xNestedy")), "{found:?}");
+        let found = read("_(f\"x{y, f'Nested'}\")");
+        assert!(!found.contains(&known("Nested")), "{found:?}");
+    }
+
+    #[test]
+    fn a_doubled_brace_odoo_cannot_read_leaves_the_calls_closing_after_it_uncertain() {
         for src in [
             "_(\"Before\")\n_(f\"Close with }}\")\n_(\"After\")\n",
             "_(\"Before\")\n_(f\"Use {{}} here\")\n_(\"After\")\n",
@@ -566,7 +673,8 @@ mod tests {
         ] {
             for series in [None, Series::parse("saas~18.2"), Series::parse("20.0")] {
                 let found = read_in(src, series);
-                assert!(found.iter().all(|m| !m.1), "{src} {series:?}: {found:?}");
+                assert_eq!(found.first(), Some(&certain("Before")), "{src} {series:?}");
+                assert!(found[1..].iter().all(|m| !m.1), "{src} {series:?}: {found:?}");
             }
         }
         let babel = "_(f\"Close with }}\")\n_(\"After\")\n";
