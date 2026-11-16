@@ -24,7 +24,7 @@ use crate::sql::{
 };
 use crate::superuser::{self, Escalation};
 use crate::taint::{self, Params, TaintTable};
-use crate::{async_names, domain, imports, method_body, module_state, python2};
+use crate::{async_names, domain, imports, method_body, module_state, orm_queries, python2};
 
 const FIELD_TYPES: &[&str] = &[
     "Boolean",
@@ -3983,6 +3983,7 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
         let in_user_setter = self.in_user_setter;
         self.in_user_setter |= func.name.starts_with("_auth_method_") || func.name.as_str() == "update_env";
         let model = matches!(self.owners.last(), Some(Some(Receiver::Model(_))));
+        self.facts.diags.extend(orm_queries::check(func, model, self.loc));
         let change_check = std::mem::replace(&mut self.change_check, checks_change(func).filter(|_| model));
         let skip = usize::from(func.decorator_list.iter().any(always_skips));
         self.skipped += skip;

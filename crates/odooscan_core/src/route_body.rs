@@ -209,7 +209,7 @@ impl<'a> Visitor<'a> for Walk<'a> {
     }
 }
 
-fn toggle<'a>(names: &mut FxHashSet<&'a str>, name: &'a str, on: bool) {
+pub(crate) fn toggle<'a>(names: &mut FxHashSet<&'a str>, name: &'a str, on: bool) {
     if on {
         names.insert(name);
     } else {

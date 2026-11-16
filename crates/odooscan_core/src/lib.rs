@@ -17,6 +17,7 @@ mod mentions;
 mod method_body;
 mod modifier;
 mod module_state;
+mod orm_queries;
 mod owl;
 mod placeholders;
 mod project;
