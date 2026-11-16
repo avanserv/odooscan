@@ -1,5 +1,6 @@
 //! Rules that need facts from more than one file.
 
+use std::collections::BTreeMap;
 use std::path::Path;
 use std::rc::Rc;
 use std::sync::LazyLock;
@@ -17,7 +18,7 @@ use crate::facts::{
     XmlDef, XmlRef,
 };
 use crate::grants::{self, AttachmentGrant, Grant, Grants};
-use crate::imports::{AddonImport, Fault};
+use crate::imports::{AddonImport, Fault, Graph};
 use crate::index::{
     ACTION_REGISTRY, BASE_MODEL_METHODS, Export, FIELD_REGISTRY, FieldDef, FieldInfo, Index, JsSpec, JsTarget,
     PathError, Placed, PropSchema, RELATIONAL_TYPES, SERVICE_REGISTRY, Scope, Status, TOUR_REGISTRY,
@@ -1553,11 +1554,11 @@ fn unloaded(rel: &str, ignored: Option<&str>, series: Option<Series>) -> String 
 }
 
 /// OD516 on a file of models or controllers, and OD517 on a test file, that no import reaches from
-/// the module's root, from `tests/__init__.py` for a test, or from another module. Silent when the
-/// scan cannot tell what Odoo runs: without a root `__init__.py`, with a file it cannot decode, past
-/// a file that does not parse or imports by a computed name, or when a module depending on this one
-/// has such a file, as it may import any file of this one. A module outside the dependents is
-/// OD518's when it imports one.
+/// the module's root, from `tests/__init__.py` for a test, or from another module, and OD516 on a
+/// file of models that only a dependent imports. Silent when the scan cannot tell what Odoo runs:
+/// without a root `__init__.py`, with a file it cannot decode, past a file that does not parse or
+/// imports by a computed name, or when a module depending on this one has such a file, as it may
+/// import any file of this one. A module outside the dependents is OD518's when it imports one.
 fn unimported_files<'m>(index: &Index<'m>, mi: usize, out: &mut Out<'m>) {
     let module = &index.modules[mi];
     if module.lost_text || !module.python.iter().any(|f| f.rel == "__init__.py") {
@@ -1566,21 +1567,76 @@ fn unimported_files<'m>(index: &Index<'m>, mi: usize, out: &mut Out<'m>) {
     if index.has_unread_dependent(mi) {
         return;
     }
-    let graph = &index.imports;
-    let name = module.name.as_str();
-    let mut starts: Vec<&str> = graph.elsewhere(name).collect();
-    starts.push("__init__.py");
-    let code = graph.reached(name, &starts);
-    starts.push("tests/__init__.py");
-    let tests = graph.reached(name, &starts);
+    let reach = Reach::of(index, mi);
     for file in &module.python {
         let finding = match file.rel.strip_prefix("tests/") {
-            Some(test) => unrun_test(test, &file.rel, tests.as_ref()),
-            None => unimported_code(module, file, code.as_ref()),
+            Some(test) => unrun_test(test, &file.rel, reach.tests.as_ref()),
+            None => unimported_code(module, file, &reach),
         };
         if let Some((rule, message)) = finding {
             out.push(&file.path, rule, Pos { line: 1, col: 1 }, message);
         }
+    }
+}
+
+/// The files of a module that imports reach, each `None` when the scan cannot tell.
+struct Reach<'a> {
+    graph: &'a Graph,
+    name: &'a str,
+    /// From the root `__init__.py` and from modules outside the dependents, which may load first.
+    early: Option<FxHashSet<String>>,
+    /// From `early`'s starts and from the dependents.
+    late: Option<FxHashSet<String>>,
+    /// From every start and `tests/__init__.py`, as any import binds a test.
+    tests: Option<FxHashSet<String>>,
+    /// The files of the module each dependent imports, by its name.
+    dependents: BTreeMap<&'a str, Vec<&'a str>>,
+}
+
+impl<'a> Reach<'a> {
+    fn of(index: &'a Index, mi: usize) -> Self {
+        let graph = &index.imports;
+        let name = index.modules[mi].name.as_str();
+        let mut starts = vec!["__init__.py"];
+        let mut dependents: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
+        for (file, importer) in graph.elsewhere(name) {
+            match index.by_name.get(importer) {
+                Some(&d) if index.reaches(d, mi) && !index.reaches(mi, d) => {
+                    dependents.entry(importer).or_default().push(file);
+                }
+                _ => starts.push(file),
+            }
+        }
+        let early = graph.reached(name, &starts);
+        starts.extend(dependents.values().flatten());
+        let late = graph.reached(name, &starts);
+        starts.push("tests/__init__.py");
+        let tests = graph.reached(name, &starts);
+        Self {
+            graph,
+            name,
+            early,
+            late,
+            tests,
+            dependents,
+        }
+    }
+
+    /// The first dependent by name whose imports reach `rel`.
+    fn importer(&self, rel: &str) -> Option<&'a str> {
+        let mut dependents = self.dependents.iter();
+        let found = dependents.find(|(_, starts)| {
+            let reached = self.graph.reached(self.name, starts);
+            reached.is_some_and(|r| r.contains(rel))
+        });
+        found.map(|(name, _)| *name)
+    }
+
+    /// Whether only a dependent's import reaches `rel`. `late` starts from all of `early`'s starts, so
+    /// it is unknown whenever `early` is.
+    fn dependent_only(&self, rel: &str) -> bool {
+        let early = self.early.as_ref().is_some_and(|r| r.contains(rel));
+        !early && self.late.as_ref().is_some_and(|r| r.contains(rel))
     }
 }
 
@@ -1594,28 +1650,50 @@ fn unrun_test(test: &str, rel: &str, reached: Option<&FxHashSet<String>>) -> Opt
     })
 }
 
-/// OD516 on a file of models or controllers that `reached` lacks, upgrade scripts, IoT handlers and
-/// the manifest aside.
-fn unimported_code(
-    module: &Module,
-    file: &SourceFile<PyFacts>,
-    reached: Option<&FxHashSet<String>>,
-) -> Option<(&'static str, String)> {
+/// OD516 on a file of models or controllers that no import reaches, and on one of models that only
+/// a dependent's import reaches, upgrade scripts, IoT handlers and the manifest aside. A dependent
+/// loads after the module, so a model class that only the dependent's import defines misses the
+/// module's build. Odoo serves the controllers of every installed module, so a dependent's import
+/// is enough for those.
+fn unimported_code(module: &Module, file: &SourceFile<PyFacts>, reach: &Reach) -> Option<(&'static str, String)> {
     let dir = file.rel.split_once('/').map(|(dir, _)| dir);
-    if dir.is_some_and(|d| UPGRADE_DIRS.contains(&d) || d == IOT_DIR)
-        || file.path == module.manifest_path
-        || reached.is_none_or(|r| r.contains(&file.rel))
-    {
+    if dir.is_some_and(|d| UPGRADE_DIRS.contains(&d) || d == IOT_DIR) || file.path == module.manifest_path {
         return None;
     }
-    let what = loaded_class(&file.facts)?;
-    let message = format!("no import from the module's __init__.py reaches this file, so Odoo never loads {what}");
+    let late = reach.late.as_ref()?;
+    if !late.contains(&file.rel) {
+        let what = loaded_class(&file.facts)?;
+        let message = format!("no import from the module's __init__.py reaches this file, so Odoo never loads {what}");
+        return Some(("OD516", message));
+    }
+    if !reach.dependent_only(&file.rel) {
+        return None;
+    }
+    let (_, what) = first_model(&file.facts)?;
+    let importer = reach.importer(&file.rel)?;
+    let message = format!(
+        "only modules that depend on this one import this file, such as '{importer}', so a fresh start does not build {what}"
+    );
     Some(("OD516", message))
 }
 
 /// The first model or controller a file defines, as OD516 names it. A class extending a controller
 /// of the file is one too, but the class it extends comes first.
 fn loaded_class(facts: &PyFacts) -> Option<String> {
+    let controllers = facts
+        .controllers
+        .iter()
+        .filter(|c| !c.routes.is_empty() || c.bases.contains(&ClassBase::Root))
+        .map(|c| (c.pos, format!("controller '{}'", c.name)));
+    first_model(facts)
+        .into_iter()
+        .chain(controllers)
+        .min_by_key(|(pos, _)| *pos)
+        .map(|(_, what)| what)
+}
+
+/// The first model class a file defines, or extends, as OD516 names it.
+fn first_model(facts: &PyFacts) -> Option<(Pos, String)> {
     let models = facts.classes.iter().map(|class| {
         let what = if class.new_model {
             "model"
@@ -1624,15 +1702,7 @@ fn loaded_class(facts: &PyFacts) -> Option<String> {
         };
         (class.pos, format!("{what} '{}'", class.model))
     });
-    let controllers = facts
-        .controllers
-        .iter()
-        .filter(|c| !c.routes.is_empty() || c.bases.contains(&ClassBase::Root))
-        .map(|c| (c.pos, format!("controller '{}'", c.name)));
-    models
-        .chain(controllers)
-        .min_by_key(|(pos, _)| *pos)
-        .map(|(_, what)| what)
+    models.min_by_key(|(pos, _)| *pos)
 }
 
 fn same_module_xmlids<'m>(index: &Index<'m>, mi: usize, series: Option<Series>, out: &mut Out<'m>) {
