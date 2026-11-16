@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.15.0](https://github.com/avanserv/odooscan/compare/v0.14.0...v0.15.0) (2026-11-16)
+
+
+### Features
+
+* **csvdata:** Report a data CSV that drops cells silently ([#404](https://github.com/avanserv/odooscan/issues/404)) ([6ec0138](https://github.com/avanserv/odooscan/commit/6ec013825bf97ca8b5c75b3b00e0352447a08257))
+
+
+### Bug Fixes
+
+* **checks:** Keep OD201 and OD206 silent on a partial scope ([#396](https://github.com/avanserv/odooscan/issues/396)) ([cea4617](https://github.com/avanserv/odooscan/commit/cea4617cb953e9b8ab93d9823145057e5f3a7b00))
+* **checks:** Report a model file only a dependent imports in OD516 ([#398](https://github.com/avanserv/odooscan/issues/398)) ([c020b22](https://github.com/avanserv/odooscan/commit/c020b22dfdf690a69dc43b428bcfd1f7426bfd71))
+* **checks:** Report OD210 rule domains on a partial module's own model ([#397](https://github.com/avanserv/odooscan/issues/397)) ([2209331](https://github.com/avanserv/odooscan/commit/220933138b114fb6c709b5310e1f554986799531))
+* **manifest:** Report a manifest with a byte order mark from 11.0 ([#411](https://github.com/avanserv/odooscan/issues/411)) ([3b63399](https://github.com/avanserv/odooscan/commit/3b633991e521ba73915356e01113794a4389258c))
+* **manifest:** Report a manifest with a byte order mark from 12.0 ([#403](https://github.com/avanserv/odooscan/issues/403)) ([bba42c1](https://github.com/avanserv/odooscan/commit/bba42c1cef1b5ecd02b2c5e0cb3101428defadfc))
+* **series:** Order the 9.0 SaaS releases between 9.0 and 10.0 ([#406](https://github.com/avanserv/odooscan/issues/406)) ([cb20eac](https://github.com/avanserv/odooscan/commit/cb20eac13949ba8d3be3791da65fd09c9e3034b0))
+* **xml:** Leave a namespaced tree or t-esc to Odoo, which ignores it ([#405](https://github.com/avanserv/odooscan/issues/405)) ([6f2d951](https://github.com/avanserv/odooscan/commit/6f2d95133937cef570f537f1f02197087f8eb3d3))
+
 ## [0.14.0](https://github.com/avanserv/odooscan/compare/v0.13.0...v0.14.0) (2026-11-16)
 
 
