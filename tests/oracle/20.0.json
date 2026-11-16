@@ -115,6 +115,48 @@
       "count": 1
     },
     {
+      "path": "addons/account/security/ir.access.csv",
+      "code": "OD407",
+      "message": "account.cash.rounding.company_id has no index, yet ir.access record account.account_cash_rounding_comp_rule filters reads of account.cash.rounding on it; add index=True to the field",
+      "count": 1
+    },
+    {
+      "path": "addons/account/security/ir.access.csv",
+      "code": "OD407",
+      "message": "account.payment.term.company_id has no index, yet ir.access record account.account_payment_term_comp_rule filters reads of account.payment.term on it; add index=True to the field",
+      "count": 1
+    },
+    {
+      "path": "addons/account/security/ir.access.csv",
+      "code": "OD407",
+      "message": "account.reconcile.model.company_id has no index, yet ir.access record account.account_reconcile_model_template_comp_rule filters reads of account.reconcile.model on it; add index=True to the field",
+      "count": 1
+    },
+    {
+      "path": "addons/account/security/ir.access.csv",
+      "code": "OD407",
+      "message": "account.report.external.value.company_id has no index, yet ir.access record account.report_external_value_comp_rule filters reads of account.report.external.value on it; add index=True to the field",
+      "count": 1
+    },
+    {
+      "path": "addons/account/security/ir.access.csv",
+      "code": "OD407",
+      "message": "account.tax.company_id has no index, yet ir.access record account.tax_comp_rule filters reads of account.tax on it; add index=True to the field",
+      "count": 1
+    },
+    {
+      "path": "addons/account/security/ir.access.csv",
+      "code": "OD407",
+      "message": "account.tax.group.company_id has no index, yet ir.access record account.tax_group_comp_rule filters reads of account.tax.group on it; add index=True to the field",
+      "count": 1
+    },
+    {
+      "path": "addons/account/security/ir.access.csv",
+      "code": "OD407",
+      "message": "account.tax.repartition.line.company_id has no index, yet ir.access record account.tax_rep_comp_rule filters reads of account.tax.repartition.line on it; add index=True to the field",
+      "count": 1
+    },
+    {
       "path": "addons/account/static/src/components/document_file_uploader/document_file_uploader.js",
       "code": "OD609",
       "message": "markup() of a value built at runtime makes t-out render it as HTML unescaped; check that no user input reaches it, or use markup`...`, which escapes each placeholder",
@@ -220,6 +262,12 @@
       "path": "addons/analytic/__manifest__.py",
       "code": "OD520",
       "message": "module 'base' already comes with 'mail', also in depends",
+      "count": 1
+    },
+    {
+      "path": "addons/analytic/security/ir.access.csv",
+      "code": "OD407",
+      "message": "account.analytic.applicability.company_id has no index, yet ir.access record analytic.analytic_applicability_comp_rule filters reads of account.analytic.applicability on it; add index=True to the field",
       "count": 1
     },
     {
@@ -547,6 +595,18 @@
       "count": 1
     },
     {
+      "path": "addons/certificate/security/ir.access.csv",
+      "code": "OD407",
+      "message": "certificate.certificate.company_id has no index, yet ir.access record certificate.certificate_rule_company filters reads of certificate.certificate on it; add index=True to the field",
+      "count": 1
+    },
+    {
+      "path": "addons/certificate/security/ir.access.csv",
+      "code": "OD407",
+      "message": "certificate.key.company_id has no index, yet ir.access record certificate.key_rule_company filters reads of certificate.key on it; add index=True to the field",
+      "count": 1
+    },
+    {
       "path": "addons/cloud_storage/__manifest__.py",
       "code": "OD520",
       "message": "module 'base_setup' already comes with 'mail', also in depends",
@@ -691,6 +751,12 @@
       "count": 1
     },
     {
+      "path": "addons/delivery/security/ir.access.csv",
+      "code": "OD407",
+      "message": "delivery.carrier.company_id has no index, yet ir.access record delivery.delivery_carrier_comp_rule filters reads of delivery.carrier on it; add index=True to the field",
+      "count": 1
+    },
+    {
       "path": "addons/digest/__manifest__.py",
       "code": "OD520",
       "message": "module 'mail' already comes with 'portal', also in depends",
@@ -757,9 +823,21 @@
       "count": 2
     },
     {
+      "path": "addons/event/security/ir.access.csv",
+      "code": "OD407",
+      "message": "event.registration.company_id has no index, yet ir.access record event.event_registration_company_rule filters reads of event.registration on it; add index=True to the field",
+      "count": 1
+    },
+    {
       "path": "addons/event_crm/models/event_lead_request.py",
       "code": "OD103",
       "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
+      "count": 1
+    },
+    {
+      "path": "addons/event_crm/security/ir.access.csv",
+      "code": "OD407",
+      "message": "event.lead.rule.company_id has no index, yet ir.access record event_crm.ir_rule_event_crm filters reads of event.lead.rule on it; add index=True to the field",
       "count": 1
     },
     {
@@ -778,6 +856,18 @@
       "path": "addons/fleet/data/fleet_demo.xml",
       "code": "OD303",
       "message": "XML id 'type_service_7' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/fleet/security/ir.access.csv",
+      "code": "OD407",
+      "message": "fleet.service.type.company_id has no index, yet ir.access record fleet.ir_rule_fleet_service_type filters reads of fleet.service.type on it; add index=True to the field",
+      "count": 1
+    },
+    {
+      "path": "addons/fleet/security/ir.access.csv",
+      "code": "OD407",
+      "message": "fleet.vehicle.model.company_id has no index, yet ir.access record fleet.ir_rule_fleet_vehicle_model filters reads of fleet.vehicle.model on it; add index=True to the field",
       "count": 1
     },
     {
@@ -961,6 +1051,18 @@
       "count": 1
     },
     {
+      "path": "addons/hr_holidays/security/ir.access.csv",
+      "code": "OD407",
+      "message": "hr.leave.accrual.plan.company_id has no index, yet ir.access record hr_holidays.hr_leave_accrual_plan_rule_multi_company filters reads of hr.leave.accrual.plan on it; add index=True to the field",
+      "count": 1
+    },
+    {
+      "path": "addons/hr_holidays/security/ir.access.csv",
+      "code": "OD407",
+      "message": "hr.leave.mandatory.day.company_id has no index, yet ir.access record hr_holidays.hr_leave_mandatory_day_rule_multi_company filters reads of hr.leave.mandatory.day on it; add index=True to the field",
+      "count": 1
+    },
+    {
       "path": "addons/hr_presence/__manifest__.py",
       "code": "OD520",
       "message": "module 'hr' already comes with 'hr_holidays', also in depends",
@@ -994,6 +1096,12 @@
       "path": "addons/hr_recruitment/data/hr_recruitment_demo.xml",
       "code": "OD303",
       "message": "XML id 'hr_case_traineemca1' is already defined earlier in this file",
+      "count": 1
+    },
+    {
+      "path": "addons/hr_recruitment/security/ir.access.csv",
+      "code": "OD407",
+      "message": "hr.recruitment.stage.company_id has no index, yet ir.access record hr_recruitment.ir_rule_hr_recruitment_stage_multi_company filters reads of hr.recruitment.stage on it; add index=True to the field",
       "count": 1
     },
     {
@@ -1048,6 +1156,12 @@
       "path": "addons/hr_timesheet/security/ir.access.csv",
       "code": "OD407",
       "message": "account.analytic.line.partner_id has no index, yet ir.access record hr_timesheet.timesheet_line_rule_user filters reads of account.analytic.line on it; add index=True to the field",
+      "count": 1
+    },
+    {
+      "path": "addons/hr_work_entry/security/ir.access.csv",
+      "code": "OD407",
+      "message": "hr.time.rule.company_id has no index, yet ir.access record hr_work_entry.ir_rule_hr_time_rule_multi_company filters reads of hr.time.rule on it; add index=True to the field",
       "count": 1
     },
     {
@@ -1360,6 +1474,12 @@
       "path": "addons/l10n_account_edi_ubl_cii_tests/__manifest__.py",
       "code": "OD520",
       "message": "module 'account_edi_ubl_cii' already comes with 'l10n_fr_account', also in depends",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_ar_withholding/security/ir.access.csv",
+      "code": "OD407",
+      "message": "l10n_ar.partner.tax.company_id has no index, yet ir.access record l10n_ar_withholding.l10n_ar_partner_tax_comp_rule filters reads of l10n_ar.partner.tax on it; add index=True to the field",
       "count": 1
     },
     {
@@ -1678,6 +1798,12 @@
       "path": "addons/l10n_es_edi_tbai/models/account_move_send.py",
       "code": "OD103",
       "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_es_edi_tbai/security/ir.access.csv",
+      "code": "OD407",
+      "message": "l10n_es_edi_tbai.document.company_id has no index, yet ir.access record l10n_es_edi_tbai.tbai_document_comp_rule filters reads of l10n_es_edi_tbai.document on it; add index=True to the field",
       "count": 1
     },
     {
@@ -2185,6 +2311,12 @@
       "count": 1
     },
     {
+      "path": "addons/l10n_id_efaktur_coretax/security/ir.access.csv",
+      "code": "OD407",
+      "message": "l10n_id_efaktur_coretax.document.company_id has no index, yet ir.access record l10n_id_efaktur_coretax.efaktur_document_multi_company filters reads of l10n_id_efaktur_coretax.document on it; add index=True to the field",
+      "count": 1
+    },
+    {
       "path": "addons/l10n_in/models/l10n_in_report_handler.py",
       "code": "OD211",
       "message": "no parent class of account.report defines '_init_options_buttons', so this super() call fails",
@@ -2209,9 +2341,21 @@
       "count": 2
     },
     {
+      "path": "addons/l10n_in_ewaybill/security/ir.access.csv",
+      "code": "OD407",
+      "message": "l10n.in.ewaybill.company_id has no index, yet ir.access record l10n_in_ewaybill.l10n_in_ewaybill_comp_rule filters reads of l10n.in.ewaybill on it; add index=True to the field",
+      "count": 1
+    },
+    {
       "path": "addons/l10n_in_ewaybill_irn/models/l10n_in_ewaybill.py",
       "code": "OD103",
       "message": "do not commit the cursor; Odoo commits when the request ends and rolls back on error",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_in_hr_holidays/security/ir.access.csv",
+      "code": "OD407",
+      "message": "l10n.in.hr.leave.optional.holiday.company_id has no index, yet ir.access record l10n_in_hr_holidays.hr_leave_optional_holiday_rule_multi_company filters reads of l10n.in.hr.leave.optional.holiday on it; add index=True to the field",
       "count": 1
     },
     {
@@ -2260,6 +2404,12 @@
       "path": "addons/l10n_latam_check/models/account_journal.py",
       "code": "OD211",
       "message": "no parent class of account.journal defines '_get_reusable_payment_methods', so this super() call fails",
+      "count": 1
+    },
+    {
+      "path": "addons/l10n_latam_check/security/ir.access.csv",
+      "code": "OD407",
+      "message": "l10n_latam.check.company_id has no index, yet ir.access record l10n_latam_check.l10n_latam_check_comp_rule filters reads of l10n_latam.check on it; add index=True to the field",
       "count": 1
     },
     {
@@ -2467,6 +2617,30 @@
       "count": 1
     },
     {
+      "path": "addons/loyalty/security/ir.access.csv",
+      "code": "OD407",
+      "message": "loyalty.card.company_id has no index, yet ir.access record loyalty.sale_loyalty_card_company_rule filters reads of loyalty.card on it; add index=True to the field",
+      "count": 1
+    },
+    {
+      "path": "addons/loyalty/security/ir.access.csv",
+      "code": "OD407",
+      "message": "loyalty.program.company_id has no index, yet ir.access record loyalty.sale_loyalty_program_company_rule filters reads of loyalty.program on it; add index=True to the field",
+      "count": 1
+    },
+    {
+      "path": "addons/loyalty/security/ir.access.csv",
+      "code": "OD407",
+      "message": "loyalty.reward.company_id has no index, yet ir.access record loyalty.sale_loyalty_reward_company_rule filters reads of loyalty.reward on it; add index=True to the field",
+      "count": 1
+    },
+    {
+      "path": "addons/loyalty/security/ir.access.csv",
+      "code": "OD407",
+      "message": "loyalty.rule.company_id has no index, yet ir.access record loyalty.sale_loyalty_rule_company_rule filters reads of loyalty.rule on it; add index=True to the field",
+      "count": 1
+    },
+    {
       "path": "addons/lunch/data/lunch_demo.xml",
       "code": "OD303",
       "message": "XML id 'product_chicken_curry' is already defined earlier in this file",
@@ -2476,6 +2650,24 @@
       "path": "addons/lunch/security/ir.access.csv",
       "code": "OD407",
       "message": "lunch.cashmove.user_id has no index, yet ir.access record lunch.lunch_mind_your_own_food_money filters reads of lunch.cashmove on it; add index=True to the field",
+      "count": 1
+    },
+    {
+      "path": "addons/lunch/security/ir.access.csv",
+      "code": "OD407",
+      "message": "lunch.location.company_id has no index, yet ir.access record lunch.ir_rule_lunch_location_multi_company filters reads of lunch.location on it; add index=True to the field",
+      "count": 1
+    },
+    {
+      "path": "addons/lunch/security/ir.access.csv",
+      "code": "OD407",
+      "message": "lunch.product.category.company_id has no index, yet ir.access record lunch.ir_rule_lunch_product_category_multi_company filters reads of lunch.product.category on it; add index=True to the field",
+      "count": 1
+    },
+    {
+      "path": "addons/lunch/security/ir.access.csv",
+      "code": "OD407",
+      "message": "lunch.supplier.company_id has no index, yet ir.access record lunch.ir_rule_lunch_supplier_multi_company filters reads of lunch.supplier on it; add index=True to the field",
       "count": 1
     },
     {
@@ -2769,7 +2961,37 @@
     {
       "path": "addons/maintenance/security/ir.access.csv",
       "code": "OD407",
+      "message": "maintenance.equipment.category.company_id has no index, yet ir.access record maintenance.maintenance_equipment_category_comp_rule filters reads of maintenance.equipment.category on it; add index=True to the field",
+      "count": 1
+    },
+    {
+      "path": "addons/maintenance/security/ir.access.csv",
+      "code": "OD407",
+      "message": "maintenance.equipment.company_id has no index, yet ir.access record maintenance.equipment_rule_user filters reads of maintenance.equipment on it; add index=True to the field",
+      "count": 1
+    },
+    {
+      "path": "addons/maintenance/security/ir.access.csv",
+      "code": "OD407",
+      "message": "maintenance.equipment.company_id has no index, yet ir.access record maintenance.maintenance_equipment_comp_rule filters reads of maintenance.equipment on it; add index=True to the field",
+      "count": 1
+    },
+    {
+      "path": "addons/maintenance/security/ir.access.csv",
+      "code": "OD407",
+      "message": "maintenance.request.company_id has no index, yet ir.access record maintenance.maintenance_request_comp_rule filters reads of maintenance.request on it; add index=True to the field",
+      "count": 1
+    },
+    {
+      "path": "addons/maintenance/security/ir.access.csv",
+      "code": "OD407",
       "message": "maintenance.request.owner_user_id has no index, yet ir.access record maintenance.equipment_request_rule_user filters reads of maintenance.request on it; add index=True to the field",
+      "count": 1
+    },
+    {
+      "path": "addons/maintenance/security/ir.access.csv",
+      "code": "OD407",
+      "message": "maintenance.team.company_id has no index, yet ir.access record maintenance.maintenance_team_comp_rule filters reads of maintenance.team on it; add index=True to the field",
       "count": 1
     },
     {
@@ -3457,6 +3679,24 @@
       "count": 2
     },
     {
+      "path": "addons/point_of_sale/security/ir.access.csv",
+      "code": "OD407",
+      "message": "pos.order.line.company_id has no index, yet ir.access record point_of_sale.rule_pos_order_line_multi_company filters reads of pos.order.line on it; add index=True to the field",
+      "count": 1
+    },
+    {
+      "path": "addons/point_of_sale/security/ir.access.csv",
+      "code": "OD407",
+      "message": "pos.payment.company_id has no index, yet ir.access record point_of_sale.rule_pos_payment_multi_company filters reads of pos.payment on it; add index=True to the field",
+      "count": 1
+    },
+    {
+      "path": "addons/point_of_sale/security/ir.access.csv",
+      "code": "OD407",
+      "message": "pos.payment.method.company_id has no index, yet ir.access record point_of_sale.rule_pos_payment_method_multi_company filters reads of pos.payment.method on it; add index=True to the field",
+      "count": 1
+    },
+    {
       "path": "addons/point_of_sale/static/src/app/models/product_tag.js",
       "code": "OD609",
       "message": "markup() of a value built at runtime makes t-out render it as HTML unescaped; check that no user input reaches it, or use markup`...`, which escapes each placeholder",
@@ -3799,6 +4039,12 @@
       "count": 1
     },
     {
+      "path": "addons/product/security/ir.access.csv",
+      "code": "OD407",
+      "message": "product.category.company_id has no index, yet ir.access record product.product_category_comp_rule filters reads of product.category on it; add index=True to the field",
+      "count": 1
+    },
+    {
       "path": "addons/product/static/src/js/pricelist_report/product_pricelist_report.js",
       "code": "OD609",
       "message": "markup() of a value built at runtime makes t-out render it as HTML unescaped; check that no user input reaches it, or use markup`...`, which escapes each placeholder",
@@ -3873,6 +4119,24 @@
     {
       "path": "addons/project/security/ir.access.csv",
       "code": "OD407",
+      "message": "project.project.company_id has no index, yet ir.access record project.project_comp_rule filters reads of project.project on it; add index=True to the field",
+      "count": 1
+    },
+    {
+      "path": "addons/project/security/ir.access.csv",
+      "code": "OD407",
+      "message": "project.project.stage.company_id has no index, yet ir.access record project.project_project_stage_rule filters reads of project.project.stage on it; add index=True to the field",
+      "count": 1
+    },
+    {
+      "path": "addons/project/security/ir.access.csv",
+      "code": "OD407",
+      "message": "project.task.company_id has no index, yet ir.access record project.task_comp_rule filters reads of project.task on it; add index=True to the field",
+      "count": 1
+    },
+    {
+      "path": "addons/project/security/ir.access.csv",
+      "code": "OD407",
       "message": "project.update.user_id has no index, yet ir.access record project.update_visibility_rule filters reads of project.update on it; add index=True to the field",
       "count": 1
     },
@@ -3919,6 +4183,12 @@
       "count": 1
     },
     {
+      "path": "addons/purchase_requisition/security/ir.access.csv",
+      "code": "OD407",
+      "message": "purchase.requisition.company_id has no index, yet ir.access record purchase_requisition.purchase_requisition_comp_rule filters reads of purchase.requisition on it; add index=True to the field",
+      "count": 1
+    },
+    {
       "path": "addons/purchase_stock/models/stock.py",
       "code": "OD134",
       "message": "search() runs a query for each record of the loop, keyed on warehouse_id; search once for all of them and group the result by warehouse_id",
@@ -3928,6 +4198,18 @@
       "path": "addons/resource/__manifest__.py",
       "code": "OD520",
       "message": "module 'base' already comes with 'web', also in depends",
+      "count": 1
+    },
+    {
+      "path": "addons/resource/security/ir.access.csv",
+      "code": "OD407",
+      "message": "resource.calendar.leaves.company_id has no index, yet ir.access record resource.resource_calendar_leaves_rule_multi_company filters reads of resource.calendar.leaves on it; add index=True to the field",
+      "count": 1
+    },
+    {
+      "path": "addons/resource/security/ir.access.csv",
+      "code": "OD407",
+      "message": "resource.resource.company_id has no index, yet ir.access record resource.resource_resource_multi_company filters reads of resource.resource on it; add index=True to the field",
       "count": 1
     },
     {
@@ -4048,6 +4330,12 @@
       "path": "addons/sale_management/controllers/portal.py",
       "code": "OD111",
       "message": "route with auth='public' calls sudo(); check that every record it reads or writes is filtered by an access check",
+      "count": 1
+    },
+    {
+      "path": "addons/sale_management/security/ir.access.csv",
+      "code": "OD407",
+      "message": "sale.order.template.company_id has no index, yet ir.access record sale_management.sale_order_template_rule_company filters reads of sale.order.template on it; add index=True to the field",
       "count": 1
     },
     {
@@ -4264,6 +4552,12 @@
       "path": "addons/stock/report/stock_forecasted.py",
       "code": "OD139",
       "message": "search() without a limit fetches every matching id to keep the first; pass limit=1",
+      "count": 1
+    },
+    {
+      "path": "addons/stock/security/ir.access.csv",
+      "code": "OD407",
+      "message": "stock.storage.category.company_id has no index, yet ir.access record stock.stock_storage_category_rule filters reads of stock.storage.category on it; add index=True to the field",
       "count": 1
     },
     {
@@ -4555,6 +4849,36 @@
       "count": 1
     },
     {
+      "path": "addons/test_mail/security/ir.access.csv",
+      "code": "OD407",
+      "message": "mail.test.container.mc.company_id has no index, yet ir.access record test_mail.mail_test_container_mc_rule filters reads of mail.test.container.mc on it; add index=True to the field",
+      "count": 1
+    },
+    {
+      "path": "addons/test_mail/security/ir.access.csv",
+      "code": "OD407",
+      "message": "mail.test.multi.company.company_id has no index, yet ir.access record test_mail.mail_test_multi_company_rule filters reads of mail.test.multi.company on it; add index=True to the field",
+      "count": 1
+    },
+    {
+      "path": "addons/test_mail/security/ir.access.csv",
+      "code": "OD407",
+      "message": "mail.test.multi.company.with.activity.company_id has no index, yet ir.access record test_mail.mail_test_multi_company_with_activity_rule filters reads of mail.test.multi.company.with.activity on it; add index=True to the field",
+      "count": 1
+    },
+    {
+      "path": "addons/test_mail/security/ir.access.csv",
+      "code": "OD407",
+      "message": "mail.test.ticket.mc.company_id has no index, yet ir.access record test_mail.mail_test_ticket_mc_rule filters reads of mail.test.ticket.mc on it; add index=True to the field",
+      "count": 1
+    },
+    {
+      "path": "addons/test_mail/security/ir.access.csv",
+      "code": "OD407",
+      "message": "mail.test.ticket.partner.company_id has no index, yet ir.access record test_mail.mail_test_ticket_partner_rule filters reads of mail.test.ticket.partner on it; add index=True to the field",
+      "count": 1
+    },
+    {
       "path": "addons/test_mail_full/__manifest__.py",
       "code": "OD520",
       "message": "module 'mail' already comes with 'mail_bot', also in depends",
@@ -4624,6 +4948,12 @@
       "path": "addons/test_mail_full/security/ir.access.csv",
       "code": "OD402",
       "message": "base.group_portal gets write, create or unlink on mail.test.portal; public and portal access should be read-only and go through controllers",
+      "count": 1
+    },
+    {
+      "path": "addons/test_mail_full/security/ir.access.csv",
+      "code": "OD407",
+      "message": "mail.test.rating.company_id has no index, yet ir.access record test_mail_full.mail_test_rating_rule_mc filters reads of mail.test.rating on it; add index=True to the field",
       "count": 1
     },
     {
@@ -5632,6 +5962,18 @@
       "path": "addons/website_sale/security/ir.access.csv",
       "code": "OD402",
       "message": "base.group_portal gets write, create or unlink on product.wishlist; public and portal access should be read-only and go through controllers",
+      "count": 1
+    },
+    {
+      "path": "addons/website_sale/security/ir.access.csv",
+      "code": "OD407",
+      "message": "product.pricelist.company_id has no index, yet ir.access record website_sale.product_pricelist_comp_rule filters reads of product.pricelist on it; add index=True to the field",
+      "count": 1
+    },
+    {
+      "path": "addons/website_sale/security/ir.access.csv",
+      "code": "OD407",
+      "message": "product.pricelist.item.company_id has no index, yet ir.access record website_sale.product_pricelist_item_comp_rule filters reads of product.pricelist.item on it; add index=True to the field",
       "count": 1
     },
     {

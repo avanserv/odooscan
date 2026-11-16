@@ -7087,10 +7087,10 @@ impl<'m> Ctx<'_, 'm> {
         !defs.is_empty() && defs.iter().all(|(_, _, d)| !d.splat && own(d))
     }
 
-    /// Whether a term of `terms` filters the column, on a Many2one only with its comodel known and
-    /// other than `res.company`. Only a relational field takes a dotted path (18.0
-    /// `odoo/osv/expression.py:387-390`), which reaches the column through an `IN` unless the field
-    /// joins, as `any` on a Many2one does under `auto_join` (`:1137-1150`).
+    /// Whether a term of `terms` filters the column, on a Many2one only with its comodel known.
+    /// Only a relational field takes a dotted path (18.0 `odoo/osv/expression.py:387-390`), which
+    /// reaches the column through an `IN` unless the field joins, as `any` on a Many2one does under
+    /// `auto_join` (`:1137-1150`).
     fn served_path(&self, model: &'m str, field: &Field<'m>, ftype: &str, terms: &domain::Served) -> bool {
         let name = field.defs.first().map_or("", |d| d.2.name.as_str());
         let comodel = self
@@ -7099,7 +7099,7 @@ impl<'m> Ctx<'_, 'm> {
             .ok()
             .flatten()
             .and_then(|i| i.comodel);
-        if ftype == "Many2one" && comodel.as_deref().is_none_or(|c| c == "res.company") {
+        if ftype == "Many2one" && comodel.is_none() {
             return false;
         }
         let own = comodel.as_deref() == Some(model);

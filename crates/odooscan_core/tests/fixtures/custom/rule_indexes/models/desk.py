@@ -25,6 +25,7 @@ class DeskCase(models.Model):
     stage_id = fields.Many2one("desk.team", index=True)
     queue_ref = fields.Char(index="btree_not_null")
     company_id = fields.Many2one("res.company")
+    home_company_id = fields.Many2one("res.company", index=True)
     state = fields.Selection([("open", "Open"), ("closed", "Closed")])
     urgent = fields.Boolean()
     title = fields.Char(translate=True)
