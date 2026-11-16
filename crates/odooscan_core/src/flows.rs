@@ -629,8 +629,8 @@ mod tests {
             call("request.env['x.y'].with_user(request.env.user).sudo()"),
             ["model.py:5 OD704 route parameter 'post' reaches self.write() through '_apply()'"]
         );
-        // Only a parameter's origin leaves the callee, so `docs/rules/index.md` (OD7: data flows)
-        // says a mapping the method reads from the request itself is not followed.
+        // Only a parameter's origin leaves the callee, so `docs/rules/OD704.md` says a mapping the
+        // method reads from the request itself is not followed.
         let own = scan_messages(
             "    def r(self, **post):\n        request.env['x.y'].sudo()._own()\n",
             "    def _own(self):\n        self.write(request.params)\n",
