@@ -1505,7 +1505,7 @@ pub(crate) fn in_static(module: &str, parts: &[&str]) -> bool {
 type Loaded = FxHashSet<bundles::File>;
 
 /// The bundles each loaded script is in, as indices into the sorted bundle names.
-type ScriptBundles = FxHashMap<(usize, usize), Vec<usize>>;
+type ScriptBundles = FxHashMap<bundles::File, Vec<usize>>;
 
 /// The bundles some indexed manifest names, sorted, the bundles each script is in, and the template
 /// files some bundle loads, as (module, file). A bundle may load another module's files, and a file
