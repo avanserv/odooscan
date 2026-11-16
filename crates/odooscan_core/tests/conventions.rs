@@ -9,7 +9,8 @@ use ignore::WalkBuilder;
 use regex::Regex;
 
 /// Odoo's majors run from 8.0 and are always `N.0`, so a tool version like `Python 3.12` or
-/// `PostgreSQL 16.4` is none; other minors appear only in the saas forms.
+/// `PostgreSQL 16.4` is none; other minors appear in the saas forms, and bare only after a `saas~`
+/// member of a list (`SAAS_RUN`).
 const SERIES: &str = r"(?:\d+\.saas~\d+|saas~\d+\.\d+|saas-\d+(?:\.\d+)?|(?:[89]|[1-9]\d)\.0)";
 /// Spaces, or one line break: a wrapped doc comment puts a comment leader after it, a wrapped
 /// Markdown line in `docs/` none.
@@ -17,13 +18,27 @@ const GAP: &str = r"(?:[ \t]+|[ \t]*\n[ \t]*(?:(?:///|//!|//|#)[ \t]*)?)";
 /// A `:line` cites a line of the path before it, so it carries a series too.
 const PATH: &str = r"`(?P<path>(?:odoo/|addons/|:\d)[^`\n]*)`";
 
-static SERIES_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(SERIES).unwrap());
+/// What parts two members of a list, also when the list wraps.
+static SEP: LazyLock<String> = LazyLock::new(|| format!(r"(?:,{GAP}?|,?{GAP}(?:and|or){GAP})"));
 
-/// Each member of a list counts, as in `16.0 and 18.0`, also when the list wraps.
-static SERIES_LIST: LazyLock<String> =
-    LazyLock::new(|| format!(r"(?P<list>{SERIES}(?:(?:,{GAP}?|,?{GAP}(?:and|or){GAP}){SERIES})*)"));
+/// A `saas~` series and the bare minors after it, as in `saas~17.1 and 17.3`, which carry its
+/// prefix. Any other member, an `N.0` included, ends the run, as a bare minor after it is a tool
+/// version: a path `on saas~17.1, 18.0 and 3.12` counts no 3.12.
+static SAAS_RUN: LazyLock<String> = LazyLock::new(|| format!(r"saas~\d+\.\d+(?:{}\d+\.(?:[1-9]|0\d)\d*)*", *SEP));
 
-/// A series must not follow a word character, `.`, `~` or `-`, so the `10.3` of a version `2.10.3`
+/// Each member of a list counts, as in `16.0 and 18.0` or `saas~17.1 and 17.3`, also when the list
+/// wraps. A bare minor joins only through `SAAS_RUN`, so a tool's list never counts.
+static SERIES_LIST: LazyLock<String> = LazyLock::new(|| {
+    let member = format!("(?:{}|{SERIES})", *SAAS_RUN);
+    format!(r"(?P<list>{member}(?:{}{member})*)", *SEP)
+});
+
+/// One member of a matched list. The bare form comes first, so it takes the whole `17.03` that
+/// `SERIES` would cut to `17.0`; an `N.0` it takes reads the same, and no saas form starts with a
+/// digit, a period and a digit.
+static MEMBER: LazyLock<Regex> = LazyLock::new(|| Regex::new(&format!(r"(?:\d+\.\d+|{SERIES})")).unwrap());
+
+/// A series must not follow a word character, `.`, `~` or `-`, so the `18.0` of a version `1.18.0`
 /// is none.
 static BEFORE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(&format!(r"(?m)(?:^|[^\w.~-]){}{GAP}{PATH}", *SERIES_LIST)).unwrap());
@@ -82,7 +97,7 @@ fn citations(text: &str) -> Vec<(usize, String, String)> {
         .flat_map(|c| {
             let list = c.name("list").unwrap();
             let path = c["path"].to_owned();
-            SERIES_RE
+            MEMBER
                 .find_iter(list.as_str())
                 .map(|s| (line(list.start() + s.start()), s.as_str().to_owned(), path.clone()))
                 .collect::<Vec<_>>()
@@ -146,6 +161,25 @@ fn reports_each_member_of_a_list() {
 }
 
 #[test]
+fn reports_each_member_of_a_saas_list() {
+    let both = [cite(1, "17.3", "odoo/x.py"), cite(1, "saas~17.1", "odoo/x.py")];
+    let text = ["saas~17.1 and 17.3", " `", "odoo/x.py", "`"].concat();
+    assert_eq!(reported(&text), both);
+    let text = ["`", "odoo/x.py", "` on saas~17.1 and 17.3."].concat();
+    assert_eq!(reported(&text), both);
+    let text = ["/// saas~17.1, 17.3\n/// `", "odoo/x.py", "`"].concat();
+    assert_eq!(reported(&text), both);
+    let text = ["16.0, saas~17.1 and 17.3", " `", "odoo/x.py", "`"].concat();
+    let all = [cite(1, "16.0", "odoo/x.py"), both[0].clone(), both[1].clone()];
+    assert_eq!(reported(&text), all);
+    let text = ["saas~17.1 and 17.03", " `", "odoo/x.py", "`"].concat();
+    assert_eq!(
+        reported(&text),
+        [cite(1, "17.03", "odoo/x.py"), cite(1, "saas~17.1", "odoo/x.py")]
+    );
+}
+
+#[test]
 fn reports_a_series_that_ends_the_comment_line_before() {
     let text = ["/// It reads it (16.0\n", "/// `", "odoo/fields.py:10", "`)."].concat();
     assert_eq!(reported(&text), [cite(1, "16.0", "odoo/fields.py:10")]);
@@ -182,7 +216,7 @@ fn reports_a_series_after_a_path_that_ends_a_sentence() {
 
 #[test]
 fn reports_every_form_of_a_series() {
-    for series in ["saas~17.2", "saas-17", "saas-17.2", "8.saas~6"] {
+    for series in ["saas~17.2", "saas-17", "saas-17.2", "8.saas~6", "9.saas~11"] {
         let text = [series, " `", "odoo/models.py", "`"].concat();
         assert_eq!(reported(&text), [cite(1, series, "odoo/models.py")]);
     }
@@ -215,9 +249,32 @@ fn passes_a_version_that_is_no_series() {
         "PostgreSQL 16.4 `odoo/sql_db.py`",
         "Node 20.11 `addons/web/x.js`",
         "`odoo/sql_db.py` on 16.4.",
+        "1.16.0 `odoo/x.py`",
+        "Python 3.10 and 3.12 `odoo/release.py`",
+        "18.0 and 3.12 `odoo/x.py`",
+        "18.0, 2.5 `odoo/x.py`",
+        "Node 18.0 and 20.11 `addons/web/x.js`",
     ] {
         assert_eq!(reported(text), [], "{text}");
     }
+}
+
+#[test]
+fn passes_a_tool_version_after_a_major_in_a_saas_list() {
+    let text = ["saas~17.1, 18.0 and 3.12 `", "odoo/x.py", "`"].concat();
+    assert_eq!(citations(&text), []);
+    let text = ["`", "odoo/x.py", "` on saas~17.1, 18.0 and 3.12"].concat();
+    assert_eq!(
+        citations(&text),
+        [cite(1, "18.0", "odoo/x.py"), cite(1, "saas~17.1", "odoo/x.py")]
+    );
+}
+
+// `reported` drops the 18.0 as pinned whether or not the bound holds, so this asserts on
+// `citations`.
+#[test]
+fn passes_a_series_inside_a_version() {
+    assert_eq!(citations("1.18.0 `odoo/x.py`"), []);
 }
 
 /// A hyphen names the branch, not the series.
