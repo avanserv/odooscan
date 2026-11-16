@@ -645,19 +645,13 @@ fn strings(expr: &Expr) -> Vec<&ast::ExprStringLiteral> {
 }
 
 #[derive(Default)]
-struct Finder<'n> {
-    attr: Option<&'n str>,
+struct SuperFinder {
     found: bool,
 }
 
-impl<'a> Visitor<'a> for Finder<'_> {
+impl<'a> Visitor<'a> for SuperFinder {
     fn visit_expr(&mut self, expr: &'a Expr) {
-        let hit = match (self.attr, expr) {
-            (None, Expr::Call(c)) => is_super(&c.func),
-            (Some(attr), Expr::Attribute(a)) => a.attr.as_str() == attr,
-            _ => false,
-        };
-        self.found |= hit;
+        self.found |= matches!(expr, Expr::Call(c) if is_super(&c.func));
         if !self.found {
             visitor::walk_expr(self, expr);
         }
@@ -1230,8 +1224,9 @@ impl<'a> Visitor<'a> for SuperCalls<'a> {
     }
 }
 
-fn body_contains(body: &[Stmt], attr: Option<&str>) -> bool {
-    let mut finder = Finder { attr, found: false };
+/// Whether any `super()` call appears in the body, nested definitions included.
+fn calls_super(body: &[Stmt]) -> bool {
+    let mut finder = SuperFinder::default();
     finder.visit_body(body);
     finder.found
 }
@@ -1490,7 +1485,7 @@ fn compute_method<'c>(class: &'c ast::StmtClassDef, field: &FieldFact) -> Option
         Stmt::FunctionDef(f) if f.name.as_str() == name => Some(f),
         _ => None,
     })?;
-    (!body_contains(&func.body, None)).then_some(func)
+    (!calls_super(&func.body)).then_some(func)
 }
 
 /// Each method a field of the class names as its `option`, with the field.
@@ -2963,7 +2958,7 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
             );
         }
         self.api_definitions(func, supers);
-        if SUPER_REQUIRED.contains(&name) && !body_contains(&func.body, None) {
+        if SUPER_REQUIRED.contains(&name) && !calls_super(&func.body) {
             self.diag(
                 "OD105",
                 &func.name,
