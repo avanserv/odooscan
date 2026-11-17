@@ -1,0 +1,8 @@
+<odoo>
+    <record id="field_x_node_parent_id" model="ir.model.fields">
+        <field name="name">x_node_parent_id</field>
+        <field name="model_id" ref="model_parent_store12_node"/>
+        <field name="ttype">many2one</field>
+        <field name="relation">parent.store12.node</field>
+    </record>
+</odoo>

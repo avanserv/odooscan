@@ -3417,7 +3417,7 @@ impl<'m> Index<'m> {
     /// and of the models it inherits or delegates to, and every parent they name. `base` is in every
     /// chain, so as a parent it proves nothing.
     pub fn holds_fields(&self, module: usize, model: &str, scope: &Scope) -> bool {
-        let introduces = |m: &str| m == "base" || self.classes(m).iter().any(|(mi, c)| *mi == module && c.new_model);
+        let introduces = |m: &str| self.introduces_model(module, m);
         let chain = self.chain(model, Some(scope), true);
         model != "base"
             && introduces(model)
@@ -3428,6 +3428,12 @@ impl<'m> Index<'m> {
             })
             && !self.hidden_field_parents(model, scope)
             && !self.unread_delegate(model, scope)
+    }
+
+    /// Whether `module` has a class that introduces `model` with `_name`, or `model` is `base`, which
+    /// every module holds.
+    pub fn introduces_model(&self, module: usize, model: &str) -> bool {
+        model == "base" || self.classes(model).iter().any(|(mi, c)| *mi == module && c.new_model)
     }
 
     /// Whether the class that introduces `model` with `_name` is in scope. When it is not, the

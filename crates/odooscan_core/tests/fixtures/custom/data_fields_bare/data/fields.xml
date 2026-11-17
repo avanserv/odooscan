@@ -1,0 +1,8 @@
+<odoo>
+    <record id="field_x_bare_parent_id" model="ir.model.fields">
+        <field name="name">x_bare_parent_id</field>
+        <field name="model_id" ref="data_fields.model_data_ticket_copy"/>
+        <field name="ttype">many2one</field>
+        <field name="relation">data.ticket.copy</field>
+    </record>
+</odoo>

@@ -401,6 +401,8 @@ custom/data_fields_dep/views/partner_views.xml:8:17: OD304 'x_demo': res.partner
 custom/data_fields_old/data/properties.xml:4:9: OD309 ir.property has no field 'value'
 custom/data_fields_old/data/properties.xml:5:9: OD309 ir.property has no field 'ghost'
 custom/data_fields_side/views/partner_views.xml:7:17: OD304 'x_flag': field 'x_flag' of res.partner comes from module data_fields, which is not in depends
+custom/data_fields_tree/models/ticket.py:9:20: OD203 'x_tree_parent_id': data.ticket has no field 'x_tree_parent_id'
+custom/data_fields_twig/models/tree.py:23:20: OD203 'x_line_parent_id': data.ticket.line has no field 'x_line_parent_id'
 custom/delegate_levels/models/levels.py:20:42: OD207 'rank_number' is a Integer field related to 'rank', which is a Char field
 custom/delegate_levels/models/levels.py:30:39: OD203 'holder.name': level.bottom.holder is not a relational field, so the path cannot continue
 custom/delegate_levels/models/levels.py:31:42: OD207 'rank_number' is a Integer field related to 'rank', which is a Char field
@@ -1040,6 +1042,7 @@ custom/owl_props/static/src/xml/board.xml:8:50: OD614 FancyCard declares no prop
 custom/owl_props/static/src/xml/board.xml:9:14: OD615 <Pair> leaves out 'left' and 'right', which Pair requires, so Owl throws when it renders the tag in debug mode; pass them, or make them optional
 custom/owl_props/static/src/xml/board.xml:25:14: OD615 <ListCard> leaves out 'title', which ListCard requires, so Owl throws when it renders the tag in debug mode; pass it, or make it optional
 custom/owl_props/static/src/xml/board.xml:51:35: OD614 Chip declares no prop 'extra', so Owl throws when it renders <Chip> in debug mode; fix the name, or declare the prop
+custom/parent_store12/models/node.py:10:20: OD203 'x_node_parent_id': parent.store12.node has no field 'x_node_parent_id'
 custom/partial_sites/__manifest__.py:5:25: OD503 module 'ghost_enterprise' is not on the addons path
 custom/partial_sites/models/sites.py:24:22: OD301 module base defines no XML id 'base.no_such_id'
 custom/partial_sites/models/sites.py:25:22: OD302 'mail.no_such_id' belongs to module mail; add it to depends

@@ -2218,6 +2218,16 @@ fn conditional_methods(stmt: &Stmt, fact: &mut ClassFact) {
     }
 }
 
+/// The field list of `fact` that the naming term `name` fills.
+fn term_fields<'f>(fact: &'f mut ClassFact, name: &str) -> &'f mut Vec<Spanned<String>> {
+    match name {
+        "_order" | "_fold_name" => &mut fact.order_fields,
+        "_parent_name" => &mut fact.parent_fields,
+        "_rec_name" | "_active_name" => &mut fact.setup_fields,
+        other => unreachable!("naming term {other} has no field list"),
+    }
+}
+
 /// Whether a statement of a class body binds an attribute that names the class or keeps it out of
 /// the registry where `class_attrs` does not read it: in an `if`, `try` or `with` block, or in a
 /// tuple, list or starred target.
@@ -2856,11 +2866,7 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
             }
         }
         for (name, fields) in std::mem::take(&mut naming.terms) {
-            match name.as_str() {
-                "_order" | "_fold_name" | "_parent_name" => fact.order_fields.extend(fields),
-                "_rec_name" | "_active_name" => fact.setup_fields.extend(fields),
-                other => unreachable!("naming term {other} has no field list"),
-            }
+            term_fields(&mut fact, &name).extend(fields);
         }
         fact.unassigned_computes = self.unassigned_computes(class, &fact);
         self.named_model(fact, naming, may_reach_orm(class))
@@ -4909,7 +4915,8 @@ mod tests {
         );
         let values = |v: &[Spanned<String>]| v.iter().map(|s| s.value.clone()).collect::<Vec<_>>();
         let class = &facts.classes[0];
-        assert_eq!(values(&class.order_fields), ["sequence", "id", "up_id", "folded"]);
+        assert_eq!(values(&class.order_fields), ["sequence", "id", "folded"]);
+        assert_eq!(values(&class.parent_fields), ["up_id"]);
         assert_eq!(values(&class.setup_fields), ["code", "x_active"]);
         assert_eq!(values(&class.rec_names_search), ["name", "partner_id.ref"]);
         let parent = class.attr("_parent_name").map(|a| &a.value);
@@ -4928,7 +4935,8 @@ mod tests {
              _order = 'x_d, id'\n    _rec_name = 'x_e'\n    _parent_store = True\n    _parent_name = 'x_f'\n    \
              _register = True\n    _register = False\n",
         );
-        assert_eq!(values(&twice.order_fields), ["x_d", "id", "x_f"]);
+        assert_eq!(values(&twice.order_fields), ["x_d", "id"]);
+        assert_eq!(values(&twice.parent_fields), ["x_f"]);
         assert_eq!(values(&twice.setup_fields), ["x_e"]);
         assert_eq!(
             twice.attr("_parent_store").map(|a| (&a.value, a.pos.line)),

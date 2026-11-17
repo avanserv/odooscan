@@ -1,0 +1,38 @@
+<odoo>
+    <record id="field_x_twig_parent_id" model="ir.model.fields">
+        <field name="name">x_twig_parent_id</field>
+        <field name="model_id" ref="data_fields.model_data_ticket"/>
+        <field name="ttype">many2one</field>
+        <field name="relation">data.ticket</field>
+    </record>
+    <record id="field_x_leaf_parent_id" model="ir.model.fields">
+        <field name="name">x_leaf_parent_id</field>
+        <field name="model_id" ref="data_fields_tree.model_data_tree_leaf"/>
+        <field name="ttype">many2one</field>
+        <field name="relation">data.tree.leaf</field>
+    </record>
+    <record id="field_x_branch_parent_id" model="ir.model.fields">
+        <field name="name">x_branch_parent_id</field>
+        <field name="model_id" ref="data_fields_tree.model_data_tree_branch"/>
+        <field name="ttype">many2one</field>
+        <field name="relation">data.tree.branch</field>
+    </record>
+    <record id="field_x_line_parent_id" model="ir.model.fields">
+        <field name="name">x_line_parent_id</field>
+        <field name="model_id" ref="data_fields.model_data_ticket_line"/>
+        <field name="ttype">many2one</field>
+        <field name="relation">data.ticket.line</field>
+    </record>
+    <record id="field_x_copy_parent_id" model="ir.model.fields">
+        <field name="name">x_copy_parent_id</field>
+        <field name="model_id" ref="data_fields.model_data_ticket_copy"/>
+        <field name="ttype">many2one</field>
+        <field name="relation">data.ticket.copy</field>
+    </record>
+    <record id="field_x_base_parent_id" model="ir.model.fields">
+        <field name="name">x_base_parent_id</field>
+        <field name="model_id" ref="data_fields.model_data_ticket_base"/>
+        <field name="ttype">many2one</field>
+        <field name="relation">data.ticket.base</field>
+    </record>
+</odoo>
