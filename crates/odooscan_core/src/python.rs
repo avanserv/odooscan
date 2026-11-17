@@ -1239,8 +1239,8 @@ fn is_super(func: &Expr) -> bool {
 }
 
 impl<'a> Visitor<'a> for SuperCalls<'a> {
-    /// A class body's `super()` calls are not the method's. Its decorators and bases run in the
-    /// method.
+    /// A class body's `super()` calls are not the method's. Its decorators and the arguments of its
+    /// head, bases and keywords alike, run in the method.
     fn visit_stmt(&mut self, stmt: &'a Stmt) {
         match stmt {
             Stmt::ClassDef(class) => {
@@ -5646,15 +5646,20 @@ mod tests {
     fn a_nested_class_keeps_its_super_calls() {
         let facts = analyze(
             "class X(models.Model):\n    _name = 'x'\n    def write(self, vals):\n        \
-             @super().decorator()\n        class Inner(super().base()):\n            \
+             @super().decorator()\n        class Inner(super().base(), metaclass=super().meta()):\n            \
              def write(self, vals):\n                return super().write(vals)\n        \
              class Own(models.Model):\n            _inherit = 'x'\n            \
              def _own(self):\n                return super()._own()\n        \
-             def helper():\n            return super().in_function()\n",
+             def helper(rec):\n            class Deep(super().deep_base()):\n                \
+             def write(self, vals):\n                    return super().write(vals)\n            \
+             return super().in_function()\n",
             None,
         );
         let called = |class: &ClassFact| class.super_calls.iter().map(|c| c.value.clone()).collect::<Vec<_>>();
-        assert_eq!(called(&facts.classes[0]), ["decorator", "base", "in_function"]);
+        assert_eq!(
+            called(&facts.classes[0]),
+            ["decorator", "base", "meta", "deep_base", "in_function"]
+        );
         assert_eq!(called(&facts.classes[1]), ["_own"]);
         assert!(facts.classes[0].extended.is_empty());
         assert!(!facts.diags.iter().any(|d| d.code == "OD119"));
