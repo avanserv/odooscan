@@ -233,6 +233,11 @@ pub struct ClassFact {
     /// Methods the class's methods call through `super()`, leaving out a call inside a `hasattr`
     /// test on that same `super()` and name, and `__getattr__` called from `__getattr__`.
     pub super_calls: Vec<Spanned<String>>,
+    /// Methods called through `super()` in the methods of a class built on the type of the records,
+    /// such as `class K(type(self))`, that a method of this class defines. Any class of the model
+    /// answers them, this one included. Left out: a guarded call, a `__name` call, and
+    /// `__getattr__` called from `__getattr__`.
+    pub model_super_calls: Vec<Spanned<String>>,
     /// Methods of the class that call the method they override through `super()`.
     pub extended: Vec<String>,
     /// The base classes that are plain Python classes, whose methods only Python knows: any base
@@ -344,6 +349,7 @@ impl ClassFact {
             setup_fields: vec![],
             rec_names_search: vec![],
             super_calls: vec![],
+            model_super_calls: vec![],
             extended: vec![],
             table: None,
             attrs: vec![],

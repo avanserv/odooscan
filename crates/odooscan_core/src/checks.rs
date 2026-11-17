@@ -2905,25 +2905,29 @@ impl<'m> Ctx<'_, 'm> {
     }
 
     /// A `super()` call that no parent class answers, where `hides_parents` leaves every parent seen.
+    /// One from a class built on the type of the records may reach this class too.
     fn super_calls(&self, out: &mut Out<'m>, path: &'m Path, class: &ClassFact) {
-        if class.super_calls.is_empty() || self.hides_parents(class) {
+        if (class.super_calls.is_empty() && class.model_super_calls.is_empty()) || self.hides_parents(class) {
             return;
         }
-        for call in &class.super_calls {
-            if !self
-                .index
+        let parent = |call: &&Spanned<String>| {
+            self.index
                 .has_parent_method(&class.model, &call.value, class, self.series)
-            {
-                out.push(
-                    path,
-                    "OD211",
-                    call.pos,
-                    format!(
-                        "no parent class of {} defines '{}', so this super() call fails",
-                        class.model, call.value
-                    ),
-                );
-            }
+        };
+        let own = |call: &&Spanned<String>| class.methods.contains(&call.value);
+        for call in class.model_super_calls.iter().filter(|c| !own(c) && !parent(c)) {
+            let message = format!(
+                "no class of {} defines '{}', so this super() call fails",
+                class.model, call.value
+            );
+            out.push(path, "OD211", call.pos, message);
+        }
+        for call in class.super_calls.iter().filter(|c| !parent(c)) {
+            let message = format!(
+                "no parent class of {} defines '{}', so this super() call fails",
+                class.model, call.value
+            );
+            out.push(path, "OD211", call.pos, message);
         }
     }
 

@@ -179,3 +179,37 @@ class SuperNestedExplicit(models.Model):
                 return super(SuperNestedExplicit, self)._explicit_later()
 
         return Proxy
+
+
+class SuperNestedDynamic(models.Model):
+    _inherit = "bad.super"
+
+    def _dyn_own(self):
+        return 1
+
+    def _nest_dynamic(self):
+        class Typed(type(self)):
+            def _typed(self):
+                if hasattr(super(), "_dynamic_guard"):
+                    super()._dynamic_guard()
+                super()._dyn_own()
+                super().action_go()
+                return super()._dynamic_gone()
+
+        class Classed(self.__class__):
+            def _classed(self):
+                return super()._class_gone()
+
+        class Mixed(type(self), dict):
+            def _mixed(self):
+                return super()._mixed_gone()
+
+        return Typed, Classed, Mixed
+
+    @classmethod
+    def _nest_meta(cls):
+        class Meta(type(cls)):
+            def _meta(self):
+                return super()._meta_gone()
+
+        return Meta
