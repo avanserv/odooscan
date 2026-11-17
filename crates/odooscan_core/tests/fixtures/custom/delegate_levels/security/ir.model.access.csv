@@ -1,0 +1,6 @@
+id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
+access_level_top,level.top,model_level_top,base.group_user,1,1,1,1
+access_level_middle,level.middle,model_level_middle,base.group_user,1,1,1,1
+access_level_bottom,level.bottom,model_level_bottom,base.group_user,1,1,1,1
+access_level_bridge,level.bridge,model_level_bridge,base.group_user,1,1,1,1
+access_level_through,level.through,model_level_through,base.group_user,1,1,1,1
