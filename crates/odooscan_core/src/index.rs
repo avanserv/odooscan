@@ -216,7 +216,8 @@ pub(crate) const BASE_MODEL_METHODS: &[&str] = &[
 
 /// The methods of `BaseModel` outside `BASE_MODEL_METHODS`, which OD116 reads as the members a
 /// field must not replace in every series, by `def` or class-level alias, read off the heads 12.0
-/// to 20.0 and saas~11.5 to saas~19.4: a button, a `<function>` or a `super()` call may name any.
+/// to 20.0 and saas~11.5 to saas~19.4: a button or a `<function>` may name any, and a `super()`
+/// call any but `BASE_MODEL_VALUES`.
 /// `OLD_BASE_METHODS` holds those gone before these heads, dated by series.
 /// Dunders stay out because buttons read this list, so `BASE_MODEL_DUNDERS` holds them for
 /// `super()` alone. Any other `__` name stays out too: it is mangled, so `getattr` never finds it.
@@ -390,6 +391,36 @@ const BASE_MODEL_EXTRA: &[&str] = &[
     "view_header_get",
     "view_init",
 ];
+
+/// The members of `BASE_MODEL_EXTRA` that Odoo binds to a property or a plain value, never a
+/// method, in every series that has them (`_populate_sizes` and `_populate_dependencies` 14.0 to
+/// 17.0, the `_transient_max_*` pair on `TransientModel` from 19.0): none of their values is
+/// callable, so a `super()` call to one raises `TypeError`. They stay in `BASE_MODEL_EXTRA`, since a
+/// field must not replace them either (OD116) and a button finds them as `getattr` does.
+const BASE_MODEL_VALUES: &[&str] = &[
+    "_cache",
+    "_constraint_methods",
+    "_context",
+    "_cr",
+    "_onchange_methods",
+    "_ondelete_methods",
+    "_origin",
+    "_populate_dependencies",
+    "_populate_sizes",
+    "_table_sql",
+    "_transient_max_count",
+    "_transient_max_hours",
+    "_uid",
+    "ids",
+];
+
+/// Whether `super()` finds `method` as a method of `BaseModel` or `object` in `series`.
+fn base_parent_method(method: &str, series: Option<Series>) -> bool {
+    BASE_MODEL_METHODS.contains(&method)
+        || (BASE_MODEL_EXTRA.contains(&method) && !BASE_MODEL_VALUES.contains(&method))
+        || old_base_method(method, series)
+        || BASE_MODEL_DUNDERS.contains(&method)
+}
 
 /// The methods of `BaseModel` gone by saas~11.5, by the range of series that has them, read off the
 /// heads 9.0 to saas~11.4, but for the saas branches `Series` cannot name. `16c26525a725` renames
@@ -3842,15 +3873,18 @@ impl<'m> Index<'m> {
     /// inherits by `_inherit`, or a plain base a class of them reads, `except`'s included, defines
     /// `method`. A parent it delegates to does not count, since `super()` follows the class bases,
     /// which Odoo builds from `_inherit` and `base`. Modules outside the scope count: an override of
-    /// a method from a module that is not in depends is called only by that module.
+    /// a method from a module that is not in depends is called only by that module. A property or
+    /// plain value of `BaseModel` is no parent method: calling it raises `TypeError`.
     pub fn has_parent_method(&self, model: &str, method: &str, except: &ClassFact, series: Option<Series>) -> bool {
         let parent =
             |c: &ClassFact| c.base_binds(method) || (!std::ptr::eq(c, except) && c.methods.iter().any(|m| m == method));
-        BASE_MODEL_METHODS.contains(&method)
-            || BASE_MODEL_EXTRA.contains(&method)
-            || old_base_method(method, series)
-            || BASE_MODEL_DUNDERS.contains(&method)
-            || self.chain_classes(model).iter().any(|(_, c)| parent(c))
+        base_parent_method(method, series) || self.chain_classes(model).iter().any(|(_, c)| parent(c))
+    }
+
+    /// Whether a parent class defines `name` as `has_parent_method` reads it, or `BaseModel` binds
+    /// it to a value, which a `def` of the same name replaces where Odoo reads it.
+    pub fn has_parent_member(&self, model: &str, name: &str, except: &ClassFact, series: Option<Series>) -> bool {
+        BASE_MODEL_VALUES.contains(&name) || self.has_parent_method(model, name, except, series)
     }
 
     /// Whether a file of any module names the hook method `name`, whole or by a prefix it is built
@@ -4351,11 +4385,11 @@ mod tests {
     use rustc_hash::FxHashSet;
 
     use super::{
-        BASE_MODEL_DUNDERS, BASE_MODEL_EXTRA, BASE_MODEL_METHODS, BASE_PRIVATE_METHODS, BASE_RPC_METHODS, Export,
-        FIELD_CLASSES, FieldHolder, FieldSpelling, Index, JsSpec, OLD_BASE_METHODS, OWL_COMPONENT, OWL1_COMPONENT,
-        PlacedWrite, Scope, Status, XmlIdDef, absolute_import, base_private_method, base_rpc_method, class_file,
-        depends_closure, field_id_prefixes, fold_writes, js_module_path, last_text, mangles_alike, old_base_method,
-        test_bundle, triggers, unseen_table_id,
+        BASE_MODEL_DUNDERS, BASE_MODEL_EXTRA, BASE_MODEL_METHODS, BASE_MODEL_VALUES, BASE_PRIVATE_METHODS,
+        BASE_RPC_METHODS, Export, FIELD_CLASSES, FieldHolder, FieldSpelling, Index, JsSpec, OLD_BASE_METHODS,
+        OWL_COMPONENT, OWL1_COMPONENT, PlacedWrite, Scope, Status, XmlIdDef, absolute_import, base_parent_method,
+        base_private_method, base_rpc_method, class_file, depends_closure, field_id_prefixes, fold_writes,
+        js_module_path, last_text, mangles_alike, old_base_method, test_bundle, triggers, unseen_table_id,
     };
     use crate::mentions::{Mentions, Words};
     use crate::project::{Module, SourceFile, module};
@@ -4714,6 +4748,27 @@ mod tests {
         }
         for name in dated {
             assert!(BASE_MODEL_EXTRA.contains(&name), "{name} is missing from the flat list");
+        }
+    }
+
+    #[test]
+    fn values_are_no_parent_methods() {
+        let series = [None, Series::parse("15.0"), Series::parse("20.0")];
+        for (name, s) in BASE_MODEL_VALUES.iter().flat_map(|n| series.map(|s| (n, s))) {
+            assert!(!base_parent_method(name, s), "{name} on {s:?}");
+        }
+        for (name, s) in ["name_get", "_populate", "__init__"]
+            .iter()
+            .flat_map(|n| series.map(|s| (n, s)))
+        {
+            assert!(base_parent_method(name, s), "{name} on {s:?}");
+        }
+    }
+
+    #[test]
+    fn values_stay_base_model_members() {
+        for name in BASE_MODEL_VALUES {
+            assert!(BASE_MODEL_EXTRA.contains(name), "{name} is missing from the flat list");
         }
     }
 

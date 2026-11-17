@@ -63,3 +63,16 @@ class ResPartnerDunders(models.Model):
 
     def __nope__(self):
         return super().__nope__()
+
+
+class ResPartnerValues(models.Model):
+    _inherit = "res.partner"
+
+    def _values_ids(self):
+        return super().ids()
+
+    def _values_origin(self):
+        return super()._origin
+
+    def _onchange_methods(self):
+        return {}
