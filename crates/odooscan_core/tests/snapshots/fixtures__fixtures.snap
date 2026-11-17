@@ -649,8 +649,12 @@ custom/field_options/models/site.py:68:65: OD222 'country_ids' has check_company
 custom/field_options/models/site.py:76:86: OD222 'origin_id' has check_company=True, but res.country has no company_id field to check; remove check_company
 custom/field_options/models/site.py:82:68: OD222 'home_country_id' has check_company=True, but res.country has no company_id field to check; remove check_company
 custom/form_patches/static/src/base_calls.js:7:43: OD604 model 'form.card' has no method 'ids'
-custom/form_patches/static/src/base_calls.js:8:43: OD604 model 'form.card' has no method 'concat'
+custom/form_patches/static/src/base_calls.js:8:43: OD607 method 'concat' is private, so the server refuses to call it over RPC
 custom/form_patches/static/src/base_calls.js:9:43: OD604 model 'form.card' has no method 'name_get'
+custom/form_patches/static/src/base_calls.js:10:43: OD607 method 'ensure_one' is private, so the server refuses to call it over RPC
+custom/form_patches/static/src/base_calls.js:11:43: OD607 method 'init' is private, so the server refuses to call it over RPC
+custom/form_patches/static/src/base_calls.js:12:51: OD607 method 'ensure_one' is private, so the server refuses to call it over RPC
+custom/form_patches/static/src/base_calls.js:13:43: OD607 method 'action_stamp_card' is private, so the server refuses to call it over RPC
 custom/form_patches/static/src/partner_card.js:4:45: OD604 model 'res.partner' has no method 'action_unfollow'
 custom/form_patches/static/src/partner_card.js:5:45: OD604 method 'action_follow' of res.partner comes from module mail, which is not in depends
 custom/form_patches/static/src/partner_card.js:6:38: OD603 no indexed module defines model 'res.partner.title'
@@ -802,6 +806,7 @@ custom/legacy15/security/second_writes.xml:2:5: OD323 XML id 'rule_partner_repla
 custom/legacy15/security/second_writes.xml:3:36: OD407 res.partner.name has no index, yet record rule legacy15.rule_partner_replaced filters reads of res.partner on it; add index=True to the field
 custom/legacy15/static/src/base_calls.js:9:45: OD604 model 'res.partner' has no method 'ids'
 custom/legacy15/static/src/base_calls.js:10:45: OD604 model 'res.partner' has no method 'get_property_definition'
+custom/legacy15/static/src/base_calls.js:12:45: OD607 method 'init' is private, so the server refuses to call it over RPC
 custom/legacy154/data/calls.xml:4:41: OD314 res.partner has no method '_neutralized'
 custom/legacy154/models/res_company.py:14:24: OD211 no parent class of res.company defines '_neutralized', so this super() call fails
 custom/legacy154/models/upgrade.py:9:14: OD126 sudo(user) no longer works from saas~15.3; use with_user(user)
@@ -995,6 +1000,8 @@ custom/modern20/security/ir.access-inactive.csv:3:1: OD402 base.group_portal get
 custom/modern20/security/ir.access.csv:2:1: OD210 'no_csv_name': modern.lamp has no field 'no_csv_name'
 custom/modern20/static/src/base_calls.js:5:45: OD604 model 'res.partner' has no method 'get_formview_action'
 custom/modern20/static/src/base_calls.js:6:45: OD604 model 'res.partner' has no method 'ids'
+custom/modern20/static/src/base_calls.js:7:47: OD607 method 'get_all' is private, so the server refuses to call it over RPC
+custom/modern20/static/src/base_calls.js:8:45: OD604 model 'res.partner' has no method 'get_all'
 custom/modern20/views/pages.xml:5:13: OD325 the server no longer knows t-esc and renders nothing for it; write t-out
 custom/modern20/views/pages.xml:6:13: OD307 t-raw renders unescaped HTML; use t-out and wrap trusted HTML in Markup
 custom/modern20/views/pages.xml:18:21: OD325 the server no longer knows t-esc and renders nothing for it; write t-out

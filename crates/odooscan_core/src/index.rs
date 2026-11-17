@@ -3937,6 +3937,17 @@ impl<'m> Index<'m> {
             && self.merged_classes(model, scope).iter().any(|(_, c)| c.cached)
     }
 
+    /// Whether Odoo refuses a button or an RPC call on `name`: a leading `_` or a private method of
+    /// `BaseModel` whatever the model, and with a known `model` a private method of `CachedModel` or
+    /// an `@api.private` one on any class in scope, since the refusal walks the whole MRO.
+    pub fn refused_call(&self, model: Option<&str>, name: &str, scope: &Scope, series: Option<Series>) -> bool {
+        name.starts_with('_')
+            || base_private_method(name, series)
+            || model.is_some_and(|model| {
+                self.cached_private_method(model, name, scope, series) || self.private_method(model, name, scope)
+            })
+    }
+
     /// Whether a parent class defines `name` as `has_parent_method` reads it, or `BaseModel` binds
     /// it to a value, which a `def` of the same name replaces where Odoo reads it.
     pub fn has_parent_member(&self, model: &str, name: &str, except: &ClassFact, series: Option<Series>) -> bool {
@@ -4817,6 +4828,30 @@ mod tests {
         assert!(!private("x.tariff", Some("saas~19.3")) && private("x.tariff", Some("saas~19.4")));
         assert!(!private("x.tariff", None));
         assert!(!private("x.plain", Some("20.0")));
+    }
+
+    #[test]
+    fn refused_call_reads_base_model_cached_model_and_a_leading_underscore() {
+        let mut modules = [module("base", "{'version': '20.0.1.0'}")];
+        modules[0].python.push(python_18(TARIFFS));
+        let index = Index::build(&modules, None);
+        let scope = index.scope(0);
+        let refused = |model: Option<&str>, name: &str, series: Option<&str>| {
+            index.refused_call(model, name, &scope, series.and_then(Series::parse))
+        };
+        for series in [Some("15.0"), Some("saas~16.2"), None] {
+            assert!(!refused(None, "ensure_one", series), "{series:?}");
+        }
+        assert!(refused(None, "ensure_one", Some("18.0")));
+        assert!(refused(None, "init", Some("15.0")) && refused(None, "init", None));
+        let tariff = Some("x.tariff");
+        assert!(refused(tariff, "get_all", Some("saas~19.4")));
+        for series in [Some("saas~19.3"), None] {
+            assert!(!refused(tariff, "get_all", series), "{series:?}");
+        }
+        assert!(!refused(None, "get_all", Some("20.0")));
+        assert!(!refused(Some("x.plain"), "get_all", Some("20.0")));
+        assert!(refused(None, "_x", None));
     }
 
     #[test]

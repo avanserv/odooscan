@@ -8,5 +8,7 @@ export class PartnerBaseCalls {
         await this.orm.call("res.partner", "concat", [[1]]);
         await this.orm.call("res.partner", "ids", []);
         await this.orm.call("res.partner", "get_property_definition", ["x_size"]);
+        await this.orm.call("res.partner", "ensure_one", [[1]]);
+        await this.orm.call("res.partner", "init", []);
     }
 }

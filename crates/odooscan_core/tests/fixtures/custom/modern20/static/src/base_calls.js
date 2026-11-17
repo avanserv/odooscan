@@ -4,5 +4,7 @@ export class PartnerBaseCalls {
         await this.orm.call("res.partner", "check_field_access", ["name", "read"]);
         await this.orm.call("res.partner", "get_formview_action", [[1]]);
         await this.orm.call("res.partner", "ids", []);
+        await this.orm.call("modern.tariff", "get_all", []);
+        await this.orm.call("res.partner", "get_all", []);
     }
 }
