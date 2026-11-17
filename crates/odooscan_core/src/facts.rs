@@ -664,7 +664,8 @@ pub struct SqlColumn {
     /// The reference as written.
     pub text: String,
     pub pos: Pos,
-    /// The query runs in `init()` or `_auto_init()`, ahead of its module's data.
+    /// The query runs in the `init()` or `_auto_init()` of a model class,
+    /// ahead of its module's data.
     pub before_data: bool,
 }
 

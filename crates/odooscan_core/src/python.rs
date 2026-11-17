@@ -2717,6 +2717,9 @@ struct PyVisitor<'a, 'ast> {
     /// Where the fact of each enclosing class sits in `facts.classes`, None for a class that is no
     /// model.
     class_facts: Vec<Option<usize>>,
+    /// Whether each enclosing class is or extends a model: it has an ORM base, whose model a
+    /// `_name` or `_inherit` that is no literal hides, or it names its model.
+    model_classes: Vec<bool>,
     /// What `self` is in a method of each enclosing class, none for an enclosing function.
     owners: Vec<Option<Receiver>>,
     /// Where the outermost enclosing class starts, which the routing table knows it by.
@@ -2730,8 +2733,11 @@ struct PyVisitor<'a, 'ast> {
     /// What each enclosing function does with cursors, innermost last.
     cursor_uses: Vec<CursorUse<'ast>>,
     /// Whether the code is in the `init()` or `_auto_init()` of a class, which creates the view of
-    /// the model the class is or is mixed into, and which Odoo runs ahead of the module's data.
+    /// the model the class is or is mixed into.
     in_view_maker: bool,
+    /// Whether the code is in the `init()` or `_auto_init()` of a model class, or nested in one,
+    /// which Odoo runs ahead of the module's data.
+    before_data: bool,
     /// Whether the code is in an `_auth_method_*()`, which sets the user of a request by design, or
     /// in an override of `update_env()`, which passes on the user its caller gives.
     in_user_setter: bool,
@@ -2783,6 +2789,7 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
             holders: GuardHolders::default(),
             class_models: vec![],
             class_facts: vec![],
+            model_classes: vec![],
             owners: vec![],
             class_start: None,
             query_vars: None,
@@ -2790,6 +2797,7 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
             self_cursors: vec![],
             cursor_uses: vec![],
             in_view_maker: false,
+            before_data: false,
             in_user_setter: false,
             change_check: None,
             import_shims: 0,
@@ -4308,7 +4316,7 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
                 column: column.column,
                 text: column.text,
                 pos,
-                before_data: self.in_view_maker,
+                before_data: self.before_data,
             });
         }
     }
@@ -4518,6 +4526,8 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
         let maker = in_class && matches!(func.name.as_str(), "init" | "_auto_init");
         let in_view_maker = self.in_view_maker;
         self.in_view_maker |= maker;
+        let before_data = self.before_data;
+        self.before_data |= maker && self.model_classes.last() == Some(&true);
         self.auth_method_override(func);
         let in_user_setter = self.in_user_setter;
         self.in_user_setter |= func.name.starts_with("_auth_method_") || func.name.as_str() == "update_env";
@@ -4535,6 +4545,7 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
         self.owners.pop();
         self.skipped -= skip;
         self.in_view_maker = in_view_maker;
+        self.before_data = before_data;
         self.in_user_setter = in_user_setter;
         self.change_check = change_check;
         self.holders.names = names;
@@ -4606,6 +4617,7 @@ impl<'ast> Visitor<'ast> for PyVisitor<'_, 'ast> {
     fn visit_stmt(&mut self, stmt: &'ast Stmt) {
         match stmt {
             Stmt::ClassDef(class) => {
+                let orm = model_kind(class, &self.kinds).is_some();
                 let fact = self.class_fact(class);
                 self.sql_write_checks(class, fact.as_ref());
                 let model = fact
@@ -4621,6 +4633,7 @@ impl<'ast> Visitor<'ast> for PyVisitor<'_, 'ast> {
                 self.owners.push(Some(owner));
                 self.class_facts
                     .push(fact.is_some().then_some(self.facts.classes.len()));
+                self.model_classes.push(orm || fact.is_some());
                 self.facts.classes.extend(fact);
                 self.class_models.push(model);
                 self.self_cursors.push(self_cursor(class));
@@ -4632,6 +4645,7 @@ impl<'ast> Visitor<'ast> for PyVisitor<'_, 'ast> {
                 self.holders.attrs = attrs;
                 self.self_cursors.pop();
                 self.class_models.pop();
+                self.model_classes.pop();
                 self.class_facts.pop();
                 self.owners.pop();
                 self.class_start = class_start;
@@ -7066,6 +7080,48 @@ class U(HttpCase):
             .map(|c| (c.column.as_str(), c.before_data))
             .collect();
         assert_eq!(found, [("x", true), ("y", true), ("z", false)]);
+    }
+
+    #[test]
+    fn leaves_the_init_of_a_plain_class_or_a_nested_function_with_the_data() {
+        let src = "from odoo import http, models\n\n\
+                   class H(http.Controller):\n    \
+                   def init(self):\n        self.env.cr.execute('SELECT a.v FROM t a')\n\n\
+                   class P:\n    \
+                   def init(self):\n        self.env.cr.execute('SELECT b.w FROM t b')\n\n\
+                   class X(models.Model):\n    _name = 'x'\n\n    \
+                   def f(self):\n        \
+                   def init(self):\n            self.env.cr.execute('SELECT c.x FROM t c')\n\n    \
+                   def init(self):\n        \
+                   def g():\n            self.env.cr.execute('SELECT d.y FROM t d')\n\n\
+                   class A(models.AbstractModel):\n    _name = 'a'\n\n    \
+                   def init(self):\n        self.env.cr.execute('SELECT e.z FROM t e')\n";
+        let facts = analyze(src, None);
+        let found: Vec<_> = facts
+            .sql_columns
+            .iter()
+            .map(|c| (c.column.as_str(), c.before_data))
+            .collect();
+        assert_eq!(
+            found,
+            [("v", false), ("w", false), ("x", false), ("y", true), ("z", true)]
+        );
+    }
+
+    #[test]
+    fn marks_the_init_of_a_model_class_whose_model_is_no_literal_as_ahead_of_the_data() {
+        let src = "from odoo import models\n\n\
+                   class X(models.Model):\n    _name = MODEL_NAME\n\n    \
+                   def init(self):\n        self.env.cr.execute('SELECT a.v FROM t a')\n\n\
+                   class Y(X):\n    _inherit = INHERITED\n\n    \
+                   def _auto_init(self):\n        self.env.cr.execute('SELECT b.w FROM t b')\n";
+        let facts = analyze(src, None);
+        let found: Vec<_> = facts
+            .sql_columns
+            .iter()
+            .map(|c| (c.column.as_str(), c.before_data))
+            .collect();
+        assert_eq!(found, [("v", true), ("w", true)]);
     }
 
     /// The table and column of each query column a source reads, in order.
