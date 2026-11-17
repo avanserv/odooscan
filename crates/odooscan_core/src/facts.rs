@@ -663,6 +663,8 @@ pub struct FieldClass {
     pub ftype: Option<String>,
     /// The last name of each other base, which only the scope of a module that calls it can resolve.
     pub bases: Vec<String>,
+    /// The body binds `__init__`, which replaces the ORM's reading of the call's positions.
+    pub own_init: bool,
 }
 
 /// What a route's own decorator gives one key of its routing.

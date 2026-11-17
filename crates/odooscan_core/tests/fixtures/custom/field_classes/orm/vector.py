@@ -32,3 +32,14 @@ class Subseries(Series[int]):
 # orm/mark.py has a Many2one of this name, so the scan cannot tell which one a call means.
 class Mark(fields.Char):
     pass
+
+
+# Odoo builds a field from the keywords its __init__ chain hands to Field.__init__, so a class with
+# its own __init__ may read any argument as any attribute: here the first one is the label.
+class CompanyLink(fields.Many2one):
+    def __init__(self, string=None, **kwargs):
+        super().__init__("res.company", string=string, **kwargs)
+
+
+class SubCompanyLink(CompanyLink):
+    pass
