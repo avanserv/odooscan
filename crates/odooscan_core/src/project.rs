@@ -12,7 +12,7 @@ use crate::mentions::{Mentions, Words};
 use crate::series::Series;
 use crate::suppress::Suppressions;
 use crate::taint::TaintTable;
-use crate::{csvdata, decode, js, owl, po, python, routing, sql, xml};
+use crate::{csvdata, decode, imports, index, js, owl, po, python, routing, sql, xml};
 
 const MANIFESTS: &[&str] = &["__manifest__.py", "__openerp__.py"];
 
@@ -410,11 +410,12 @@ pub fn load(
     modules
         .par_iter_mut()
         .for_each(|module| parse_module_files(module, default_series, taint));
-    let known = python::field_classes(modules.iter().flat_map(|m| &m.python).map(|f| &f.facts));
+    let known = module_field_classes(&modules, default_series);
     let routes = routing::Table::of_modules(&modules);
     modules
         .par_iter_mut()
-        .for_each(|module| read_again(module, default_series, &known, &routes, taint));
+        .zip(&known)
+        .for_each(|(module, known)| read_again(module, default_series, known, &routes, taint));
     notices.extend(python2_notices(&modules, default_series));
     let odoo_reads = rejected.iter().map(|r| (r.name.clone(), r.rejection.odoo)).collect();
     let (broken, rejected_notices) = rejected_manifests(rejected);
@@ -484,9 +485,40 @@ fn python2_notices(modules: &[Module], default_series: Option<Series>) -> Vec<St
     notices
 }
 
+/// The field classes each module may call, those its scope defines, bases included. The scope is
+/// that of `Index::scope`, seeded with the addons the module's files import by path too, so a
+/// same-named class outside it does not count (OD210's page). A module that calls none of the
+/// scan's field classes gets none, without its scope being worked out.
+fn module_field_classes(modules: &[Module], series: Option<Series>) -> Vec<python::FieldClasses> {
+    let all = python::field_classes(modules.iter().flat_map(|m| &m.python).map(|f| &f.facts));
+    let by_name: FxHashMap<&str, usize> = modules.iter().enumerate().map(|(i, m)| (m.name.as_str(), i)).collect();
+    let always = index::always_installed(modules, &by_name, series);
+    let classes_of = |(mi, module): (usize, &Module)| {
+        let mut calls = module.python.iter().flat_map(|f| &f.facts.attr_calls);
+        if !calls.any(|name| all.contains_key(name)) {
+            return python::FieldClasses::default();
+        }
+        let seeds = imported_modules(module, &by_name).chain([mi]);
+        let scope = index::scope_of(modules, &by_name, &always, seeds, series);
+        let in_scope = modules.iter().zip(scope).filter_map(|(m, s)| s.then_some(m));
+        python::field_classes(in_scope.flat_map(|m| &m.python).map(|f| &f.facts))
+    };
+    modules.par_iter().enumerate().map(classes_of).collect()
+}
+
+/// The indexes of the modules of `by_name` that a file of `module` imports by path.
+fn imported_modules<'a>(module: &'a Module, by_name: &'a FxHashMap<&str, usize>) -> impl Iterator<Item = usize> + 'a {
+    let facts = module
+        .python
+        .iter()
+        .filter_map(|f| Some((f.rel.as_str(), f.facts.imports.as_ref()?)));
+    let addons = facts.flat_map(|(rel, i)| i.list.iter().flat_map(move |fact| imports::imported_addons(rel, fact)));
+    addons.filter_map(|addon| by_name.get(addon.as_str()).copied())
+}
+
 /// Reads again the files the first pass could not read whole: those whose class attributes call
-/// a field class of the scan, which the first pass takes for a method, and those with a route that
-/// inherits from a controller of the scan. Either may live in any module.
+/// a field class of the module's scope (`module_field_classes`), which the first pass takes for a
+/// method, and those with a route that inherits from a controller of the scan.
 fn read_again(
     module: &mut Module,
     default_series: Option<Series>,
@@ -502,7 +534,7 @@ fn read_again(
         if !(calls_fields || file.facts.inherits_routes) {
             return;
         }
-        // A file read again for its routes alone reads no field class of the scan, as the first
+        // A file read again for its routes alone reads no field class of its scope, as the first
         // pass did: they also decide the groups a call outside a class attribute references.
         let fields = if calls_fields { known } else { &unread };
         if let Ok(text) = std::fs::read_to_string(&file.path) {
@@ -1084,6 +1116,67 @@ mod tests {
             .facts;
         assert_eq!(facts.diags.iter().map(|d| d.code).collect::<Vec<_>>(), ["OD111"]);
         assert!(facts.group_refs.is_empty(), "{:?}", facts.group_refs);
+    }
+
+    #[test]
+    fn a_call_is_a_field_only_when_its_class_is_in_the_module_scope() {
+        let dir = scratch("field-scope");
+        let model = |name: &str| format!("class X(models.Model):\n    _name = 'x.{name}'\n");
+        let files = [
+            (
+                "orm_vec",
+                "{'version': '18.0.1.0.0'}",
+                "orm.py",
+                "from odoo import fields\n\nclass Vector(fields.Field):\n    pass\n".to_owned(),
+            ),
+            (
+                "user",
+                "{'version': '18.0.1.0.0', 'depends': ['orm_vec']}",
+                "models.py",
+                format!("from odoo import models\n\n{}    v = Vector()\n", model("user")),
+            ),
+            (
+                "plain",
+                "{'version': '18.0.1.0.0'}",
+                "models.py",
+                format!(
+                    "from odoo import models\n\nclass Vector:\n    pass\n\nclass Grid(Vector):\n    pass\n\n{}    v = Vector()\n    g = Grid()\n",
+                    model("plain")
+                ),
+            ),
+            (
+                "importer",
+                "{'version': '18.0.1.0.0'}",
+                "models.py",
+                format!(
+                    "from odoo import models\nfrom odoo.addons.orm_vec.orm import Vector\n\n{}    v = Vector()\n",
+                    model("importer")
+                ),
+            ),
+        ];
+        let paths = files.map(|(name, manifest, rel, src)| {
+            let module = written(&dir, name, manifest);
+            std::fs::write(module.join(rel), src).unwrap();
+            module
+        });
+        let modules = load(&paths, &[], None, None, &TaintTable::default()).modules;
+        let _ = std::fs::remove_dir_all(&dir);
+        let read = |name: &str| {
+            let module = modules.iter().find(|m| m.name == name).unwrap();
+            let class = &module
+                .python
+                .iter()
+                .find(|f| f.rel == "models.py")
+                .unwrap()
+                .facts
+                .classes[0];
+            let fields: Vec<&str> = class.fields.iter().map(|f| f.name.as_str()).collect();
+            (fields, class.methods.clone())
+        };
+        let none: Vec<String> = vec![];
+        assert_eq!(read("user"), (vec!["v"], none.clone()));
+        assert_eq!(read("plain"), (vec![], vec!["v".to_owned(), "g".to_owned()]));
+        assert_eq!(read("importer"), (vec!["v"], none));
     }
 
     /// A module `name` in `dir`, created when missing, whose manifest holds `manifest`.

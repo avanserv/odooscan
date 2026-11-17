@@ -520,44 +520,16 @@ impl Graph {
     /// with a file that does not decode or parse on the way, under `base.maintenance`, which Odoo
     /// maps to `odoo.upgrade`, or under a `tests/` it lacks, as a fetched core drops it.
     pub fn addon_imports(&self, rel: &str, fact: &ImportFact) -> Vec<AddonImport> {
-        let mut found = vec![];
-        if !fact.from {
-            for name in &fact.names {
-                if let Some(Place::In(to, path)) = addon_place(rel, 0, Some(&name.value)) {
-                    found.push(self.addon_import(to, path, name.value.clone(), name.pos, &[]));
-                }
-            }
-            return found;
-        }
-        let module = fact.module.as_deref();
-        let written = format!("{}{}", ".".repeat(fact.level as usize), module.unwrap_or_default());
-        match addon_place(rel, fact.level, module) {
-            Some(Place::In(to, path)) => found.push(self.addon_import(to, path, written, fact.pos, &fact.names)),
-            Some(Place::Addons) => {
-                let sep = if module.is_some() { "." } else { "" };
-                for name in fact.names.iter().filter(|n| n.value != "*") {
-                    let text = format!("{written}{sep}{}", name.value);
-                    found.push(self.addon_import(name.value.clone(), vec![], text, name.pos, &[]));
-                }
-            }
-            None => {}
-        }
-        found
+        let named = named_modules(rel, fact).into_iter();
+        named.map(|n| self.addon_import(n)).collect()
     }
 
-    fn addon_import(
-        &self,
-        to: String,
-        path: Vec<String>,
-        text: String,
-        pos: Pos,
-        names: &[Spanned<String>],
-    ) -> AddonImport {
+    fn addon_import(&self, named: Named) -> AddonImport {
         AddonImport {
-            faults: self.faults(&to, &path, names),
-            addon: to,
-            text,
-            pos,
+            faults: self.faults(&named.addon, &named.path, named.names),
+            addon: named.addon,
+            text: named.text,
+            pos: named.pos,
         }
     }
 
@@ -749,6 +721,66 @@ impl Graph {
             }
         }
     }
+}
+
+/// The addons `fact` of file `rel` imports a module of by its path, its own included.
+pub fn imported_addons(rel: &str, fact: &ImportFact) -> Vec<String> {
+    named_modules(rel, fact).into_iter().map(|n| n.addon).collect()
+}
+
+/// A module of an addon an import names by its path, with the names a `from` imports of it.
+struct Named<'f> {
+    addon: String,
+    path: Vec<String>,
+    /// The module as the import writes it, its leading dots included.
+    text: String,
+    pos: Pos,
+    names: &'f [Spanned<String>],
+}
+
+/// The modules of addons `fact` of file `rel` names by their path.
+fn named_modules<'f>(rel: &str, fact: &'f ImportFact) -> Vec<Named<'f>> {
+    if !fact.from {
+        return fact.names.iter().filter_map(|name| plain_named(rel, name)).collect();
+    }
+    let module = fact.module.as_deref();
+    let written = format!("{}{}", ".".repeat(fact.level as usize), module.unwrap_or_default());
+    match addon_place(rel, fact.level, module) {
+        Some(Place::In(addon, path)) => vec![Named {
+            addon,
+            path,
+            text: written,
+            pos: fact.pos,
+            names: &fact.names,
+        }],
+        Some(Place::Addons) => {
+            let sep = if module.is_some() { "." } else { "" };
+            let names = fact.names.iter().filter(|n| n.value != "*");
+            let named = names.map(|name| Named {
+                addon: name.value.clone(),
+                path: vec![],
+                text: format!("{written}{sep}{}", name.value),
+                pos: name.pos,
+                names: &[],
+            });
+            named.collect()
+        }
+        None => vec![],
+    }
+}
+
+/// The module of an addon a plain `import` of `name` in file `rel` names, if any.
+fn plain_named<'f>(rel: &str, name: &Spanned<String>) -> Option<Named<'f>> {
+    let Some(Place::In(addon, path)) = addon_place(rel, 0, Some(&name.value)) else {
+        return None;
+    };
+    Some(Named {
+        addon,
+        path,
+        text: name.value.clone(),
+        pos: name.pos,
+        names: &[],
+    })
 }
 
 /// What an import names in `odoo.addons`, by its absolute path under `odoo.addons` or
@@ -1288,6 +1320,32 @@ mod tests {
                 row("base", "odoo.addons.base.maintenance.migrations", 12, &[]),
                 row("lib", "odoo.addons.lib.tests.common", 13, &[]),
             ]
+        );
+    }
+
+    #[test]
+    fn an_import_by_path_names_its_addons() {
+        let src = "from odoo.addons.lib.models import Book\nfrom odoo.addons import a, b\n\
+                   import odoo.addons.shop.models, os\nfrom ...far.util import x\nfrom .. import near\n";
+        let named: Vec<Vec<String>> = imports(src)
+            .list
+            .iter()
+            .map(|f| imported_addons("models/x.py", f))
+            .collect();
+        let owned = |names: &[&str]| names.iter().map(|n| (*n).to_owned()).collect::<Vec<_>>();
+        let rows = [
+            owned(&["lib"]),
+            owned(&["a", "b"]),
+            owned(&["shop"]),
+            owned(&["far"]),
+            owned(&[]),
+        ];
+        assert_eq!(named, rows);
+        assert!(
+            imports("import os\n")
+                .list
+                .iter()
+                .all(|f| imported_addons("x.py", f).is_empty())
         );
     }
 

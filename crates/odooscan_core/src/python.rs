@@ -54,7 +54,7 @@ const FIELD_TYPES: &[&str] = &[
 /// The packages whose `fields` module holds the ORM's field classes, by series.
 const ORM_PACKAGES: &[&str] = &["odoo", "openerp"];
 
-/// The field classes a whole scan defines, by class name, each with its field type.
+/// The field classes a module's scope defines, by class name, each with its field type.
 pub type FieldClasses = FxHashMap<String, String>;
 
 /// Recordset methods whose first argument, or `domain`, is a domain on the recordset's model.
@@ -490,7 +490,7 @@ fn proven_type(base: &Expr, class: &str, imported: &[(&str, String)]) -> Option<
     }
 }
 
-/// The field classes of `facts`, those that reach the ORM through other classes of the scan among
+/// The field classes of `facts`, including those that reach the ORM through other classes among
 /// them, which may live in another file or module. A call names its class by name alone, so a name
 /// with two field types tells neither: it gets `UNREAD_TYPE`. A type only ever moves towards that,
 /// so the result does not depend on the order files are read in.

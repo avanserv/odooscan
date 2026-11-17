@@ -1,0 +1,12 @@
+<odoo>
+    <record id="handler_form" model="ir.ui.view">
+        <field name="name">x.plain.handler.form</field>
+        <field name="model">x.plain.handler</field>
+        <field name="arch" type="xml">
+            <form>
+                <button type="object" name="handler" string="Handle"/>
+                <button type="object" name="grid" string="Grid"/>
+            </form>
+        </field>
+    </record>
+</odoo>
