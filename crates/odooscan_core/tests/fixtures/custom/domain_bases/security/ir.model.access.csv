@@ -21,3 +21,9 @@ access_domain_dotted_parent,domain.dotted_parent,model_domain_dotted_parent,base
 access_domain_fieldless,domain.fieldless,model_domain_fieldless,base.group_user,1,0,0,0
 access_domain_holding,domain.holding,model_domain_holding,base.group_user,1,0,0,0
 access_domain_foreign,domain.foreign,model_domain_foreign,base.group_user,1,0,0,0
+access_domain_unread_inherits,domain.unread.inherits,model_domain_unread_inherits,base.group_user,1,0,0,0
+access_domain_unread_flag,domain.unread.flag,model_domain_unread_flag,base.group_user,1,0,0,0
+access_domain_unread_comodel,domain.unread.comodel,model_domain_unread_comodel,base.group_user,1,0,0,0
+access_domain_unread_key,domain.unread.key,model_domain_unread_key,base.group_user,1,0,0,0
+access_domain_unread_above,domain.unread.above,model_domain_unread_above,base.group_user,1,0,0,0
+access_domain_literal_delegate,domain.literal.delegate,model_domain_literal_delegate,base.group_user,1,0,0,0
