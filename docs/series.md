@@ -16,11 +16,11 @@ series, ordered between 9.0 and 10.0. 9.saas~12, 9.saas~13, the SaaS releases of
 a spelling such as `9.10` or `10.1` stay unknown: a module whose version names one gets only the
 rules that carry no range, and both flags refuse them.
 
-The series also decides the model of a class without `_name` whose `_inherit` is a list or tuple,
-which saas~18.1 names after the class as [OD209](rules/OD209.md) describes. A module of unknown
-series reads it as before saas~18.1, and where the two readings differ, the module's models count as
-built at runtime, as with a `_name` given by an expression: a model id that no indexed module
-defines is not reported, [OD201](rules/OD201.md) skips a model no indexed module defines, and
+The series also decides the model of a class without `_name` whose `_inherit` is absent, a list or a
+tuple, which saas~18.1 names after the class as [OD209](rules/OD209.md) describes. A module of
+unknown series reads it as before saas~18.1, and where the two readings differ, the module's models
+count as built at runtime, as with a `_name` given by an expression: a model id that no indexed
+module defines is not reported, [OD201](rules/OD201.md) skips a model no indexed module defines, and
 [OD604](rules/OD604.md) checks no method the module's scripts call.
 
 [OD202](rules/OD202.md) and [OD603](rules/OD603.md) stay silent on a model only a module missing

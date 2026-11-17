@@ -1846,9 +1846,38 @@ fn conditional_methods(stmt: &Stmt, fact: &mut ClassFact) {
     }
 }
 
+/// Whether a statement of a class body binds an attribute that names the class or keeps it out of
+/// the registry where `class_attrs` does not read it: in an `if`, `try` or `with` block, or in a
+/// tuple, list or starred target.
+fn hides_naming(stmt: &Stmt) -> bool {
+    match assigned(stmt) {
+        Some((targets, _)) => targets.iter().filter(|t| !t.is_name_expr()).any(binds_naming),
+        None => module_state::top_level(std::slice::from_ref(stmt))
+            .into_iter()
+            .filter_map(assigned)
+            .flat_map(|(targets, _)| targets)
+            .any(binds_naming),
+    }
+}
+
+fn binds_naming(target: &Expr) -> bool {
+    match target {
+        Expr::Name(n) => matches!(n.id.as_str(), "_name" | "_inherit" | "_register"),
+        Expr::Tuple(t) => t.elts.iter().any(binds_naming),
+        Expr::List(l) => l.elts.iter().any(binds_naming),
+        Expr::Starred(s) => binds_naming(&s.value),
+        _ => false,
+    }
+}
+
 /// The first series that names a class without `_name` after the class, dotted, whenever
 /// `_inherit` is not one string (`saas~18.1`).
 const DOTTED_CLASS_NAME: Series = Series { major: 18, minor: 1 };
+
+/// The first series whose `MetaModel.__new__` names a class without `_name` from its own body.
+/// Before it, `_build_model` reads `_name` and `_inherit` through the bases, so a class on a model
+/// class takes its name from that base's attributes.
+const OWN_BODY_NAMING: Series = Series { major: 14, minor: 4 };
 
 /// The first series whose metaclass makes no fields of `_columns`, which that of 9.0 to 9.saas~11
 /// still does.
@@ -1866,6 +1895,14 @@ struct Naming {
     built_start: Option<String>,
     /// Odoo may register the class, so a name it reads as another model may be built.
     registers: bool,
+    /// A base of the class is an ORM model class and Odoo names the class from its own body, even
+    /// without `_name` or `_inherit`. Before saas~14.4, or in an unknown series, a class whose base
+    /// is a model class of its file takes its name from that base's attributes instead.
+    own_body_names: bool,
+    /// The body binds `_name`, `_inherit` or `_register` where the scan does not read it, or sets
+    /// `_register` to a value only a run tells, which may name the class otherwise or keep it out
+    /// of the registry.
+    hidden_naming: bool,
     inherit: InheritShape,
     /// `_columns` hides a key. Waits here for the name: `_inherit` assigns `inherit_unknown`, in any
     /// order in the class, and the name reads that flag for what `_inherit` lists.
@@ -1876,6 +1913,20 @@ struct Naming {
 }
 
 impl Naming {
+    /// How many entries `_inherit` lists when Odoo names the class from it and the class name, or
+    /// `None` when the class extends the first entry, if any.
+    fn listed(&self, inherit_unknown: bool) -> Option<usize> {
+        match self.inherit {
+            InheritShape::List(count) if count > 0 && !inherit_unknown => Some(count),
+            InheritShape::Absent | InheritShape::List(0) if self.named_after_class() => Some(0),
+            _ => None,
+        }
+    }
+
+    fn named_after_class(&self) -> bool {
+        self.own_body_names && self.registers && !self.hidden_naming
+    }
+
     fn term(&mut self, name: &str, fields: Vec<Spanned<String>>) {
         match self.terms.iter_mut().find(|(n, _)| n == name) {
             Some((_, held)) => *held = fields,
@@ -1884,10 +1935,12 @@ impl Naming {
     }
 }
 
-/// The form of `_inherit`, which decides the name of a class without `_name`.
+/// The form of `_inherit`, which decides the name of a class without `_name`. Odoo reads a class
+/// body without `_inherit` as an empty one.
 #[derive(Clone, Copy, Default)]
 enum InheritShape {
     #[default]
+    Absent,
     Other,
     Str,
     /// A list or tuple, by its element count, literal or not.
@@ -2390,10 +2443,13 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
             self.field_class(class);
             return None;
         }
+        let mut naming = Naming {
+            own_body_names: self.own_body_names(class, kind),
+            ..Naming::default()
+        };
         if let Some(kind) = kind {
             self.kinds.insert(class.name.to_string(), kind);
         }
-        let mut naming = Naming::default();
         let plain_bases: Vec<String> = class
             .bases()
             .iter()
@@ -2409,6 +2465,7 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
             ..ClassFact::new(self.loc.at(&class.name), class.name.to_string())
         };
         for stmt in &class.body {
+            naming.hidden_naming |= hides_naming(stmt);
             if let Some((targets, value)) = assigned(stmt) {
                 self.class_attrs(targets, value, &mut fact, &mut naming);
             } else if let Stmt::FunctionDef(func) = stmt {
@@ -2417,6 +2474,11 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
                 conditional_methods(stmt, &mut fact);
             }
         }
+        // `registered` counts a non-literal `_register` in, which is safe for a class that has a
+        // name but would give one to a class Odoo may leave out of the registry.
+        naming.hidden_naming |= fact
+            .attr("_register")
+            .is_some_and(|r| matches!(r.value, OptionValue::Other));
         for (name, fields) in std::mem::take(&mut naming.terms) {
             match name.as_str() {
                 "_order" | "_fold_name" | "_parent_name" => fact.order_fields.extend(fields),
@@ -2426,6 +2488,19 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
         }
         fact.unassigned_computes = self.unassigned_computes(class, &fact);
         self.named_model(fact, naming, may_reach_orm(class))
+    }
+
+    /// Whether `class`, of `kind`, is an ORM class that Odoo names from its own body: from
+    /// saas~14.4 any, else one with no base that is a model class of the file, whose `_name` and
+    /// `_inherit` it would read.
+    fn own_body_names(&self, class: &ast::StmtClassDef, kind: Option<ModelKind>) -> bool {
+        let own_body = self.series.is_some_and(|s| s >= OWN_BODY_NAMING)
+            || !class
+                .bases()
+                .iter()
+                .filter_map(tail_name)
+                .any(|b| self.kinds.contains_key(b));
+        kind.is_some() && own_body
     }
 
     /// The `plain_bases` of `class` the scan does not read, and the names those it reads bind: the
@@ -2478,13 +2553,15 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
     /// `_inherit` and the class name. An unknown series reads it as before saas~18.1, and a class
     /// that the two readings name apart makes the file's models dynamic. A list with a non-literal
     /// entry hides the name before saas~18.1 and whether the model is new from it, so the class
-    /// extends its first literal entry.
+    /// extends its first literal entry. With no `_inherit`, or an empty one, only a class that
+    /// `Naming::named_after_class` accepts gets the name of the class.
     fn model_name(&mut self, class_name: &str, naming: &Naming, fact: &ClassFact) -> Option<String> {
         let first = || fact.inherit.first().map(|i| i.value.clone());
-        let count = match naming.inherit {
-            _ if naming.named => return naming.name.clone().or_else(first),
-            InheritShape::List(count) if count > 0 && !fact.inherit_unknown => count,
-            _ => return first(),
+        if naming.named {
+            return naming.name.clone().or_else(first);
+        }
+        let Some(count) = naming.listed(fact.inherit_unknown) else {
+            return first();
         };
         let earlier = if count == 1 {
             first()
@@ -5948,7 +6025,27 @@ class U(HttpCase):
                 [&extended, &extended, &extended, &extended],
             ),
             ("    _inherit = [PARENT]", [&None, &None, &None, &None]),
-            ("    _inherit = []", [&None, &None, &None, &None]),
+            (
+                "    _inherit = []",
+                [&verbatim, &derived, &derived, &model("ResPartnerX", true, true)],
+            ),
+            (
+                "    _inherit = ()",
+                [&verbatim, &derived, &derived, &model("ResPartnerX", true, true)],
+            ),
+            (
+                "    pass",
+                [&verbatim, &derived, &derived, &model("ResPartnerX", true, true)],
+            ),
+            (
+                "    wattage = fields.Integer()",
+                [&verbatim, &derived, &derived, &model("ResPartnerX", true, true)],
+            ),
+            ("    _register = False", [&None, &None, &None, &None]),
+            ("    _register = REGISTER", [&None, &None, &None, &None]),
+            ("    if X:\n        _name = 'x'", [&None, &None, &None, &None]),
+            ("    _name, _description = 'x', 'X'", [&None, &None, &None, &None]),
+            ("    [_register] = [False]", [&None, &None, &None, &None]),
             ("    _inherit = PARENTS", [&None, &None, &None, &None]),
             (
                 "    _name = 'x'\n    _inherit = ['a', 'b']",
@@ -5973,6 +6070,32 @@ class U(HttpCase):
                 assert_eq!(&named(body, series), want, "{body} at {series:?}");
             }
         }
+        let plain = analyze("class X(Mixin):\n    _inherit = []\n", Series::parse("18.0"));
+        assert!(plain.classes.is_empty());
+    }
+
+    #[test]
+    fn names_a_class_on_a_model_class_of_its_file_from_saas_14_4() {
+        let src = "class A(models.Model):\n    _name = 'a'\n\nclass B(A):\n    x = fields.Char()\n";
+        let model_of = |src: &str, class: &str, series: Option<&str>| {
+            let facts = analyze(src, series.and_then(Series::parse));
+            facts
+                .classes
+                .iter()
+                .find(|c| c.class_name == class)
+                .map(|c| c.model.clone())
+        };
+        for (series, want) in [
+            (Some("14.0"), None),
+            (Some("saas~14.3"), None),
+            (None, None),
+            (Some("saas~14.4"), Some("B")),
+            (Some("15.0"), Some("B")),
+        ] {
+            assert_eq!(model_of(src, "B", series).as_deref(), want, "{series:?}");
+        }
+        let direct = "class C(models.Model):\n    x = fields.Char()\n";
+        assert_eq!(model_of(direct, "C", Some("14.0")).as_deref(), Some("C"));
     }
 
     #[test]

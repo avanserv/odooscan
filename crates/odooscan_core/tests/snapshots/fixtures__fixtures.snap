@@ -964,6 +964,10 @@ custom/modifiers17/views/jobs.xml:368:47: OD317 invisible reads field 'phase', w
 custom/modifiers17/views/jobs.xml:390:49: OD316 readonly names 'true': modifier.job has no field 'true'
 custom/modifiers17/views/unlisted.xml:1:1: OD502 'views/unlisted.xml' is not in the manifest's data or demo, so Odoo never loads it
 custom/modifiers173/views/tasks.xml:8:47: OD316 invisible names 'active_id': modifier.task has no field 'active_id'
+custom/nameless_models/models/desk_lamp.py:10:7: OD401 model 'DeskShade' has no ir.model.access rule, so only the superuser can use it
+custom/nameless_models/views/desk_lamp_views.xml:8:17: OD304 'lumens': DeskLamp has no field 'lumens'
+custom/nameless_models20/models/desk_lamp.py:10:7: OD209 module base already defines model 'res.partner', and this class replaces it; extend it with _inherit = 'res.partner'
+custom/nameless_models20/views/desk_lamp_views.xml:8:17: OD304 'lumens': desk.lamp has no field 'lumens'
 custom/orm_overrides/models/caches.py:7:21: OD120 'lang' in an ormcache key is not a parameter of _greeting_for(), so every call raises NameError; key on a parameter or on self
 custom/orm_overrides/models/caches.py:11:29: OD120 'country' in an ormcache key is not a parameter of _country_label(), so every call raises NameError; key on a parameter or on self
 custom/orm_overrides/models/caches.py:31:21: OD120 'method' in an ormcache key is not a parameter of _named_by_method(), so every call raises NameError; key on a parameter or on self

@@ -416,6 +416,7 @@ fn access_severity_follows_the_module_series() {
         ("bad_sale", Severity::Warning),
         ("encoded_lost_stranger", Severity::Warning),
         ("modern20", Severity::Info),
+        ("nameless_models", Severity::Warning),
         ("saas132", Severity::Warning),
         ("saas193", Severity::Warning),
         ("saas194", Severity::Info),
