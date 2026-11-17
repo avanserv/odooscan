@@ -664,9 +664,13 @@ pub struct SqlColumn {
     /// The reference as written.
     pub text: String,
     pub pos: Pos,
-    /// The query runs in the `init()` or `_auto_init()` of a model class,
-    /// ahead of its module's data.
+    /// The query runs in a method Odoo calls as it sets up the table of a model class, ahead of
+    /// its module's data: `init()`, `_auto_init()`, `_init_column()` or an `init_storage` method
+    /// as the series reads them, or a method of the class one of those calls.
     pub before_data: bool,
+    /// The module-level function holding the query, also when a function nested in it does, which
+    /// a module's `pre_init_hook` may name.
+    pub function: Option<String>,
 }
 
 /// A class that is no model and has a base, so it may be a field class: Odoo takes any instance of

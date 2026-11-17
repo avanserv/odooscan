@@ -182,6 +182,9 @@ pub struct Manifest {
     pub demo: Vec<Spanned<String>>,
     pub category: Option<String>,
     pub installable: bool,
+    /// The function `pre_init_hook` names, which Odoo runs ahead of the module's Python setup and
+    /// data.
+    pub pre_init_hook: Option<String>,
     pub auto_install: AutoInstall,
     /// The `countries` key lists a name.
     pub countries: bool,
@@ -301,7 +304,7 @@ impl Manifest {
 
     fn set(&mut self, loc: &Source, key: &str, at: Pos, value: &Expr) {
         match key {
-            "version" | "category" | "installable" => self.set_scalar(loc, key, value),
+            "version" | "category" | "installable" | "pre_init_hook" => self.set_scalar(loc, key, value),
             "license" => self.set_license(loc, value),
             "depends" | "data" | "demo" | "init_xml" | "update_xml" | "demo_xml" => self.set_files(loc, key, value),
             "assets" => self.set_assets(loc, value),
@@ -320,6 +323,7 @@ impl Manifest {
                 });
             }
             "category" => self.category = str_lit(value).map(str::to_owned),
+            "pre_init_hook" => self.pre_init_hook = str_lit(value).map(str::to_owned),
             "installable" => self.installable = !matches!(value, Expr::BooleanLiteral(b) if !b.value),
             _ => {}
         }
@@ -1235,6 +1239,14 @@ mod tests {
         assert_eq!(m.unread, ["static/src/xml/a.xml"]);
         assert!(parse(r#"{"qweb": []}"#).unwrap().qweb.is_none());
         assert!(parse("{}").unwrap().qweb.is_none());
+    }
+
+    #[test]
+    fn reads_the_pre_init_hook_when_it_is_a_string() {
+        let hook = |src: &str| parse(src).unwrap().pre_init_hook;
+        assert_eq!(hook("{'pre_init_hook': '_pre_init'}").as_deref(), Some("_pre_init"));
+        assert_eq!(hook("{'pre_init_hook': 3}"), None);
+        assert_eq!(hook("{'post_init_hook': '_post_init'}"), None);
     }
 
     #[test]

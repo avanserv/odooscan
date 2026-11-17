@@ -128,3 +128,23 @@ class DataTicketLeaf(models.Model):
 class DataTicketHelper(http.Controller):
     def init(self):
         self.env.cr.execute("SELECT t.x_column FROM data_ticket t")
+
+
+class DataTicketSetup(models.Model):
+    _inherit = "data.ticket"
+
+    # Odoo runs _init_column and init_storage only on a table that holds rows, as on the
+    # upgrade that adds this field.
+    seeded = fields.Char(init_storage="_init_seeded")
+
+    def init(self):
+        self._x_setup_helper()
+
+    def _x_setup_helper(self):
+        self.env.cr.execute("SELECT t.x_column FROM data_ticket t")
+
+    def _init_seeded(self, records):
+        self.env.cr.execute("SELECT t.x_column FROM data_ticket t")
+
+    def _init_column(self, column_name):
+        self.env.cr.execute("SELECT t.x_column FROM data_ticket t")

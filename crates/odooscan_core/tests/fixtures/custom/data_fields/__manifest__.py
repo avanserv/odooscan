@@ -12,5 +12,7 @@
         "security/rules.xml",
     ],
     "demo": ["demo/views.xml", "demo/fields.xml"],
+    "pre_init_hook": "_x_pre_init",
+    "post_init_hook": "_x_post_init",
     "license": "LGPL-3",
 }

@@ -1566,6 +1566,53 @@ fn field_methods<'f>(fact: &'f ClassFact, option: &str) -> Vec<(&'f str, &'f str
         .collect()
 }
 
+/// The methods a class body defines, each with what it and its closures do with cursors.
+fn class_methods(class: &ast::StmtClassDef) -> Vec<(&ast::StmtFunctionDef, CursorUse<'_>)> {
+    class
+        .body
+        .iter()
+        .filter_map(Stmt::as_function_def_stmt)
+        .map(|f| (f, CursorUse::scan_nested(f)))
+        .collect()
+}
+
+/// The methods of a model class Odoo runs as it sets up the model's table, ahead of the module's
+/// data: `init()` and `_auto_init()`, `_init_column()` in the series whose `update_db` calls it,
+/// and the `init_storage` methods its fields name from 20.0. An unknown series reads neither of the
+/// last two, as which one runs depends on the series.
+fn setup_roots(fact: Option<&ClassFact>, series: Option<Series>) -> Vec<&str> {
+    let mut roots = vec!["init", "_auto_init"];
+    if series.is_some_and(|s| (INIT_COLUMN_START..INIT_STORAGE_START).contains(&s)) {
+        roots.push("_init_column");
+    }
+    if let Some(fact) = fact.filter(|_| series.is_some_and(|s| s >= INIT_STORAGE_START)) {
+        roots.extend(
+            field_methods(fact, "init_storage")
+                .into_iter()
+                .map(|(method, _)| method),
+        );
+    }
+    roots
+}
+
+/// The names of `roots` and of every method of the class they call on `self`, directly or through
+/// one another.
+fn setup_methods<'ast>(
+    methods: &[(&'ast ast::StmtFunctionDef, CursorUse<'ast>)],
+    roots: &[&str],
+) -> FxHashSet<&'ast str> {
+    let mut found: FxHashSet<&str> = FxHashSet::default();
+    let mut pending: Vec<&str> = roots.to_vec();
+    while let Some(name) = pending.pop() {
+        for (func, uses) in methods.iter().filter(|(f, _)| f.name.as_str() == name) {
+            if found.insert(func.name.as_str()) {
+                pending.extend(&uses.own_methods);
+            }
+        }
+    }
+    found
+}
+
 /// The table of the model a class defines or extends, unless `_table` is set to something other
 /// than a literal.
 fn model_table(fact: &ClassFact) -> Option<String> {
@@ -1596,6 +1643,17 @@ fn stores_inverse(write: &Write, table: Option<&str>, fields: &[&str]) -> bool {
             .columns
             .as_ref()
             .is_some_and(|columns| columns.iter().all(|c| fields.contains(&c.as_str())))
+}
+
+/// What the visitor held before it entered a function, which it restores once it leaves.
+struct FunctionState<'ast> {
+    outermost: bool,
+    names: FxHashMap<&'ast str, Held>,
+    in_view_maker: bool,
+    before_data: bool,
+    in_user_setter: bool,
+    change_check: Option<ChangeCheck<'ast>>,
+    skip: usize,
 }
 
 /// A class of a file that does not parse, as far as its tokens name its model.
@@ -2268,6 +2326,13 @@ const OWN_BODY_NAMING: Series = Series { major: 14, minor: 4 };
 /// still does.
 const COLUMNS_END: Series = Series { major: 10, minor: 0 };
 
+/// The first series whose `update_db` fills a new column through `_init_column()` (9.saas~10).
+const INIT_COLUMN_START: Series = Series { major: 9, minor: 10 };
+
+/// The first series that fills a new column through the field's `init_storage` method and calls
+/// `_init_column()` no more (20.0, not saas~19.4).
+const INIT_STORAGE_START: Series = Series { major: 20, minor: 0 };
+
 /// What a class body says that waits until the whole body is read: the name of its model and the
 /// fields its term attributes name.
 #[derive(Default)]
@@ -2717,9 +2782,10 @@ struct PyVisitor<'a, 'ast> {
     /// Where the fact of each enclosing class sits in `facts.classes`, None for a class that is no
     /// model.
     class_facts: Vec<Option<usize>>,
-    /// Whether each enclosing class is or extends a model: it has an ORM base, whose model a
-    /// `_name` or `_inherit` that is no literal hides, or it names its model.
-    model_classes: Vec<bool>,
+    /// The methods of each enclosing class that Odoo runs ahead of the module's data
+    /// (`setup_methods`), none for a class that is no model. A model class has an ORM base, whose
+    /// model a `_name` or `_inherit` that is no literal hides, or it names its model.
+    setup_methods: Vec<FxHashSet<&'ast str>>,
     /// What `self` is in a method of each enclosing class, none for an enclosing function.
     owners: Vec<Option<Receiver>>,
     /// Where the outermost enclosing class starts, which the routing table knows it by.
@@ -2735,9 +2801,10 @@ struct PyVisitor<'a, 'ast> {
     /// Whether the code is in the `init()` or `_auto_init()` of a class, which creates the view of
     /// the model the class is or is mixed into.
     in_view_maker: bool,
-    /// Whether the code is in the `init()` or `_auto_init()` of a model class, or nested in one,
-    /// which Odoo runs ahead of the module's data.
+    /// Whether the code is in a method of `setup_methods`, or nested in one.
     before_data: bool,
+    /// The module-level function the code is in, nested functions included.
+    module_function: Option<&'ast str>,
     /// Whether the code is in an `_auth_method_*()`, which sets the user of a request by design, or
     /// in an override of `update_env()`, which passes on the user its caller gives.
     in_user_setter: bool,
@@ -2789,7 +2856,7 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
             holders: GuardHolders::default(),
             class_models: vec![],
             class_facts: vec![],
-            model_classes: vec![],
+            setup_methods: vec![],
             owners: vec![],
             class_start: None,
             query_vars: None,
@@ -2798,6 +2865,7 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
             cursor_uses: vec![],
             in_view_maker: false,
             before_data: false,
+            module_function: None,
             in_user_setter: false,
             change_check: None,
             import_shims: 0,
@@ -4317,6 +4385,7 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
                 text: column.text,
                 pos,
                 before_data: self.before_data,
+                function: self.module_function.map(str::to_owned),
             });
         }
     }
@@ -4411,13 +4480,7 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
 
     /// OD122 on each literal write statement a method of the class runs without invalidating the
     /// cache itself or through another method of the class.
-    fn sql_write_checks(&mut self, class: &ast::StmtClassDef, fact: Option<&ClassFact>) {
-        let methods: Vec<(&ast::StmtFunctionDef, CursorUse)> = class
-            .body
-            .iter()
-            .filter_map(Stmt::as_function_def_stmt)
-            .map(|f| (f, CursorUse::scan_nested(f)))
-            .collect();
+    fn sql_write_checks(&mut self, methods: &[(&ast::StmtFunctionDef, CursorUse)], fact: Option<&ClassFact>) {
         let invalidating: Vec<&str> = methods
             .iter()
             .filter(|(_, uses)| uses.invalidates)
@@ -4426,7 +4489,7 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
         let storage = fact.map(|f| field_methods(f, "init_storage")).unwrap_or_default();
         let inverses = fact.map(|f| field_methods(f, "inverse")).unwrap_or_default();
         let table = fact.and_then(model_table);
-        for (func, uses) in &methods {
+        for (func, uses) in methods {
             if cache_free(func, &storage)
                 || uses.invalidates
                 || uses.own_methods.iter().any(|m| invalidating.contains(m))
@@ -4508,34 +4571,57 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
         }
     }
 
+    fn visit_class(&mut self, class: &'ast ast::StmtClassDef, stmt: &'ast Stmt) {
+        let orm = model_kind(class, &self.kinds).is_some();
+        let fact = self.class_fact(class);
+        let methods = class_methods(class);
+        self.sql_write_checks(&methods, fact.as_ref());
+        let setup = if orm || fact.is_some() {
+            setup_methods(&methods, &setup_roots(fact.as_ref(), self.series))
+        } else {
+            FxHashSet::default()
+        };
+        let model = fact
+            .as_ref()
+            .filter(|f| f.kind != ModelKind::Abstract)
+            .map(|f| f.model.clone());
+        let owner = match &fact {
+            Some(f) => Receiver::Model(f.model.clone()),
+            None => Receiver::Class(class.name.to_string()),
+        };
+        let class_start = self.class_start;
+        self.class_start = class_start.or(Some(class.start()));
+        self.owners.push(Some(owner));
+        self.class_facts
+            .push(fact.is_some().then_some(self.facts.classes.len()));
+        self.setup_methods.push(setup);
+        self.facts.classes.extend(fact);
+        self.class_models.push(model);
+        self.self_cursors.push(self_cursor(class));
+        let attrs = std::mem::replace(&mut self.holders.attrs, GuardHolders::attrs_of(class));
+        let skip = usize::from(class.decorator_list.iter().any(always_skips));
+        self.skipped += skip;
+        visitor::walk_stmt(self, stmt);
+        self.skipped -= skip;
+        self.holders.attrs = attrs;
+        self.self_cursors.pop();
+        self.class_models.pop();
+        self.setup_methods.pop();
+        self.class_facts.pop();
+        self.owners.pop();
+        self.class_start = class_start;
+    }
+
     fn visit_function(&mut self, func: &'ast ast::StmtFunctionDef, stmt: &'ast Stmt) {
         let routing = self.routing(func);
         self.route_checks(func, routing.as_ref());
         let uses = CursorUse::scan(func, self.cursor_uses.last());
         self.rollback_checks(func, &uses);
         self.flows(func, routing.as_ref());
-        let outermost = self.query_vars.is_none();
-        if outermost {
-            self.query_vars = Some(QueryVars::of(func));
-        }
-        let names = self.holders.names.clone();
-        if outermost {
-            self.holders.names.clear();
-        }
-        let in_class = matches!(self.owners.last(), Some(Some(_)));
-        let maker = in_class && matches!(func.name.as_str(), "init" | "_auto_init");
-        let in_view_maker = self.in_view_maker;
-        self.in_view_maker |= maker;
-        let before_data = self.before_data;
-        self.before_data |= maker && self.model_classes.last() == Some(&true);
         self.auth_method_override(func);
-        let in_user_setter = self.in_user_setter;
-        self.in_user_setter |= func.name.starts_with("_auth_method_") || func.name.as_str() == "update_env";
         let model = matches!(self.owners.last(), Some(Some(Receiver::Model(_))));
         self.facts.diags.extend(orm_queries::check(func, model, self.loc));
-        let change_check = std::mem::replace(&mut self.change_check, checks_change(func).filter(|_| model));
-        let skip = usize::from(func.decorator_list.iter().any(always_skips));
-        self.skipped += skip;
+        let saved = self.enter_function(func, model);
         self.owners.push(None);
         self.cursor_uses.push(uses);
         self.deferred += 1;
@@ -4543,13 +4629,53 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
         self.deferred -= 1;
         self.cursor_uses.pop();
         self.owners.pop();
-        self.skipped -= skip;
-        self.in_view_maker = in_view_maker;
-        self.before_data = before_data;
-        self.in_user_setter = in_user_setter;
-        self.change_check = change_check;
-        self.holders.names = names;
-        if outermost {
+        self.leave_function(saved);
+    }
+
+    /// Sets what holds in the body of `func`, a method of a model class when `model`, and returns
+    /// what held before, for `leave_function`.
+    fn enter_function(&mut self, func: &'ast ast::StmtFunctionDef, model: bool) -> FunctionState<'ast> {
+        let outermost = self.query_vars.is_none();
+        let names = if outermost {
+            self.query_vars = Some(QueryVars::of(func));
+            std::mem::take(&mut self.holders.names)
+        } else {
+            self.holders.names.clone()
+        };
+        let name = func.name.as_str();
+        let in_class = matches!(self.owners.last(), Some(Some(_)));
+        if self.owners.is_empty() {
+            self.module_function = Some(name);
+        }
+        let skip = usize::from(func.decorator_list.iter().any(always_skips));
+        self.skipped += skip;
+        let saved = FunctionState {
+            outermost,
+            names,
+            in_view_maker: self.in_view_maker,
+            before_data: self.before_data,
+            in_user_setter: self.in_user_setter,
+            change_check: std::mem::replace(&mut self.change_check, checks_change(func).filter(|_| model)),
+            skip,
+        };
+        self.in_view_maker |= in_class && matches!(name, "init" | "_auto_init");
+        self.before_data |= in_class && self.setup_methods.last().is_some_and(|set| set.contains(name));
+        self.in_user_setter |= name.starts_with("_auth_method_") || name == "update_env";
+        saved
+    }
+
+    /// Restores what `enter_function` changed, once the visitor has left the function's body.
+    fn leave_function(&mut self, saved: FunctionState<'ast>) {
+        if self.owners.is_empty() {
+            self.module_function = None;
+        }
+        self.skipped -= saved.skip;
+        self.in_view_maker = saved.in_view_maker;
+        self.before_data = saved.before_data;
+        self.in_user_setter = saved.in_user_setter;
+        self.change_check = saved.change_check;
+        self.holders.names = saved.names;
+        if saved.outermost {
             self.query_vars = None;
         }
     }
@@ -4616,41 +4742,7 @@ impl<'ast> Visitor<'ast> for PyVisitor<'_, 'ast> {
 
     fn visit_stmt(&mut self, stmt: &'ast Stmt) {
         match stmt {
-            Stmt::ClassDef(class) => {
-                let orm = model_kind(class, &self.kinds).is_some();
-                let fact = self.class_fact(class);
-                self.sql_write_checks(class, fact.as_ref());
-                let model = fact
-                    .as_ref()
-                    .filter(|f| f.kind != ModelKind::Abstract)
-                    .map(|f| f.model.clone());
-                let owner = match &fact {
-                    Some(f) => Receiver::Model(f.model.clone()),
-                    None => Receiver::Class(class.name.to_string()),
-                };
-                let class_start = self.class_start;
-                self.class_start = class_start.or(Some(class.start()));
-                self.owners.push(Some(owner));
-                self.class_facts
-                    .push(fact.is_some().then_some(self.facts.classes.len()));
-                self.model_classes.push(orm || fact.is_some());
-                self.facts.classes.extend(fact);
-                self.class_models.push(model);
-                self.self_cursors.push(self_cursor(class));
-                let attrs = std::mem::replace(&mut self.holders.attrs, GuardHolders::attrs_of(class));
-                let skip = usize::from(class.decorator_list.iter().any(always_skips));
-                self.skipped += skip;
-                visitor::walk_stmt(self, stmt);
-                self.skipped -= skip;
-                self.holders.attrs = attrs;
-                self.self_cursors.pop();
-                self.class_models.pop();
-                self.model_classes.pop();
-                self.class_facts.pop();
-                self.owners.pop();
-                self.class_start = class_start;
-                return;
-            }
+            Stmt::ClassDef(class) => return self.visit_class(class, stmt),
             Stmt::FunctionDef(func) => return self.visit_function(func, stmt),
             Stmt::If(i) => {
                 return self.branches(
@@ -7122,6 +7214,135 @@ class U(HttpCase):
             .map(|c| (c.column.as_str(), c.before_data))
             .collect();
         assert_eq!(found, [("v", true), ("w", true)]);
+    }
+
+    /// Whether each query of `src` runs ahead of the data, by its column, in a module of `series`.
+    fn before_data(src: &str, series: Option<&str>) -> Vec<(String, bool)> {
+        let facts = analyze(src, series.and_then(Series::parse));
+        facts
+            .sql_columns
+            .into_iter()
+            .map(|c| (c.column, c.before_data))
+            .collect()
+    }
+
+    const SETUP_SRC: &str = "\
+from odoo import fields, models
+
+class X(models.Model):
+    _inherit = 'x'
+    seeded = fields.Char(init_storage='_init_seeded')
+
+    def init(self):
+        self._helper()
+
+    def _helper(self):
+        self.env.cr.execute('SELECT a.helper FROM t a')
+        self._inner()
+
+    def _inner(self):
+        self.env.cr.execute('SELECT a.inner FROM t a')
+
+    def _init_column(self, name):
+        self.env.cr.execute('SELECT a.column FROM t a')
+
+    def _init_seeded(self, records):
+        self.env.cr.execute('SELECT a.storage FROM t a')
+
+    def _uncalled(self):
+        self.env.cr.execute('SELECT a.uncalled FROM t a')
+
+class P:
+    def init(self):
+        self._plain()
+
+    def _plain(self):
+        self.env.cr.execute('SELECT a.plain FROM t a')
+";
+
+    #[test]
+    fn marks_the_methods_odoo_runs_as_it_sets_up_a_table_as_ahead_of_the_data() {
+        let expect = |column: bool, storage: bool| {
+            [
+                ("helper", true),
+                ("inner", true),
+                ("column", column),
+                ("storage", storage),
+                ("uncalled", false),
+                ("plain", false),
+            ]
+            .map(|(c, b)| (c.to_owned(), b))
+        };
+        assert_eq!(before_data(SETUP_SRC, Some("20.0")), expect(false, true));
+        assert_eq!(before_data(SETUP_SRC, Some("saas~19.4")), expect(true, false));
+        assert_eq!(before_data(SETUP_SRC, Some("18.0")), expect(true, false));
+        assert_eq!(before_data(SETUP_SRC, Some("9.0")), expect(false, false));
+    }
+
+    #[test]
+    fn reads_neither_init_column_nor_init_storage_as_ahead_of_the_data_without_a_series() {
+        let found = before_data(SETUP_SRC, None);
+        let ahead: Vec<&str> = found.iter().filter(|(_, b)| *b).map(|(c, _)| c.as_str()).collect();
+        assert_eq!(ahead, ["helper", "inner"]);
+    }
+
+    #[test]
+    fn follows_the_helpers_of_auto_init_through_a_call_cycle() {
+        let src = "\
+from odoo import models
+
+class X(models.Model):
+    _inherit = 'x'
+
+    def _auto_init(self):
+        self._a()
+
+    def _a(self):
+        self.env.cr.execute('SELECT a.first FROM t a')
+        self._b()
+
+    def _b(self):
+        self.env.cr.execute('SELECT a.second FROM t a')
+        self._a()
+";
+        let ahead = [("first".to_owned(), true), ("second".to_owned(), true)];
+        assert_eq!(before_data(src, Some("18.0")), ahead);
+    }
+
+    #[test]
+    fn names_the_module_level_function_holding_a_query() {
+        let src = "\
+from odoo import models
+
+def _pre_init(env):
+    env.cr.execute('SELECT a.top FROM t a')
+
+    def nested():
+        env.cr.execute('SELECT a.nested FROM t a')
+
+class X(models.Model):
+    _inherit = 'x'
+
+    def _pre_init(self):
+        self.env.cr.execute('SELECT a.method FROM t a')
+
+env.cr.execute('SELECT a.module FROM t a')
+";
+        let facts = analyze(src, None);
+        let found: Vec<_> = facts
+            .sql_columns
+            .iter()
+            .map(|c| (c.column.as_str(), c.function.as_deref()))
+            .collect();
+        assert_eq!(
+            found,
+            [
+                ("top", Some("_pre_init")),
+                ("nested", Some("_pre_init")),
+                ("method", None),
+                ("module", None)
+            ]
+        );
     }
 
     /// The table and column of each query column a source reads, in order.
