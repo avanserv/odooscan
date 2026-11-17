@@ -246,11 +246,13 @@ pub struct ClassFact {
     /// A method of the class creates a view whose whole name is `self._table`, the model's own.
     pub own_view: bool,
     /// The columns each literal definition of `_sql_constraints`, or of a call of `Constraint`,
-    /// `Index` or `UniqueIndex` such as `models.Index(...)`, names.
+    /// `Index` or `UniqueIndex` such as `models.Index(...)`, names, and each keyed definition that
+    /// names none or cannot be read.
     pub definitions: Vec<Definition>,
 }
 
-/// A column a literal constraint or index definition names, or a keyed definition that names none.
+/// A column a literal constraint or index definition names, or a keyed definition that names none
+/// or cannot be read.
 #[derive(Debug)]
 pub struct Definition {
     pub source: DefinitionSource,
@@ -259,8 +261,8 @@ pub struct Definition {
     pub key: Option<String>,
     /// Where the definition sits, which orders two of one class.
     pub at: Pos,
-    /// None for a keyed definition naming no column, such as `CHECK (TRUE)`, which still replaces
-    /// a definition of its key.
+    /// None for a keyed definition naming no column, such as `CHECK (TRUE)`, or one the scan cannot
+    /// read, such as a lambda or a `%` format; either still replaces a definition of its key.
     pub column: Option<Spanned<String>>,
 }
 

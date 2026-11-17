@@ -117,3 +117,13 @@ class ShelfPile(models.Model):
     _parent_store = False
 
     up_id = fields.Many2one("shelf.pile")
+
+
+class ShelfTote(models.Model):
+    _name = "shelf.tote"
+    _description = "Shelf tote"
+    _inherit = ["shelf.code.mixin"]
+
+    _code_index = models.Index(lambda registry: "(name)")
+
+    name = fields.Char()

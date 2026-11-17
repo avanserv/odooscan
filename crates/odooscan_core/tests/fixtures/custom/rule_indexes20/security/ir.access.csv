@@ -14,3 +14,4 @@ access_lane_tree,Lanes under mine,model_shelf_lane,base.group_user,r,"['|', ('up
 access_stack_tree,Stacks under mine,model_shelf_stack,base.group_user,r,"['|', ('up_id', 'child_of', [1]), ('parent_id', 'child_of', [1])]"
 access_pile_tree,Piles under mine,model_shelf_pile,base.group_user,r,"[('up_id', 'child_of', [1])]"
 access_box_company,Boxes of my companies,model_shelf_box,base.group_user,r,"[('company_id', 'parent_of', company_ids)]"
+access_tote_code,Totes by code,model_shelf_tote,base.group_user,r,"[('code', '=', 'a')]"

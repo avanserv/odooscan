@@ -2721,7 +2721,8 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
     }
 
     /// The columns a literal constraint or index definition names, each where the source spells it,
-    /// or the definition alone when it has a key and names none.
+    /// or the definition alone when it has a key and names none or cannot be read, such as a lambda
+    /// or a `%` format: either still replaces a definition of its key.
     fn definition(
         &self,
         source: DefinitionSource,
@@ -2730,9 +2731,9 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
         definition: &Expr,
         fact: &mut ClassFact,
     ) {
-        let Some(columns) = str_lit(definition).and_then(sql::definition_columns) else {
-            return;
-        };
+        let columns = str_lit(definition)
+            .and_then(sql::definition_columns)
+            .unwrap_or_default();
         if columns.is_empty() && key.is_some() {
             fact.definitions.push(Definition {
                 source,
@@ -6405,7 +6406,7 @@ class U(HttpCase):
     }
 
     #[test]
-    fn reads_the_columns_of_literal_definitions_by_source() {
+    fn reads_the_columns_of_definitions_by_source() {
         let src = "class X(models.Model):\n    _name = 'x'\n    \
                    _sql_constraints = [\n        ('a_uniq', 'unique(a)', 'A is unique'),\n        \
                    ('b_check', 'CHECK (b > %s)' % LIMIT, 'B is large'),\n        ('c_check', \"CHECK(c\\n > 0)\", ''),\n    ]\n    \
@@ -6413,32 +6414,39 @@ class U(HttpCase):
                    _f_check = models.Constraint('CHECK (f > 0)', 'F is positive')\n    \
                    _g_index = models.Index(lambda registry: '(g)')\n    _h_index = Index('(h)')\n    \
                    _t_check = models.Constraint('CHECK (TRUE)')\n";
+        let found = |facts: &PyFacts| -> Vec<String> {
+            facts.classes[0]
+                .definitions
+                .iter()
+                .map(|d| {
+                    let key = d.key.as_deref().unwrap_or("?");
+                    let column = d.column.as_ref().map_or_else(
+                        || "-".to_owned(),
+                        |c| format!("{}:{}:{}", c.value, c.pos.line, c.pos.col),
+                    );
+                    format!("{:?} {key} {} {column}", d.source, d.at.line)
+                })
+                .collect()
+        };
         let facts = analyze(src, None);
-        let found: Vec<String> = facts.classes[0]
-            .definitions
-            .iter()
-            .map(|d| {
-                let key = d.key.as_deref().unwrap_or("?");
-                let column = d.column.as_ref().map_or_else(
-                    || "-".to_owned(),
-                    |c| format!("{}:{}:{}", c.value, c.pos.line, c.pos.col),
-                );
-                format!("{:?} {key} {} {column}", d.source, d.at.line)
-            })
-            .collect();
         assert_eq!(
-            found,
+            found(&facts),
             [
                 "SqlConstraints a_uniq 4 a:4:28",
+                "SqlConstraints b_check 5 -",
                 "SqlConstraints c_check 6 c:6:21",
                 "TableObject _d_uniq 8 d:8:36",
                 "TableObject _d_uniq 8 e:8:45",
                 "TableObject _f_check 9 f:9:42",
+                "TableObject _g_index 10 -",
                 "TableObject _h_index 11 h:11:24",
                 "TableObject _t_check 12 -",
             ]
         );
         assert!(facts.classes[0].fields.is_empty());
+        let unread = "class X(models.Model):\n    _name = 'x'\n    _sql_constraints = [\n        \
+                      (KEY, 'check(x > %s)' % N, ''),\n        ('k', 'check(x > %s)', ''),\n    ]\n";
+        assert_eq!(found(&analyze(unread, None)), ["SqlConstraints k 5 -"]);
     }
 
     #[test]

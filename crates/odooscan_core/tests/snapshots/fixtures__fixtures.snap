@@ -1396,6 +1396,7 @@ custom/rule_indexes/security/rules.xml:122:36: OD407 desk.badge.holder_id has no
 custom/rule_indexes/security/rules.xml:127:36: OD407 desk.pass.badge has no index, yet record rule rule_indexes.rule_pass_badge filters reads of desk.pass on it; add index=True to the field
 custom/rule_indexes/security/rules.xml:132:36: OD407 desk.card.badge has no index, yet record rule rule_indexes.rule_card_badge filters reads of desk.card on it; add index=True to the field
 custom/rule_indexes/security/rules.xml:142:36: OD407 desk.case.company_id has no index, yet record rule rule_indexes.rule_case_company filters reads of desk.case on it; add index=True to the field
+custom/rule_indexes/security/rules.xml:147:36: OD407 desk.visa.badge has no index, yet record rule rule_indexes.rule_visa_unread_override_replaces filters reads of desk.visa on it; add index=True to the field
 custom/rule_indexes20/security/ir.access.csv:2:1: OD407 shelf.bin.zone has no index, yet ir.access record rule_indexes20.access_bin_zone filters reads of shelf.bin on it; add index=True to the field
 custom/rule_indexes20/security/ir.access.csv:8:1: OD407 shelf.rack.twin_id has no index, yet ir.access record rule_indexes20.access_rack_tree filters reads of shelf.rack on it; add index=True to the field
 custom/rule_indexes20/security/ir.access.csv:10:1: OD407 shelf.bay.parent_id has no index, yet ir.access record rule_indexes20.access_bay_tree filters reads of shelf.bay on it; add index=True to the field
@@ -1404,6 +1405,7 @@ custom/rule_indexes20/security/ir.access.csv:13:1: OD407 shelf.lane.parent_id ha
 custom/rule_indexes20/security/ir.access.csv:14:1: OD407 shelf.stack.up_id has no index, yet ir.access record rule_indexes20.access_stack_tree filters reads of shelf.stack on it; add index=True to the field
 custom/rule_indexes20/security/ir.access.csv:15:1: OD407 shelf.pile.up_id has no index, yet ir.access record rule_indexes20.access_pile_tree filters reads of shelf.pile on it; add index=True to the field
 custom/rule_indexes20/security/ir.access.csv:16:1: OD407 shelf.box.company_id has no index, yet ir.access record rule_indexes20.access_box_company filters reads of shelf.box on it; add index=True to the field
+custom/rule_indexes20/security/ir.access.csv:17:1: OD407 shelf.tote.code has no index, yet ir.access record rule_indexes20.access_tote_code filters reads of shelf.tote on it; add index=True to the field
 custom/saas124/views/actions.xml:5:33: OD318 saas124.plain has no field activity_ids, which the activity view searches; inherit mail.activity.mixin
 custom/saas124/views/actions.xml:11:33: OD318 saas124.tracked has no primary activity view, and nothing generates one
 custom/saas125/models/res_partner.py:7:68: OD222 'home_country_id' has check_company=True, but res.country has no company_id field to check; remove check_company
