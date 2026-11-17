@@ -2029,15 +2029,22 @@ impl<'m> Ctx<'_, 'm> {
     /// add it. Nothing explains a field found there that is not relational.
     fn may_hide(&self, e: &PathError<'_>) -> bool {
         let unseen = match e {
-            PathError::Missing { model, .. } => {
-                self.built_here(model)
-                    || self.index.hidden_field_parents(model, self.scope)
-                    || self.index.unread_delegate(model, self.scope)
-            }
+            PathError::Missing { model, .. } => self.may_lack(model),
             PathError::Hidden { model, .. } => self.built_here(model),
             PathError::NotRelational { .. } => false,
         };
         unseen || self.lost_field(e) || self.may_supply(e)
+    }
+
+    /// Whether `model` may hold a field it lacks: this module builds it at runtime, or a parent the
+    /// scan cannot read may give it the field. For a model only modules outside the scope define,
+    /// any class of it, its parents or `base` in any indexed module is judged, since any may be
+    /// installed.
+    fn may_lack(&self, model: &str) -> bool {
+        self.built_here(model)
+            || self.index.hidden_field_parents(model, self.scope)
+            || self.index.unread_delegate(model, self.scope)
+            || self.index.hidden_outside(model, self.scope)
     }
 
     /// Whether a data file the scan cannot read may add the field a path lacks. A dependency's file
