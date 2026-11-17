@@ -1611,7 +1611,7 @@ impl<'a> Reach<'a> {
         let mut dependents: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
         for (file, importer) in graph.elsewhere(name) {
             match index.by_name.get(importer) {
-                Some(&d) if index.reaches(d, mi) && !index.reaches(mi, d) => {
+                Some(&d) if index.loads_after(d, mi) && !index.loads_after(mi, d) => {
                     dependents.entry(importer).or_default().push(file);
                 }
                 _ => starts.push(file),
@@ -5414,14 +5414,14 @@ impl<'m> Ctx<'_, 'm> {
     /// Whether the registry certainly merges what module `a.0`'s class `a.1` gives `model` at `a.2`
     /// before what `b` gives. The classes of `model` come after those of the models they inherit,
     /// unless one of them lists another model before its own in `_inherit`, which puts that model
-    /// after the classes loaded before it. Among them, a dependency's come first, then in each
-    /// module the class that introduces the model, then the others of one file in order; files load
-    /// in the order of the imports, which is not indexed.
+    /// after the classes loaded before it. Among them, `base`'s and a dependency's come first, then
+    /// in each module the class that introduces the model, then the others of one file in order;
+    /// files load in the order of the imports, which is not indexed.
     fn merges_before(&self, model: &str, a: (usize, &ClassFact, Pos), b: (usize, &ClassFact, Pos)) -> bool {
         match (a.1.model == model, b.1.model == model) {
             (_, false) => false,
             (false, true) => !self.inherits_ahead(model),
-            _ if a.0 != b.0 => self.index.reaches(b.0, a.0) && !self.index.reaches(a.0, b.0),
+            _ if a.0 != b.0 => self.index.loads_after(b.0, a.0) && !self.index.loads_after(a.0, b.0),
             _ if a.1.new_model != b.1.new_model => a.1.new_model,
             _ => self.in_one_file(a.0, a.1, b.1) && a.2 < b.2,
         }
