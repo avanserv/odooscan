@@ -1,0 +1,5 @@
+id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
+access_unread_forms_annotated,Unread annotated,model_unread_forms_annotated,base.group_user,1,1,1,1
+access_unread_forms_chained,Unread chained,model_unread_forms_chained,base.group_user,1,1,1,1
+access_unread_forms_line,Unread line,model_unread_forms_line,base.group_user,1,1,1,1
+access_unread_forms_meta,Unread meta,model_unread_forms_meta,base.group_user,1,1,1,1

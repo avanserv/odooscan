@@ -1,0 +1,38 @@
+<odoo>
+    <record id="unread_forms_annotated_view_form" model="ir.ui.view">
+        <field name="name">unread.forms.annotated.form</field>
+        <field name="model">unread.forms.annotated</field>
+        <field name="arch" type="xml">
+            <form>
+                <field name="note"/>
+            </form>
+        </field>
+    </record>
+    <record id="unread_forms_chained_view_form" model="ir.ui.view">
+        <field name="name">unread.forms.chained.form</field>
+        <field name="model">unread.forms.chained</field>
+        <field name="arch" type="xml">
+            <form>
+                <field name="note"/>
+            </form>
+        </field>
+    </record>
+    <record id="unread_forms_line_view_form" model="ir.ui.view">
+        <field name="name">unread.forms.line.form</field>
+        <field name="model">unread.forms.line</field>
+        <field name="arch" type="xml">
+            <form>
+                <field name="display_name"/>
+            </form>
+        </field>
+    </record>
+    <record id="unread_forms_meta_view_form" model="ir.ui.view">
+        <field name="name">unread.forms.meta.form</field>
+        <field name="model">unread.forms.meta</field>
+        <field name="arch" type="xml">
+            <form>
+                <field name="note"/>
+            </form>
+        </field>
+    </record>
+</odoo>
