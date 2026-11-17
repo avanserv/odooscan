@@ -3343,8 +3343,10 @@ impl<'m> Index<'m> {
     /// Whether a class of the chain of `model` has a non-literal `_inherit` element or one of the
     /// `bases` the scan does not read. Unlike `hidden_parents`, a Python base defined above the class
     /// in its file that is another class of the chain counts as read: mixins subclass each other
-    /// along their `_inherit`, and Odoo merges that class's fields either way. Every chain holds
-    /// `base`, so its classes prove nothing.
+    /// along their `_inherit`, and Odoo merges that class's fields either way. A class of `base`
+    /// counts too: Odoo appends `base` to the parents of every other model (18.0
+    /// `odoo/models.py:732-736`, 20.0 `odoo/orm/model_classes.py:179-183`), so its fields and
+    /// methods reach the model whether or not it is a Python base.
     fn unread_bases(
         &self,
         model: &str,
@@ -3354,9 +3356,8 @@ impl<'m> Index<'m> {
     ) -> bool {
         let chain = self.chain(model, Some(scope), delegated);
         let read = |mi: usize, class: &ClassFact, base: &str| {
-            self.class_above(mi, class, base).is_some_and(|above| {
-                above.model != "base" && chain.iter().any(|(_, other)| std::ptr::eq(*other, above))
-            })
+            self.class_above(mi, class, base)
+                .is_some_and(|above| chain.iter().any(|(_, other)| std::ptr::eq(*other, above)))
         };
         chain
             .iter()
@@ -5940,5 +5941,32 @@ Order.components.Card = null;
             index.js_resolve("x/static/tests/a.js", "@old/../tests/kit"),
             JsSpec::Missing(2)
         ));
+    }
+
+    #[test]
+    fn a_class_of_base_above_in_the_file_is_a_read_parent() {
+        let manifest = |depends: &str| format!("{{'version': '18.0.1.0', 'depends': [{depends}]}}");
+        let mut modules = [module("base", &manifest("")), module("main", &manifest("'base'"))];
+        modules[0]
+            .python
+            .push(python_18("class B(models.Model):\n    _name = 'base'\n"));
+        modules[1].python.push(python_18(
+            "from odoo.addons.other.models import Imported\n\n\
+             class Base(models.AbstractModel):\n    _inherit = 'base'\n\n\
+             class Base(Base):\n    _inherit = 'base'\n\n\
+             class Local(models.Model, Base):\n    _name = 'main.local'\n\n\
+             class Plain(models.Model):\n    _name = 'main.plain'\n\n\
+             class Foreign(models.Model, Imported):\n    _name = 'main.foreign'\n",
+        ));
+        let index = Index::build(&modules, None);
+        let main = index.by_name["main"];
+        let scope = index.scope(main);
+        for model in ["main.local", "main.plain"] {
+            assert!(!index.hidden_field_parents(model, &scope), "{model}");
+            assert!(!index.hidden_method_parents(model, &scope), "{model}");
+        }
+        assert!(index.hidden_field_parents("main.foreign", &scope));
+        assert!(index.hidden_method_parents("main.foreign", &scope));
+        assert!(index.holds_model(main, "main.local", &scope));
     }
 }
