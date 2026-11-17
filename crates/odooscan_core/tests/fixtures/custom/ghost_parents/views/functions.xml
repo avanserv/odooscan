@@ -1,0 +1,5 @@
+<odoo>
+    <function model="ghost.widget" name="action_ghost"/>
+    <function model="parent.shelf" name="action_ghost"/>
+    <function model="parent.bench" name="action_ghost"/>
+</odoo>

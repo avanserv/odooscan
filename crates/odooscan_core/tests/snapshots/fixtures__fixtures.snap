@@ -618,6 +618,9 @@ custom/form_patches/static/src/quick_form_card.js:8:24: OD605 no indexed bundle 
 custom/form_patches/static/src/quick_form_card.xml:14:9: OD606 no <div> with class 'o_form_status' in template web.FormController or the templates that extend it
 custom/form_patches/static/src/quick_form_card.xml:15:9: OD606 <div> with class 'o_mail_chatter' is added by module mail, which is not in depends
 custom/form_patches/static/src/quick_form_card.xml:18:19: OD605 no indexed bundle defines template 'web.FormCompiler'
+custom/ghost_parents/models/parents.py:5:16: OD201 no indexed module defines model 'ghost.widget'
+custom/ghost_parents/models/parents.py:15:16: OD201 no indexed module defines model 'ghost.tray'
+custom/ghost_parents/views/functions.xml:4:42: OD314 parent.bench has no method 'action_ghost'
 custom/html_sinks/static/src/debug.js:2:5: OD611 console.log() is a debugging leftover that writes to every user's console; remove it
 custom/html_sinks/static/src/debug.js:3:5: OD612 debugger pauses the script in every browser with the developer tools open; remove it
 custom/html_sinks/static/src/debug.js:13:5: OD611 console.log() is a debugging leftover that writes to every user's console; remove it
