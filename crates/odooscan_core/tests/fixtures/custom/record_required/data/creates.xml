@@ -27,4 +27,6 @@
     <record id="legacy_empty" model="rr.legacy"/>
     <record id="legacy_hidden_empty" model="rr.legacy.hidden"/>
     <record id="blind_empty" model="rr.blind"/>
+    <record id="chained_empty" model="rr.chained"/>
+    <record id="noted_empty" model="rr.noted"/>
 </odoo>

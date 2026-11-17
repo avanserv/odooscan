@@ -5,3 +5,7 @@ access_modifier_ticket_tag,modifier.ticket.tag,model_modifier_ticket_tag,base.gr
 access_modifier_line_tag,modifier.line.tag,model_modifier_line_tag,base.group_user,1,1,1,0
 access_modifier_hook,modifier.hook,model_modifier_hook,base.group_user,1,1,1,0
 access_modifier_bound,modifier.bound,model_modifier_bound,base.group_user,1,1,1,0
+access_modifier_stamped,modifier.stamped,model_modifier_stamped,base.group_user,1,1,1,0
+access_modifier_chained,modifier.chained,model_modifier_chained,base.group_user,1,1,1,0
+access_modifier_noted,modifier.noted,model_modifier_noted,base.group_user,1,1,1,0
+access_modifier_unread_inherits,modifier.unread.inherits,model_modifier_unread_inherits,base.group_user,1,1,1,0

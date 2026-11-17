@@ -1,0 +1,66 @@
+<odoo>
+    <record id="chained_form" model="ir.ui.view">
+        <field name="name">modifier.chained.form</field>
+        <field name="model">modifier.chained</field>
+        <field name="arch" type="xml">
+            <form>
+                <field name="name" invisible="no_chained_stamp"/>
+                <field name="name" invisible="stamp"/>
+            </form>
+        </field>
+    </record>
+
+    <record id="noted_form" model="ir.ui.view">
+        <field name="name">modifier.noted.form</field>
+        <field name="model">modifier.noted</field>
+        <field name="arch" type="xml">
+            <form>
+                <field name="name" invisible="no_noted_flag"/>
+            </form>
+        </field>
+    </record>
+
+    <record id="unread_inherits_form" model="ir.ui.view">
+        <field name="name">modifier.unread.inherits.form</field>
+        <field name="model">modifier.unread.inherits</field>
+        <field name="arch" type="xml">
+            <form>
+                <field name="stamped_id" invisible="stamp"/>
+            </form>
+        </field>
+    </record>
+
+    <record id="ticket_chained" model="ir.ui.view">
+        <field name="name">modifier.ticket.chained</field>
+        <field name="model">modifier.ticket</field>
+        <field name="arch" type="xml">
+            <form>
+                <field name="chained_ids"/>
+                <field name="noted_ids"/>
+            </form>
+        </field>
+    </record>
+
+    <record id="ticket_chained_list" model="ir.ui.view">
+        <field name="name">modifier.ticket.chained.list</field>
+        <field name="model">modifier.ticket</field>
+        <field name="inherit_id" ref="ticket_chained"/>
+        <field name="arch" type="xml">
+            <field name="chained_ids" position="inside">
+                <list>
+                    <field name="name" invisible="stamp"/>
+                </list>
+            </field>
+            <field name="chained_ids" position="after">
+                <field name="name" invisible="stamp"/>
+                <field name="name" invisible="no_chained_flag"/>
+            </field>
+            <field name="noted_ids" position="inside">
+                <list>
+                    <field name="name"/>
+                    <field name="no_noted_column"/>
+                </list>
+            </field>
+        </field>
+    </record>
+</odoo>

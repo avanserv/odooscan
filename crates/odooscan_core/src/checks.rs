@@ -3380,7 +3380,7 @@ impl<'m> Ctx<'_, 'm> {
         let classes = self.index.merged_classes(model, self.scope);
         let no_table = |c: &ClassFact| c.attr("_auto").is_some_and(|a| a.value != OptionValue::Bool(true));
         let unread = |c: &ClassFact| c.inherits_unknown || no_table(c) || (c.model == model && fills_on_create(c));
-        if !self.sees_whole_model(model) || classes.iter().any(|(_, c)| unread(c)) {
+        if !self.sees_creates(model) || classes.iter().any(|(_, c)| unread(c)) {
             return Required::default();
         }
         let delegates: Vec<(&'m str, &'m str)> = classes
@@ -3440,7 +3440,7 @@ impl<'m> Ctx<'_, 'm> {
     fn record_write(&self, out: &mut Out<'m>, path: &'m Path, write: &'m RecordWrite) {
         // A dependency's unread file loads first and adds no Selection value, as a Python field wins
         // over a manual one. The module's own file may replace what this write gives.
-        if self.module.lost_data() || !self.sees_all_classes(&write.model) {
+        if self.module.lost_data() || !self.sees_field_defs(&write.model) {
             return;
         }
         for field in &write.fields {
@@ -4206,16 +4206,32 @@ impl<'m> Ctx<'_, 'm> {
         }
     }
 
-    /// Whether the scan sees every class and data file that could add to `model`. A caller stays
-    /// silent on a model that is not visible: only the places that call `model_ref` raise OD201 or
-    /// OD202.
+    /// Whether the scan sees every class and data file that could add a field to `model`. A caller
+    /// stays silent on a model that is not visible: only the places that call `model_ref` raise
+    /// OD201 or OD202.
     fn sees_whole_model(&self, model: &str) -> bool {
-        !self.lost && self.sees_all_classes(model)
+        !self.lost && self.sees_all_fields(model)
     }
 
-    /// What `sees_whole_model` asks, short of the data files.
-    fn sees_all_classes(&self, model: &str) -> bool {
-        self.sees_classes(model) && !self.index.hidden_parents(model, self.scope)
+    /// Whether the scan knows every field `model` has, short of the data files. Odoo also adds the
+    /// fields of an `_inherits` parent, which a delegate the scan cannot read leaves unknown.
+    fn sees_all_fields(&self, model: &str) -> bool {
+        self.sees_field_defs(model) && !self.index.unread_delegate(model, self.scope)
+    }
+
+    /// Whether the scan reads every definition of each field it finds on `model`. Odoo takes fields
+    /// from every model class of the MRO (18.0 `odoo/models.py:3640`, `:3653-3657`; 20.0
+    /// `odoo/orm/model_classes.py:382`, `:395-399`), so only a parent that may hold one counts.
+    fn sees_field_defs(&self, model: &str) -> bool {
+        self.sees_classes(model) && !self.index.hidden_field_parents(model, self.scope)
+    }
+
+    /// Whether the scan reads every data file, every definition of each field it finds on `model`
+    /// and every hook that may fill one on a create. A Python base that is a class of an `_inherits`
+    /// delegate is read for fields, but `_inherits` passes on no method, so the hooks it binds stay
+    /// unread.
+    fn sees_creates(&self, model: &str) -> bool {
+        !self.lost && self.sees_field_defs(model) && !self.index.hidden_method_parents(model, self.scope)
     }
 
     /// Whether the scan reaches every class of `model`, short of the parents a class hides from it.
@@ -4479,7 +4495,7 @@ impl<'m> Ctx<'_, 'm> {
 
     /// Whether `field` may exist on `model`, even if only outside `depends` or the scan's reach.
     fn may_have(&self, model: &str, field: &str) -> bool {
-        !self.sees_all_classes(model) || !matches!(self.index.field(model, field, self.scope), Err(None))
+        !self.sees_all_fields(model) || !matches!(self.index.field(model, field, self.scope), Err(None))
     }
 
     /// Before saas~17.3 Odoo refuses a modifier on a field the view lacks. Any element of the tree
@@ -4725,8 +4741,11 @@ fn database_id(field: &FieldWrite) -> bool {
     field.name == "id" || (field.name == ".id" && matches!(field.value, WrittenValue::Text(_)))
 }
 
+/// Whether `class` binds a create hook, in its body or through a plain base the scan reads.
 fn fills_on_create(class: &ClassFact) -> bool {
-    CREATE_HOOKS.iter().any(|h| class.methods.iter().any(|m| m == h))
+    CREATE_HOOKS
+        .iter()
+        .any(|h| class.methods.iter().any(|m| m == h) || class.base_binds(h))
 }
 
 /// Whether the `_defaults` of `class` may hold `name`. An expression may hold anything.

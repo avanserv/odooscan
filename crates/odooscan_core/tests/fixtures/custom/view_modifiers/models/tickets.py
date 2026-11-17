@@ -18,6 +18,8 @@ class ModifierTicket(models.Model):
     hook_ids = fields.Many2many("modifier.hook")
     bound_ids = fields.Many2many("modifier.bound")
     loose_ids = fields.Many2many(LOOSE_COMODEL)
+    chained_ids = fields.Many2many("modifier.chained")
+    noted_ids = fields.Many2many("modifier.noted")
 
     def action_close(self):
         return True

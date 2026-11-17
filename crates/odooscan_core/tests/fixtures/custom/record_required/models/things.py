@@ -1,4 +1,5 @@
 from odoo import api, fields, models
+from odoo.addons.base.models.image_mixin import ImageMixin
 
 COND = 1 > 0
 KW = {"readonly": True}
@@ -6,8 +7,14 @@ PARENTS = {"rr.parent": "parent_id"}
 DEFAULTS = {"code": "c"}
 
 
-class PlainMixin:
-    pass
+class Filling:
+    def create(self, vals_list):
+        return super().create(vals_list)
+
+
+class Noted:
+    def action_note(self):
+        return True
 
 
 class RrTag(models.Model):
@@ -131,9 +138,9 @@ class RrLegacyHidden(models.Model):
     code = fields.Char(required=True)
 
 
-class RrHidden(PlainMixin, models.Model):
+class RrHidden(ImageMixin, models.Model):
     _name = "rr.hidden"
-    _description = "A parent the scan cannot see"
+    _description = "A Python base outside its chain"
 
     name = fields.Char(required=True)
 
@@ -351,3 +358,52 @@ class RrChildShadow(models.Model):
 
     parent_id = fields.Many2one("rr.parent", required=True, ondelete="cascade")
     label = fields.Char(related="parent_id.label", readonly=False, default="x")
+
+
+class RrStamped(models.Model):
+    _name = "rr.stamped"
+    _description = "Holds the field a Python base gives"
+
+    stamp = fields.Char(required=True)
+
+
+class RrChained(RrStamped):
+    _name = "rr.chained"
+    _inherit = ["rr.stamped"]
+    _description = "Python base that _inherit reads too"
+
+
+class RrNoted(models.Model, Noted):
+    _name = "rr.noted"
+    _description = "Python base that holds no field"
+
+    name = fields.Char(required=True)
+
+
+class RrFilled(Filling, models.Model):
+    _name = "rr.filled"
+    _description = "Python base that binds create"
+
+    name = fields.Char(required=True)
+
+
+class RrHeld(models.Model):
+    _name = "rr.held"
+    _description = "Delegate whose class fills the notes of its heirs"
+
+    name = fields.Char()
+
+    def default_get(self, fields_list):
+        defaults = super().default_get(fields_list)
+        if "note" in fields_list:
+            defaults.setdefault("note", "held")
+        return defaults
+
+
+class RrHolder(RrHeld):
+    _name = "rr.holder"
+    _description = "Python base a class of its delegate, which binds default_get"
+    _inherits = {"rr.held": "held_id"}
+
+    held_id = fields.Many2one("rr.held", required=True, ondelete="cascade")
+    note = fields.Char(required=True)

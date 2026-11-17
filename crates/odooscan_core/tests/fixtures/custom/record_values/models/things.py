@@ -1,4 +1,5 @@
 from odoo import _, fields, models
+from odoo.addons.base.models.image_mixin import ImageMixin
 
 KW = {"readonly": True}
 LABELS = {"a": "Named elsewhere"}
@@ -6,10 +7,6 @@ STATES = [("a", "Ay")]
 OTHER_MODEL = "rv." + "other"
 INVERSE = "thing" + "_id"
 TABLE = "rv_" + "computed"
-
-
-class PlainMixin:
-    pass
 
 
 class RvOther(models.Model):
@@ -44,7 +41,7 @@ class RvComputedTwin(models.Model):
     name = fields.Char()
 
 
-class RvBlended(PlainMixin, models.Model):
+class RvBlended(ImageMixin, models.Model):
     _name = "rv.blended"
     _description = "Blended"
 
@@ -166,3 +163,17 @@ class RvThingByCompany(models.Model):
 
     def _compute_grade(self):
         self.computed_grade = "gold"
+
+
+class RvStamped(models.Model):
+    _name = "rv.stamped"
+    _description = "Holds the fields a Python base gives"
+
+    other_id = fields.Many2one("rv.other")
+    state = fields.Selection([("a", "Ay")])
+
+
+class RvChained(RvStamped):
+    _name = "rv.chained"
+    _inherit = ["rv.stamped"]
+    _description = "Python base that _inherit reads too"
