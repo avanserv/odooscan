@@ -2805,11 +2805,15 @@ impl<'m> Index<'m> {
     }
 
     /// The scope of what Odoo reads as it sets up the Python fields and attributes of `module`, and
-    /// of what `init()` and `_auto_init()` run. That comes ahead of the data files of `module`, so of
-    /// the `ir.model.fields` records only those of its dependencies count, and a failure there
-    /// refuses the install whatever the file order.
+    /// of what `init()` and `_auto_init()` run. That comes ahead of the data files of `module`, so the
+    /// `ir.model.fields` records that count are those of its dependencies and of the always-installed
+    /// modules that load first: one that loads after has not run its data files yet on the database
+    /// that installs both. A failure there refuses the install whatever the file order.
     pub fn setup_scope(&self, module: usize) -> Scope {
         let (mut records, _) = depends_closure(self.modules, &self.by_name, [module], self.default_series);
+        for (mi, held) in records.iter_mut().enumerate() {
+            *held |= self.always_installed[mi] && self.loads_before(mi, module);
+        }
         records[module] = false;
         Scope {
             records,
@@ -4638,6 +4642,33 @@ mod tests {
         // At one depth the name decides.
         assert!(before("main", "side") && before("aside", "heir") && !before("side", "main"));
         assert!(!before("main", "main"));
+    }
+
+    #[test]
+    fn setup_scope_records_the_depends_and_the_always_installed_that_load_first() {
+        let manifest = |depends: &str, extra: &str| format!("{{'depends': [{depends}]{extra}}}");
+        let modules = [
+            module("base", &manifest("", "")),
+            module("aaa_auto", &manifest("'base'", ", 'auto_install': True")),
+            module("zzz_auto", &manifest("'base'", ", 'auto_install': True")),
+            module("lib", &manifest("'base'", "")),
+            module("mid", &manifest("'base'", "")),
+            module("top", &manifest("'mid'", "")),
+        ];
+        let index = Index::build(&modules, None);
+        let names = |held: &[bool]| -> Vec<&str> {
+            let set = modules.iter().zip(held).filter(|(_, held)| **held);
+            set.map(|(m, _)| m.name.as_str()).collect()
+        };
+        for (reader, records) in [
+            ("mid", vec!["base", "aaa_auto"]),
+            ("top", vec!["base", "aaa_auto", "zzz_auto", "mid"]),
+        ] {
+            let mi = index.by_name[reader];
+            let setup = index.setup_scope(mi);
+            assert_eq!(names(&setup.records), records, "{reader}");
+            assert_eq!(setup.visible, index.scope(mi).visible, "{reader}");
+        }
     }
 
     #[test]

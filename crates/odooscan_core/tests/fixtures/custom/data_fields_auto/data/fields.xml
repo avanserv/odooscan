@@ -1,0 +1,7 @@
+<odoo>
+    <record id="field_x_thing" model="ir.model.fields">
+        <field name="name">x_thing</field>
+        <field name="model_id" ref="base.model_res_partner"/>
+        <field name="ttype">char</field>
+    </record>
+</odoo>
