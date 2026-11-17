@@ -19,3 +19,5 @@ class Lens(models.Model):
 
     mark = fields.Char()
     prism_ids = fields.One2many("x.prism", "lens_mark")
+    # Mark is a Char or a Many2one, so whether label keeps the type Tag gives it is unknown.
+    label = Mark()

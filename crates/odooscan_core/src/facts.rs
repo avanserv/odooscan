@@ -159,6 +159,11 @@ impl FieldFact {
     pub fn option(&self, name: &str) -> Option<&Spanned<OptionValue>> {
         self.options.iter().find(|(n, _)| n == name).map(|(_, v)| v)
     }
+
+    /// The field is a Many2many, or its class name has two types and one of its classes is one.
+    pub fn may_be_many2many(&self) -> bool {
+        self.ftype == "Many2many" || (self.ftype == UNREAD_TYPE && self.lineage.iter().any(|c| c == "Many2many"))
+    }
 }
 
 /// The fields a literal domain names, and the model it filters.

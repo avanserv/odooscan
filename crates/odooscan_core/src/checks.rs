@@ -6516,9 +6516,10 @@ impl<'m> Ctx<'_, 'm> {
     /// model it inherits has a field, `base` apart, so it stores nothing; a class of those, in any
     /// indexed module but for one that does not parse outside the scope, defines `init()` or
     /// `_auto_init()`, sets a table query, creates a view whose whole name is `self._table` or has
-    /// a parent the scan cannot see; another model, or a Many2many in scope, has that table; an
-    /// indexed module creates a view of that name in Python or SQL; or this module, not a
-    /// dependency, creates a view it names at runtime. `table_models` leaves out an abstract model.
+    /// a parent the scan cannot see; another model, or a field in scope that may be a Many2many,
+    /// has that table; an indexed module creates a view of that name in Python or SQL; or this
+    /// module, not a dependency, creates a view it names at runtime. `table_models` leaves out an
+    /// abstract model.
     fn view_made(&self, model: &str, table: &str) -> bool {
         let creates = |c: &ClassFact| {
             c.hidden_parents() || c.own_view || c.methods.iter().any(|m| VIEW_MAKERS.contains(&m.as_str()))

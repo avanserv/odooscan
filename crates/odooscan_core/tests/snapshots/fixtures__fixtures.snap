@@ -542,6 +542,9 @@ custom/field_classes/models/lens.py:20:25: OD104 this default is computed once a
 custom/field_classes/models/lens.py:49:23: OD210 'embeding': x.lens has no field 'embeding'
 custom/field_classes/models/lens.py:50:23: OD210 'link.missing': res.partner has no field 'missing'
 custom/field_classes/models/lens.py:51:30: OD210 'opaque': x.lens has no field 'opaque'
+custom/field_classes/models/lens_summary.py:11:5: OD225 x.lens.summary.note is stored, but the view x_lens_summary selects no column note for it; select one AS note in init()
+custom/field_classes/models/lens_tables.py:10:5: OD226 _auto = False leaves x.lens.partner without a table, and nothing creates the view res_partner_x_lens_rel; create it in init(), or drop _auto = False
+custom/field_classes/models/lens_tables.py:21:5: OD226 _auto = False leaves x.lens.currency without a table, and nothing creates the view x_lens_currency_rel; create it in init(), or drop _auto = False
 custom/field_classes/views/lens_views.xml:7:45: OD312 x.lens has no method 'embedding'
 custom/field_classes14/data/badges.xml:2:5: OD324 x.badge.old.label is required and has no default, so creating this record fails if the column is NOT NULL; give the field a value
 custom/field_classes_plain/models/handler.py:14:23: OD210 'handler': x.plain.handler has no field 'handler'
