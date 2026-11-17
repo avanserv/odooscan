@@ -4794,7 +4794,7 @@ fn database_id(field: &FieldWrite) -> bool {
 fn fills_on_create(class: &ClassFact) -> bool {
     CREATE_HOOKS
         .iter()
-        .any(|h| class.methods.iter().any(|m| m == h) || class.base_binds(h))
+        .any(|h| class.methods.iter().any(|m| m == h) || class.base_binds(h, &class.class_name))
 }
 
 /// Whether the `_defaults` of `class` may hold `name`. An expression may hold anything.
