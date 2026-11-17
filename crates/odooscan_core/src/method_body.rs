@@ -11,6 +11,7 @@ use ruff_python_parser::parse_expression;
 use ruff_python_stdlib::builtins::is_python_builtin;
 
 use crate::facts::UNREAD_TYPE;
+use crate::python;
 
 /// Past every Python minor version, so that a builtin of any version counts.
 const ANY_PYTHON: u8 = u8::MAX;
@@ -581,8 +582,8 @@ struct Exits {
     /// A path leaves the loop it is in by a `break`.
     breaks: bool,
     /// A path stops by a `continue` of the loop over `self`, a `raise`, or an exception leaving a
-    /// loop that never ends, instead of filling, which matters only to a `finally` around it, since
-    /// that still runs.
+    /// `while True:` loop with no `break` of its own and a body that does not fill, instead of
+    /// filling, which matters only to a `finally` around it, since that still runs.
     ends: bool,
 }
 
@@ -607,15 +608,23 @@ impl Exits {
         exits.breaks
     }
 
+    /// Whether `stmts` may `break` the loop they are in, or `return`, before their first statement
+    /// that fills.
+    fn leaves_unfilled(stmts: &[Stmt]) -> bool {
+        let mut exits = Exits::new(true);
+        exits.body(stmts);
+        exits.breaks || exits.leaves
+    }
+
     /// Whether a statement of `stmts` fills.
     fn body(&mut self, stmts: &[Stmt]) -> bool {
         stmts.iter().any(|s| self.fills(s))
     }
 
     /// A `raise` fills, since Odoo reports the exception anyway. A `with` fills when its body
-    /// does, unless it swallows the exceptions that may skip the call; an `if` with an `elif` or
-    /// `else`, a `try` or a `match` fills when every path through it does, as `branches` and
-    /// `handled` read them, and a loop as `looped` does.
+    /// does, unless it swallows an exception its body may raise, which skips the call; an `if`
+    /// with an `elif` or `else`, a `try` or a `match` fills when every path through it does, as
+    /// `branches` and `handled` read them, and a loop as `looped` does.
     fn fills(&mut self, stmt: &Stmt) -> bool {
         match stmt {
             Stmt::Expr(e) => matches!(&*e.value, Expr::Call(c) if calls_self_method(c)),
@@ -623,7 +632,7 @@ impl Exits {
                 self.ends = true;
                 true
             }
-            Stmt::With(w) => self.body(&w.body) && !suppresses(w),
+            Stmt::With(w) => self.body(&w.body) && !may_swallow(w),
             Stmt::If(i) => {
                 let body = self.body(&i.body);
                 self.every(i.elif_else_clauses.iter().map(|c| &c.body[..])) && body
@@ -654,10 +663,11 @@ impl Exits {
     }
 
     /// A loop that is not `endless` may run no iteration, so it never fills, and only such a loop
-    /// runs its `else`. An endless one with no `break` of its own fills, since nothing after it
-    /// runs, but only a `return` or an exception leaves it, so unless its body fills it ends as a
-    /// `raise` does. One with such a `break` fills when its body fills before any, walked as
-    /// `breaks_unfilled` walks it; a `continue` there restarts the body, which then fills first.
+    /// runs its `else`. An endless one fills when no `break` of its own comes before the first
+    /// statement of its body that fills, walked as `breaks_unfilled` walks it: a `continue` there
+    /// restarts the body, which then fills first, and one with no such `break` either ends past a
+    /// fill or is left by a `return` or an exception alone, so unless its body fills, a path ends
+    /// there as at a `raise`.
     fn looped(&mut self, stmt: &Stmt) -> bool {
         let Some((body, orelse, endless)) = loop_parts(stmt) else {
             return false;
@@ -677,11 +687,8 @@ impl Exits {
             self.body(orelse);
             return false;
         }
-        if !breaks_own(body) {
-            self.ends |= !filled;
-            return true;
-        }
-        filled && !breaks
+        self.ends |= !filled && !breaks_own(body);
+        !breaks
     }
 
     /// Whether there is a body and each fills, walking every one.
@@ -717,6 +724,84 @@ pub(crate) fn suppress_call(expr: &Expr) -> Option<&ast::ExprCall> {
     named.then_some(c)
 }
 
+/// Whether the body of a `with` under `contextlib.suppress` may raise what it swallows: by a call,
+/// a bare `raise`, or a `raise` of a class a `suppress` argument names, outside the body of a `try`
+/// whose handlers catch every class named. False for any other `with`.
+fn may_swallow(w: &ast::StmtWith) -> bool {
+    let calls = w.items.iter().filter_map(|i| suppress_call(&i.context_expr));
+    let classes: Vec<&Expr> = calls.flat_map(|c| c.arguments.args.iter()).collect();
+    let mut points = RaisePoints {
+        classes: &classes,
+        found: false,
+    };
+    if !classes.is_empty() {
+        points.visit_body(&w.body);
+    }
+    points.found
+}
+
+struct RaisePoints<'c> {
+    /// The arguments of the `suppress` calls, each a class or a tuple of them.
+    classes: &'c [&'c Expr],
+    found: bool,
+}
+
+impl RaisePoints<'_> {
+    /// A `raise` of a class no argument names goes past the `with`. Building the exception is
+    /// taken not to raise, so `raise UserError(_('x'))` is no call.
+    fn raised(&self, exc: Option<&Expr>) -> bool {
+        let Some(exc) = exc else { return true };
+        let class = match exc {
+            Expr::Call(c) => &*c.func,
+            e => e,
+        };
+        let name = python::tail_name(class).unwrap_or_default();
+        self.classes.iter().any(|arg| python::names_error(arg, name))
+    }
+
+    /// Whether some handler of `t` catches each named class. An argument that is no class name may
+    /// hold any class, and the empty name stands for it, which only a handler of every error takes.
+    fn shields(&self, t: &ast::StmtTry) -> bool {
+        let mut names = vec![];
+        self.classes.iter().for_each(|arg| class_names(arg, &mut names));
+        names
+            .iter()
+            .all(|name| (t.handlers.iter()).any(|ast::ExceptHandler::ExceptHandler(h)| python::catches(h, name)))
+    }
+}
+
+impl<'a> Visitor<'a> for RaisePoints<'_> {
+    fn visit_stmt(&mut self, stmt: &'a Stmt) {
+        match stmt {
+            Stmt::FunctionDef(_) | Stmt::ClassDef(_) => {}
+            Stmt::Raise(r) => self.found |= self.raised(r.exc.as_deref()),
+            Stmt::Try(t) if self.shields(t) => {
+                (t.handlers.iter()).for_each(|ast::ExceptHandler::ExceptHandler(h)| self.visit_body(&h.body));
+                self.visit_body(&t.orelse);
+                self.visit_body(&t.finalbody);
+            }
+            _ => visitor::walk_stmt(self, stmt),
+        }
+    }
+
+    fn visit_expr(&mut self, expr: &'a Expr) {
+        match expr {
+            Expr::Call(_) => self.found = true,
+            Expr::Lambda(_) => {}
+            _ => visitor::walk_expr(self, expr),
+        }
+    }
+}
+
+/// The names of the classes an exception class or a tuple of them gives, the empty one for any other
+/// expression.
+fn class_names<'e>(expr: &'e Expr, names: &mut Vec<&'e str>) {
+    match expr {
+        Expr::Tuple(t) => t.elts.iter().for_each(|e| class_names(e, names)),
+        e => names.push(python::tail_name(e).unwrap_or_default()),
+    }
+}
+
 #[derive(Clone, Copy)]
 struct Paths<'a> {
     record: &'a str,
@@ -725,9 +810,9 @@ struct Paths<'a> {
     nested: bool,
     /// In a `try` whose `finally` may jump, which still runs after a `continue` or a `raise`.
     jumping_finally: bool,
-    /// In the body of a `with` under `contextlib.suppress`, which may swallow the exception that
-    /// leaves a loop that never ends, so the statements after the `with` still run.
-    suppressed: bool,
+    /// In a `while True:` body, with no `break` or `return` before a fill after the statement
+    /// walked, so an exception that a `contextlib.suppress` there swallows starts the body again.
+    restarts: bool,
     ftype: &'a str,
 }
 
@@ -738,8 +823,16 @@ impl<'a> Paths<'a> {
             field,
             nested: false,
             jumping_finally: false,
-            suppressed: false,
+            restarts: false,
             ftype,
+        }
+    }
+
+    /// The paths of a statement that `rest` follows in its block.
+    fn at(&self, rest: &[Stmt]) -> Self {
+        Self {
+            restarts: self.restarts && !Exits::leaves_unfilled(rest),
+            ..*self
         }
     }
 
@@ -761,7 +854,7 @@ impl<'a> Paths<'a> {
         tests::BLOCK_WALKS.with(|walks| walks.set(walks.get() + 1));
         let mut continued = false;
         for (n, stmt) in stmts.iter().enumerate() {
-            let (flow, continues) = self.stmt(stmt, sides);
+            let (flow, continues) = self.at(&stmts[n + 1..]).stmt(stmt, sides);
             continued |= continues || flow == Flow::Continued;
             let flow = match flow {
                 Flow::Open | Flow::Continued => continue,
@@ -784,11 +877,12 @@ impl<'a> Paths<'a> {
 
     /// Nothing after a statement that never ends runs. Only a `return`, which the walk of its body
     /// already finds `Left`, or an exception, which Odoo reports, leaves it, so after an assignment
-    /// it fills, unless a `finally` that may jump or a `contextlib.suppress` catches that exception.
+    /// it fills, unless a `finally` that may jump catches that exception; `within` reads a
+    /// `contextlib.suppress` that may swallow it.
     fn followed(&self, stmt: &Stmt, rest: &[Stmt], flow: Flow) -> Flow {
         match flow {
             _ if !never_ends(stmt) => self.after(rest, flow),
-            Flow::Assigned if !self.jumping_finally && !self.suppressed => Flow::Filled,
+            Flow::Assigned if !self.jumping_finally => Flow::Filled,
             flow => flow,
         }
     }
@@ -836,16 +930,16 @@ impl<'a> Paths<'a> {
     }
 
     /// Under `contextlib.suppress`, an exception may skip the write of a side, so the body pairs
-    /// only within itself.
+    /// only within itself, and a body that fills only does so when it raises nothing the `with`
+    /// swallows, since that skips the rest of it, or when the swallowed exception `restarts` it.
     fn within<'s>(&self, w: &'s ast::StmtWith, sides: &mut Vec<Side<'s>>) -> (Flow, bool) {
         if !suppresses(w) {
             return self.steps(&w.body, sides);
         }
-        let inner = Paths {
-            suppressed: true,
-            ..*self
-        };
-        inner.steps(&w.body, &mut vec![])
+        match self.steps(&w.body, &mut vec![]) {
+            (Flow::Filled, continued) if !self.restarts && may_swallow(w) => (Flow::Assigned, continued),
+            ends => ends,
+        }
     }
 
     /// A `for` whose body assigns does so when its iterable is not empty, so it pairs as
@@ -854,7 +948,11 @@ impl<'a> Paths<'a> {
         let Some((body, orelse, endless)) = loop_parts(stmt) else {
             return Flow::Open;
         };
-        let inner = Paths { nested: true, ..*self };
+        let inner = Paths {
+            nested: true,
+            restarts: endless,
+            ..*self
+        };
         let looped = if endless && !Exits::breaks_unfilled(body) {
             inner.steps(body, &mut vec![]).0
         } else {
@@ -932,10 +1030,7 @@ impl<'a> Paths<'a> {
     /// is still one after a `finally` that goes on.
     fn handled<'s>(&self, t: &'s ast::StmtTry, sides: &mut Vec<Side<'s>>) -> (Flow, bool) {
         let finally = self.block(&t.finalbody);
-        let tried = Paths {
-            jumping_finally: self.jumping_finally || finally > Flow::Open,
-            ..*self
-        };
+        let tried = self.in_try(t, finally);
         let handlers = tried.excepts(t);
         let mut own = vec![];
         let sides = if handlers.iter().all(|&(h, continues)| h <= Flow::Assigned && !continues) {
@@ -959,6 +1054,17 @@ impl<'a> Paths<'a> {
             Flow::Open => (flow, continued),
             _ if continued => (self.finally(t, flow.max(Flow::Continued), finally), false),
             _ => (self.finally(t, flow, finally), false),
+        }
+    }
+
+    /// The paths to walk the body, `else` and handlers of `t` with, given how its `finally` ends.
+    /// The `else` and `finally` run after the body, so they too must not leave before a fill for
+    /// an exception swallowed there to start the loop again.
+    fn in_try(&self, t: &ast::StmtTry, finally: Flow) -> Self {
+        Self {
+            jumping_finally: self.jumping_finally || finally > Flow::Open,
+            restarts: self.restarts && !Exits::leaves_unfilled(&t.orelse) && !Exits::leaves_unfilled(&t.finalbody),
+            ..*self
         }
     }
 
@@ -1457,6 +1563,10 @@ mod tests {
             "rec.f = 1\nwhile True:\n    for line in rec.line_ids:\n        if line.a:\n            break\n    self._fill_f()\n    break\nreturn",
             "rec.f = 1\nwhile True:\n    self._fill_f()\nreturn",
             "while True:\n    if rec.c:\n        continue\n    while True:\n        self._fill_f()\n        break\n    break\nrec.f = 1\nreturn",
+            "rec.f = 1\ntry:\n    while True:\n        if rec.c:\n            break\n    self._fill_f()\nfinally:\n    break",
+            "try:\n    rec.f = 1\n    while True:\n        if rec.c:\n            break\n    self._fill_f()\nfinally:\n    return",
+            "rec.f = 1\ntry:\n    while True:\n        with suppress(ConnectionError):\n            self._fetch()\n            break\n    self._fill_f()\nfinally:\n    break",
+            "rec.f = 1\ntry:\n    while True:\n        if rec.c:\n            self._fill_f()\n            break\n    self._fill_f()\nfinally:\n    break",
         ];
         for stmts in assigned {
             assert!(!unassigned(&format!("for rec in self:\n{}", indent(stmts))), "{stmts}");
@@ -1500,6 +1610,62 @@ mod tests {
         ];
         for stmts in reported {
             assert!(unassigned(&format!("for rec in self:\n{}", indent(stmts))), "{stmts}");
+        }
+    }
+
+    #[test]
+    fn a_suppressed_exception_skips_the_rest_of_its_with() {
+        let reported = [
+            "with contextlib.suppress(ValueError):\n    rec.f = 1\n    self._fill_f()\nreturn",
+            "with suppress(ValueError):\n    self._fill_f()\nreturn",
+            "with suppress(ValueError):\n    rec.f = 1\n    while True:\n        foo()\nreturn",
+            "with suppress(ValueError):\n    rec.f = 1\n    while True:\n        foo()\nbreak",
+            "with suppress(ValueError):\n    rec.f = 1\n    with rec.lock():\n        while True:\n            foo()\nreturn",
+            "with suppress(ValueError):\n    rec.f = 1\n    raise ValueError('x')\nreturn",
+            "with suppress(ValueError):\n    rec.f = 1\n    raise\nreturn",
+            "with suppress(Exception):\n    rec.f = 1\n    raise UserError('x')\nreturn",
+            "with suppress(KeyError):\n    rec.f = 1\n    if rec.a:\n        continue\n    self._fill_f()\nreturn",
+            "with suppress(ValueError):\n    rec.f = 1\n    try:\n        while True:\n            foo()\n    except Exception:\n        self._fill_f()\nreturn",
+            "with suppress(ValueError):\n    rec.f = 1\n    try:\n        while True:\n            foo()\n    except KeyError:\n        raise UserError('x')\nreturn",
+            "while True:\n    with suppress(ValueError):\n        self._fill_f()\n        break\n    break\nrec.f = 1\nreturn",
+            "while True:\n    try:\n        with suppress(ValueError):\n            self._fill_f()\n            break\n    finally:\n        break\nrec.f = 1\nreturn",
+            "while True:\n    with suppress(ValueError):\n        self._fill_f()\n        break\n    if rec.a:\n        return",
+        ];
+        for stmts in reported {
+            assert!(unassigned(&format!("for rec in self:\n{}", indent(stmts))), "{stmts}");
+        }
+        let assigned = [
+            "with rec.lock():\n    rec.f = 1\n    self._fill_f()\nreturn",
+            "with suppress(ValueError):\n    rec.f = 1\n    if rec.a:\n        self._fill_f()\n    else:\n        self._fill_f()\nif rec.c:\n    rec.f = 2",
+            "with suppress(ValueError):\n    rec.f = 1\n    match rec.a:\n        case 1:\n            self._fill_f()\n        case _:\n            self._fill_f()\nif rec.c:\n    rec.f = 2",
+            "with suppress(ValueError):\n    rec.f = 1\n    try:\n        self._fill_f()\n    except ValueError:\n        self._fill_f()\nif rec.c:\n    rec.f = 2",
+            "with suppress(KeyError):\n    rec.f = 1\n    if rec.a:\n        continue\nself._fill_f()\nreturn",
+            "with suppress(ValueError):\n    rec.f = 1\n    raise UserError('x')\nreturn",
+            "with suppress(ValueError):\n    rec.f = 1\n    try:\n        while True:\n            foo()\n    except Exception:\n        raise UserError('x')\nreturn",
+            "with suppress(ValueError):\n    while True:\n        rec.f = 1\nreturn",
+            "with suppress(ValueError):\n    rec.f = int(rec.a)",
+            "rec.f = 1\nwith suppress(ValueError):\n    raise UserError('x')\nreturn",
+        ];
+        for stmts in assigned {
+            assert!(!unassigned(&format!("for rec in self:\n{}", indent(stmts))), "{stmts}");
+        }
+    }
+
+    #[test]
+    fn a_suppressed_exception_in_a_while_true_loop_retries() {
+        let retry = indent("with suppress(ValueError):\n    self._fill_f()\n    break");
+        let assigned = [
+            format!("while True:\n{retry}rec.f = 1\nreturn"),
+            format!("while True:\n{retry}    if rec.attempts > 3:\n        raise UserError('x')\nrec.f = 1\nreturn"),
+            format!(
+                "while True:\n    try:\n{}    finally:\n        rec.g = 1\nrec.f = 1\nreturn",
+                indent(&retry)
+            ),
+            format!("while True:\n    with rec.lock():\n{}rec.f = 1\nreturn", indent(&retry)),
+            format!("rec.f = 1\nwhile True:\n{retry}return"),
+        ];
+        for stmts in assigned {
+            assert!(!unassigned(&format!("for rec in self:\n{}", indent(&stmts))), "{stmts}");
         }
     }
 
