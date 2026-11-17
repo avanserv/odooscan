@@ -1748,6 +1748,7 @@ custom/unparsed_stranger/models/ledger.py:8:44: OD211 no parent class of unparse
 custom/unparsed_stranger/views/stranger.xml:4:9: OD202 model 'unparsed.fresh' comes from module unparsed_code; add it to depends
 custom/unparsed_stranger/views/stranger.xml:11:9: OD309 unparsed.ledger has no field 'note'
 custom/unparsed_stranger/views/stranger.xml:15:39: OD321 'unparsed_stranger.ledger_second' is a record of unparsed.ledger, but unparsed.ledger.partner_id takes res.partner
+custom/unread_kinds10/security/ir.model.access.csv:4:1: OD402 no group limits this row, so every user, public and portal included, gets write, create or unlink on model_unread_kinds_desk; name a group
 custom/unversioned_logs/data/code.xml:6:30: OD319 Odoo refuses this code when it loads the record from 10.0, or when the action runs below it: Expected an expression
 custom/unversioned_logs/data/code.xml:12:30: OD319 Odoo refuses this code when it loads the record from 10.0, or when the action runs below it: Expected an expression
 custom/unversioned_logs/data/reports.xml:7:35: OD311 no indexed module defines template 'unversioned_logs.absent_record'
