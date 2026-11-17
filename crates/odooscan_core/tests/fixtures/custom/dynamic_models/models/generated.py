@@ -8,6 +8,8 @@ for kind in KINDS:
         _name = f"bad.generated.{kind}"
 
         name = fields.Char()
+        size = fields.Integer()
+        scale = fields.Integer()
 
 
 class GeneratedUser(models.Model):
@@ -24,3 +26,12 @@ class GeneratedHuge(models.Model):
     _inherit = "bad.generated.huge"
 
     label = fields.Char()
+
+
+class GeneratedPaths(models.Model):
+    _inherit = "bad.generated.user"
+    _rec_names_search = ["large_id.scale", "large_id.name"]
+
+    large_size = fields.Integer(related="large_id.size")
+    large_name = fields.Char(related="large_id.name")
+    user_label = fields.Char(related="no_generated_user")
