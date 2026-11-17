@@ -16,6 +16,7 @@ use crate::facts::{
     SqlColumn, SqlView, Subject, UNREAD_TYPE, XmlRef, mangled, private_name,
 };
 use crate::fix::{self, Edit, Fix};
+use crate::method_body::is_name;
 use crate::placeholders::{self, Specs};
 use crate::route_body::{self, RouteBody};
 use crate::routing::{self, Routing, Scope};
@@ -1211,13 +1212,14 @@ fn caught_lookups(t: &ast::StmtTry, settled: bool) -> Vec<Option<Subject>> {
 }
 
 /// The methods called as `super().name(...)` or `super(Class, self).name(...)`, each with whether
-/// a `hasattr` test on the same `super()` and name encloses the call. In a class the method defines,
-/// only an explicit `super(Class, self)` outside the class's functions and lambdas is the method's.
-/// When `records`, `dynamic` holds the calls of the methods of a class that subclasses the type of
-/// the method's records, which the model's classes answer, each with the method that makes it.
+/// a `hasattr` test on the same `super()` and name has passed where the call runs. In a class the
+/// method defines, only an explicit `super(Class, self)` outside the class's functions and lambdas
+/// is the method's. When `records`, `dynamic` holds the calls of the methods of a class that
+/// subclasses the type of the method's records, which the model's classes answer, each with the
+/// method that makes it.
 struct SuperCalls<'a> {
     calls: Vec<SuperCall<'a>>,
-    guards: Vec<(&'a Expr, &'a str)>,
+    guards: Vec<Guard<'a>>,
     outer: Outer<'a>,
     nested: bool,
     records: bool,
@@ -1226,6 +1228,14 @@ struct SuperCalls<'a> {
 
 /// A method called through `super()`, where, and whether a `hasattr` test guards the call.
 type SuperCall<'a> = (&'a str, TextSize, bool);
+
+/// A `hasattr(target, name)` test that holds where the walk stands, `own` when `target` is a
+/// `super()` of the method's class, so that it guards a call through another spelling of it.
+struct Guard<'a> {
+    target: &'a Expr,
+    name: &'a str,
+    own: bool,
+}
 
 impl<'a> SuperCalls<'a> {
     fn new(outer: Outer<'a>, records: bool) -> Self {
@@ -1257,36 +1267,109 @@ impl<'a> SuperCalls<'a> {
         }
     }
 
-    fn under(&mut self, test: &'a Expr, visit: impl FnOnce(&mut Self)) {
+    /// Holds the `hasattr` tests that `test` being `truth` proves, until the caller truncates.
+    fn hold(&mut self, test: &'a Expr, truth: bool) {
+        let mut tests = vec![];
+        hasattr_tests(test, truth, &mut tests);
+        for (target, name) in tests {
+            let own = target
+                .as_call_expr()
+                .is_some_and(|call| self.outer.own(call, self.nested));
+            self.guards.push(Guard { target, name, own });
+        }
+    }
+
+    fn under(&mut self, test: &'a Expr, truth: bool, visit: impl FnOnce(&mut Self)) {
         let depth = self.guards.len();
-        hasattr_tests(test, &mut self.guards);
+        self.hold(test, truth);
         visit(self);
         self.guards.truncate(depth);
     }
+
+    /// Each clause runs only once every earlier test has failed.
+    fn visit_if(&mut self, branch: &'a ast::StmtIf) {
+        let depth = self.guards.len();
+        let clauses = std::iter::once((Some(&*branch.test), &branch.body))
+            .chain(branch.elif_else_clauses.iter().map(|c| (c.test.as_ref(), &c.body)));
+        for (test, body) in clauses {
+            let Some(test) = test else {
+                self.visit_body(body);
+                continue;
+            };
+            self.visit_expr(test);
+            self.under(test, true, |calls| calls.visit_body(body));
+            self.hold(test, false);
+        }
+        self.guards.truncate(depth);
+    }
+
+    fn visit_ternary(&mut self, branch: &'a ast::ExprIf) {
+        self.visit_expr(&branch.test);
+        self.under(&branch.test, true, |calls| calls.visit_expr(&branch.body));
+        self.under(&branch.test, false, |calls| calls.visit_expr(&branch.orelse));
+    }
+
+    /// An operand runs only when each earlier one has come out true for `and`, false for `or`.
+    fn visit_bool_op(&mut self, all: &'a ast::ExprBoolOp) {
+        let depth = self.guards.len();
+        for value in &all.values {
+            self.visit_expr(value);
+            self.hold(value, all.op == BoolOp::And);
+        }
+        self.guards.truncate(depth);
+    }
+
+    /// Records `expr` when it calls a method through a `super()` of the method.
+    fn record(&mut self, expr: &'a Expr) {
+        let Expr::Call(call) = expr else {
+            return;
+        };
+        let Expr::Attribute(a) = &*call.func else {
+            return;
+        };
+        let Expr::Call(inner) = &*a.value else {
+            return;
+        };
+        if !self.outer.counts(inner, self.nested) {
+            return;
+        }
+        let name = a.attr.as_str();
+        let own = self.outer.own(inner, self.nested);
+        let guarded = self
+            .guards
+            .iter()
+            .any(|g| g.name == name && ((own && g.own) || method_body::same(g.target, &a.value)));
+        self.calls.push((name, a.attr.start(), guarded));
+    }
 }
 
-/// The `hasattr(super(...), 'name')` tests that must hold for `test` to hold.
-fn hasattr_tests<'a>(test: &'a Expr, tests: &mut Vec<(&'a Expr, &'a str)>) {
+/// The `hasattr(super(...), 'name')` tests that hold whenever `test` comes out as `truth`.
+fn hasattr_tests<'a>(test: &'a Expr, truth: bool, tests: &mut Vec<(&'a Expr, &'a str)>) {
     match test {
-        Expr::BoolOp(all) if all.op == BoolOp::And => {
+        Expr::UnaryOp(not) if not.op == UnaryOp::Not => hasattr_tests(&not.operand, !truth, tests),
+        Expr::BoolOp(all) if (all.op == BoolOp::And) == truth => {
             for value in &all.values {
-                hasattr_tests(value, tests);
+                hasattr_tests(value, truth, tests);
             }
         }
-        Expr::Call(call) if matches!(&*call.func, Expr::Name(n) if n.id.as_str() == "hasattr") => {
-            if let [target @ Expr::Call(inner), name] = &*call.arguments.args
-                && is_super(&inner.func)
-                && let Some(name) = str_lit(name)
-            {
-                tests.push((target, name));
-            }
-        }
+        Expr::Call(call) if truth => tests.extend(super_hasattr(call)),
         _ => {}
     }
 }
 
+/// The `super()` and the name of `hasattr(super(...), 'name')`.
+fn super_hasattr(call: &ast::ExprCall) -> Option<(&Expr, &str)> {
+    if !is_name(&call.func, "hasattr") {
+        return None;
+    }
+    match &*call.arguments.args {
+        [target @ Expr::Call(inner), name] if is_super(&inner.func) => Some((target, str_lit(name)?)),
+        _ => None,
+    }
+}
+
 fn is_super(func: &Expr) -> bool {
-    matches!(func, Expr::Name(n) if n.id.as_str() == "super")
+    is_name(func, "super")
 }
 
 /// The class and the first parameter of a method, which name its own `super()` in a class the
@@ -1328,9 +1411,23 @@ impl<'a> Outer<'a> {
 
     /// Whether the call is `super(class, this)`, positional and nothing else.
     fn names(&self, call: &ast::ExprCall) -> bool {
-        let name = |expr: &Expr, want: Option<&str>| matches!(expr, Expr::Name(n) if Some(n.id.as_str()) == want);
         call.arguments.keywords.is_empty()
-            && matches!(&*call.arguments.args, [class, this] if name(class, Some(self.class)) && name(this, self.this))
+            && matches!(&*call.arguments.args, [class, this]
+                if is_name(class, self.class) && self.this.is_some_and(|name| is_name(this, name)))
+    }
+
+    /// Whether the call is a `super()` of the method's class, `nested` when it stands in a class
+    /// body: a bare one outside it, or `super(class, this)` with `this` or `this.sudo(...)`, which
+    /// builds records of the same class, so the MRO it searches is the same.
+    fn own(&self, call: &ast::ExprCall, nested: bool) -> bool {
+        if !is_super(&call.func) || !call.arguments.keywords.is_empty() {
+            return false;
+        }
+        match &*call.arguments.args {
+            [] => !nested,
+            [class, this] => is_name(class, self.class) && self.this.is_some_and(|name| is_this_or_sudo(this, name)),
+            _ => false,
+        }
     }
 
     /// Whether the call is a `super()` of the method, `nested` when it stands in a class body.
@@ -1340,16 +1437,25 @@ impl<'a> Outer<'a> {
     }
 }
 
-/// Whether `expr` is `type(this)` or `this.__class__`.
-fn type_of(expr: &Expr, this: &str) -> bool {
-    let is_this = |e: &Expr| matches!(e, Expr::Name(n) if n.id.as_str() == this);
+/// Whether `expr` is `this` or `this.sudo(...)`.
+fn is_this_or_sudo(expr: &Expr, this: &str) -> bool {
     match expr {
         Expr::Call(call) => {
-            matches!(&*call.func, Expr::Name(n) if n.id.as_str() == "type")
-                && call.arguments.keywords.is_empty()
-                && matches!(&*call.arguments.args, [arg] if is_this(arg))
+            matches!(&*call.func, Expr::Attribute(a) if a.attr.as_str() == "sudo" && is_name(&a.value, this))
         }
-        Expr::Attribute(a) => a.attr.as_str() == "__class__" && is_this(&a.value),
+        _ => is_name(expr, this),
+    }
+}
+
+/// Whether `expr` is `type(this)` or `this.__class__`.
+fn type_of(expr: &Expr, this: &str) -> bool {
+    match expr {
+        Expr::Call(call) => {
+            is_name(&call.func, "type")
+                && call.arguments.keywords.is_empty()
+                && matches!(&*call.arguments.args, [arg] if is_name(arg, this))
+        }
+        Expr::Attribute(a) => a.attr.as_str() == "__class__" && is_name(&a.value, this),
         _ => false,
     }
 }
@@ -1415,52 +1521,43 @@ impl<'a> MethodWalk<'a> for SuperCalls<'a> {
 }
 
 impl<'a> Visitor<'a> for SuperCalls<'a> {
+    /// The statements after an `if` whose body leaves run only once its test has failed. `break`
+    /// counts here though `exits` leaves it out: the code after the loop is a sibling body, which
+    /// never sees the guard.
+    fn visit_body(&mut self, body: &'a [Stmt]) {
+        let depth = self.guards.len();
+        for stmt in body {
+            self.visit_stmt(stmt);
+            if let Stmt::If(branch) = stmt
+                && (exits(&branch.body) || matches!(branch.body.last(), Some(Stmt::Break(_))))
+            {
+                self.hold(&branch.test, false);
+            }
+        }
+        self.guards.truncate(depth);
+    }
+
     fn visit_stmt(&mut self, stmt: &'a Stmt) {
         self.dynamic_class(stmt);
         if visit_method_stmt(self, stmt) {
             return;
         }
         match stmt {
-            Stmt::If(branch) => {
-                self.visit_expr(&branch.test);
-                self.under(&branch.test, |calls| calls.visit_body(&branch.body));
-                for clause in &branch.elif_else_clauses {
-                    match &clause.test {
-                        Some(test) => {
-                            self.visit_expr(test);
-                            self.under(test, |calls| calls.visit_body(&clause.body));
-                        }
-                        None => self.visit_body(&clause.body),
-                    }
-                }
-            }
+            Stmt::If(branch) => self.visit_if(branch),
             _ => visitor::walk_stmt(self, stmt),
         }
     }
 
     fn visit_expr(&mut self, expr: &'a Expr) {
-        if let Expr::If(branch) = expr {
-            self.visit_expr(&branch.test);
-            self.under(&branch.test, |calls| calls.visit_expr(&branch.body));
-            self.visit_expr(&branch.orelse);
-            return;
+        match expr {
+            Expr::If(branch) => self.visit_ternary(branch),
+            Expr::BoolOp(all) => self.visit_bool_op(all),
+            _ if visit_nested_lambda(self, expr) => {}
+            _ => {
+                self.record(expr);
+                visitor::walk_expr(self, expr);
+            }
         }
-        if visit_nested_lambda(self, expr) {
-            return;
-        }
-        if let Expr::Call(call) = expr
-            && let Expr::Attribute(a) = &*call.func
-            && let Expr::Call(inner) = &*a.value
-            && self.outer.counts(inner, self.nested)
-        {
-            let name = a.attr.as_str();
-            let guarded = self
-                .guards
-                .iter()
-                .any(|(target, test)| *test == name && method_body::same(target, &a.value));
-            self.calls.push((name, a.attr.start(), guarded));
-        }
-        visitor::walk_expr(self, expr);
     }
 }
 
@@ -6174,37 +6271,66 @@ mod tests {
     #[test]
     fn a_hasattr_test_guards_only_its_own_super_call() {
         let called = |body: &str| {
+            let lines: String = body.lines().map(|line| format!("        {line}\n")).collect();
             let facts = analyze(
-                &format!("class X(models.Model):\n    _name = 'x'\n    def m(self):\n{body}"),
+                &format!("class X(models.Model):\n    _name = 'x'\n    def m(self, other):\n{lines}"),
                 None,
             );
             let class = &facts.classes[0];
             class.super_calls.iter().map(|c| c.value.clone()).collect::<Vec<_>>()
         };
         let none: [&str; 0] = [];
-        for silent in [
-            "        if hasattr(super(), 'a'):\n            super().a()\n",
-            "        if hasattr(super(X, self), 'a'):\n            super(X, self).a()\n",
-            "        if x and hasattr(super(), 'a'):\n            super().a()\n",
-            "        if x:\n            pass\n        elif hasattr(super(), 'a'):\n            super().a()\n",
-            "        if hasattr(super(), 'a'):\n            def f():\n                super().a()\n",
-            "        return super().a() if hasattr(super(), 'a') else None\n",
-        ] {
-            assert_eq!(called(silent), none, "{silent}");
+        let silent = [
+            "if hasattr(super(), 'a'):\n    super().a()",
+            "if hasattr(super(X, self), 'a'):\n    super(X, self).a()",
+            "if x and hasattr(super(), 'a'):\n    super().a()",
+            "if x:\n    pass\nelif hasattr(super(), 'a'):\n    super().a()",
+            "if hasattr(super(), 'a'):\n    def f():\n        super().a()",
+            "return super().a() if hasattr(super(), 'a') else None",
+            "if not hasattr(super(), 'a'):\n    return\nsuper().a()",
+            "if not hasattr(super(), 'a'):\n    raise E\nsuper().a()",
+            "for r in self:\n    if not hasattr(super(), 'a'):\n        continue\n    super().a()",
+            "for r in self:\n    if not hasattr(super(), 'a'):\n        break\n    super().a()",
+            "if not hasattr(super(), 'a'):\n    pass\nelse:\n    super().a()",
+            "if not hasattr(super(), 'a'):\n    pass\nelif x:\n    super().a()",
+            "if not (x or not hasattr(super(), 'a')):\n    super().a()",
+            "return not hasattr(super(), 'a') or super().a()",
+            "return None if not hasattr(super(), 'a') else super().a()",
+            "return hasattr(super(), 'a') and super().a()",
+            "if x and hasattr(super(), 'a') and super().a():\n    pass",
+            "if hasattr(super(X, self), 'a'):\n    super().a()",
+            "if hasattr(super(), 'a'):\n    super(X, self).a()",
+            "if hasattr(super(X, self.sudo()), 'a'):\n    super().a()",
+            "if hasattr(super(), 'a'):\n    super(X, self.sudo()).a()",
+            "if hasattr(super(X, self.sudo()), 'a'):\n    super(X, self.sudo()).a()",
+            "if hasattr(super(), 'a'):\n    class K:\n        y = super(X, self).a()",
+        ];
+        for body in silent {
+            assert_eq!(called(body), none, "{body}");
         }
-        for reported in [
-            "        super().a()\n",
-            "        if hasattr(super(), 'b'):\n            super().a()\n",
-            "        if hasattr(super(), 'a'):\n            pass\n        super().a()\n",
-            "        if hasattr(super(), 'a'):\n            pass\n        else:\n            super().a()\n",
-            "        if hasattr(super(), 'a'):\n            pass\n        elif x:\n            super().a()\n",
-            "        if hasattr(super(), 'a') or x:\n            super().a()\n",
-            "        if not hasattr(super(), 'a'):\n            super().a()\n",
-            "        if hasattr(self, 'a'):\n            super().a()\n",
-            "        if hasattr(super(Y, self), 'a'):\n            super(X, self).a()\n",
-            "        return None if hasattr(super(), 'a') else super().a()\n",
-        ] {
-            assert_eq!(called(reported), ["a"], "{reported}");
+        let reported = [
+            "super().a()",
+            "if hasattr(super(), 'a'):\n    pass\nsuper().a()",
+            "if hasattr(super(), 'a'):\n    pass\nelse:\n    super().a()",
+            "if hasattr(super(), 'a'):\n    pass\nelif x:\n    super().a()",
+            "if hasattr(super(), 'a') or x:\n    super().a()",
+            "if not hasattr(super(), 'a'):\n    super().a()",
+            "if not hasattr(super(), 'a'):\n    x()\nsuper().a()",
+            "for r in self:\n    if not hasattr(super(), 'a'):\n        continue\nsuper().a()",
+            "for r in self:\n    if not hasattr(super(), 'a'):\n        break\nsuper().a()",
+            "return hasattr(super(), 'a') or super().a()",
+            "return not hasattr(super(), 'a') and super().a()",
+            "if hasattr(self, 'a'):\n    super().a()",
+            "if hasattr(super(Y, self), 'a'):\n    super(X, self).a()",
+            "if hasattr(super(Y, self), 'a'):\n    super().a()",
+            "if hasattr(super(X, other), 'a'):\n    super().a()",
+            "if hasattr(super(X, other.sudo()), 'a'):\n    super().a()",
+            "if hasattr(super(X, self, 1), 'a'):\n    super().a()",
+            "return None if hasattr(super(), 'a') else super().a()",
+        ];
+        let other_name = silent.map(|body| body.replacen("'a'", "'b'", 1));
+        for body in reported.iter().copied().chain(other_name.iter().map(String::as_str)) {
+            assert_eq!(called(body), ["a"], "{body}");
         }
     }
 

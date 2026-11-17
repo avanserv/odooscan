@@ -18,7 +18,7 @@ const ANY_PYTHON: u8 = u8::MAX;
 /// Methods a dict has and a list lacks.
 const DICT_METHODS: &[&str] = &["get", "items", "keys", "values", "setdefault", "update"];
 
-fn is_name(expr: &Expr, name: &str) -> bool {
+pub(crate) fn is_name(expr: &Expr, name: &str) -> bool {
     matches!(expr, Expr::Name(n) if n.id.as_str() == name)
 }
 
