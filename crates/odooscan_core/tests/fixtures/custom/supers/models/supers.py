@@ -166,3 +166,16 @@ class _SuperSteps(models.Model):
 
     def __step(self):
         return super().__step()
+
+
+class SuperNestedExplicit(models.Model):
+    _inherit = "bad.super"
+
+    def _nest_explicit(self):
+        class Proxy(dict):
+            gone = super(SuperNestedExplicit, self)._explicit_gone()
+
+            def _later(self):
+                return super(SuperNestedExplicit, self)._explicit_later()
+
+        return Proxy

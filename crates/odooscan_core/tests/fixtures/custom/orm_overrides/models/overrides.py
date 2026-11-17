@@ -71,3 +71,19 @@ class ResPartnerShims(models.Model):
             pass
 
         return Copied
+
+
+class ResPartnerPending(models.Model):
+    _inherit = "res.partner"
+
+    def write(self, vals):
+        class Pending:
+            result = super(ResPartnerPending, self).write(vals)
+
+        return Pending.result
+
+    def copy(self, default=None):
+        class Pending:
+            result = super(ResPartnerPending, self).copy(default)
+
+        Pending.result.ensure_one()

@@ -711,24 +711,30 @@ fn strings(expr: &Expr) -> Vec<&ast::ExprStringLiteral> {
     }
 }
 
-#[derive(Default)]
-struct SuperFinder {
+struct SuperFinder<'o> {
     found: bool,
+    outer: Outer<'o>,
+    nested: bool,
 }
 
-impl<'a> Visitor<'a> for SuperFinder {
+impl<'a> Visitor<'a> for SuperFinder<'_> {
     fn visit_stmt(&mut self, stmt: &'a Stmt) {
-        match stmt {
-            Stmt::ClassDef(class) => visit_class_head(self, class),
-            _ => visitor::walk_stmt(self, stmt),
+        if !visit_method_stmt(self, stmt) {
+            visitor::walk_stmt(self, stmt);
         }
     }
 
     fn visit_expr(&mut self, expr: &'a Expr) {
-        self.found |= matches!(expr, Expr::Call(c) if is_super(&c.func));
-        if !self.found {
+        self.found |= matches!(expr, Expr::Call(c) if self.outer.counts(c, self.nested));
+        if !self.found && !visit_nested_lambda(self, expr) {
             visitor::walk_expr(self, expr);
         }
+    }
+}
+
+impl<'a> MethodWalk<'a> for SuperFinder<'_> {
+    fn nested(&mut self) -> &mut bool {
+        &mut self.nested
     }
 }
 
@@ -1205,14 +1211,25 @@ fn caught_lookups(t: &ast::StmtTry, settled: bool) -> Vec<Option<Subject>> {
 }
 
 /// The methods called as `super().name(...)` or `super(Class, self).name(...)`, each with whether
-/// a `hasattr` test on the same `super()` and name encloses the call.
-#[derive(Default)]
+/// a `hasattr` test on the same `super()` and name encloses the call. In a class the method defines,
+/// only an explicit `super(Class, self)` outside the class's functions and lambdas is the method's.
 struct SuperCalls<'a> {
     calls: Vec<(&'a str, TextSize, bool)>,
     guards: Vec<(&'a Expr, &'a str)>,
+    outer: Outer<'a>,
+    nested: bool,
 }
 
 impl<'a> SuperCalls<'a> {
+    fn new(outer: Outer<'a>) -> Self {
+        Self {
+            calls: vec![],
+            guards: vec![],
+            outer,
+            nested: false,
+        }
+    }
+
     fn under(&mut self, test: &'a Expr, visit: impl FnOnce(&mut Self)) {
         let depth = self.guards.len();
         hasattr_tests(test, &mut self.guards);
@@ -1245,8 +1262,44 @@ fn is_super(func: &Expr) -> bool {
     matches!(func, Expr::Name(n) if n.id.as_str() == "super")
 }
 
-/// Visits what a class statement inside a method runs in the method: its decorators and the
-/// arguments of its head, bases and keywords alike. Its body's calls belong to its own methods.
+/// The class and the first parameter of a method, which name its own `super()` in a class the
+/// method defines. A bare `super()` there names that class instead.
+#[derive(Clone, Copy)]
+struct Outer<'a> {
+    class: &'a str,
+    this: Option<&'a str>,
+}
+
+impl<'a> Outer<'a> {
+    fn new(class: &'a str, func: &'a ast::StmtFunctionDef) -> Self {
+        let params = &func.parameters;
+        let this = params.posonlyargs.iter().chain(&params.args).next();
+        Self {
+            class,
+            this: this.map(|p| p.parameter.name.as_str()),
+        }
+    }
+
+    /// Whether the call is `super(class, this)`, positional and nothing else.
+    fn names(&self, call: &ast::ExprCall) -> bool {
+        let name = |expr: &Expr, want: Option<&str>| matches!(expr, Expr::Name(n) if Some(n.id.as_str()) == want);
+        call.arguments.keywords.is_empty()
+            && matches!(&*call.arguments.args, [class, this] if name(class, Some(self.class)) && name(this, self.this))
+    }
+
+    /// Whether the call is a `super()` of the method, `nested` when it stands in a class body.
+    fn counts(&self, call: &ast::ExprCall, nested: bool) -> bool {
+        is_super(&call.func) && (!nested || self.names(call))
+    }
+}
+
+/// A walk of a method's body that tells which of its calls run in a class the method defines.
+trait MethodWalk<'a>: Visitor<'a> {
+    fn nested(&mut self) -> &mut bool;
+}
+
+/// Visits the head of a class statement inside a method, which runs in the method: its decorators
+/// and the arguments of its head, bases and keywords alike.
 fn visit_class_head<'a, V: Visitor<'a>>(visitor: &mut V, class: &'a ast::StmtClassDef) {
     for decorator in &class.decorator_list {
         visitor.visit_decorator(decorator);
@@ -1256,10 +1309,55 @@ fn visit_class_head<'a, V: Visitor<'a>>(visitor: &mut V, class: &'a ast::StmtCla
     }
 }
 
+/// Visits a statement whose parts run at different times, returning whether it was one. A class
+/// the method defines runs its head and body in the method, nested; a function in that body runs
+/// only its decorators and defaults there, its body belonging to the class.
+fn visit_method_stmt<'a, V: MethodWalk<'a>>(visitor: &mut V, stmt: &'a Stmt) -> bool {
+    match stmt {
+        Stmt::ClassDef(class) => {
+            visit_class_head(visitor, class);
+            let nested = std::mem::replace(visitor.nested(), true);
+            visitor.visit_body(&class.body);
+            *visitor.nested() = nested;
+        }
+        Stmt::FunctionDef(func) if *visitor.nested() => {
+            for decorator in &func.decorator_list {
+                visitor.visit_decorator(decorator);
+            }
+            visitor.visit_parameters(&func.parameters);
+        }
+        _ => return false,
+    }
+    true
+}
+
+/// Visits only the defaults of a lambda in a nested class body, returning whether it was one: its
+/// body runs later, as the class's.
+fn visit_nested_lambda<'a, V: MethodWalk<'a>>(visitor: &mut V, expr: &'a Expr) -> bool {
+    let Expr::Lambda(lambda) = expr else {
+        return false;
+    };
+    if !*visitor.nested() {
+        return false;
+    }
+    if let Some(parameters) = &lambda.parameters {
+        visitor.visit_parameters(parameters);
+    }
+    true
+}
+
+impl<'a> MethodWalk<'a> for SuperCalls<'a> {
+    fn nested(&mut self) -> &mut bool {
+        &mut self.nested
+    }
+}
+
 impl<'a> Visitor<'a> for SuperCalls<'a> {
     fn visit_stmt(&mut self, stmt: &'a Stmt) {
+        if visit_method_stmt(self, stmt) {
+            return;
+        }
         match stmt {
-            Stmt::ClassDef(class) => visit_class_head(self, class),
             Stmt::If(branch) => {
                 self.visit_expr(&branch.test);
                 self.under(&branch.test, |calls| calls.visit_body(&branch.body));
@@ -1284,10 +1382,13 @@ impl<'a> Visitor<'a> for SuperCalls<'a> {
             self.visit_expr(&branch.orelse);
             return;
         }
+        if visit_nested_lambda(self, expr) {
+            return;
+        }
         if let Expr::Call(call) = expr
             && let Expr::Attribute(a) = &*call.func
             && let Expr::Call(inner) = &*a.value
-            && is_super(&inner.func)
+            && self.outer.counts(inner, self.nested)
         {
             let name = a.attr.as_str();
             let guarded = self
@@ -1300,11 +1401,16 @@ impl<'a> Visitor<'a> for SuperCalls<'a> {
     }
 }
 
-/// Whether any `super()` call appears in the body. One in a nested function counts; one in the body
-/// of a nested class does not, though one in its decorators or bases does.
-fn calls_super(body: &[Stmt]) -> bool {
-    let mut finder = SuperFinder::default();
-    finder.visit_body(body);
+/// Whether any `super()` call of the method `func` of `class` appears in its body. One in a nested
+/// function counts. In a nested class, one in its head counts, and in its body only an explicit
+/// `super(Class, self)` outside its functions and lambdas, as a bare `super()` names that class.
+fn calls_super(class: &str, func: &ast::StmtFunctionDef) -> bool {
+    let mut finder = SuperFinder {
+        found: false,
+        outer: Outer::new(class, func),
+        nested: false,
+    };
+    finder.visit_body(&func.body);
     finder.found
 }
 
@@ -1562,7 +1668,7 @@ fn compute_method<'c>(class: &'c ast::StmtClassDef, field: &FieldFact) -> Option
         Stmt::FunctionDef(f) if f.name.as_str() == name => Some(f),
         _ => None,
     })?;
-    (!calls_super(&func.body)).then_some(func)
+    (!calls_super(class.name.as_str(), func)).then_some(func)
 }
 
 /// Each method a field of the class names as its `option`, with the field.
@@ -3237,7 +3343,8 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
         if func.name.as_str() == "init" {
             fact.views = self.init_views(func);
         }
-        let mut calls = SuperCalls::default();
+        let class = fact.class_name.clone();
+        let mut calls = SuperCalls::new(Outer::new(&class, func));
         calls.visit_body(&func.body);
         self.method_checks(func, fact, &calls.calls);
         self.override_checks(func, &calls.calls);
@@ -3699,7 +3806,7 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
             );
         }
         self.api_definitions(func, supers);
-        if SUPER_REQUIRED.contains(&name) && !calls_super(&func.body) {
+        if SUPER_REQUIRED.contains(&name) && !calls_super(&fact.class_name, func) {
             self.diag(
                 "OD105",
                 &func.name,
@@ -5669,7 +5776,9 @@ mod tests {
              return super().default_get(fields_list)\n        return helper()\n    \
              def _compute_hint(self):\n        class Inner(dict):\n            \
              def get(self, key):\n                return super().get(key)\n        \
-             for rec in self:\n            if rec.name:\n                rec.hint = 'x'\n",
+             for rec in self:\n            if rec.name:\n                rec.hint = 'x'\n\
+             class Y(models.Model):\n    _inherit = 'x'\n    def create(self, vals):\n        \
+             class Inner:\n            y = super(Y, self).create(vals)\n        return Inner.y\n",
             None,
         );
         let missing: Vec<_> = facts
@@ -5683,6 +5792,60 @@ mod tests {
         assert_eq!(computes.len(), 1);
         assert_eq!(computes[0].0.value, "_compute_hint");
         assert_eq!(computes[0].1, ["hint"]);
+    }
+
+    #[test]
+    fn a_nested_class_reads_the_explicit_super() {
+        let facts = analyze(
+            "class X(models.Model):\n    _name = 'x'\n    def write(self, vals):\n        \
+             class Inner(dict):\n            y = super(X, self).write(vals)\n            \
+             z = [super(X, self).a() for _ in range(1)]\n            \
+             class Deeper:\n                w = super(X, self).b()\n            \
+             @super(X, self).c()\n            def m(self, d=super(X, self).d()):\n                \
+             return super(X, self).e()\n            \
+             f = lambda g=super(X, self).g(): super(X, self).h()\n            \
+             i = super(Inner, self).i()\n            j = super(X, other).j()\n            \
+             k = super().k()\n            l = super(X, self, 1).l()\n            \
+             n = super(X, obj=self).n()\n        return Inner.y\n    \
+             def unlink(rec):\n        class Inner:\n            \
+             a = super(X, rec).unlink()\n            b = super(X, self).o()\n        return Inner.a\n",
+            None,
+        );
+        let class = &facts.classes[0];
+        let called: Vec<_> = class.super_calls.iter().map(|c| c.value.as_str()).collect();
+        assert_eq!(called, ["write", "a", "b", "c", "d", "g", "unlink"]);
+        assert_eq!(class.extended, ["write", "unlink"]);
+        assert!(!facts.diags.iter().any(|d| matches!(d.code, "OD105" | "OD119")));
+    }
+
+    #[test]
+    fn a_nested_class_hides_a_super_not_naming_the_method() {
+        let facts = analyze(
+            "class X(models.Model):\n    _name = 'x'\n    x = fields.Char(compute='_compute_x')\n    \
+             y = fields.Char(compute='_compute_y')\n    \
+             def create(self, vals):\n        class Inner:\n            y = super().create(vals)\n        \
+             return Inner.y\n    \
+             def write(self, vals):\n        class Inner:\n            y = super(Inner, self).write(vals)\n        \
+             return Inner.y\n    \
+             def _compute_x(self):\n        class B:\n            base = super(X, self)._compute_x()\n        \
+             for rec in self:\n            if rec.name:\n                rec.x = 'x'\n    \
+             def _compute_y(self):\n        class B:\n            base = super(B, self)._compute_y()\n        \
+             for rec in self:\n            if rec.name:\n                rec.y = 'y'\n",
+            None,
+        );
+        let missing: Vec<_> = facts
+            .diags
+            .iter()
+            .filter(|d| d.code == "OD105")
+            .map(|d| d.message.split('(').next().unwrap_or_default())
+            .collect();
+        assert_eq!(missing, ["create", "write"]);
+        let computes: Vec<_> = facts.classes[0]
+            .unassigned_computes
+            .iter()
+            .map(|c| c.0.value.as_str())
+            .collect();
+        assert_eq!(computes, ["_compute_y"]);
     }
 
     #[test]

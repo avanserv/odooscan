@@ -448,3 +448,26 @@ class ResPartnerShimHint(models.Model):
         for partner in self:
             if partner.name:
                 partner.shim_hint = partner.name
+
+
+class ResPartnerBadgeHint(models.Model):
+    _inherit = "res.partner"
+
+    badge_hint = fields.Char(compute="_compute_badge_hint")
+
+    @api.depends("name")
+    def _compute_badge_hint(self):
+        for partner in self:
+            if partner.name:
+                partner.badge_hint = partner.name[:1]
+
+
+class ResPartnerBadgeHintFallback(models.Model):
+    _inherit = "res.partner"
+
+    def _compute_badge_hint(self):
+        class Badge:
+            base = super(ResPartnerBadgeHintFallback, self)._compute_badge_hint()
+
+        for partner in self.filtered(lambda p: not p.name):
+            partner.badge_hint = Badge.base
