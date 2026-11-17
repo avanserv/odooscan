@@ -783,3 +783,16 @@ fn a_seriesless_web_runs_the_owl_of_the_module_checked() {
     let found: Vec<_> = report.diagnostics.iter().map(|d| (d.code, d.line)).collect();
     assert_eq!(found, [("OD613", 7), ("OD613", 13), ("OD602", 19), ("OD602", 25)]);
 }
+
+#[test]
+fn a_module_named_before_base_writes_a_base_record_after_it() {
+    // `bare_rank` sorts before `base` and reads no `depends` on 18.0, yet Odoo loads `base` first.
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/base_rank");
+    let report = scan(&ScanOptions {
+        paths: vec![root.join("custom")],
+        addons_paths: vec![root.join("core")],
+        ..Default::default()
+    });
+    let found: Vec<_> = report.diagnostics.iter().map(|d| (d.code, d.line)).collect();
+    assert_eq!(found, [("OD322", 3)]);
+}
