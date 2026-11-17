@@ -432,3 +432,19 @@ class ResPartnerQueueLabel(models.Model):
     def _fill_queue_label(self):
         for partner in self:
             partner.queue_label = partner.handle or False
+
+
+class ResPartnerShimHint(models.Model):
+    _inherit = "res.partner"
+
+    shim_hint = fields.Char(compute="_compute_shim_hint")
+
+    @api.depends("name")
+    def _compute_shim_hint(self):
+        class Shim(dict):
+            def get(self, key):
+                return super().get(key)
+
+        for partner in self:
+            if partner.name:
+                partner.shim_hint = partner.name
