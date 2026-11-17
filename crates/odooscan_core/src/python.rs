@@ -11,9 +11,9 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::api_table::{self, Kind};
 use crate::facts::{
-    ClassBase, ClassFact, Definition, DefinitionSource, DomainFact, FieldClass, FieldFact, FlowSummary, GuardedRef,
-    MethodDef, ModelKind, OptionValue, Param, Pos, PyFacts, RawDiag, Receiver, Signature, Spanned, SqlColumn, SqlView,
-    Subject, UNREAD_TYPE, XmlRef,
+    BaseSource, ClassBase, ClassFact, Definition, DefinitionSource, DomainFact, FieldClass, FieldFact, FlowSummary,
+    GuardedRef, MethodDef, ModelKind, OptionValue, Param, Pos, PyFacts, RawDiag, Receiver, Signature, Spanned,
+    SqlColumn, SqlView, Subject, UNREAD_TYPE, XmlRef,
 };
 use crate::fix::{self, Edit, Fix};
 use crate::placeholders::{self, Specs};
@@ -2462,6 +2462,85 @@ impl<'a> BoundNames<'a> {
     }
 }
 
+/// What a statement of the module body binds a name to, for a class below that names it as a base.
+enum TopBinding<'a> {
+    /// A class the statement defines.
+    Class(&'a ast::StmtClassDef),
+    /// An import, with the level and the dotted path of what it names.
+    Import { level: u32, path: String },
+    /// Anything else that binds the name, such as an assignment or a function, whose value the scan
+    /// does not follow.
+    Other,
+}
+
+/// A name a statement of the module body binds, with where the statement ends.
+struct TopBound<'a> {
+    name: &'a str,
+    end: TextSize,
+    binding: TopBinding<'a>,
+}
+
+impl TopBound<'_> {
+    /// Whether the statement may bind `name`: a star import binds `*`, which may be any name.
+    fn binds(&self, name: &str) -> bool {
+        self.name == name || self.name == "*"
+    }
+}
+
+/// Each name each statement of the module body binds, in order. A name an `if`, a `try`, a `with`
+/// or an assignment binds is `Other`, since the scan does not follow which value it gets.
+fn top_bindings(body: &[Stmt]) -> Vec<TopBound<'_>> {
+    let mut bound = vec![];
+    for stmt in body {
+        let names: Vec<(&str, TopBinding)> = match stmt {
+            Stmt::ClassDef(class) => vec![(class.name.as_str(), TopBinding::Class(class))],
+            Stmt::Import(import) => import.names.iter().map(plain_import).collect(),
+            Stmt::ImportFrom(import) => import.names.iter().map(|a| from_import(import, a)).collect(),
+            _ => {
+                let mut names = BoundNames::default();
+                names.visit_stmt(stmt);
+                names.0.into_iter().map(|n| (n, TopBinding::Other)).collect()
+            }
+        };
+        let end = stmt.end();
+        bound.extend(names.into_iter().map(|(name, binding)| TopBound { name, end, binding }));
+    }
+    bound
+}
+
+/// What an alias of `import a.b` binds: `a` itself without an `as`, else `a.b`.
+fn plain_import(alias: &ast::Alias) -> (&str, TopBinding<'_>) {
+    let path = match &alias.asname {
+        Some(_) => alias.name.as_str(),
+        None => alias.name.as_str().split('.').next().unwrap_or_default(),
+    };
+    let name = alias.asname.as_ref().map_or(path, |a| a.as_str());
+    let binding = TopBinding::Import {
+        level: 0,
+        path: path.to_owned(),
+    };
+    (name, binding)
+}
+
+/// What an alias of `from ... import` binds.
+fn from_import<'a>(import: &'a ast::StmtImportFrom, alias: &'a ast::Alias) -> (&'a str, TopBinding<'a>) {
+    if alias.name.as_str() == "*" {
+        return ("*", TopBinding::Other);
+    }
+    let path = match &import.module {
+        Some(module) => format!("{module}.{}", alias.name),
+        None => alias.name.to_string(),
+    };
+    let name = alias.asname.as_ref().unwrap_or(&alias.name).as_str();
+    (
+        name,
+        TopBinding::Import {
+            level: import.level,
+            path,
+        },
+    )
+}
+
 /// A class of the file that can give a subclass no field.
 struct Fieldless<'a> {
     end: TextSize,
@@ -2773,6 +2852,8 @@ struct PyVisitor<'a, 'ast> {
     kinds: FxHashMap<String, ModelKind>,
     /// What `fieldless_classes` reads of the file.
     fieldless: FxHashMap<&'ast str, Fieldless<'ast>>,
+    /// What `top_bindings` reads of the file.
+    top_bindings: Vec<TopBound<'ast>>,
     /// What each guard that code runs behind proves, outermost first.
     guarded: Vec<Proven>,
     /// The holders of a guard in reach: the outermost enclosing function's, the innermost class's.
@@ -2852,6 +2933,7 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
             facts: PyFacts::default(),
             kinds: FxHashMap::default(),
             fieldless: fieldless_classes(body),
+            top_bindings: top_bindings(body),
             guarded: vec![],
             holders: GuardHolders::default(),
             class_models: vec![],
@@ -2917,18 +2999,15 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
         if let Some(kind) = kind {
             self.kinds.insert(class.name.to_string(), kind);
         }
-        let plain_bases: Vec<String> = class
-            .bases()
-            .iter()
-            .filter(|b| tail_name(b).and_then(orm_kind).is_none())
-            .map(|b| b.as_name_expr().map_or("", |n| n.id.as_str()).to_owned())
-            .collect();
-        let (opaque_bases, base_methods) = self.read_bases(class, &plain_bases);
+        let (plain_bases, plain_sources) = self.plain_bases(class);
+        let (opaque_bases, base_methods) = self.read_bases(class, &plain_bases, &plain_sources);
         let mut fact = ClassFact {
             kind: kind.unwrap_or(ModelKind::Model),
             plain_bases,
+            plain_sources,
             opaque_bases,
             base_methods,
+            importable: self.importable(class),
             ..ClassFact::new(self.loc.at(&class.name), class.name.to_string())
         };
         for stmt in &class.body {
@@ -2961,15 +3040,70 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
         kind.is_some() && own_body
     }
 
-    /// The `plain_bases` of `class` the scan does not read, and the names those it reads bind: the
-    /// classes its file defines above it that can hold no field.
-    fn read_bases(&self, class: &ast::StmtClassDef, plain_bases: &[String]) -> (Vec<String>, Vec<String>) {
+    /// The `plain_bases` of `class`, and the `plain_sources` beside them.
+    fn plain_bases(&self, class: &ast::StmtClassDef) -> (Vec<String>, Vec<BaseSource>) {
+        let plain = class
+            .bases()
+            .iter()
+            .filter(|b| tail_name(b).and_then(orm_kind).is_none());
+        plain
+            .map(|b| {
+                let name = b.as_name_expr().map_or("", |n| n.id.as_str()).to_owned();
+                (name, self.base_source(class, b))
+            })
+            .unzip()
+    }
+
+    /// Where the name `base` starts from is bound at `class`: by the last statement of the module
+    /// body that binds it and ends before the class. A class below the module body reads none, as
+    /// what an `if`, a `try` or a function around it binds first is not read.
+    fn base_source(&self, class: &ast::StmtClassDef, base: &Expr) -> BaseSource {
+        let dotted = module_state::dotted(base);
+        let Some(root) = module_state::root(base).filter(|_| self.at_top(class) && !dotted.contains("...")) else {
+            return BaseSource::Unread;
+        };
+        let bound = self
+            .top_bindings
+            .iter()
+            .rfind(|b| b.end <= class.start() && b.binds(root));
+        match bound.map(|b| &b.binding) {
+            Some(TopBinding::Class(bound)) if base.is_name_expr() => BaseSource::Local(self.loc.at(&bound.name)),
+            Some(TopBinding::Import { level, path }) => BaseSource::Imported {
+                level: *level,
+                path: module_state::imported_path(base, &[(root, path.clone())]).unwrap_or_default(),
+            },
+            _ => BaseSource::Unread,
+        }
+    }
+
+    /// Whether `class` is a statement of the module body.
+    fn at_top(&self, class: &ast::StmtClassDef) -> bool {
+        let at = class.start();
+        self.top_bindings
+            .iter()
+            .any(|b| matches!(b.binding, TopBinding::Class(c) if c.start() == at))
+    }
+
+    /// Whether the module body binds the name of `class` to it last: see `ClassFact::importable`.
+    fn importable(&self, class: &ast::StmtClassDef) -> bool {
+        let last = self.top_bindings.iter().rfind(|b| b.binds(&class.name));
+        last.is_some_and(|b| matches!(b.binding, TopBinding::Class(c) if c.start() == class.start()))
+    }
+
+    /// The sources of the `plain_bases` of `class` the scan does not read, and the names those it
+    /// reads bind: the classes its file defines above it that can hold no field.
+    fn read_bases(
+        &self,
+        class: &ast::StmtClassDef,
+        plain_bases: &[String],
+        sources: &[BaseSource],
+    ) -> (Vec<BaseSource>, Vec<String>) {
         let mut opaque = vec![];
         let mut binds = vec![];
-        for base in plain_bases {
+        for (base, source) in plain_bases.iter().zip(sources) {
             match self.fieldless.get(base.as_str()).filter(|f| f.end <= class.start()) {
                 Some(fieldless) => binds.extend(fieldless.binds.iter().map(|n| (*n).to_owned())),
-                None => opaque.push(base.clone()),
+                None => opaque.push(source.clone()),
             }
         }
         (opaque, binds)
@@ -6235,7 +6369,7 @@ class U(HttpCase):
         ] {
             let facts = analyze(&format!("{layout}{class}"), None);
             let class = facts.classes.last().unwrap();
-            assert_eq!(class.opaque_bases, ["Layout"], "{layout}");
+            assert_eq!(class.opaque_bases.len(), 1, "{layout}");
             assert!(class.base_methods.is_empty(), "{layout}");
         }
     }
@@ -6246,7 +6380,117 @@ class U(HttpCase):
             "class X(models.Model, Layout):\n    _name = 'x'\nclass Layout:\n    pass\n",
             None,
         );
-        assert_eq!(facts.classes[0].opaque_bases, ["Layout"]);
+        assert_eq!(facts.classes[0].opaque_bases, [BaseSource::Unread]);
+    }
+
+    #[test]
+    fn reads_where_the_module_body_binds_each_plain_base() {
+        let imported = |level, path: &str| BaseSource::Imported {
+            level,
+            path: path.to_owned(),
+        };
+        for (above, base, source) in [
+            ("from .mixins import Layout\n", "Layout", imported(1, "mixins.Layout")),
+            (
+                "from .mixins import Grid as Layout\n",
+                "Layout",
+                imported(1, "mixins.Grid"),
+            ),
+            ("from . import mixins\n", "mixins.Layout", imported(1, "mixins.Layout")),
+            (
+                "from ..lib.mixins import Layout\n",
+                "Layout",
+                imported(2, "lib.mixins.Layout"),
+            ),
+            (
+                "import odoo.addons.kit.models\n",
+                "odoo.addons.kit.models.Layout",
+                imported(0, "odoo.addons.kit.models.Layout"),
+            ),
+            (
+                "import odoo.addons.kit.models as kit\n",
+                "kit.Layout",
+                imported(0, "odoo.addons.kit.models.Layout"),
+            ),
+            (
+                "from odoo.addons.kit.models.mixins import Layout\n",
+                "Layout",
+                imported(0, "odoo.addons.kit.models.mixins.Layout"),
+            ),
+            (
+                "class Layout(models.Model):\n    _name = 'y'\nfrom .mixins import Layout\n",
+                "Layout",
+                imported(1, "mixins.Layout"),
+            ),
+            (
+                "from .mixins import Layout\nfrom .grid import *\n",
+                "Layout",
+                BaseSource::Unread,
+            ),
+            (
+                "from .mixins import Layout\nLayout = make(Layout)\n",
+                "Layout",
+                BaseSource::Unread,
+            ),
+            (
+                "from .mixins import Layout\nif MADE:\n    from .grid import Layout\n",
+                "Layout",
+                BaseSource::Unread,
+            ),
+            ("from .mixins import Layout\n", "Layout()", BaseSource::Unread),
+            ("from .mixins import kinds\n", "kinds[0]", BaseSource::Unread),
+            ("", "Layout", BaseSource::Unread),
+            (
+                "class Kit(models.Model):\n    _name = 'y'\n",
+                "Kit.Layout",
+                BaseSource::Unread,
+            ),
+        ] {
+            let facts = analyze(
+                &format!("{above}class X(models.Model, {base}):\n    _name = 'x'\n"),
+                None,
+            );
+            let class = facts.classes.last().unwrap();
+            assert_eq!(class.plain_sources, [source], "{above}");
+        }
+        let facts = analyze(
+            "class Layout(models.Model):\n    _name = 'y'\nclass X(models.Model, Layout):\n    _name = 'x'\n",
+            None,
+        );
+        assert_eq!(
+            facts.classes[1].plain_sources,
+            [BaseSource::Local(facts.classes[0].pos)]
+        );
+    }
+
+    #[test]
+    fn reads_no_plain_base_of_a_class_below_the_module_body() {
+        let facts = analyze(
+            "from .mixins import Layout\nif MADE:\n    class X(models.Model, Layout):\n        _name = 'x'\n",
+            None,
+        );
+        assert_eq!(facts.classes[0].plain_sources, [BaseSource::Unread]);
+    }
+
+    #[test]
+    fn marks_a_class_the_module_body_binds_its_name_to_last_importable() {
+        let class = "class Layout(models.Model):\n    _name = 'y'\n";
+        for (below, importable) in [
+            ("", true),
+            ("class Other(models.Model):\n    _name = 'z'\n", true),
+            ("Layout = make(Layout)\n", false),
+            ("from .grid import Layout\n", false),
+            ("from .grid import *\n", false),
+            ("class Layout(models.Model):\n    _name = 'z'\n", false),
+        ] {
+            let facts = analyze(&format!("{class}{below}"), None);
+            assert_eq!(facts.classes[0].importable, importable, "{below}");
+        }
+        let facts = analyze(
+            &format!("if MADE:\n    {}", class.replace("\n    _", "\n        _")),
+            None,
+        );
+        assert!(!facts.classes[0].importable);
     }
 
     #[test]

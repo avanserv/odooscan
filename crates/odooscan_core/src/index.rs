@@ -4,8 +4,8 @@ use globset::{GlobBuilder, GlobSet, GlobSetBuilder};
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::facts::{
-    ActionFact, Annotation, ArchElement, ArchEmptied, ArchSubview, ArchValued, ClassFact, ComponentItem, DataFacts,
-    FieldFact, FlowSummary, Heritage, JsClass, JsName, ModelKind, OptionValue, PropItem, PyFacts, Receiver,
+    ActionFact, Annotation, ArchElement, ArchEmptied, ArchSubview, ArchValued, BaseSource, ClassFact, ComponentItem,
+    DataFacts, FieldFact, FlowSummary, Heritage, JsClass, JsName, ModelKind, OptionValue, PropItem, PyFacts, Receiver,
     RecordWrite, ReportFact, RouteKey, RuleFact, ServerFact, Signature, Static, StaticWrite, UNREAD_TYPE, ViewFact,
     WrittenValue,
 };
@@ -636,6 +636,22 @@ pub(crate) fn class_file(path: &str) -> Option<(&str, [String; 2], &str)> {
     let (module, class) = rest.rsplit_once('.')?;
     let dir = module.replace('.', "/");
     Some((addon, [format!("{dir}.py"), format!("{dir}/__init__.py")], class))
+}
+
+/// The absolute path of what an import of `path`, `level` dots up from the file `rel` of `addon`,
+/// names; none for a level past the addon's root.
+fn absolute_import(addon: &str, rel: &str, level: u32, path: &str) -> Option<String> {
+    if level == 0 {
+        return Some(path.to_owned());
+    }
+    // A file's package is its directory, `__init__.py` included, and each dot past the first goes
+    // one package up.
+    let mut package: Vec<&str> = rel.split('/').collect();
+    package.pop();
+    let up = usize::try_from(level - 1).ok()?;
+    package.truncate(package.len().checked_sub(up)?);
+    let package = package.iter().map(|p| format!(".{p}")).collect::<String>();
+    Some(format!("odoo.addons.{addon}{package}.{path}"))
 }
 
 fn model_xmlid(model: &str) -> String {
@@ -3165,10 +3181,17 @@ impl<'m> Index<'m> {
     /// is a model class of the file the path imports it from, none when that addon or file is not
     /// indexed. A class without facts there is no model, since the parser keeps facts only for those.
     pub fn model_class(&self, path: &str) -> Option<bool> {
+        let (file, class) = self.path_file(path)?;
+        Some(file.facts.classes.iter().any(|c| c.class_name == class))
+    }
+
+    /// The indexed file a dotted path of `odoo.addons` imports a class from, and the class name: see
+    /// `class_file`.
+    fn path_file<'p>(&self, path: &'p str) -> Option<(&'m SourceFile<PyFacts>, &'p str)> {
         let (addon, files, class) = class_file(path)?;
         let module = &self.modules[*self.by_name.get(addon)?];
         let file = module.python.iter().find(|f| files.contains(&f.rel))?;
-        Some(file.facts.classes.iter().any(|c| c.class_name == class))
+        Some((file, class))
     }
 
     /// The definitions of a full XML id that a module of `series` can reach. A database runs one
@@ -3354,43 +3377,64 @@ impl<'m> Index<'m> {
     }
 
     /// Whether a class of the chain of `model` has a non-literal `_inherit` element or one of the
-    /// `bases` the scan does not read. Unlike `hidden_parents`, a Python base defined above the class
-    /// in its file that is another class of the chain counts as read: mixins subclass each other
-    /// along their `_inherit`, and Odoo merges that class's fields either way. A class of `base`
-    /// counts too: Odoo appends `base` to the parents of every other model (18.0
-    /// `odoo/models.py:732-736`, 20.0 `odoo/orm/model_classes.py:179-183`), so its fields and
+    /// `bases` the scan does not read. Unlike `hidden_parents`, a Python base that is another class
+    /// of the chain counts as read, whether the file defines it above the class or imports it:
+    /// mixins subclass each other along their `_inherit`, and Odoo merges that class's fields either
+    /// way. A class of `base` counts too: Odoo appends `base` to the parents of every other model
+    /// (18.0 `odoo/models.py:732-736`, 20.0 `odoo/orm/model_classes.py:179-183`), so its fields and
     /// methods reach the model whether or not it is a Python base.
     fn unread_bases(
         &self,
         model: &str,
         scope: &Scope,
         delegated: bool,
-        bases: impl Fn(&ClassFact) -> &[String],
+        bases: impl Fn(&ClassFact) -> &[BaseSource],
     ) -> bool {
         let chain = self.chain(model, Some(scope), delegated);
-        let read = |mi: usize, class: &ClassFact, base: &str| {
-            self.class_above(mi, class, base)
-                .is_some_and(|above| chain.iter().any(|(_, other)| std::ptr::eq(*other, above)))
+        let read = |mi: usize, class: &ClassFact, base: &BaseSource| {
+            self.base_class(mi, class, base)
+                .is_some_and(|parent| chain.iter().any(|(_, other)| std::ptr::eq(*other, parent)))
         };
         chain
             .iter()
             .any(|&(mi, c)| c.inherit_unknown || bases(c).iter().any(|base| !read(mi, c, base)))
     }
 
-    /// The class `name` holds where `class` is defined, when its own file defines it above. The
-    /// index keeps no imports, so a class of that name elsewhere may be another class.
-    fn class_above(&self, mi: usize, class: &ClassFact, name: &str) -> Option<&'m ClassFact> {
-        let above = self.classes_above(mi, class).iter();
-        above.rev().find(|c| c.class_name == name)
+    /// The model class a plain base of `class`, of module `mi`, names, when the scan reads it: a
+    /// model class of its file, or the one an import names in an indexed file. Odoo imports an addon
+    /// as `odoo.addons.<name>` (18.0 `odoo/modules/module.py:379-383`, 20.0 `:536-540`), which
+    /// `absolute_import` spells a relative import as.
+    fn base_class(&self, mi: usize, class: &ClassFact, base: &BaseSource) -> Option<&'m ClassFact> {
+        let (file, _) = self.file_of(mi, class)?;
+        match base {
+            BaseSource::Local(pos) => file.facts.classes.iter().find(|c| c.pos == *pos),
+            BaseSource::Imported { level, path } => {
+                let path = absolute_import(&self.modules[mi].name, &file.rel, *level, path)?;
+                self.imported_class(&path)
+            }
+            BaseSource::Unread => None,
+        }
+    }
+
+    /// The class an import of the dotted `path` gets: the model class its file binds the name to
+    /// last.
+    fn imported_class(&self, path: &str) -> Option<&'m ClassFact> {
+        let (file, class) = self.path_file(path)?;
+        let classes = file.facts.classes.iter();
+        classes.rev().find(|c| c.importable && c.class_name == class)
     }
 
     /// The classes above `class` in its file of module `mi`.
     fn classes_above(&self, mi: usize, class: &ClassFact) -> &'m [ClassFact] {
-        let mut files = self.modules[mi].python.iter().map(|f| f.facts.classes.as_slice());
-        let at = |classes: &'m [ClassFact]| classes.iter().position(|c| std::ptr::eq(c, class));
-        files
-            .find_map(|classes| at(classes).map(|at| &classes[..at]))
+        self.file_of(mi, class)
+            .map(|(file, at)| &file.facts.classes[..at])
             .unwrap_or_default()
+    }
+
+    /// The file of module `mi` that holds `class`, and where `class` sits among its classes.
+    fn file_of(&self, mi: usize, class: &ClassFact) -> Option<(&'m SourceFile<PyFacts>, usize)> {
+        let at = |f: &'m SourceFile<PyFacts>| f.facts.classes.iter().position(|c| std::ptr::eq(c, class));
+        self.modules[mi].python.iter().find_map(|f| at(f).map(|at| (f, at)))
     }
 
     /// Whether a class merged into `model` has a parent the scan cannot see. A parent reached through
@@ -3440,7 +3484,7 @@ impl<'m> Index<'m> {
     /// What `holds_fields` asks, and no plain base the scan does not read, which may hold methods
     /// whatever its fields.
     pub fn holds_model(&self, module: usize, model: &str, scope: &Scope) -> bool {
-        self.holds_fields(module, model, scope) && !self.unread_bases(model, scope, true, |c| &c.plain_bases)
+        self.holds_fields(module, model, scope) && !self.unread_bases(model, scope, true, |c| &c.plain_sources)
     }
 
     /// Whether `module` introduces `model` and holds all its fields: every class in scope of `model`
@@ -4263,9 +4307,9 @@ mod tests {
     use super::{
         BASE_MODEL_DUNDERS, BASE_MODEL_EXTRA, BASE_MODEL_METHODS, BASE_PRIVATE_METHODS, BASE_RPC_METHODS, Export,
         FIELD_CLASSES, FieldHolder, FieldSpelling, Index, JsSpec, OLD_BASE_METHODS, OWL_COMPONENT, OWL1_COMPONENT,
-        PlacedWrite, Scope, Status, XmlIdDef, base_private_method, base_rpc_method, class_file, depends_closure,
-        field_id_prefixes, fold_writes, js_module_path, last_text, mangles_alike, old_base_method, test_bundle,
-        triggers, unseen_table_id,
+        PlacedWrite, Scope, Status, XmlIdDef, absolute_import, base_private_method, base_rpc_method, class_file,
+        depends_closure, field_id_prefixes, fold_writes, js_module_path, last_text, mangles_alike, old_base_method,
+        test_bundle, triggers, unseen_table_id,
     };
     use crate::mentions::{Mentions, Words};
     use crate::project::{Module, SourceFile, module};
@@ -4465,6 +4509,26 @@ mod tests {
         );
         assert_eq!(class_file("odoo.addons.base.LabelWizard"), None);
         assert_eq!(class_file("odoo.models.BaseModel"), None);
+    }
+
+    #[test]
+    fn a_relative_import_resolves_below_the_addon_package() {
+        let import = |rel, level| absolute_import("kit", rel, level, "mixins.Layout");
+        assert_eq!(import("models/x.py", 0).as_deref(), Some("mixins.Layout"));
+        assert_eq!(
+            import("models/x.py", 1).as_deref(),
+            Some("odoo.addons.kit.models.mixins.Layout")
+        );
+        assert_eq!(
+            import("models/__init__.py", 1).as_deref(),
+            Some("odoo.addons.kit.models.mixins.Layout")
+        );
+        assert_eq!(
+            import("models/x.py", 2).as_deref(),
+            Some("odoo.addons.kit.mixins.Layout")
+        );
+        assert_eq!(import("x.py", 1).as_deref(), Some("odoo.addons.kit.mixins.Layout"));
+        assert_eq!(import("models/x.py", 3), None);
     }
 
     fn private(name: &str, series: &str) -> bool {
@@ -6021,5 +6085,41 @@ Order.components.Card = null;
         assert!(index.hidden_outside("side.hidden", &main));
         assert!(!index.hidden_outside("side.plain", &main));
         assert!(!index.hidden_outside("side.hidden", &reader));
+    }
+
+    #[test]
+    fn an_imported_base_of_the_chain_is_a_read_parent() {
+        let manifest = |depends: &str| format!("{{'version': '18.0.1.0', 'depends': [{depends}]}}");
+        let mut modules = [module("base", &manifest("")), module("kit", &manifest("'base'"))];
+        modules[0]
+            .python
+            .push(python_18("class B(models.Model):\n    _name = 'base'\n"));
+        let at = |rel: &str, source: &str| SourceFile {
+            rel: rel.to_owned(),
+            ..python_18(source)
+        };
+        modules[1].python.push(at(
+            "models/stamped.py",
+            "class Stamped(models.Model):\n    _name = 'kit.stamped'\n\n\
+             class Shadow(models.Model):\n    _name = 'kit.shadow'\n\n\
+             Shadow = make(Shadow)\n",
+        ));
+        modules[1].python.push(at(
+            "models/users.py",
+            "from .stamped import Stamped, Shadow\n\
+             from odoo.addons.kit.models import stamped\n\n\
+             class Relative(Stamped):\n    _name = 'kit.relative'\n    _inherit = ['kit.stamped']\n\n\
+             class Absolute(stamped.Stamped):\n    _name = 'kit.absolute'\n    _inherit = ['kit.stamped']\n\n\
+             class Rebound(Shadow):\n    _name = 'kit.rebound'\n    _inherit = ['kit.shadow']\n",
+        ));
+        let index = Index::build(&modules, None);
+        let kit = index.by_name["kit"];
+        let scope = index.scope(kit);
+        for model in ["kit.relative", "kit.absolute"] {
+            assert!(index.holds_model(kit, model, &scope), "{model}");
+            assert!(!index.hidden_field_parents(model, &scope), "{model}");
+            assert!(!index.hidden_method_parents(model, &scope), "{model}");
+        }
+        assert!(index.hidden_field_parents("kit.rebound", &scope));
     }
 }

@@ -240,10 +240,15 @@ pub struct ClassFact {
     /// first three. Each is its bare name, or empty for a base a class of the file cannot be, such
     /// as `Layout()` or `mixins.Layout`.
     pub plain_bases: Vec<String>,
-    /// The entries of `plain_bases` the scan does not read: all but the classes its file defines
-    /// above it that can hold no field. Those still give the class methods, so they stay in
+    /// Where the name each of `plain_bases` starts from is bound, in its order.
+    pub plain_sources: Vec<BaseSource>,
+    /// The sources of the `plain_bases` the scan does not read: all but the classes its file
+    /// defines above it that can hold no field. Those still give the class methods, so they stay in
     /// `plain_bases`.
-    pub opaque_bases: Vec<String>,
+    pub opaque_bases: Vec<BaseSource>,
+    /// The module body binds the class name to this class last, so an import of the name from the
+    /// file gets it.
+    pub importable: bool,
     /// The names the `plain_bases` the scan reads bind, other than those starting with `__`.
     pub base_methods: Vec<String>,
     /// The value of `_table`, when the class sets it.
@@ -262,6 +267,19 @@ pub struct ClassFact {
     /// `Index` or `UniqueIndex` such as `models.Index(...)`, names, and each keyed definition that
     /// names none or cannot be read.
     pub definitions: Vec<Definition>,
+}
+
+/// Where the name a plain base of a class starts from is bound, by the last statement of the module
+/// body that binds it before the class.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum BaseSource {
+    /// A class of the file, at its name, which the base names bare.
+    Local(Pos),
+    /// What an import names: the dotted path below the package `level` dots up from the file, or an
+    /// absolute one for level 0, then the attributes the base reads off the bound name.
+    Imported { level: u32, path: String },
+    /// Anything else: an assignment, a function, a star import, a class below the module body.
+    Unread,
 }
 
 /// A column a literal constraint or index definition names, or a keyed definition that names none
@@ -333,7 +351,9 @@ impl ClassFact {
             own_view: false,
             definitions: vec![],
             plain_bases: vec![],
+            plain_sources: vec![],
             opaque_bases: vec![],
+            importable: false,
             base_methods: vec![],
         }
     }
