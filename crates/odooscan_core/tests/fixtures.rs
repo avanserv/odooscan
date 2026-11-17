@@ -416,6 +416,7 @@ fn python_api_stages_keep_their_severity() {
         "legacy154",
         "legacy17",
         "modern20",
+        "orm_overrides",
         "saas131",
         "saas181",
         "saas192",
