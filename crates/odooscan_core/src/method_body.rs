@@ -505,6 +505,30 @@ fn side<'s>(i: &'s ast::StmtIf, body: Flow, clauses: &[Flow]) -> Option<Side<'s>
     })
 }
 
+/// The sides each branch of `i` starts with, its body then each clause. No path through a branch
+/// has an earlier test of the chain true, nor its own test false, so a side `Filled` on those
+/// paths lets a statement there pair with the test alone: `for line in x:` under `elif x:`, or
+/// under `if not x:` then `elif y:`.
+fn guards(i: &ast::StmtIf) -> Vec<Vec<Side<'_>>> {
+    let filled = |test, holds| Side {
+        test,
+        holds,
+        flow: Flow::Filled,
+    };
+    let tests = std::iter::once(Some(&*i.test)).chain(i.elif_else_clauses.iter().map(|c| c.test.as_ref()));
+    let mut earlier = vec![];
+    tests
+        .map(|test| {
+            let mut seed = earlier.clone();
+            if let Some(test) = test {
+                seed.push(filled(test, false));
+                earlier.push(filled(test, true));
+            }
+            seed
+        })
+        .collect()
+}
+
 /// How statements jump before a call of a method of `self`, which may assign the field on every
 /// record: each block is walked up to the first statement that fills, that call, a `raise`, or a
 /// compound statement making one on every path. A `break` or `continue` in a loop among them stays
@@ -734,9 +758,9 @@ impl<'a> Paths<'a> {
             Stmt::If(i) => return self.branches(i, sides),
             Stmt::Try(t) => return self.handled(t, sides),
             Stmt::With(w) => return self.within(w, sides),
+            Stmt::Match(m) => return self.matched(m),
             Stmt::Raise(_) => Flow::Assigned,
             Stmt::For(_) | Stmt::While(_) => self.nested_loop(stmt, sides),
-            Stmt::Match(m) => join(m.cases.iter().map(|c| self.block(&c.body))),
             _ => self.assigned(stmt),
         };
         (flow, false)
@@ -804,31 +828,36 @@ impl<'a> Paths<'a> {
 
     /// A chain with an `elif` but no `else` is taken to cover every case, as a `match` is. An
     /// open `if` whose body or lone `else` assigns pairs with one of `sides` to cover every path.
-    /// No path through its body has the test false, nor through a lone `else` true, so each starts
-    /// with a side on those paths that a statement pairing with the test covers.
     fn branches<'s>(&self, i: &'s ast::StmtIf, sides: &mut Vec<Side<'s>>) -> (Flow, bool) {
-        let guard = |holds| {
-            vec![Side {
-                test: &i.test,
-                holds,
-                flow: Flow::Filled,
-            }]
-        };
-        let (body, mut continued) = self.steps(&i.body, &mut guard(false));
-        let lone_else = matches!(&*i.elif_else_clauses, [c] if c.test.is_none());
-        let clauses: Vec<_> = (i.elif_else_clauses.iter())
-            .map(|c| {
-                let (flow, continues) = self.steps(&c.body, &mut if lone_else { guard(true) } else { vec![] });
+        let bodies = std::iter::once(&i.body[..]).chain(i.elif_else_clauses.iter().map(|c| &c.body[..]));
+        let (flows, continued) = self.arms(bodies.zip(guards(i)));
+        let fallthrough = i.elif_else_clauses.is_empty().then_some(Flow::Open);
+        let flow = join(flows.iter().copied().chain(fallthrough));
+        match side(i, flows[0], &flows[1..]) {
+            Some(side) if flow == Flow::Open => (pair(side, sides), continued),
+            _ => (flow, continued),
+        }
+    }
+
+    /// A `match` is taken to cover every case, and a case that may `continue` a nested loop leaves
+    /// the others to decide, as an `if` branch does.
+    fn matched(&self, m: &ast::StmtMatch) -> (Flow, bool) {
+        let (flows, continued) = self.arms(m.cases.iter().map(|c| (&c.body[..], vec![])));
+        (join(flows), continued)
+    }
+
+    /// How each body ends, walked with the sides it starts with, and whether one may `continue` a
+    /// nested loop.
+    fn arms<'s>(&self, bodies: impl Iterator<Item = (&'s [Stmt], Vec<Side<'s>>)>) -> (Vec<Flow>, bool) {
+        let mut continued = false;
+        let flows = bodies
+            .map(|(body, mut seed)| {
+                let (flow, continues) = self.steps(body, &mut seed);
                 continued |= continues;
                 flow
             })
             .collect();
-        let fallthrough = i.elif_else_clauses.is_empty().then_some(Flow::Open);
-        let flow = join(std::iter::once(body).chain(clauses.iter().copied()).chain(fallthrough));
-        match side(i, body, &clauses) {
-            Some(side) if flow == Flow::Open => (pair(side, sides), continued),
-            _ => (flow, continued),
-        }
+        (flows, continued)
     }
 
     /// The body then its `else`, or a handler, runs before the `finally`. A body that first writes
@@ -1121,6 +1150,8 @@ mod tests {
             "while rec.a:\n    rec.f = 1\n    break",
             "while True:\n    if rec.a:\n        break\n    rec.f = 1\n    break",
             "for line in rec.line_ids:\n    try:\n        if not line.a:\n            continue\n        v = int(line.a)\n    except ValueError:\n        raise\n    else:\n        break\nelse:\n    rec.f = 1",
+            "for line in rec.line_ids:\n    match line.a:\n        case 0:\n            break\n        case _:\n            pass\nelse:\n    rec.f = 1",
+            "for line in rec.line_ids:\n    match line.a:\n        case 0:\n            continue\n        case _:\n            pass\n    break\nelse:\n    rec.f = 1",
         ];
         for stmts in reported {
             assert!(unassigned(&format!("for rec in self:\n{}", indent(stmts))), "{stmts}");
@@ -1133,6 +1164,7 @@ mod tests {
             "for line in rec.line_ids:\n    try:\n        if not line.a:\n            continue\n        rec.f = int(line.a)\n    except ValueError:\n        raise\n    break\nelse:\n    rec.f = False",
             "for line in rec.line_ids:\n    with rec.lock():\n        if not line.a:\n            continue\n        rec.f = int(line.a)\n    break\nelse:\n    rec.f = False",
             "for line in rec.line_ids:\n    if not line.a:\n        continue\n    else:\n        rec.f = line.a\n    break\nelse:\n    rec.f = False",
+            "for line in rec.line_ids:\n    match line.a:\n        case 0:\n            continue\n        case _:\n            rec.f = line.a\n    break\nelse:\n    rec.f = False",
             "for line in rec.line_ids:\n    try:\n        rec.f = int(line.a)\n    except ValueError:\n        continue\n    break\nelse:\n    rec.f = False",
         ];
         for stmts in assigned {
@@ -1241,6 +1273,28 @@ mod tests {
     }
 
     #[test]
+    fn an_elif_starts_with_the_earlier_tests_false() {
+        let loops = indent("for line in rec.line_ids:\n    rec.f = line.a");
+        let assigned = [
+            format!("if not rec.line_ids:\n    rec.f = False\nelif rec.a:\n{loops}"),
+            format!("if not rec.line_ids:\n    rec.f = False\nelif rec.a:\n    rec.f = 1\nelse:\n{loops}"),
+            format!("if not rec.line_ids:\n    rec.f = False\nelif rec.a:\n    rec.f = 1\nelif rec.b:\n{loops}"),
+            format!("if rec.a:\n    rec.f = 1\nelif rec.line_ids:\n{loops}"),
+            "if rec.t == 'x':\n    rec.f = 1\nelif rec.a:\n    if rec.t != 'x':\n        rec.f = 2".to_owned(),
+        ];
+        for stmts in assigned {
+            assert!(!unassigned(&format!("for rec in self:\n{}", indent(&stmts))), "{stmts}");
+        }
+        let reported = [
+            format!("if rec.b:\n    rec.f = False\nelif rec.a:\n{loops}"),
+            format!("if rec.line_ids:\n    rec.f = False\nelif rec.a:\n{loops}"),
+        ];
+        for stmts in reported {
+            assert!(unassigned(&format!("for rec in self:\n{}", indent(&stmts))), "{stmts}");
+        }
+    }
+
+    #[test]
     fn leaving_the_loop_over_self_leaves_later_records_unassigned() {
         let reported = [
             "rec.f = 1\nif rec.a:\n    break",
@@ -1280,6 +1334,8 @@ mod tests {
             "rec.f = 1\nwhile True:\n    if rec.d:\n        return\n    self._fill_f()\n    break",
             "rec.f = 1\nwhile True:\n    try:\n        self._fill_f()\n    except ValueError:\n        break\n    break\nreturn",
             "rec.f = 1\nwhile True:\n    if rec.c:\n        continue\n    else:\n        self._fill_f()\n    break\nreturn",
+            "while True:\n    if rec.c == 1:\n        continue\n    else:\n        self._fill_f()\n    break\nrec.f = 1\nreturn",
+            "while True:\n    match rec.c:\n        case 1:\n            continue\n        case _:\n            self._fill_f()\n    break\nrec.f = 1\nreturn",
             "rec.f = 1\nwhile rec.a:\n    self._fill_f()\n    break\nreturn",
             "rec.f = 1\nfor line in rec.line_ids:\n    self._fill_f()\n    break\nreturn",
         ];
