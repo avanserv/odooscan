@@ -1763,6 +1763,7 @@ custom/supers/models/supers.py:85:31: OD211 no parent class of bad.super defines
 custom/supers/models/supers.py:97:21: OD211 no parent class of bad.super defines '_guard_unchecked', so this super() call fails
 custom/supers/models/supers.py:98:24: OD211 no parent class of bad.super defines '_guard_gone', so this super() call fails
 custom/supers/models/supers.py:108:24: OD211 no parent class of bad.super defines '__getattr__', so this super() call fails
+custom/supers/models/supers.py:122:24: OD211 no parent class of bad.super defines '__seal', so this super() call fails
 custom/test_imports/static/src/widget.js:4:24: OD605 no indexed bundle defines template 'test_imports.Gone'
 custom/test_imports/static/src/widget_patch.js:7:22: OD602 neither Widget nor its parents have 'prepare', so super.prepare() fails
 custom/test_imports/static/tests/widget.test.js:3:10: OD601 '@web/../tests/web_test_helpers' does not export 'mountGone'

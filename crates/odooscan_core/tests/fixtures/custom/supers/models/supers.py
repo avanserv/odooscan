@@ -106,3 +106,31 @@ class SuperAttributes(models.Model):
 
     def _lookup(self, name):
         return super().__getattr__(name)
+
+
+class SuperSeal(models.Model):
+    _inherit = "bad.super"
+
+    def __seal(self):
+        return 1
+
+
+class SuperSealOther(models.Model):
+    _inherit = "bad.super"
+
+    def __seal(self):
+        return super().__seal()
+
+
+class SuperSeal(models.Model):
+    _inherit = "bad.super"
+
+    def __seal(self):
+        return super(SuperSeal, self).__seal()
+
+
+class _SuperSeal(models.Model):
+    _inherit = "bad.super"
+
+    def __seal(self):
+        return super().__seal()
