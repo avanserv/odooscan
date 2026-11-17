@@ -3779,6 +3779,16 @@ impl<'m> Index<'m> {
             .any(|parent| !self.has_introducer(&parent.value))
     }
 
+    /// As `unindexed_parent`, counting only the classes of `module`. A class of another module
+    /// listing such a parent leaves a typo in `module` reported.
+    pub fn lists_unindexed_parent(&self, module: usize, model: &str, scope: &Scope) -> bool {
+        self.merged_classes(model, scope)
+            .iter()
+            .filter(|(mi, _)| *mi == module)
+            .flat_map(|(_, c)| &c.inherit)
+            .any(|parent| !self.has_introducer(&parent.value))
+    }
+
     /// Whether a class of any module introduces `model` with `_name`. Odoo refuses to extend or
     /// inherit a model absent from the registry (18.0 `odoo/models.py:739-741`, `:759-761`; 20.0
     /// `odoo/orm/model_classes.py:186-188`, `:208-210`), so one only extended here is introduced
@@ -4171,6 +4181,18 @@ mod tests {
     use crate::python;
     use crate::series::Series;
     use crate::xml;
+
+    fn python_18(source: &str) -> SourceFile<crate::facts::PyFacts> {
+        SourceFile {
+            path: PathBuf::new(),
+            rel: String::new(),
+            rank: None,
+            demo: false,
+            facts: python::analyze(source, Series::parse("18.0")),
+            suppressions: Default::default(),
+            mentions: Mentions::default(),
+        }
+    }
 
     #[test]
     fn a_private_name_mangles_alike_only_in_classes_of_one_name() {
@@ -4747,35 +4769,24 @@ mod tests {
 
     #[test]
     fn words_take_from_a_set_by_any_name_only_it_gives() {
-        fn python(source: &str) -> SourceFile<crate::facts::PyFacts> {
-            SourceFile {
-                path: PathBuf::new(),
-                rel: String::new(),
-                rank: None,
-                demo: false,
-                facts: python::analyze(source, Series::parse("18.0")),
-                suppressions: Default::default(),
-                mentions: Mentions::default(),
-            }
-        }
         let manifest = |depends: &str| format!("{{'version': '18.0.1.0', 'depends': [{depends}]}}");
         let mut modules = [
             module("base", &manifest("")),
             module("prov", &manifest("'base'")),
             module("main", &manifest("'prov'")),
         ];
-        modules[0].python.push(python(
+        modules[0].python.push(python_18(
             "class P(models.Model):\n    _name = 'res.partner'\n    name = fields.Char()\n    tz = fields.Char()\n\n    def _engine(self):\n        raise NotImplementedError()\n\n    def copy(self):\n        pass\n\n    def _compute_kind(self):\n        pass\n\n\
              class C(models.Model):\n    _name = 'res.company'\n    name = fields.Char()\n",
         ));
-        modules[1].python.push(python(
+        modules[1].python.push(python_18(
             "from odoo import http\n\n\
              class T(models.Model):\n    _name = 'prov.thing'\n    name = fields.Char()\n    prov_code = fields.Char()\n\n    def action_prov(self):\n        pass\n\n\
              class P(models.Model):\n    _inherit = 'res.partner'\n    name = fields.Char(required=True)\n    kind = fields.Selection(selection_add=[('prov_kind', 'Prov')])\n\n    def _engine(self):\n        return 1\n\n    def copy(self):\n        pass\n\n    def _compute_kind(self):\n        pass\n\n\
              class C(models.Model):\n    _inherit = 'res.company'\n    tz = fields.Char()\n\n    def copy(self):\n        pass\n\n    def _compute_zone(self):\n        pass\n\n\
              class Map(http.Controller):\n    @http.route('/prov_map', auth='public')\n    def map(self):\n        pass\n\n    @http.route(['/prov/item/<int:x>'])\n    def item(self, x):\n        pass\n",
         ));
-        modules[2].python.push(python(
+        modules[2].python.push(python_18(
             "class P(models.Model):\n    _inherit = 'res.partner'\n    prov_code = fields.Char()\n",
         ));
         let index = Index::build(&modules, None);
@@ -4818,17 +4829,6 @@ mod tests {
 
     #[test]
     fn an_inherit_parent_is_indexed_only_where_a_class_introduces_it() {
-        fn python(source: &str) -> SourceFile<crate::facts::PyFacts> {
-            SourceFile {
-                path: PathBuf::new(),
-                rel: String::new(),
-                rank: None,
-                demo: false,
-                facts: python::analyze(source, Series::parse("18.0")),
-                suppressions: Default::default(),
-                mentions: Mentions::default(),
-            }
-        }
         let manifest = |depends: &str| format!("{{'version': '18.0.1.0', 'depends': [{depends}]}}");
         let mut modules = [
             module("base", &manifest("")),
@@ -4837,11 +4837,11 @@ mod tests {
         ];
         modules[0]
             .python
-            .push(python("class P(models.Model):\n    _name = 'res.partner'\n"));
+            .push(python_18("class P(models.Model):\n    _name = 'res.partner'\n"));
         modules[1]
             .python
-            .push(python("class T(models.Model):\n    _name = 'side.thing'\n"));
-        modules[2].python.push(python(
+            .push(python_18("class T(models.Model):\n    _name = 'side.thing'\n"));
+        modules[2].python.push(python_18(
             "class W(models.AbstractModel):\n    _inherit = 'ghost.widget'\n\n\
              class S(models.AbstractModel):\n    _name = 'parent.shelf'\n    _inherit = ['ghost.tray']\n\n\
              class G(models.AbstractModel):\n    _inherit = 'ghost.tray'\n\n\
@@ -4857,6 +4857,36 @@ mod tests {
         for model in ["parent.bench", "res.partner", "side.thing"] {
             assert!(!index.unindexed_parent(model, &scope), "{model}");
         }
+    }
+
+    #[test]
+    fn a_module_lists_an_unindexed_parent_only_in_its_own_classes() {
+        let manifest = |depends: &str| format!("{{'version': '18.0.1.0', 'depends': [{depends}]}}");
+        let mut modules = [
+            module("base", &manifest("")),
+            module("vendor", &manifest("'base'")),
+            module("main", &manifest("'vendor'")),
+        ];
+        modules[0]
+            .python
+            .push(python_18("class P(models.Model):\n    _name = 'res.partner'\n"));
+        modules[1].python.push(python_18(
+            "class T(models.Model):\n    _name = 'vendor.thing'\n    _inherit = ['ghost.mixin']\n",
+        ));
+        modules[2].python.push(python_18(
+            "class T(models.Model):\n    _inherit = 'vendor.thing'\n\n\
+             class B(models.Model):\n    _name = 'main.box'\n    _inherit = ['ghost.box']\n\n\
+             class R(models.Model):\n    _name = 'main.rack'\n    _inherit = ['main.box']\n",
+        ));
+        let index = Index::build(&modules, None);
+        let (vendor, main) = (index.by_name["vendor"], index.by_name["main"]);
+        let scope = index.scope(main);
+        for model in ["main.box", "main.rack"] {
+            assert!(index.lists_unindexed_parent(main, model, &scope), "{model}");
+        }
+        assert!(!index.lists_unindexed_parent(main, "vendor.thing", &scope));
+        assert!(index.unindexed_parent("vendor.thing", &scope));
+        assert!(index.lists_unindexed_parent(vendor, "vendor.thing", &index.scope(vendor)));
     }
 
     #[test]

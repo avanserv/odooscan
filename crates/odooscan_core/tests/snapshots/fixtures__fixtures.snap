@@ -156,7 +156,6 @@ custom/bad_sale/models/models.py:6:32: OD201 no indexed module defines model 're
 custom/bad_sale/models/models.py:9:24: OD108 group_operator is renamed aggregator
 custom/bad_sale/models/models.py:10:32: OD104 this default is computed once at import; pass the function itself, e.g. default=fields.Date.today
 custom/bad_sale/models/models.py:12:40: OD203 'partner_id.country_id.cde': res.country has no field 'cde'
-custom/bad_sale/models/models.py:14:34: OD204 bad.order has no method '_compute_total'
 custom/bad_sale/models/models.py:15:32: OD201 no indexed module defines model 'res.ghost'
 custom/bad_sale/models/models.py:16:33: OD301 module base defines no XML id 'base.group_nobody'
 custom/bad_sale/models/models.py:18:37: OD203 'partner_id.name.size': res.partner.name is not a relational field, so the path cannot continue
@@ -618,9 +617,11 @@ custom/form_patches/static/src/quick_form_card.js:8:24: OD605 no indexed bundle 
 custom/form_patches/static/src/quick_form_card.xml:14:9: OD606 no <div> with class 'o_form_status' in template web.FormController or the templates that extend it
 custom/form_patches/static/src/quick_form_card.xml:15:9: OD606 <div> with class 'o_mail_chatter' is added by module mail, which is not in depends
 custom/form_patches/static/src/quick_form_card.xml:18:19: OD605 no indexed bundle defines template 'web.FormCompiler'
+custom/ghost_parents/models/computes.py:21:33: OD204 parent.bench has no method '_compute_label'
 custom/ghost_parents/models/parents.py:5:16: OD201 no indexed module defines model 'ghost.widget'
 custom/ghost_parents/models/parents.py:15:16: OD201 no indexed module defines model 'ghost.tray'
 custom/ghost_parents/views/functions.xml:4:42: OD314 parent.bench has no method 'action_ghost'
+custom/ghost_parents_heir/models/shelf.py:7:32: OD204 parent.shelf has no method '_compute_note'
 custom/html_sinks/static/src/debug.js:2:5: OD611 console.log() is a debugging leftover that writes to every user's console; remove it
 custom/html_sinks/static/src/debug.js:3:5: OD612 debugger pauses the script in every browser with the developer tools open; remove it
 custom/html_sinks/static/src/debug.js:13:5: OD611 console.log() is a debugging leftover that writes to every user's console; remove it
