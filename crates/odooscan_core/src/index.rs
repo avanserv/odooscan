@@ -3514,28 +3514,32 @@ impl<'m> Index<'m> {
     }
 
     /// Whether a class of `model` or of a model it inherits, or an `ir.model.fields` record, in any
-    /// indexed module, defines `field`. A record in `scope` counts only if it has loaded by then.
-    pub fn defines_field(&self, model: &str, field: &str, scope: &Scope) -> bool {
+    /// indexed module, defines `field`; with `delegated`, a record on a model it reaches through
+    /// `_inherits` counts too, though a class is never taken through `_inherits`. A record in
+    /// `scope` counts only if it has loaded by then.
+    pub fn defines_field(&self, model: &str, field: &str, scope: &Scope, delegated: bool) -> bool {
         let counts = |f: &DataField| !scope.sees(f.module) || scope.holds(f);
         self.chain(model, None, false)
             .iter()
             .any(|(_, c)| c.fields.iter().any(|f| f.name == field))
-            || self.data_field(model, field, None, counts).is_some()
+            || self.data_field(model, field, None, delegated, counts).is_some()
     }
 
-    /// The `ir.model.fields` record that adds `field` to `model` or to a model of its chain. Odoo adds
-    /// such a field before it copies delegated ones, so `_inherits` children get it. `_inherit`
-    /// children do not, but the chain joins both, and staying silent there is the safe side. Only
-    /// the records `counts` keeps qualify.
+    /// The `ir.model.fields` record that adds `field` to `model` or to a model of its chain, which
+    /// takes in the `_inherits` parents only with `delegated`. Odoo adds such a field before it
+    /// copies delegated ones, so `_inherits` children get it as a related field, though their table
+    /// holds no column for it. `_inherit` children do not get it, yet the chain joins them to the
+    /// model and staying silent there is the safe side. Only the records `counts` keeps qualify.
     fn data_field(
         &self,
         model: &str,
         field: &str,
         scope: Option<&Scope>,
+        delegated: bool,
         counts: impl Fn(&DataField) -> bool,
     ) -> Option<&DataField<'m>> {
         let candidates = self.data_fields.get(field)?;
-        let chain = self.chain(model, scope, true);
+        let chain = self.chain(model, scope, delegated);
         let on = |m: &str| m == model || chain.iter().any(|(_, c)| c.model == m);
         candidates.iter().filter(|f| counts(f)).find(|f| f.model.is_none_or(on))
     }
@@ -3598,7 +3602,7 @@ impl<'m> Index<'m> {
         let defs = self.nearest_defs(model, field, scope);
         let Some((_, _, first)) = defs.first() else {
             // Odoo skips a manual field whose name a class already gave the model.
-            if let Some(data) = self.data_field(model, field, Some(scope), |f| scope.holds(f)) {
+            if let Some(data) = self.data_field(model, field, Some(scope), true, |f| scope.holds(f)) {
                 return Ok(Some(FieldInfo {
                     ftype: data.ftype,
                     comodel: data.comodel.map(str::to_owned),
@@ -3607,7 +3611,7 @@ impl<'m> Index<'m> {
             let python = self.field_defs(model, field, None).first().map(|(mi, _, _)| *mi);
             // A record in scope that has not loaded yet is no matter of `depends`.
             let elsewhere = |f: &DataField| !scope.sees(f.module);
-            let definer = python.or_else(|| self.data_field(model, field, None, elsewhere).map(|d| d.module));
+            let definer = python.or_else(|| self.data_field(model, field, None, true, elsewhere).map(|d| d.module));
             return Err(definer.map(|mi| self.modules[mi].name.as_str()));
         };
         let comodel = defs
