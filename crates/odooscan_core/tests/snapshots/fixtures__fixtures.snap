@@ -536,12 +536,14 @@ custom/exposure_portal/security/ir.model.access.csv:2:1: OD402 base.group_portal
 custom/exposure_portal/security/ir.model.access.csv:2:1: OD403 Html field 'body' of exposure.internal is not sanitized (sanitize=False) and this row lets base.group_portal write exposure.internal, so they can store script that runs for whoever opens the record; keep the sanitizer on, or give the field groups
 custom/exposure_portal/security/ir.model.access.csv:2:1: OD404 'api_token' of exposure.internal holds a secret and has no groups, and this row lets base.group_portal read exposure.internal, so they can read it over RPC; give the field groups, such as base.group_system
 custom/exposure_portal/security/ir.model.access.csv:3:1: OD402 base.group_portal gets write, create or unlink on exposure.model_exposure_board; public and portal access should be read-only and go through controllers
+custom/field_classes/data/badges.xml:2:5: OD324 x.badge.code is required and has no default, so creating this record fails if the column is NOT NULL; give the field a value
 custom/field_classes/models/lens.py:5:6: OD518 'odoo.addons.optics.orm' comes from module optics; add it to depends
 custom/field_classes/models/lens.py:20:25: OD104 this default is computed once at import; pass the function itself, e.g. default=fields.Date.today
 custom/field_classes/models/lens.py:49:23: OD210 'embeding': x.lens has no field 'embeding'
 custom/field_classes/models/lens.py:50:23: OD210 'link.missing': res.partner has no field 'missing'
 custom/field_classes/models/lens.py:51:30: OD210 'opaque': x.lens has no field 'opaque'
 custom/field_classes/views/lens_views.xml:7:45: OD312 x.lens has no method 'embedding'
+custom/field_classes14/data/badges.xml:2:5: OD324 x.badge.old.label is required and has no default, so creating this record fails if the column is NOT NULL; give the field a value
 custom/field_classes_plain/models/handler.py:14:23: OD210 'handler': x.plain.handler has no field 'handler'
 custom/field_classes_plain/models/handler.py:15:30: OD210 'grid': x.plain.handler has no field 'grid'
 custom/field_ids_after/data/refs.xml:9:9: OD301 module field_ids_broken defines no XML id 'field_ids_broken.field_field_ids_gone_name'
