@@ -1,0 +1,29 @@
+<odoo>
+    <record id="view_old_valued_form" model="ir.ui.view">
+        <field name="name">old.valued.form</field>
+        <field name="model">old.valued</field>
+        <field name="arch" type="xml">
+            <form>
+                <field name="no_valued"/>
+            </form>
+        </field>
+    </record>
+    <record id="view_old_hooked_form" model="ir.ui.view">
+        <field name="name">old.hooked.form</field>
+        <field name="model">old.hooked</field>
+        <field name="arch" type="xml">
+            <form>
+                <field name="no_hooked"/>
+            </form>
+        </field>
+    </record>
+    <record id="view_old_held_form" model="ir.ui.view">
+        <field name="name">old.held.form</field>
+        <field name="model">old.held</field>
+        <field name="arch" type="xml">
+            <form>
+                <field name="no_held"/>
+            </form>
+        </field>
+    </record>
+</odoo>
