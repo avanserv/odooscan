@@ -1354,13 +1354,14 @@ fn type_of(expr: &Expr, this: &str) -> bool {
     }
 }
 
-/// A walk of a method's body that tells which of its calls run in a class the method defines.
+/// A walk that tells which of its calls run as a class body runs, `nested` while it stands in one:
+/// a walk of a method's body, for the classes the method defines, or of a whole module.
 trait MethodWalk<'a>: Visitor<'a> {
     fn nested(&mut self) -> &mut bool;
 }
 
-/// Visits the head of a class statement inside a method, which runs in the method: its decorators
-/// and the arguments of its head, bases and keywords alike.
+/// Visits the head of a class statement, which runs where the statement runs, not in the class
+/// body: its decorators and the arguments of its head, bases and keywords alike.
 fn visit_class_head<'a, V: Visitor<'a>>(visitor: &mut V, class: &'a ast::StmtClassDef) {
     for decorator in &class.decorator_list {
         visitor.visit_decorator(decorator);
@@ -1371,8 +1372,8 @@ fn visit_class_head<'a, V: Visitor<'a>>(visitor: &mut V, class: &'a ast::StmtCla
 }
 
 /// Visits a statement whose parts run at different times, returning whether it was one. A class
-/// the method defines runs its head and body in the method, nested; a function in that body runs
-/// only its decorators and defaults there, its body belonging to the class.
+/// runs its head where it stands and its body nested; a function in a nested body runs only its
+/// decorators and parameters there, its body running later as the class's.
 fn visit_method_stmt<'a, V: MethodWalk<'a>>(visitor: &mut V, stmt: &'a Stmt) -> bool {
     match stmt {
         Stmt::ClassDef(class) => {
@@ -1474,6 +1475,145 @@ fn calls_super(class: &str, func: &ast::StmtFunctionDef) -> bool {
     };
     finder.visit_body(&func.body);
     finder.found
+}
+
+/// Whether the call is `super()` with no argument, which takes its class and instance from the
+/// function it runs in.
+fn bare_super(call: &ast::ExprCall) -> bool {
+    is_super(&call.func) && call.arguments.args.is_empty() && call.arguments.keywords.is_empty()
+}
+
+/// Collects each `super()` with no argument that runs in a class body rather than in a function,
+/// `nested` while the walk stands in one. `eager` unless the file has `from __future__ import
+/// annotations`: every series supports a Python before 3.14, which evaluates the annotations of a
+/// class body and its methods' heads as the body runs.
+struct ClassBodySupers<'a> {
+    nested: bool,
+    eager: bool,
+    found: Vec<&'a ast::ExprCall>,
+}
+
+impl<'a> ClassBodySupers<'a> {
+    /// Visits what `visit_method_stmt` leaves of a method in a class body: its return annotation,
+    /// which runs with its head, and its body, which has the class and instance a bare `super()`
+    /// needs and may hold a class of its own.
+    fn visit_method(&mut self, func: &'a ast::StmtFunctionDef) {
+        if let Some(returns) = &func.returns {
+            self.visit_annotation(returns);
+        }
+        self.nested = false;
+        self.visit_body(&func.body);
+        self.nested = true;
+    }
+}
+
+impl<'a> MethodWalk<'a> for ClassBodySupers<'a> {
+    fn nested(&mut self) -> &mut bool {
+        &mut self.nested
+    }
+}
+
+impl<'a> Visitor<'a> for ClassBodySupers<'a> {
+    fn visit_stmt(&mut self, stmt: &'a Stmt) {
+        if !visit_method_stmt(self, stmt) {
+            visitor::walk_stmt(self, stmt);
+        } else if let Stmt::FunctionDef(func) = stmt {
+            self.visit_method(func);
+        }
+    }
+
+    fn visit_expr(&mut self, expr: &'a Expr) {
+        if self.nested
+            && let Expr::Call(call) = expr
+            && bare_super(call)
+        {
+            self.found.push(call);
+        }
+        if !visit_nested_lambda(self, expr) {
+            visitor::walk_expr(self, expr);
+        }
+    }
+
+    fn visit_annotation(&mut self, expr: &'a Expr) {
+        if self.eager {
+            visitor::walk_annotation(self, expr);
+        }
+    }
+}
+
+/// Whether the file has `from __future__ import annotations`, which keeps each annotation as a
+/// string.
+fn defers_annotations(body: &[Stmt]) -> bool {
+    body.iter().any(|stmt| {
+        matches!(stmt, Stmt::ImportFrom(import)
+            if import.module.as_ref().is_some_and(|m| m.as_str() == "__future__")
+                && import.names.iter().any(|alias| alias.name.as_str() == "annotations"))
+    })
+}
+
+/// Whether the file binds the name `super` in any scope, which may shadow the builtin. A binding
+/// in an unrelated function counts too, erring toward silence.
+#[derive(Default)]
+struct SuperBinding {
+    found: bool,
+}
+
+impl<'a> Visitor<'a> for SuperBinding {
+    fn visit_stmt(&mut self, stmt: &'a Stmt) {
+        let name = match stmt {
+            Stmt::FunctionDef(func) => Some(&func.name),
+            Stmt::ClassDef(class) => Some(&class.name),
+            _ => None,
+        };
+        self.found |= name.is_some_and(|name| name.as_str() == "super");
+        visitor::walk_stmt(self, stmt);
+    }
+
+    fn visit_expr(&mut self, expr: &'a Expr) {
+        self.found |= matches!(expr, Expr::Name(n) if n.ctx.is_store() && n.id.as_str() == "super");
+        visitor::walk_expr(self, expr);
+    }
+
+    fn visit_alias(&mut self, alias: &'a ast::Alias) {
+        let bound = alias.asname.as_ref().unwrap_or(&alias.name).as_str();
+        self.found |= bound.split('.').next() == Some("super");
+    }
+
+    fn visit_parameter(&mut self, parameter: &'a ast::Parameter) {
+        self.found |= parameter.name.as_str() == "super";
+        visitor::walk_parameter(self, parameter);
+    }
+
+    fn visit_except_handler(&mut self, handler: &'a ast::ExceptHandler) {
+        let ast::ExceptHandler::ExceptHandler(h) = handler;
+        self.found |= h.name.as_ref().is_some_and(|name| name.as_str() == "super");
+        visitor::walk_except_handler(self, handler);
+    }
+}
+
+/// OD140 on each `super()` with no argument that runs in a class body, in its comprehensions or
+/// in the decorators, defaults and annotations of its methods, where no function supplies its
+/// class.
+fn class_body_supers(body: &[Stmt], loc: &Locator) -> Vec<RawDiag> {
+    let mut walk = ClassBodySupers {
+        nested: false,
+        eager: !defers_annotations(body),
+        found: vec![],
+    };
+    walk.visit_body(body);
+    let mut binding = SuperBinding::default();
+    if !walk.found.is_empty() {
+        binding.visit_body(body);
+    }
+    if binding.found {
+        return vec![];
+    }
+    let message = "super() without arguments runs in a class body, where it has no class or instance, so it \
+                   raises; move the call into a method";
+    walk.found
+        .into_iter()
+        .map(|call| RawDiag::new("OD140", loc.at(call), message))
+        .collect()
 }
 
 /// The kind of an ORM model base class by its name. `CachedModel`, from 20.0, is a `Model` that
@@ -2385,6 +2525,7 @@ pub fn analyze_with(
     let (patches, diags) = module_state::check(body, &loc);
     v.facts.import_patches = patches;
     v.facts.diags.extend(diags);
+    v.facts.diags.extend(class_body_supers(body, &loc));
     if stage {
         v.facts.migrate = module_state::migrate(body, &loc);
     }
@@ -5940,6 +6081,67 @@ mod tests {
         assert_eq!(called(&facts.classes[1]), ["_own"]);
         assert!(facts.classes[0].extended.is_empty());
         assert!(!facts.diags.iter().any(|d| d.code == "OD119"));
+    }
+
+    /// The lines of the OD140 findings of `src`.
+    fn class_body_super_lines(src: &str) -> Vec<u32> {
+        let facts = analyze(src, None);
+        facts
+            .diags
+            .iter()
+            .filter(|d| d.code == "OD140")
+            .map(|d| d.pos.line)
+            .collect()
+    }
+
+    #[test]
+    fn super_in_a_class_body_is_reported() {
+        let lines = class_body_super_lines(
+            "class A:\n    x = super().a()\n    y = [super().b() for _ in range(2)]\n    \
+             z = {super().c() for _ in range(2)}\n    w = {k: super().d() for k in range(2)}\n    \
+             g = (super().e() for _ in range(2))\n    v = [i for i in super().f()]\n    \
+             @super().g()\n    def m(self, d=super().h()):\n        return d\n    \
+             class Head(super().i()):\n        pass\n    f = lambda d=super().j(): d\n\
+             def outer(self):\n    class Local:\n        k = super().k()\n    return Local\n\
+             class B:\n    x: super().l() = 1\n    def n(self, d: super().m() = 1) -> super().n():\n        \
+             return d\n",
+        );
+        assert_eq!(lines, [2, 3, 4, 5, 6, 7, 8, 9, 11, 13, 16, 19, 20, 20]);
+    }
+
+    #[test]
+    fn super_in_a_method_is_not() {
+        let lines = class_body_super_lines(
+            "class A:\n    def m(self):\n        def helper():\n            return super().a()\n        \
+             class Inner(super().b(), metaclass=super().c()):\n            pass\n        \
+             x: super().i() = [super().g() for _ in range(2)]\n        \
+             return super().d(), helper, Inner, x\n    \
+             f = lambda self: super().e()\n    k = super(Base, obj).f()\n",
+        );
+        assert!(lines.is_empty(), "{lines:?}");
+    }
+
+    #[test]
+    fn super_in_a_deferred_annotation_is_not() {
+        let lines = class_body_super_lines(
+            "from __future__ import annotations\nclass A:\n    x: super().g() = 1\n    \
+             def n(self, d: super().h() = 1) -> super().i():\n        return d\n",
+        );
+        assert!(lines.is_empty(), "{lines:?}");
+    }
+
+    #[test]
+    fn a_bound_super_is_not_the_builtin() {
+        for src in [
+            "def super():\n    return object\nclass A:\n    x = super().a()\n",
+            "from compat import super\nclass A:\n    x = super().a()\n",
+            "import super\nclass A:\n    x = super().a()\n",
+            "class A:\n    super = object\n    x = super().a()\n",
+            "try:\n    pass\nexcept Exception as super:\n    pass\nclass A:\n    x = super().a()\n",
+        ] {
+            let lines = class_body_super_lines(src);
+            assert!(lines.is_empty(), "{src}: {lines:?}");
+        }
     }
 
     #[test]

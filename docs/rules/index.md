@@ -95,6 +95,7 @@ in one file.
 | [OD137](OD137.md) | `write-in-loop` | A loop over records writes the same values to each record where one write() would do. |
 | [OD138](OD138.md) | `len-of-search` | len() counts the result of search() where search_count() would count in the database. |
 | [OD139](OD139.md) | `search-first-without-limit` | search() without a limit fetches every match to keep the first. |
+| [OD140](OD140.md) | `super-in-class-body` | super() without arguments runs in a class body, where it has no class or instance, so it raises. |
 
 ## OD2: models and fields
 

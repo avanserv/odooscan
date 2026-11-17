@@ -192,6 +192,7 @@ rules! {
     "OD137" "write-in-loop" Performance Info None, false, "A loop over records writes the same values to each record where one write() would do.";
     "OD138" "len-of-search" Performance Warning None, false, "len() counts the result of search() where search_count() would count in the database.";
     "OD139" "search-first-without-limit" Performance Warning None, false, "search() without a limit fetches every match to keep the first.";
+    "OD140" "super-in-class-body" Correctness Error None, false, "super() without arguments runs in a class body, where it has no class or instance, so it raises.";
     "OD201" "unknown-model" Correctness Error None, true, "The model is not defined by any indexed module.";
     "OD202" "model-not-in-depends" Correctness Error None, true, "The model comes from a module missing from depends.";
     "OD203" "unresolved-field-path" Correctness Error None, true, "A field path does not resolve on its model.";
