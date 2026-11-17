@@ -466,6 +466,8 @@ custom/domain_bases_side/models/imported.py:8:30: OD210 'no_side_stamped': domai
 custom/domains20/controllers/main.py:11:20: OD715 route parameter 'filters' reaches the domain or the fields of sudo().search_count(), so the user searches or groups by any field as superuser; build each condition with a field and an operator the code picks
 custom/dynamic_models/models/generated.py:37:38: OD203 'no_generated_user': bad.generated.user has no field 'no_generated_user'
 custom/dynamic_models/views/large.xml:39:17: OD304 'scale': bad.generated.user has no field 'scale'
+custom/dynamic_models_heir/models/heir.py:8:32: OD202 model 'side.order' comes from module dynamic_models_side; add it to depends
+custom/dynamic_models_heir/static/src/heir.js:4:30: OD603 model 'side.order' comes from module dynamic_models_side, which is not in depends
 custom/dynamic_models_opaque/views/holder.xml:7:17: OD304 'no_holder_field': opaque.holder has no field 'no_holder_field'
 custom/dynamic_models_outside/models/built.py:14:32: OD202 model 'bad.generated.large' comes from module dynamic_models_side; add it to depends
 custom/dynamic_models_outside/models/built.py:17:25: OD206 no indexed module defines model 'outside.test.model'

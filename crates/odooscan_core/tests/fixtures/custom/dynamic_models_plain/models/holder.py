@@ -10,3 +10,9 @@ class PlainHolder(models.Model):
 
     def _small_records(self):
         return self.env["bad.generated.small"].search([])
+
+
+class PlainNotes(models.Model):
+    _inherit = "plain.holder"
+
+    note_id = fields.Many2one("x_side_note")

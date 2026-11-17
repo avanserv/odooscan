@@ -291,6 +291,7 @@ pub fn check_module<'m>(index: &Index<'m>, mi: usize, series: Option<Series>) ->
         let installs = index.install_scope(mi, series);
         let loaded = index.loaded_scope(mi, &scope, &installs);
         let built = BuiltModels::of(module);
+        let scope_built = BuiltModels::of_scope(index, mi, &scope);
         let ctx = Ctx {
             index,
             mi,
@@ -301,6 +302,7 @@ pub fn check_module<'m>(index: &Index<'m>, mi: usize, series: Option<Series>) ->
             loaded: &loaded,
             dynamic: module.python.iter().any(|f| f.facts.dynamic_models),
             built: &built,
+            scope_built: &scope_built,
             partial: index.partial_scope(&scope),
             lost: index.lost_scope(&scope),
             series,
@@ -1936,6 +1938,13 @@ fn load_place(module: &Module, series: Option<Series>, def_rank: usize, rank: us
     format!("in {}", file.unwrap_or_default())
 }
 
+/// The start of every name `base` builds at runtime, which OD202 and OD603 read in place of what
+/// its code shows. Odoo builds a model from an `ir.model` row only for `state = 'manual'`, and
+/// such a row's name must start with `x_` (18.0 `odoo/addons/base/models/ir_model.py:279-280`,
+/// `:482-483`, `:494-500`, `:515-517`; 20.0 `odoo/addons/base/models/ir_model.py:293-294`,
+/// `:560-566`, `odoo/orm/model_classes.py:584-586`).
+const CUSTOM_MODEL_START: &str = "x_";
+
 /// The names a module may build at runtime. A model another module spells out is still that
 /// module's unless the name fits, so a name that fits nothing is a real gap in `depends`.
 struct BuiltModels<'m> {
@@ -1956,6 +1965,29 @@ impl<'m> BuiltModels<'m> {
                 .map(String::as_str)
                 .collect(),
         }
+    }
+
+    /// The names the modules of `scope` may build. `base` gives `CUSTOM_MODEL_START` alone, as
+    /// whatever its code shows, the only models it builds at runtime are custom ones. A start that
+    /// fits every name counts for module `mi` alone: an always-installed module that names its
+    /// models through a helper would otherwise silence every module.
+    fn of_scope(index: &Index<'m>, mi: usize, scope: &Scope) -> Self {
+        let mut built = Self {
+            starts: vec![],
+            names: vec![],
+        };
+        let seen = index.modules.iter().enumerate().filter(|&(i, _)| scope.sees(i));
+        for (i, module) in seen {
+            if module.name == "base" {
+                built.starts.push(CUSTOM_MODEL_START);
+                continue;
+            }
+            let of = Self::of(module);
+            let shared = of.starts.into_iter().filter(|start| i == mi || !start.is_empty());
+            built.starts.extend(shared);
+            built.names.extend(of.names);
+        }
+        built
     }
 
     fn fit(&self, model: &str) -> bool {
@@ -1980,6 +2012,9 @@ struct Ctx<'a, 'm> {
     dynamic: bool,
     /// What the module may build, outside tests, examples and upgrade scripts.
     built: &'a BuiltModels<'m>,
+    /// What the modules of `scope` may build, the module included, with `base` read through
+    /// `CUSTOM_MODEL_START`.
+    scope_built: &'a BuiltModels<'m>,
     /// A module in scope depends on one that is not indexed, such as an Enterprise module, which
     /// may hold anything a rule misses.
     partial: bool,
@@ -2070,7 +2105,7 @@ impl<'m> Ctx<'_, 'm> {
     fn model_ref(&self, out: &mut Out<'m>, path: &'m Path, model: &Spanned<String>, extender: Option<usize>) {
         match self.index.model_status(&model.value, self.scope, extender) {
             Status::Visible => {}
-            Status::Hidden(_) if self.partial || self.built.fit(&model.value) => {}
+            Status::Hidden(_) if self.partial || self.scope_built.fit(&model.value) => {}
             Status::Hidden(m) => out.push(
                 path,
                 "OD202",
@@ -2580,7 +2615,7 @@ impl<'m> Ctx<'_, 'm> {
         };
         let message = match self.index.model_status(&model.value, self.scope, None) {
             Status::Visible => return self.orm_method(out, path, call, &model.value),
-            Status::Hidden(m) if !self.built.fit(&model.value) => {
+            Status::Hidden(m) if !self.scope_built.fit(&model.value) => {
                 format!("model '{}' comes from module {m}, which is not in depends", model.value)
             }
             Status::Missing if !self.dynamic => format!("no indexed module defines model '{}'", model.value),
