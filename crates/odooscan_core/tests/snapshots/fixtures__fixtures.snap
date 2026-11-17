@@ -983,6 +983,10 @@ custom/modern20/models/res_partner.py:111:7: OD401 model 'modern.lamp.shade' has
 custom/modern20/models/res_partner.py:117:39: OD224 l.x_shade: modern_lamp has no such column, since modern.lamp has no field x_shade; name the column of a stored field of modern.lamp
 custom/modern20/models/tariff.py:13:45: OD212 Monetary field 'amount' takes its currency from 'x_tariff_currency_id', which modern.tariff does not have
 custom/modern20/models/tariff.py:16:39: OD224 t.code: modern_tariff has no such column, since modern.tariff has no field code; name the column of a stored field of modern.tariff
+custom/modern20/models/tariff.py:43:24: OD211 no parent class of modern.tariff defines '_cached_data_domain', so this super() call fails
+custom/modern20/models/tariff.py:49:5: OD116 field '_cached_data' replaces the method _cached_data() of CachedModel on this model, so callers get the field instead; rename it
+custom/modern20/models/tariff.py:56:5: OD116 field 'get_all' replaces the method get_all() of CachedModel on this model, so callers get the field instead; rename it
+custom/modern20/models/tariff.py:57:5: OD116 field '_cached_data_fields' replaces the attribute _cached_data_fields of CachedModel on this model, so callers get the field instead; rename it
 custom/modern20/models/upgrade.py:10:40: OD126 read_group(fields=, orderby=, lazy=) no longer works from 20.0; use read_group(domain, groupby, aggregates, order=)
 custom/modern20/models/upgrade.py:13:9: OD126 overriding read_group() no longer works from saas~19.1; override _read_group() or formatted_read_group()
 custom/modern20/security/access.xml:6:30: OD210 'no_xml_domain': modern.lamp has no field 'no_xml_domain'
@@ -999,6 +1003,7 @@ custom/modern20/views/pages.xml:42:9: OD325 the server no longer knows t-esc and
 custom/modern20/views/pages.xml:52:9: OD325 the server no longer knows t-esc and renders nothing for it; write t-out
 custom/modern20/views/pages.xml:62:9: OD325 the server no longer knows t-esc and renders nothing for it; write t-out
 custom/modern20/views/pages.xml:77:13: OD325 the server no longer knows t-esc and renders nothing for it; write t-out
+custom/modern20/views/tariff.xml:7:45: OD313 method 'get_all' of modern.tariff is private, so Odoo refuses to call it from a button
 custom/modifiers17/views/jobs.xml:7:47: OD317 invisible reads field 'state', which the view does not show
 custom/modifiers17/views/jobs.xml:54:47: OD317 invisible reads field 'note', which the view does not show
 custom/modifiers17/views/jobs.xml:76:51: OD317 invisible reads field 'phase', which the view does not show

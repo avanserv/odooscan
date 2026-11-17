@@ -184,6 +184,9 @@ pub struct ClassFact {
     /// The model is not among the class's `_inherit`, so the class defines it.
     pub new_model: bool,
     pub kind: ModelKind,
+    /// A base of the class is `CachedModel`, whose members the model gets beside those of
+    /// `BaseModel`.
+    pub cached: bool,
     pub inherit: Vec<Spanned<String>>,
     /// `_inherit` is neither `_name`, a string, nor a list or tuple of strings only, or the class is
     /// `unread`, so which models it lists, and in which order, is unknown. Also set below 10.0 and
@@ -331,6 +334,7 @@ impl ClassFact {
             model: String::new(),
             new_model: false,
             kind: ModelKind::Model,
+            cached: false,
             inherit: vec![],
             inherit_unknown: false,
             unread: false,

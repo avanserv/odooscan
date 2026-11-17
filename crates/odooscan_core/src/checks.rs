@@ -20,10 +20,10 @@ use crate::facts::{
 use crate::grants::{self, AttachmentGrant, Grant, Grants};
 use crate::imports::{AddonImport, Fault, Graph};
 use crate::index::{
-    ACTION_REGISTRY, BASE_MODEL_METHODS, Export, FIELD_REGISTRY, FieldDef, FieldInfo, Index, JsSpec, JsTarget,
-    PathError, Placed, PropSchema, RELATIONAL_TYPES, SERVICE_REGISTRY, Scope, Status, TOUR_REGISTRY,
-    VIEW_WIDGET_REGISTRY, ViewTree, asset_glob_set, base_private_method, full_id, in_static, js_lookup, js_url,
-    loaded_data, located, normal_parts, wildcard,
+    ACTION_REGISTRY, BASE_MODEL_METHODS, CACHED_MODEL_SINCE, Export, FIELD_REGISTRY, FieldDef, FieldInfo, Index,
+    JsSpec, JsTarget, PathError, Placed, PropSchema, RELATIONAL_TYPES, SERVICE_REGISTRY, Scope, Status, TOUR_REGISTRY,
+    VIEW_WIDGET_REGISTRY, ViewTree, asset_glob_set, base_private_method, cached_model_method, cached_model_value,
+    dated_member, full_id, in_static, js_lookup, js_url, loaded_data, located, normal_parts, wildcard,
 };
 use crate::mentions::HOOK_PREFIXES;
 use crate::module_state::UPGRADE_DIRS;
@@ -258,7 +258,7 @@ pub fn check_module<'m>(index: &Index<'m>, mi: usize, series: Option<Series>) ->
     ids_repeated_in_a_file(module, series, &mut out);
     ids_repeated_across_files(module, series, &mut out);
     same_module_xmlids(index, mi, series, &mut out);
-    shadowed_members(module, series, &mut out);
+    shadowed_members(index, module, series, &mut out);
     legacy_hook_rollbacks(module, series, &mut out);
     cache_key_names(module, series, &mut out);
     import_patches(index, module, &mut out);
@@ -1091,17 +1091,20 @@ const CACHE_KEY_GLOBALS: &[(&str, &[&str])] = &[
 /// series: `grouped`, `fetch` and `search_fetch` among them.
 const UNPLACED_MEMBERS: &[&str] = &["copy_multi", "_read", "_name_search"];
 
-/// Python finds a field before the member of `BaseModel` it is named like, so the model loses the
-/// member. Odoo never checks for it.
-fn shadowed_members<'m>(module: &'m Module, series: Option<Series>, out: &mut Out<'m>) {
+/// Python finds a field before the member of `BaseModel`, or of `CachedModel` on a model on it, that
+/// it is named like, so the model loses the member. Odoo never checks for it.
+fn shadowed_members<'m>(index: &Index<'m>, module: &'m Module, series: Option<Series>, out: &mut Out<'m>) {
     for file in &module.python {
-        for field in file.facts.classes.iter().flat_map(|c| &c.fields) {
-            if let Some(member) = shadowed_member(&field.name, series) {
-                let message = format!(
-                    "field '{}' replaces the {member} of BaseModel on this model, so callers get the field instead; rename it",
-                    field.name
-                );
-                out.push(&file.path, "OD116", field.name_pos, message);
+        for class in &file.facts.classes {
+            let cached = |name: &str| cached_member(name, series).filter(|_| index.cached_model(&class.model));
+            for field in &class.fields {
+                if let Some(member) = shadowed_member(&field.name, series).or_else(|| cached(&field.name)) {
+                    let message = format!(
+                        "field '{}' replaces the {member} on this model, so callers get the field instead; rename it",
+                        field.name
+                    );
+                    out.push(&file.path, "OD116", field.name_pos, message);
+                }
             }
         }
     }
@@ -1270,9 +1273,7 @@ fn import_patches<'m>(index: &Index<'m>, module: &'m Module, out: &mut Out<'m>) 
 /// Whether a key may read `name` as a global of Odoo's cache module in `series`. A module of
 /// unknown series may run on any, so it may read the names of every series.
 fn cache_global(name: &str, series: Option<Series>) -> bool {
-    CACHE_KEY_GLOBALS
-        .iter()
-        .any(|(spec, names)| names.contains(&name) && series.is_none_or(|s| series::matches(spec, s)))
+    dated_member(CACHE_KEY_GLOBALS, name, series)
 }
 
 /// The member of `BaseModel` in `series` that a field called `name` replaces, as the message
@@ -1283,9 +1284,23 @@ fn shadowed_member(name: &str, series: Option<Series>) -> Option<String> {
         return None;
     }
     if MODEL_ATTRS.contains(&name) {
-        Some(format!("attribute {name}"))
+        Some(format!("attribute {name} of BaseModel"))
     } else if BASE_MODEL_METHODS.contains(&name) && !UNPLACED_MEMBERS.contains(&name) {
-        Some(format!("method {name}()"))
+        Some(format!("method {name}() of BaseModel"))
+    } else {
+        None
+    }
+}
+
+/// The member of `CachedModel` in `series` that a field called `name` replaces, as the message
+/// names it. A module of unknown series that has `CachedModel` runs on saas~19.1 or later, so it
+/// has the members of saas~19.1.
+fn cached_member(name: &str, series: Option<Series>) -> Option<String> {
+    let series = Some(series.unwrap_or(CACHED_MODEL_SINCE));
+    if cached_model_value(name, series) {
+        Some(format!("attribute {name} of CachedModel"))
+    } else if cached_model_method(name, series) {
+        Some(format!("method {name}() of CachedModel"))
     } else {
         None
     }
@@ -4238,12 +4253,13 @@ impl<'m> Ctx<'_, 'm> {
     }
 
     /// A leading `_` or a private method of `BaseModel` is private whatever the model defines, so it
-    /// needs no lookup, even on a model the scan cannot see whole. `@api.private` counts on any
-    /// definition, since Odoo walks the whole MRO.
+    /// needs no lookup, even on a model the scan cannot see whole. A private method of `CachedModel`
+    /// and `@api.private` count on any definition in scope, since Odoo walks the whole MRO.
     fn button(&self, out: &mut Out<'m>, path: &'m Path, model: &str, method: &Spanned<String>) {
         let name = &method.value;
         if name.starts_with('_')
             || base_private_method(name, self.series)
+            || self.index.cached_private_method(model, name, self.scope, self.series)
             || self.index.private_method(model, name, self.scope)
         {
             let message = format!("method '{name}' of {model} is private, so Odoo refuses to call it from a button");
@@ -7512,7 +7528,7 @@ mod tests {
 
     use super::{
         CACHE_KEY_GLOBALS, MEMBER_SERIES, MagicEra, REPORT_TAG, applies, builds_models, bundle_list, cache_global,
-        callable_attr, csv_label, derived_label, es_module, exported_text, fetches_own_view, field_name,
+        cached_member, callable_attr, csv_label, derived_label, es_module, exported_text, fetches_own_view, field_name,
         has_last_update, hoot_adds, keeps_set, magic_era, no_access_message, page_miss, parent_path_children,
         patch_form, public_write_message, reads_model_access, reads_requires, shadowed_member, static_only,
         stores_parent_path, tuple_checked, tuple_listed, unknown_dependency, unmatched_asset, warns_on_labels,
@@ -7824,9 +7840,29 @@ mod tests {
         let eighteen = Series::parse("18.0");
         assert_eq!(
             shadowed_member("_table_query", eighteen).as_deref(),
-            Some("attribute _table_query")
+            Some("attribute _table_query of BaseModel")
         );
-        assert_eq!(shadowed_member("copy", eighteen).as_deref(), Some("method copy()"));
+        assert_eq!(
+            shadowed_member("copy", eighteen).as_deref(),
+            Some("method copy() of BaseModel")
+        );
+    }
+
+    #[test]
+    fn shadows_the_members_cached_model_has_in_the_series() {
+        let shadows = |name: &str, series: Option<&str>| cached_member(name, series.and_then(Series::parse));
+        assert!(shadows("get_all", Some("saas~19.3")).is_none());
+        assert_eq!(
+            shadows("get_all", Some("saas~19.4")).as_deref(),
+            Some("method get_all() of CachedModel")
+        );
+        assert!(shadows("get_all", None).is_none() && shadows("_cached_data", None).is_some());
+        assert_eq!(
+            shadows("_cached_data_fields", None).as_deref(),
+            Some("attribute _cached_data_fields of CachedModel")
+        );
+        assert!(shadows("_clear_cache_name", Some("20.0")).is_none());
+        assert!(shadows("_cached_data_fields", Some("18.0")).is_none());
     }
 
     #[test]

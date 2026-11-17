@@ -1,0 +1,11 @@
+<odoo>
+    <record id="modern_tariff_form" model="ir.ui.view">
+        <field name="name">modern20.tariff.form</field>
+        <field name="model">modern.tariff</field>
+        <field name="arch" type="xml">
+            <form>
+                <button type="object" name="get_all"/>
+            </form>
+        </field>
+    </record>
+</odoo>
