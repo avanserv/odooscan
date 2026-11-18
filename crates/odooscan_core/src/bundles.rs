@@ -438,6 +438,9 @@ impl<'m> Filler<'m> {
             Directive::Append | Directive::Include => None,
         };
         filled.insert(&paths, at);
+        // Only a manifest replaces; a template's replace arrives as `before` and `remove`. The
+        // insert skips a listed path, so `('replace', t, t)` drops `t` (18.0 `:236-238`,
+        // `:412-426`; 20.0 `:232-234`, `:402-416`).
         if entry.directive == Directive::Replace {
             filled.remove(&target);
         }
@@ -551,6 +554,33 @@ mod tests {
         let bundles = contents(&[web14(), x]);
         assert_eq!(bundles["x.lazy"], ["web/h.js"]);
         assert_eq!(bundles["web.assets_backend"], ["web/a.js", "web/h.js"]);
+    }
+
+    #[test]
+    fn a_template_replacing_a_script_with_itself_keeps_it() {
+        let replaced = |content: &str| {
+            let x = rendered(
+                "x",
+                "14.0.1.0.0",
+                "'web'",
+                &["b.js", "c.js"],
+                &format!(
+                    r#"<template id="assets" inherit_id="web.assets_backend">
+                        <xpath expr="//script[@src='/web/static/src/a.js']" position="replace">{content}</xpath>
+                    </template>"#
+                ),
+            );
+            contents(&[web14(), x])["web.assets_backend"].clone()
+        };
+        let itself = r#"<script src="/web/static/src/a.js"/>"#;
+        assert_eq!(replaced(itself), ["web/a.js", "web/h.js"]);
+        let more = format!(r#"{itself}<script src="/x/static/src/b.js"/>"#);
+        assert_eq!(replaced(&more), ["web/a.js", "x/b.js", "web/h.js"]);
+        // Each child goes before the target in turn, so the target stays between them.
+        let around = format!(r#"<script src="/x/static/src/b.js"/>{itself}<script src="/x/static/src/c.js"/>"#);
+        assert_eq!(replaced(&around), ["x/b.js", "web/a.js", "x/c.js", "web/h.js"]);
+        let dotted = r#"<script src="/web/static/src/./a.js"/>"#;
+        assert_eq!(replaced(dotted), ["web/a.js", "web/h.js"]);
     }
 
     #[test]
@@ -729,6 +759,21 @@ mod tests {
             &[],
         );
         assert_eq!(contents(&[web, x])["b"], ["x/a.js"]);
+    }
+
+    #[test]
+    fn a_manifest_replacing_a_file_with_itself_removes_it() {
+        let a = addon(
+            "a",
+            r#""assets": {"b": [
+                "a/static/src/a.js",
+                "a/static/src/h.js",
+                ("replace", "a/static/src/a.js", "a/static/src/a.js"),
+            ]}"#,
+            &["a.js", "h.js"],
+            &[],
+        );
+        assert_eq!(contents(&[a])["b"], ["a/h.js"]);
     }
 
     #[test]

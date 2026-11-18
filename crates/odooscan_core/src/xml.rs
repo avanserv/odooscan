@@ -12,6 +12,7 @@ use crate::facts::{
     WrittenValue, XmlDef, XmlRef,
 };
 use crate::fix::{Edit, Fix};
+use crate::index::normal_parts;
 use crate::manifest::{AssetEntry, Directive};
 use crate::modifier;
 use crate::record_eval;
@@ -1767,8 +1768,8 @@ fn asset_of(node: Node) -> Option<AssetEntry> {
 }
 
 /// What the specs of an extending template, through `<data>`, put in its bundle. A spec placed
-/// against a script it locates chains its scripts from there, and replacing with no script removes
-/// it; any other spec appends, as the rendered order is out of reach.
+/// against a script it locates chains its scripts from there; any other spec appends, as the
+/// rendered order is out of reach.
 fn extension_assets(node: Node, assets: &mut Vec<AssetEntry>) {
     for spec in node.children().filter(Node::is_element) {
         if spec.has_tag_name("data") {
@@ -1776,32 +1777,48 @@ fn extension_assets(node: Node, assets: &mut Vec<AssetEntry>) {
             continue;
         }
         let added = rendered(spec).into_iter().filter_map(asset_of);
-        let mut directive = match spec.attribute("position").unwrap_or("inside") {
-            "before" => Directive::Before,
-            "after" => Directive::After,
-            "replace" => Directive::Replace,
-            _ => Directive::Append,
-        };
-        let Some(target) = located_script(spec).filter(|_| directive != Directive::Append) else {
-            assets.extend(added);
-            continue;
-        };
-        let mut anchor = target.clone();
-        for mut entry in added {
-            if entry.directive == Directive::Append {
-                entry.directive = directive;
-                entry.target = Some(std::mem::replace(&mut anchor, entry.path.clone()));
-                directive = Directive::After;
-            }
-            assets.push(entry);
+        let directive = spec_directive(spec);
+        match located_script(spec).filter(|_| directive != Directive::Append) {
+            Some(target) => place(added, directive, target, assets),
+            None => assets.extend(added),
         }
-        if directive == Directive::Replace {
-            assets.push(AssetEntry {
-                directive: Directive::Remove,
-                target: None,
-                path: target,
-            });
+    }
+}
+
+/// Where a spec puts its content against the node it locates, `inside` and any unknown position
+/// appending.
+fn spec_directive(spec: Node) -> Directive {
+    match spec.attribute("position").unwrap_or("inside") {
+        "before" => Directive::Before,
+        "after" => Directive::After,
+        "replace" => Directive::Replace,
+        _ => Directive::Append,
+    }
+}
+
+/// Chains the scripts of `added` from `target`, the first placed by `directive`, or `before` it for
+/// a replace. Odoo replaces a node by adding each child before it, then dropping it, in every series
+/// (18.0 `odoo/tools/template_inheritance.py:208-212`, 20.0 `:209-213`), so a replacing script whose
+/// path normalises to the target's keeps it in the bundle.
+fn place(added: impl Iterator<Item = AssetEntry>, directive: Directive, target: String, assets: &mut Vec<AssetEntry>) {
+    let replace = directive == Directive::Replace;
+    let mut next = if replace { Directive::Before } else { directive };
+    let mut kept = false;
+    let mut anchor = target.clone();
+    for mut entry in added {
+        if entry.directive == Directive::Append {
+            kept |= normal_parts(&entry.path) == normal_parts(&target);
+            entry.directive = std::mem::replace(&mut next, Directive::After);
+            entry.target = Some(std::mem::replace(&mut anchor, entry.path.clone()));
         }
+        assets.push(entry);
+    }
+    if replace && !kept {
+        assets.push(AssetEntry {
+            directive: Directive::Remove,
+            target: None,
+            path: target,
+        });
     }
 }
 
@@ -2356,7 +2373,8 @@ mod tests {
                 <script src="/a/static/src/z.js"/>
             </xpath>
             <xpath expr="//script[@src='/web/static/src/gone.js']" position="replace"/>
-            <xpath expr="//script[last()]" position="after"><script src="/a/static/src/last.js"/></xpath>"#,
+            <xpath expr="//script[last()]" position="after"><script src="/a/static/src/last.js"/></xpath>
+            <script src="/web/static/src/kept.js" position="replace"><script src="/web/static/src/kept.js"/></script>"#,
         );
         assert_eq!(
             assets(&spec),
@@ -2366,10 +2384,20 @@ mod tests {
                 "After:web/static/src/x.js>a/static/src/one.js",
                 "After:a/static/src/one.js>a/static/src/two.js",
                 "Before:web/static/src/y.js>a/static/src/b.js",
-                "Replace:web/static/src/z.js>a/static/src/z.js",
+                "Before:web/static/src/z.js>a/static/src/z.js",
+                "Remove:>web/static/src/z.js",
                 "Remove:>web/static/src/gone.js",
                 "Append:>a/static/src/last.js",
+                "Before:web/static/src/kept.js>web/static/src/kept.js",
             ]
+        );
+        // The bundle loads a path by its normalised parts, so a `.` part still names the target.
+        let dotted = extension(
+            r#"<script src="/web/static/src/kept.js" position="replace"><script src="/web/static/src/./kept.js"/></script>"#,
+        );
+        assert_eq!(
+            assets(&dotted),
+            ["Before:web/static/src/kept.js>web/static/src/./kept.js"]
         );
     }
 
