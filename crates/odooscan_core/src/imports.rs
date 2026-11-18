@@ -7,7 +7,7 @@ use ruff_python_ast::visitor::{self, Visitor};
 use ruff_python_ast::{self as ast, Expr, Stmt};
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use crate::facts::{Exports, FileImports, ImportFact, Pos, Spanned};
+use crate::facts::{Exports, FileImports, ImportFact, ImportGuard, Pos, Spanned};
 use crate::project::Module;
 use crate::python::{Locator, str_lit, tail_name};
 use crate::series::Series;
@@ -31,7 +31,7 @@ pub(crate) fn file_imports(body: &[Stmt], loc: &Locator) -> FileImports {
         list: vec![],
         dynamic: false,
         deferred: false,
-        guarded: false,
+        guard: ImportGuard::Unguarded,
         typing: false,
     };
     collect.visit_body(body);
@@ -49,7 +49,7 @@ struct Collect<'l> {
     list: Vec<ImportFact>,
     dynamic: bool,
     deferred: bool,
-    guarded: bool,
+    guard: ImportGuard,
     /// Under `if TYPE_CHECKING:`, which never runs.
     typing: bool,
 }
@@ -87,7 +87,7 @@ impl<'a> Collect<'_> {
             names: names.iter().map(|a| self.spanned(a)).collect(),
             from,
             deferred: self.deferred,
-            guarded: self.guarded,
+            guard: self.guard,
         }
     }
 
@@ -104,21 +104,21 @@ impl<'a> Collect<'_> {
         self.list.push(fact);
     }
 
-    /// Visits a statement whose body an import may fail in without stopping the module, guarding
-    /// that body, and whether it was one.
+    /// Visits a `try`, a `with` or an `if TYPE_CHECKING:`, guarding its body by what a failed
+    /// import there may raise without stopping the module, and whether `stmt` was one.
     fn guards(&mut self, stmt: &'a Stmt) -> bool {
         match stmt {
-            Stmt::Try(t) if t.handlers.iter().any(catches_import) => self.guarded_try(t),
-            Stmt::With(w) if suppresses_import(w) => {
+            Stmt::Try(t) => self.guarded_try(t),
+            Stmt::With(w) => {
                 for item in &w.items {
                     self.visit_with_item(item);
                 }
-                self.guard(&w.body);
+                self.guard(suppress_guard(w), &w.body);
             }
             Stmt::If(i) if type_checking(&i.test) => {
                 self.visit_expr(&i.test);
                 let outer = std::mem::replace(&mut self.typing, true);
-                self.guard(&i.body);
+                self.guard(ImportGuard::Any, &i.body);
                 self.typing = outer;
                 for clause in &i.elif_else_clauses {
                     self.visit_elif_else_clause(clause);
@@ -130,7 +130,8 @@ impl<'a> Collect<'_> {
     }
 
     fn guarded_try(&mut self, t: &'a ast::StmtTry) {
-        self.guard(&t.body);
+        let kind = t.handlers.iter().map(handler_guard).max().unwrap_or_default();
+        self.guard(kind, &t.body);
         for handler in &t.handlers {
             self.visit_except_handler(handler);
         }
@@ -145,16 +146,23 @@ impl<'a> Collect<'_> {
             self.visit_decorator(decorator);
         }
         self.visit_parameters(&f.parameters);
-        let outer = (self.deferred, self.guarded);
-        (self.deferred, self.guarded) = (true, self.typing);
+        let typed = if self.typing {
+            ImportGuard::Any
+        } else {
+            ImportGuard::Unguarded
+        };
+        let outer = (self.deferred, self.guard);
+        (self.deferred, self.guard) = (true, typed);
         self.visit_body(&f.body);
-        (self.deferred, self.guarded) = outer;
+        (self.deferred, self.guard) = outer;
     }
 
-    fn guard(&mut self, body: &'a [Stmt]) {
-        let outer = std::mem::replace(&mut self.guarded, true);
+    /// Visits `body` guarded by `kind` too, where the wider of the two guards wins.
+    fn guard(&mut self, kind: ImportGuard, body: &'a [Stmt]) {
+        let outer = self.guard;
+        self.guard = outer.max(kind);
         self.visit_body(body);
-        self.guarded = outer;
+        self.guard = outer;
     }
 
     /// The name an alias imports, which `as` leaves the parent package bound under too.
@@ -197,33 +205,42 @@ impl<'a> Collect<'_> {
     }
 }
 
-/// What a failed import raises.
-const IMPORT_ERRORS: [&str; 2] = ["ImportError", "ModuleNotFoundError"];
-
-/// Whether a handler catches what a failed import raises.
+/// Whether a handler catches what some failed import raises.
 pub(crate) fn catches_import(handler: &ast::ExceptHandler) -> bool {
-    let ast::ExceptHandler::ExceptHandler(h) = handler;
-    IMPORT_ERRORS.into_iter().any(|error| python::catches(h, error))
+    handler_guard(handler) != ImportGuard::Unguarded
 }
 
-/// Whether a `with` holds a `suppress()` that may swallow what a failed import raises.
-fn suppresses_import(w: &ast::StmtWith) -> bool {
+/// What a handler catches of a failed import. `ModuleNotFoundError` is the subclass of
+/// `ImportError` a missing module raises, so a handler naming only it lets a missing name through.
+fn handler_guard(handler: &ast::ExceptHandler) -> ImportGuard {
+    let ast::ExceptHandler::ExceptHandler(h) = handler;
+    if python::catches(h, "ImportError") {
+        ImportGuard::Any
+    } else if python::catches(h, "ModuleNotFoundError") {
+        ImportGuard::MissingModule
+    } else {
+        ImportGuard::Unguarded
+    }
+}
+
+/// What the `suppress()` calls of a `with` may swallow of a failed import.
+fn suppress_guard(w: &ast::StmtWith) -> ImportGuard {
     let items = w.items.iter();
     let calls = items.filter_map(|i| method_body::suppress_call(&i.context_expr));
-    let mut args = calls.flat_map(|c| c.arguments.args.iter());
-    args.any(may_catch_import)
+    let args = calls.flat_map(|c| c.arguments.args.iter());
+    args.map(arg_guard).max().unwrap_or_default()
 }
 
-/// Whether a `suppress()` argument may name what a failed import raises. Only another exception
-/// class by its name is known not to: any other name, such as `OPTIONAL_ERRORS`, may hold a tuple
+/// What a `suppress()` argument may swallow of a failed import. Only another exception class by
+/// its name is known to swallow none: any other name, such as `OPTIONAL_ERRORS`, may hold a tuple
 /// of classes, and a starred argument or a call any class.
-fn may_catch_import(arg: &Expr) -> bool {
+fn arg_guard(arg: &Expr) -> ImportGuard {
     match arg {
-        Expr::Tuple(types) => types.iter().any(may_catch_import),
-        _ => {
-            tail_name(arg).is_none_or(|name| !exception_class(name))
-                || IMPORT_ERRORS.into_iter().any(|error| python::names_error(arg, error))
-        }
+        Expr::Tuple(types) => types.iter().map(arg_guard).max().unwrap_or_default(),
+        _ if python::names_error(arg, "ImportError") => ImportGuard::Any,
+        _ if python::names_error(arg, "ModuleNotFoundError") => ImportGuard::MissingModule,
+        _ if tail_name(arg).is_none_or(|name| !exception_class(name)) => ImportGuard::Any,
+        _ => ImportGuard::Unguarded,
     }
 }
 
@@ -431,6 +448,18 @@ pub enum Fault {
     Missing,
     /// The module neither binds the name nor has a submodule of it.
     Undefined(Spanned<String>),
+}
+
+impl Fault {
+    /// Whether `guard` catches what the import raises: a missing module raises
+    /// `ModuleNotFoundError`, and a name `from` finds neither bound nor a submodule plain
+    /// `ImportError`, as `_handle_fromlist` swallows the failed submodule import first.
+    pub fn guarded_by(&self, guard: ImportGuard) -> bool {
+        match self {
+            Self::Missing => guard >= ImportGuard::MissingModule,
+            Self::Undefined(_) => guard == ImportGuard::Any,
+        }
+    }
 }
 
 /// The imports of every module of the scan.
@@ -867,64 +896,125 @@ mod tests {
                    with contextlib.suppress(ImportError):\n    import i\nif typing.TYPE_CHECKING:\n    import j\nelse:\n    import k\n\
                    class K:\n    def m(self):\n        try:\n            import l\n        except ImportError:\n            pass\n\
                    def n():\n    importlib.import_module('o')\n";
-        let flags: Vec<(String, bool, bool)> = imports(src)
+        let flags: Vec<(String, bool, ImportGuard)> = imports(src)
             .list
             .into_iter()
-            .map(|f| (f.names[0].value.clone(), f.deferred, f.guarded))
+            .map(|f| (f.names[0].value.clone(), f.deferred, f.guard))
             .collect();
+        let (no, module, any) = (ImportGuard::Unguarded, ImportGuard::MissingModule, ImportGuard::Any);
         let expected = [
-            ("a", false, false),
-            ("b", false, true),
-            ("c", true, false),
-            ("d", false, false),
-            ("e", false, false),
-            ("g", false, true),
-            ("h", false, false),
-            ("i", false, true),
-            ("j", false, true),
-            ("k", false, false),
-            ("l", true, true),
-            ("o", true, false),
+            ("a", false, no),
+            ("b", false, any),
+            ("c", true, no),
+            ("d", false, no),
+            ("e", false, no),
+            ("g", false, module),
+            ("h", false, no),
+            ("i", false, any),
+            ("j", false, any),
+            ("k", false, no),
+            ("l", true, any),
+            ("o", true, no),
         ];
         let expected: Vec<_> = expected.iter().map(|(n, d, g)| ((*n).to_owned(), *d, *g)).collect();
         assert_eq!(flags, expected);
     }
 
-    /// Whether the first import of `src` is guarded.
-    fn guarded(src: &str) -> bool {
-        imports(src).list[0].guarded
+    /// The guard of the first import of `src`.
+    fn guarded(src: &str) -> ImportGuard {
+        imports(src).list[0].guard
     }
 
     #[test]
     fn a_suppress_guards_only_when_it_may_swallow_an_import_error() {
+        let (no, module, any) = (ImportGuard::Unguarded, ImportGuard::MissingModule, ImportGuard::Any);
         for (args, expected) in [
-            ("KeyError", false),
-            ("()", false),
-            ("", false),
-            ("ImportError", true),
-            ("KeyError, ModuleNotFoundError", true),
-            ("(KeyError, ImportError)", true),
-            ("Exception", true),
-            ("builtins.BaseException", true),
-            ("*errors", true),
-            ("UserError, binascii.Error, KeyboardInterrupt", false),
-            ("OPTIONAL_ERRORS", true),
-            ("(KeyError, self.errors)", true),
-            ("errors()", true),
+            ("KeyError", no),
+            ("()", no),
+            ("", no),
+            ("ImportError", any),
+            ("KeyError, ModuleNotFoundError", module),
+            ("(KeyError, ImportError)", any),
+            ("ModuleNotFoundError, ImportError", any),
+            ("Exception", any),
+            ("builtins.BaseException", any),
+            ("*errors", any),
+            ("UserError, binascii.Error, KeyboardInterrupt", no),
+            ("OPTIONAL_ERRORS", any),
+            ("(KeyError, self.errors)", any),
+            ("errors()", any),
+            ("ModuleNotFoundError, errors()", any),
         ] {
             let src = format!("with suppress({args}):\n    import a\n");
             assert_eq!(guarded(&src), expected, "{args}");
         }
         let among = "with open(p) as f, contextlib.suppress(ImportError):\n    import a\n";
-        assert!(guarded(among));
+        assert_eq!(guarded(among), any);
+    }
+
+    #[test]
+    fn a_try_guards_by_its_widest_handler() {
+        let (no, module, any) = (ImportGuard::Unguarded, ImportGuard::MissingModule, ImportGuard::Any);
+        for (handlers, expected) in [
+            ("except KeyError:\n    pass\n", no),
+            ("except ModuleNotFoundError:\n    pass\n", module),
+            (
+                "except KeyError:\n    pass\nexcept ModuleNotFoundError:\n    pass\n",
+                module,
+            ),
+            (
+                "except ModuleNotFoundError:\n    pass\nexcept ImportError:\n    pass\n",
+                any,
+            ),
+            ("except (ModuleNotFoundError, ImportError):\n    pass\n", any),
+            ("except (ModuleNotFoundError, KeyError):\n    pass\n", module),
+            ("except:\n    pass\n", any),
+            ("except Exception:\n    pass\n", any),
+            ("except BaseException:\n    pass\n", any),
+            ("finally:\n    pass\n", no),
+        ] {
+            let src = format!("try:\n    import a\n{handlers}");
+            assert_eq!(guarded(&src), expected, "{handlers}");
+        }
+    }
+
+    #[test]
+    fn the_wider_of_nested_guards_wins() {
+        let (module, any) = (ImportGuard::MissingModule, ImportGuard::Any);
+        let narrow_in_wide =
+            "try:\n    with suppress(ModuleNotFoundError):\n        import a\nexcept ImportError:\n    pass\n";
+        assert_eq!(guarded(narrow_in_wide), any);
+        let wide_in_narrow = "try:\n    with suppress(ImportError):\n        import a\n    import b\nexcept ModuleNotFoundError:\n    pass\n";
+        let guards: Vec<_> = imports(wide_in_narrow).list.iter().map(|f| f.guard).collect();
+        assert_eq!(guards, [any, module]);
+        let unguarded_in_narrow =
+            "with suppress(ModuleNotFoundError):\n    try:\n        import a\n    except KeyError:\n        pass\n";
+        assert_eq!(guarded(unguarded_in_narrow), module);
+    }
+
+    #[test]
+    fn a_missing_module_is_guarded_by_any_guard_and_a_missing_name_only_by_a_full_one() {
+        let name = Fault::Undefined(Spanned {
+            value: "x".to_owned(),
+            pos: Pos::default(),
+        });
+        for (guard, missing, undefined) in [
+            (ImportGuard::Unguarded, false, false),
+            (ImportGuard::MissingModule, true, false),
+            (ImportGuard::Any, true, true),
+        ] {
+            assert_eq!(Fault::Missing.guarded_by(guard), missing, "{guard:?}");
+            assert_eq!(name.guarded_by(guard), undefined, "{guard:?}");
+        }
     }
 
     #[test]
     fn a_def_under_type_checking_is_guarded_and_one_in_its_else_is_not() {
         let src = "if TYPE_CHECKING:\n    def f():\n        import a\n    class K:\n        def m(self):\n            import b\n\
                    else:\n    def g():\n        import c\n";
-        let flags: Vec<(bool, bool)> = imports(src).list.iter().map(|f| (f.deferred, f.guarded)).collect();
-        assert_eq!(flags, [(true, true), (true, true), (true, false)]);
+        let flags: Vec<(bool, ImportGuard)> = imports(src).list.iter().map(|f| (f.deferred, f.guard)).collect();
+        let (no, any) = (ImportGuard::Unguarded, ImportGuard::Any);
+        assert_eq!(flags, [(true, any), (true, any), (true, no)]);
     }
 
     #[test]

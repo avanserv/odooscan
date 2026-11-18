@@ -844,10 +844,21 @@ pub struct ImportFact {
     pub from: bool,
     /// In a function, which runs it only when called.
     pub deferred: bool,
-    /// Where a failed import changes nothing: in a `try` catching it or under a `suppress()` that
-    /// may, or anywhere under `if TYPE_CHECKING:`, which never runs, a function defined there
-    /// included.
-    pub guarded: bool,
+    pub guard: ImportGuard,
+}
+
+/// Which failures of an import change nothing, ordered from none to any, so the innermost of
+/// nested guards counts only where it catches more.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
+pub enum ImportGuard {
+    #[default]
+    Unguarded,
+    /// Only `ModuleNotFoundError` is caught, which a missing module raises but a name missing from
+    /// a module that exists does not.
+    MissingModule,
+    /// In a `try` catching `ImportError` or under a `suppress()` that may, or anywhere under
+    /// `if TYPE_CHECKING:`, which never runs, a function defined there included.
+    Any,
 }
 
 /// The `__all__` of a file, which decides the submodules a star import of its package runs.
