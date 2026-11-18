@@ -19,8 +19,8 @@ use oxc_syntax::operator::UnaryOperator;
 use oxc_syntax::scope::ScopeFlags;
 
 use crate::facts::{
-    Annotation, ComponentItem, Heritage, JsAlias, JsClass, JsDefine, JsFacts, JsName, JsPatch, JsProps, Lines, OrmCall,
-    Pos, PropItem, RawDiag, Spanned, Static, StaticWrite,
+    Annotation, ComponentItem, Heritage, JsAlias, JsClass, JsDefine, JsFacts, JsName, JsPatch, JsProps, Lines,
+    ModuleTag, OrmCall, Pos, PropItem, RawDiag, Spanned, Static, StaticWrite,
 };
 use crate::series::Series;
 
@@ -45,8 +45,14 @@ const ORM_METHODS: &[&str] = &[
 pub fn analyze(text: &str) -> JsFacts {
     let lines = Lines::new(text);
     let mut facts = JsFacts {
-        annotation: annotation(text),
-        alias: alias(text),
+        tag: ModuleTag {
+            annotation: annotation(text, false),
+            alias: alias(text, false),
+        },
+        early_tag: ModuleTag {
+            annotation: annotation(text, true),
+            alias: alias(text, true),
+        },
         ..JsFacts::default()
     };
     let allocator = Allocator::default();
@@ -198,47 +204,54 @@ fn eslint_directive(content: &str) -> (&str, Vec<&str>) {
     (kind, names)
 }
 
-/// The text after `@odoo-module` in the comments that open the file, where Odoo reads it.
-fn module_tag(text: &str) -> Option<&str> {
-    let mut rest = text.trim_start();
-    loop {
-        let (comment, after) = if let Some(r) = rest.strip_prefix("//") {
-            r.split_once('\n').unwrap_or((r, ""))
-        } else {
-            let r = rest.strip_prefix("/*")?;
-            r.split_once("*/").unwrap_or((r, ""))
-        };
-        if let Some((_, tail)) = comment.split_once("@odoo-module") {
-            return Some(tail);
-        }
-        rest = after.trim_start();
-    }
+/// Python's `\s`, which Odoo's pattern reads: Unicode whitespace and the separators U+001C to U+001F.
+fn py_space(c: char) -> bool {
+    c.is_whitespace() || ('\u{1c}'..='\u{1f}').contains(&c)
 }
 
-fn annotation(text: &str) -> Annotation {
-    let Some(tail) = module_tag(text) else {
+const TAG: &str = "@odoo-module";
+
+/// The text after `@odoo-module` where Odoo's pattern finds it, to the file end, as `ignore` and
+/// `alias=` follow any whitespace, newlines included. The pattern matches at the file start, past
+/// whitespace, a `//` or `/*` and then the tag, its `.` stopping at a newline: the last tag on that
+/// first line counts. Before saas~17.2 (`early`) the whitespace before the tag may span newlines,
+/// so a tag starting a later line after only whitespace counts first, as the greedy `.*` tries it.
+fn module_tag(text: &str, early: bool) -> Option<&str> {
+    let rest = text.trim_start_matches(py_space);
+    let line = rest.strip_prefix("//").or_else(|| rest.strip_prefix("/*"))?;
+    let end = line.find('\n').unwrap_or(line.len());
+    let later = early.then(|| line[end..].trim_start_matches(py_space).strip_prefix(TAG));
+    later
+        .flatten()
+        .or_else(|| line[..end].rfind(TAG).map(|at| &line[at + TAG.len()..]))
+}
+
+/// `ignore` takes any word that starts with it, as Odoo's pattern has no word boundary there, and
+/// only from saas~17.2; the `early` reading has no `ignore`.
+fn annotation(text: &str, early: bool) -> Annotation {
+    let Some(tail) = module_tag(text, early) else {
         return Annotation::None;
     };
-    let ignore = tail.starts_with(char::is_whitespace) && tail.split_whitespace().next() == Some("ignore");
+    let ignore = !early && tail.starts_with(py_space) && tail.trim_start_matches(py_space).starts_with("ignore");
     if ignore { Annotation::Ignore } else { Annotation::Module }
 }
 
 /// `alias=<name>` right after `@odoo-module`, then optionally `default=<value>`, each up to a space
 /// or a `*`. An ignored file has none.
-fn alias(text: &str) -> Option<JsAlias> {
+fn alias(text: &str, early: bool) -> Option<JsAlias> {
     let token = |s: &str| -> (String, usize) {
-        let end = s.find(|c: char| c.is_whitespace() || c == '*').unwrap_or(s.len());
+        let end = s.find(|c: char| py_space(c) || c == '*').unwrap_or(s.len());
         (s[..end].to_owned(), end)
     };
-    let tail = module_tag(text)?;
+    let tail = module_tag(text, early)?;
     let rest = tail
-        .strip_prefix(char::is_whitespace)?
-        .trim_start()
+        .strip_prefix(py_space)?
+        .trim_start_matches(py_space)
         .strip_prefix("alias=")?;
     let (name, end) = token(rest);
     let default = rest[end..]
-        .strip_prefix(char::is_whitespace)
-        .and_then(|a| a.trim_start().strip_prefix("default="))
+        .strip_prefix(py_space)
+        .and_then(|a| a.trim_start_matches(py_space).strip_prefix("default="))
         .map(|d| token(d).0);
     (!name.is_empty()).then_some(JsAlias { name, default })
 }
@@ -246,7 +259,31 @@ fn alias(text: &str) -> Option<JsAlias> {
 /// From saas~17.2 an alias is any name and any `default=` value makes it stand for the file's
 /// exports (18.0 `odoo/tools/js_transpiler.py:664-672`, 20.0 `:691-699`); before, a name of word
 /// characters and dots, and `default=` one of `false`, `False` or `0` (commit `3ca925b8a82e`).
-const PERMISSIVE_ALIAS: Series = Series { major: 17, minor: 2 };
+/// The same commit drops the whitespace before the tag, and `5f2c50583600` adds `ignore`.
+const PERMISSIVE_TAG: Series = Series { major: 17, minor: 2 };
+
+impl JsFacts {
+    /// The series' reading of the tag. An unknown series takes the newer: its ES modules are a
+    /// subset of the older's, so it reports fewer imports and the scripts it leaves are opaque.
+    pub fn annotation(&self, series: Option<Series>) -> Annotation {
+        if series.is_some_and(|s| s < PERMISSIVE_TAG) {
+            self.early_tag.annotation
+        } else {
+            self.tag.annotation
+        }
+    }
+
+    /// The series' alias. An unknown series takes either reading's, as OD601 may report a name no
+    /// file claims as missing.
+    pub fn alias(&self, series: Option<Series>) -> Option<&JsAlias> {
+        let (tag, early) = (self.tag.alias.as_ref(), self.early_tag.alias.as_ref());
+        match series {
+            Some(s) if s < PERMISSIVE_TAG => early,
+            Some(_) => tag,
+            None => tag.or(early),
+        }
+    }
+}
 
 impl JsAlias {
     /// The name the series registers and whether it returns the file's exports rather than its
@@ -254,7 +291,7 @@ impl JsAlias {
     pub fn registered(&self, series: Option<Series>) -> Option<(&str, bool)> {
         let word = |c: char| c.is_alphanumeric() || c == '_';
         let default = self.default.as_deref();
-        if series.is_none_or(|s| s >= PERMISSIVE_ALIAS) {
+        if series.is_none_or(|s| s >= PERMISSIVE_TAG) {
             let proxies = default.is_some_and(|d| d.starts_with(|c| word(c) || c == '$'));
             return Some((&self.name, proxies));
         }
@@ -1391,22 +1428,66 @@ mod tests {
     }
 
     #[test]
-    fn reads_the_annotation_from_the_leading_comments() {
-        assert_eq!(
-            annotation("/** @odoo-module **/\nimport x from 'y';"),
-            Annotation::Module
-        );
-        assert_eq!(annotation("// @odoo-module ignore\n"), Annotation::Ignore);
-        assert_eq!(
-            annotation("/* license */\n/** @odoo-module alias=a.b **/"),
-            Annotation::Module
-        );
-        assert_eq!(annotation("import x from 'y'; // @odoo-module"), Annotation::None);
+    fn reads_the_annotation_on_the_first_line() {
+        let module = [
+            "/** @odoo-module **/\nimport x from 'y';",
+            "\n\n  /** @odoo-module **/",
+            "\u{1c}// @odoo-module",
+            "/* a */ var y; // @odoo-module",
+            "// @odoo-module ignore @odoo-module",
+        ];
+        for text in module {
+            assert_eq!(annotation(text, false), Annotation::Module, "{text:?}");
+        }
+        let none = [
+            "// license\n// @odoo-module",
+            "// license\n// @odoo-module ignore",
+            "/* license */\n/** @odoo-module alias=a.b **/",
+            "/**\n * Copyright\n * @odoo-module\n */",
+            "/**\n@odoo-module\n*/",
+            "import x from 'y'; // @odoo-module",
+        ];
+        for text in none {
+            assert_eq!(annotation(text, false), Annotation::None, "{text:?}");
+        }
+        let ignore = [
+            "// @odoo-module ignore\n",
+            "/** @odoo-module ignored */",
+            "// @odoo-module @odoo-module ignore",
+            "/** @odoo-module\n ignore */",
+        ];
+        for text in ignore {
+            assert_eq!(annotation(text, false), Annotation::Ignore, "{text:?}");
+        }
+    }
+
+    #[test]
+    fn reads_the_annotation_after_whitespace_before_saas_17_2() {
+        let module = [
+            "/** @odoo-module **/",
+            "/**\n@odoo-module\n*/",
+            "/*\n\n    @odoo-module alias=web.Foo */",
+            "// a\n\u{1f}@odoo-module",
+            "/** @odoo-module ignore */",
+            "/** @odoo-module ignored */",
+        ];
+        for text in module {
+            assert_eq!(annotation(text, true), Annotation::Module, "{text:?}");
+        }
+        let none = [
+            "/**\n * @odoo-module\n */",
+            "// license\n// @odoo-module",
+            "/* license */\n/** @odoo-module **/",
+            "import x from 'y'; // @odoo-module",
+        ];
+        for text in none {
+            assert_eq!(annotation(text, true), Annotation::None, "{text:?}");
+        }
     }
 
     #[test]
     fn reads_the_alias_after_the_annotation() {
-        let read = |text: &str| alias(text).map(|a| (a.name, a.default));
+        let read = |text: &str| alias(text, false).map(|a| (a.name, a.default));
         let some = |name: &str, default: Option<&str>| Some((name.to_owned(), default.map(str::to_owned)));
         assert_eq!(
             read("/** @odoo-module alias=@web/../tests/utils default=false */"),
@@ -1419,12 +1500,35 @@ mod tests {
         assert_eq!(read("/** @odoo-module default=false alias=a.b */"), None);
         assert_eq!(read("/** @odoo-module alias= */"), None);
         assert_eq!(read("/** @odoo-module **/"), None);
+        assert_eq!(read("/** @odoo-module\n   alias=a.b */"), some("a.b", None));
+        assert_eq!(read("/* license */\n/** @odoo-module alias=a.b */"), None);
+        assert_eq!(read("/*\n    @odoo-module alias=web.Foo */"), None);
+        let early = |text: &str| alias(text, true).map(|a| (a.name, a.default));
+        assert_eq!(early("/*\n    @odoo-module alias=web.Foo */"), some("web.Foo", None));
+        assert_eq!(early("/* @odoo-module alias=a.b */\n@odoo-module"), None);
+        assert_eq!(early("/* license */\n/** @odoo-module alias=a.b */"), None);
+    }
+
+    #[test]
+    fn a_series_reads_its_own_tag() {
+        let facts = analyze("/*\n    @odoo-module ignore alias=web.Foo */");
+        assert_eq!(facts.annotation(Series::parse("saas~17.1")), Annotation::Module);
+        assert_eq!(facts.annotation(Series::parse("saas~17.2")), Annotation::None);
+        assert_eq!(facts.annotation(None), Annotation::None);
+        let facts = analyze("/*\n    @odoo-module alias=web.Foo */");
+        let name = |series: Option<Series>| facts.alias(series).map(|a| a.name.as_str());
+        assert_eq!(name(Series::parse("17.0")), Some("web.Foo"));
+        assert_eq!(name(Series::parse("18.0")), None);
+        assert_eq!(name(None), Some("web.Foo"));
+        let ignored = analyze("// @odoo-module ignore");
+        assert_eq!(ignored.annotation(Series::parse("16.0")), Annotation::Module);
+        assert_eq!(ignored.annotation(None), Annotation::Ignore);
     }
 
     #[test]
     fn a_series_reads_its_own_part_of_the_alias() {
         let registered = |text: &str, series: &str| {
-            let alias = alias(text).unwrap();
+            let alias = alias(text, false).unwrap();
             alias.registered(Series::parse(series)).map(|(n, p)| (n.to_owned(), p))
         };
         let tests = "/** @odoo-module alias=@web/../tests/utils default=false */";
