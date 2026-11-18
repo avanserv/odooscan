@@ -260,7 +260,7 @@ pub fn check_module<'m>(index: &Index<'m>, mi: usize, series: Option<Series>) ->
     let module = &index.modules[mi];
     let mut out = Out { diags: vec![] };
     manifest_files(module, &mut out);
-    manifest_keys(index, module, &mut out);
+    manifest_keys(module, series, &mut out);
     upgrade_folders(module, series, &mut out);
     upgrade_scripts(module, series, &mut out);
     unmatched_assets(module, series, &mut out);
@@ -1366,16 +1366,16 @@ fn manifest_files<'m>(module: &'m Module, out: &mut Out<'m>) {
     }
 }
 
-/// The manifest's own findings, OD509 on a version the Odoo of the scan's series will not install,
+/// The manifest's own findings, OD509 on a version the Odoo of `series` will not install,
 /// and OD510 on a module in its own `depends`, which Odoo never loads since a module loads once all
-/// of its depends have (18.0 `odoo/modules/graph.py:85-104`). The scan's series is the one
-/// `--target-series` or `--odoo-version` names, else the module's own.
-fn manifest_keys<'m>(index: &Index<'m>, module: &'m Module, out: &mut Out<'m>) {
+/// of its depends have (18.0 `odoo/modules/graph.py:85-104`). `series` is `--target-series`, else
+/// the module's own, else `--odoo-version`.
+fn manifest_keys<'m>(module: &'m Module, series: Option<Series>, out: &mut Out<'m>) {
     let path = module.manifest_path.as_path();
     out.diags
         .extend(module.manifest.diags.iter().map(|d| (path, d.clone())));
     if let Some(version) = &module.manifest.version
-        && let Some(message) = manifest::version_refusal(&version.value, index.default_series.or(module.series))
+        && let Some(message) = manifest::version_refusal(&version.value, series)
     {
         out.push(path, "OD509", version.pos, message);
     }
