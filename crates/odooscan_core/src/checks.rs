@@ -532,15 +532,13 @@ fn public_write_message(row: &AccessRow, module: &str, series: Option<Series>) -
 }
 
 /// What OD503 says of `dep`, a module the scan does not index, given how the Odoo of its series
-/// reads its manifest when odooscan rejects it. A manifest that Odoo reads but odooscan does not
-/// gets its own wording, since its notice alone says why.
-fn unknown_dependency(dep: &str, rejected: Option<&manifest::OdooReads>) -> String {
+/// reads its manifest when odooscan rejects it. None when the Odoo of `series`, the dependent's,
+/// reads it too, since the notice on that manifest already names the gap.
+fn unknown_dependency(dep: &str, rejected: Option<manifest::OdooReads>, series: Option<Series>) -> Option<String> {
     match rejected {
-        Some(manifest::OdooReads::No) => format!("Odoo cannot read the manifest of module '{dep}'"),
-        Some(manifest::OdooReads::AsPython2 | manifest::OdooReads::AsExpression) => {
-            format!("odooscan cannot read the manifest of module '{dep}'")
-        }
-        None => format!("module '{dep}' is not on the addons path"),
+        Some(reads) if reads.on(series) => None,
+        Some(_) => Some(format!("Odoo cannot read the manifest of module '{dep}'")),
+        None => Some(format!("module '{dep}' is not on the addons path")),
     }
 }
 
@@ -2187,12 +2185,12 @@ impl<'m> Ctx<'_, 'm> {
         let manifest = &self.module.manifest_path;
         for dep in &self.module.manifest.depends {
             match self.index.by_name.get(dep.value.as_str()) {
-                None => out.push(
-                    manifest,
-                    "OD503",
-                    dep.pos,
-                    unknown_dependency(&dep.value, self.index.rejected.get(dep.value.as_str())),
-                ),
+                None => {
+                    let rejected = self.index.rejected.get(dep.value.as_str()).copied();
+                    if let Some(message) = unknown_dependency(&dep.value, rejected, self.series) {
+                        out.push(manifest, "OD503", dep.pos, message);
+                    }
+                }
                 Some(&d) if self.index.reaches(d, me) => out.push(
                     manifest,
                     "OD504",
@@ -7810,19 +7808,24 @@ mod tests {
     }
 
     #[test]
-    fn the_unknown_dependency_message_says_whether_odoo_reads_the_manifest() {
-        assert_eq!(
-            unknown_dependency("x", Some(&OdooReads::No)),
-            "Odoo cannot read the manifest of module 'x'"
-        );
+    fn the_unknown_dependency_is_silent_on_a_manifest_the_dependents_odoo_reads() {
+        let message = |reads: Option<OdooReads>, series: &str| unknown_dependency("x", reads, Series::parse(series));
+        let unreadable = Some("Odoo cannot read the manifest of module 'x'");
+        assert_eq!(message(Some(OdooReads::No), "9.0").as_deref(), unreadable);
+        assert_eq!(message(Some(OdooReads::AsPython2), "9.0"), None);
+        assert_eq!(message(Some(OdooReads::AsPython2), "10.0"), None);
+        assert_eq!(message(Some(OdooReads::AsPython2), "11.0").as_deref(), unreadable);
+        assert_eq!(message(Some(OdooReads::AsExpression), "9.0"), None);
+        assert_eq!(message(Some(OdooReads::AsExpression), "10.0").as_deref(), unreadable);
         for reads in [OdooReads::AsPython2, OdooReads::AsExpression] {
             assert_eq!(
-                unknown_dependency("x", Some(&reads)),
-                "odooscan cannot read the manifest of module 'x'",
+                unknown_dependency("x", Some(reads), None).as_deref(),
+                unreadable,
                 "{reads:?}"
             );
         }
-        assert_eq!(unknown_dependency("x", None), "module 'x' is not on the addons path");
+        let absent = Some("module 'x' is not on the addons path");
+        assert_eq!(message(None, "9.0").as_deref(), absent);
     }
 
     #[test]

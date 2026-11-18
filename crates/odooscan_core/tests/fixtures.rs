@@ -813,6 +813,59 @@ fn a_seriesless_web_runs_the_owl_of_the_module_checked() {
 }
 
 #[test]
+fn a_legacy_manifest_dependency_gets_od503_only_where_odoo_cannot_read_it() {
+    // Only `legacy_depends_modern` names a series, so the default one decides how the Odoo of the
+    // others reads them; the 18.0 module cannot install either dependency whatever that is.
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+    let scan_as = |series: &str| {
+        scan(&ScanOptions {
+            paths: vec![root.join("legacy_depends/custom")],
+            addons_paths: vec![root.join("legacy_depends/addons"), root.join("core")],
+            default_series: Series::parse(series),
+            ..Default::default()
+        })
+    };
+    let od503 = |report: &odooscan_core::Report, module: &str| -> Vec<String> {
+        let found = report
+            .diagnostics
+            .iter()
+            .filter(|d| d.code == "OD503" && d.path.starts_with(module));
+        found.map(|d| d.message.clone()).collect()
+    };
+    let unreadable = |dep: &str| format!("Odoo cannot read the manifest of module '{dep}'");
+    let unreadable_both = [unreadable("python2_manifest"), unreadable("eval_manifest")];
+    let python2 = |series: &str| {
+        format!(
+            "python2_manifest/__openerp__.py:4:17: Python 2 syntax, which {series} runs; this module is not indexed"
+        )
+    };
+    let eval = "eval_manifest/__openerp__.py:1:1: 9.0 evaluates the manifest, which odooscan reads only as literal \
+                key/value pairs; this module is not indexed";
+    let user = root.join("legacy_depends/custom/legacy_depends_user");
+    let modern = root.join("legacy_depends/custom/legacy_depends_modern");
+    let user = user.to_str().unwrap();
+    let modern = modern.to_str().unwrap();
+
+    let nine = scan_as("9.0");
+    assert_eq!(od503(&nine, user), Vec::<String>::new());
+    assert_eq!(od503(&nine, modern), unreadable_both);
+    for notice in [python2("9.0").as_str(), eval] {
+        assert!(
+            nine.notices.iter().any(|n| n == notice),
+            "{notice}: {:#?}",
+            nine.notices
+        );
+    }
+    let ten = scan_as("10.0");
+    assert_eq!(od503(&ten, user), [unreadable("eval_manifest")]);
+    assert_eq!(od503(&ten, modern), unreadable_both);
+    assert!(ten.notices.contains(&python2("10.0")), "{:#?}", ten.notices);
+    let eighteen = scan_as("18.0");
+    assert_eq!(od503(&eighteen, user), unreadable_both);
+    assert_eq!(od503(&eighteen, modern), unreadable_both);
+}
+
+#[test]
 fn a_module_named_before_base_writes_a_base_record_after_it() {
     // `bare_rank` sorts before `base` and reads no `depends` on 18.0, yet Odoo loads `base` first.
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/base_rank");

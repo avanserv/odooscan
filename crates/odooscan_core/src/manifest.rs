@@ -601,6 +601,19 @@ pub enum OdooReads {
     AsExpression,
 }
 
+impl OdooReads {
+    /// Whether the Odoo of `series` also reads a manifest read as `self` in its own series, which
+    /// may differ: a dependency without a readable version is read in the default series, while
+    /// the module depending on it installs it on the Odoo of its own.
+    pub fn on(self, series: Option<Series>) -> bool {
+        match self {
+            OdooReads::No => false,
+            OdooReads::AsPython2 => python2::runs_on(series),
+            OdooReads::AsExpression => series.is_some_and(|s| s < LITERAL_EVAL),
+        }
+    }
+}
+
 /// The manifest in `bytes`, or why the Odoo of `series` cannot read it. `series` is handed the
 /// manifest's own series, none when that cannot be read. From 11.0 Odoo reads the file as UTF-8
 /// with `ast.literal_eval` (18.0 `odoo/modules/module.py:312-313`, `odoo/tools/misc.py:257`). 10.0
