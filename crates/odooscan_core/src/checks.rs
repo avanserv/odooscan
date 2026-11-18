@@ -1533,34 +1533,14 @@ fn outside_static(name: &str, path: &str, parts: &[&str], static_only: bool) -> 
 }
 
 /// OD505 on a `qweb` key, which from saas~14.3 nothing reads, and OD506 on a `web.assets_qweb`
-/// bundle, which nothing loads from `XML_IN_BUNDLES`, when a file they name is in no bundle that
-/// gives templates in the series. A module moving to `assets` often keeps the dead list beside the
-/// bundle that loads the same files.
+/// bundle, which nothing loads from `XML_IN_BUNDLES`, when a file they name is in no bundle of the
+/// manifest that gives templates in the series. A module moving to `assets` often keeps the dead
+/// list beside the bundle that loads the same files.
 fn unread_template_lists<'m>(module: &'m Module, series: Option<Series>, out: &mut Out<'m>) {
     let manifest = &module.manifest;
-    let xml_in_bundles = series.is_some_and(|s| s >= XML_IN_BUNDLES);
-    let loading = |assets_qweb: bool| {
-        let bundles = manifest
-            .bundles
-            .iter()
-            .filter(|b| (b.name.value == "web.assets_qweb") == assets_qweb);
-        asset_glob_set(bundles.flat_map(|b| &b.globs))
-    };
-    if let Some(qweb) = &manifest.qweb {
-        let listed: Vec<_> = qweb.value.iter().map(|f| format!("{}/{f}", module.name)).collect();
-        if lost(module, &listed, &loading(!xml_in_bundles)) {
-            let bundle = if xml_in_bundles {
-                "web.assets_backend"
-            } else {
-                "web.assets_qweb"
-            };
-            let message = format!(
-                "Odoo ignores the qweb key, so the templates it lists that no bundle loads are missing; list them under {bundle} in assets"
-            );
-            out.push(&module.manifest_path, "OD505", qweb.pos, message);
-        }
-    }
-    let others = loading(false);
+    let fetched = bundle_globs(manifest, |b| bundles::fetches_templates(b, series));
+    ignored_qweb_key(module, series, &fetched, out);
+    let others = bundle_globs(manifest, |b| b != "web.assets_qweb");
     for bundle in manifest.bundles.iter().filter(|b| b.name.value == "web.assets_qweb") {
         if lost(module, &bundle.globs, &others) {
             out.push(
@@ -1572,6 +1552,38 @@ fn unread_template_lists<'m>(module: &'m Module, series: Option<Series>, out: &m
         }
     }
     qweb_asset_records(module, series, &others, out);
+}
+
+/// The globs of the manifest's bundles whose name `keep` takes.
+fn bundle_globs(manifest: &manifest::Manifest, keep: impl Fn(&str) -> bool) -> GlobSet {
+    asset_glob_set(
+        manifest
+            .bundles
+            .iter()
+            .filter(|b| keep(&b.name.value))
+            .flat_map(|b| &b.globs),
+    )
+}
+
+/// OD505 on a `qweb` key naming a file that `fetched` misses. `fetched` holds the globs of the
+/// bundles giving templates.
+fn ignored_qweb_key<'m>(module: &'m Module, series: Option<Series>, fetched: &GlobSet, out: &mut Out<'m>) {
+    let Some(qweb) = &module.manifest.qweb else {
+        return;
+    };
+    let listed: Vec<_> = qweb.value.iter().map(|f| format!("{}/{f}", module.name)).collect();
+    if !lost(module, &listed, fetched) {
+        return;
+    }
+    let advice = if series.is_some_and(|s| s >= XML_IN_BUNDLES) {
+        "under web.assets_backend in assets"
+    } else {
+        "under the bundle of the page that renders them, web.assets_qweb for the web client"
+    };
+    let message = format!(
+        "Odoo ignores the qweb key, so the templates it lists that no bundle loads are missing; list them {advice}"
+    );
+    out.push(&module.manifest_path, "OD505", qweb.pos, message);
 }
 
 /// OD506 on an `ir.asset` record of a loaded file that adds to `web.assets_qweb` a file no bundle

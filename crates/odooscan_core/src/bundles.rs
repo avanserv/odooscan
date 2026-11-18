@@ -25,8 +25,33 @@ const ASSET_RECORDS: Series = Series { major: 14, minor: 3 };
 
 /// The first series that loads the XML of a bundle with its scripts (18.0
 /// `odoo/addons/base/models/assetsbundle.py:323-336`, 20.0 `:358-371`). It never loads
-/// `web.assets_qweb`, which 15.0 fetches apart: 5410b7c238f2 removes that fetch in 16.0.
+/// `web.assets_qweb`, whose templates 15.0 fetches through a route of their own: 5410b7c238f2
+/// removes that route in 16.0.
 pub(crate) const XML_IN_BUNDLES: Series = Series { major: 16, minor: 0 };
+
+/// The bundles whose templates a page fetches through the template route before `XML_IN_BUNDLES`,
+/// each from its first series: up to saas~14.4 the route serves `web.assets_qweb` alone, and
+/// saas~14.5 (db7b485d984e, 80d74e7ee0ea, e50bc120020d) and saas~15.3 (99b56ec7069b) add pages
+/// asking for other bundles.
+const TEMPLATE_PAGES: [(&str, Series); 5] = [
+    ("web.assets_qweb", ASSET_RECORDS),
+    ("web.assets_frontend", Series { major: 14, minor: 5 }),
+    ("mail.assets_discuss_public", Series { major: 14, minor: 5 }),
+    ("project.assets_qweb", Series { major: 14, minor: 5 }),
+    ("mrp_subcontracting.assets_qweb", Series { major: 15, minor: 3 }),
+];
+
+/// Whether a page gets the templates `bundle` lists in `series`: before `XML_IN_BUNDLES` through
+/// the template route, and from it with the bundle's scripts. An unknown series reads as before
+/// 16.0, with every bundle some series fetches.
+pub(crate) fn fetches_templates(bundle: &str, series: Option<Series>) -> bool {
+    match series {
+        Some(s) if s >= XML_IN_BUNDLES => loads_templates(bundle, series),
+        _ => TEMPLATE_PAGES
+            .iter()
+            .any(|&(name, first)| name == bundle && series.is_none_or(|s| first <= s)),
+    }
+}
 
 /// Whether a page loads the templates `bundle` lists in `series`. From `XML_IN_BUNDLES` no page
 /// loads `web.assets_qweb`, though a bundle that includes it still gets its files. An unknown
@@ -924,5 +949,20 @@ mod tests {
         let bundles = contents(&[a]);
         assert_eq!(bundles["outer"], ["a/j.js"]);
         assert_eq!(bundles["inner"], ["a/i.js", "a/j.js"]);
+    }
+
+    #[test]
+    fn template_pages_fetch_from_their_series() {
+        let fetches = |bundle, series| fetches_templates(bundle, Series::parse(series));
+        assert!(!fetches("web.assets_frontend", "saas~14.4"));
+        assert!(fetches("web.assets_frontend", "saas~14.5"));
+        assert!(!fetches("mrp_subcontracting.assets_qweb", "saas~15.2"));
+        assert!(fetches("mrp_subcontracting.assets_qweb", "saas~15.3"));
+        assert!(fetches("web.assets_qweb", "15.0"));
+        assert!(!fetches("web.assets_backend", "15.0"));
+        assert!(fetches("web.assets_backend", "16.0"));
+        assert!(!fetches("web.assets_qweb", "16.0"));
+        assert!(fetches_templates("web.assets_frontend", None));
+        assert!(!fetches_templates("web.assets_backend", None));
     }
 }

@@ -306,7 +306,7 @@ impl Manifest {
         match key {
             "version" | "category" | "installable" | "pre_init_hook" => self.set_scalar(loc, key, value),
             "license" => self.set_license(loc, value),
-            "depends" | "data" | "demo" | "init_xml" | "update_xml" | "demo_xml" => self.set_files(loc, key, value),
+            "depends" | "data" | "demo" | "init_xml" | "update_xml" | "demo_xml" => self.set_lists(loc, key, value),
             "assets" => self.set_assets(loc, value),
             "qweb" => self.set_qweb(loc, at, value),
             "auto_install" | "countries" => self.set_install(loc, key, value),
@@ -347,7 +347,7 @@ impl Manifest {
         });
     }
 
-    fn set_files(&mut self, loc: &Source, key: &str, value: &Expr) {
+    fn set_lists(&mut self, loc: &Source, key: &str, value: &Expr) {
         match key {
             "depends" => self.depends = list(loc, value),
             "data" => self.data = list(loc, value),

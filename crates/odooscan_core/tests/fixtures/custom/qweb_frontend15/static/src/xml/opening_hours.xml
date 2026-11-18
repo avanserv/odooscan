@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<templates xml:space="preserve">
+    <t t-name="qweb_frontend15.OpeningHours" owl="1">
+        <p class="o_opening_hours" t-esc="props.hours"/>
+    </t>
+</templates>
