@@ -757,6 +757,7 @@ custom/legacy13/models/ledger.py:18:41: OD220 'stamped_on' has the label 'Create
 custom/legacy13/models/res_partner.py:7:72: OD213 'holder_id' is required, so Odoo refuses ondelete='set null'; use 'restrict' or 'cascade'
 custom/legacy13/models/res_partner.py:9:18: OD214 'origin_ids' and 'market_ids' are Many2many fields of res.partner to the same comodel without relation, so Odoo gives both the same table; set relation on one
 custom/legacy13/models/res_partner.py:12:68: OD222 'home_country_id' has check_company=True, but res.country has no company_id field to check; remove check_company
+custom/legacy13/models/res_partner.py:32:53: OD222 'work_country_id' has check_company=True, but res.country has no company_id field to check; remove check_company
 custom/legacy13/security/rules.xml:4:36: OD210 'no_legacy_field': legacy.ledger has no field 'no_legacy_field'
 custom/legacy13/views/views.xml:16:45: OD312 legacy.stamp has no method 'action_stmap'
 custom/legacy13/views/views.xml:17:45: OD313 method '_stamp' of legacy.stamp is private, so Odoo refuses to call it from a button
@@ -831,11 +832,15 @@ custom/legacy16/models/res_partner.py:23:41: OD220 'touched_on' has the label 'L
 custom/legacy16/models/res_partner.py:31:40: OD220 'turned_on' has the label 'Last Modified on' of field '__last_update' of legacy.turnstile, so Odoo logs a warning and users cannot tell them apart; give it another string
 custom/legacy16/models/res_partner.py:37:21: OD120 'time' in an ormcache key is not a parameter of _quarter_hour_rates(), so every call raises NameError; key on a parameter or on self
 custom/legacy16/models/res_partner.py:49:68: OD222 'home_country_id' has check_company=True, but res.country has no company_id field to check; remove check_company
+custom/legacy16/models/res_partner.py:50:68: OD222 'work_country_id' has check_company=True, but res.country has no company_id field to check; remove check_company
+custom/legacy16/models/res_partner.py:51:70: OD222 'branch_country_id' has check_company=True, but res.country has no company_id field to check; remove check_company
+custom/legacy16/models/res_partner.py:52:70: OD222 'office_country_id' has check_company=True, but res.country has no company_id field to check; remove check_company
 custom/legacy16/views/assets.xml:2:5: OD328 'web.assets_frontend' is no longer a template but an asset bundle; list the files under it in the manifest's assets
 custom/legacy17/data/res.partner-translated.csv:1:1: OD309 res.partner has no field 'name@fr'
 custom/legacy17/data/translated.xml:5:9: OD309 res.partner has no field 'name@fr'
 custom/legacy17/models/res_partner.py:7:68: OD222 'home_country_id' has check_company=True, but res.country has no company_id field to check; remove check_company
 custom/legacy17/models/res_partner.py:13:68: OD222 'home_country_id' has check_company=True, but res.country has no company_id field to check; remove check_company
+custom/legacy17/models/res_partner.py:14:68: OD222 'work_country_id' has check_company=True, but res.country has no company_id field to check; remove check_company
 custom/legacy17/models/upgrade.py:8:14: OD126 flush() no longer works from saas~16.2; use flush_model(), flush_recordset() or self.env.flush_all()
 custom/legacy17/models/upgrade.py:9:33: OD126 recompute() no longer works from saas~16.2; use flush_model(), flush_recordset() or self.env.flush_all()
 custom/legacy17/models/upgrade.py:10:14: OD126 invalidate_cache() no longer works from saas~16.2; use invalidate_model(), invalidate_recordset() or self.env.invalidate_all()

@@ -110,7 +110,7 @@ impl Diagnostic {
         let related = steps(&d.related);
         Self {
             code: d.code,
-            severity: rule(d.code).severity_for(series),
+            severity: d.severity.unwrap_or_else(|| rule(d.code).severity_for(series)),
             path,
             line: d.pos.line,
             column: d.pos.col,
@@ -365,6 +365,14 @@ mod tests {
         assert!(deep_gap_notices(&index::Index::build(&modules, None)).is_empty());
         modules.insert(0, project::module("base", &manifest("")));
         assert_eq!(deep_gap_notices(&index::Index::build(&modules, None)).len(), 1);
+    }
+
+    #[test]
+    fn a_finding_severity_replaces_the_series_one() {
+        let at = |raw: RawDiag| Diagnostic::new(PathBuf::from("models/site.py"), &raw, Series::parse("16.0")).severity;
+        let raw = || RawDiag::new("OD222", facts::Pos { line: 3, col: 5 }, "");
+        assert_eq!(at(raw()), Severity::Warning);
+        assert_eq!(at(raw().with_severity(Some(Severity::Error))), Severity::Error);
     }
 
     #[test]

@@ -338,13 +338,17 @@ fn severities(code: &str) -> Vec<(String, Severity)> {
 }
 
 #[test]
-fn company_check_severity_follows_the_module_series() {
+fn company_check_severity_follows_the_module_series_and_the_field_domain() {
     let expected = [
         ("field_options", Severity::Error),
+        ("legacy13", Severity::Error),
         ("legacy13", Severity::Warning),
+        ("legacy16", Severity::Error),
+        ("legacy16", Severity::Warning),
+        ("legacy16", Severity::Error),
         ("legacy16", Severity::Warning),
         ("legacy17", Severity::Error),
-        ("saas125", Severity::Warning),
+        ("saas125", Severity::Error),
     ];
     assert_eq!(severities("OD222"), expected.map(|(m, s)| (m.to_owned(), s)));
 }

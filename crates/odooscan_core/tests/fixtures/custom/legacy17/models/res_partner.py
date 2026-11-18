@@ -11,3 +11,4 @@ class ResPartner(models.Model):
     _inherit = "res.partner"
 
     home_country_id = fields.Many2one("res.country", check_company=True)
+    work_country_id = fields.Many2one("res.country", check_company=True, domain=[("code", "!=", False)])

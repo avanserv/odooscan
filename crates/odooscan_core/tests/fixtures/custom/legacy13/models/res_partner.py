@@ -18,3 +18,15 @@ class ResPartner(models.Model):
         for partner in self:
             if partner.name:
                 partner.initials = partner.name[:2]
+
+
+class ResPartnerWork(models.Model):
+    _inherit = "res.partner"
+
+    work_country_id = fields.Many2one("res.country", domain="[('code', '!=', False)]")
+
+
+class ResPartnerWorkCheck(models.Model):
+    _inherit = "res.partner"
+
+    work_country_id = fields.Many2one(check_company=True)

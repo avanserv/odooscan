@@ -6,6 +6,7 @@ use ruff_text_size::TextSize;
 
 use crate::fix::Fix;
 use crate::manifest::AssetEntry;
+use crate::rules::Severity;
 
 /// The type of a field the scan cannot tell: an `ir.model.fields` record gives no `ttype` it can
 /// read, or a field class's name stands for two types.
@@ -42,6 +43,8 @@ pub struct RawDiag {
     /// Further places the finding stands for, such as each entry a per-file count covers.
     pub related: Vec<Step>,
     pub fix: Option<Fix>,
+    /// The severity of this finding, which replaces the one its rule gives the module's series.
+    pub severity: Option<Severity>,
 }
 
 impl RawDiag {
@@ -53,6 +56,7 @@ impl RawDiag {
             flow: vec![],
             related: vec![],
             fix: None,
+            severity: None,
         }
     }
 
@@ -63,6 +67,11 @@ impl RawDiag {
 
     pub fn with_related(mut self, related: Vec<Step>) -> Self {
         self.related = related;
+        self
+    }
+
+    pub fn with_severity(mut self, severity: Option<Severity>) -> Self {
+        self.severity = severity;
         self
     }
 }
