@@ -275,8 +275,8 @@ fn block(exports: Exports, body: &[Stmt], may_skip: bool) -> Exports {
         .fold(exports, |exports, stmt| statement(exports, stmt, may_skip))
 }
 
-/// `__all__` after `stmt`: an `if` or `try` may not run a replacement, while a `with` body always
-/// runs as its block does.
+/// `__all__` after `stmt`: an `if`, or a `try` with an `except` clause, may not run a replacement,
+/// while a `with` body and the body of a `try` with only `finally` run as their block does.
 fn statement(exports: Exports, stmt: &Stmt, may_skip: bool) -> Exports {
     match stmt {
         Stmt::If(i) => branched(exports, i),
@@ -299,17 +299,18 @@ fn branched(exports: Exports, i: &ast::StmtIf) -> Exports {
         .fold(exports, |exports, body| block(exports, body, true))
 }
 
-/// `__all__` after a `try`, whose body may stop at any statement and whose handlers and `else`
-/// may not run. The import completes only after `finally` ran, so it reads as at the `try`.
+/// `__all__` after a `try`, whose body may stop at any statement a handler catches and whose
+/// handlers and `else` may not run. With no handler, a body that stops fails the import, so the
+/// body and `finally` both read as at the `try`.
 fn tried(exports: Exports, t: &ast::StmtTry, may_skip: bool) -> Exports {
+    let ran = block(exports, &t.body, may_skip || !t.handlers.is_empty());
     let handlers = t.handlers.iter().map(|h| {
         let ast::ExceptHandler::ExceptHandler(h) = h;
         &h.body[..]
     });
-    let skipped = std::iter::once(&t.body[..])
-        .chain(handlers)
+    let skipped = handlers
         .chain(std::iter::once(&t.orelse[..]))
-        .fold(exports, |exports, body| block(exports, body, true));
+        .fold(ran, |exports, body| block(exports, body, true));
     block(skipped, &t.finalbody, may_skip)
 }
 
@@ -319,10 +320,19 @@ fn looped(exports: Exports, stmt: &Stmt) -> Exports {
     match stmt {
         Stmt::Expr(e) => grown(exports, &e.value),
         Stmt::AugAssign(_) => bound(exports, stmt),
-        Stmt::Assign(a) if a.targets.iter().any(is_all) => Exports::Unread,
-        Stmt::AnnAssign(a) if is_all(&a.target) => Exports::Unread,
+        Stmt::Assign(a) if a.targets.iter().any(is_all) => assigned_maybe(exports, stmt),
+        Stmt::AnnAssign(a) if is_all(&a.target) => assigned_maybe(exports, stmt),
         Stmt::For(f) if is_all(&f.target) => Exports::Unread,
         _ => exports,
+    }
+}
+
+/// `__all__` after an assignment that may not run. With no earlier list, a star import takes
+/// either no submodule or those the assignment lists, so the list holds every name it may.
+fn assigned_maybe(exports: Exports, stmt: &Stmt) -> Exports {
+    match exports {
+        Exports::Absent => bound(Exports::Absent, stmt),
+        _ => Exports::Unread,
     }
 }
 
@@ -348,10 +358,18 @@ fn bound(exports: Exports, stmt: &Stmt) -> Exports {
     }
 }
 
-/// `__all__` after `expr` runs at the top of the file. `append` of a string and `extend` of
-/// literals grow a read list; any other method of `__all__` may change it in any way.
+/// `__all__` after `expr` runs, grown by every call it may make. A call that may not run, in a
+/// comprehension, a branch of a conditional or `and`/`or`, or a lambda body, still counts: an extra
+/// name only widens what a star import reaches, which can hide a finding but never invent one.
 fn grown(exports: Exports, expr: &Expr) -> Exports {
-    let Expr::Call(call) = expr else { return exports };
+    let mut calls = python::Calls::default();
+    calls.visit_expr(expr);
+    calls.calls.into_iter().fold(exports, grown_by)
+}
+
+/// `__all__` after `call`. `append` of a string and `extend` of literals grow a read list; any
+/// other method of `__all__` may change it in any way.
+fn grown_by(exports: Exports, call: &ast::ExprCall) -> Exports {
     let Expr::Attribute(method) = &*call.func else {
         return exports;
     };
@@ -1160,6 +1178,37 @@ mod tests {
     }
 
     #[test]
+    fn all_grown_inside_an_expression_is_read() {
+        let read = |src: &str| imports(src).exports;
+        for grows in [
+            "[__all__.append('b') for _ in x]",
+            "{__all__.append('b') for _ in x}",
+            "list(__all__.append('b') for _ in x)",
+            "__all__.append('b') if x else None",
+            "x and __all__.extend(['b'])",
+            "x or __all__.append('b')",
+            "if x:\n    [__all__.append('b') for _ in x]",
+            "(lambda: __all__.append('b'))()",
+            "for y in x:\n    [__all__.append('b') for _ in y]",
+        ] {
+            let src = format!("__all__ = ['a']\n{grows}\n");
+            assert_eq!(read(&src), Exports::Literal(owned(&["a", "b"])), "{src}");
+        }
+        for unread in [
+            "[__all__.append(n) for n in names]",
+            "x and __all__.insert(0, 'b')",
+            "print(__all__.remove('a'))",
+        ] {
+            let src = format!("__all__ = ['a']\n{unread}\n");
+            assert_eq!(read(&src), Exports::Unread, "{src}");
+        }
+        assert_eq!(
+            read("__all__ = ['a']\n[n.append('b') for n in x]\n"),
+            Exports::Literal(owned(&["a"]))
+        );
+    }
+
+    #[test]
     fn all_assigned_in_a_branch_is_unread() {
         let read = |src: &str| imports(src).exports;
         let caught = "except KeyError:\n    pass\n";
@@ -1191,6 +1240,45 @@ mod tests {
             read("__all__ = ['a']\nif x:\n    __all__ = ['b']\n__all__ = ['c']\n"),
             Exports::Literal(owned(&["c"]))
         );
+    }
+
+    #[test]
+    fn all_assigned_maybe_with_no_list_is_the_list() {
+        let read = |src: &str| imports(src).exports;
+        let caught = "except KeyError:\n    pass\n";
+        for (place, rest) in [
+            ("if x:\n    ", ""),
+            ("if x:\n    pass\nelif y:\n    ", ""),
+            ("if x:\n    pass\nelse:\n    ", ""),
+            ("try:\n    ", caught),
+            ("try:\n    pass\nexcept KeyError:\n    ", ""),
+            ("try:\n    pass\nexcept KeyError:\n    pass\nelse:\n    ", ""),
+            ("for _ in x:\n    ", ""),
+            ("match x:\n    case 1:\n        ", ""),
+            ("if x:\n    try:\n        pass\n    finally:\n        ", ""),
+        ] {
+            for assigns in ["__all__ = ['b']", "__all__: list = ['b']"] {
+                let src = format!("{place}{assigns}\n{rest}");
+                assert_eq!(read(&src), Exports::Literal(owned(&["b"])), "{src}");
+            }
+            let src = format!("{place}__all__ = names\n{rest}");
+            assert_eq!(read(&src), Exports::Unread, "{src}");
+        }
+    }
+
+    #[test]
+    fn a_try_with_only_finally_runs_its_body() {
+        let read = |src: &str| imports(src).exports;
+        let only_finally = "try:\n    __all__ = ['b']\nfinally:\n    pass\n";
+        assert_eq!(
+            read(&format!("__all__ = ['a']\n{only_finally}")),
+            Exports::Literal(owned(&["b"]))
+        );
+        let nested = only_finally.replace('\n', "\n    ");
+        for (head, tail) in [("if x:\n    ", ""), ("try:\n    ", "except KeyError:\n    pass\n")] {
+            let src = format!("__all__ = ['a']\n{head}{}\n{tail}", nested.trim_end());
+            assert_eq!(read(&src), Exports::Unread, "{src}");
+        }
     }
 
     #[test]

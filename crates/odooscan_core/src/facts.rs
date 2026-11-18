@@ -866,7 +866,7 @@ pub enum ImportGuard {
 pub enum Exports {
     #[default]
     Absent,
-    /// A list or tuple of string literals.
+    /// Every name the list may hold, each a string literal.
     Literal(Vec<String>),
     /// Any other form, which may name any submodule.
     Unread,
