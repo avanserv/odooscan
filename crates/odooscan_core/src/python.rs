@@ -22,7 +22,7 @@ use crate::route_body::{self, RouteBody};
 use crate::routing::{self, Routing, Scope};
 use crate::series::Series;
 use crate::sql::{
-    self, Created, CursorUse, QueryVars, Write, is_self, odoo_cursor, query_head, query_source, query_text,
+    self, Created, CursorUse, Expected, QueryVars, Write, is_self, odoo_cursor, query_head, query_source, query_text,
     self_cursor, source_offset,
 };
 use crate::superuser::{self, Escalation};
@@ -2097,6 +2097,33 @@ fn stores_inverse(write: &Write, table: Option<&str>, fields: &[&str]) -> bool {
             .columns
             .as_ref()
             .is_some_and(|columns| columns.iter().all(|c| fields.contains(&c.as_str())))
+}
+
+/// The first series whose `assertRaises` runs its block under `cr.savepoint()`, which flushes on
+/// entry and clears the cache when the block raises (18.0 `odoo/tests/common.py:485-512` and
+/// `odoo/sql_db.py:123-135`; commit 1595c0ee27c7, first in saas~14.5). Before it, the block only
+/// clears the cache on failure, and 13.0 and 14.0 restore the pending writes after that.
+const RAISES_SAVEPOINT: Series = Series { major: 14, minor: 5 };
+
+/// The first series whose `assertRaisesRegex` takes the same savepoint (20.0
+/// `odoo/tests/common.py:790-827`; commit de59def4deeb, first in saas~19.1). Before it, unittest's
+/// own `assertRaisesRegex` runs, and it knows no cursor.
+const REGEX_SAVEPOINT: Series = Series { major: 19, minor: 1 };
+
+/// Whether Odoo rolls back the write, with the cache, when the assertion around it passes.
+fn rolled_back(write: &Write, series: Option<Series>) -> bool {
+    let since = match write.expected {
+        Some(Expected::Raises) => RAISES_SAVEPOINT,
+        Some(Expected::RaisesRegex) => REGEX_SAVEPOINT,
+        None => return false,
+    };
+    series.is_some_and(|s| s >= since)
+}
+
+/// Whether a write may leave values in the cache stale: it sets no column the method adds, nor
+/// only the columns its inverse stores, and no assertion rolls it back.
+fn leaves_stale(uses: &CursorUse, write: &Write, table: Option<&str>, fields: &[&str], series: Option<Series>) -> bool {
+    !uses.adds_columns_of(write) && !stores_inverse(write, table, fields) && !rolled_back(write, series)
 }
 
 /// What the visitor held before it entered a function, which it restores once it leaves.
@@ -5157,10 +5184,11 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
                 .filter(|(m, _)| *m == func.name.as_str())
                 .map(|(_, f)| *f)
                 .collect();
+            let series = self.series;
             let stale = uses
                 .writes
                 .iter()
-                .filter(|w| !uses.adds_columns_of(w) && !stores_inverse(w, table.as_deref(), &fields));
+                .filter(|w| leaves_stale(uses, w, table.as_deref(), &fields, series));
             for write in stale {
                 self.diag(
                     "OD122",
@@ -5864,6 +5892,23 @@ mod tests {
             .map(|d| d.pos.line)
             .collect();
         assert_eq!(lines, [13]);
+    }
+
+    #[test]
+    fn a_write_an_assertion_rolls_back_is_silent_from_its_savepoint_series() {
+        let reported = |assertion: &str, series: Option<&str>| {
+            let src = format!(
+                "class T(TransactionCase):\n    def test_x(self):\n        with self.{assertion}:\n            \
+                 self.env.cr.execute('UPDATE x SET a = 1')\n"
+            );
+            let facts = analyze(&src, series.and_then(Series::parse));
+            facts.diags.iter().any(|d| d.code == "OD122")
+        };
+        assert!(reported("assertRaises(E)", Some("saas~14.4")));
+        assert!(reported("assertRaises(E)", None));
+        assert!(!reported("assertRaises(E)", Some("saas~14.5")));
+        assert!(reported("assertRaisesRegex(E, 'y')", Some("19.0")));
+        assert!(!reported("assertRaisesRegex(E, 'y')", Some("saas~19.1")));
     }
 
     /// The field classes of one file per source, sorted.
