@@ -25,7 +25,7 @@ them.
 | --- | --- | --- |
 | [OD107](rules/OD107.md) | removes `@api.multi` with its line | anything else is on the line, a comment included; `@api.one` returned a list, so it is never removed |
 | [OD108](rules/OD108.md) | `group_operator=` becomes `aggregator=` | the call also passes `aggregator=`, or unpacks a dict with `**` |
-| [OD109](rules/OD109.md) | `self._cr`, `self._uid` and `self._context` become `self.env.cr`, `self.env.uid` and `self.env.context` | the attribute is assigned or deleted, or the code is not in a model class |
+| [OD109](rules/OD109.md) | `self._cr`, `self._uid` and `self._context` become `self.env.cr`, `self.env.uid` and `self.env.context` | the attribute is assigned or deleted |
 | [OD125](rules/OD125.md), [OD126](rules/OD126.md) | `sudo(user)` becomes `with_user(user)` | `sudo()` is given anything beside the user |
 | [OD125](rules/OD125.md) | `track_visibility="onchange"` becomes `tracking=True` | the value is not a non-empty string, or the call also passes `tracking=` or `track_sequence=`, or unpacks a dict with `**` |
 | [OD306](rules/OD306.md) | `<tree>` becomes `<list>`, in its opening and closing tags | an xpath of a view in its inheritance tree names `tree`, as a step, or as a string beside a call to `name()` or `local-name()`; a module that is not checked has a `<tree>` there; a `<tree>` spec and a `<tree>` it may find are both there; the name comes from a DOCTYPE entity |

@@ -12,3 +12,11 @@ class ResPartnerUpgrade(models.Model):
 
     def _x_reset_lang(self):
         return self.with_context(lang=self._context.get("lang"), reset_by=self._uid)
+
+
+class ModernCursorHolder:
+    def __init__(self, cursor):
+        self._cr = cursor
+
+    def cursor(self):
+        return self._cr

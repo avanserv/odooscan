@@ -3406,6 +3406,9 @@ struct PyVisitor<'a, 'ast> {
     /// Where the fact of each enclosing class sits in `facts.classes`, None for a class that is no
     /// model.
     class_facts: Vec<Option<usize>>,
+    /// Whether each enclosing class is a model class: one with an ORM base, which holds even when
+    /// its model cannot be named, or one with a fact.
+    model_classes: Vec<bool>,
     /// The methods of each enclosing class that Odoo runs ahead of the module's data
     /// (`setup_methods`), none for a class that is no model. A model class has an ORM base, whose
     /// model a `_name` or `_inherit` that is no literal hides, or it names its model.
@@ -3481,6 +3484,7 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
             holders: GuardHolders::default(),
             class_models: vec![],
             class_facts: vec![],
+            model_classes: vec![],
             setup_methods: vec![],
             owners: vec![],
             class_start: None,
@@ -5239,20 +5243,25 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
     }
 
     fn private_attr(&mut self, a: &ast::ExprAttribute, expr: &Expr) {
-        if matches!(a.attr.as_str(), "_cr" | "_uid" | "_context")
-            && matches!(&*a.value, Expr::Name(n) if n.id.as_str() == "self")
+        // Outside a model class `self` may be anything, so its `_cr` need not be the deprecated one.
+        if self.model_classes.last() != Some(&true)
+            || !matches!(a.attr.as_str(), "_cr" | "_uid" | "_context")
+            || !matches!(&*a.value, Expr::Name(n) if n.id.as_str() == "self")
         {
-            let public = &a.attr.as_str()[1..];
-            // Outside a model `self` may be anything, and a write would set another attribute.
-            let read_on_model = a.ctx.is_load() && matches!(self.class_facts.last(), Some(Some(_)));
-            let fix = read_on_model.then(|| self.loc.replace(a.attr.range(), &format!("env.{public}")));
-            self.fixed_diag(
-                "OD109",
-                expr,
-                format!("self.{} is deprecated; use self.env.{public}", a.attr),
-                fix,
-            );
+            return;
         }
+        let public = &a.attr.as_str()[1..];
+        // A write would set another attribute than the one `self.env` exposes.
+        let fix = a
+            .ctx
+            .is_load()
+            .then(|| self.loc.replace(a.attr.range(), &format!("env.{public}")));
+        self.fixed_diag(
+            "OD109",
+            expr,
+            format!("self.{} is deprecated; use self.env.{public}", a.attr),
+            fix,
+        );
     }
 
     fn visit_class(&mut self, class: &'ast ast::StmtClassDef, stmt: &'ast Stmt) {
@@ -5280,6 +5289,7 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
         self.owners.push(Some(owner));
         self.class_facts
             .push(fact.is_some().then_some(self.facts.classes.len()));
+        self.model_classes.push(orm || fact.is_some());
         self.setup_methods.push(setup);
         self.facts.classes.extend(fact);
         self.class_models.push(model);
@@ -5294,6 +5304,7 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
         self.class_models.pop();
         self.setup_methods.pop();
         self.class_facts.pop();
+        self.model_classes.pop();
         self.owners.pop();
         self.class_start = class_start;
     }
@@ -9700,18 +9711,51 @@ env.cr.execute('SELECT a.module FROM t a')
     }
 
     #[test]
-    fn a_private_env_shortcut_written_or_outside_a_model_stays() {
+    fn a_private_env_shortcut_written_on_a_model_stays() {
         unfixed(
             &format!("{MODEL}\n    def f(self):\n        self._context = {{}}\n"),
             "19.0",
             "OD109",
         );
-        unfixed(
-            "class Helper:\n    def f(self):\n        self._cr.execute('SELECT 1')\n",
-            "19.0",
-            "OD109",
+    }
+
+    #[test]
+    fn a_private_env_shortcut_is_reported_only_inside_a_model_class() {
+        let od109 = |src: &str| {
+            codes(src, Series::parse("19.0"))
+                .into_iter()
+                .filter(|c| *c == "OD109")
+                .count()
+        };
+        assert_eq!(
+            od109("class Helper:\n    def f(self):\n        self._cr.execute('SELECT 1')\n"),
+            0
         );
-        unfixed("def f(self):\n    return self._uid\n", "19.0", "OD109");
+        assert_eq!(od109("def f(self):\n    return self._uid\n"), 0);
+        let nested = format!("{MODEL}\n    class Helper:\n        def f(self):\n            return self._context\n");
+        assert_eq!(od109(&nested), 0, "{nested}");
+        let inner =
+            format!("{MODEL}\n    def f(self):\n        def g():\n            return self._uid\n        return g()\n");
+        assert_eq!(od109(&inner), 1, "{inner}");
+    }
+
+    #[test]
+    fn a_private_env_shortcut_on_a_model_with_no_named_model_goes_through_env() {
+        for body in [
+            "_inherit = INHERIT",
+            "_register = False",
+            "_name = PREFIX + '.x'",
+            "if PREFIX:\n        _name = 'x.y'",
+        ] {
+            let src = format!(
+                "from odoo import models\n\n\nclass X(models.Model):\n    {body}\n\n    \
+                 def f(self):\n        return self._uid\n"
+            );
+            assert!(
+                rewrites(&src, "19.0", "OD109").contains("return self.env.uid\n"),
+                "{src}"
+            );
+        }
     }
 
     #[test]

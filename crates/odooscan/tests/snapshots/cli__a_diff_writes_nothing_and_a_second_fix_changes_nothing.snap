@@ -105,12 +105,15 @@ expression: diff
  class ModernNote(models.AbstractModel):
 --- a/custom/modern19/models/upgrade.py
 +++ b/custom/modern19/models/upgrade.py
-@@ -11,4 +11,4 @@
+@@ -11,7 +11,7 @@
          return expression.AND([[("name", "=", "x")], [("country_id", "=", False)]])
  
      def _x_reset_lang(self):
 -        return self.with_context(lang=self._context.get("lang"), reset_by=self._uid)
 +        return self.with_context(lang=self.env.context.get("lang"), reset_by=self.env.uid)
+ 
+ 
+ class ModernCursorHolder:
 --- a/custom/modern20/views/pages.xml
 +++ b/custom/modern20/views/pages.xml
 @@ -35,7 +35,7 @@
