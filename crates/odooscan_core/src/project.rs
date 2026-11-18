@@ -93,6 +93,9 @@ pub struct Module {
     /// The files under `static/` Odoo may serve as assets, as `<module>/<path>`, for a checked
     /// module whose manifest has `assets`.
     pub static_assets: Vec<String>,
+    /// The plain `assets` paths of the module outside `static/` that name a file, normalized to
+    /// `<module>/<path>`, for a checked module whose manifest has `assets`.
+    pub outside_assets: Vec<String>,
     /// A file whose text may name a method could not be read: Python, XML or CSV that does not
     /// decode, or a script or template under `static/src` that is not UTF-8.
     pub lost_text: bool,
@@ -102,7 +105,8 @@ pub struct Module {
 }
 
 impl Module {
-    /// Whether the scan lists `static_assets`, so that an empty list means no file.
+    /// Whether the scan lists `static_assets` and `outside_assets`, so that an empty list means no
+    /// file.
     pub fn reads_static_assets(&self) -> bool {
         self.checked && !self.manifest.bundles.is_empty()
     }
@@ -162,6 +166,7 @@ pub(crate) fn module(name: &str, manifest: &str) -> Module {
         template: None,
         sql_views: vec![],
         static_assets: vec![],
+        outside_assets: vec![],
         lost_text: false,
         words: Words::default(),
     }
@@ -355,6 +360,29 @@ fn static_assets(dir: &Path, name: &str) -> Vec<String> {
             ))
         })
         .collect()
+}
+
+/// The paths of `outside_assets` that are files under `module.dir`. Odoo globs a plain path to
+/// itself, so one `is_file` per path stands for its glob.
+fn outside_assets(module: &Module) -> Vec<String> {
+    let paths = module.manifest.bundles.iter().flat_map(|b| &b.paths);
+    paths
+        .filter_map(|path| plain_outside(&module.name, &path.value))
+        .filter(|rel| {
+            let in_module = rel.split_once('/').map_or("", |(_, p)| p);
+            module.dir.join(in_module).is_file()
+        })
+        .collect()
+}
+
+/// The normalized `<module>/<path>` of an `assets` path of `name`'s that holds no wildcard and
+/// stays inside the module but outside `static/`.
+fn plain_outside(name: &str, path: &str) -> Option<String> {
+    if index::wildcard(path) || path.split('/').find(|p| !p.is_empty()) != Some(name) {
+        return None;
+    }
+    let parts = index::normal_parts(path);
+    (parts.len() > 1 && parts[0] == name && !index::in_static(name, &parts)).then(|| parts.join("/"))
 }
 
 pub struct Discovery {
@@ -647,6 +675,7 @@ fn read_module(
         template: None,
         sql_views: vec![],
         static_assets: vec![],
+        outside_assets: vec![],
         lost_text: false,
         words: Words::default(),
     }))
@@ -861,6 +890,7 @@ fn parse_module_files(module: &mut Module, default_series: Option<Series>, taint
     module.sql_views = sql_views(module, series);
     if module.reads_static_assets() {
         module.static_assets = static_assets(&module.dir, &module.name);
+        module.outside_assets = outside_assets(module);
     }
 }
 
