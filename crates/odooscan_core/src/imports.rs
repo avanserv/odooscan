@@ -265,17 +265,52 @@ fn type_checking(test: &Expr) -> bool {
 
 /// What the file binds to `__all__` at import.
 fn exports(body: &[Stmt]) -> Exports {
-    let mut exports = Exports::Absent;
-    for stmt in module_state::top_level(body) {
-        exports = match stmt {
-            Stmt::Expr(e) => grown(exports, &e.value),
-            Stmt::For(_) | Stmt::While(_) | Stmt::Match(_) => module_state::bound(std::slice::from_ref(stmt))
-                .into_iter()
-                .fold(exports, looped),
-            _ => bound(exports, stmt),
-        };
+    block(Exports::Absent, body, false)
+}
+
+/// `__all__` after `body` runs, where `may_skip` says some of it may not run, so that an
+/// assignment there may leave the earlier list in place.
+fn block(exports: Exports, body: &[Stmt], may_skip: bool) -> Exports {
+    body.iter()
+        .fold(exports, |exports, stmt| statement(exports, stmt, may_skip))
+}
+
+/// `__all__` after `stmt`: an `if` or `try` may not run a replacement, while a `with` body always
+/// runs as its block does.
+fn statement(exports: Exports, stmt: &Stmt, may_skip: bool) -> Exports {
+    match stmt {
+        Stmt::If(i) => branched(exports, i),
+        Stmt::Try(t) => tried(exports, t, may_skip),
+        Stmt::With(w) => block(exports, &w.body, may_skip),
+        Stmt::For(_) | Stmt::While(_) | Stmt::Match(_) => module_state::bound(std::slice::from_ref(stmt))
+            .into_iter()
+            .fold(exports, looped),
+        _ if may_skip => looped(exports, stmt),
+        Stmt::Expr(e) => grown(exports, &e.value),
+        _ => bound(exports, stmt),
     }
-    exports
+}
+
+/// `__all__` after an `if`, where any one clause may run, or none without an `else`.
+fn branched(exports: Exports, i: &ast::StmtIf) -> Exports {
+    let clauses = i.elif_else_clauses.iter().map(|c| &c.body[..]);
+    std::iter::once(&i.body[..])
+        .chain(clauses)
+        .fold(exports, |exports, body| block(exports, body, true))
+}
+
+/// `__all__` after a `try`, whose body may stop at any statement and whose handlers and `else`
+/// may not run. The import completes only after `finally` ran, so it reads as at the `try`.
+fn tried(exports: Exports, t: &ast::StmtTry, may_skip: bool) -> Exports {
+    let handlers = t.handlers.iter().map(|h| {
+        let ast::ExceptHandler::ExceptHandler(h) = h;
+        &h.body[..]
+    });
+    let skipped = std::iter::once(&t.body[..])
+        .chain(handlers)
+        .chain(std::iter::once(&t.orelse[..]))
+        .fold(exports, |exports, body| block(exports, body, true));
+    block(skipped, &t.finalbody, may_skip)
 }
 
 /// `__all__` after `stmt` in a loop or `match` case, which may run any number of times or none,
@@ -1122,6 +1157,40 @@ mod tests {
             let src = format!("__all__ = ['a']\n{unread}");
             assert_eq!(read(&src), Exports::Unread, "{unread}");
         }
+    }
+
+    #[test]
+    fn all_assigned_in_a_branch_is_unread() {
+        let read = |src: &str| imports(src).exports;
+        let caught = "except KeyError:\n    pass\n";
+        for (place, rest) in [
+            ("if x:\n    ", ""),
+            ("if x:\n    pass\nelif y:\n    ", ""),
+            ("if x:\n    pass\nelse:\n    ", ""),
+            ("try:\n    ", caught),
+            ("try:\n    pass\nexcept KeyError:\n    ", ""),
+            ("try:\n    pass\nexcept KeyError:\n    pass\nelse:\n    ", ""),
+            ("if x:\n    with y:\n        ", ""),
+            ("with y:\n    if x:\n        ", ""),
+            ("if x:\n    try:\n        pass\n    finally:\n        ", ""),
+        ] {
+            for assigns in ["__all__ = ['b']", "__all__: list = ['b']"] {
+                let src = format!("__all__ = ['a']\n{place}{assigns}\n{rest}");
+                assert_eq!(read(&src), Exports::Unread, "{src}");
+            }
+            for grows in ["__all__.append('b')", "__all__.extend(['b'])", "__all__ += ['b']"] {
+                let src = format!("__all__ = ['a']\n{place}{grows}\n{rest}");
+                assert_eq!(read(&src), Exports::Literal(owned(&["a", "b"])), "{src}");
+            }
+        }
+        for place in ["try:\n    pass\nfinally:\n    ", "with y:\n    "] {
+            let src = format!("__all__ = ['a']\n{place}__all__ = ['b']\n");
+            assert_eq!(read(&src), Exports::Literal(owned(&["b"])), "{src}");
+        }
+        assert_eq!(
+            read("__all__ = ['a']\nif x:\n    __all__ = ['b']\n__all__ = ['c']\n"),
+            Exports::Literal(owned(&["c"]))
+        );
     }
 
     #[test]
