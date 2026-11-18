@@ -177,3 +177,28 @@ class SoftPartner(models.Model):
         side = self.env["ir.module.module"]._get("soft_guards_side")
         if side and side.state == "uninstalled":
             return self.env["soft.thing"].search([("code", "=", "record and state")])
+
+    def _behind_a_search_of_installed_or_absent(self):
+        modules = self.env["ir.module.module"]
+        if modules.search([("name", "=", "soft_guards_side"), ("state", "in", ["installed", "uninstalled"])]):
+            return self.env["soft.thing"].search([("code", "=", "installed or absent")])
+
+    def _behind_a_count_of_installed_or_queued(self):
+        modules = self.env["ir.module.module"]
+        if modules.search_count([("name", "=", "soft_guards_side"), ("state", "in", ["installed", "to install"])]):
+            return self.env["soft.thing"].search([("code", "=", "installed or queued")])
+
+    def _behind_a_search_of_a_given_state(self, state):
+        modules = self.env["ir.module.module"]
+        if modules.search([("name", "=", "soft_guards_side"), ("state", "in", ["installed", state])]):
+            return self.env["soft.thing"].search([("code", "=", "given state")])
+
+    def _behind_a_search_of_installed_alone(self):
+        modules = self.env["ir.module.module"]
+        if modules.search([("name", "=", "soft_guards_side"), ("state", "in", ["installed"])]):
+            return self.env["soft.thing"].search([("code", "=", "installed alone")])
+
+    def _behind_a_search_of_loaded_states(self):
+        modules = self.env["ir.module.module"]
+        if modules.search([("name", "=", "soft_guards_side"), ("state", "in", ("installed", "to upgrade", "to remove"))]):
+            return self.env["soft.thing"].search([("code", "=", "loaded states")])

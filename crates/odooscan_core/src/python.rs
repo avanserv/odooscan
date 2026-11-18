@@ -89,6 +89,10 @@ pub(crate) const SAME_MODEL: &[&str] = &["sudo", "with_context", "with_company",
 /// ORM methods whose overrides must chain to the parent implementation.
 const SUPER_REQUIRED: &[&str] = &["create", "write", "unlink", "copy", "default_get"];
 
+/// The module states whose code the registry loads, outside an update that also loads
+/// `to install`, so a module in one of them is there.
+const LOADED_STATES: [&str; 3] = ["installed", "to upgrade", "to remove"];
+
 pub struct Locator<'a> {
     src: &'a str,
     index: LineIndex,
@@ -923,8 +927,8 @@ impl<'a> GuardHolders<'a> {
         if states.contains(&"uninstalled") {
             return Some((false, proven));
         }
-        let loaded = |state: &&str| matches!(*state, "installed" | "to upgrade" | "to remove");
-        (states.contains(&"installed") && states.iter().all(loaded)).then_some((true, proven))
+        let loaded = states.iter().all(|state| LOADED_STATES.contains(state));
+        (states.contains(&"installed") && loaded).then_some((true, proven))
     }
 
     fn held(&self, expr: &Expr) -> Option<Held> {
@@ -970,7 +974,7 @@ impl<'a> GuardHolders<'a> {
             && self.reads_modules(&a.value)
             && keyword(call, "domain")
                 .or_else(|| call.arguments.args.first())
-                .is_some_and(|domain| domain::requires(domain, "state", "installed"))
+                .is_some_and(|domain| domain::requires(domain, "state", "installed", &LOADED_STATES))
     }
 
     fn unbind(&mut self, target: &Expr) {

@@ -4,6 +4,7 @@ use ruff_python_ast::{self as ast, Expr};
 use ruff_python_parser::parse_expression;
 
 use crate::facts::{ActionValue, Spanned};
+use crate::python::str_lit;
 
 pub(crate) fn items(expr: &Expr) -> Option<&[Expr]> {
     match expr {
@@ -31,21 +32,35 @@ pub fn fields(expr: &Expr) -> Option<Vec<&ast::ExprStringLiteral>> {
     Some(out)
 }
 
-/// Whether a literal domain has a term asking for `value` in `field`, with `=` or `in`.
-/// An operator could lift that term, and anything but a term may hold one.
-pub(crate) fn requires(expr: &Expr, field: &str, value: &str) -> bool {
-    let is_value = |e: &Expr| matches!(e, Expr::StringLiteral(s) if s.value.to_str() == value);
-    let keeps = |term: &Expr| match items(term) {
-        Some([Expr::StringLiteral(name), Expr::StringLiteral(op), right]) if name.value.to_str() == field => {
-            match op.value.to_str() {
-                "=" => is_value(right),
-                "in" => items(right).is_some_and(|values| values.iter().any(is_value)),
-                _ => false,
-            }
-        }
-        _ => false,
+/// Whether a literal domain has a term asking for `value` in `field`, with `=`, or with `in` a
+/// literal list that holds it and allows nothing beyond `allowed`. An operator could lift that
+/// term, and anything but a term may hold one.
+pub(crate) fn requires(expr: &Expr, field: &str, value: &str, allowed: &[&str]) -> bool {
+    items(expr).is_some_and(|terms| {
+        terms.iter().all(|t| items(t).is_some()) && terms.iter().any(|t| keeps(t, field, value, allowed))
+    })
+}
+
+/// Whether `term` asks for `value` in `field` and allows nothing beyond `allowed`.
+fn keeps(term: &Expr, field: &str, value: &str, allowed: &[&str]) -> bool {
+    let Some([Expr::StringLiteral(name), Expr::StringLiteral(op), right]) = items(term) else {
+        return false;
     };
-    items(expr).is_some_and(|terms| terms.iter().all(|t| items(t).is_some()) && terms.iter().any(keeps))
+    if name.value.to_str() != field {
+        return false;
+    }
+    match op.value.to_str() {
+        "=" => matches!(right, Expr::StringLiteral(s) if s.value.to_str() == value),
+        "in" => items(right).is_some_and(|list| only_allowed(list, value, allowed)),
+        _ => false,
+    }
+}
+
+/// Whether `list` holds `value` and every item is a string in `allowed`, since an item the scan
+/// cannot read might be anything.
+fn only_allowed(list: &[Expr], value: &str, allowed: &[&str]) -> bool {
+    list.iter().any(|e| str_lit(e) == Some(value))
+        && list.iter().all(|e| str_lit(e).is_some_and(|s| allowed.contains(&s)))
 }
 
 /// The literal values a domain of terms alone allows in `field`, from its first term on it with
@@ -488,6 +503,34 @@ mod tests {
             "[",
         ] {
             assert_eq!(searched_model(search), None, "{search}");
+        }
+    }
+
+    #[test]
+    fn requires_allows_only_listed_values() {
+        let allowed = ["installed", "to upgrade", "to remove"];
+        let requires = |text: &str| {
+            let parsed = parse_expression(text).unwrap();
+            requires(parsed.expr(), "state", "installed", &allowed)
+        };
+        for text in [
+            "[('state', '=', 'installed')]",
+            "[('state', 'in', ['installed'])]",
+            "[('state', 'in', ('installed', 'to upgrade', 'to remove'))]",
+            "[('state', 'in', ['installed', 'uninstalled']), ('state', '=', 'installed')]",
+        ] {
+            assert!(requires(text), "{text}");
+        }
+        for text in [
+            "[('state', 'in', ['installed', 'uninstalled'])]",
+            "[('state', 'in', ['installed', 'to install'])]",
+            "[('state', 'in', ['installed', state])]",
+            "[('name', 'in', ['installed'])]",
+            "[('state', 'in', ['to upgrade'])]",
+            "[('state', 'in', states)]",
+            "['|', ('state', '=', 'installed'), ('state', '=', 'uninstalled')]",
+        ] {
+            assert!(!requires(text), "{text}");
         }
     }
 
