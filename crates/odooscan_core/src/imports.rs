@@ -201,7 +201,7 @@ impl<'a> Collect<'_> {
 const IMPORT_ERRORS: [&str; 2] = ["ImportError", "ModuleNotFoundError"];
 
 /// Whether a handler catches what a failed import raises.
-fn catches_import(handler: &ast::ExceptHandler) -> bool {
+pub(crate) fn catches_import(handler: &ast::ExceptHandler) -> bool {
     let ast::ExceptHandler::ExceptHandler(h) = handler;
     IMPORT_ERRORS.into_iter().any(|error| python::catches(h, error))
 }

@@ -20,3 +20,14 @@ class ModernCursorHolder:
 
     def cursor(self):
         return self._cr
+
+
+try:
+    from odoo.fields import Domain
+except ImportError:
+    from odoo.osv import expression as domain_expression
+
+try:
+    from odoo.tools import float_round
+except ImportError:
+    from odoo.osv import expression as round_expression

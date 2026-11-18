@@ -972,6 +972,7 @@ custom/modern19/models/upgrade.py:2:1: OD125 importing odoo.osv is deprecated fr
 custom/modern19/models/upgrade.py:8:33: OD125 oldname= is ignored from saas~12.5; use an upgrade script that renames the column
 custom/modern19/models/upgrade.py:14:39: OD109 self._context is deprecated; use self.env.context
 custom/modern19/models/upgrade.py:14:75: OD109 self._uid is deprecated; use self.env.uid
+custom/modern19/models/upgrade.py:33:5: OD125 importing odoo.osv is deprecated from 19.0; use odoo.fields.Domain
 custom/modern19/models/views.py:15:5: OD226 _auto = False leaves modern.gauge without a table, and nothing creates the view modern_gauge; create it in init(), or drop _auto = False
 custom/modern19/static/src/base_calls.js:4:45: OD607 method 'is_transient' is a class method, a static method or a partial, so the server refuses to call it over RPC
 custom/modern19/static/src/base_calls.js:5:45: OD604 model 'res.partner' has no method 'ids'
@@ -1568,6 +1569,7 @@ custom/saas192/models/upgrade.py:14:14: OD126 check_access_rights() no longer wo
 custom/saas192/models/upgrade.py:15:14: OD126 check_access_rule() no longer works from saas~19.1; use check_access()
 custom/saas192/models/upgrade.py:16:33: OD126 read_group() no longer works from saas~19.1; use _read_group()
 custom/saas192/models/upgrade.py:20:9: OD126 overriding read_group() no longer works from saas~19.1; override _read_group() or formatted_read_group()
+custom/saas192/models/upgrade.py:32:5: OD126 importing odoo.osv no longer works from saas~19.1; use odoo.fields.Domain
 custom/saas193/models/ledger.py:4:7: OD401 model 'saas.before.ledger' has no ir.model.access rule, so only the superuser can use it
 custom/saas193/models/memo.py:8:34: OD219 'stage' sets tracking, but saas.memo does not inherit mail.thread, so Odoo ignores it and logs a warning; inherit mail.thread or remove tracking
 custom/saas193/security/ir.model.access.csv:2:1: OD402 no group limits this row, so every user, public and portal included, gets write, create or unlink on model_saas_before_desk; name a group

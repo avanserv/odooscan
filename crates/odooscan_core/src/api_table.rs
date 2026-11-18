@@ -55,6 +55,10 @@ pub(crate) struct Row {
     pub if_false: Option<IfFalse>,
     /// The advice for a written field given a negative number.
     pub if_negative: Option<&'static str>,
+    /// What a `from` import names when it brings in what replaces the form, such as
+    /// `odoo.fields.Domain`: an import of the form in a handler of a `try` importing it is a
+    /// fallback that runs only where the replacement is missing.
+    pub replaced_by: Option<&'static str>,
 }
 
 /// An argument of a call, by keyword or position, and the advice for a call passing `False` there.
@@ -86,6 +90,7 @@ const fn row(
         instead_before: None,
         if_false: None,
         if_negative: None,
+        replaced_by: None,
     }
 }
 
@@ -286,14 +291,19 @@ pub(crate) static ROWS: &[Row] = &[
         at(19, 1),
         "override _read_group() or formatted_read_group()",
     ),
-    // 19.0 warns on import, saas~19.1 has no such package.
-    row(
-        Kind::Import("odoo.osv"),
-        "importing odoo.osv",
-        at(19, 0),
-        at(19, 1),
-        "use odoo.fields.Domain",
-    ),
+    // 19.0 warns on import, saas~19.1 has no such package. odoo.fields exports Domain from saas~18.1
+    // (20.0 `odoo/fields/__init__.py:20`), before the warning, so a module trying it first never
+    // runs a fallback to odoo.osv.
+    Row {
+        replaced_by: Some("odoo.fields.Domain"),
+        ..row(
+            Kind::Import("odoo.osv"),
+            "importing odoo.osv",
+            at(19, 0),
+            at(19, 1),
+            "use odoo.fields.Domain",
+        )
+    },
     // saas~15.3's Request has no such attribute and keeps the body on its dispatcher (18.0
     // `odoo/http.py:2332`, `:2370`), and saas~15.4 adds get_json_data() (18.0 `:1853`).
     Row {
