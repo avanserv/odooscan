@@ -6,5 +6,6 @@ export class PartnerBaseCalls {
         await this.orm.call("res.partner", "ids", []);
         await this.orm.call("modern.tariff", "get_all", []);
         await this.orm.call("res.partner", "get_all", []);
+        await this.orm.call(this.props.resModel, "is_transient", []);
     }
 }

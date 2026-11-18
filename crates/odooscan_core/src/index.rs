@@ -595,6 +595,15 @@ pub(crate) fn base_private_method(name: &str, series: Option<Series>) -> bool {
     })
 }
 
+/// Series whose RPC refuses a method whose class attribute is the instance attribute, so one that
+/// binds to no records (20.0 `odoo/orm/models.py:215`, commit `1c15baf8d8e8`; 18.0
+/// `odoo/service/model.py:29-46` lacks the test).
+const UNBOUND_REFUSED: &str = ">=19.0";
+
+/// The public methods of `BaseModel` that bind to no records in every series of `UNBOUND_REFUSED`
+/// (20.0 `odoo/orm/models.py:5228`). When adding a series, reread its class methods.
+const BASE_UNBOUND_METHODS: &[&str] = &["is_transient"];
+
 /// The first series with `CachedModel`, so a model on it runs on this series or a later one.
 pub(crate) const CACHED_MODEL_SINCE: Series = Series { major: 19, minor: 1 };
 
@@ -3948,6 +3957,37 @@ impl<'m> Index<'m> {
             })
     }
 
+    /// Whether Odoo refuses an RPC call on `name` because the model's class binds it to no records: a
+    /// class method, a static method or a `partial`. Every class in scope of a known `model` that
+    /// binds it, or whose plain base does, must, since the index does not order the MRO, and with
+    /// none or no model `BaseModel` decides. A base the scan cannot read, which a class in a file
+    /// that does not parse counts as having, may bind it to the records. An unknown series counts
+    /// none, as 18.0 calls such a method.
+    pub fn unbound_method(&self, model: Option<&str>, name: &str, scope: &Scope, series: Option<Series>) -> bool {
+        if !series.is_some_and(|s| series::matches(UNBOUND_REFUSED, s)) {
+            return false;
+        }
+        let Some(model) = model else {
+            return BASE_UNBOUND_METHODS.contains(&name);
+        };
+        if self.hidden_method_parents(model, scope) {
+            return false;
+        }
+        let classes = self.merged_classes(model, scope);
+        let bindings: Vec<bool> = classes.iter().filter_map(|(_, c)| c.unbound(name)).collect();
+        if bindings.is_empty() {
+            BASE_UNBOUND_METHODS.contains(&name)
+        } else {
+            bindings.iter().all(|&unbound| unbound)
+        }
+    }
+
+    /// Whether Odoo refuses an RPC call on `name`: what it refuses of a button too, or a method
+    /// bound to no records.
+    pub fn refused_rpc(&self, model: Option<&str>, name: &str, scope: &Scope, series: Option<Series>) -> bool {
+        self.refused_call(model, name, scope, series) || self.unbound_method(model, name, scope, series)
+    }
+
     /// Whether a parent class defines `name` as `has_parent_method` reads it, or `BaseModel` binds
     /// it to a value, which a `def` of the same name replaces where Odoo reads it.
     pub fn has_parent_member(&self, model: &str, name: &str, except: &ClassFact, series: Option<Series>) -> bool {
@@ -4852,6 +4892,68 @@ mod tests {
         assert!(!refused(None, "get_all", Some("20.0")));
         assert!(!refused(Some("x.plain"), "get_all", Some("20.0")));
         assert!(refused(None, "_x", None));
+    }
+
+    #[test]
+    fn unbound_method_needs_every_binding_unbound_from_19_0() {
+        let mut modules = [module("base", "{'version': '20.0.1.0'}")];
+        modules[0].python.push(python_18(
+            "class Clock(models.Model):\n    _name = 'x.clock'\n\n    \
+             @classmethod\n    def tick(cls):\n        pass\n\n    \
+             @classmethod\n    def swing(cls):\n        pass\n\n\
+             class ClockMore(models.Model):\n    _inherit = 'x.clock'\n\n    \
+             def swing(self):\n        pass\n\n\
+             class Dial(models.Model):\n    _name = 'x.dial'\n\n    \
+             def is_transient(self):\n        pass\n",
+        ));
+        let index = Index::build(&modules, None);
+        let scope = index.scope(0);
+        let unbound = |model: Option<&str>, name: &str, series: Option<&str>| {
+            index.unbound_method(model, name, &scope, series.and_then(Series::parse))
+        };
+        let clock = Some("x.clock");
+        assert!(unbound(clock, "tick", Some("19.0")) && unbound(clock, "tick", Some("20.0")));
+        for series in [Some("saas~18.4"), None] {
+            assert!(!unbound(clock, "tick", series), "{series:?}");
+            assert!(!unbound(None, "is_transient", series), "{series:?}");
+        }
+        assert!(!unbound(clock, "swing", Some("20.0")));
+        assert!(unbound(clock, "is_transient", Some("19.0")) && unbound(None, "is_transient", Some("20.0")));
+        assert!(!unbound(Some("x.dial"), "is_transient", Some("20.0")));
+        assert!(!unbound(clock, "missing", Some("20.0")) && !unbound(None, "tick", Some("20.0")));
+        let series = Series::parse("20.0");
+        assert!(!index.refused_call(clock, "tick", &scope, series));
+        assert!(index.refused_rpc(clock, "tick", &scope, series));
+    }
+
+    #[test]
+    fn unbound_method_stays_silent_on_a_binding_it_cannot_read() {
+        let mut modules = [module("base", "{'version': '20.0.1.0'}")];
+        modules[0].python.push(python_18(
+            "class Lamp(models.Model):\n    _name = 'x.lamp'\n\n    \
+             @classmethod\n    def glow(cls):\n        pass\n\n\
+             class Bulb(models.Model):\n    _name = 'x.bulb'\n\n    \
+             @classmethod\n    def glow(cls):\n        pass\n\n\
+             class Fan(models.Model):\n    _name = 'x.fan'\n\n    \
+             @classmethod\n    def spin(cls):\n        pass\n\n\
+             class Clock(models.Model):\n    _name = 'x.clock'\n\n    \
+             @classmethod\n    def tick(cls):\n        pass\n\n\
+             class GlowMixin:\n    def glow(self):\n        pass\n\n\
+             class LampMore(models.Model, GlowMixin):\n    _inherit = 'x.lamp'\n\n\
+             class BulbMore(models.Model, GlowMixin):\n    _inherit = 'x.bulb'\n\n    \
+             @staticmethod\n    def glow():\n        pass\n\n\
+             class FanMore(models.Model, Blade):\n    _inherit = 'x.fan'\n",
+        ));
+        let unparsed = python_18("class ClockMore(models.Model):\n    _inherit = 'x.clock'\n\nprint 'x'\n");
+        assert!(unparsed.facts.classes.iter().all(|c| c.unread));
+        modules[0].python.push(unparsed);
+        let index = Index::build(&modules, None);
+        let scope = index.scope(0);
+        let unbound = |model: &str, name: &str| index.unbound_method(Some(model), name, &scope, Series::parse("20.0"));
+        assert!(!unbound("x.lamp", "glow") && unbound("x.lamp", "is_transient"));
+        assert!(unbound("x.bulb", "glow"));
+        assert!(!unbound("x.fan", "spin") && !unbound("x.fan", "is_transient"));
+        assert!(!unbound("x.clock", "tick"));
     }
 
     #[test]

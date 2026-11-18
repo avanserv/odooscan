@@ -987,8 +987,8 @@ fn loaded_script<'m>(
         .extend(file.facts.diags.iter().map(|d| (file.path.as_path(), d.clone())));
 }
 
-/// The server refuses to dispatch what a button may not call either. A model that is not a literal
-/// leaves only what `BaseModel` refuses whatever the model.
+/// The server refuses to dispatch what a button may not call either, and from 19.0 a method bound to
+/// no records. A model that is not a literal leaves only what `BaseModel` refuses whatever the model.
 fn private_rpc<'m>(
     index: &Index<'m>,
     scope: &Scope,
@@ -996,15 +996,20 @@ fn private_rpc<'m>(
     out: &mut Out<'m>,
     file: &'m SourceFile<JsFacts>,
 ) {
-    let calls = file.facts.orm_calls.iter().filter_map(|c| {
-        let model = c.model.as_ref().map(|m| m.value.as_str());
-        c.method
-            .as_ref()
-            .filter(|m| index.refused_call(model, &m.value, scope, series))
-    });
-    for method in calls {
+    for call in &file.facts.orm_calls {
+        let model = call.model.as_ref().map(|m| m.value.as_str());
+        let Some(method) = call.method.as_ref() else {
+            continue;
+        };
+        let reason = if index.refused_call(model, &method.value, scope, series) {
+            "is private"
+        } else if index.unbound_method(model, &method.value, scope, series) {
+            "is a class method, a static method or a partial"
+        } else {
+            continue;
+        };
         let message = format!(
-            "method '{}' is private, so the server refuses to call it over RPC",
+            "method '{}' {reason}, so the server refuses to call it over RPC",
             method.value
         );
         out.push(&file.path, "OD607", method.pos, message);
@@ -2659,7 +2664,7 @@ impl<'m> Ctx<'_, 'm> {
 
     /// A refused method is OD607's, whether the model has it or not.
     fn orm_method(&self, out: &mut Out<'m>, path: &'m Path, call: &OrmCall, model: &str) {
-        let refused = |name: &str| self.index.refused_call(Some(model), name, self.scope, self.series);
+        let refused = |name: &str| self.index.refused_rpc(Some(model), name, self.scope, self.series);
         let Some(method) = call
             .method
             .as_ref()

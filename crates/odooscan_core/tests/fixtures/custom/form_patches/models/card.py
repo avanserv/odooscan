@@ -1,3 +1,5 @@
+from functools import partial
+
 from odoo import api, fields, models
 
 
@@ -11,6 +13,16 @@ class FormCardPrintable(models.AbstractModel):
     @api.private
     def action_stamp_card(self):
         return True
+
+    @classmethod
+    def card_sizes(cls):
+        return ["a6", "a7"]
+
+    @staticmethod
+    def card_margin(size):
+        return 4 if size == "a7" else 6
+
+    card_title = partial(str.title)
 
 
 class FormCard(models.Model):

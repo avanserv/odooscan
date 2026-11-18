@@ -247,7 +247,7 @@ built on each series, and which scripts are test scripts.
 | [OD604](OD604.md) | `unknown-rpc-method` | An ORM call from JS names a method its model does not have. |
 | [OD605](OD605.md) | `unknown-template` | A component, a t-inherit or a t-call names a template no indexed bundle defines. |
 | [OD606](OD606.md) | `unmatched-template-locator` | A template locates an element its parent templates do not have. |
-| [OD607](OD607.md) | `private-rpc-method` | An ORM call from JS names a private method, which Odoo refuses to call over RPC. |
+| [OD607](OD607.md) | `private-rpc-method` | An ORM call from JS names a method Odoo refuses to call over RPC. |
 | [OD608](OD608.md) | `cross-bundle-js-import` | A JS import names a module the importer's page has not loaded when the importer runs. |
 | [OD609](OD609.md) | `unescaped-markup` | Owl's `markup()` receives a value built at runtime, which `t-out` renders unescaped. |
 | [OD610](OD610.md) | `html-sink` | A script sets a value built at runtime as the HTML of an element. |

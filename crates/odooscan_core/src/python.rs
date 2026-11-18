@@ -2719,11 +2719,27 @@ fn records(fact: &ClassFact) -> bool {
     !fact.defs.last().is_some_and(|def| def.decorators.iter().any(unbound))
 }
 
-/// Records that a class has a method, and whether `@api.private` marks it.
+/// Records that a class has a method, and whether `@api.private` marks it or Python binds it to no
+/// records.
 fn method_name(func: &ast::StmtFunctionDef, fact: &mut ClassFact) {
     fact.methods.push(func.name.to_string());
     if func.decorator_list.iter().any(|d| is_api(&d.expression, "private")) {
         fact.private_methods.push(func.name.to_string());
+    }
+    let unbinding = |d: &ast::Decorator| matches!(tail_name(&d.expression), Some("classmethod" | "staticmethod"));
+    if func.decorator_list.iter().any(unbinding) {
+        fact.unbound_methods.push(func.name.to_string());
+    }
+}
+
+/// Records that a class binds `name` to `value`, which may be a method. A `partial` binds to the
+/// records only from Python 3.14, so on the older ones Odoo supports it is as unbound as a
+/// `classmethod` or a `staticmethod`; a `partialmethod` binds on every one.
+fn alias_name(name: &str, value: &Expr, fact: &mut ClassFact) {
+    fact.methods.push(name.to_owned());
+    let called = value.as_call_expr().and_then(|c| tail_name(&c.func));
+    if matches!(called, Some("partial" | "classmethod" | "staticmethod")) {
+        fact.unbound_methods.push(name.to_owned());
     }
 }
 
@@ -2739,9 +2755,10 @@ fn conditional_methods(stmt: &Stmt, fact: &mut ClassFact) {
             if extends(&fact.class_name, func) {
                 fact.extended.push(func.name.to_string());
             }
-        } else if let Some((targets, _)) = assigned(stmt).filter(|(_, value)| may_be_method(value, &unread)) {
-            let names = targets.iter().filter_map(Expr::as_name_expr);
-            fact.methods.extend(names.map(|name| name.id.to_string()));
+        } else if let Some((targets, value)) = assigned(stmt).filter(|(_, value)| may_be_method(value, &unread)) {
+            for name in targets.iter().filter_map(Expr::as_name_expr) {
+                alias_name(&name.id, value, fact);
+            }
         }
     }
 }
@@ -3872,7 +3889,7 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
     /// Records a class attribute as a method, with what it calls: `attr_calls` tells which files a
     /// scan must read again once it knows its field classes.
     fn method_attr(&mut self, target: &ast::ExprName, value: &Expr, fact: &mut ClassFact) {
-        fact.methods.push(target.id.to_string());
+        alias_name(&target.id, value, fact);
         let called = value.as_call_expr().and_then(|c| tail_name(&c.func));
         self.facts.attr_calls.extend(called.map(str::to_owned));
     }
@@ -8108,6 +8125,28 @@ class U(HttpCase):
         let class = &facts.classes[0];
         assert_eq!(class.private_methods, ["a"]);
         assert_eq!(class.methods, ["a", "b", "c", "d", "e"]);
+    }
+
+    #[test]
+    fn reads_the_bindings_python_does_not_bind_to_records() {
+        let class = class_defs(
+            "    @classmethod\n    def a(cls):\n        pass\n\n    \
+             @builtins.staticmethod\n    def b():\n        pass\n\n    \
+             c = partial(a, 1)\n    d = functools.partialmethod(a, 1)\n    e = staticmethod(len)\n    \
+             if flag:\n        f = functools.partial(a)\n        g = classmethod(b)\n\n    \
+             @classmethod\n    def h(cls):\n        pass\n\n    \
+             def h(self):\n        pass\n\n    \
+             def i(self):\n        pass\n\n    \
+             i = staticmethod(len)\n",
+        );
+        assert_eq!(class.unbound_methods, ["a", "b", "c", "e", "f", "g", "h", "i"]);
+        for name in ["a", "b", "c", "e", "f", "g"] {
+            assert_eq!(class.unbound(name), Some(true), "{name}");
+        }
+        for name in ["d", "h", "i"] {
+            assert_eq!(class.unbound(name), Some(false), "{name}");
+        }
+        assert_eq!(class.unbound("z"), None);
     }
 
     fn class_defs(body: &str) -> ClassFact {
