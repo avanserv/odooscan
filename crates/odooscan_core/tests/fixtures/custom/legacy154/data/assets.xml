@@ -1,0 +1,7 @@
+<odoo>
+    <record id="asset_panel_templates" model="ir.asset">
+        <field name="name">Panel templates</field>
+        <field name="bundle">web.assets_qweb</field>
+        <field name="path">legacy154/static/src/xml/panel.xml</field>
+    </record>
+</odoo>

@@ -210,7 +210,7 @@ modules, and the Python files and tests no import reaches.
 | [OD503](OD503.md) | `unknown-dependency` | A module in depends is not on the addons path, is not installable, or its manifest cannot be read. |
 | [OD504](OD504.md) | `circular-dependency` | A module in depends depends back on this module. |
 | [OD505](OD505.md) | `qweb-key-ignored` | The manifest lists templates under qweb, which Odoo ignores. |
-| [OD506](OD506.md) | `assets-qweb-unloaded` | The manifest adds files to web.assets_qweb, which Odoo no longer loads. |
+| [OD506](OD506.md) | `assets-qweb-unloaded` | The manifest or an ir.asset record adds files to web.assets_qweb, which Odoo no longer loads. |
 | [OD507](OD507.md) | `license-missing` | The manifest names no license, which Odoo reads as LGPL-3. |
 | [OD508](OD508.md) | `license-unknown` | The manifest names a license Odoo does not know, which fails the module list update. |
 | [OD509](OD509.md) | `version-refused` | The manifest version has a form Odoo refuses, or names another series. |

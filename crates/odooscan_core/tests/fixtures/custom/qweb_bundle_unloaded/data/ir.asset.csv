@@ -1,0 +1,2 @@
+id,name,bundle,path
+asset_old_templates,Old templates,web.assets_qweb,qweb_bundle_unloaded/static/src/old.xml

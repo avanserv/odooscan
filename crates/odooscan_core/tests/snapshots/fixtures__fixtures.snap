@@ -838,6 +838,7 @@ custom/legacy16/models/res_partner.py:50:68: OD222 'work_country_id' has check_c
 custom/legacy16/models/res_partner.py:51:70: OD222 'branch_country_id' has check_company=True, but res.country has no company_id field to check; remove check_company
 custom/legacy16/models/res_partner.py:52:70: OD222 'office_country_id' has check_company=True, but res.country has no company_id field to check; remove check_company
 custom/legacy16/views/assets.xml:2:5: OD328 'web.assets_frontend' is no longer a template but an asset bundle; list the files under it in the manifest's assets
+custom/legacy16/views/assets.xml:14:5: OD506 Odoo no longer loads web.assets_qweb, so the templates this ir.asset record adds that no other bundle loads are missing; set its bundle to web.assets_backend
 custom/legacy17/data/res.partner-translated.csv:1:1: OD309 res.partner has no field 'name@fr'
 custom/legacy17/data/translated.xml:5:9: OD309 res.partner has no field 'name@fr'
 custom/legacy17/models/res_partner.py:7:68: OD222 'home_country_id' has check_company=True, but res.country has no company_id field to check; remove check_company
@@ -1154,7 +1155,8 @@ custom/public_grant_domain/security/ir.access.csv:2:1: OD402 base.group_portal g
 custom/public_grant_public/controllers/main.py:14:9: OD717 route parameter 'upload' reaches the content of create(), which public=True lets anyone download; keep it private and share it with generate_access_token()
 custom/public_grant_public/controllers/main.py:20:9: OD717 route parameter 'upload' reaches the content of create(), which public=True lets anyone download; keep it private and share it with generate_access_token()
 custom/public_grant_public/security/ir.access.csv:2:1: OD402 base.group_public gets write, create or unlink on ir.attachment; public and portal access should be read-only and go through controllers
-custom/qweb_bundle_unloaded/__manifest__.py:7:9: OD506 Odoo no longer loads web.assets_qweb, so the templates it lists that no other bundle loads are missing; list them under web.assets_backend
+custom/qweb_bundle_unloaded/__manifest__.py:8:9: OD506 Odoo no longer loads web.assets_qweb, so the templates it lists that no other bundle loads are missing; list them under web.assets_backend
+custom/qweb_bundle_unloaded/data/ir.asset.csv:2:1: OD506 Odoo no longer loads web.assets_qweb, so the templates this ir.asset record adds that no other bundle loads are missing; set its bundle to web.assets_backend
 custom/qweb_bundle_unloaded/static/src/main/main.xml:4:20: OD605 no indexed bundle defines template 'qweb_bundle_unloaded.Old'
 custom/qweb_bundle_unloaded/static/src/main/main.xml:7:19: OD605 no indexed bundle defines template 'qweb_bundle_unloaded.Old'
 custom/qweb_bundle_unloaded/static/src/main/main.xml:13:9: OD606 no <span> with class 'o_ext' in template qweb_bundle_unloaded.Shared or the templates that extend it

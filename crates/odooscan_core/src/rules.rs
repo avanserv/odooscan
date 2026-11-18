@@ -321,7 +321,7 @@ rules! {
     // saas~14.2 globs the `qweb` key, saas~14.3 reads only `web.assets_qweb`.
     "OD505" "qweb-key-ignored" Deprecation Warning Some(">=saas~14.3"), false, "The manifest lists templates under qweb, which Odoo ignores.";
     // saas~15.4 fetches `web.assets_qweb`, 16.0 never.
-    "OD506" "assets-qweb-unloaded" Deprecation Warning Some(">=16.0"), false, "The manifest adds files to web.assets_qweb, which Odoo no longer loads.";
+    "OD506" "assets-qweb-unloaded" Deprecation Warning Some(">=16.0"), false, "The manifest or an ir.asset record adds files to web.assets_qweb, which Odoo no longer loads.";
     "OD507" "license-missing" Quality Warning None, false, "The manifest names no license, which Odoo reads as LGPL-3.";
     "OD508" "license-unknown" Correctness Error None, false, "The manifest names a license Odoo does not know, which fails the module list update.";
     "OD509" "version-refused" Correctness Error None, false, "The manifest version has a form Odoo refuses, or names another series.";

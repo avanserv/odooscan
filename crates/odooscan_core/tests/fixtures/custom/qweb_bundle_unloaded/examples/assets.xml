@@ -1,0 +1,7 @@
+<odoo>
+    <record id="asset_example_templates" model="ir.asset">
+        <field name="name">Example templates</field>
+        <field name="bundle">web.assets_qweb</field>
+        <field name="path">qweb_bundle_unloaded/static/src/old.xml</field>
+    </record>
+</odoo>
