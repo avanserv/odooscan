@@ -395,7 +395,11 @@ fn asset_declarations_are_reported_from_their_series() {
         ("saas143", Severity::Warning),
     ];
     assert_eq!(severities("OD505"), expected.map(|(m, s)| (m.to_owned(), s)));
-    assert_eq!(severities("OD506"), [("legacy16".to_owned(), Severity::Warning)]);
+    let expected = [
+        ("legacy16", Severity::Warning),
+        ("qweb_bundle_unloaded", Severity::Warning),
+    ];
+    assert_eq!(severities("OD506"), expected.map(|(m, s)| (m.to_owned(), s)));
 }
 
 #[test]

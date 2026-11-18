@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<templates xml:space="preserve">
+    <t t-name="qweb_bundle_unloaded.Main">
+        <t t-call="qweb_bundle_unloaded.Old"/>
+        <t t-call="qweb_bundle_unloaded.Shared"/>
+    </t>
+    <t t-inherit="qweb_bundle_unloaded.Old" t-inherit-mode="extension">
+        <xpath expr="//div[hasclass('o_old')]" position="after">
+            <span/>
+        </xpath>
+    </t>
+    <t t-inherit="qweb_bundle_unloaded.Shared" t-inherit-mode="extension">
+        <xpath expr="//span[hasclass('o_ext')]" position="after">
+            <span/>
+        </xpath>
+    </t>
+</templates>
