@@ -379,43 +379,65 @@ impl<'t> Paths<'t> {
         Self { endpoints, by_url }
     }
 
-    /// OD231 on each path a route of `module` gives an endpoint that another endpoint serves too,
-    /// as the route and the message. Each clash is reported once, where `outranks` leaves it.
+    /// OD231 on each path of an endpoint that another endpoint serves too, at each route of
+    /// `module` that `bringers` blames, as the route and the message. Each clash is reported once,
+    /// where `outranks` leaves it.
     fn shadowed(&self, index: &Index, module: &str) -> Vec<(Origin<'t>, String)> {
         let mut found = vec![];
         let mut reported = FxHashSet::default();
         for ours in &self.endpoints {
-            for &origin in ours.origins.iter().filter(|o| o.at.addon == module) {
-                for url in ours.urls {
-                    let mut others = self.by_url[url.as_str()].iter().map(|&i| &self.endpoints[i]);
-                    let Some(theirs) = others.find(|theirs| clashes(index, (ours, origin), theirs)) else {
-                        continue;
-                    };
-                    if reported.insert((std::ptr::from_ref(origin.route), url)) {
-                        let other = theirs.origins[0];
-                        let message = format!(
-                            "path '{url}' is also routed by {}.{} in module {}, so one of the two hides the other",
-                            other.at.class.name, other.route.method, other.at.addon
-                        );
-                        found.push((origin, message));
+            for url in ours.urls {
+                for theirs in self.rivals(ours, url) {
+                    let their_bringers = bringers(theirs, ours);
+                    for origin in bringers(ours, theirs).into_iter().filter(|o| o.at.addon == module) {
+                        let outranked = their_bringers.iter().any(|&other| outranks(index, other, origin));
+                        if !outranked && reported.insert((std::ptr::from_ref(origin.route), url)) {
+                            found.push((origin, shadow_message(url, their_bringers[0])));
+                        }
                     }
                 }
             }
         }
         found
     }
+
+    /// The endpoints that serve `url` besides `ours`: they share no route with it, and a request
+    /// method may reach either.
+    fn rivals<'p>(&'p self, ours: &'p Endpoint<'t>, url: &str) -> impl Iterator<Item = &'p Endpoint<'t>> {
+        let shares = |theirs: &Endpoint| {
+            ours.origins
+                .iter()
+                .any(|o| theirs.origins.iter().any(|t| std::ptr::eq(o.route, t.route)))
+        };
+        self.by_url[url]
+            .iter()
+            .map(|&i| &self.endpoints[i])
+            .filter(move |theirs| !shares(theirs) && overlap(ours.methods.as_ref(), theirs.methods.as_ref()))
+    }
 }
 
-/// Whether OD231 reports at `origin` of `ours` that `theirs` serves a path of it too: they share no
-/// route, a request method may reach either, and no route of `theirs` reports the clash instead.
-fn clashes(index: &Index, (ours, origin): (&Endpoint, Origin), theirs: &Endpoint) -> bool {
-    let shared = ours
-        .origins
+/// The routes of `ours` that bring its clash with `theirs` in: those that widen its methods from a
+/// set `theirs` did not reach, else the routes that give its paths.
+fn bringers<'t>(ours: &Endpoint<'t>, theirs: &Endpoint<'t>) -> Vec<Origin<'t>> {
+    let widened: Vec<_> = ours
+        .widened
         .iter()
-        .any(|o| theirs.origins.iter().any(|t| std::ptr::eq(o.route, t.route)));
-    !shared
-        && overlap(ours.methods.as_ref(), theirs.methods.as_ref())
-        && !theirs.origins.iter().any(|&other| outranks(index, other, origin))
+        .filter(|w| !overlap(w.before.as_ref(), theirs.methods.as_ref()))
+        .map(|w| w.origin)
+        .collect();
+    if widened.is_empty() {
+        ours.origins.clone()
+    } else {
+        widened
+    }
+}
+
+/// OD231's message for a path that `other`, a route bringing in the other endpoint, serves too.
+fn shadow_message(url: &str, other: Origin) -> String {
+    format!(
+        "path '{url}' is also routed by {}.{} in module {}, so one of the two hides the other",
+        other.at.class.name, other.route.method, other.at.addon
+    )
 }
 
 /// Whether a clash between two routes is reported at `other` rather than at `origin`: of one
@@ -2427,8 +2449,10 @@ impl<'m> Ctx<'_, 'm> {
                 self.undecorated_overrides(out, &file.path, class);
             }
         }
-        let spells = |c: &ClassAt| served(c.rel) && c.class.routes.iter().any(|r| !literal_urls(r).is_empty());
-        if !table.module(name).any(|c| spells(&c)) {
+        // A route that gives `methods` alone may widen an endpoint into a clash.
+        let route_may_clash = |r: &RouteDef| !literal_urls(r).is_empty() || !matches!(r.methods, RouteKey::Absent);
+        let class_may_clash = |c: &ClassAt| served(c.rel) && c.class.routes.iter().any(route_may_clash);
+        if !table.module(name).any(|c| class_may_clash(&c)) {
             return;
         }
         let seen = |addon: &&str| self.index.by_name.get(addon).is_some_and(|&mi| self.scope.sees(mi));
@@ -7631,7 +7655,7 @@ mod tests {
     use rustc_hash::FxHashSet;
 
     use super::{
-        CACHE_KEY_GLOBALS, MEMBER_SERIES, MagicEra, Merged, REPORT_TAG, applies, builds_models, bundle_list,
+        CACHE_KEY_GLOBALS, MEMBER_SERIES, MagicEra, Merged, Paths, REPORT_TAG, applies, builds_models, bundle_list,
         cache_global, cached_member, callable_attr, csv_label, derived_label, es_module, exported_text,
         fetches_own_view, field_name, has_last_update, hoot_adds, keeps_set, labels_before_ondelete, lacks_domain,
         lone_add_applied, magic_era, no_access_message, page_miss, parent_path_children, patch_form,
@@ -7641,7 +7665,10 @@ mod tests {
     use crate::facts::{
         AccessRow, Annotation, DefinitionSource, JsName, OptionValue, Perms, Pos, Spanned, UNREAD_TYPE,
     };
+    use crate::index::Index;
     use crate::manifest::OdooReads;
+    use crate::python::analyze;
+    use crate::routing::{Origin, Table};
     use crate::series::Series;
 
     fn everyone_row(group: &str, grants: Perms) -> AccessRow {
@@ -8177,5 +8204,80 @@ mod tests {
         for text in ["%s", "12", "m", "a %", "..."] {
             assert!(!exported_text(text), "{text}");
         }
+    }
+
+    /// OD231 in the scan of `module` over `files`, as module, class, method and message. The index
+    /// holds no module, so no route of one module outranks one of another.
+    fn shadows(files: &[(&str, &str)], module: &str) -> Vec<(String, String, String, String)> {
+        let facts: Vec<_> = files.iter().map(|(_, src)| analyze(src, None)).collect();
+        let table = Table::of(files.iter().zip(&facts).map(|((addon, _), f)| (*addon, "main.py", f)));
+        let classes: Vec<_> = files.iter().flat_map(|(addon, _)| table.module(addon)).collect();
+        let index = Index::build(&[], None);
+        let found = Paths::of(table.endpoints(&classes)).shadowed(&index, module);
+        let summary = |(o, message): (Origin, String)| {
+            (
+                o.at.addon.to_owned(),
+                o.at.class.name.clone(),
+                o.route.method.clone(),
+                message,
+            )
+        };
+        found.into_iter().map(summary).collect()
+    }
+
+    const POST_ROUTE: &str = "from odoo import http\n\nclass Routes(http.Controller):\n    @http.route('/w', methods=['POST'])\n    def x(self):\n        pass\n";
+    const GET_ROUTE: &str = "from odoo import http\n\nclass Other(http.Controller):\n    @http.route('/w', methods=['GET'])\n    def y(self):\n        pass\n";
+
+    /// A module whose class `class` overrides `base` of `module` to give `methods` on `x`.
+    fn widening(module: &str, base: &str, class: &str, methods: &str) -> String {
+        format!(
+            "from odoo import http\nfrom odoo.addons.{module}.main import {base}\n\nclass {class}({base}):\n    @http.route(methods={methods})\n    def x(self):\n        pass\n"
+        )
+    }
+
+    #[test]
+    fn a_widening_and_a_new_route_on_its_path_clash_once_at_the_later() {
+        let widen = "\nclass R(Routes):\n    @http.route(methods=['GET', 'POST'])\n    def x(self):\n        pass\n";
+        let other = GET_ROUTE.trim_start_matches("from odoo import http\n");
+        let at = |src: String| -> Vec<_> {
+            let found = shadows(&[("m", &src)], "m");
+            found.into_iter().map(|(_, class, method, _)| (class, method)).collect()
+        };
+        let pair = |class: &str, method: &str| vec![(class.to_owned(), method.to_owned())];
+        assert_eq!(at(format!("{POST_ROUTE}{other}{widen}")), pair("R", "x"));
+        let found = shadows(&[("m", &format!("{POST_ROUTE}{widen}{other}"))], "m");
+        assert_eq!(found.len(), 1, "{found:?}");
+        assert_eq!((found[0].1.as_str(), found[0].2.as_str()), ("Other", "y"));
+        // The rival takes GET through R's override alone, so the message names it.
+        assert!(found[0].3.contains("routed by R.x in module m"), "{}", found[0].3);
+    }
+
+    #[test]
+    fn a_chain_of_widenings_is_reported_at_the_one_that_reaches_the_rival() {
+        let b = widening("a", "Routes", "R", "['GET', 'POST']");
+        let c = widening("b", "R", "S", "['GET', 'POST', 'PUT']");
+        let a = format!(
+            "{POST_ROUTE}\n{}",
+            GET_ROUTE.trim_start_matches("from odoo import http\n")
+        );
+        let found = shadows(&[("a", &a), ("b", &b)], "b");
+        let at: Vec<_> = found
+            .iter()
+            .map(|(module, class, method, _)| (module.as_str(), class.as_str(), method.as_str()))
+            .collect();
+        assert_eq!(at, [("b", "R", "x")]);
+        // The methods before S's override already reach GET.
+        let all = [("a", a.as_str()), ("b", &b), ("c", &c)];
+        assert_eq!(shadows(&all, "c"), []);
+    }
+
+    #[test]
+    fn a_route_on_a_widened_path_names_the_override_that_widened_it() {
+        let b = widening("a", "Routes", "R", "['GET', 'POST']");
+        let found = shadows(&[("a", POST_ROUTE), ("b", &b), ("d", GET_ROUTE)], "d");
+        assert_eq!(found.len(), 1, "{found:?}");
+        assert_eq!((found[0].1.as_str(), found[0].2.as_str()), ("Other", "y"));
+        let message = "path '/w' is also routed by R.x in module b, so one of the two hides the other";
+        assert_eq!(found[0].3, message);
     }
 }
