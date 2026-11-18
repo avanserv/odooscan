@@ -192,6 +192,19 @@ const TUPLE_UNCHECKED: Series = Series { major: 17, minor: 2 };
 /// values, so the `selection_add` fails (`:2948-2949`).
 const TUPLE_LISTED: Series = Series { major: 18, minor: 1 };
 
+/// The first series that ignores the `selection_add` of a field with a single definition (18.0
+/// `odoo/fields.py:2919-2920`). Before, Odoo applies the `selection_add` of every definition.
+const LONE_ADD_IGNORED: Series = Series { major: 14, minor: 4 };
+
+/// The first series that labels a one-item `selection_add` entry from the values the field has
+/// before the ondelete check (20.0 `odoo/orm/fields_selection.py:132`). Before, Odoo looks the label
+/// up after that check (18.0 `odoo/fields.py:2989`); either way a new value raises a KeyError.
+const UNLABELLED_LOOKUP: Series = Series { major: 19, minor: 3 };
+
+/// The first series that takes a tuple as a `selection_add` (20.0
+/// `odoo/orm/fields_selection.py:127`). Before, Odoo asserts a list (18.0 `odoo/fields.py:2946-2947`).
+const TUPLE_ADDED: Series = Series { major: 19, minor: 4 };
+
 /// The first series that reads a lone definition's tuple into `_selection`, so a write checks it
 /// (20.0 `odoo/orm/fields_selection.py:102-113`, `:180`). From `TUPLE_LISTED`, saas~19.2 returns
 /// before that for a lone definition: only several definitions or a field from another model get
@@ -5201,6 +5214,21 @@ fn same_table(field: &Field, other: &Field) -> bool {
         && other.stored() == Some(true)
 }
 
+/// The finding for the values a required field's `selection_add` leaves 'set null', if any.
+fn set_null_message(own: &FieldFact, added: &[String], known: &FxHashSet<&str>) -> Option<String> {
+    let set_null = set_null_values(own, added, known).filter(|v| !v.is_empty())?;
+    let (values, them) = if set_null.len() == 1 {
+        ("value", "it")
+    } else {
+        ("values", "each")
+    };
+    Some(format!(
+        "'{}' is required, so Odoo refuses ondelete 'set null' for the selection_add {values} '{}'; give {them} 'cascade', 'set default' or a function",
+        own.name,
+        set_null.join("', '")
+    ))
+}
+
 /// The values a definition leaves with ondelete 'set null': the default for each value it adds
 /// that the field did not have, and those it gives 'set null'. Odoo only checks a definition that
 /// adds a value. None when its ondelete is not a literal dict.
@@ -5927,37 +5955,52 @@ impl<'m> Ctx<'_, 'm> {
         self.before(model, a, b) || (!self.before(model, b, a) && (a.0 != me || self.load_key(a) < self.load_key(b)))
     }
 
-    /// Odoo gives each value `selection_add` adds to a Selection the ondelete policy 'set null'
-    /// unless told otherwise, and refuses that policy on a required field.
+    /// Odoo refuses the `selection_add` of a required Selection that is a tuple, gives a new value no
+    /// label, or leaves a new value the ondelete policy 'set null', its default. From
+    /// `LONE_ADD_IGNORED` it ignores the `selection_add` of a field with a single definition.
     fn selection_add(&self, out: &mut Out<'m>, path: &'m Path, field: &Field<'m>, at: usize) {
-        let own = field.defs[at].2;
-        let Some(Spanned {
-            value: OptionValue::Strs(added) | OptionValue::Tuple(added),
-            pos,
-        }) = own.option("selection_add")
-        else {
+        let Some(Spanned { value, pos }) = field.defs[at].2.option("selection_add") else {
+            return;
+        };
+        let (OptionValue::Strs(added) | OptionValue::Tuple(added)) = value else {
             return;
         };
         if field.get("related") != Merged::Unset || !field.is("required", &OptionValue::Bool(true)) {
             return;
         }
-        let Some(known) = earlier_values(field, at, tuple_listed(self.series)) else {
-            return;
+        if field.defs.len() > 1 || lone_add_applied(self.series) {
+            let tuple = matches!(value, OptionValue::Tuple(_));
+            if let Some(message) = self.add_failure(field, at, added, tuple) {
+                out.push(path, "OD216", *pos, message);
+            }
+        }
+    }
+
+    /// Why Odoo refuses the `selection_add` of definition `at` of a required field, in the order it
+    /// checks: the type, then the ondelete policy of the new values and the label of each, the label
+    /// first from `UNLABELLED_LOOKUP`.
+    fn add_failure(&self, field: &Field<'m>, at: usize, added: &'m [String], tuple: bool) -> Option<String> {
+        let own = field.defs[at].2;
+        if tuple && tuple_add_refused(self.series) {
+            return Some(format!(
+                "Odoo only takes a list as the selection_add of '{}' before saas~19.4; make the tuple a list",
+                own.name
+            ));
+        }
+        let known = earlier_values(field, at, tuple_listed(self.series))?;
+        let unlabelled = || {
+            let value = own.unlabelled.iter().find(|v| !known.contains(v.as_str()))?;
+            Some(format!(
+                "Odoo looks up the label of the new selection_add value '{value}' of '{}' among the values the field has, and raises a KeyError; give it a label",
+                own.name
+            ))
         };
-        let Some(set_null) = set_null_values(own, added, &known).filter(|v| !v.is_empty()) else {
-            return;
-        };
-        let (values, them) = if set_null.len() == 1 {
-            ("value", "it")
+        let set_null = || set_null_message(own, added, &known);
+        if labels_before_ondelete(self.series) {
+            unlabelled().or_else(set_null)
         } else {
-            ("values", "each")
-        };
-        let message = format!(
-            "'{}' is required, so Odoo refuses ondelete 'set null' for the selection_add {values} '{}'; give {them} 'cascade', 'set default' or a function",
-            own.name,
-            set_null.join("', '")
-        );
-        out.push(path, "OD216", *pos, message);
+            set_null().or_else(unlabelled)
+        }
     }
 
     /// Odoo hands each attribute a field does not know to the model's `_valid_field_parameter`, and
@@ -6324,12 +6367,10 @@ fn delegation_fix(field: &Field, defaulted: bool) -> Option<String> {
 /// The values the field has before its definition `at` applies its `selection_add`, or None when a
 /// definition computes them, or one that sets them may come before or after it or the last
 /// `selection` list. Odoo replaces the values with each `selection` list it meets, the definition's
-/// own included, and ignores the `selection_add` of a lone definition from 15.0. `tuples` tells
-/// whether the series takes a tuple as a `selection` list.
+/// own included. `tuples` tells whether the series takes a tuple as a `selection` list.
 fn earlier_values<'m>(field: &Field<'m>, at: usize, tuples: bool) -> Option<FxHashSet<&'m str>> {
     if let Some(own) = field.defs[at].2.option("selection") {
-        let own = own.value.listed(tuples)?;
-        return (field.defs.len() > 1).then(|| own.iter().map(String::as_str).collect());
+        return Some(own.value.listed(tuples)?.iter().map(String::as_str).collect());
     }
     let setters = earlier_setters(field, at)?;
     let base = last_list(field, &setters)?;
@@ -6372,9 +6413,9 @@ fn last_list(field: &Field, setters: &[usize]) -> Option<usize> {
 /// Adds the values of a definition's `selection` and `selection_add`. None when one is not a
 /// literal list, or `selection` is a tuple and not `tuples`.
 fn selection_values<'m>(def: &'m FieldFact, tuples: bool, values: &mut FxHashSet<&'m str>) -> Option<()> {
-    for (name, tuples) in [("selection", tuples), ("selection_add", true)] {
+    for (name, reads_tuple) in [("selection", tuples), ("selection_add", true)] {
         if let Some(option) = def.option(name) {
-            values.extend(option.value.listed(tuples)?.iter().map(String::as_str));
+            values.extend(option.value.listed(reads_tuple)?.iter().map(String::as_str));
         }
     }
     Some(())
@@ -6389,6 +6430,18 @@ fn tuple_checked(series: Option<Series>) -> bool {
 
 fn tuple_listed(series: Option<Series>) -> bool {
     series.is_some_and(|s| s >= TUPLE_LISTED)
+}
+
+fn lone_add_applied(series: Option<Series>) -> bool {
+    series.is_some_and(|s| s < LONE_ADD_IGNORED)
+}
+
+fn labels_before_ondelete(series: Option<Series>) -> bool {
+    series.is_some_and(|s| s >= UNLABELLED_LOOKUP)
+}
+
+fn tuple_add_refused(series: Option<Series>) -> bool {
+    series.is_some_and(|s| s < TUPLE_ADDED)
 }
 
 /// Whether Odoo's import takes `cell` for a value of `defs`: it compares each value and each label,
@@ -7548,9 +7601,10 @@ mod tests {
     use super::{
         CACHE_KEY_GLOBALS, MEMBER_SERIES, MagicEra, REPORT_TAG, applies, builds_models, bundle_list, cache_global,
         cached_member, callable_attr, csv_label, derived_label, es_module, exported_text, fetches_own_view, field_name,
-        has_last_update, hoot_adds, keeps_set, magic_era, no_access_message, page_miss, parent_path_children,
-        patch_form, public_write_message, reads_model_access, reads_requires, shadowed_member, static_only,
-        stores_parent_path, tuple_checked, tuple_listed, unknown_dependency, unmatched_asset, warns_on_labels,
+        has_last_update, hoot_adds, keeps_set, labels_before_ondelete, lone_add_applied, magic_era, no_access_message,
+        page_miss, parent_path_children, patch_form, public_write_message, reads_model_access, reads_requires,
+        shadowed_member, static_only, stores_parent_path, tuple_add_refused, tuple_checked, tuple_listed,
+        unknown_dependency, unmatched_asset, warns_on_labels,
     };
     use crate::facts::{AccessRow, Annotation, DefinitionSource, JsName, Perms, Pos, Spanned, UNREAD_TYPE};
     use crate::manifest::OdooReads;
@@ -7753,6 +7807,30 @@ mod tests {
         assert!(!takes("saas~17.1") && !takes("18.0"));
         assert!(takes("saas~18.1") && takes("20.0"));
         assert!(!tuple_listed(None));
+    }
+
+    #[test]
+    fn a_lone_selection_add_applies_through_saas_14_3() {
+        let applied = |series: &str| lone_add_applied(Series::parse(series));
+        assert!(applied("13.0") && applied("14.0") && applied("saas~14.3"));
+        assert!(!applied("saas~14.4") && !applied("15.0"));
+        assert!(!lone_add_applied(None));
+    }
+
+    #[test]
+    fn a_selection_add_label_is_looked_up_before_ondelete_from_saas_19_3() {
+        let first = |series: &str| labels_before_ondelete(Series::parse(series));
+        assert!(!first("18.0") && !first("saas~19.2"));
+        assert!(first("saas~19.3") && first("20.0"));
+        assert!(!labels_before_ondelete(None));
+    }
+
+    #[test]
+    fn a_tuple_selection_add_is_refused_through_saas_19_3() {
+        let refused = |series: &str| tuple_add_refused(Series::parse(series));
+        assert!(refused("14.0") && refused("18.0") && refused("saas~19.3"));
+        assert!(!refused("saas~19.4") && !refused("20.0"));
+        assert!(!tuple_add_refused(None));
     }
 
     #[test]

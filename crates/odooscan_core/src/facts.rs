@@ -145,6 +145,8 @@ pub struct FieldFact {
     /// The label of each value of literal `selection` and `selection_add` lists, none where only a
     /// run tells it.
     pub labels: Vec<Option<String>>,
+    /// The values a literal `selection_add` gives as a one-item tuple or list, with no label.
+    pub unlabelled: Vec<String>,
     /// The call unpacks `*args` or `**kwargs`, so it may set any attribute it does not name, passes
     /// a field of unread type arguments by position, which name no known attribute, or there is no
     /// call to read: a key of `_columns`.

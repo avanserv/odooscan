@@ -1575,6 +1575,15 @@ custom/saas193/models/memo.py:8:34: OD219 'stage' sets tracking, but saas.memo d
 custom/saas193/security/ir.model.access.csv:2:1: OD402 no group limits this row, so every user, public and portal included, gets write, create or unlink on model_saas_before_desk; name a group
 custom/saas193/security/ir.model.access.csv:3:1: OD402 base.group_portal gets write, create or unlink on model_saas_before_desk; public and portal access should be read-only and go through controllers
 custom/saas194/models/ledger.py:4:7: OD401 model 'saas.after.ledger' has no ir.access rule with a group, so only the superuser can use it
+custom/selection_add14/models/res_partner.py:8:45: OD216 'sa14_stage' is required, so Odoo refuses ondelete 'set null' for the selection_add value 'held'; give it 'cascade', 'set default' or a function
+custom/selection_add18/models/res_partner.py:20:49: OD216 Odoo only takes a list as the selection_add of 'sa18_stage' before saas~19.4; make the tuple a list
+custom/selection_add18/models/res_partner.py:21:49: OD216 Odoo only takes a list as the selection_add of 'sa18_phase' before saas~19.4; make the tuple a list
+custom/selection_add18/models/res_partner.py:22:49: OD216 Odoo looks up the label of the new selection_add value 'held' of 'sa18_level' among the values the field has, and raises a KeyError; give it a label
+custom/selection_add18/models/res_partner.py:23:49: OD216 'sa18_grade' is required, so Odoo refuses ondelete 'set null' for the selection_add value 'held'; give it 'cascade', 'set default' or a function
+custom/selection_add18/models/res_partner.py:24:48: OD216 Odoo only takes a list as the selection_add of 'sa18_tier' before saas~19.4; make the tuple a list
+custom/selection_add20/models/res_partner.py:18:49: OD216 Odoo looks up the label of the new selection_add value 'held' of 'sa20_stage' among the values the field has, and raises a KeyError; give it a label
+custom/selection_add20/models/res_partner.py:19:49: OD216 Odoo looks up the label of the new selection_add value 'held' of 'sa20_phase' among the values the field has, and raises a KeyError; give it a label
+custom/selection_add20/models/res_partner.py:22:49: OD216 'sa20_level' is required, so Odoo refuses ondelete 'set null' for the selection_add value 'high'; give it 'cascade', 'set default' or a function
 custom/selection_values13/data/res.partner.csv:2:1: OD322 res.partner.sv13_state has no value 'DRAFT'
 custom/selection_values17/data/partners.xml:4:33: OD322 res.partner.sv17_mode has no value 'zz'
 custom/selection_values17/data/partners.xml:14:42: OD321 'base.main_company' is a record of res.company, but res.partner.sv17_agent_id takes res.partner

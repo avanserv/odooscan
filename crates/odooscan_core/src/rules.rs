@@ -208,7 +208,7 @@ rules! {
     "OD213" "required-many2one-set-null" Correctness Error Some(">=13.0"), true, "A required Many2one declares ondelete='set null'.";
     "OD214" "many2many-table-clash" Correctness Error Some(">=13.0"), true, "Two Many2many fields of a model to one comodel get the same table.";
     "OD215" "many2many-table-too-long" Correctness Error None, true, "A Many2many's relation table name is longer than PostgreSQL allows.";
-    "OD216" "selection-add-without-ondelete" Correctness Error Some(">=14.0"), true, "selection_add leaves a value of a required Selection with ondelete 'set null'.";
+    "OD216" "selection-add-without-ondelete" Correctness Error Some(">=14.0"), true, "The selection_add of a required Selection is a tuple, adds a new value without a label, or leaves a value with ondelete 'set null'.";
     "OD217" "parent-store-without-path" Correctness Error None, true, "A model sets _parent_store without an indexed parent_path field.";
     "OD218" "delegation-field-not-required" Correctness Warning None, true, "A field that delegates to a parent model is not required with ondelete cascade or restrict.";
     // 14.0 validates the merged attributes and warns (231bdca3f26d; 18.0 `odoo/fields.py:488-493`, `:525-533`).
