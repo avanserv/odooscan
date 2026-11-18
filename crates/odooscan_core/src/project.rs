@@ -364,6 +364,9 @@ pub struct Discovery {
     pub broken: Vec<Broken>,
     /// The modules, checked or indexed, whose manifest `manifest::read` rejects, by name.
     pub rejected: FxHashMap<String, OdooReads>,
+    /// The modules, checked or indexed, whose manifest sets `installable` to false, so Odoo never
+    /// installs them, by name. A rejected one is among them when odooscan reads that much of it.
+    pub uninstallable: FxHashSet<String>,
 }
 
 /// The manifest of a checked module that Odoo cannot read, so the module is not loaded.
@@ -383,6 +386,13 @@ struct Rejected {
     rejection: Rejection,
 }
 
+/// Why `read_module` reads no module from a manifest.
+enum Unread {
+    Rejected(Rejected),
+    /// The module of this name sets `installable` to false.
+    Uninstallable(String),
+}
+
 /// Reads the modules, `target` standing for the series of each checked one.
 pub fn load(
     paths: &[PathBuf],
@@ -392,13 +402,14 @@ pub fn load(
     taint: &TaintTable,
 ) -> Discovery {
     let mut notices = target.map_or_else(Vec::new, |t| checkout_notices(addons_paths, t));
-    let (mut modules, rejected): (Vec<Module>, Vec<Rejected>) = candidates(paths, addons_paths)
+    let (mut modules, unread): (Vec<Module>, Vec<Unread>) = candidates(paths, addons_paths)
         .into_par_iter()
         .filter_map(|(name, dir, checked)| read_module(name, dir, checked, target, default_series))
         .partition_map(|read| match read {
             Ok(module) => Either::Left(module),
-            Err(rejected) => Either::Right(rejected),
+            Err(unread) => Either::Right(unread),
         });
+    let (rejected, uninstallable) = split_unread(unread);
     for m in modules.iter().filter(|_| default_series.is_none()) {
         if m.checked && m.series.is_none() {
             notices.push(format!(
@@ -425,12 +436,32 @@ pub fn load(
         notices,
         broken,
         rejected: odoo_reads,
+        uninstallable,
     }
+}
+
+/// The rejected manifests of `unread`, and the names of the modules that are not installable,
+/// rejected ones included.
+fn split_unread(unread: Vec<Unread>) -> (Vec<Rejected>, FxHashSet<String>) {
+    let mut rejected = vec![];
+    let mut uninstallable = FxHashSet::default();
+    for u in unread {
+        match u {
+            Unread::Rejected(r) => rejected.push(r),
+            Unread::Uninstallable(name) => {
+                uninstallable.insert(name);
+            }
+        }
+    }
+    let retired = rejected.iter().filter(|r| !r.rejection.installable);
+    uninstallable.extend(retired.map(|r| r.name.clone()));
+    (rejected, uninstallable)
 }
 
 /// The checked manifests of `rejected` that get OD000, by path, and a sorted notice for each other
 /// one: its module is not indexed. A module depending on it gets OD503 unless the Odoo of that
-/// module's series reads the manifest, as 9.0 does a Python 2 file; then this notice alone names it.
+/// module's series reads the manifest, as 9.0 does a Python 2 file, and the manifest leaves the
+/// module installable; then this notice alone names it.
 fn rejected_manifests(rejected: Vec<Rejected>) -> (Vec<Broken>, Vec<String>) {
     let mut broken = vec![];
     let mut notices = vec![];
@@ -573,51 +604,52 @@ fn candidates(paths: &[PathBuf], addons_paths: &[PathBuf]) -> Vec<(String, PathB
     chosen
 }
 
-/// The module in `dir`, or its manifest when odooscan cannot read it; none when the manifest cannot
-/// be read at all or the module is not installable. A checked module takes `target` for its series,
-/// an indexed one keeps its manifest's, and either falls back to `default_series`.
+/// The module in `dir`, or why it is not read: odooscan rejects its manifest, or the module is not
+/// installable. None when the manifest cannot be read at all. A checked module takes `target` for
+/// its series, an indexed one keeps its manifest's, and either falls back to `default_series`.
 fn read_module(
     name: String,
     dir: PathBuf,
     checked: bool,
     target: Option<Series>,
     default_series: Option<Series>,
-) -> Option<Result<Module, Rejected>> {
+) -> Option<Result<Module, Unread>> {
     let manifest_path = manifest_in(&dir)?;
     let bytes = std::fs::read(&manifest_path).ok()?;
     let series = |own: Option<Series>| target.filter(|_| checked).or(own).or(default_series);
     let manifest = match manifest::read(&bytes, series) {
         Ok(manifest) => manifest,
         Err(rejection) => {
-            return Some(Err(Rejected {
+            return Some(Err(Unread::Rejected(Rejected {
                 name,
                 path: manifest_path,
                 checked,
                 bytes,
                 rejection,
-            }));
+            })));
         }
     };
-    manifest.installable.then(|| {
-        Ok(Module {
-            series: target.filter(|_| checked).or(manifest.series()),
-            name,
-            dir,
-            manifest_path,
-            manifest,
-            checked,
-            python: vec![],
-            data: vec![],
-            js: vec![],
-            templates: vec![],
-            translations: vec![],
-            template: None,
-            sql_views: vec![],
-            static_assets: vec![],
-            lost_text: false,
-            words: Words::default(),
-        })
-    })
+    if !manifest.installable {
+        return Some(Err(Unread::Uninstallable(name)));
+    }
+    Some(Ok(Module {
+        series: target.filter(|_| checked).or(manifest.series()),
+        name,
+        dir,
+        manifest_path,
+        manifest,
+        checked,
+        python: vec![],
+        data: vec![],
+        js: vec![],
+        templates: vec![],
+        translations: vec![],
+        template: None,
+        sql_views: vec![],
+        static_assets: vec![],
+        lost_text: false,
+        words: Words::default(),
+    }))
 }
 
 /// Each file the manifest loads in `series` by its first load position, where a reference to an
@@ -1284,6 +1316,30 @@ mod tests {
         );
         assert_eq!(discovery.rejected.len(), 1);
         assert_eq!(discovery.rejected.get("open"), Some(&OdooReads::No));
+    }
+
+    #[test]
+    fn a_module_that_is_not_installable_is_named_checked_or_indexed() {
+        let dir = scratch("manifest-uninstallable");
+        let checked = written(&dir.join("checked"), "retired", "{'installable': False}");
+        let addons = dir.join("addons");
+        written(&addons, "off", "{'installable': False}");
+        written(&addons, "legacy", "{'sequence': 0755, 'installable': False}");
+        written(&addons, "on", "{'installable': True}");
+        let discovery = load(
+            &[checked],
+            &[addons],
+            Series::parse("10.0"),
+            None,
+            &TaintTable::default(),
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+        let mut uninstallable: Vec<_> = discovery.uninstallable.iter().map(String::as_str).collect();
+        uninstallable.sort_unstable();
+        assert_eq!(uninstallable, ["legacy", "off", "retired"]);
+        let modules: Vec<_> = discovery.modules.iter().map(|m| m.name.as_str()).collect();
+        assert_eq!(modules, ["on"]);
+        assert_eq!(discovery.rejected.get("legacy"), Some(&OdooReads::AsPython2));
     }
 
     #[test]

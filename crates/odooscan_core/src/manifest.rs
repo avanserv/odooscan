@@ -581,6 +581,8 @@ pub struct Rejection {
     pub error: Spanned<String>,
     pub series: Option<Series>,
     pub odoo: OdooReads,
+    /// Whether the manifest leaves the module installable, as far as odooscan reads its entries.
+    pub installable: bool,
 }
 
 impl Rejection {
@@ -639,7 +641,13 @@ pub fn read(bytes: &[u8], series: impl FnOnce(Option<Series>) -> Option<Series>)
     if let (Some(m), Some(e)) = (manifest.as_mut(), expr) {
         m.diags = m.findings(loc.at(e), series);
     }
-    let reject = |(error, odoo)| Rejection { error, series, odoo };
+    let partial = manifest.as_ref().map(|m| m.installable);
+    let reject = |(error, odoo)| Rejection {
+        error,
+        series,
+        odoo,
+        installable: partial.unwrap_or_else(|| installable(body, &loc, odoo)),
+    };
     if let Some(e) = unreadable(body, &loc, not_utf8, series) {
         return Err(reject((e, OdooReads::No)));
     }
@@ -648,6 +656,47 @@ pub fn read(bytes: &[u8], series: impl FnOnce(Option<Series>) -> Option<Series>)
         reject((e, if python2 { OdooReads::AsPython2 } else { OdooReads::No }))
     })?;
     literal_manifest(&loc, top, manifest, series).map_err(reject)
+}
+
+/// Whether a manifest whose entries `pairs` cannot read leaves the module installable: the last
+/// `installable` of its pairs, or of the keywords of the `dict(...)` call 9.0 evaluates. Python 2
+/// is parsed rewritten at the same length, so a range of the rewrite holds in `body`; the rewrite
+/// spells `False` as `FALSE`, so the value is judged by its text in `body`.
+fn installable(body: &str, loc: &Source, odoo: OdooReads) -> bool {
+    let code = match odoo {
+        OdooReads::AsPython2 => Cow::Owned(python2::rewrite(body)),
+        _ => Cow::Borrowed(body),
+    };
+    let Ok(parsed) = parse_module(&code) else {
+        return true;
+    };
+    let Ok(top) = top_expression(loc, &parsed.syntax().body) else {
+        return true;
+    };
+    let value = match pairs(top) {
+        Some(pairs) => pairs
+            .into_iter()
+            .filter(|(key, _)| str_lit(key) == Some("installable"))
+            .map(|(_, value)| value)
+            .last(),
+        None => dict_keyword(top, "installable"),
+    };
+    value.is_none_or(|v| &body[v.range()] != "False")
+}
+
+/// The value of the last `keyword` of `top` when it is a `dict(...)` call.
+fn dict_keyword<'a>(top: &'a Expr, keyword: &str) -> Option<&'a Expr> {
+    let Expr::Call(call) = top else {
+        return None;
+    };
+    if !matches!(&*call.func, Expr::Name(name) if name.id.as_str() == "dict") {
+        return None;
+    }
+    let keywords = call.arguments.keywords.iter();
+    keywords
+        .filter(|k| k.arg.as_ref().is_some_and(|arg| arg.as_str() == keyword))
+        .map(|k| &k.value)
+        .last()
 }
 
 /// Why the Odoo of `series` cannot read the manifest as text, ahead of any syntax error, as in
@@ -1880,6 +1929,37 @@ mod tests {
         assert_eq!(odoo_reads(b"{'name': 'x',", "9.0"), Some(OdooReads::No));
         assert_eq!(odoo_reads(b"{'sequence': 0755}", "9.0"), Some(OdooReads::AsPython2));
         assert_eq!(odoo_reads(b"{'sequence': 0755}", "11.0"), Some(OdooReads::No));
+    }
+
+    /// Whether the manifest `src`, which `series` rejects, leaves its module installable.
+    fn rejected_installable(src: &str, series: &str) -> bool {
+        read(src.as_bytes(), |_| Series::parse(series)).unwrap_err().installable
+    }
+
+    #[test]
+    fn a_rejected_manifest_reads_installable() {
+        let python2 = "{'sequence': 0755, 'installable': True, 'installable': False}";
+        assert!(!rejected_installable(python2, "9.0"));
+        assert!(!rejected_installable(
+            "[('sequence', 0755), ('installable', False)]",
+            "9.0"
+        ));
+        assert!(!rejected_installable("dict(name='x', installable=False)", "9.0"));
+        assert!(!rejected_installable("dict(installable=False)", "10.0"));
+        let python2_call = "dict(sequence=0755, installable=False)";
+        assert_eq!(odoo_reads(python2_call.as_bytes(), "9.0"), Some(OdooReads::AsPython2));
+        assert!(!rejected_installable(python2_call, "9.0"));
+        assert!(rejected_installable("dict(sequence=0755, installable=True)", "9.0"));
+        assert!(!rejected_installable(
+            "[('installable', False), ('name', NAME)]",
+            "10.0"
+        ));
+        assert!(!rejected_installable("\u{feff}{'installable': False}", "11.0"));
+        assert!(rejected_installable("{'sequence': 0755}", "9.0"));
+        assert!(rejected_installable("{'sequence': 0755, 'installable': True}", "9.0"));
+        assert!(rejected_installable("dict(name='x', installable=True)", "9.0"));
+        assert!(rejected_installable("dict(name='x')", "9.0"));
+        assert!(rejected_installable("{'installable': False", "9.0"));
     }
 
     #[test]

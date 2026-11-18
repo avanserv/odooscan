@@ -1458,6 +1458,7 @@ custom/report_tag161/data/reports.xml:28:35: OD311 no indexed module defines tem
 custom/report_tag161/data/reports.xml:29:46: OD319 Odoo refuses this expression when it prints the report: Unexpected token at the end of an expression
 custom/report_tag161/data/updates.xml:2:5: OD323 XML id 'tag_replaces' is already defined in data/reports.xml, and this definition overwrites the fields both name; remove the copy when the two say the same thing, or rename one when both are meant to exist
 custom/report_unversioned/__manifest__.py:1:44: OD521 nothing of module 'web' is used, nor of what only it brings
+custom/retired_dep_user/__manifest__.py:4:25: OD503 module 'prov_retired' is not installable: its manifest sets installable to False
 custom/route_auto_heir/controllers/main.py:6:9: OD231 path '/route_auto/shared' is also routed by Shared.shared in module route_auto, so one of the two hides the other
 custom/route_auto_side/controllers/main.py:6:9: OD231 path '/route_auto/side' is also routed by Shared.side in module route_auto, so one of the two hides the other
 custom/route_clash/controllers/main.py:13:9: OD231 path '/bad/routes/new' is also routed by Routes.new in module bad_sale, so one of the two hides the other

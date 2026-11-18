@@ -316,7 +316,7 @@ rules! {
     "OD407" "rule-field-without-index" Performance Info None, true, "A record rule or ir.access domain filters reads on a stored field without an index.";
     "OD501" "manifest-data-missing" Correctness Error None, false, "A file listed in the manifest does not exist.";
     "OD502" "data-file-not-loaded" Quality Warning None, false, "A data file is listed under no manifest key Odoo reads, so Odoo never loads it.";
-    "OD503" "unknown-dependency" Correctness Error None, true, "A module in depends is not on the addons path, or its manifest cannot be read.";
+    "OD503" "unknown-dependency" Correctness Error None, true, "A module in depends is not on the addons path, is not installable, or its manifest cannot be read.";
     "OD504" "circular-dependency" Correctness Error None, true, "A module in depends depends back on this module.";
     // saas~14.2 globs the `qweb` key, saas~14.3 reads only `web.assets_qweb`.
     "OD505" "qweb-key-ignored" Deprecation Warning Some(">=saas~14.3"), false, "The manifest lists templates under qweb, which Odoo ignores.";
