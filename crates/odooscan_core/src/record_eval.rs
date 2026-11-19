@@ -38,7 +38,7 @@ pub fn literal_string(eval: &str) -> Option<String> {
     string(parse_expression(eval.trim()).ok()?.expr())
 }
 
-fn falsy(expr: &Expr) -> bool {
+pub(crate) fn falsy(expr: &Expr) -> bool {
     Truthiness::from_expr(expr, |_| false).into_bool() == Some(false)
 }
 

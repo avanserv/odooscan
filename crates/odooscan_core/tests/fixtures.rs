@@ -448,6 +448,7 @@ fn access_severity_follows_the_module_series() {
     let expected = [
         ("bad_sale", Severity::Warning),
         ("encoded_lost_stranger", Severity::Warning),
+        ("falsy_names20", Severity::Info),
         ("modern20", Severity::Info),
         ("nameless_models", Severity::Warning),
         ("saas132", Severity::Warning),

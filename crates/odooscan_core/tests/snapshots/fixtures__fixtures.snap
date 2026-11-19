@@ -588,6 +588,10 @@ custom/exposure_portal/security/ir.model.access.csv:2:1: OD402 base.group_portal
 custom/exposure_portal/security/ir.model.access.csv:2:1: OD403 Html field 'body' of exposure.internal is not sanitized (sanitize=False) and this row lets base.group_portal write exposure.internal, so they can store script that runs for whoever opens the record; keep the sanitizer on, or give the field groups
 custom/exposure_portal/security/ir.model.access.csv:2:1: OD404 'api_token' of exposure.internal holds a secret and has no groups, and this row lets base.group_portal read exposure.internal, so they can read it over RPC; give the field groups, such as base.group_system
 custom/exposure_portal/security/ir.model.access.csv:3:1: OD402 base.group_portal gets write, create or unlink on exposure.model_exposure_board; public and portal access should be read-only and go through controllers
+custom/falsy_names20/data/ghost_sconces.xml:2:5: OD201 no indexed module defines model 'ghost.sconce'
+custom/falsy_names20/models/desk_lamp.py:4:7: OD209 module base already defines model 'res.partner', and this class replaces it; extend it with _inherit = 'res.partner'
+custom/falsy_names20/models/desk_lamp.py:18:7: OD401 model 'desk.shade' has no ir.access rule with a group, so only the superuser can use it
+custom/falsy_names20/views/desk_lamp_views.xml:8:17: OD304 'lumens': desk.lamp has no field 'lumens'
 custom/field_classes/data/badges.xml:2:5: OD324 x.badge.code is required and has no default, so creating this record fails if the column is NOT NULL; give the field a value
 custom/field_classes/models/lens.py:5:6: OD518 'odoo.addons.optics.orm' comes from module optics; add it to depends
 custom/field_classes/models/lens.py:20:25: OD104 this default is computed once at import; pass the function itself, e.g. default=fields.Date.today
@@ -655,6 +659,7 @@ custom/field_options/models/site.py:53:48: OD222 'country_id' has check_company=
 custom/field_options/models/site.py:68:65: OD222 'country_ids' has check_company=True, but res.country has no company_id field to check; remove check_company
 custom/field_options/models/site.py:76:86: OD222 'origin_id' has check_company=True, but res.country has no company_id field to check; remove check_company
 custom/field_options/models/site.py:82:68: OD222 'home_country_id' has check_company=True, but res.country has no company_id field to check; remove check_company
+custom/file_model_base14/data/ghost_sconces.xml:2:5: OD201 no indexed module defines model 'ghost.sconce'
 custom/form_patches/static/src/base_calls.js:7:43: OD604 model 'form.card' has no method 'ids'
 custom/form_patches/static/src/base_calls.js:8:43: OD607 method 'concat' is private, so the server refuses to call it over RPC
 custom/form_patches/static/src/base_calls.js:9:43: OD604 model 'form.card' has no method 'name_get'

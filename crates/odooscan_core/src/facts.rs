@@ -885,14 +885,16 @@ pub struct PyFacts {
     /// A route of the file sits in a class whose bases the whole scan may hold, so its routing
     /// merges with that of the routes it overrides.
     pub inherits_routes: bool,
-    /// A class names its model with an expression, so models and their ids are built at runtime,
-    /// lacks `_name` in a module of unknown series and is named apart before and from saas~18.1, or
-    /// sits in a file that does not parse with a `_name` or an `_inherit` its tokens do not spell.
+    /// Models and their ids are built at runtime: a class names its model with an expression, or
+    /// with a non-string literal that tests false and that the series does not replace. In a module
+    /// of unknown series, a class is named apart before and from saas~18.1, or sits on a model class
+    /// of its file with no `_name` and no `_inherit` or an empty one. A file that does not parse
+    /// also counts when it holds a `_name` or an `_inherit` its tokens do not spell.
     pub dynamic_models: bool,
     /// The literal start of each name the file's classes may give a model at runtime, empty when
     /// the expression shows none, which fits every name.
     pub built_model_starts: Vec<String>,
-    /// The whole name of the reading a class of unknown series does not take, which fits that name
+    /// The whole name of each reading a class of unknown series does not take, which fits that name
     /// alone.
     pub built_model_names: Vec<String>,
     /// Literal model names in `env['x']` outside code that runs once a runtime test of a model, field

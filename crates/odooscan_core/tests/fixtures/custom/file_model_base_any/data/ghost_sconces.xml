@@ -1,0 +1,5 @@
+<odoo>
+    <record id="ghost_sconce_hall" model="ghost.sconce">
+        <field name="name">Hall</field>
+    </record>
+</odoo>
