@@ -4,3 +4,4 @@ access_columns_hidden,columns hidden,model_legacy9_columns_hidden,base.group_use
 access_columns_user,columns user,model_legacy9_columns_user,base.group_user,1,1,1,1
 access_ledger,ledger,model_legacy9_ledger,base.group_user,1,1,1,1
 access_gauge,gauge,model_legacy9_gauge,base.group_user,1,1,1,1
+access_columns_twice,columns twice,model_legacy9_columns_twice,base.group_user,1,1,1,1

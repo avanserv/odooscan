@@ -36,3 +36,10 @@ class ParcelRulesMixin(models.AbstractModel):
 class ResPartnerRules(models.Model):
     _inherit = "res.partner"
     _sql_constraints = [("name_type_unique", "UNIQUE(name, type, short_name)", "A contact name is unique per type.")]
+
+
+# The class keeps the last _sql_constraints, so Odoo never reads the first list.
+class ParcelLockerLimits(models.Model):
+    _inherit = "parcel.locker"
+    _sql_constraints = [("ghost_positive", "CHECK(x_ghost_count > 0)", "Odoo never reads this list.")]
+    _sql_constraints = [("slot_positive", "CHECK(x_slot_count > 0)", "A locker has a slot.")]

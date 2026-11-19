@@ -68,3 +68,4 @@ access_parcel_ramp,parcel.ramp,model_parcel_ramp,base.group_user,1,1,1,1
 access_parcel_pallet,parcel.pallet,model_parcel_pallet,base.group_user,1,1,1,1
 access_parcel_chute,parcel.chute,model_parcel_chute,base.group_user,1,1,1,1
 access_parcel_quota,parcel.quota,model_parcel_quota,base.group_user,1,0,0,0
+access_parcel_terminal,parcel.terminal,model_parcel_terminal,base.group_user,1,1,1,1

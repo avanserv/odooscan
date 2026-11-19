@@ -487,6 +487,7 @@ custom/dynamic_models_plain/models/holder.py:12:25: OD206 no indexed module defi
 custom/dynamic_models_plain/static/src/large.js:3:30: OD603 model 'bad.generated.large' comes from module dynamic_models_side, which is not in depends
 custom/dynamic_models_plain/views/large.xml:4:9: OD202 model 'bad.generated.large' comes from module dynamic_models_side; add it to depends
 custom/dynamic_models_plain/views/large.xml:7:17: OD304 'name': field 'name' of bad.generated.large comes from module sql_base_entries, which is not in depends
+custom/dynamic_models_settled/data/records.xml:2:5: OD201 no indexed module defines model 'ghost.settled'
 custom/dynamic_models_unbuilt/models/proxies.py:27:32: OD202 model 'bad.generated.large' comes from module dynamic_models_side; add it to depends
 custom/dynamic_models_unbuilt/models/proxies.py:30:25: OD206 no indexed module defines model 'unbuilt.proxy'
 custom/dynamic_models_unbuilt/static/src/large.js:3:30: OD603 model 'bad.generated.large' comes from module dynamic_models_side, which is not in depends
@@ -871,6 +872,7 @@ custom/legacy9/data/rewrites.xml:2:5: OD323 XML id 'rewritten_code' is already d
 custom/legacy9/data/rewrites.xml:6:5: OD323 XML id 'rewritten_state' is already defined in data/calls.xml, and this definition overwrites the fields both name; remove the copy when the two say the same thing, or rename one when both are meant to exist
 custom/legacy9/data/translated.xml:5:9: OD309 res.partner has no field 'name@fr'
 custom/legacy9/models/columns.py:31:33: OD203 'holder_id.ghost': legacy9.columns has no field 'ghost'
+custom/legacy9/models/columns.py:37:14: OD203 'sequence': legacy9.columns.twice has no field 'sequence'
 custom/legacy9/models/res_company.py:14:40: OD211 no parent class of res.company defines '_auto_finish', so this super() call fails
 custom/legacy9/views/aliases.xml:7:45: OD312 legacy9.ledger has no method 'action_absent'
 custom/legacy9/views/aliases.xml:23:33: OD318 legacy9.ledger has no primary legacy9_unregistered view, and nothing generates one
@@ -1778,6 +1780,7 @@ custom/sql_columns/models/constraints.py:8:36: OD227 total_weight: parcel_box ha
 custom/sql_columns/models/constraints.py:9:38: OD227 tag_ids: parcel_box has no such column, since parcel.box.tag_ids is a Many2many, which has no column; drop it from the definition
 custom/sql_columns/models/constraints.py:10:34: OD227 display_name: parcel_box has no such column, since parcel.box.display_name is computed by the ORM, not stored; drop it from the definition
 custom/sql_columns/models/constraints.py:27:52: OD227 name: parcel_locker has no such column, since name is a field of parcel.depot, which parcel.locker reaches through _inherits; declare the definition on parcel.depot
+custom/sql_columns/models/constraints.py:45:50: OD227 x_slot_count: parcel_locker has no such column, since parcel.locker has no field x_slot_count; name the column of a stored field of parcel.locker
 custom/sql_columns/models/delegations.py:26:33: OD227 name: parcel_stand has no such column, since name is a field of parcel.depot, which parcel.stand reaches through _inherits; declare the definition on parcel.depot
 custom/sql_columns/models/delegations.py:30:52: OD224 s.name: parcel_stand has no such column, since name is a field of parcel.depot, which parcel.stand reaches through _inherits; join parcel_depot on x_host_id
 custom/sql_columns/models/delegations.py:30:60: OD224 s.bogus: parcel_stand has no such column, since parcel.stand has no field bogus; name the column of a stored field of parcel.stand
@@ -1793,6 +1796,9 @@ custom/sql_columns/models/delegations.py:254:55: OD224 p.x_cleat_id: parcel_pont
 custom/sql_columns/models/delegations.py:331:39: OD224 s.x_shop_depot_id: parcel_shop has no such column, since parcel.shop.x_shop_depot_id is not stored; set store=True on the field, or read it through the ORM
 custom/sql_columns/models/delegations.py:342:39: OD224 a.name: parcel_annex has no such column, since name is a field of parcel.box, which parcel.annex reaches through _inherits; join parcel_box on x_annex_box_id
 custom/sql_columns/models/delegations.py:354:39: OD224 o.name: parcel_outlet has no such column, since name is a field of parcel.depot, which parcel.outlet reaches through _inherits; join parcel_depot on x_outlet_depot_id
+custom/sql_columns/models/delegations.py:401:23: OD224 t.x_old_terminal_id: parcel_terminal has no such column, since parcel.terminal has no field x_old_terminal_id; name the column of a stored field of parcel.terminal
+custom/sql_columns/models/delegations.py:401:44: OD224 t.weight_uom_id: parcel_terminal has no such column, since parcel.terminal has no field weight_uom_id; name the column of a stored field of parcel.terminal
+custom/sql_columns/models/delegations.py:401:84: OD224 t.name: parcel_terminal has no such column, since name is a field of parcel.depot, which parcel.terminal reaches through _inherits; join parcel_depot on x_terminal_depot_id
 custom/sql_columns/models/parcels.py:76:5: OD226 _auto = False leaves parcel.report without a table, and nothing creates the view parcel_report; create it in init(), or drop _auto = False
 custom/sql_columns/models/parcels.py:168:63: OD227 write_date: parcel_beacon has no such column, since parcel.beacon.write_date is not created, as parcel.beacon sets _log_access to False; drop it from the definition, or log access on the model
 custom/sql_columns/models/parcels.py:219:62: OD224 t.channel: parcel_tracker has no such column, since parcel.tracker.channel is not stored; set store=True on the field, or read it through the ORM

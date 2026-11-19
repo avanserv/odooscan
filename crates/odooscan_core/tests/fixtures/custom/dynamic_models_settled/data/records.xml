@@ -1,0 +1,5 @@
+<odoo>
+    <record id="settled_ghost_first" model="ghost.settled">
+        <field name="name">First</field>
+    </record>
+</odoo>
