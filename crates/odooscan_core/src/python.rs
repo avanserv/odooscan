@@ -2184,6 +2184,10 @@ struct UnreadClass {
     /// What `built_name_start` reads of an `_inherit` the class hides, which leaves a class without
     /// `_name` as unnamed as a built `_name` does.
     inherit_start: Option<String>,
+    /// The last `=` to `_inherit` holds a value the scan does not read. An augmented `_inherit`
+    /// hides what it lists too but builds no name, so only this marks the module as building model
+    /// names at runtime and keeps `inherit_start`.
+    inherit_hidden: bool,
     may_reach_orm: bool,
 }
 
@@ -2265,6 +2269,7 @@ impl UnreadFile<'_, '_, '_> {
             },
             depth: self.depth,
             inherit_start: None,
+            inherit_hidden: false,
             may_reach_orm: header.may_reach_orm,
         });
         if opens_block(tokens) {
@@ -2368,14 +2373,47 @@ impl UnreadFile<'_, '_, '_> {
         }
     }
 
-    /// Reads a statement the body of the class at `at` holds directly. A compound one binds only in
-    /// the body it holds, which the chain reader does not take, so a naming binding there hides the
-    /// name.
+    /// Reads a statement the body of the class at `at` holds directly. A naming binding the chain
+    /// reader does not take hides the name: by the header of a compound statement or the body it
+    /// holds, by `del`, or by an augmented assignment, which `augmented` reads.
     fn member(&mut self, at: usize, tokens: &[Token]) {
         let read = !starts_compound(tokens[0].kind()) && self.chain(at, tokens);
         if !read && binds_naming_statement(self.src, tokens) {
             self.classes[at].naming.hidden_naming = true;
+            self.augmented(at, tokens);
         }
+    }
+
+    /// Reads `_name` or `_inherit` of the class at `at` augmented, as by `+=`, the way
+    /// `PyVisitor::augmented_naming` does, through any parentheses around the target.
+    fn augmented(&mut self, at: usize, tokens: &[Token]) {
+        let Some(end) = tokens.iter().find(|t| ends_statement(t.kind())) else {
+            return;
+        };
+        let line: Vec<&Token> = tokens
+            .iter()
+            .filter(|t| !t.kind().is_trivia())
+            .take_while(|t| !ends_statement(t.kind()))
+            .collect();
+        let op = target_len(&line, |kind| kind.as_augmented_assign_operator().is_some());
+        let Some(name) = line.get(op).and_then(|op| self.augmented_name(line[0], op)) else {
+            return;
+        };
+        let range = TextRange::new(line.get(op + 1).map_or(end.start(), |t| t.start()), end.start());
+        let parsed = parse_expression_range(self.src, range);
+        let unparsed = hidden_value(range);
+        let value = parsed.as_ref().map_or(&unparsed, |parsed| parsed.expr());
+        let class = &mut self.classes[at];
+        let added = line[op].kind() == TokenKind::PlusEqual;
+        self.visitor
+            .augmented_attr(&name, value, added, &mut class.fact, &mut class.naming);
+    }
+
+    /// The name an augmented assignment from `first` to its operator `op` binds, if it binds one.
+    fn augmented_name(&self, first: &Token, op: &Token) -> Option<String> {
+        op.kind().as_augmented_assign_operator()?;
+        let target = parse_expression_range(self.src, TextRange::new(first.start(), op.start())).ok()?;
+        target.expr().as_name_expr().map(|n| n.id.to_string())
     }
 
     /// Reads an assignment, `a = b = value` or `a: T = value`, of the class at `at`, as the parsed
@@ -2421,8 +2459,11 @@ impl UnreadFile<'_, '_, '_> {
         let class = &mut self.classes[at];
         let visitor = &mut self.visitor;
         visitor.class_attrs(std::slice::from_ref(target), value, &mut class.fact, &mut class.naming);
-        if target.as_name_expr().is_some_and(|n| n.id.as_str() == "_inherit") && class.fact.inherit_unknown {
-            class.inherit_start = built_name_start(value);
+        if target.as_name_expr().is_some_and(|n| n.id.as_str() == "_inherit") {
+            class.inherit_hidden = class.fact.inherit_unknown;
+            if class.inherit_hidden {
+                class.inherit_start = built_name_start(value);
+            }
         }
     }
 
@@ -2432,7 +2473,7 @@ impl UnreadFile<'_, '_, '_> {
         let mut visitor = self.visitor;
         for mut class in self.classes {
             // `_name` settles the model whatever `_inherit` hides, in either order in the class.
-            if class.fact.inherit_unknown && !class.naming.named {
+            if class.inherit_hidden && !class.naming.named {
                 visitor.facts.dynamic_models = true;
                 class.naming.built_start = class.inherit_start;
             }
@@ -2566,32 +2607,93 @@ fn starts_compound(kind: TokenKind) -> bool {
 }
 
 /// Whether a statement binds a `NAMING_BINDINGS` name by its targets or, when compound, by those of
-/// a statement of the body it holds on its header line.
+/// its header or of a statement of the body it holds on its header line.
 fn binds_naming_statement(src: &str, tokens: &[Token]) -> bool {
     if !starts_compound(tokens[0].kind()) {
-        return binds_naming_tokens(src, tokens);
+        return binds_naming_simple(src, tokens);
     }
-    inline_starts(tokens)
-        .into_iter()
-        .any(|at| binds_naming_tokens(src, &tokens[at..]))
+    let end = header_colon(tokens).unwrap_or_else(|| line_end(tokens));
+    let header: Vec<&Token> = tokens[..end].iter().filter(|t| !t.kind().is_trivia()).collect();
+    let mut targets = for_target(&header).into_iter().chain(as_targets(&header));
+    targets.any(|target| target_binds_naming(src, target))
+        || inline_starts(tokens)
+            .into_iter()
+            .any(|at| binds_naming_simple(src, &tokens[at..]))
+}
+
+/// Whether a simple statement binds a `NAMING_BINDINGS` name by the targets it assigns or deletes.
+fn binds_naming_simple(src: &str, tokens: &[Token]) -> bool {
+    let line: Vec<&Token> = tokens
+        .iter()
+        .filter(|t| !t.kind().is_trivia())
+        .take_while(|t| !ends_statement(t.kind()))
+        .collect();
+    match line.split_first() {
+        Some((del, targets)) if del.kind() == TokenKind::Del => target_binds_naming(src, targets),
+        _ => binds_naming_tokens(src, tokens),
+    }
+}
+
+/// The target of a `for` or `async for` header, between `for` and its `in`.
+fn for_target<'h, 't>(header: &'h [&'t Token]) -> Option<&'h [&'t Token]> {
+    let start = match header {
+        [first, ..] if first.kind() == TokenKind::For => 1,
+        [first, second, ..] if first.kind() == TokenKind::Async && second.kind() == TokenKind::For => 2,
+        _ => return None,
+    };
+    let rest = &header[start..];
+    Some(&rest[..target_len(rest, |kind| kind == TokenKind::In)])
+}
+
+/// The target after each `as` of a `with` or `except` header, up to the `,` or `:` that ends it, or
+/// the bracket that closes the items it stands in.
+fn as_targets<'h, 't>(header: &'h [&'t Token]) -> Vec<&'h [&'t Token]> {
+    let starts = (1..=header.len()).filter(|&at| header[at - 1].kind() == TokenKind::As);
+    starts
+        .map(|start| {
+            let rest = &header[start..];
+            &rest[..target_len(rest, |kind| matches!(kind, TokenKind::Comma | TokenKind::Colon))]
+        })
+        .collect()
+}
+
+/// How many tokens a target spans: up to a closing bracket it does not open, or a token `ends`
+/// takes outside brackets.
+fn target_len(tokens: &[&Token], ends: fn(TokenKind) -> bool) -> usize {
+    let mut nesting = 0isize;
+    tokens
+        .iter()
+        .position(|t| {
+            nesting += bracket_step(t.kind());
+            nesting < 0 || (nesting == 0 && ends(t.kind()))
+        })
+        .unwrap_or(tokens.len())
+}
+
+/// Where the logical line of a statement, from its first token, ends.
+fn line_end(tokens: &[Token]) -> usize {
+    tokens
+        .iter()
+        .position(|t| matches!(t.kind(), TokenKind::Newline | TokenKind::EndOfFile))
+        .unwrap_or(tokens.len())
+}
+
+/// The colon that ends the header of a compound statement, from its first token, on its line.
+fn header_colon(tokens: &[Token]) -> Option<usize> {
+    let mut nesting = 0usize;
+    tokens[..line_end(tokens)].iter().position(|t| {
+        nesting = nesting.saturating_add_signed(bracket_step(t.kind()));
+        nesting == 0 && t.kind() == TokenKind::Colon
+    })
 }
 
 /// Where each statement of the body a compound statement, from its first token, holds on its
 /// header line starts: after the colon that ends the header, then after each `;`.
 fn inline_starts(tokens: &[Token]) -> Vec<usize> {
-    let line = tokens
-        .iter()
-        .position(|t| matches!(t.kind(), TokenKind::Newline | TokenKind::EndOfFile))
-        .unwrap_or(tokens.len());
-    let mut nesting = 0usize;
-    let colon = tokens[..line].iter().position(|t| {
-        nesting = nesting.saturating_add_signed(bracket_step(t.kind()));
-        nesting == 0 && t.kind() == TokenKind::Colon
-    });
-    let Some(colon) = colon else {
+    let Some(colon) = header_colon(tokens) else {
         return vec![];
     };
-    (colon + 1..line)
+    (colon + 1..line_end(tokens))
         .filter(|&at| at == colon + 1 || tokens[at - 1].kind() == TokenKind::Semi)
         .collect()
 }
@@ -2865,17 +2967,33 @@ fn term_fields<'f>(fact: &'f mut ClassFact, name: &str) -> &'f mut Vec<Spanned<S
 }
 
 /// Whether a statement of a class body binds an attribute that names the class or keeps it out of
-/// the registry where `class_attrs` does not read it: in an `if`, `try` or `with` block, or in a
-/// tuple, list or starred target.
+/// the registry where `class_attrs` does not read it: in a tuple, list or starred target, in the
+/// block or the header of a compound statement, or by `+=` or `del`.
 fn hides_naming(stmt: &Stmt) -> bool {
     match assigned(stmt) {
         Some((targets, _)) => targets.iter().filter(|t| !t.is_name_expr()).any(binds_naming),
-        None => module_state::top_level(std::slice::from_ref(stmt))
+        None => module_state::bound(std::slice::from_ref(stmt))
             .into_iter()
-            .filter_map(assigned)
-            .flat_map(|(targets, _)| targets)
-            .any(binds_naming),
+            .any(binds_naming_in_place),
     }
+}
+
+/// Whether a statement binds a `NAMING_BINDINGS` name where it stands, by a target it assigns or
+/// deletes, a header target or an `except ... as` name, and not in a block it holds.
+fn binds_naming_in_place(stmt: &Stmt) -> bool {
+    module_state::targets(stmt).into_iter().any(binds_naming) || handler_binds_naming(stmt)
+}
+
+fn handler_binds_naming(stmt: &Stmt) -> bool {
+    let Stmt::Try(t) = stmt else {
+        return false;
+    };
+    t.handlers.iter().any(|handler| {
+        let ast::ExceptHandler::ExceptHandler(h) = handler;
+        h.name
+            .as_ref()
+            .is_some_and(|name| NAMING_BINDINGS.contains(&name.as_str()))
+    })
 }
 
 /// The class attributes a binding of which `class_attrs` does not read hides what names the class.
@@ -2969,6 +3087,15 @@ impl Naming {
         }
     }
 
+    /// Reads `_name` augmented, `added` when by `+=`, which builds a name from the literal start it
+    /// held.
+    fn added_name(&mut self, added: bool) {
+        let start = self.name.take().or(self.built_start.take()).filter(|_| added);
+        self.named = true;
+        self.falsy_name = false;
+        self.built_start = Some(start.unwrap_or_default());
+    }
+
     fn named_after_class(&self) -> bool {
         self.own_body_names && self.registers && !self.hidden_naming
     }
@@ -3009,6 +3136,9 @@ enum InheritShape {
     Str,
     /// A list or tuple, by its element count, literal or not.
     List(usize),
+    /// Augmented, as by `+=`, which the scan does not add up: without `_name` the class gets no
+    /// name.
+    Added,
 }
 
 impl InheritShape {
@@ -3666,6 +3796,7 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
             } else if let Stmt::FunctionDef(func) = stmt {
                 self.method_fact(func, &mut fact);
             } else {
+                self.augmented_naming(stmt, &mut fact, &mut naming);
                 conditional_methods(stmt, &mut fact);
             }
         }
@@ -3840,10 +3971,10 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
     /// `_inherit` and the class name. An unknown series reads it as before saas~18.1, and a class
     /// that the two readings name apart makes the file's models dynamic. A list with a non-literal
     /// entry hides the name before saas~18.1 and whether the model is new from it, so the class
-    /// extends its first literal entry. With no `_inherit`, or an empty one, only a class that
-    /// `Naming::named_after_class` accepts gets the name of the class; in an unknown series, one
-    /// that `Naming::named_by_file_base` accepts records both names a series from saas~14.4 may
-    /// give it.
+    /// extends its first literal entry, while an augmented `_inherit` gives no name. With no
+    /// `_inherit`, or an empty one, only a class that `Naming::named_after_class` accepts gets the
+    /// name of the class; in an unknown series, one that `Naming::named_by_file_base` accepts records
+    /// both names a series from saas~14.4 may give it.
     fn model_name(&mut self, class_name: &str, naming: &Naming, fact: &ClassFact) -> Option<String> {
         let first = || fact.inherit.first().map(|i| i.value.clone());
         if naming.falsy_name {
@@ -3856,7 +3987,7 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
             if self.series.is_none() && naming.named_by_file_base() {
                 self.file_base_readings(class_name, naming, fact);
             }
-            return first();
+            return first().filter(|_| !matches!(naming.inherit, InheritShape::Added));
         };
         let earlier = if count == 1 {
             first()
@@ -4012,6 +4143,44 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
                 _ => self.attr_or_field(target, value, fact),
             }
         }
+    }
+
+    fn augmented_naming(&mut self, stmt: &Stmt, fact: &mut ClassFact, naming: &mut Naming) {
+        let Stmt::AugAssign(aug) = stmt else {
+            return;
+        };
+        if let Some(target) = aug.target.as_name_expr() {
+            let added = aug.op == ast::Operator::Add;
+            self.augmented_attr(target.id.as_str(), &aug.value, added, fact, naming);
+        }
+    }
+
+    /// Reads `_name` or `_inherit` augmented by `value`, `added` when by `+=`. The scan does not
+    /// work out the result, so the class gets no name it may not have: `_name` builds one from what
+    /// it held, and `_inherit` hides what it lists.
+    fn augmented_attr(&mut self, name: &str, value: &Expr, added: bool, fact: &mut ClassFact, naming: &mut Naming) {
+        match name {
+            "_name" => naming.added_name(added),
+            "_inherit" => self.added_inherit(value, added, fact, naming),
+            _ => return,
+        }
+        self.naming_bases.insert(fact.class_name.clone());
+    }
+
+    /// Reads `_inherit` augmented by `value`. A `+=` to a list keeps the parents it held and adds the
+    /// literal entries of a list or tuple `value`, while a string grows into another name.
+    fn added_inherit(&self, value: &Expr, added: bool, fact: &mut ClassFact, naming: &mut Naming) {
+        fact.inherit_unknown = true;
+        let listed = matches!(
+            naming.inherit,
+            InheritShape::Absent | InheritShape::List(_) | InheritShape::Added
+        );
+        if !(added && listed) {
+            fact.inherit.clear();
+        } else if matches!(value, Expr::List(_) | Expr::Tuple(_)) {
+            fact.inherit.extend(strings(value).into_iter().map(|s| self.spanned(s)));
+        }
+        naming.inherit = InheritShape::Added;
     }
 
     /// Reads `_name` or `_inherit`, either of which makes the class one of `naming_bases`.
@@ -5729,6 +5898,26 @@ mod tests {
 
     /// The imports that prove the ORM bases the class-name tests use.
     const ORM_IMPORTS: &str = "from odoo import fields, models\nfrom odoo.osv import osv\n";
+
+    /// Class bodies that bind `_name`, `_inherit` or `_register` where neither reader takes the
+    /// value, so that no class of them is named.
+    const HIDING_BODIES: [&str; 12] = [
+        "    for _ in range(1):\n        _inherit = 'a'",
+        "    while FLAG:\n        _name = 'a'",
+        "    for _name in NAMES:\n        pass",
+        "    for _name in NAMES: pass",
+        "    with f() as (x, _name):\n        pass",
+        "    try:\n        pass\n    except E as _name:\n        pass",
+        "    if FLAG:\n        for _name in NAMES:\n            pass",
+        "    match FLAG:\n        case 1:\n            _name = 'a'",
+        "    _inherit += ['a']",
+        "    _register = True\n    del _register",
+        "    _inherit = ['a']\n    _inherit += ['b']",
+        "    _name = 'a'\n    _name += '.b'",
+    ];
+
+    /// Class bodies whose headers bind no naming attribute, so that the class is named after itself.
+    const NAMING_BODIES: [&str; 2] = ["    for x in NAMES: pass", "    with f(_name) as x:\n        pass"];
 
     /// The body of a method `r` that creates a public attachment.
     const PUBLIC_CREATE: &str = "    def r(self):\n        d = request.params.get('d')\n        self.env['x.y']._m(d)\n        \
@@ -7959,10 +8148,11 @@ class U(HttpCase):
         assert_eq!(unread(settled), (vec![new.clone()], false, vec![]));
         let built = "class X(models.Model):\n    _name = 'a'\n    _name = MODEL";
         assert_eq!(unread(built), (vec![], true, vec![String::new()]));
+        let replaced = "class X(models.Model):\n    _inherit += ['b']\n    _inherit = ['c']";
+        assert_eq!(unread(replaced), (vec![("c".to_owned(), false)], false, vec![]));
         for body in [
             "class X(models.Model):\n    x, _name = y = 'a', 'b'",
             "class X(models.Model): x = 1; _name, _d = 'a', 'b'",
-            "class X(models.Model):\n    _inherit += ['a']",
         ] {
             assert_eq!(unread(body), (vec![], false, vec![]), "{body}");
         }
@@ -7992,6 +8182,23 @@ class U(HttpCase):
             "class X(models.Model):\n    _inherit = []",
         ] {
             assert_eq!(unread(body), (vec![("X".to_owned(), true)], false, vec![]), "{body}");
+        }
+        for body in NAMING_BODIES {
+            let src = format!("class X(models.Model):\n{body}");
+            assert_eq!(unread(&src), (vec![("X".to_owned(), true)], false, vec![]), "{body}");
+        }
+        for body in HIDING_BODIES
+            .into_iter()
+            .chain(["    async for _name in NAMES:\n        pass"])
+        {
+            // `_name +=` builds a name from the literal it held.
+            let added = body.contains("_name +=");
+            let starts = if added { vec!["a".to_owned()] } else { vec![] };
+            assert_eq!(
+                unread(&format!("class X(models.Model):\n{body}")),
+                (vec![], added, starts),
+                "{body}"
+            );
         }
     }
 
@@ -8041,15 +8248,23 @@ class U(HttpCase):
             "class X(models.Model):\n    _register = False",
             "class X(models.Model):\n    _register = REG",
             "class X(models.Model):\n    if FLAG:\n        _name = 'a'",
-            "class X(models.Model):\n    for _ in range(1):\n        _inherit = 'a'",
-            "class X(models.Model):\n    while FLAG:\n        _inherit = 'a'",
             "class X(models.Model):\n    if FLAG: pass; _name = 'a'",
             "class X(models.Model):\n    (_name, _d) = 'a', 'b'",
             "class X(`models.Model`):\n    pass",
             "class X(models.Model):\n    _name, _d = 'a', 'b'",
-            "class X(models.Model):\n    _inherit += ['a']",
         ] {
             assert_eq!(named(body, "10.0"), (vec![], false), "{body}");
+        }
+        for body in NAMING_BODIES {
+            let src = format!("class X(models.Model):\n{body}");
+            assert_eq!(named(&src, "10.0"), (vec!["X".to_owned()], false), "{body}");
+        }
+        for body in HIDING_BODIES
+            .into_iter()
+            .chain(["    async for _name in NAMES:\n        pass"])
+        {
+            let src = format!("class X(models.Model):\n{body}");
+            assert_eq!(named(&src, "10.0"), (vec![], body.contains("_name +=")), "{body}");
         }
     }
 
@@ -8066,6 +8281,10 @@ class U(HttpCase):
             ("class X(models.Model):\n    _name = print x", hidden(vec![], "")),
             ("class X(models.Model):\n    _inherit = PARENT", hidden(vec![], "")),
             ("class X(models.Model):\n    _inherit = _name", hidden(vec![], "")),
+            (
+                "class X(models.Model):\n    _inherit = PARENT\n    _inherit += ['b']",
+                hidden(vec![], ""),
+            ),
             (
                 "class X(models.Model):\n    _inherit = ['a', PARENT]",
                 hidden(vec![a.clone()], ""),
@@ -8286,8 +8505,15 @@ class U(HttpCase):
                 "    _name = b''\n    _inherit = 'a'",
                 [&falsy, &derived, &derived, &falsy],
             ),
+            (
+                "    _inherit += ['b']\n    _inherit = ['c']",
+                [&model("c", false, false), &derived, &derived, &model("c", false, true)],
+            ),
         ];
-        for (body, expected) in cases {
+        let unknown = model("ResPartnerX", true, true);
+        let headers = NAMING_BODIES.map(|body| (body, [&verbatim, &derived, &derived, &unknown]));
+        let hiding = HIDING_BODIES.map(|body| (body, [&None; 4]));
+        for (body, expected) in cases.into_iter().chain(headers).chain(hiding) {
             for (series, want) in [Some("18.0"), Some("saas~18.1"), Some("20.0"), None]
                 .into_iter()
                 .zip(expected)
@@ -8295,8 +8521,74 @@ class U(HttpCase):
                 assert_eq!(&named(body, series), want, "{body} at {series:?}");
             }
         }
+        let added = analyze(
+            &format!("{ORM_IMPORTS}class X(models.Model):\n    _name = 'a'\n    _name += '.b'\n"),
+            Series::parse("18.0"),
+        );
+        assert!(added.dynamic_models);
+        assert_eq!(added.built_model_starts, ["a"]);
         let plain = analyze("class X(Mixin):\n    _inherit = []\n", Series::parse("18.0"));
         assert!(plain.classes.is_empty());
+    }
+
+    #[test]
+    fn both_readers_read_a_hidden_name_alike() {
+        let read = |body: &str, tail: &str| {
+            let facts = analyze(
+                &format!("{ORM_IMPORTS}class X(models.Model):\n{body}\n{tail}"),
+                Series::parse("10.0"),
+            );
+            let models: Vec<_> = facts.classes.iter().map(|c| (c.model.clone(), c.new_model)).collect();
+            (models, facts.dynamic_models, facts.built_model_starts)
+        };
+        let more = [
+            "    _name += '.b'",
+            "    _name = 'a%s' % X\n    _name += '.b'",
+            "    _name = 'a'\n    (_name) += '.b'",
+            "    _inherit += ['b']\n    _inherit = ['c']",
+            "    _name = 'x'\n    _inherit = ['a']\n    _inherit += ['b']",
+            "    _name = MODEL\n    _inherit += ['b']",
+            "    _inherit += PARENTS",
+            "    _inherit = ['a']\n    _inherit += PARENTS",
+            "    _inherit += 'b'",
+            "    _inherit = 'a'\n    _inherit += 'b'",
+            "    _inherit = ['a']\n    _inherit -= ['b']",
+            "    _inherit = ['a']\n    _inherit *= 2",
+            "    _inherit = ['a']\n    (_inherit) += ['b']",
+        ];
+        for body in HIDING_BODIES.into_iter().chain(NAMING_BODIES).chain(more) {
+            assert_eq!(read(body, ""), read(body, "print 'x'\n"), "{body}");
+        }
+        // Only the unread reader takes an `_inherit` it does not read for one that builds the name,
+        // and a `+=` after it keeps that.
+        for body in [
+            "    _inherit = PARENT\n    _inherit += ['b']",
+            "    _inherit = ['a', PARENT]\n    _inherit += ['b']",
+        ] {
+            assert_eq!(read(body, ""), (vec![], false, vec![]), "{body}");
+            assert_eq!(read(body, "print 'x'\n"), (vec![], true, vec![String::new()]), "{body}");
+        }
+    }
+
+    #[test]
+    fn keeps_the_parents_a_list_held_before_it_is_augmented() {
+        let parents = |inherit: &str| {
+            let src = format!("{ORM_IMPORTS}class X(models.Model):\n    _name = 'x'\n{inherit}\n");
+            let class = analyze(&src, Series::parse("18.0")).classes.remove(0);
+            let names: Vec<_> = class.inherit.into_iter().map(|i| i.value).collect();
+            (class.model, names, class.inherit_unknown)
+        };
+        let listed = "    _inherit = ['a', 'b']\n    _inherit += ['c', C]";
+        assert_eq!(
+            parents(listed),
+            ("x".to_owned(), vec!["a".into(), "b".into(), "c".into()], true)
+        );
+        for grown in [
+            "    _inherit = 'a'\n    _inherit += 'b'",
+            "    _inherit = ['a']\n    _inherit *= 2",
+        ] {
+            assert_eq!(parents(grown), ("x".to_owned(), vec![], true), "{grown}");
+        }
     }
 
     #[test]

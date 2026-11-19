@@ -558,7 +558,7 @@ fn captures(pattern: &ast::Pattern) -> Vec<&str> {
 }
 
 /// The targets `stmt` assigns or deletes.
-fn targets(stmt: &Stmt) -> Vec<&Expr> {
+pub(crate) fn targets(stmt: &Stmt) -> Vec<&Expr> {
     match stmt {
         Stmt::Assign(a) => a.targets.iter().collect(),
         Stmt::AnnAssign(a) if a.value.is_some() => vec![&*a.target],
