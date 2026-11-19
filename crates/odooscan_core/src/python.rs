@@ -2385,6 +2385,7 @@ impl UnreadFile<'_, '_, '_> {
         self.classes.push(UnreadClass {
             fact: ClassFact {
                 kind: header.kind.unwrap_or(ModelKind::Model),
+                on_model_base: header.kind.is_some(),
                 cached: header.cached,
                 ..ClassFact::new(self.visitor.loc.pos(name.start()), class_name)
             },
@@ -3444,6 +3445,17 @@ impl<'a> BoundNames<'a> {
     }
 }
 
+/// Whether `self` in a method of a class is a model, for OD109.
+enum ClassModel {
+    /// A class with an ORM base, which holds even when its model cannot be named, or with a fact.
+    Model,
+    /// A class whose only bases a model may come through are these imports, which `checks.rs`
+    /// resolves through the index.
+    ImportedBases(Vec<BaseSource>),
+    /// Any other class, whose `self` may be anything.
+    Plain,
+}
+
 /// What a statement of the module body binds a name to, for a class below that names it as a base.
 enum TopBinding<'a> {
     /// A class the statement defines.
@@ -3902,9 +3914,8 @@ struct PyVisitor<'a, 'ast> {
     /// Where the fact of each enclosing class sits in `facts.classes`, None for a class that is no
     /// model.
     class_facts: Vec<Option<usize>>,
-    /// Whether each enclosing class is a model class: one with an ORM base, which holds even when
-    /// its model cannot be named, or one with a fact.
-    model_classes: Vec<bool>,
+    /// Whether each enclosing class is a model class, or what of it the index decides that by.
+    model_classes: Vec<ClassModel>,
     /// The methods of each enclosing class that Odoo runs ahead of the module's data
     /// (`setup_methods`), none for a class that is no model. A model class has an ORM base, whose
     /// model a `_name` or `_inherit` that is no literal hides, or it names its model.
@@ -4055,6 +4066,7 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
         let (opaque_bases, base_methods) = self.read_bases(class, &plain_bases, &plain_sources);
         let mut fact = ClassFact {
             kind: kind.unwrap_or(ModelKind::Model),
+            on_model_base: kind.is_some(),
             cached: on_cached_model(class),
             plain_bases,
             plain_sources,
@@ -5969,7 +5981,7 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
 
     fn private_attr(&mut self, a: &ast::ExprAttribute, expr: &Expr) {
         // Outside a model class `self` may be anything, so its `_cr` need not be the deprecated one.
-        if self.model_classes.last() != Some(&true)
+        if matches!(self.model_classes.last(), None | Some(ClassModel::Plain))
             || !matches!(a.attr.as_str(), "_cr" | "_uid" | "_context")
             || !matches!(&*a.value, Expr::Name(n) if n.id.as_str() == "self")
         {
@@ -5981,12 +5993,41 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
             .ctx
             .is_load()
             .then(|| self.loc.replace(a.attr.range(), &format!("env.{public}")));
-        self.fixed_diag(
+        let mut diag = RawDiag::new(
             "OD109",
-            expr,
+            self.loc.at(expr),
             format!("self.{} is deprecated; use self.env.{public}", a.attr),
-            fix,
         );
+        diag.fix = fix;
+        self.class_model_diag(diag);
+    }
+
+    /// Reports `diag` in the innermost class, or leaves it to `checks.rs` when only the index can
+    /// tell whether the class is a model.
+    fn class_model_diag(&mut self, diag: RawDiag) {
+        match self.model_classes.last() {
+            Some(ClassModel::ImportedBases(bases)) => {
+                self.facts.imported_base_shortcuts.push((bases.clone(), diag));
+            }
+            _ => self.facts.diags.push(diag),
+        }
+    }
+
+    /// What `class` is to OD109: a model class when `model`, else what its imported plain bases
+    /// leave to the index. The import of a nested class is not read, so it stays plain.
+    fn class_model(&self, class: &ast::StmtClassDef, model: bool) -> ClassModel {
+        if model {
+            return ClassModel::Model;
+        }
+        let (_, sources) = self.plain_bases(class);
+        let imported: Vec<_> = sources
+            .into_iter()
+            .filter(|s| matches!(s, BaseSource::Imported { .. }))
+            .collect();
+        match imported.is_empty() {
+            true => ClassModel::Plain,
+            false => ClassModel::ImportedBases(imported),
+        }
     }
 
     fn visit_class(&mut self, class: &'ast ast::StmtClassDef, stmt: &'ast Stmt) {
@@ -6014,7 +6055,8 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
         self.owners.push(Some(owner));
         self.class_facts
             .push(fact.is_some().then_some(self.facts.classes.len()));
-        self.model_classes.push(orm || fact.is_some());
+        let class_model = self.class_model(class, orm || fact.is_some());
+        self.model_classes.push(class_model);
         self.setup_methods.push(setup);
         self.facts.classes.extend(fact);
         self.class_models.push(model);
@@ -11344,6 +11386,54 @@ env.cr.execute('SELECT a.module FROM t a')
         let inner =
             format!("{MODEL}\n    def f(self):\n        def g():\n            return self._uid\n        return g()\n");
         assert_eq!(od109(&inner), 1, "{inner}");
+    }
+
+    #[test]
+    fn a_private_env_shortcut_on_an_imported_base_is_left_to_the_index() {
+        let read = "from .a import A\n\n\nclass B(A):\n    def f(self):\n        return self._cr\n";
+        let facts = analyze(read, Series::parse("19.0"));
+        assert!(facts.diags.iter().all(|d| d.code != "OD109"), "{read}");
+        let [(bases, diag)] = &facts.imported_base_shortcuts[..] else {
+            panic!("one deferred OD109 in {read}");
+        };
+        let imported = BaseSource::Imported {
+            level: 1,
+            path: "a.A".to_owned(),
+        };
+        assert_eq!(bases, &[imported]);
+        let fix = diag.fix.as_ref().expect("a fix");
+        let (out, _) = fix::apply(read.as_bytes(), &[fix]);
+        assert!(String::from_utf8(out).unwrap().ends_with("return self.env.cr\n"));
+        let write = "from .a import A\n\n\nclass B(A):\n    def f(self):\n        self._context = {}\n";
+        let facts = analyze(write, Series::parse("19.0"));
+        let fixes: Vec<_> = facts
+            .imported_base_shortcuts
+            .iter()
+            .map(|(_, d)| d.fix.is_some())
+            .collect();
+        assert_eq!(fixes, [false], "{write}");
+    }
+
+    #[test]
+    fn a_private_env_shortcut_on_a_nested_or_local_plain_base_is_not_left_to_the_index() {
+        let nested = format!(
+            "from .a import A\n\n\n{MODEL}\n    class Helper(A):\n        def f(self):\n            return self._cr\n"
+        );
+        let local = "class Plain:\n    pass\n\n\nclass B(Plain):\n    def f(self):\n        return self._cr\n";
+        for src in [nested.as_str(), local] {
+            let facts = analyze(src, Series::parse("19.0"));
+            assert!(facts.imported_base_shortcuts.is_empty(), "{src}");
+            assert!(facts.diags.iter().all(|d| d.code != "OD109"), "{src}");
+        }
+    }
+
+    #[test]
+    fn a_private_env_shortcut_in_a_class_that_names_its_model_on_an_imported_base_is_reported_once() {
+        let src =
+            "from .a import A\n\n\nclass B(A):\n    _inherit = 'x'\n\n    def f(self):\n        return self._cr\n";
+        let facts = analyze(src, Series::parse("19.0"));
+        assert!(facts.imported_base_shortcuts.is_empty(), "{src}");
+        assert_eq!(facts.diags.iter().filter(|d| d.code == "OD109").count(), 1, "{src}");
     }
 
     #[test]

@@ -3741,12 +3741,22 @@ impl<'m> Index<'m> {
         class.inherit_unknown || bases.iter().any(|base| !read(base))
     }
 
-    /// The model class a plain base of `class`, of module `mi`, names, when the scan reads it: a
-    /// model class of its file, or the one an import names in an indexed file. Odoo imports an addon
-    /// as `odoo.addons.<name>` (18.0 `odoo/modules/module.py:379-383`, 20.0 `:536-540`), which
-    /// `absolute_import` spells a relative import as.
+    /// The model class a plain base of `class`, of module `mi`, names: see `file_base_class`.
     fn base_class(&self, mi: usize, class: &ClassFact, base: &BaseSource) -> Option<&'m ClassFact> {
         let (file, _) = self.file_of(mi, class)?;
+        self.file_base_class(mi, file, base)
+    }
+
+    /// The model class a plain base read in `file`, of module `mi`, names, when the scan reads it: a
+    /// model class of the file, or the one an import names in an indexed file. Odoo imports an addon
+    /// as `odoo.addons.<name>` (18.0 `odoo/modules/module.py:379-383`, 20.0 `:536-540`), which
+    /// `absolute_import` spells a relative import as.
+    pub fn file_base_class(
+        &self,
+        mi: usize,
+        file: &'m SourceFile<PyFacts>,
+        base: &BaseSource,
+    ) -> Option<&'m ClassFact> {
         match base {
             BaseSource::Local(pos) => file.facts.classes.iter().find(|c| c.pos == *pos),
             BaseSource::Imported { level, path } => {
@@ -4775,6 +4785,7 @@ mod tests {
         base_rpc_method, class_file, depends_closure, field_id_prefixes, fold_writes, js_module_path, last_text,
         mangles_alike, old_base_method, test_bundle, triggers, unseen_table_id,
     };
+    use crate::facts::BaseSource;
     use crate::mentions::{Mentions, Words};
     use crate::project::{Module, SourceFile, module};
     use crate::python;
@@ -7493,6 +7504,34 @@ Order.components.Card = null;
                 "{source}"
             );
         }
+    }
+
+    #[test]
+    fn file_base_class_resolves_a_model_class_of_an_indexed_file() {
+        let file = |rel: &str, source: &str| SourceFile {
+            rel: rel.to_owned(),
+            ..python_18(source)
+        };
+        let mut modules = [module("kit", "{'version': '18.0.1.0'}")];
+        modules[0].python.push(file(
+            "models/a.py",
+            "class A(models.Model):\n    _name = 'kit.a'\n\nclass Plain:\n    pass\n",
+        ));
+        modules[0].python.push(file("models/b.py", ""));
+        let index = Index::build(&modules, None);
+        let kit = index.by_name["kit"];
+        let [a, b] = [&modules[0].python[0], &modules[0].python[1]];
+        let imported = |level: u32, path: &str| BaseSource::Imported {
+            level,
+            path: path.to_owned(),
+        };
+        let named = |base: &BaseSource, file| index.file_base_class(kit, file, base).map(|c| c.class_name.as_str());
+        assert_eq!(named(&imported(1, "a.A"), b), Some("A"));
+        assert_eq!(named(&imported(0, "odoo.addons.kit.models.a.A"), b), Some("A"));
+        assert_eq!(named(&BaseSource::Local(a.facts.classes[0].pos), a), Some("A"));
+        assert_eq!(named(&imported(1, "a.Plain"), b), None);
+        assert_eq!(named(&imported(0, "odoo.addons.other.models.a.A"), b), None);
+        assert_eq!(named(&BaseSource::Unread, b), None);
     }
 
     #[test]

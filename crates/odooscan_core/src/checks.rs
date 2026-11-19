@@ -11,9 +11,9 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::bundles::{self, XML_IN_BUNDLES};
 use crate::facts::{
-    AccessRow, ActionFact, ActionValue, ActionViewId, ArchElement, ArchModifier, ArchSubview, ArchWidget, ClassBase,
-    ClassFact, ComponentTag, DataFacts, Definition, DefinitionSource, DomainFact, FieldFact, FieldWrite, Flag,
-    FunctionCall, GuardedRef, ImportFact, ImportGuard, JsClass, JsFacts, JsName, MethodDef, Migrate, ModelKind,
+    AccessRow, ActionFact, ActionValue, ActionViewId, ArchElement, ArchModifier, ArchSubview, ArchWidget, BaseSource,
+    ClassBase, ClassFact, ComponentTag, DataFacts, Definition, DefinitionSource, DomainFact, FieldFact, FieldWrite,
+    Flag, FunctionCall, GuardedRef, ImportFact, ImportGuard, JsClass, JsFacts, JsName, MethodDef, Migrate, ModelKind,
     OptionValue, OrmCall, OwlTemplate, Pos, PyFacts, RawDiag, RecordFact, RecordWrite, Refusal, ReportFact, RouteDef,
     RouteKey, RuleFact, ServerFact, Signature, Spanned, SqlColumn, SqlView, Subject, TemplateEntry, UNREAD_TYPE,
     ViewFact, WrittenValue, XmlDef, XmlRef, private_name,
@@ -271,6 +271,7 @@ pub fn check_module<'m>(index: &Index<'m>, mi: usize, series: Option<Series>) ->
     legacy_hook_rollbacks(module, series, &mut out);
     cache_key_names(module, series, &mut out);
     import_patches(index, module, &mut out);
+    imported_base_shortcuts(index, mi, &mut out);
     public_writes(index, mi, series, &mut out);
     refused_server_code(index, mi, series, &mut out);
     refused_file_names(index, mi, series, &mut out);
@@ -1345,6 +1346,19 @@ fn import_patches<'m>(index: &Index<'m>, module: &'m Module, out: &mut Out<'m>) 
             let diag = module_state::diag(p, index.model_class(&p.path));
             (file.path.as_path(), diag)
         }));
+    }
+}
+
+/// OD109 in a class whose imported plain base the index resolves to a class on a model base:
+/// `BaseModel` holds the shortcuts, so `self` of any subclass reaches them. A class that only names
+/// a model by a literal `_name` or `_inherit` has a fact too, yet no `BaseModel` to inherit.
+fn imported_base_shortcuts<'m>(index: &Index<'m>, mi: usize, out: &mut Out<'m>) {
+    for file in &index.modules[mi].python {
+        let on_model = |b: &BaseSource| index.file_base_class(mi, file, b).is_some_and(|c| c.on_model_base);
+        let model = |bases: &[BaseSource]| bases.iter().any(on_model);
+        let found = file.facts.imported_base_shortcuts.iter();
+        let found = found.filter(|(bases, _)| model(bases));
+        out.diags.extend(found.map(|(_, d)| (file.path.as_path(), d.clone())));
     }
 }
 
@@ -8498,6 +8512,37 @@ mod tests {
         let reach = Reach::of(&index, index.by_name["base"]);
         assert_eq!(reach.dependents.keys().copied().collect::<Vec<_>>(), ["aaa"]);
         assert!(reach.dependent_only("models/thing.py"));
+    }
+
+    #[test]
+    fn a_private_env_shortcut_is_reported_only_on_an_imported_base_the_index_reads_as_a_model() {
+        let python = |rel: &str, source: &str| crate::project::SourceFile {
+            path: std::path::PathBuf::new(),
+            rel: rel.to_owned(),
+            rank: None,
+            demo: false,
+            facts: analyze(source, Series::parse("19.0")),
+            suppressions: Default::default(),
+            mentions: Default::default(),
+        };
+        let a = "from odoo import models\n\n\nclass A(models.Model):\n    _name = 'm1.a'\n\n\nclass Plain:\n    pass\n\n\nclass Named:\n    _name = 'm1.named'\n";
+        let fixed = |b: &str| {
+            let mut modules = vec![crate::project::module("m1", "{'version': '19.0.1.0.0'}")];
+            modules[0].python.push(python("models/a.py", a));
+            modules[0].python.push(python("models/b.py", b));
+            let index = Index::build(&modules, None);
+            let diags = check_module(&index, 0, Series::parse("19.0"));
+            let od109 = diags.into_iter().filter(|(_, d)| d.code == "OD109");
+            od109.map(|(_, d)| d.fix.is_some()).collect::<Vec<_>>()
+        };
+        let heir = |import: &str, base: &str| {
+            format!("{import}\n\n\nclass B({base}):\n    def f(self):\n        return self._uid\n")
+        };
+        assert_eq!(fixed(&heir("from .a import A", "A")), [true]);
+        assert_eq!(fixed(&heir("from odoo.addons.m1.models import a", "a.A")), [true]);
+        assert_eq!(fixed(&heir("from .a import Plain", "Plain")), []);
+        assert_eq!(fixed(&heir("from .a import Named", "Named")), []);
+        assert_eq!(fixed(&heir("from odoo.addons.other.models.a import A", "A")), []);
     }
 
     #[test]
