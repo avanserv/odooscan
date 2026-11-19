@@ -864,14 +864,14 @@ fn parse_module_files(module: &mut Module, default_series: Option<Series>, taint
     module
         .data
         .sort_by_key(|f| (f.rank.unwrap_or(usize::MAX), f.rel.clone()));
-    let (mut js, lost_js, js_words) = parse_static_files(&module.dir, "src", "js", checked, js::analyze);
+    let (mut js, lost_js, js_words) = parse_static_files(&module.dir, "src", "js", checked, js::analyze, None);
     // `static_words` reads the words of tests already, and a test that does not decode hides no hook
     // name, as `hook_mentions` takes no name from a test.
-    let (tests, _, _) = parse_static_files(&module.dir, "tests", "js", checked, js::analyze);
+    let (tests, _, _) = parse_static_files(&module.dir, "tests", "js", checked, js::analyze, None);
     js.extend(tests);
     module.js = js;
     let (templates, lost_templates, template_words) =
-        parse_static_files(&module.dir, "src", "xml", checked, owl::analyze);
+        parse_static_files(&module.dir, "src", "xml", checked, owl::analyze, Some(owl::undecoded));
     module.templates = templates;
     module.lost_text |= lost_js || lost_templates;
     words.extend([js_words, template_words]);
@@ -985,41 +985,55 @@ fn mark_unread(entries: &mut [TemplateEntry], python: &[SourceFile<PyFacts>], di
 }
 
 /// The files of `extension` under `static/<folder>`, whether one of them could not be read, and
-/// their words when the module is checked.
+/// their words when the module is checked. One that is not UTF-8 is kept with the facts
+/// `undecoded` gives, and dropped without it.
 fn parse_static_files<T: Send>(
     dir: &Path,
     folder: &str,
     extension: &str,
     checked: bool,
     analyze: fn(&str) -> T,
+    undecoded: Option<fn() -> T>,
 ) -> (Vec<SourceFile<T>>, bool, Words) {
     let paths = static_files(dir, folder, extension);
     let count = paths.len();
-    let (mut files, words): (Vec<_>, Vec<_>) = paths
+    let read: Vec<_> = paths
         .into_par_iter()
-        .filter_map(|path| {
-            // Odoo decodes assets as UTF-8 whatever they declare (18.0 `odoo/addons/base/models/assetsbundle.py:776`).
-            let text = std::fs::read_to_string(&path).ok()?;
-            let words = if checked { Words::scan(&text) } else { Words::default() };
-            let file = SourceFile {
-                rel: normalize(&path.strip_prefix(dir).ok()?.to_string_lossy()),
-                rank: None,
-                demo: false,
-                suppressions: if checked {
-                    Suppressions::parse(&text)
-                } else {
-                    Suppressions::default()
-                },
-                facts: analyze(&text),
-                mentions: Mentions::scan(&text),
-                path,
-            };
-            Some((file, words))
-        })
-        .unzip();
+        .filter_map(|path| static_file(dir, path, checked, analyze, undecoded))
+        .collect();
+    let lost = read.len() < count || read.iter().any(|(_, _, lost)| *lost);
+    let (mut files, words): (Vec<_>, Vec<_>) = read.into_iter().map(|(file, words, _)| (file, words)).unzip();
     files.sort_by(|a, b| a.rel.cmp(&b.rel));
-    let lost = files.len() < count;
     (files, lost, Words::merge(&words))
+}
+
+/// A file of `parse_static_files`, its words, and whether its text is lost.
+fn static_file<T>(
+    dir: &Path,
+    path: PathBuf,
+    checked: bool,
+    analyze: fn(&str) -> T,
+    undecoded: Option<fn() -> T>,
+) -> Option<(SourceFile<T>, Words, bool)> {
+    let rel = normalize(&path.strip_prefix(dir).ok()?.to_string_lossy());
+    let bytes = std::fs::read(&path).ok()?;
+    // Odoo decodes assets as UTF-8 whatever they declare (18.0 `odoo/addons/base/models/assetsbundle.py:776`).
+    let text = String::from_utf8(bytes).ok();
+    let facts = match &text {
+        Some(text) => analyze(text),
+        None => undecoded?(),
+    };
+    let checked_text = text.as_deref().filter(|_| checked);
+    let file = SourceFile {
+        rel,
+        rank: None,
+        demo: false,
+        suppressions: checked_text.map(Suppressions::parse).unwrap_or_default(),
+        facts,
+        mentions: text.as_deref().map(Mentions::scan).unwrap_or_default(),
+        path,
+    };
+    Some((file, checked_text.map(Words::scan).unwrap_or_default(), text.is_none()))
 }
 
 #[cfg(test)]
@@ -1556,6 +1570,24 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         assert_eq!(modules.len(), 1);
         assert!(modules[0].python.is_empty());
+    }
+
+    #[test]
+    fn a_template_that_is_not_utf8_stays_unreadable() {
+        let dir = scratch("undecoded-template");
+        let module = written(&dir, "undecoded_template", "{'version': '18.0.1.0.0'}");
+        std::fs::create_dir_all(module.join("static/src")).unwrap();
+        std::fs::write(module.join("static/src/a.xml"), b"<templates>\xE9</templates>").unwrap();
+        // A test script's loss leaves `lost_text` alone, so the template alone sets it.
+        std::fs::create_dir_all(module.join("static/tests")).unwrap();
+        std::fs::write(module.join("static/tests/b.js"), b"// \xE9\n").unwrap();
+        let modules = load(&[module], &[], None, None, &TaintTable::default()).modules;
+        let _ = std::fs::remove_dir_all(&dir);
+        let rels: Vec<_> = modules[0].templates.iter().map(|f| f.rel.as_str()).collect();
+        assert_eq!(rels, ["static/src/a.xml"]);
+        assert!(modules[0].templates[0].facts.unreadable);
+        assert!(modules[0].lost_text);
+        assert!(modules[0].js.is_empty());
     }
 
     fn checkout(name: &str, release: &str) -> PathBuf {

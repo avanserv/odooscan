@@ -1687,6 +1687,9 @@ pub struct ComponentTag {
 #[derive(Debug, Default)]
 pub struct TemplateFacts {
     pub templates: Vec<OwlTemplate>,
+    /// The file is not UTF-8 or does not parse, so these facts say nothing of what it holds. A
+    /// blank file is not marked, as it holds no template.
+    pub unreadable: bool,
 }
 
 /// A translation catalog yields findings alone: nothing in it is indexed.

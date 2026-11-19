@@ -426,6 +426,8 @@ custom/depends_unused/__manifest__.py:26:9: OD504 module 'prov_back' depends bac
 custom/depends_unused_implied/__manifest__.py:4:25: OD520 module 'mail' already comes with 'sale', also in depends
 custom/depends_unused_mist/__manifest__.py:4:30: OD521 nothing of module 'prov_veil' is used, nor of what only it brings
 custom/depends_unused_reach/__manifest__.py:4:17: OD521 nothing of module 'prov_glen' is used, nor of what only it brings
+custom/depends_unused_smudge/__manifest__.py:4:46: OD521 nothing of module 'prov_spark' is used, nor of what only it brings
+custom/depends_unused_smudge/static/src/form_note.xml:4:9: OD606 no <div> with class 'o_smudge_panel' in template web.FormController or the templates that extend it
 custom/domain_bases/models/domain_delegates.py:74:30: OD210 'no_literal_stamp': domain.literal.delegate has no field 'no_literal_stamp'
 custom/domain_bases/models/domain_imports.py:14:30: OD210 'no_relative_stamp': domain.relative has no field 'no_relative_stamp'
 custom/domain_bases/models/domain_imports.py:23:30: OD210 'no_module_stamp': domain.module has no field 'no_module_stamp'

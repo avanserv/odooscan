@@ -21,8 +21,9 @@ const HASCLASS: &str = "hasclass";
 /// Any tag, for xpath steps written `*[...]`.
 const ANY: &str = "*";
 
-/// A file that does not parse is skipped: Odoo reads it with a recovering parser, so a strict
-/// error would not be Odoo's.
+/// A file that does not parse is unreadable, as the scan cannot tell what its author meant it to
+/// hold; a blank one holds no template. Odoo parses a template file strictly too (18.0
+/// `odoo/addons/base/models/assetsbundle.py:866-870`), so no recovering parser reads more of it.
 pub fn analyze(text: &str) -> TemplateFacts {
     let lines = Lines::new(text);
     let opts = ParsingOptions {
@@ -30,7 +31,10 @@ pub fn analyze(text: &str) -> TemplateFacts {
         ..ParsingOptions::default()
     };
     let Ok(doc) = Document::parse_with_options(text, opts) else {
-        return TemplateFacts::default();
+        return TemplateFacts {
+            unreadable: !text.trim().is_empty(),
+            ..TemplateFacts::default()
+        };
     };
     let root = doc.root_element();
     // A file holds its templates under a `<templates>` or `<odoo>` root, or is a single template.
@@ -42,7 +46,19 @@ pub fn analyze(text: &str) -> TemplateFacts {
     } else {
         template(root, &lines).into_iter().collect()
     };
-    TemplateFacts { templates }
+    TemplateFacts {
+        templates,
+        unreadable: false,
+    }
+}
+
+/// A template file that is not UTF-8, which Odoo refuses (18.0
+/// `odoo/addons/base/models/assetsbundle.py:776-780`).
+pub fn undecoded() -> TemplateFacts {
+    TemplateFacts {
+        unreadable: true,
+        ..TemplateFacts::default()
+    }
 }
 
 /// A template with `t-inherit-mode="extension"` modifies its parent in place and registers no
@@ -254,6 +270,13 @@ mod tests {
 
     fn show(e: &ArchElement) -> String {
         format!("{}[{}={}]", e.tag, e.attr, e.value)
+    }
+
+    #[test]
+    fn a_template_file_that_does_not_parse_is_unreadable() {
+        assert!(analyze(r#"<templates><t t-name="x.A"><div></t></templates>"#).unreadable);
+        assert!(!analyze(" \n").unreadable);
+        assert!(!analyze(r#"<templates><t t-name="x.A"/></templates>"#).unreadable);
     }
 
     #[test]
