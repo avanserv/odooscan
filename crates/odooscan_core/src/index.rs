@@ -3462,13 +3462,21 @@ impl<'m> Index<'m> {
     /// by `_inherit` and so may share its ids, as `ir.actions.*` do for `ir.actions.actions`, or one
     /// on the same table. A table only a run tells, on either model, counts as the same: a wrong
     /// report costs more than a miss. None when a class of `model` is unknown to the index, or no
-    /// class introduces `model`.
+    /// class introduces `model`. A plain base of a class of `base` is not unknown here: Odoo reads
+    /// `_inherit` from each class body (18.0 `odoo/models.py:246-248`, `:734-736`; 20.0
+    /// `odoo/orm/models.py:263-266`, `odoo/orm/model_classes.py:181-183`) and `_table` from the
+    /// classes that define a model (18.0 `odoo/models.py:826-832`, 20.0
+    /// `odoo/orm/model_classes.py:291-297`).
     pub fn stands_for(&self, model: &str, comodel: &str, scope: &Scope) -> Option<bool> {
         if model == comodel {
             return Some(true);
         }
         let classes = self.chain_read_from(model, scope);
-        if !self.has_introducer(model) || classes.iter().any(|(_, c)| c.hidden_parents()) {
+        let unknown = |c: &ClassFact| match c.model.as_str() {
+            "base" => c.inherit_unknown,
+            _ => c.hidden_parents(),
+        };
+        if !self.has_introducer(model) || classes.iter().any(|(_, c)| unknown(c)) {
             return None;
         }
         let inherits = classes.iter().any(|(_, c)| c.model == comodel);
@@ -3603,9 +3611,20 @@ impl<'m> Index<'m> {
     /// Whether a class in scope of `model`, or of a model it inherits or delegates to, has a parent
     /// the scan cannot see, whose fields and methods it does not know.
     pub fn hidden_parents(&self, model: &str, scope: &Scope) -> bool {
-        self.chain(model, Some(scope), true)
-            .iter()
-            .any(|(_, c)| c.hidden_parents())
+        let chain = self.chain(model, Some(scope), true);
+        self.hides_parents_in(&chain, &self.merged_classes(model, scope))
+    }
+
+    /// Whether a class of `chain` has a parent the scan cannot see. A class of `base` is in every
+    /// chain, so for it a plain base that is a class of `merged`, the `merged_classes` of the model,
+    /// counts as seen: else a `class Base(Base)` would hide the parents of every model of its module
+    /// and its dependents. A class of a model reached only through `_inherits` does not count, as it
+    /// gives the model its methods through the MRO of `base`.
+    fn hides_parents_in(&self, chain: &[(usize, &'m ClassFact)], merged: &[(usize, &'m ClassFact)]) -> bool {
+        chain.iter().any(|&(mi, c)| match c.model.as_str() {
+            "base" => self.unread_parents(mi, c, merged, &c.plain_sources),
+            _ => c.hidden_parents(),
+        })
     }
 
     /// Whether a class in scope of `model`, or of a model it inherits or delegates to, sits in a file
@@ -3664,10 +3683,10 @@ impl<'m> Index<'m> {
     }
 
     /// Whether a class of the chain of `model` has a non-literal `_inherit` element or one of the
-    /// `bases` the scan does not read. Unlike `hidden_parents`, a Python base that is another class
-    /// of the chain counts as read, whether the file defines it above the class or imports it:
-    /// mixins subclass each other along their `_inherit`, and Odoo merges that class's fields either
-    /// way. A class of `base` counts too: Odoo appends `base` to the parents of every other model
+    /// `bases` the scan does not read. A Python base that is another class of the chain counts as
+    /// read on every class, where `hidden_parents` reads it so only on a class of `base`, whether the
+    /// file defines it above the class or imports it: mixins subclass each other along their
+    /// `_inherit`, and Odoo merges that class's fields either way. A class of `base` counts too: Odoo appends `base` to the parents of every other model
     /// (18.0 `odoo/models.py:732-736`, 20.0 `odoo/orm/model_classes.py:179-183`), so its fields and
     /// methods reach the model whether or not it is a Python base.
     fn unread_bases(
@@ -3678,13 +3697,25 @@ impl<'m> Index<'m> {
         bases: impl Fn(&ClassFact) -> &[BaseSource],
     ) -> bool {
         let chain = self.chain(model, Some(scope), delegated);
-        let read = |mi: usize, class: &ClassFact, base: &BaseSource| {
+        chain
+            .iter()
+            .any(|&(mi, c)| self.unread_parents(mi, c, &chain, bases(c)))
+    }
+
+    /// Whether `class`, of module `mi`, has a non-literal `_inherit` element or one of `bases` that
+    /// the scan does not read as a class of `chain`.
+    pub fn unread_parents(
+        &self,
+        mi: usize,
+        class: &ClassFact,
+        chain: &[(usize, &'m ClassFact)],
+        bases: &[BaseSource],
+    ) -> bool {
+        let read = |base: &BaseSource| {
             self.base_class(mi, class, base)
                 .is_some_and(|parent| chain.iter().any(|(_, other)| std::ptr::eq(*other, parent)))
         };
-        chain
-            .iter()
-            .any(|&(mi, c)| c.inherit_unknown || bases(c).iter().any(|base| !read(mi, c, base)))
+        class.inherit_unknown || bases.iter().any(|base| !read(base))
     }
 
     /// The model class a plain base of `class`, of module `mi`, names, when the scan reads it: a
@@ -3728,9 +3759,8 @@ impl<'m> Index<'m> {
     /// `_inherits` does not count: it gives the model its fields, so its hidden methods do not reach
     /// the model.
     pub fn merged_hidden_parents(&self, model: &str, scope: &Scope) -> bool {
-        self.merged_classes(model, scope)
-            .iter()
-            .any(|(_, c)| c.hidden_parents())
+        let merged = self.merged_classes(model, scope);
+        self.hides_parents_in(&merged, &merged)
     }
 
     /// Whether a class of `class`'s model, or a parent or delegate of it, is out of the scan's sight,
@@ -3748,27 +3778,39 @@ impl<'m> Index<'m> {
     /// every extension of a model introduced outside the scan would read its fields as unknown.
     /// `hidden_parents` asks of methods too, which a delegate does not pass on.
     pub fn unread_delegate(&self, model: &str, scope: &Scope) -> bool {
-        self.chain(model, Some(scope), true).iter().any(|(_, c)| {
-            let delegates = c.inherits.iter().map(|(parent, _)| parent);
-            let mut parents = delegates.chain(c.inherit.iter().map(|parent| &parent.value));
-            let unread = |parent: &String| *parent != c.model && !self.has_introducer(parent);
-            c.inherits_unknown || c.delegate_unknown || parents.any(unread)
-        })
+        self.chain(model, Some(scope), true)
+            .iter()
+            .any(|(_, c)| self.delegates_unread(c))
+    }
+
+    /// Whether class `c` delegates to a parent the scan cannot read, or is such a parent: see
+    /// `unread_delegate`.
+    fn delegates_unread(&self, c: &ClassFact) -> bool {
+        let delegates = c.inherits.iter().map(|(parent, _)| parent);
+        let mut parents = delegates.chain(c.inherit.iter().map(|parent| &parent.value));
+        let unread = |parent: &String| *parent != c.model && !self.has_introducer(parent);
+        c.inherits_unknown || c.delegate_unknown || parents.any(unread)
     }
 
     /// Whether `model`, defined only by modules outside `scope`, may get fields from a parent the
-    /// scan cannot read on any class of it, its parents or `base` in any indexed module. Odoo
-    /// builds the model from the classes of every installed module (18.0
-    /// `odoo/modules/registry.py:290-292`, `odoo/modules/loading.py:195`; 20.0
-    /// `odoo/orm/registry.py:449-451`, `odoo/modules/loading.py:181`) and takes fields from every
-    /// class of its MRO (18.0 `odoo/models.py:3640`, `:3653-3657`; 20.0
-    /// `odoo/orm/model_classes.py:382`, `:395-399`), and any of those modules may be installed.
+    /// scan cannot read on any class of it or its parents in any indexed module, or of `base` in a
+    /// module the closure of the model's introducer sees, which installs with the model. Odoo builds
+    /// the model from the classes of every installed module (18.0 `odoo/modules/registry.py:290-292`,
+    /// `odoo/modules/loading.py:195`; 20.0 `odoo/orm/registry.py:449-451`,
+    /// `odoo/modules/loading.py:181`) and takes fields from every class of its MRO (18.0
+    /// `odoo/models.py:3640`, `:3653-3657`; 20.0 `odoo/orm/model_classes.py:382`, `:395-399`).
     pub fn hidden_outside(&self, model: &str, scope: &Scope) -> bool {
-        if !matches!(self.model_status(model, scope, None), Status::Hidden(_)) {
+        let Status::Hidden(owner) = self.model_status(model, scope, None) else {
             return false;
-        }
-        let every = self.every_module();
-        self.hidden_field_parents(model, &every) || self.unread_delegate(model, &every)
+        };
+        let installed = self.scope(self.by_name[owner]);
+        let mut chain = self.chain(model, Some(&self.every_module()), true);
+        // Outside the owner's closure a class of `base` may not install with the model, so it
+        // neither hides fields nor reads as the parent of another class.
+        chain.retain(|&(mi, c)| c.model != "base" || installed.sees(mi));
+        chain
+            .iter()
+            .any(|&(mi, c)| self.unread_parents(mi, c, &chain, &c.opaque_bases) || self.delegates_unread(c))
     }
 
     /// What `holds_fields` asks, and no plain base the scan does not read, which may hold methods
@@ -7225,6 +7267,145 @@ Order.components.Card = null;
         assert!(index.hidden_outside("side.hidden", &main));
         assert!(!index.hidden_outside("side.plain", &main));
         assert!(!index.hidden_outside("side.hidden", &reader));
+    }
+
+    const REBOUND_BASE: &str = "class Base(models.AbstractModel):\n    _inherit = 'base'\n\n\
+                                class Base(Base):\n    _inherit = 'base'\n";
+    const OPAQUE_BASE: &str = "from mixin_kit import ImportedMixin\n\n\
+                               class Base(models.AbstractModel, ImportedMixin):\n    _inherit = 'base'\n";
+
+    /// `base`, `kit` with two models, which depends on `kit_depends`, and `extra`, which holds the
+    /// classes of `base` in `source`.
+    fn base_class_modules(kit_depends: &str, source: &str) -> [Module; 3] {
+        let manifest = |depends: &str| format!("{{'version': '18.0.1.0', 'depends': [{depends}]}}");
+        let mut modules = [
+            module("base", &manifest("")),
+            module("kit", &manifest(kit_depends)),
+            module("extra", &manifest("'base'")),
+        ];
+        modules[0]
+            .python
+            .push(python_18("class B(models.Model):\n    _name = 'base'\n"));
+        modules[1].python.push(python_18(
+            "class Thing(models.Model):\n    _name = 'kit.thing'\n\n\
+             class Other(models.Model):\n    _name = 'kit.other'\n",
+        ));
+        modules[2].python.push(python_18(source));
+        modules
+    }
+
+    #[test]
+    fn a_plain_base_of_a_class_of_base_keeps_other_models_apart() {
+        for source in [REBOUND_BASE, OPAQUE_BASE] {
+            let modules = base_class_modules("'base'", source);
+            let index = Index::build(&modules, None);
+            let kit = index.scope(index.by_name["kit"]);
+            assert_eq!(
+                index.stands_for("kit.thing", "kit.other", &kit),
+                Some(false),
+                "{source}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_non_literal_inherit_of_a_class_of_base_leaves_other_models_unknown() {
+        let source = "class Base(models.AbstractModel):\n    _inherit = ['base', PARENT]\n";
+        let modules = base_class_modules("'base'", source);
+        let index = Index::build(&modules, None);
+        let kit = index.scope(index.by_name["kit"]);
+        assert_eq!(index.stands_for("kit.thing", "kit.other", &kit), None);
+    }
+
+    #[test]
+    fn a_class_of_base_hides_parents_only_through_an_unresolved_base() {
+        for (source, hidden) in [(REBOUND_BASE, false), (OPAQUE_BASE, true)] {
+            let modules = base_class_modules("'extra'", source);
+            let index = Index::build(&modules, None);
+            let kit = index.scope(index.by_name["kit"]);
+            assert_eq!(index.hidden_parents("kit.thing", &kit), hidden, "{source}");
+            assert_eq!(index.merged_hidden_parents("kit.thing", &kit), hidden, "{source}");
+        }
+    }
+
+    #[test]
+    fn only_an_unresolved_base_of_a_class_of_base_is_unread() {
+        for (source, unread) in [(REBOUND_BASE, false), (OPAQUE_BASE, true)] {
+            let modules = base_class_modules("'base'", source);
+            let index = Index::build(&modules, None);
+            let extra = index.by_name["extra"];
+            let chain = index.chain_classes("kit.thing");
+            let &(mi, class) = chain
+                .iter()
+                .find(|(mi, c)| *mi == extra && !c.plain_bases.is_empty())
+                .unwrap();
+            assert_eq!(
+                index.unread_parents(mi, class, &chain, &class.plain_sources),
+                unread,
+                "{source}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_class_of_base_hides_parents_only_where_the_model_installs_it() {
+        let hidden = |kit_depends: &str| {
+            let modules = base_class_modules(kit_depends, OPAQUE_BASE);
+            let index = Index::build(&modules, None);
+            let reader = index.scope(index.by_name["base"]);
+            index.hidden_outside("kit.thing", &reader)
+        };
+        assert!(!hidden("'base'"));
+        assert!(hidden("'extra'"));
+    }
+
+    #[test]
+    fn a_class_of_base_out_of_the_owner_closure_is_no_read_parent() {
+        let manifest = |depends: &str| format!("{{'version': '18.0.1.0', 'depends': [{depends}]}}");
+        let mut modules = [
+            module("base", &manifest("")),
+            module("kit", &manifest("'base'")),
+            module("extra", &manifest("'kit'")),
+        ];
+        modules[0]
+            .python
+            .push(python_18("class B(models.Model):\n    _name = 'base'\n"));
+        modules[1]
+            .python
+            .push(python_18("class Thing(models.Model):\n    _name = 'kit.thing'\n"));
+        modules[2].python.push(python_18(
+            "class Base(models.AbstractModel):\n    _inherit = 'base'\n    x_flag = fields.Char()\n\n\
+             class Thing(Base):\n    _inherit = 'kit.thing'\n",
+        ));
+        let index = Index::build(&modules, None);
+        let reader = index.scope(index.by_name["base"]);
+        assert!(index.hidden_outside("kit.thing", &reader));
+    }
+
+    #[test]
+    fn a_class_of_base_on_a_class_of_a_delegate_hides_parents() {
+        let manifest = |depends: &str| format!("{{'version': '18.0.1.0', 'depends': [{depends}]}}");
+        let mut modules = [
+            module("base", &manifest("")),
+            module("kit", &manifest("'base'")),
+            module("extra", &manifest("'kit'")),
+        ];
+        modules[0]
+            .python
+            .push(python_18("class B(models.Model):\n    _name = 'base'\n"));
+        modules[1].python.push(python_18(
+            "class Parent(models.Model):\n    _name = 'kit.parent'\n\n\
+             class Thing(models.Model):\n    _name = 'kit.thing'\n    _inherits = {'kit.parent': 'parent_id'}\n\
+             \x20   parent_id = fields.Many2one('kit.parent')\n",
+        ));
+        modules[2].python.push(python_18(
+            "class Parent(models.Model):\n    _inherit = 'kit.parent'\n\n\
+             class Base(Parent):\n    _inherit = 'base'\n",
+        ));
+        let index = Index::build(&modules, None);
+        let extra = index.scope(index.by_name["extra"]);
+        assert!(index.hidden_parents("kit.thing", &extra));
+        assert!(!index.hidden_parents("kit.parent", &extra));
     }
 
     #[test]

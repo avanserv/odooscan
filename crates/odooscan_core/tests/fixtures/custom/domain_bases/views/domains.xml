@@ -114,4 +114,8 @@
             </form>
         </field>
     </record>
+
+    <record id="domain_whole_action_link" model="domain.whole">
+        <field name="parent_id" ref="action_domain_hidden"/>
+    </record>
 </odoo>
