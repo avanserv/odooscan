@@ -890,7 +890,8 @@ custom/legacy15/models/res_partner.py:9:22: OD212 Monetary field 'parent_balance
 custom/legacy15/models/res_partner.py:13:18: OD221 'child_ids.total' makes 'total' depend on itself on other records, so Odoo logs a warning; declare 'total' with recursive=True
 custom/legacy15/models/res_partner.py:49:24: OD211 no parent class of res.partner defines '_name_gone', so this super() call fails
 custom/legacy15/models/res_partner.py:65:24: OD211 no parent class of res.partner defines '__nope__', so this super() call fails
-custom/legacy15/models/res_partner.py:72:24: OD211 no parent class of res.partner defines 'ids', so this super() call fails
+custom/legacy15/models/res_partner.py:72:24: OD211 'ids' is a property or plain value of BaseModel, not a method, so this super() call raises TypeError
+custom/legacy15/models/res_partner.py:81:24: OD211 '_populate_sizes' is a property or plain value of BaseModel, not a method, so this super() call raises TypeError
 custom/legacy15/security/rules.xml:4:36: OD210 'no_replaced': res.partner has no field 'no_replaced'
 custom/legacy15/security/second_writes.xml:2:5: OD323 XML id 'rule_partner_replaced' is already defined in security/rules.xml, and this definition overwrites the fields both name; remove the copy when the two say the same thing, or rename one when both are meant to exist
 custom/legacy15/security/second_writes.xml:3:36: OD407 res.partner.name has no index, yet record rule legacy15.rule_partner_replaced filters reads of res.partner on it; add index=True to the field
@@ -1923,7 +1924,7 @@ custom/supers/models/supers.py:85:31: OD211 no parent class of bad.super defines
 custom/supers/models/supers.py:97:21: OD211 no parent class of bad.super defines '_guard_unchecked', so this super() call fails
 custom/supers/models/supers.py:98:24: OD211 no parent class of bad.super defines '_guard_gone', so this super() call fails
 custom/supers/models/supers.py:108:24: OD211 no parent class of bad.super defines '__getattr__', so this super() call fails
-custom/supers/models/supers.py:122:24: OD211 no parent class of bad.super defines '__seal', so this super() call fails
+custom/supers/models/supers.py:122:24: OD211 '__seal' is private to class SuperSeal: this super() call looks up '_SuperSealOther__seal', which no parent class of bad.super defines, so it fails
 custom/supers/models/supers.py:176:53: OD211 no parent class of bad.super defines '_explicit_gone', so this super() call fails
 custom/supers/models/supers.py:197:32: OD211 no class of bad.super defines '_dynamic_gone', so this super() call fails
 custom/supers/models/supers.py:201:32: OD211 no class of bad.super defines '_class_gone', so this super() call fails
@@ -1932,6 +1933,8 @@ custom/supers/models/supers.py:224:22: OD140 super() without arguments runs in a
 custom/supers/models/supers.py:245:17: OD211 no parent class of bad.super defines '_neg_other', so this super() call fails
 custom/supers/models/supers.py:253:21: OD211 no parent class of bad.super defines '_class_other', so this super() call fails
 custom/supers/models/supers.py:254:59: OD211 no parent class of bad.super defines '_and_other', so this super() call fails
+custom/supers/models/supers.py:265:24: OD211 no parent class of bad.super defines '_populate_sizes', so this super() call fails
+custom/supers/models/supers.py:272:24: OD211 '__lid' is private to class SuperSealLater: this super() call looks up '_SuperSealFirst__lid', which no parent class of bad.super defines, so it fails
 custom/test_imports/static/src/widget.js:4:24: OD605 no indexed bundle defines template 'test_imports.Gone'
 custom/test_imports/static/src/widget_patch.js:7:22: OD602 neither Widget nor its parents have 'prepare', so super.prepare() fails
 custom/test_imports/static/tests/widget.test.js:3:10: OD601 '@web/../tests/web_test_helpers' does not export 'mountGone'

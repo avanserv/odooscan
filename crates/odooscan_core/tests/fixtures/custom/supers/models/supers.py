@@ -256,3 +256,24 @@ class SuperGuardForms(models.Model):
 
 class SuperGuardLater(models.Model):
     _inherit = "bad.super"
+
+
+class SuperValues(models.Model):
+    _inherit = "bad.super"
+
+    def _values_populate(self):
+        return super()._populate_sizes()
+
+
+class SuperSealFirst(models.Model):
+    _inherit = "bad.super"
+
+    def __lid(self):
+        return super().__lid()
+
+
+class SuperSealLater(models.Model):
+    _inherit = "bad.super"
+
+    def __lid(self):
+        return 2

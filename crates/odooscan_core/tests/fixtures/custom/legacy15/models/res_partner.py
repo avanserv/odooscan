@@ -76,3 +76,6 @@ class ResPartnerValues(models.Model):
 
     def _onchange_methods(self):
         return {}
+
+    def _values_populate(self):
+        return super()._populate_sizes()
