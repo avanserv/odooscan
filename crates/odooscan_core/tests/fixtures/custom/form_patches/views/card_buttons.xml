@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="form_card_buttons" model="ir.ui.view">
+        <field name="model">form.card</field>
+        <field name="arch" type="xml">
+            <form>
+                <header>
+                    <button type="object" name="card_sizes" string="Sizes"/>
+                    <button type="object" name="card_margin" string="Margin"/>
+                    <button type="object" name="card_title" string="Title"/>
+                    <button type="object" name="is_transient" string="Transient"/>
+                </header>
+            </form>
+        </field>
+    </record>
+</odoo>

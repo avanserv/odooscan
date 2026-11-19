@@ -4203,12 +4203,12 @@ impl<'m> Index<'m> {
             })
     }
 
-    /// Whether Odoo refuses an RPC call on `name` because the model's class binds it to no records: a
-    /// class method, a static method or a `partial`. Every class in scope of a known `model` that
-    /// binds it, or whose plain base does, must, since the index does not order the MRO, and with
-    /// none or no model `BaseModel` decides. A base the scan cannot read, which a class in a file
-    /// that does not parse counts as having, may bind it to the records. An unknown series counts
-    /// none, as 18.0 calls such a method.
+    /// Whether Odoo refuses a button or an RPC call on `name` because the model's class binds it to
+    /// no records: a class method, a static method or a `partial`. Every class in scope of a known
+    /// `model` that binds it, or whose plain base does, must, since the index does not order the
+    /// MRO, and with none or no model `BaseModel` decides. A base the scan cannot read, which a
+    /// class in a file that does not parse counts as having, may bind it to the records. An
+    /// unknown series counts none, as 18.0 calls such a method.
     pub fn unbound_method(&self, model: Option<&str>, name: &str, scope: &Scope, series: Option<Series>) -> bool {
         if !series.is_some_and(|s| series::matches(UNBOUND_REFUSED, s)) {
             return false;
@@ -4226,12 +4226,6 @@ impl<'m> Index<'m> {
         } else {
             bindings.iter().all(|&unbound| unbound)
         }
-    }
-
-    /// Whether Odoo refuses an RPC call on `name`: what it refuses of a button too, or a method
-    /// bound to no records.
-    pub fn refused_rpc(&self, model: Option<&str>, name: &str, scope: &Scope, series: Option<Series>) -> bool {
-        self.refused_call(model, name, scope, series) || self.unbound_method(model, name, scope, series)
     }
 
     /// Whether a parent class defines `name` as `has_parent_method` reads it, or `BaseModel` binds
@@ -5222,9 +5216,7 @@ mod tests {
         assert!(unbound(clock, "is_transient", Some("19.0")) && unbound(None, "is_transient", Some("20.0")));
         assert!(!unbound(Some("x.dial"), "is_transient", Some("20.0")));
         assert!(!unbound(clock, "missing", Some("20.0")) && !unbound(None, "tick", Some("20.0")));
-        let series = Series::parse("20.0");
-        assert!(!index.refused_call(clock, "tick", &scope, series));
-        assert!(index.refused_rpc(clock, "tick", &scope, series));
+        assert!(!index.refused_call(clock, "tick", &scope, Series::parse("20.0")));
     }
 
     #[test]

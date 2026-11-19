@@ -258,7 +258,7 @@ rules! {
     "OD310" "unmatched-view-locator" Correctness Error None, true, "An inherited view locates an element its parent views do not have.";
     "OD311" "unknown-qweb-template" Correctness Error None, true, "A QWeb view or a report names a template no module in scope defines.";
     "OD312" "unknown-button-method" Correctness Error None, true, "A button calls a method its model does not have.";
-    "OD313" "private-button-method" Correctness Error None, true, "A button calls a private method, which Odoo refuses.";
+    "OD313" "private-button-method" Correctness Error None, true, "A button calls a method Odoo refuses to call.";
     "OD314" "unknown-function-method" Correctness Error None, true, "A <function> of a data file calls a method its model does not have.";
     // saas~16.4 has no `VIEW_MODIFIERS`, and 17.0 validates them (18.0
     // `odoo/addons/base/models/ir_ui_view.py:1812-1815`, 20.0 `:2224-2227`).

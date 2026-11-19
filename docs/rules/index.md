@@ -160,7 +160,7 @@ scripts add to a registry.
 | [OD310](OD310.md) | `unmatched-view-locator` | An inherited view locates an element its parent views do not have. |
 | [OD311](OD311.md) | `unknown-qweb-template` | A QWeb view or a report names a template no module in scope defines. |
 | [OD312](OD312.md) | `unknown-button-method` | A button calls a method its model does not have. |
-| [OD313](OD313.md) | `private-button-method` | A button calls a private method, which Odoo refuses. |
+| [OD313](OD313.md) | `private-button-method` | A button calls a method Odoo refuses to call. |
 | [OD314](OD314.md) | `unknown-function-method` | A `<function>` of a data file calls a method its model does not have. |
 | [OD315](OD315.md) | `invalid-modifier` | A view modifier is not an expression Odoo reads. |
 | [OD316](OD316.md) | `unknown-modifier-name` | A view modifier names a field its model does not have. |
