@@ -709,6 +709,23 @@ custom/ghost_parents/models/parents.py:11:17: OD201 no indexed module defines mo
 custom/ghost_parents/models/parents.py:15:16: OD201 no indexed module defines model 'ghost.tray'
 custom/ghost_parents/views/functions.xml:4:42: OD314 parent.bench has no method 'action_ghost'
 custom/ghost_parents_heir/models/shelf.py:7:32: OD204 parent.shelf has no method '_compute_note'
+custom/ghost_refs/data/records.xml:13:39: OD321 'ghost_refs.refs_one' is a record of refs.thing, but refs.holder.partner_id takes res.partner
+custom/ghost_refs/models/ghost_thing.py:6:16: OD201 no indexed module defines model 'ghost.thing'
+custom/ghost_refs/models/ghost_thing.py:21:16: OD201 no indexed module defines model 'ghost.thing'
+custom/ghost_refs/models/refs.py:15:24: OD211 no parent class of refs.thing defines 'action_go', so this super() call fails
+custom/ghost_refs/models/refs.py:17:9: OD230 no parent class of refs.thing defines '_compute_spare' and no file names it, so Odoo never runs it
+custom/ghost_refs/models/refs.py:27:9: OD229 this override takes no 'stamp' by position, which action_sign(self, stamp) in module ghost_refs requires, so a call that passes it fails
+custom/ghost_refs/models/refs.py:36:34: OD202 model 'ghost.lantern' comes from module ghost_refs_side; add it to depends
+custom/ghost_refs/models/refs.py:37:39: OD202 model 'side.lantern' comes from module ghost_refs_side; add it to depends
+custom/ghost_refs/models/refs.py:39:45: OD203 'side_lantern_id.wick': field 'wick' of side.lantern comes from module ghost_refs_side, which is not in depends
+custom/ghost_refs/models/refs.py:41:46: OD208 inverse 'tag' on refs.thing is a Char field, not a Many2one
+custom/ghost_refs/models/refs.py:50:34: OD202 model 'ghost.lantern' comes from module ghost_refs_side; add it to depends
+custom/ghost_refs/models/refs.py:59:34: OD202 model 'side.lantern' comes from module ghost_refs_side; add it to depends
+custom/ghost_refs/models/refs.py:60:33: OD203 'glow': refs.heir has no field 'glow'
+custom/ghost_refs/models/refs.py:66:17: OD202 model 'ghost.lantern' comes from module ghost_refs_side; add it to depends
+custom/ghost_refs/models/refs.py:74:17: OD202 model 'side.lantern' comes from module ghost_refs_side; add it to depends
+custom/ghost_refs/models/refs.py:76:33: OD203 'glow': refs.cub has no field 'glow'
+custom/ghost_refs_side/models/lantern.py:6:16: OD201 no indexed module defines model 'ghost.lantern'
 custom/html_sinks/static/src/debug.js:2:5: OD611 console.log() is a debugging leftover that writes to every user's console; remove it
 custom/html_sinks/static/src/debug.js:3:5: OD612 debugger pauses the script in every browser with the developer tools open; remove it
 custom/html_sinks/static/src/debug.js:13:5: OD611 console.log() is a debugging leftover that writes to every user's console; remove it

@@ -3438,13 +3438,14 @@ impl<'m> Index<'m> {
     /// Whether a record of `model` may be one of `comodel`: the same model, a model that inherits it
     /// by `_inherit` and so may share its ids, as `ir.actions.*` do for `ir.actions.actions`, or one
     /// on the same table. A table only a run tells, on either model, counts as the same: a wrong
-    /// report costs more than a miss. None when a class of `model` is unknown to the index.
+    /// report costs more than a miss. None when a class of `model` is unknown to the index, or no
+    /// class introduces `model`.
     pub fn stands_for(&self, model: &str, comodel: &str, scope: &Scope) -> Option<bool> {
         if model == comodel {
             return Some(true);
         }
         let classes = self.chain_read_from(model, scope);
-        if !self.has_model(model) || classes.iter().any(|(_, c)| c.hidden_parents()) {
+        if !self.has_introducer(model) || classes.iter().any(|(_, c)| c.hidden_parents()) {
             return None;
         }
         let inherits = classes.iter().any(|(_, c)| c.model == comodel);
@@ -3465,10 +3466,6 @@ impl<'m> Index<'m> {
     /// The model of the `ir.model` record Odoo generates under a full XML id.
     pub fn model_of_xmlid(&self, id: &str) -> Option<&'m str> {
         self.model_by_xmlid.get(id).copied()
-    }
-
-    pub fn has_model(&self, model: &str) -> bool {
-        self.models.contains_key(model)
     }
 
     /// Whether `model` is defined in scope, ignoring every class of module `extender` that only
@@ -3686,12 +3683,15 @@ impl<'m> Index<'m> {
 
     /// Whether a class in scope of `model`, or of a model it inherits or delegates to, delegates to a
     /// parent the scan cannot read, or is such a parent, so the fields `model` has through `_inherits`
-    /// are not all known. `hidden_parents` asks of methods too, which a delegate does not pass on.
+    /// are not all known. A parent no class introduces counts, but not a class's own model: else
+    /// every extension of a model introduced outside the scan would read its fields as unknown.
+    /// `hidden_parents` asks of methods too, which a delegate does not pass on.
     pub fn unread_delegate(&self, model: &str, scope: &Scope) -> bool {
         self.chain(model, Some(scope), true).iter().any(|(_, c)| {
             let delegates = c.inherits.iter().map(|(parent, _)| parent);
             let mut parents = delegates.chain(c.inherit.iter().map(|parent| &parent.value));
-            c.inherits_unknown || c.delegate_unknown || parents.any(|parent| !self.has_model(parent))
+            let unread = |parent: &String| *parent != c.model && !self.has_introducer(parent);
+            c.inherits_unknown || c.delegate_unknown || parents.any(unread)
         })
     }
 
@@ -4243,17 +4243,19 @@ impl<'m> Index<'m> {
     /// Whether a class of any module introduces `model` with `_name`. Odoo refuses to extend or
     /// inherit a model absent from the registry (18.0 `odoo/models.py:739-741`, `:759-761`; 20.0
     /// `odoo/orm/model_classes.py:186-188`, `:208-210`), so one only extended here is introduced
-    /// outside the scan.
-    fn has_introducer(&self, model: &str) -> bool {
+    /// outside the scan, and copies an `_inherits` parent's fields from that registry model (18.0
+    /// `odoo/models.py:3565-3569`; 20.0 `odoo/orm/model_classes.py:518-522`).
+    pub fn has_introducer(&self, model: &str) -> bool {
         self.classes(model).iter().any(|(_, c)| c.new_model)
     }
 
-    /// Follows a dotted field path from `model`. Paths through models nobody defines are accepted.
+    /// Follows a dotted field path from `model`. Paths through models no class introduces are
+    /// accepted.
     pub fn resolve_path(&self, model: &str, path: &str, scope: &Scope) -> Result<(), PathError<'m>> {
         let mut model = model.to_owned();
         let segments: Vec<&str> = path.split('.').collect();
         for (i, segment) in segments.iter().enumerate() {
-            if !self.has_model(&model) {
+            if !self.has_introducer(&model) {
                 return Ok(());
             }
             let Some(info) = self.step(&model, segment, scope)? else {
@@ -5719,6 +5721,42 @@ mod tests {
         for model in ["parent.bench", "res.partner", "side.thing"] {
             assert!(!index.unindexed_parent(model, &scope), "{model}");
         }
+    }
+
+    #[test]
+    fn a_model_no_class_introduces_reads_as_unknown() {
+        let manifest = |depends: &str| format!("{{'version': '18.0.1.0', 'depends': [{depends}]}}");
+        let mut modules = [
+            module("base", &manifest("")),
+            module("side", &manifest("'base'")),
+            module("main", &manifest("'base'")),
+        ];
+        modules[0]
+            .python
+            .push(python_18("class P(models.Model):\n    _name = 'res.partner'\n"));
+        modules[1].python.push(python_18(
+            "class G(models.AbstractModel):\n    _inherit = 'ghost.lantern'\n    wick = fields.Char()\n\n\
+             class S(models.AbstractModel):\n    _name = 'side.lantern'\n    wick = fields.Char()\n",
+        ));
+        modules[2].python.push(python_18(
+            "class G(models.Model):\n    _inherit = 'ghost.thing'\n\n\
+             class R(models.Model):\n    _name = 'refs.thing'\n\n\
+             class C(models.Model):\n    _name = 'refs.child'\n    _inherits = {'ghost.lantern': 'lantern_id'}\n\n\
+             class H(models.Model):\n    _name = 'refs.heir'\n    _inherits = {'side.lantern': 'lantern_id'}\n\n\
+             class K(models.Model):\n    _name = 'refs.kid'\n    _inherit = ['ghost.lantern']\n",
+        ));
+        let index = Index::build(&modules, None);
+        let scope = index.scope(index.by_name["main"]);
+        assert!(index.resolve_path("ghost.thing", "wick", &scope).is_ok());
+        assert!(index.resolve_path("refs.thing", "wick", &scope).is_err());
+        for model in ["refs.child", "refs.kid"] {
+            assert!(index.unread_delegate(model, &scope), "{model}");
+        }
+        for model in ["ghost.thing", "refs.heir"] {
+            assert!(!index.unread_delegate(model, &scope), "{model}");
+        }
+        assert_eq!(index.stands_for("ghost.thing", "res.partner", &scope), None);
+        assert_eq!(index.stands_for("refs.thing", "res.partner", &scope), Some(false));
     }
 
     #[test]

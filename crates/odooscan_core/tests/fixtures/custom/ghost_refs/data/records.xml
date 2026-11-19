@@ -1,0 +1,15 @@
+<odoo>
+    <record id="ghost_one" model="ghost.thing">
+        <field name="tag">ghost</field>
+    </record>
+    <record id="refs_one" model="refs.thing">
+        <field name="tag">refs</field>
+    </record>
+    <!-- No indexed class introduces ghost.thing, so its table may be that of res.partner. -->
+    <record id="holder_ghost" model="refs.holder">
+        <field name="partner_id" ref="ghost_one"/>
+    </record>
+    <record id="holder_refs" model="refs.holder">
+        <field name="partner_id" ref="refs_one"/>
+    </record>
+</odoo>
