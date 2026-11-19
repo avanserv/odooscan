@@ -40,17 +40,27 @@ class DomainReimported(Shadowed):
         return self.search([("stamp", "=", "a")])
 
 
-class Assigned(models.Model):
-    _inherit = "domain.shadowed"
+class Base(models.AbstractModel):
+    _inherit = "base"
 
 
-Assigned = DomainOwn
+class DomainKept(Base):
+    _name = "domain.kept"
+    _description = "Abstract through a class of base"
 
 
-class DomainAssigned(Assigned):
+Base = DomainOwn
+
+
+class DomainAssigned(Base):
     _name = "domain.assigned"
     _inherit = ["domain.shadowed"]
     _description = "Python base an assignment rebinds past a class of the chain"
 
     def x_lookup(self):
         return self.search([("stamp", "=", "a")])
+
+
+class DomainRebased(Base):
+    _name = "domain.rebased"
+    _description = "Python base an assignment rebinds past an abstract class"

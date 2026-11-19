@@ -447,6 +447,7 @@ fn an_undecorated_route_override_is_an_error_before_saas_15_3() {
 fn access_severity_follows_the_module_series() {
     let expected = [
         ("bad_sale", Severity::Warning),
+        ("domain_bases", Severity::Warning),
         ("encoded_lost_stranger", Severity::Warning),
         ("falsy_names20", Severity::Info),
         ("modern20", Severity::Info),
