@@ -61,16 +61,19 @@ finding stays reported. A second `--fix` changes nothing the first one fixed.
 
 A file is left alone with a notice when its text changed between the check reading it and the
 fix, or when putting the rewrite in its place would change more than its text: when the user cannot
-write it, when it has other hard links, when it belongs to another user, or when it belongs to a
-group its owner is not in. The last three are checked on Unix only.
+write it, when it has other hard links, when it belongs to another user, or when its group cannot be
+given to the rewrite. The last three are checked on Unix only. The group is in question only when
+the directory does not give it to a new file, as a setgid directory does, and any directory on BSD
+and macOS: when the user running the fix is not in it, or a user namespace, as in a rootless
+container, does not map it.
 
 `--diff` gives the same notice and leaves the file out of the diff when its text changed, which
 both find by comparing it with what the check read, and when its mode lets no one write it or it
 has other hard links, which its metadata tells without opening it for write. Other skips and
 failures show only on a real write, so `--diff` still prints the rewrite of, for example, a file of
-another user or of a group its owner is not in, one that its mode lets others write but not the
-user running it, one that an ACL or a read-only mount protects, or one in a directory where no file
-can be created. Under root, it leaves out a read-only file that `--fix` writes.
+another user or of a group the rewrite cannot be given, one that its mode lets others write but not
+the user running it, one that an ACL or a read-only mount protects, or one in a directory where no
+file can be created. Under root, it leaves out a read-only file that `--fix` writes.
 
 ## Exit status and flags
 

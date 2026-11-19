@@ -1,6 +1,6 @@
 //! `check --fix` and `check --diff`: the rewrites that the reported findings carry, file by file.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::OsString;
 use std::fs::{File, Metadata, OpenOptions};
 use std::io::{self, Write};
@@ -63,12 +63,15 @@ fn rewrite<'d>(path: &'d Path, found: Vec<&'d Diagnostic>, rel: &dyn Fn(&Path) -
     })
 }
 
-/// Prints the rewrites of the fixes of `diags` as unified diffs, and writes nothing. Exits 1 when
-/// anything is reported, as a check does, so that a diff that leaves findings fails.
+/// Prints the rewrites of the fixes of `diags` as unified diffs, and writes nothing. Leaves out a
+/// file that `--fix` would leave alone, as far as its text and its metadata tell. Exits 1 when
+/// anything is reported, as a check does, so that a diff that leaves findings fails, and 2 when a
+/// file to rewrite cannot be resolved or its metadata read.
 pub fn diff(diags: &[&Diagnostic], rel: &dyn Fn(&Path) -> String) -> ExitCode {
-    let rewrites = rewrites(diags, rel);
-    let fixable: usize = rewrites.iter().map(|r| r.fixed.len()).sum();
-    let files = rewrites.len();
+    show(rewrites(diags, rel), diags, rel)
+}
+
+fn show(rewrites: Vec<Rewrite<'_>>, diags: &[&Diagnostic], rel: &dyn Fn(&Path) -> String) -> ExitCode {
     let (shown, failed) = foreseen(rewrites, rel);
     let mut stdout = io::stdout().lock();
     for r in &shown {
@@ -80,14 +83,7 @@ pub fn diff(diags: &[&Diagnostic], rel: &dyn Fn(&Path) -> String) -> ExitCode {
             .to_string();
         let _ = stdout.write_all(text.as_bytes());
     }
-    let left = match files - shown.len() {
-        0 => String::new(),
-        n => format!(", {n} left out"),
-    };
-    eprintln!(
-        "{fixable} of {} diagnostics have a fix, in {files} files{left}",
-        diags.len()
-    );
+    eprintln!("{}", counted(diags, shown.len()));
     if failed {
         ExitCode::from(2)
     } else if diags.is_empty() {
@@ -97,9 +93,31 @@ pub fn diff(diags: &[&Diagnostic], rel: &dyn Fn(&Path) -> String) -> ExitCode {
     }
 }
 
+/// The line that sums up a diff showing `shown` files. It counts every finding with a fix and
+/// every file one is in, so that a file `rewrite` or `foreseen` dropped, or a fix that overlaps
+/// another, still counts.
+fn counted(diags: &[&Diagnostic], shown: usize) -> String {
+    let fixable: Vec<&Path> = diags
+        .iter()
+        .filter(|d| d.fix.is_some())
+        .map(|d| d.path.as_path())
+        .collect();
+    let files = fixable.iter().collect::<BTreeSet<_>>().len();
+    let left = match files.saturating_sub(shown) {
+        0 => String::new(),
+        n => format!(", {n} files left out of the diff"),
+    };
+    format!(
+        "{} of {} diagnostics have a fix, in {files} files{left}",
+        fixable.len(),
+        diags.len()
+    )
+}
+
 /// The rewrites that `--fix` would write, as far as the metadata of their files tells without
-/// opening them for write, which could wake a file watcher, and whether one failed as `--fix`
-/// would. The others get the notice or the error that `write` gives.
+/// opening them for write, which could wake a file watcher, and whether resolving or reading the
+/// metadata of one failed, which `--fix` reports as an error. The others get the notice or the
+/// error that `write` gives.
 fn foreseen<'d>(rewrites: Vec<Rewrite<'d>>, rel: &dyn Fn(&Path) -> String) -> (Vec<Rewrite<'d>>, bool) {
     let (mut shown, mut failed) = (Vec::new(), false);
     for r in rewrites {
@@ -171,9 +189,9 @@ fn put(path: &Path, temp: &Path, file: File, original: &Metadata, bytes: &[u8]) 
 }
 
 /// Why `--fix` leaves the file at `path` alone before writing anything: replacing a file that the
-/// user running the check cannot write would bypass its mode, and replacing one with other hard links would split it from
-/// them. Skipping a read-only file also spares the cleanup a read-only temporary file, which
-/// Windows refuses to remove.
+/// user running the check cannot write would bypass its mode, and replacing one with other hard
+/// links would split it from them. Skipping a read-only file also spares the cleanup a read-only
+/// temporary file, which Windows refuses to remove.
 fn kept(path: &Path, original: &Metadata) -> Option<&'static str> {
     if OpenOptions::new().write(true).open(path).is_err() {
         return Some("is not writable");
@@ -224,7 +242,7 @@ fn create_beside(path: &Path) -> io::Result<(PathBuf, File)> {
     Err(io::Error::from(io::ErrorKind::AlreadyExists))
 }
 
-/// The file `temp` names, created empty, or `None` when a file or a link is there already. On Unix
+/// The file `temp` names, created empty, or `None` when a file or a link is there already. On Unix,
 /// only its user may open it until `fill` gives it the group and the mode of the original: a file
 /// made under the umask could be opened by that group, or anyone, who would keep the descriptor.
 fn create_new(temp: &Path) -> io::Result<Option<File>> {
@@ -240,9 +258,10 @@ fn create_new(temp: &Path) -> io::Result<Option<File>> {
 }
 
 /// Writes `bytes` to the new file, which only its user may open, with the group and the mode of
-/// `original` set first so that the text is never readable beyond what the original allows. Returns why the rewrite must not replace
-/// the original, when it must not. The file is closed on return, which Windows needs before the
-/// rename. The mode comes after the group, since a change of group clears the set-id bits.
+/// `original` set first so that the text is never readable beyond what the original allows.
+/// Returns why the rewrite must not replace the original, when it must not. The file is closed on
+/// return, which Windows needs before the rename. The mode comes after the group, since a change
+/// of group clears the set-id bits.
 fn fill(mut file: File, original: &Metadata, bytes: &[u8]) -> io::Result<Option<&'static str>> {
     let made = file.metadata()?;
     if let Some(why) = owned_apart(original, &made) {
@@ -270,8 +289,9 @@ fn owned_apart(_: &Metadata, _: &Metadata) -> Option<&'static str> {
 }
 
 /// Gives `file` the group of `original`, since a new file takes the user's primary group, or the
-/// directory's under setgid or on BSD and macOS. The user may give it only a group they are in, so
-/// a file of another group is left alone rather than handed over.
+/// directory's under setgid or on BSD and macOS. The user may give it only a group they are in
+/// (EPERM otherwise), and a user namespace only a group it maps (EINVAL otherwise), so a file of
+/// such a group is left alone rather than handed over.
 #[cfg(unix)]
 fn regroup(file: &File, made: &Metadata, original: &Metadata) -> io::Result<Option<&'static str>> {
     use std::os::unix::fs::MetadataExt;
@@ -280,8 +300,19 @@ fn regroup(file: &File, made: &Metadata, original: &Metadata) -> io::Result<Opti
     }
     match std::os::unix::fs::fchown(file, None, Some(original.gid())) {
         Ok(()) => Ok(None),
-        Err(e) if e.kind() == io::ErrorKind::PermissionDenied => Ok(Some("belongs to a group its owner is not in")),
-        Err(e) => Err(e),
+        Err(e) => ungiven(e),
+    }
+}
+
+/// Why the rewrite is left alone when `fchown` failed with `e` because the group cannot be given,
+/// or `e` when it failed otherwise.
+#[cfg(unix)]
+fn ungiven(e: io::Error) -> io::Result<Option<&'static str>> {
+    match e.kind() {
+        io::ErrorKind::PermissionDenied | io::ErrorKind::InvalidInput => {
+            Ok(Some("belongs to a group its owner is not in"))
+        }
+        _ => Err(e),
     }
 }
 
@@ -413,8 +444,17 @@ mod tests {
         assert_eq!(mode & 0o077, 0, "{mode:o}");
     }
 
+    #[cfg(unix)]
     #[test]
-    fn a_diff_reports_a_file_it_cannot_resolve_as_a_failure() {
+    fn an_unmapped_or_foreign_group_is_skipped() {
+        let refused = |errno| ungiven(io::Error::from_raw_os_error(errno)).map_err(|e| e.raw_os_error());
+        let notice = Ok(Some("belongs to a group its owner is not in"));
+        assert_eq!((refused(22), refused(1), refused(5)), (notice, notice, Err(Some(5))));
+    }
+
+    /// No CLI run reaches a failure of `target` after `rewrite` read the file, so `show` gets one.
+    #[test]
+    fn a_diff_exits_2_when_a_file_cannot_be_resolved() {
         let dir = scratch("unresolved");
         let gone = dir.join("gone.py");
         let rewrite = Rewrite {
@@ -423,9 +463,26 @@ mod tests {
             after: vec![],
             fixed: vec![],
         };
-        let (shown, failed) = foreseen(vec![rewrite], &|p| p.display().to_string());
+        let code = show(vec![rewrite], &[], &|p| p.display().to_string());
         let _ = std::fs::remove_dir_all(&dir);
-        assert_eq!((shown.len(), failed), (0, true));
+        assert_eq!(code, ExitCode::from(2));
+    }
+
+    #[test]
+    fn the_left_out_count_covers_every_dropped_file() {
+        let (a, b) = (found(Path::new("a.py"), 0, "a"), found(Path::new("b.py"), 0, "b"));
+        let unfixable = Diagnostic {
+            fix: None,
+            ..found(Path::new("a.py"), 0, "a")
+        };
+        let diags = [&a, &b, &unfixable];
+        assert_eq!(
+            (counted(&diags, 0), counted(&diags, 2)),
+            (
+                "2 of 3 diagnostics have a fix, in 2 files, 2 files left out of the diff".to_owned(),
+                "2 of 3 diagnostics have a fix, in 2 files".to_owned()
+            )
+        );
     }
 
     #[cfg(unix)]

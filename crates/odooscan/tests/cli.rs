@@ -1021,7 +1021,7 @@ fn assert_skipped_by_diff((code, stdout, stderr): (Option<i32>, String, String),
     assert_eq!((code, stdout.as_str()), (Some(1), ""), "{stderr}");
     assert!(stderr.contains(notice), "{stderr}");
     assert!(
-        stderr.contains("1 of 1 diagnostics have a fix, in 1 files, 1 left out"),
+        stderr.contains("1 of 1 diagnostics have a fix, in 1 files, 1 files left out of the diff"),
         "{stderr}"
     );
 }
