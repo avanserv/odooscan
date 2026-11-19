@@ -187,6 +187,9 @@ pub struct FieldFact {
     pub labels: Vec<Option<String>>,
     /// The values a literal `selection_add` gives as a one-item tuple or list, with no label.
     pub unlabelled: Vec<String>,
+    /// The values a literal `selection_add` gives as a two-item tuple or list, the only entries
+    /// whose label Odoo keeps before saas~17.2.
+    pub paired: Vec<String>,
     /// The call unpacks `*args` or `**kwargs`, so it may set any attribute it does not name, passes
     /// a field of unread type arguments by position, which name no known attribute, or there is no
     /// call to read: a key of `_columns`.
