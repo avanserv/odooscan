@@ -7,7 +7,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use crate::facts::{
     ActionFact, Annotation, ArchElement, ArchEmptied, ArchSubview, ArchValued, BaseSource, ClassFact, ComponentItem,
     DataFacts, FieldFact, FlowSummary, Heritage, JsClass, JsFacts, JsName, ModelKind, OptionValue, OwlTemplate,
-    PropItem, PyFacts, Receiver, RecordWrite, ReportFact, RouteKey, RuleFact, ServerFact, Signature, Static,
+    PropItem, PyFacts, Receiver, RecordWrite, ReportFact, RouteKey, Rows, RuleFact, ServerFact, Signature, Static,
     StaticWrite, UNREAD_TYPE, ViewFact, WrittenValue, mangled,
 };
 use crate::js::{self, OWL_MODULE};
@@ -3808,22 +3808,19 @@ impl<'m> Index<'m> {
     /// Whether a field of a module in `scope` that may be a Many2many keeps its rows in `table`,
     /// which it names with `relation`, or which Odoo names after the tables of its model and comodel.
     pub fn relation_table(&self, table: &str, scope: &Scope) -> bool {
-        let named = |model: &str, field: &FieldFact| match field.option("relation").map(|r| &r.value) {
-            Some(OptionValue::Str(relation)) => relation == table,
-            Some(_) => false,
-            None => field.comodel.as_ref().is_some_and(|comodel| {
-                let mut tables = [self.table(model, scope), self.table(&comodel.value, scope)];
+        let named = |model: &str, field: &FieldFact| match field.rows.as_ref().and_then(|r| r.table.as_ref()) {
+            Some(Rows::Relation(relation)) => relation == table,
+            Some(Rows::Comodel(comodel)) => {
+                let mut tables = [self.table(model, scope), self.table(comodel, scope)];
                 tables.sort();
                 matches!(tables, [Some(a), Some(b)] if format!("{a}_{b}_rel") == table)
-            }),
+            }
+            None => false,
         };
-        self.models.values().flatten().any(|(mi, class)| {
-            scope.sees(*mi)
-                && class
-                    .fields
-                    .iter()
-                    .any(|f| f.may_be_many2many() && named(&class.model, f))
-        })
+        self.models
+            .values()
+            .flatten()
+            .any(|(mi, class)| scope.sees(*mi) && class.fields.iter().any(|f| named(&class.model, f)))
     }
 
     /// Whether a class of `model` or of a model it inherits, or an `ir.model.fields` record, in any

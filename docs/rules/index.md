@@ -38,8 +38,9 @@ other names.
 
 [OD223](OD223.md) does not judge which numbers such a field takes, so it counts a real number the
 field is assigned first as a value it takes. [OD226](OD226.md) counts the field as a Many2many when
-one of the classes is one, keeping its rows in the table its `relation` keyword names or, without
-one, in the table Odoo names after the tables of its model and comodel.
+one of the classes is one, and reads its arguments as a Many2many does, by keyword or by position:
+it keeps its rows in the table its `relation` names or, without one, in the table Odoo names after
+the tables of its model and comodel.
 
 ## OD0: parsing
 

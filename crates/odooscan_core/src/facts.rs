@@ -131,6 +131,37 @@ impl OptionValue {
             _ => None,
         }
     }
+
+    /// The truth Python gives the value, or None when only a run tells it.
+    pub fn truth(&self) -> Option<bool> {
+        match self {
+            Self::Falsy => Some(false),
+            Self::Bool(b) => Some(*b),
+            Self::Str(s) => Some(!s.is_empty()),
+            Self::Strs(v) | Self::Tuple(v) => Some(!v.is_empty()),
+            Self::Dict(d) => Some(!d.is_empty()),
+            Self::Other => None,
+        }
+    }
+}
+
+/// The table a Many2many keeps its rows in, as far as its call tells it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Rows {
+    /// The literal `relation`.
+    Relation(String),
+    /// None given, so Odoo names the table after the tables of the model and this literal comodel.
+    Comodel(String),
+}
+
+/// What the call of a field that may be a Many2many tells of its table.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RowsTable {
+    pub table: Option<Rows>,
+    /// The table may be one the scan cannot name: the `relation` is no literal or, without one, the
+    /// comodel is no literal, the call unpacks `*args` or `**kwargs`, or the field class has its own
+    /// `__init__`.
+    pub unread: bool,
 }
 
 #[derive(Debug)]
@@ -160,10 +191,17 @@ pub struct FieldFact {
     /// a field of unread type arguments by position, which name no known attribute, or there is no
     /// call to read: a key of `_columns`.
     pub splat: bool,
+    /// The call may set by keyword attributes it does not name: it unpacks `**kwargs`, its field
+    /// class maps its arguments in its own `__init__`, or there is no call to read. The ORM's own
+    /// constructors take no `store`, `related` or `compute` by position, so `*args` hides none.
+    pub keywords_hidden: bool,
     /// The class the call names, then the scanned classes it derives from, the ORM type they prove
     /// and the ORM base of an ORM subclass among them, as `Binary` for `Image`; empty for a key of
     /// `_columns`. Odoo keeps or drops a definition's attributes by its class.
     pub lineage: Vec<String>,
+    /// Where the field keeps its rows when it may be a Many2many; None otherwise and for a key of
+    /// `_columns`.
+    pub rows: Option<RowsTable>,
 }
 
 impl FieldFact {
@@ -174,6 +212,16 @@ impl FieldFact {
     /// The field is a Many2many, or its class name has two types and one of its classes is one.
     pub fn may_be_many2many(&self) -> bool {
         self.ftype == "Many2many" || (self.ftype == UNREAD_TYPE && self.lineage.iter().any(|c| c == "Many2many"))
+    }
+
+    /// Whether Odoo may store the field: a false `store` says no, and without one a `related` or
+    /// `compute` that is true, beside no keyword the call may hide, makes it default to false.
+    pub fn may_be_stored(&self) -> bool {
+        let proven = |name| self.option(name).is_some_and(|o| o.value.truth() == Some(true));
+        match self.option("store") {
+            Some(store) => store.value.truth() != Some(false),
+            None => self.keywords_hidden || !(proven("related") || proven("compute")),
+        }
     }
 }
 

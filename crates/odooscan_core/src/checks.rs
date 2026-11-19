@@ -6500,12 +6500,9 @@ fn may_delegate(field: &Field) -> bool {
 /// tells.
 fn truth(merged: Merged) -> Option<bool> {
     match merged {
-        Merged::Unset | Merged::Known(OptionValue::Falsy) => Some(false),
-        Merged::Known(OptionValue::Bool(b)) => Some(*b),
-        Merged::Known(OptionValue::Str(s)) => Some(!s.is_empty()),
-        Merged::Known(OptionValue::Strs(v) | OptionValue::Tuple(v)) => Some(!v.is_empty()),
-        Merged::Known(OptionValue::Dict(d)) => Some(!d.is_empty()),
-        Merged::Known(OptionValue::Other) | Merged::Unknown => None,
+        Merged::Unset => Some(false),
+        Merged::Known(value) => value.truth(),
+        Merged::Unknown => None,
     }
 }
 
@@ -6923,8 +6920,8 @@ impl<'m> Ctx<'_, 'm> {
     /// `_auto_init()`, sets a table query, creates a view whose whole name is `self._table` or has
     /// a parent the scan cannot see; another model, or a field in scope that may be a Many2many,
     /// has that table; an indexed module creates a view of that name in Python or SQL; or this
-    /// module, not a dependency, creates a view it names at runtime. `table_models` leaves out an
-    /// abstract model.
+    /// module, not a dependency, creates a view it names at runtime or has a Many2many that may be
+    /// stored in a table the scan cannot name. `table_models` leaves out an abstract model.
     fn view_made(&self, model: &str, table: &str) -> bool {
         let creates = |c: &ClassFact| {
             c.hidden_parents() || c.own_view || c.methods.iter().any(|m| VIEW_MAKERS.contains(&m.as_str()))
@@ -6937,6 +6934,16 @@ impl<'m> Ctx<'_, 'm> {
             || self.index.relation_table(table, self.scope)
             || self.index.creates_view(table)
             || self.module.python.iter().any(|f| f.facts.creates_any_view)
+            || self.unread_rows()
+    }
+
+    /// Whether a field of this module's own classes may be a stored Many2many whose table the scan
+    /// cannot name, which may then be any. A dependency's does not count, as `**kwargs` may hide a
+    /// `related` that keeps the field from storing anything.
+    fn unread_rows(&self) -> bool {
+        let unread = |f: &FieldFact| f.rows.as_ref().is_some_and(|r| r.unread) && f.may_be_stored();
+        let classes = self.module.python.iter().flat_map(|f| &f.facts.classes);
+        classes.flat_map(|c| &c.fields).any(unread)
     }
 
     /// The view the `init()` of `model` creates, when its text spells the names of the columns. The
