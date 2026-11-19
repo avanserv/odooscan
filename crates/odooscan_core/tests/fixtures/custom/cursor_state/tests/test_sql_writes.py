@@ -39,3 +39,8 @@ class TestSqlWrites(TransactionCase):
 
             self.env["res.partner"].create({})
         rank()
+
+    def test_rank_expected_to_fail_bound(self):
+        with self.assertRaises(IntegrityError) as cm:
+            self.env.cr.execute("UPDATE res_partner SET x_rank = 17 WHERE id = %s", [self.env.user.partner_id.id])
+        self.assertIn("x_rank", str(cm.exception))
