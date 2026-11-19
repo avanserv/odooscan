@@ -8,4 +8,21 @@
     <record id="leaf_unknown_kind" model="data.ticket.leaf">
         <field name="kind">nope</field>
     </record>
+    <record id="line_owner" model="data.ticket.line">
+        <field name="name">Owner</field>
+    </record>
+    <record id="card_grade" model="data.ticket.card">
+        <field name="x_grade">high</field>
+        <field name="x_owner_id" ref="line_owner"/>
+    </record>
+    <record id="slip_grade" model="data.ticket.slip">
+        <field name="x_grade">high</field>
+        <field name="x_owner_id" ref="line_owner"/>
+    </record>
+    <record id="badge_grade" model="data.ticket.badge">
+        <field name="x_grade">high</field>
+    </record>
+    <record id="label_grade" model="data.ticket.label">
+        <field name="x_grade">high</field>
+    </record>
 </odoo>

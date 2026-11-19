@@ -6884,9 +6884,10 @@ impl<'m> Ctx<'_, 'm> {
     }
 
     /// The model `model` delegates to that has the field `name`, by a class or an `ir.model.fields`
-    /// record, with the field that delegates to it, among the `_inherits` entries and
-    /// `delegate=True` fields of the classes it merges: the first whose field the merged `_inherits`
-    /// may still name, else the first.
+    /// record, with the field that delegates to it: the last whose field the merged `_inherits` may
+    /// still name, else the last. The pairs hold each merged class's `_inherits` in dict order, then
+    /// its delegate-only parents, class after class (task 2327). Odoo collects the parents' fields in
+    /// `_inherits` order, so a later parent's field replaces an earlier one's.
     fn delegated_field(&self, model: &str, name: &str) -> Option<(&'m str, &'m str)> {
         let classes = self.index.merged_classes(model, self.scope);
         let pairs: Vec<(&'m str, &'m str)> = classes
@@ -6901,7 +6902,7 @@ impl<'m> Ctx<'_, 'm> {
             .map(|(parent, via)| (parent.as_str(), via.as_str()))
             .collect();
         let holds = |&&(_, via): &&(&str, &str)| self.inherits_entry(model, via) != Some(false);
-        pairs.iter().find(holds).or(pairs.first()).copied()
+        pairs.iter().rev().find(holds).or(pairs.last()).copied()
     }
 }
 

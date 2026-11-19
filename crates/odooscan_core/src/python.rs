@@ -3205,7 +3205,7 @@ struct Naming {
     columns_hidden: bool,
     /// Where the last `_columns` spells each key, so that a later one drops the fields it gave.
     columns: Vec<Pos>,
-    /// The literal pairs of the last `_inherits` dict, which `settle` adds to the delegate fields'.
+    /// The literal pairs of the last `_inherits` dict, which `settle` puts before the delegate fields'.
     inherits: Vec<(String, String)>,
     /// The fields each of `_order`, `_fold_name`, `_parent_name`, `_rec_name` and `_active_name`
     /// names, at the slot of its first assignment with the value of its last, which Python binds.
@@ -3263,7 +3263,10 @@ impl Naming {
         for (name, fields) in std::mem::take(&mut self.terms) {
             term_fields(fact, &name).extend(fields);
         }
-        for pair in std::mem::take(&mut self.inherits) {
+        // Odoo keeps a delegate field that repeats an entry at the dict's position and adds the
+        // others after the dict (18.0 `odoo/models.py:3612`), and a later parent's field wins.
+        let delegates = std::mem::replace(&mut fact.inherits, std::mem::take(&mut self.inherits));
+        for pair in delegates {
             if !fact.inherits.contains(&pair) {
                 fact.inherits.push(pair);
             }
@@ -7859,8 +7862,8 @@ class U(HttpCase):
         assert_eq!(
             class.inherits,
             [
-                ("res.company".to_owned(), "company_id".to_owned()),
-                ("res.partner".to_owned(), "partner_id".to_owned())
+                ("res.partner".to_owned(), "partner_id".to_owned()),
+                ("res.company".to_owned(), "company_id".to_owned())
             ]
         );
     }
@@ -8164,7 +8167,7 @@ class U(HttpCase):
         let then_dict = "    _inherits = PARENTS\n    _inherits = {'a': 'a_id'}\n";
         assert_eq!(read(then_dict), (vec![pair("a", "a_id")], vec!["a".to_owned()], false));
         let delegate = format!("    c_id = fields.Many2one('c', delegate=True)\n{twice}");
-        assert_eq!(read(&delegate).0, [pair("c", "c_id"), pair("b", "b_id")]);
+        assert_eq!(read(&delegate).0, [pair("b", "b_id"), pair("c", "c_id")]);
         let delegate_then_name = format!("    c_id = fields.Many2one('c', delegate=True)\n{then_name}");
         assert_eq!(read(&delegate_then_name), (vec![pair("c", "c_id")], vec![], true));
     }
