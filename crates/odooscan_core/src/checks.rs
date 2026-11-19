@@ -2361,8 +2361,10 @@ impl<'m> Ctx<'_, 'm> {
     }
 
     /// The OD201 message for `model` when no class of this module introduces it: a module that
-    /// depends on this one loads after it, so its class is not in the registry when this module
-    /// needs the model, and adding it to `depends` would make a cycle.
+    /// loads after this one (`Index::follows`) has no class in the registry when this module needs
+    /// the model. One that depends on this module would make a cycle in `depends`; for `base`, every
+    /// other module loads after it, since Odoo loads `base` alone first (18.0
+    /// `odoo/modules/loading.py:407-409`, 20.0 `:359-361`).
     fn missing_model(&self, model: &str) -> String {
         match self.index.dependent_introducer(model, self.mi) {
             Some(m) => {
@@ -8532,6 +8534,37 @@ mod tests {
         modules[2].python.push(python(builder));
         let index = Index::build(&modules, Series::parse("18.0"));
         let diags = check_module(&index, 1, Series::parse("18.0"));
+        let codes = diags.iter().map(|(_, d)| (d.code, d.pos.line));
+        assert_eq!(
+            codes.filter(|(code, _)| *code == "OD201").collect::<Vec<_>>(),
+            [("OD201", 3)]
+        );
+    }
+
+    #[test]
+    fn a_name_only_an_always_installed_module_builds_is_unknown_in_base() {
+        let python = |source: &str| crate::project::SourceFile {
+            path: std::path::PathBuf::new(),
+            rel: "models/main.py".to_owned(),
+            rank: None,
+            demo: false,
+            facts: analyze(source, Series::parse("18.0")),
+            suppressions: Default::default(),
+            mentions: Default::default(),
+        };
+        // Below saas~18.2 `all` does not reach `base`, but Odoo still loads `base` alone first, so
+        // what `all` builds does not exist yet when `base` sets up its fields.
+        let mut modules = vec![
+            crate::project::module("base", "{'version': '18.0.1.0'}"),
+            crate::project::module("all", "{'version': '18.0.1.0', 'auto_install': True}"),
+        ];
+        let wiring = "class W(models.AbstractModel):\n    _name = 'w.wiring'\n    socket_id = fields.Many2one('dependent.socket')\n";
+        modules[0].python.push(python(wiring));
+        let builder = "class B(models.AbstractModel):\n    _name = 'dependent.%s' % KIND\n";
+        modules[1].python.push(python(builder));
+        let index = Index::build(&modules, Series::parse("18.0"));
+        assert!(index.scope(0).sees(1));
+        let diags = check_module(&index, 0, Series::parse("18.0"));
         let codes = diags.iter().map(|(_, d)| (d.code, d.pos.line));
         assert_eq!(
             codes.filter(|(code, _)| *code == "OD201").collect::<Vec<_>>(),

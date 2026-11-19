@@ -3504,9 +3504,11 @@ impl<'m> Index<'m> {
     /// (18.0 `odoo/modules/registry.py:290-292`, 20.0 `odoo/orm/registry.py:449-451`), and building
     /// one whose parent is not in the registry yet fails (18.0 `odoo/models.py:759-761`, 20.0
     /// `odoo/orm/model_classes.py:208-210`), so an introducer of the class's module counts unless
-    /// `builds_before` puts it after the class. A module that depends on the reader's loads after
-    /// it, so none of its classes count (`dependent_introducer` names it), and naming it as the
-    /// source would ask for a cycle in `depends`. A reader of None counts every class.
+    /// `builds_before` puts it after the class. A module that loads after the reader's (`follows`)
+    /// has none of its classes count (`dependent_introducer` names it). Naming it as the source
+    /// would ask for a cycle in `depends`, or, for a reader in `base`, for a module Odoo loads only
+    /// once `base` has loaded alone (18.0 `odoo/modules/loading.py:407-409`, 20.0 `:359-361`). A
+    /// reader of None counts every class.
     pub fn model_status(&self, model: &str, scope: &Scope, reader: Option<(usize, Option<&ClassFact>)>) -> Status<'m> {
         let classes = self.models.get(model).map(Vec::as_slice).unwrap_or_default();
         let others = || classes.iter().filter(|(mi, c)| self.counts(*mi, c, reader));
@@ -3529,17 +3531,18 @@ impl<'m> Index<'m> {
         }
     }
 
-    /// Whether module `mi` depends on module `e` and so loads after it. `loads_before` goes first,
-    /// as a lookup: outside a cycle, which is OD504's, a module that reaches `e` loads after it.
+    /// Whether module `mi` loads after module `e`: it depends on `e`, or `e` is `base`
+    /// (`loads_after`). `loads_before` goes first, as a lookup: outside a cycle, which is OD504's,
+    /// a module that reaches `e` loads after it.
     pub fn follows(&self, mi: usize, e: usize) -> bool {
-        self.loads_before(e, mi) && self.reaches(mi, e)
+        self.loads_before(e, mi) && self.loads_after(mi, e)
     }
 
-    /// The module that introduces `model` among those that depend on module `e`, which
+    /// The module that introduces `model` among those that load after module `e` (`follows`), which
     /// `model_status` does not count for a reader in `e`.
     pub fn dependent_introducer(&self, model: &str, e: usize) -> Option<&'m str> {
-        let dependents = self.classes(model).iter().filter(|(mi, _)| self.follows(*mi, e));
-        self.introducer(dependents).map(|mi| self.modules[mi].name.as_str())
+        let later = self.classes(model).iter().filter(|(mi, _)| self.follows(*mi, e));
+        self.introducer(later).map(|mi| self.modules[mi].name.as_str())
     }
 
     /// Whether module `mi` builds its class `first` before its class `then`: in one file by place,
@@ -6067,6 +6070,52 @@ mod tests {
         assert_eq!(index.dependent_introducer("zz.lamp", aa), Some("zz"));
         assert_eq!(status("aa.lamp", zz, Some(zz)), "visible");
         assert_eq!(index.dependent_introducer("aa.lamp", zz), None);
+    }
+
+    #[test]
+    fn base_code_ignores_a_model_a_module_loading_after_it_introduces() {
+        // Below saas~18.2 neither `via`, through a dependency naming no series, nor `aaa`, with no
+        // `depends`, reaches `base`, yet Odoo loads `base` alone before both.
+        let mut modules = [
+            module("base", "{}"),
+            module("lib", "{'version': '1.0'}"),
+            module("via", "{'version': '18.0.1.0', 'depends': ['lib']}"),
+            module("aaa", "{'version': '18.0.1.0'}"),
+            module("side", "{'version': '18.0.1.0', 'depends': ['base']}"),
+            module("all", "{'version': '18.0.1.0', 'auto_install': True}"),
+        ];
+        let sources = [
+            (2, "class V(models.Model):\n    _name = 'via.lamp'\n"),
+            (3, "class A(models.Model):\n    _name = 'aaa.lamp'\n"),
+            (5, "class L(models.Model):\n    _name = 'all.lamp'\n"),
+        ];
+        for (mi, source) in sources {
+            modules[mi].python.push(python_18(source));
+        }
+        for series in [None, Series::parse("18.0")] {
+            let index = Index::build(&modules, series);
+            let status = |model: &str, mi: usize, reader: Option<usize>| match index.model_status(
+                model,
+                &index.scope(mi),
+                reader.map(|e| (e, None)),
+            ) {
+                Status::Visible => "visible".to_owned(),
+                Status::Hidden(m) => format!("hidden {m}"),
+                Status::Missing => "missing".to_owned(),
+            };
+            let [base, side] = ["base", "side"].map(|name| index.by_name[name]);
+            assert_eq!(status("via.lamp", base, Some(base)), "missing");
+            assert_eq!(index.dependent_introducer("via.lamp", base), Some("via"));
+            assert_eq!(status("aaa.lamp", base, Some(base)), "missing");
+            assert_eq!(index.dependent_introducer("aaa.lamp", base), Some("aaa"));
+            assert_eq!(status("via.lamp", base, None), "hidden via");
+            assert_eq!(status("via.lamp", side, Some(side)), "hidden via");
+            // Always installed, `all` is in the scope of `base`, but still loads after it.
+            assert!(index.scope(base).sees(index.by_name["all"]));
+            assert_eq!(status("all.lamp", base, Some(base)), "missing");
+            assert_eq!(index.dependent_introducer("all.lamp", base), Some("all"));
+            assert_eq!(status("all.lamp", side, Some(side)), "visible");
+        }
     }
 
     #[test]
