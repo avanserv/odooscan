@@ -214,10 +214,9 @@ pub(crate) const BASE_MODEL_METHODS: &[&str] = &[
     "_where_calc",
 ];
 
-/// The methods of `BaseModel` outside `BASE_MODEL_METHODS`, which OD116 reads as the members a
-/// field must not replace in every series, by `def` or class-level alias, read off the heads 12.0
-/// to 20.0 and saas~11.5 to saas~19.4: a button or a `<function>` may name any, and a `super()`
-/// call any but `BASE_MODEL_VALUES`.
+/// The members of `BaseModel` outside `BASE_MODEL_METHODS`, by `def` or class-level alias, read
+/// off the heads 12.0 to 20.0 and saas~11.5 to saas~19.4: a button or a `<function>` may name any,
+/// and a `super()` call any but `BASE_MODEL_VALUES`.
 /// `OLD_BASE_METHODS` holds those gone before these heads, dated by series.
 /// Dunders stay out because buttons read this list, so `BASE_MODEL_DUNDERS` holds them for
 /// `super()` alone. Any other `__` name stays out too: it is mangled, so `getattr` never finds it.
@@ -396,7 +395,7 @@ const BASE_MODEL_EXTRA: &[&str] = &[
 /// method, in every series that has them (`BASE_VALUE_SERIES` dates those `BaseModel` lacks in some,
 /// and from saas~18.3 the `_transient_max_*` pair is on `TransientModel`): none of their values is
 /// callable, so a `super()` call to one raises `TypeError`. They stay in `BASE_MODEL_EXTRA`, since a
-/// field must not replace them either (OD116) and a button finds them as `getattr` does.
+/// button finds them as `getattr` does.
 const BASE_MODEL_VALUES: &[&str] = &[
     "_cache",
     "_constraint_methods",
