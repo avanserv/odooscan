@@ -1,0 +1,27 @@
+from odoo import fields, models
+
+
+class Lamp(models.Model):
+    _name = "dependent.lamp"
+    _description = "Lamp"
+
+    name = fields.Char()
+
+
+class Socket(models.Model):
+    _name = "dependent.socket"
+    _description = "Socket"
+
+    name = fields.Char()
+
+
+class Ghost(models.Model):
+    _inherit = "dependent.ghost"
+
+    chill = fields.Char()
+
+
+class Wiring(models.AbstractModel):
+    _inherit = "dependent.wiring"
+
+    gauge = fields.Integer()
