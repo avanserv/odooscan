@@ -3531,7 +3531,7 @@ impl<'m> Index<'m> {
 
     /// Whether module `mi` depends on module `e` and so loads after it. `loads_before` goes first,
     /// as a lookup: outside a cycle, which is OD504's, a module that reaches `e` loads after it.
-    fn follows(&self, mi: usize, e: usize) -> bool {
+    pub fn follows(&self, mi: usize, e: usize) -> bool {
         self.loads_before(e, mi) && self.reaches(mi, e)
     }
 

@@ -300,7 +300,8 @@ pub fn check_module<'m>(index: &Index<'m>, mi: usize, series: Option<Series>) ->
         let installs = index.install_scope(mi, series);
         let loaded = index.loaded_scope(mi, &scope, &installs);
         let built = BuiltModels::of(module);
-        let scope_built = BuiltModels::of_scope(index, mi, &scope);
+        let scope_built = BuiltModels::of_scope(index, mi, &scope, |_| true);
+        let ahead_built = BuiltModels::of_scope(index, mi, &scope, |i| !index.follows(i, mi));
         let ctx = Ctx {
             index,
             mi,
@@ -312,6 +313,7 @@ pub fn check_module<'m>(index: &Index<'m>, mi: usize, series: Option<Series>) ->
             dynamic: names_models_at_runtime(module),
             built: &built,
             scope_built: &scope_built,
+            ahead_built: &ahead_built,
             partial: index.partial_scope(&scope),
             lost: index.lost_scope(&scope),
             unread_text: index.unread_in(&scope),
@@ -2089,11 +2091,11 @@ fn load_place(module: &Module, series: Option<Series>, def_rank: usize, rank: us
     format!("in {}", file.unwrap_or_default())
 }
 
-/// The start of every name `base` builds at runtime, which OD202 and OD603 read in place of what
-/// its code shows. Odoo builds a model from an `ir.model` row only for `state = 'manual'`, and
-/// such a row's name must start with `x_` (18.0 `odoo/addons/base/models/ir_model.py:279-280`,
-/// `:482-483`, `:494-500`, `:515-517`; 20.0 `odoo/addons/base/models/ir_model.py:293-294`,
-/// `:560-566`, `odoo/orm/model_classes.py:584-586`).
+/// The start of every name `base` builds at runtime, which OD201, OD202, OD206 and OD603 read in
+/// place of what its code shows. Odoo builds a model from an `ir.model` row only for
+/// `state = 'manual'`, and such a row's name must start with `x_` (18.0
+/// `odoo/addons/base/models/ir_model.py:279-280`, `:482-483`, `:494-500`, `:515-517`; 20.0
+/// `odoo/addons/base/models/ir_model.py:293-294`, `:560-566`, `odoo/orm/model_classes.py:584-586`).
 const CUSTOM_MODEL_START: &str = "x_";
 
 /// The names a module may build at runtime. A model another module spells out is still that
@@ -2118,16 +2120,21 @@ impl<'m> BuiltModels<'m> {
         }
     }
 
-    /// The names the modules of `scope` may build. `base` gives `CUSTOM_MODEL_START` alone, as
-    /// whatever its code shows, the only models it builds at runtime are custom ones. A start that
-    /// fits every name counts for module `mi` alone: an always-installed module that names its
-    /// models through a helper would otherwise silence every module.
-    fn of_scope(index: &Index<'m>, mi: usize, scope: &Scope) -> Self {
+    /// The names the modules of `scope` that `keep` admits may build. `base` gives
+    /// `CUSTOM_MODEL_START` alone, as whatever its code shows, the only models it builds at runtime
+    /// are custom ones. A start that fits every name counts for module `mi` alone: an
+    /// always-installed module that names its models through a helper would otherwise silence every
+    /// module.
+    fn of_scope(index: &Index<'m>, mi: usize, scope: &Scope, keep: impl Fn(usize) -> bool) -> Self {
         let mut built = Self {
             starts: vec![],
             names: vec![],
         };
-        let seen = index.modules.iter().enumerate().filter(|&(i, _)| scope.sees(i));
+        let seen = index
+            .modules
+            .iter()
+            .enumerate()
+            .filter(|&(i, _)| scope.sees(i) && keep(i));
         for (i, module) in seen {
             if module.name == "base" {
                 built.starts.push(CUSTOM_MODEL_START);
@@ -2167,6 +2174,9 @@ struct Ctx<'a, 'm> {
     /// What the modules of `scope` may build, the module included, with `base` read through
     /// `CUSTOM_MODEL_START`.
     scope_built: &'a BuiltModels<'m>,
+    /// `scope_built` short of the always-installed modules that depend on this one: they load after
+    /// it, so what they build does not exist while it loads, as `model_status` reads them.
+    ahead_built: &'a BuiltModels<'m>,
     /// A module in scope depends on one that is not indexed, such as an Enterprise module, which
     /// may hold anything a rule misses.
     partial: bool,
@@ -2203,6 +2213,15 @@ impl<'m> Ctx<'_, 'm> {
             }
             PathError::NotRelational { .. } => false,
         }
+    }
+
+    /// Whether `model` may exist once the modules of `built` have built theirs, which Odoo does as
+    /// each loads, ahead of the modules that depend on it (18.0 `odoo/modules/loading.py:156`,
+    /// `:186`, `:195`; 20.0 `:142`, `:172`, `:181`). The module's own flag covers a class whose
+    /// `_name` is any expression, and its unparsed and unknown-series files; a start in `built`
+    /// that fits every name is there only for the module's own code (`BuiltModels::of_scope`).
+    fn may_build(&self, model: &str, built: &BuiltModels<'_>) -> bool {
+        self.dynamic || built.fit(model)
     }
 
     /// Whether this module builds `model` at runtime. A class in scope that introduces the model
@@ -2267,7 +2286,7 @@ impl<'m> Ctx<'_, 'm> {
                     late().unwrap_or_else(|| format!("model '{name}' comes from module {m}; add it to depends"));
                 out.push(path, "OD202", model.pos, message);
             }
-            Status::Missing if self.dynamic || self.partial => {}
+            Status::Missing if self.partial || self.may_build(name, self.ahead_built) => {}
             Status::Missing => {
                 let message = late().unwrap_or_else(|| self.missing_model(name));
                 out.push(path, "OD201", model.pos, message);
@@ -2508,10 +2527,10 @@ impl<'m> Ctx<'_, 'm> {
         }
         // env['x'] for a model outside depends is usually guarded by `if 'x' in self.env`, a
         // dotless name is as likely a key of some other mapping called env, and a name that fits
-        // what the module builds may exist once its code has run.
+        // what the scope builds may exist once its code has run.
         for model in models
             .iter()
-            .filter(|m| m.value.contains('.') && !self.built.fit(&m.value))
+            .filter(|m| m.value.contains('.') && !self.scope_built.fit(&m.value))
         {
             if matches!(self.index.model_status(&model.value, self.scope, None), Status::Missing) {
                 let message = format!("no indexed module defines model '{}'", model.value);
@@ -2831,7 +2850,9 @@ impl<'m> Ctx<'_, 'm> {
             Status::Hidden(m) if !self.scope_built.fit(&model.value) => {
                 format!("model '{}' comes from module {m}, which is not in depends", model.value)
             }
-            Status::Missing if !self.dynamic => format!("no indexed module defines model '{}'", model.value),
+            Status::Missing if !self.may_build(&model.value, self.scope_built) => {
+                format!("no indexed module defines model '{}'", model.value)
+            }
             _ => return,
         };
         out.push(path, "OD603", model.pos, message);
@@ -8349,7 +8370,8 @@ mod tests {
         };
         let wiring = "class W(models.AbstractModel):\n    _name = 'w.wiring'\n    socket_id = fields.Many2one('dependent.socket')\n";
         let record = r#"<odoo><record id="spare" model="dependent.socket"/></odoo>"#;
-        // `builder` may build any `dependent.` model, which silences an OD202 but not an OD201.
+        // `builder` may build any `dependent.` model and loads before `main`, so the model a
+        // dependent introduces may exist when `main` runs.
         let findings = |builds: bool, dynamic: bool, lost: bool| {
             let mut modules = vec![
                 crate::project::module("base", &manifest("")),
@@ -8387,9 +8409,42 @@ mod tests {
                 .filter(|(code, _)| code.starts_with("OD20") && *code < "OD203")
                 .collect::<Vec<_>>()
         };
-        assert_eq!(findings(true, false, false), [("OD201", 3), ("OD201", 1)]);
+        assert_eq!(findings(false, false, false), [("OD201", 3), ("OD201", 1)]);
+        assert_eq!(findings(true, false, false), []);
         assert_eq!(findings(false, true, false), []);
         assert_eq!(findings(false, false, true), [("OD201", 3)]);
+    }
+
+    #[test]
+    fn a_name_only_an_always_installed_dependent_builds_is_unknown() {
+        let manifest = |depends: &str| format!("{{'auto_install': True, 'depends': [{depends}]}}");
+        let python = |source: &str| crate::project::SourceFile {
+            path: std::path::PathBuf::new(),
+            rel: "models/main.py".to_owned(),
+            rank: None,
+            demo: false,
+            facts: analyze(source, Series::parse("18.0")),
+            suppressions: Default::default(),
+            mentions: Default::default(),
+        };
+        let mut modules = vec![
+            crate::project::module("base", &manifest("")),
+            crate::project::module("main", &manifest("'base'")),
+            crate::project::module("heir", &manifest("'main'")),
+        ];
+        let wiring = "class W(models.AbstractModel):\n    _name = 'w.wiring'\n    socket_id = fields.Many2one('dependent.socket')\n";
+        modules[1].python.push(python(wiring));
+        // `heir` is in scope as always installed, but it loads after `main`, so what it builds does
+        // not exist yet when `main` sets up its fields.
+        let builder = "class B(models.AbstractModel):\n    _name = 'dependent.%s' % KIND\n";
+        modules[2].python.push(python(builder));
+        let index = Index::build(&modules, Series::parse("18.0"));
+        let diags = check_module(&index, 1, Series::parse("18.0"));
+        let codes = diags.iter().map(|(_, d)| (d.code, d.pos.line));
+        assert_eq!(
+            codes.filter(|(code, _)| *code == "OD201").collect::<Vec<_>>(),
+            [("OD201", 3)]
+        );
     }
 
     #[test]
