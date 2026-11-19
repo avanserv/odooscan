@@ -55,6 +55,15 @@ const FIELD_TYPES: &[&str] = &[
     "Serialized",
 ];
 
+/// The ORM's field classes that derive from another of `FIELD_TYPES`, each with that base, as in
+/// 18.0 `odoo/fields.py:2723`, `:3070` and `:3441`. Each series that has the subclass, 9.0 to 20.0,
+/// derives it from the same base, so none needs a series bound.
+pub(crate) const ORM_BASES: &[(&str, &str)] = &[
+    ("Image", "Binary"),
+    ("Reference", "Selection"),
+    ("Many2oneReference", "Integer"),
+];
+
 /// The packages whose `fields` module holds the ORM's field classes, by series.
 const ORM_PACKAGES: &[&str] = &["odoo", "openerp"];
 
@@ -505,15 +514,24 @@ fn positional_args<'e>(call: &'e ast::ExprCall, known: &FieldClasses) -> Option<
     (!tail_name(&call.func).is_some_and(own)).then_some(&call.arguments.args)
 }
 
-/// The class a field call names, then the classes it derives from: `["Char"]` for `fields.Char`.
-/// The ORM's own classes resolve through `FIELD_TYPES`, so only a scanned class has ancestors.
+/// The class a field call names, then the classes it derives from: `["Char"]` for `fields.Char`,
+/// `["Image", "Binary"]` for `fields.Image`. The ORM's own classes resolve through `FIELD_TYPES`,
+/// so they bring only the base `ORM_BASES` gives them.
 fn lineage(call: &ast::ExprCall, known: &FieldClasses) -> Vec<String> {
     let Some(name) = tail_name(&call.func) else {
         return vec![];
     };
     let kind = known.get(name).filter(|_| !FIELD_TYPES.contains(&name));
     let ancestors = kind.into_iter().flat_map(|k| &k.ancestors).filter(|a| *a != name);
-    std::iter::once(name.to_owned()).chain(ancestors.cloned()).collect()
+    let mut names: Vec<String> = std::iter::once(name.to_owned()).chain(ancestors.cloned()).collect();
+    let held = |n: &str| names.iter().any(|h| h == n);
+    let bases: Vec<&str> = ORM_BASES
+        .iter()
+        .filter(|(sub, base)| held(sub) && !held(base))
+        .map(|(_, base)| *base)
+        .collect();
+    names.extend(bases.into_iter().map(str::to_owned));
+    names
 }
 
 /// A base class without its type arguments: from 18.0 `Field` is generic, as in `Field[list]`.
@@ -6604,6 +6622,22 @@ mod tests {
         );
         let lineages: Vec<_> = facts.classes[0].fields.iter().map(|f| f.lineage.clone()).collect();
         assert_eq!(lineages, [vec!["Tag", "Char"], vec!["Char"], vec![]]);
+    }
+
+    #[test]
+    fn a_field_call_of_an_orm_subclass_carries_its_orm_base() {
+        let known = FieldClasses::from_iter([pair("Tag", "Image")]);
+        let src = "class X(models.Model):\n    _name = 'x'\n    a = fields.Image()\n    b = fields.Reference()\n    \
+                   c = fields.Many2oneReference()\n    d = Tag()\n";
+        let facts = analyze_with(src, None, &known, &TaintTable::default(), Scope::default());
+        let lineages: Vec<_> = facts.classes[0].fields.iter().map(|f| f.lineage.clone()).collect();
+        let expected = [
+            vec!["Image", "Binary"],
+            vec!["Reference", "Selection"],
+            vec!["Many2oneReference", "Integer"],
+            vec!["Tag", "Image", "Binary"],
+        ];
+        assert_eq!(lineages, expected);
     }
 
     #[test]

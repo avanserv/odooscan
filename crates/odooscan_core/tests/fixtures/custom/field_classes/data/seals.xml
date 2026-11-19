@@ -1,0 +1,8 @@
+<odoo>
+    <record id="seal_bare" model="x.seal"/>
+    <record id="seal_set" model="x.seal">
+        <field name="kind">res.partner,1</field>
+        <field name="ref">1</field>
+        <field name="res_model">res.partner</field>
+    </record>
+</odoo>
