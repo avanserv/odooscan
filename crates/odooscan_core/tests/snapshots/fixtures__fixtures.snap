@@ -510,6 +510,9 @@ custom/dynamic_models_plain/views/large.xml:7:17: OD304 'name': field 'name' of 
 custom/dynamic_models_plain/views/large.xml:19:17: OD304 'name': field 'name' of x_side_note comes from module sql_base_entries, which is not in depends
 custom/dynamic_models_plain/views/large.xml:27:9: OD210 'name': field 'name' of x_side_note comes from module sql_base_entries, which is not in depends
 custom/dynamic_models_settled/data/records.xml:2:5: OD201 no indexed module defines model 'ghost.settled'
+custom/dynamic_models_short_user/models/user.py:8:32: OD202 model 'side.order' comes from module dynamic_models_side; add it to depends
+custom/dynamic_models_short_user/models/user.py:9:38: OD203 'order_id.name': field 'name' of side.order comes from module sql_base_entries, which is not in depends
+custom/dynamic_models_short_user/static/src/short.js:3:30: OD603 model 'side.order' comes from module dynamic_models_side, which is not in depends
 custom/dynamic_models_unbuilt/models/proxies.py:27:32: OD202 model 'bad.generated.large' comes from module dynamic_models_side; add it to depends
 custom/dynamic_models_unbuilt/models/proxies.py:30:25: OD206 no indexed module defines model 'unbuilt.proxy'
 custom/dynamic_models_unbuilt/static/src/large.js:3:30: OD603 model 'bad.generated.large' comes from module dynamic_models_side, which is not in depends

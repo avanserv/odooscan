@@ -39,9 +39,9 @@ path or domain Odoo checks as the module loads, an always-installed module that 
 module does not count, since it loads after it. What a module may build is read from its code
 outside `tests/`, `tests.py`, `examples/`, `migrations/` and `upgrades/`: the start an expression
 shows, every name when it shows no literal start, and for a class of unknown series each name
-another reading gives it, unless that name is one of the class's parents. An expression that shows
-no literal start counts only for the module's own code, so a helper that names the models of an
-always-installed module silences no other module. For these rules, `base` builds only names that
+another reading gives it, unless that name is one of the class's parents. Another module's start
+counts only when it contains a `.`, as model names usually do, so a helper that names the models of
+an always-installed module silences no other module. For these rules, `base` builds only names that
 start with `x_`, the custom models a user creates in the database, whatever its code shows. For
 OD203, OD210 and OD304, such a model holds beyond every model's fields only those whose names start
 with `x_` and those of the mixins `mail` adds to it when its `ir.model` row asks (`mail.thread`,

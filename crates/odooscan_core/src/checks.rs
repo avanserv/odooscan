@@ -2139,9 +2139,9 @@ impl<'m> BuiltModels<'m> {
 
     /// The names the modules of `scope` that `keep` admits may build. `base` sets `custom` and
     /// `mixin_fields` and adds no start or name: the only models it builds at runtime are custom
-    /// ones, whatever its code shows. A start that fits every name counts for module `mi` alone: an
-    /// always-installed module that names its models through a helper would otherwise silence every
-    /// module.
+    /// ones, whatever its code shows. Another module's start counts only when it holds a dot, as
+    /// model names usually do: an empty or dotless one, such as the `"s"` of `"s" + kind`, would let
+    /// an always-installed module silence every name it starts, so it counts for module `mi` alone.
     fn of_scope(index: &Index<'m>, mi: usize, scope: &Scope, keep: impl Fn(usize) -> bool) -> Self {
         let mut built = Self {
             starts: vec![],
@@ -2161,7 +2161,7 @@ impl<'m> BuiltModels<'m> {
                 continue;
             }
             let of = Self::of(module);
-            let shared = of.starts.into_iter().filter(|start| i == mi || !start.is_empty());
+            let shared = of.starts.into_iter().filter(|start| i == mi || start.contains('.'));
             built.starts.extend(shared);
             built.names.extend(of.names);
         }
@@ -2275,8 +2275,8 @@ impl<'m> Ctx<'_, 'm> {
     /// Whether `model` may exist once the modules of `built` have built theirs, which Odoo does as
     /// each loads, ahead of the modules that depend on it (18.0 `odoo/modules/loading.py:156`,
     /// `:186`, `:195`; 20.0 `:142`, `:172`, `:181`). The module's own flag covers a class whose
-    /// `_name` is any expression, and its unparsed and unknown-series files; a start in `built`
-    /// that fits every name is there only for the module's own code (`BuiltModels::of_scope`).
+    /// `_name` is any expression, and its unparsed and unknown-series files; another module's start
+    /// is in `built` only when it holds a dot (`BuiltModels::of_scope`).
     fn may_build(&self, model: &str, built: &BuiltModels<'_>) -> bool {
         self.dynamic || built.fit(model)
     }
