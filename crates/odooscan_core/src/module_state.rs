@@ -521,7 +521,7 @@ fn odoo_takes(params: &ast::Parameters) -> bool {
 }
 
 /// Whether `stmt` binds or unbinds `name` in the scope it runs in, `*` for a star import.
-fn binds(stmt: &Stmt, name: &str) -> bool {
+pub(crate) fn binds(stmt: &Stmt, name: &str) -> bool {
     match stmt {
         Stmt::FunctionDef(f) => f.name.as_str() == name,
         Stmt::ClassDef(c) => c.name.as_str() == name,
@@ -591,7 +591,48 @@ fn is_named(expr: &Expr, name: &str) -> bool {
 fn writes_names(body: &[Stmt], name: &str) -> bool {
     let mut unseen = Unseen::default();
     unseen.visit_body(body);
-    unseen.writes || unseen.names.iter().any(|n| n == name)
+    unseen.writes || unseen.names.iter().chain(&unseen.local).any(|n| n == name)
+}
+
+/// Whether code may bind `name` in the module where no statement shows it: a `global` declaration
+/// or a module-level assignment expression of it, or code that may write any name with `name` spelled as a
+/// keyword argument, an attribute or in a string, as in `globals()['__all__'] = names`. Code that
+/// writes names without spelling it, such as `eval(s)`, is taken to leave it alone.
+pub(crate) fn binds_unseen(body: &[Stmt], name: &str) -> bool {
+    let mut unseen = Unseen::default();
+    unseen.visit_body(body);
+    if unseen.names.iter().any(|n| n == name) {
+        return true;
+    }
+    if !unseen.writes {
+        return false;
+    }
+    let mut spelled = Spelled { name, found: false };
+    spelled.visit_body(body);
+    spelled.found
+}
+
+/// Whether the file spells `name` as a keyword argument, an attribute or inside a string literal,
+/// the forms in which code that writes names may write it.
+struct Spelled<'n> {
+    name: &'n str,
+    found: bool,
+}
+
+impl<'a> Visitor<'a> for Spelled<'_> {
+    fn visit_expr(&mut self, expr: &'a Expr) {
+        self.found |= match expr {
+            Expr::Call(c) => c
+                .arguments
+                .keywords
+                .iter()
+                .any(|k| k.arg.as_ref().is_some_and(|a| a == self.name)),
+            Expr::Attribute(a) => a.attr.as_str() == self.name,
+            Expr::StringLiteral(s) => s.value.to_str().contains(self.name),
+            _ => false,
+        };
+        visitor::walk_expr(self, expr);
+    }
 }
 
 /// The names the file binds at import, in the module body or a block of it, a `match` pattern
@@ -608,7 +649,7 @@ pub(crate) fn defined_names(body: &[Stmt]) -> Option<Vec<String>> {
     if unseen.writes || names.iter().any(|n| n == "__getattr__") {
         return None;
     }
-    names.extend(unseen.names);
+    names.extend(unseen.names.into_iter().chain(unseen.local));
     Some(names)
 }
 
@@ -666,13 +707,16 @@ fn target_names(target: &Expr, names: &mut Vec<String>) {
     }
 }
 
-/// The names a `global` declaration or an assignment expression anywhere in the file may bind in the
-/// module, and whether code may write any: a call of a `NAME_WRITERS` builtin, by its name, through
-/// `builtins` or imported from it, or a `NAME_HOLDERS` attribute, or `modules` imported from `sys`.
+/// The names a `global` declaration anywhere in the file or an assignment expression outside the
+/// body of a function, class or lambda binds in the module, those an assignment expression binds in
+/// such a body in `local`, and whether code may write any name: a call of a `NAME_WRITERS` builtin, by its name,
+/// through `builtins` or imported from it, or a `NAME_HOLDERS` attribute, or `modules` from `sys`.
 #[derive(Default)]
 struct Unseen {
     names: Vec<String>,
+    local: Vec<String>,
     writes: bool,
+    depth: usize,
 }
 
 impl<'a> Visitor<'a> for Unseen {
@@ -689,7 +733,11 @@ impl<'a> Visitor<'a> for Unseen {
             }
             _ => {}
         }
-        visitor::walk_stmt(self, stmt);
+        match stmt {
+            Stmt::FunctionDef(f) => self.walk_function(f),
+            Stmt::ClassDef(c) => self.walk_class(c),
+            _ => visitor::walk_stmt(self, stmt),
+        }
     }
 
     fn visit_expr(&mut self, expr: &'a Expr) {
@@ -700,10 +748,51 @@ impl<'a> Visitor<'a> for Unseen {
                 self.writes |=
                     NAME_HOLDERS.contains(&attr) || (NAME_WRITERS.contains(&attr) && is_named(&a.value, "builtins"));
             }
-            Expr::Named(n) => target_names(&n.target, &mut self.names),
+            Expr::Named(n) if self.depth == 0 => target_names(&n.target, &mut self.names),
+            Expr::Named(n) => target_names(&n.target, &mut self.local),
             _ => {}
         }
-        visitor::walk_expr(self, expr);
+        if let Expr::Lambda(l) = expr {
+            if let Some(parameters) = &l.parameters {
+                self.visit_parameters(parameters);
+            }
+            self.nested(|v| v.visit_expr(&l.body));
+        } else {
+            visitor::walk_expr(self, expr);
+        }
+    }
+}
+
+// Decorators, defaults, annotations and class bases run in the enclosing scope, so only a body
+// is nested: `@register(__all__ := names)` binds the module name.
+impl Unseen {
+    fn nested(&mut self, visit: impl FnOnce(&mut Self)) {
+        self.depth += 1;
+        visit(self);
+        self.depth -= 1;
+    }
+
+    fn walk_function(&mut self, f: &ast::StmtFunctionDef) {
+        f.decorator_list.iter().for_each(|d| self.visit_decorator(d));
+        if let Some(type_params) = &f.type_params {
+            self.visit_type_params(type_params);
+        }
+        self.visit_parameters(&f.parameters);
+        if let Some(returns) = &f.returns {
+            self.visit_annotation(returns);
+        }
+        self.nested(|v| v.visit_body(&f.body));
+    }
+
+    fn walk_class(&mut self, c: &ast::StmtClassDef) {
+        c.decorator_list.iter().for_each(|d| self.visit_decorator(d));
+        if let Some(type_params) = &c.type_params {
+            self.visit_type_params(type_params);
+        }
+        if let Some(arguments) = &c.arguments {
+            self.visit_arguments(arguments);
+        }
+        self.nested(|v| v.visit_body(&c.body));
     }
 }
 
@@ -1016,6 +1105,44 @@ mod tests {
         .chain(WRITERS)
         {
             assert_eq!(defined(src), None, "{src}");
+        }
+    }
+
+    #[test]
+    fn binds_unseen_a_name_declared_global_walrus_bound_or_spelled_under_a_name_writer() {
+        let unseen = |src: &str| binds_unseen(&parse_module(src).expect("valid Python").syntax().body, "n");
+        for src in [
+            "def f():\n    global n\n",
+            "(n := 1)\n",
+            "[(n := i) for i in x]\n",
+            "def f():\n    global n\n    (n := 1)\n",
+            "@register(n := 1)\ndef f():\n    pass\n",
+            "def f(x=(n := 1)):\n    pass\n",
+            "def f() -> (n := int):\n    pass\n",
+            "class C(B, metaclass=(n := M)):\n    pass\n",
+            "@register(n := 1)\nclass C:\n    pass\n",
+            "f = lambda x=(n := 1): x\n",
+            "globals()['n'] = 1\n",
+            "globals().update(n=1)\n",
+            "sys.modules[__name__].n = 1\n",
+            "exec('n = 1')\n",
+        ] {
+            assert!(unseen(src), "{src}");
+        }
+        for src in [
+            "n = 1\n",
+            "x = eval(s)\nn = 1\n",
+            "globals().update(d)\n",
+            "f(n=1)\n",
+            "x.n = 1\n",
+            "def f():\n    (n := 1)\n",
+            "def f():\n    [(n := i) for i in x]\n",
+            "class C:\n    (n := 1)\n",
+            "f = lambda: (n := 1)\n",
+            "f = lambda x=(m := 1): (n := x)\n",
+            "@d(m := 1)\ndef f(x=(m := 2)) -> (m := 3):\n    (n := 1)\n",
+        ] {
+            assert!(!unseen(src), "{src}");
         }
     }
 
