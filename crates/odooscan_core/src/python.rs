@@ -2144,13 +2144,13 @@ fn orm_result(method: &str) -> &'static str {
 }
 
 /// The method of the class that computes the field, unless it calls super(), whose implementation
-/// may assign the field. The last definition in source order wins, and one in an `if`, `try` or
-/// `with` block may not run, so the class's method is then unknown.
+/// may assign the field. The last definition in source order wins, and one in an `if`, `for`,
+/// `while`, `match`, `try` or `with` block may not run, so the class's method is then unknown.
 fn compute_method<'c>(class: &'c ast::StmtClassDef, field: &FieldFact) -> Option<&'c ast::StmtFunctionDef> {
     let Some(OptionValue::Str(name)) = field.option("compute").map(|o| &o.value) else {
         return None;
     };
-    let last = module_state::top_level(&class.body)
+    let last = module_state::bound(&class.body)
         .into_iter()
         .rev()
         .find(|stmt| matches!(stmt, Stmt::FunctionDef(f) if f.name.as_str() == name))?;
@@ -2183,12 +2183,12 @@ fn class_methods(class: &ast::StmtClassDef) -> Vec<(&ast::StmtFunctionDef, Curso
         .collect()
 }
 
-/// The methods the `if`, `try` and `with` blocks of a class body define, each with what it and its
-/// closures do with cursors.
+/// The methods the `if`, `for`, `while`, `match`, `try` and `with` blocks of a class body define,
+/// each with what it and its closures do with cursors.
 fn branch_methods(class: &ast::StmtClassDef) -> Vec<(&ast::StmtFunctionDef, CursorUse<'_>)> {
     let blocks = class.body.iter().filter(|stmt| !stmt.is_function_def_stmt());
     blocks
-        .flat_map(|stmt| module_state::top_level(std::slice::from_ref(stmt)))
+        .flat_map(|stmt| module_state::bound(std::slice::from_ref(stmt)))
         .filter_map(Stmt::as_function_def_stmt)
         .map(|f| (f, CursorUse::scan_nested(f)))
         .collect()
@@ -3090,13 +3090,14 @@ fn alias_name(name: &str, value: &Expr, fact: &mut ClassFact) {
     }
 }
 
-/// The method names an `if`, `try` or `with` block of a class body binds. Such a branch often
-/// serves another series, so the per-method checks and the OD211 `super()` lookup skip its body:
-/// `name_get` there must not report. One that calls its own name through `super()` still extends
-/// it, whichever series runs it, and OD122 reads its writes through `branch_methods`.
+/// The method names an `if`, `for`, `while`, `match`, `try` or `with` block of a class body binds.
+/// Such a block often serves another series, so the per-method checks and the OD211 `super()`
+/// lookup skip its body: `name_get` there must not report. One that calls its own name through
+/// `super()` still extends it, whichever series runs it, and OD122 reads its writes through
+/// `branch_methods`.
 fn conditional_methods(stmt: &Stmt, fact: &mut ClassFact) {
     let unread = FieldClasses::default();
-    for stmt in module_state::top_level(std::slice::from_ref(stmt)) {
+    for stmt in module_state::bound(std::slice::from_ref(stmt)) {
         if let Stmt::FunctionDef(func) = stmt {
             method_name(func, fact);
             if extends(&fact.class_name, func) {
@@ -5888,8 +5889,9 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
     }
 
     /// OD122 on each literal write statement a method of the class runs without invalidating the
-    /// cache itself or through another method of the class. A method in an `if`, `try` or `with`
-    /// block counts both ways: whichever series runs it, a stale cache stays stale.
+    /// cache itself or through another method of the class. A method in an `if`, `for`, `while`,
+    /// `match`, `try` or `with` block counts both ways: whichever series runs it, a stale cache stays
+    /// stale.
     fn sql_write_checks(&mut self, methods: &[&(&ast::StmtFunctionDef, CursorUse)], fact: Option<&ClassFact>) {
         let invalidating: Vec<&str> = methods
             .iter()
@@ -6663,6 +6665,21 @@ mod tests {
         assert_eq!(facts.classes[0].extended, ["write"]);
     }
 
+    #[test]
+    fn a_loop_or_match_block_extends_a_method_it_calls_through_super() {
+        let facts = analyze(
+            "class X(models.Model):\n    _inherit = 'x'\n    match a:\n        case 1:\n            \
+             def write(self, vals):\n                return super().write(vals)\n        case _:\n            \
+             def unlink(self):\n                return True\n    \
+             for a in b:\n        def create(self, vals):\n            return super().create(vals)\n    \
+             while c:\n        def copy(self):\n            return super().copy()\n    \
+             else:\n        def read(self):\n            return super().read()\n    \
+             for d in e:\n        pass\n    else:\n        def search(self):\n            return super().search()\n",
+            None,
+        );
+        assert_eq!(facts.classes[0].extended, ["write", "create", "copy", "read", "search"]);
+    }
+
     /// The compute methods that may leave `name` unassigned when `body` follows its field, computed
     /// by `_compute_name`, in a class of `x`.
     fn branch_computes(body: &str) -> Vec<String> {
@@ -6685,6 +6702,38 @@ mod tests {
     }
 
     #[test]
+    fn a_compute_in_a_loop_or_a_match_case_may_not_run() {
+        let assigns_all = |indent: &str| {
+            format!("{indent}def _compute_name(self):\n{indent}    for rec in self:\n{indent}        rec.name = 'x'\n")
+        };
+        let assigns_some = |indent: &str| {
+            format!(
+                "{indent}def _compute_name(self):\n{indent}    for rec in self:\n{indent}        if rec.id:\n{indent}            \
+                 rec.name = 'x'\n"
+            )
+        };
+        let top = assigns_some("    ");
+        for (head, indent) in [
+            ("    for a in b:\n", "        "),
+            ("    while a:\n        pass\n    else:\n", "        "),
+            ("    match a:\n        case 1:\n", "            "),
+        ] {
+            let block = format!("{head}{}", assigns_all(indent));
+            assert!(branch_computes(&block).is_empty(), "{head}");
+            assert!(branch_computes(&format!("{top}{block}")).is_empty(), "{head}");
+            assert_eq!(branch_computes(&format!("{block}{top}")), ["_compute_name"], "{head}");
+            for nest in [format!("{indent}class N:\n"), format!("{indent}def outer(self):\n")] {
+                let nested = format!("{head}{nest}{}", assigns_all(&format!("{indent}    ")));
+                assert_eq!(
+                    branch_computes(&format!("{top}{nested}")),
+                    ["_compute_name"],
+                    "{head}{nest}"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn a_conditional_block_holds_sql_writes_and_invalidations() {
         let facts = analyze(
             "class X(models.Model):\n    _inherit = 'x'\n    \
@@ -6701,6 +6750,44 @@ mod tests {
             .map(|d| d.pos.line)
             .collect();
         assert_eq!(lines, [13]);
+    }
+
+    #[test]
+    fn a_loop_block_holds_sql_writes_and_invalidations() {
+        let facts = analyze(
+            "class X(models.Model):\n    _inherit = 'x'\n    \
+             def _mark(self):\n        self.env.cr.execute('UPDATE x SET a = 1')\n        self._forget()\n    \
+             for a in b:\n        def _forget(self):\n            self.invalidate_model()\n    \
+             match c:\n        case 1:\n            def _unmark(self):\n                \
+             self.env.cr.execute('UPDATE x SET a = 0')\n",
+            None,
+        );
+        let lines: Vec<_> = facts
+            .diags
+            .iter()
+            .filter(|d| d.code == "OD122")
+            .map(|d| d.pos.line)
+            .collect();
+        assert_eq!(lines, [12]);
+    }
+
+    #[test]
+    fn a_def_nested_in_a_loop_or_match_block_invalidates_nothing_for_the_class() {
+        let facts = analyze(
+            "class X(models.Model):\n    _inherit = 'x'\n    \
+             def _mark(self):\n        self.env.cr.execute('UPDATE x SET a = 1')\n        self._forget()\n    \
+             for a in b:\n        class N:\n            def _forget(self):\n                self.invalidate_model()\n    \
+             match c:\n        case 1:\n            def outer(self):\n                \
+             def _forget(self):\n                    self.invalidate_model()\n",
+            None,
+        );
+        let lines: Vec<_> = facts
+            .diags
+            .iter()
+            .filter(|d| d.code == "OD122")
+            .map(|d| d.pos.line)
+            .collect();
+        assert_eq!(lines, [4]);
     }
 
     #[test]
@@ -8052,8 +8139,47 @@ class U(HttpCase):
     }
 
     #[test]
-    fn a_for_block_binds_no_method() {
-        assert!(method_names("    for a in b:\n        def in_for(self):\n            pass\n").is_empty());
+    fn reads_the_method_names_of_loop_and_match_blocks() {
+        let body = "    for a in b:\n        def in_for(self):\n            pass\n    \
+                    else:\n        def in_for_else(self):\n            pass\n    \
+                    while c:\n        def in_while(self):\n            pass\n    \
+                    else:\n        def in_while_else(self):\n            pass\n    \
+                    match d:\n        case 1:\n            def in_case(self):\n                pass\n        \
+                    case _:\n            def in_default(self):\n                pass\n    \
+                    for e in f:\n        if g:\n            def in_if_in_for(self):\n                pass\n    \
+                    for _ in h:\n        name_get = _legacy\n        data = 3\n    \
+                    while i:\n        alias_while: int = partialmethod(_set)\n    \
+                    match j:\n        case 1:\n            alias_case = api.model(_set)\n";
+        assert_eq!(
+            method_names(body),
+            [
+                "in_for",
+                "in_for_else",
+                "in_while",
+                "in_while_else",
+                "in_case",
+                "in_default",
+                "in_if_in_for",
+                "name_get",
+                "alias_while",
+                "alias_case"
+            ]
+        );
+    }
+
+    #[test]
+    fn a_def_nested_in_a_loop_or_match_block_is_no_method_of_the_class() {
+        let blocks = [
+            ("    for a in b:\n", "        "),
+            ("    while a:\n", "        "),
+            ("    match a:\n        case 1:\n", "            "),
+        ];
+        for (head, indent) in blocks {
+            let in_class = format!("{head}{indent}class N:\n{indent}    def x(self):\n{indent}        pass\n");
+            assert!(method_names(&in_class).is_empty(), "{head}");
+            let in_def = format!("{head}{indent}def outer(self):\n{indent}    def x(self):\n{indent}        pass\n");
+            assert_eq!(method_names(&in_def), ["outer"], "{head}");
+        }
     }
 
     #[test]

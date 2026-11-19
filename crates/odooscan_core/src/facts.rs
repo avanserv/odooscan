@@ -269,12 +269,12 @@ pub struct ClassFact {
     /// such a field still has no entry there.
     pub delegate_unknown: bool,
     pub fields: Vec<FieldFact>,
-    /// Methods the class defines, in its body or under an `if`, `try` or `with` block, the names it
-    /// binds to a value that may be a method, as Python finds those as it finds a method, and,
-    /// in its body, `_check_company_domain`, `_table_query` and `_table_sql` when it assigns them
-    /// anything but a field.
+    /// Methods the class defines, in its body or under an `if`, `for`, `while`, `match`, `try` or
+    /// `with` block, the names it binds to a value that may be a method, as Python finds those as
+    /// it finds a method, and, in its body, `_check_company_domain`, `_table_query` and
+    /// `_table_sql` when it assigns them anything but a field.
     pub methods: Vec<String>,
-    /// The `def`s of the class body, outside `if`, `try` and `with` blocks, in order.
+    /// The `def`s directly in the class body, in order.
     pub defs: Vec<MethodDef>,
     /// Methods of the class decorated with `@api.private`.
     pub private_methods: Vec<String>,
