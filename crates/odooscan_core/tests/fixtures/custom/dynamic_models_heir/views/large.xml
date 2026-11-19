@@ -1,0 +1,17 @@
+<odoo>
+    <record id="heir_large_form" model="ir.ui.view">
+        <field name="name">bad.generated.large.heir</field>
+        <field name="model">bad.generated.large</field>
+        <field name="arch" type="xml">
+            <form>
+                <field name="size"/>
+            </form>
+        </field>
+    </record>
+
+    <record id="action_heir_large" model="ir.actions.act_window">
+        <field name="name">Sized</field>
+        <field name="res_model">bad.generated.large</field>
+        <field name="domain">[('size', '>', 0)]</field>
+    </record>
+</odoo>

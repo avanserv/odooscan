@@ -35,3 +35,9 @@ class SideNote(models.Model):
     _name = "x_side_note"
 
     name = fields.Char()
+
+
+class AutoLateLarge(models.Model):
+    _name = "auto.late.large"
+
+    name = fields.Char()

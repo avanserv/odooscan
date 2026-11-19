@@ -299,7 +299,6 @@ pub fn check_module<'m>(index: &Index<'m>, mi: usize, series: Option<Series>) ->
         let setup = index.setup_scope(mi);
         let installs = index.install_scope(mi, series);
         let loaded = index.loaded_scope(mi, &scope, &installs);
-        let built = BuiltModels::of(module);
         let scope_built = BuiltModels::of_scope(index, mi, &scope, |_| true);
         let ahead_built = BuiltModels::of_scope(index, mi, &scope, |i| !index.follows(i, mi));
         let ctx = Ctx {
@@ -311,7 +310,6 @@ pub fn check_module<'m>(index: &Index<'m>, mi: usize, series: Option<Series>) ->
             installs: &installs,
             loaded: &loaded,
             dynamic: names_models_at_runtime(module),
-            built: &built,
             scope_built: &scope_built,
             ahead_built: &ahead_built,
             partial: index.partial_scope(&scope),
@@ -2091,18 +2089,35 @@ fn load_place(module: &Module, series: Option<Series>, def_rank: usize, rank: us
     format!("in {}", file.unwrap_or_default())
 }
 
-/// The start of every name `base` builds at runtime, which OD201, OD202, OD206 and OD603 read in
-/// place of what its code shows. Odoo builds a model from an `ir.model` row only for
-/// `state = 'manual'`, and such a row's name must start with `x_` (18.0
+/// The start of every name `base` builds at runtime, read in place of what its code shows. Odoo
+/// builds a model from an `ir.model` row only for `state = 'manual'`, and such a row's name must
+/// start with `x_` (18.0
 /// `odoo/addons/base/models/ir_model.py:279-280`, `:482-483`, `:494-500`, `:515-517`; 20.0
 /// `odoo/addons/base/models/ir_model.py:293-294`, `:560-566`, `odoo/orm/model_classes.py:584-586`).
 const CUSTOM_MODEL_START: &str = "x_";
 
-/// The names a module may build at runtime. A model another module spells out is still that
-/// module's unless the name fits, so a name that fits nothing is a real gap in `depends`.
+/// The start of the `state = 'manual'` fields a custom model gains, beyond those of every model and
+/// of `MAIL_MIXINS`: `base` gives it no parents and no other fields (18.0
+/// `odoo/addons/base/models/ir_model.py:482-490`, `:686-690`, `:1374-1378`; 20.0
+/// `odoo/addons/base/models/ir_model.py:546-558`, `:771-775`, `odoo/orm/model_classes.py:612-618`).
+const CUSTOM_FIELD_START: &str = "x_";
+
+/// The parents `mail` adds to a custom model whose `ir.model` row asks for them (18.0
+/// `addons/mail/models/ir_model.py:101-116`; 20.0 `addons/mail/models/ir_model.py:72-88`).
+const MAIL_MIXINS: [&str; 3] = ["mail.thread", "mail.activity.mixin", "mail.thread.blacklist"];
+
+/// The names the modules of a scope may build at runtime, and the fields a custom one of them may
+/// hold. A model another module spells out is still that module's unless the name fits, so a name
+/// that fits nothing is a real gap in `depends`.
 struct BuiltModels<'m> {
     starts: Vec<&'m str>,
     names: Vec<&'m str>,
+    /// `base` is among these modules: it builds custom models, whatever its code shows.
+    custom: bool,
+    /// The fields of `MAIL_MIXINS` and of the models they inherit, in any indexed module, short of
+    /// the fields of `base`. `None` when `mail` is not indexed, as the database may still install
+    /// it, or when the scan cannot read all of a mixin's fields: a custom model may then hold any.
+    mixin_fields: Option<FxHashSet<&'m str>>,
 }
 
 impl<'m> BuiltModels<'m> {
@@ -2117,18 +2132,22 @@ impl<'m> BuiltModels<'m> {
                 .flat_map(|f| &f.facts.built_model_names)
                 .map(String::as_str)
                 .collect(),
+            custom: false,
+            mixin_fields: None,
         }
     }
 
-    /// The names the modules of `scope` that `keep` admits may build. `base` gives
-    /// `CUSTOM_MODEL_START` alone, as whatever its code shows, the only models it builds at runtime
-    /// are custom ones. A start that fits every name counts for module `mi` alone: an
+    /// The names the modules of `scope` that `keep` admits may build. `base` sets `custom` and
+    /// `mixin_fields` and adds no start or name: the only models it builds at runtime are custom
+    /// ones, whatever its code shows. A start that fits every name counts for module `mi` alone: an
     /// always-installed module that names its models through a helper would otherwise silence every
     /// module.
     fn of_scope(index: &Index<'m>, mi: usize, scope: &Scope, keep: impl Fn(usize) -> bool) -> Self {
         let mut built = Self {
             starts: vec![],
             names: vec![],
+            custom: false,
+            mixin_fields: None,
         };
         let seen = index
             .modules
@@ -2137,7 +2156,8 @@ impl<'m> BuiltModels<'m> {
             .filter(|&(i, _)| scope.sees(i) && keep(i));
         for (i, module) in seen {
             if module.name == "base" {
-                built.starts.push(CUSTOM_MODEL_START);
+                built.custom = true;
+                built.mixin_fields = Self::mixin_fields(index);
                 continue;
             }
             let of = Self::of(module);
@@ -2148,9 +2168,48 @@ impl<'m> BuiltModels<'m> {
         built
     }
 
-    fn fit(&self, model: &str) -> bool {
+    /// `mixin_fields` as `index` reads them. A field of `base` is left out: whether a custom model
+    /// holds it is what resolving the path on the scope already says. A class of a mixin in a file
+    /// that does not parse, or with a parent the scan cannot read, may add any field.
+    fn mixin_fields(index: &Index<'m>) -> Option<FxHashSet<&'m str>> {
+        let mut fields = FxHashSet::default();
+        for mixin in MAIL_MIXINS {
+            let chain = index.chain_classes(mixin);
+            for &(mi, class) in chain.iter().filter(|(_, class)| class.model != "base") {
+                if class.unread || index.unread_parents(mi, class, &chain, &class.opaque_bases) {
+                    return None;
+                }
+                fields.extend(class.fields.iter().map(|field| field.name.as_str()));
+            }
+        }
+        index.by_name.contains_key("mail").then_some(fields)
+    }
+
+    /// Whether the code of these modules may build `model`.
+    fn spells(&self, model: &str) -> bool {
         self.names.contains(&model) || self.starts.iter().any(|start| model.starts_with(start))
     }
+
+    fn fit(&self, model: &str) -> bool {
+        self.spells(model) || (self.custom && model.starts_with(CUSTOM_MODEL_START))
+    }
+
+    /// Whether a model these modules build may hold `field` out of the scan's sight. One built by
+    /// code may hold anything; a custom one only what `custom_holds` admits.
+    fn may_hold(&self, model: &str, field: &str) -> bool {
+        self.spells(model) || (self.custom && model.starts_with(CUSTOM_MODEL_START) && self.custom_holds(field))
+    }
+
+    fn custom_holds(&self, field: &str) -> bool {
+        field.starts_with(CUSTOM_FIELD_START) || self.mixin_fields.as_ref().is_none_or(|f| f.contains(field))
+    }
+}
+
+/// The modules there when Odoo reads a domain, and what they may build.
+#[derive(Clone, Copy)]
+struct Present<'a, 'm> {
+    scope: &'a Scope,
+    built: &'a BuiltModels<'m>,
 }
 
 #[derive(Clone, Copy)]
@@ -2169,10 +2228,8 @@ struct Ctx<'a, 'm> {
     /// The module builds model names at runtime outside tests, examples and upgrade scripts, so its
     /// models and their ids cannot be listed.
     dynamic: bool,
-    /// What the module may build, outside tests, examples and upgrade scripts.
-    built: &'a BuiltModels<'m>,
-    /// What the modules of `scope` may build, the module included, with `base` read through
-    /// `CUSTOM_MODEL_START`.
+    /// What the modules of `scope` may build, the module included, outside tests, examples and
+    /// upgrade scripts, with `base` read as `custom`.
     scope_built: &'a BuiltModels<'m>,
     /// `scope_built` short of the always-installed modules that depend on this one: they load after
     /// it, so what they build does not exist while it loads, as `model_status` reads them.
@@ -2224,19 +2281,21 @@ impl<'m> Ctx<'_, 'm> {
         self.dynamic || built.fit(model)
     }
 
-    /// Whether this module builds `model` at runtime. A class in scope that introduces the model
-    /// spells it out whatever the module builds: `base` itself builds models of any name, so `fit`
-    /// alone would take all of its own models for built ones.
-    fn built_here(&self, model: &str) -> bool {
-        !self.index.introduced(model, self.scope) && self.built.fit(model)
+    /// Whether `model` may be one the modules of `built` build at runtime and hold `field` there:
+    /// any field on one their code builds, only what `BuiltModels::may_hold` admits on a custom one.
+    /// A class in scope that introduces the model spells it out, so the scan reads its fields
+    /// whatever `built` fits: a module that names its models through a helper fits all of its own.
+    fn built_holds(&self, model: &str, field: &str, built: &BuiltModels<'_>) -> bool {
+        !self.index.introduced(model, self.scope) && built.may_hold(model, field)
     }
 
-    /// Whether the model where a path fails may hold the field out of the scan's sight. That model
-    /// is the one to ask about, as a later step can be the one that hides the field. A data file
-    /// only explains a missing field: one `depends` does not reach is found on the model, so it
-    /// stays a gap unless `unseen` explains it or a file in scope that does not parse may add it.
-    fn may_hide(&self, e: &PathError<'_>) -> bool {
-        self.unseen(e, self.scope) || self.lost_field(e) || self.may_supply(e)
+    /// Whether the model where a path fails may hold the field out of the scan's sight, once the
+    /// modules of `built` have built theirs. That model is the one to ask about, as a later step can
+    /// be the one that hides the field. A data file only explains a missing field: one `depends`
+    /// does not reach is found on the model, so it stays a gap unless `unseen` explains it or a file
+    /// in scope that does not parse may add it.
+    fn may_hide(&self, e: &PathError<'_>, built: &BuiltModels<'_>) -> bool {
+        self.unseen(e, self.scope, built) || self.lost_field(e) || self.may_supply(e)
     }
 
     /// Whether a parent the scan cannot read, of a class in `scope` of `model` or of a model it
@@ -2249,18 +2308,20 @@ impl<'m> Ctx<'_, 'm> {
             || self.index.hidden_outside(model, scope)
     }
 
-    /// Whether `e` fails on a model whose fields the scan cannot see: one this module builds at
-    /// runtime, or for a missing field one a parent the scan cannot read, on `scope`, may give it.
+    /// Whether `e` fails on a model whose fields the scan cannot see: one a module of `built` builds
+    /// at runtime, or for a missing field one a parent the scan cannot read, on `scope`, may give it.
     /// Odoo builds each class's model as the module loads and merges every parent's fields and the
     /// `_inherits` ones before it resolves any path, so this holds at setup too (18.0
     /// `odoo/modules/registry.py:290-292`, `:341`, `:345`, `odoo/models.py:733`, `:3653-3657`,
     /// `:3699`; 20.0 `odoo/orm/registry.py:449-451`, `:565`, `odoo/orm/model_classes.py:180`,
-    /// `:395-399`, `:458`). `built_here` stays on `self.scope`: the setup scope keeps its `visible`,
+    /// `:395-399`, `:458`). `built_holds` stays on `self.scope`: the setup scope keeps its `visible`,
     /// which is all `introduced` reads. Nothing explains a field found there that is not relational.
-    fn unseen(&self, e: &PathError<'_>, scope: &Scope) -> bool {
+    fn unseen(&self, e: &PathError<'_>, scope: &Scope, built: &BuiltModels<'_>) -> bool {
         match e {
-            PathError::Missing { model, .. } => self.built_here(model) || self.parents_may_give(model, scope),
-            PathError::Hidden { model, .. } => self.built_here(model),
+            PathError::Missing { segment, model } => {
+                self.built_holds(model, segment, built) || self.parents_may_give(model, scope)
+            }
+            PathError::Hidden { segment, model, .. } => self.built_holds(model, segment, built),
             PathError::NotRelational { .. } => false,
         }
     }
@@ -2442,10 +2503,11 @@ impl<'m> Ctx<'_, 'm> {
     }
 
     /// OD203 on a path that fails on the scope, judged at the model where it fails as OD210 judges
-    /// its domains, through `may_hide`, so the two cannot drift.
+    /// its domains, through `may_hide`, so the two cannot drift. Odoo reads it once the install is
+    /// done, with every module in scope built.
     fn path(&self, out: &mut Out<'m>, file: &'m Path, model: &str, path: &Spanned<String>) {
         if let Err(e) = self.index.resolve_path(model, &path.value, self.scope)
-            && !self.may_hide(&e)
+            && !self.may_hide(&e, self.scope_built)
         {
             out.push(file, "OD203", path.pos, e.message(&path.value));
         }
@@ -2453,27 +2515,49 @@ impl<'m> Ctx<'_, 'm> {
 
     /// What a domain finds where Odoo checks it as the module loads from `validated` on. Before that
     /// it runs once the install is done, with all of `installs` there.
-    fn checked_reach(&self, validated: Series) -> &Scope {
+    fn checked_reach(&self, validated: Series) -> Present<'_, 'm> {
         if self.series.is_some_and(|s| s < validated) {
-            self.installs
+            self.installed()
         } else {
-            self.loaded
+            Present {
+                scope: self.loaded,
+                built: self.ahead_built,
+            }
+        }
+    }
+
+    /// What a domain finds once the install is done.
+    fn installed(&self) -> Present<'_, 'm> {
+        Present {
+            scope: self.installs,
+            built: self.scope_built,
         }
     }
 
     /// OD210 on a path that fails on `scope` and past it on `reach`, which holds what is there when
-    /// the domain is read. `scope` keeps its say: a model built here on it may be spelled out by a
-    /// module only `reach` holds, which says nothing of the model this module builds.
-    fn domain_path(&self, out: &mut Out<'m>, file: &'m Path, model: &str, path: &Spanned<String>, reach: &Scope) {
+    /// the domain is read. `scope` keeps its say: a model a module of `reach.built` builds may be
+    /// spelled out by a module only `reach.scope` holds, which says nothing of the model built at
+    /// runtime.
+    fn domain_path(
+        &self,
+        out: &mut Out<'m>,
+        file: &'m Path,
+        model: &str,
+        path: &Spanned<String>,
+        reach: Present<'_, 'm>,
+    ) {
         let Err(near) = self.index.resolve_path(model, &path.value, self.scope) else {
             return;
         };
-        if self.may_hide(&near) {
+        if self.may_hide(&near, reach.built) {
             return;
         }
-        let wider = Ctx { scope: reach, ..*self };
-        if let Err(e) = self.index.resolve_path(model, &path.value, reach)
-            && !wider.may_hide(&e)
+        let wider = Ctx {
+            scope: reach.scope,
+            ..*self
+        };
+        if let Err(e) = self.index.resolve_path(model, &path.value, reach.scope)
+            && !wider.may_hide(&e, reach.built)
         {
             out.push(file, "OD210", path.pos, e.message(&path.value));
         }
@@ -2482,14 +2566,15 @@ impl<'m> Ctx<'_, 'm> {
     /// OD203 on a path Odoo resolves as it sets up the model or as `_auto_init` reads it, when a
     /// failure refuses the install.
     /// The module's own data files load after that, so only an unread file of a module `setup_scope`
-    /// records may add the field, and not to a model the module defines whole. A model built here
-    /// and a parent the scan cannot read are weighed as `unseen` says, the parent on the setup scope.
+    /// records may add the field, and not to a model the module defines whole. A model a module
+    /// ahead of this one builds and a parent the scan cannot read are weighed as `unseen` says, the
+    /// parent on the setup scope.
     fn setup_path(&self, out: &mut Out<'m>, file: &'m Path, model: &str, path: &Spanned<String>) {
         if let Err(e) = self.index.resolve_path(model, &path.value, self.setup)
             && !self.may_supply(&e)
             && !matches!(&e, PathError::Missing { model, .. }
                 if self.index.lost_scope(self.setup) && self.may_add_field(model))
-            && !self.unseen(&e, self.setup)
+            && !self.unseen(&e, self.setup, self.ahead_built)
         {
             out.push(file, "OD203", path.pos, e.message(&path.value));
         }
@@ -3283,7 +3368,7 @@ impl<'m> Ctx<'_, 'm> {
             let reach = if field.domain_string {
                 self.checked_reach(VIEW_DOMAIN_VALIDATED)
             } else {
-                self.installs
+                self.installed()
             };
             for f in &field.domain {
                 self.domain_path(out, path, &comodel.value, f, reach);
@@ -4392,8 +4477,10 @@ impl<'m> Ctx<'_, 'm> {
             let Some(joined) = self.arch_path(model, &field.path) else {
                 continue;
             };
+            // Odoo checks the view as its module's data loads, before a module that follows it builds
+            // anything (18.0 `odoo/addons/base/models/ir_ui_view.py:354-355`; 20.0 `:653`).
             if let Err(e) = self.index.resolve_path(model, &joined, self.scope)
-                && !self.may_hide(&e)
+                && !self.may_hide(&e, self.ahead_built)
             {
                 out.push(path, "OD304", field.pos, e.message(&joined));
             }
@@ -4403,7 +4490,7 @@ impl<'m> Ctx<'_, 'm> {
     fn domains(&self, out: &mut Out<'m>, path: &'m Path, domains: &[DomainFact]) {
         for d in domains {
             for f in &d.fields {
-                self.domain_path(out, path, &d.model, f, self.installs);
+                self.domain_path(out, path, &d.model, f, self.installed());
             }
         }
     }
@@ -4421,7 +4508,7 @@ impl<'m> Ctx<'_, 'm> {
         for d in &view.domains {
             let unsure = self.unsure_spec_subview(model, view, &d.path, trees);
             let target = self.arch_model(model, &d.path).filter(|_| !unsure);
-            let reach = if d.validated { validated } else { self.installs };
+            let reach = if d.validated { validated } else { self.installed() };
             for f in target.iter().flat_map(|t| d.fields.iter().map(move |f| (t, f))) {
                 self.domain_path(out, path, f.0, f.1, reach);
             }
@@ -8445,6 +8532,69 @@ mod tests {
             codes.filter(|(code, _)| *code == "OD201").collect::<Vec<_>>(),
             [("OD201", 3)]
         );
+    }
+
+    /// The OD203 lines of `main`, whose `x_note` only `base` may build, with `mail` indexed beside it
+    /// as `mail` holds, or without it.
+    fn custom_model_paths(mail: Option<&str>) -> Vec<u32> {
+        let python = |source: &str| crate::project::SourceFile {
+            path: std::path::PathBuf::new(),
+            rel: "models/main.py".to_owned(),
+            rank: None,
+            demo: false,
+            facts: analyze(source, Series::parse("18.0")),
+            suppressions: Default::default(),
+            mentions: Default::default(),
+        };
+        let mut modules = vec![
+            crate::project::module("base", "{}"),
+            crate::project::module("main", "{'depends': ['base']}"),
+            crate::project::module("side", "{'depends': ['base']}"),
+        ];
+        let holder = "class H(models.Model):\n    _name = 'h.holder'\n    note_id = fields.Many2one('x_note')\n    \
+                      label = fields.Char(related='note_id.x_label')\n    name = fields.Char(related='note_id.name')\n    \
+                      emails = fields.Char(related='note_id.email_normalized')\n    \
+                      stamp = fields.Char(related='note_id.side_stamp')\n";
+        modules[1].python.push(python(holder));
+        // `main` does not see `side`, so `x_note` may be the custom model `base` builds, and the
+        // field `side` adds to every model is not one of the mail mixins'.
+        modules[2].python.push(python(
+            "class N(models.Model):\n    _name = 'x_note'\n    name = fields.Char()\n\n\n\
+             class S(models.AbstractModel):\n    _inherit = 'base'\n    side_stamp = fields.Char()\n",
+        ));
+        if let Some(source) = mail {
+            let mut module = crate::project::module("mail", "{'depends': ['base']}");
+            module.python.push(python(source));
+            modules.push(module);
+        }
+        let index = Index::build(&modules, Series::parse("18.0"));
+        let diags = check_module(&index, 1, Series::parse("18.0"));
+        diags
+            .iter()
+            .filter(|(_, d)| d.code == "OD203")
+            .map(|(_, d)| d.pos.line)
+            .collect()
+    }
+
+    #[test]
+    fn a_custom_model_holds_custom_and_mail_mixin_fields() {
+        let mail = |blacklist: &str| {
+            format!(
+                "class T(models.AbstractModel):\n    _name = 'mail.thread'\n    message_ids = fields.Char()\n\n\n\
+                 class B({blacklist}):\n    _name = 'mail.thread.blacklist'\n    _inherit = ['mail.thread']\n    \
+                 email_normalized = fields.Char()\n"
+            )
+        };
+        // With `mail` indexed, `x_note` holds `x_label` and a field of a mail mixin, never `name` or
+        // what another module adds to every model.
+        assert_eq!(custom_model_paths(Some(&mail("models.AbstractModel"))), [5, 7]);
+        // Without it, the database may still install `mail`, whose mixins the scan cannot read.
+        assert_eq!(custom_model_paths(None), Vec::<u32>::new());
+        // A mixin's parent or file the scan cannot read may add any field.
+        let hidden = mail("models.AbstractModel, Layout");
+        assert_eq!(custom_model_paths(Some(&hidden)), Vec::<u32>::new());
+        let unread = format!("{}    size = (\n", mail("models.AbstractModel"));
+        assert_eq!(custom_model_paths(Some(&unread)), Vec::<u32>::new());
     }
 
     #[test]

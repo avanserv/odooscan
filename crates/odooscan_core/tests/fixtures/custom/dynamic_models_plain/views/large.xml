@@ -8,4 +8,22 @@
             </form>
         </field>
     </record>
+
+    <record id="plain_note_form" model="ir.ui.view">
+        <field name="name">x_side_note.plain</field>
+        <field name="model">x_side_note</field>
+        <field name="arch" type="xml">
+            <form>
+                <field name="x_label"/>
+                <field name="message_ids"/>
+                <field name="name"/>
+            </form>
+        </field>
+    </record>
+
+    <record id="action_plain_note" model="ir.actions.act_window">
+        <field name="name">Named notes</field>
+        <field name="res_model">x_side_note</field>
+        <field name="domain">[('x_label', '!=', False), ('name', '!=', False)]</field>
+    </record>
 </odoo>

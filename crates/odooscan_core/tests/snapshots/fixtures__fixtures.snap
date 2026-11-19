@@ -485,6 +485,9 @@ custom/domain_bases_side/models/imported.py:8:30: OD210 'no_side_stamped': domai
 custom/domains20/controllers/main.py:11:20: OD715 route parameter 'filters' reaches the domain or the fields of sudo().search_count(), so the user searches or groups by any field as superuser; build each condition with a field and an operator the code picks
 custom/dynamic_models/models/generated.py:37:38: OD203 'no_generated_user': bad.generated.user has no field 'no_generated_user'
 custom/dynamic_models/views/large.xml:39:17: OD304 'scale': bad.generated.user has no field 'scale'
+custom/dynamic_models_auto/models/holder.py:10:57: OD210 'size': auto.late.large has no field 'size'
+custom/dynamic_models_auto/models/holder.py:11:40: OD203 'late_id.size': auto.late.large has no field 'size'
+custom/dynamic_models_auto/views/large.xml:7:17: OD304 'size': auto.late.large has no field 'size'
 custom/dynamic_models_heir/models/heir.py:8:32: OD202 model 'side.order' comes from module dynamic_models_side; add it to depends
 custom/dynamic_models_heir/models/heir.py:10:32: OD201 no indexed module defines model 'heir.ghost'
 custom/dynamic_models_heir/models/heir.py:16:22: OD206 no indexed module defines model 'heir.ghost'
@@ -500,9 +503,12 @@ custom/dynamic_models_plain/models/holder.py:7:32: OD202 model 'bad.generated.la
 custom/dynamic_models_plain/models/holder.py:8:41: OD203 'large_id.no_plain_size': bad.generated.large has no field 'no_plain_size'
 custom/dynamic_models_plain/models/holder.py:9:38: OD203 'large_id.name': field 'name' of bad.generated.large comes from module sql_base_entries, which is not in depends
 custom/dynamic_models_plain/models/holder.py:12:25: OD206 no indexed module defines model 'bad.generated.small'
+custom/dynamic_models_plain/models/holder.py:20:37: OD203 'note_id.name': field 'name' of x_side_note comes from module sql_base_entries, which is not in depends
 custom/dynamic_models_plain/static/src/large.js:3:30: OD603 model 'bad.generated.large' comes from module dynamic_models_side, which is not in depends
 custom/dynamic_models_plain/views/large.xml:4:9: OD202 model 'bad.generated.large' comes from module dynamic_models_side; add it to depends
 custom/dynamic_models_plain/views/large.xml:7:17: OD304 'name': field 'name' of bad.generated.large comes from module sql_base_entries, which is not in depends
+custom/dynamic_models_plain/views/large.xml:19:17: OD304 'name': field 'name' of x_side_note comes from module sql_base_entries, which is not in depends
+custom/dynamic_models_plain/views/large.xml:27:9: OD210 'name': field 'name' of x_side_note comes from module sql_base_entries, which is not in depends
 custom/dynamic_models_settled/data/records.xml:2:5: OD201 no indexed module defines model 'ghost.settled'
 custom/dynamic_models_unbuilt/models/proxies.py:27:32: OD202 model 'bad.generated.large' comes from module dynamic_models_side; add it to depends
 custom/dynamic_models_unbuilt/models/proxies.py:30:25: OD206 no indexed module defines model 'unbuilt.proxy'
