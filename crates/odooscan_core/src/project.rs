@@ -579,7 +579,7 @@ impl ScopedFieldClasses {
 
 /// When Odoo imports a file of a module.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-enum Loading {
+pub(crate) enum Loading {
     /// With the module.
     Module,
     /// For a test run alone, with every other test file: Odoo imports `<addon>.tests`, the folder
@@ -591,7 +591,7 @@ enum Loading {
 }
 
 /// When Odoo imports the file at `rel`; only the top-level folders count.
-fn loading(rel: &str) -> Loading {
+pub(crate) fn loading(rel: &str) -> Loading {
     let dir = rel.split('/').next().unwrap_or_default();
     if dir == "tests" || rel == "tests.py" {
         Loading::Tests

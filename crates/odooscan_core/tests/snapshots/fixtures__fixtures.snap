@@ -509,6 +509,10 @@ custom/dynamic_models_unknown/models/partner.py:15:31: OD202 model 'side.order.l
 custom/dynamic_models_unknown/models/partner.py:16:31: OD202 model 'sideline.note' comes from module dynamic_models_side; add it to depends
 custom/dynamic_models_unknown/models/partner.py:20:17: OD202 model 'bad.generated.huge' comes from module dynamic_models_side; add it to depends
 custom/dynamic_models_unknown/models/partner.py:24:17: OD202 model 'side.order' comes from module dynamic_models_side; add it to depends
+custom/dynamic_models_unloaded/models/holder.py:7:32: OD201 no indexed module defines model 'ghost.unloaded'
+custom/dynamic_models_unloaded/security/ir.model.access.csv:3:1: OD301 module dynamic_models_unloaded defines no XML id 'dynamic_models_unloaded.model_ghost_unloaded'
+custom/dynamic_models_unloaded/static/src/ghost.js:3:30: OD603 no indexed module defines model 'ghost.unloaded'
+custom/dynamic_models_unloaded/views/rule.xml:5:36: OD210 'no_unloaded_field': unloaded.holder has no field 'no_unloaded_field'
 custom/encoded_broken/data/broken.xml:4:1: OD000 expected 'record' tag, not 'odoo' at 4:1
 custom/encoded_csv10/data/refs.xml:8:9: OD301 module encoded_csv10 defines no XML id 'encoded_csv10.country_gone'
 custom/encoded_csv10/data/res.country.csv:1:1: OD309 res.country has no field 'no_such_field'

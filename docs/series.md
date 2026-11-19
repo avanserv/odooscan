@@ -24,21 +24,22 @@ empty one, on a proven Odoo base, and with a base that is a model class of its f
 file that binds `_name` or `_inherit`, or a class of its file that derives from such a class: the
 scan leaves it unnamed, while saas~14.4 names it after itself. A proven Odoo base is a model class
 the file imports at its top level from `odoo` or `openerp`, or a model class of the file that
-derives from one. Models built at
-runtime act as with a `_name` given by an expression: a model id that no indexed module defines is
-not reported, [OD201](rules/OD201.md) skips a model no indexed module defines, and
-[OD604](rules/OD604.md) checks no method the module's scripts call.
+derives from one. Models built at runtime in code outside the top-level `tests/`, a root
+`tests.py`, `examples/`, `migrations/` and `upgrades/` act as with a `_name` given by
+an expression: a model id that no indexed module defines is not reported, [OD201](rules/OD201.md)
+skips a model no indexed module defines, and [OD604](rules/OD604.md) checks no method the module's
+scripts call.
 
 [OD202](rules/OD202.md) and [OD603](rules/OD603.md) stay silent on a model only a module missing
 from `depends` defines when its name fits what the module, a module in its `depends` or an
 always-installed module may build, and [OD206](rules/OD206.md) on a model no indexed module defines
 when its name fits what the module itself may build. What a module may build is read from its code
-outside `tests/`, `examples/`, `migrations/` and `upgrades/`: the start an expression shows, every
-name when it shows no literal start, and for a class of unknown series each name another reading
-gives it, unless that name is one of the class's parents. An expression that shows no literal start
-counts only for the module's own code, so a helper that names the models of an always-installed
-module silences no other module. For OD202 and OD603, `base` builds only names that start with `x_`,
-the custom models a user creates in the database, whatever its code shows.
+outside `tests/`, `tests.py`, `examples/`, `migrations/` and `upgrades/`: the start an expression
+shows, every name when it shows no literal start, and for a class of unknown series each name
+another reading gives it, unless that name is one of the class's parents. An expression that shows
+no literal start counts only for the module's own code, so a helper that names the models of an
+always-installed module silences no other module. For OD202 and OD603, `base` builds only names that
+start with `x_`, the custom models a user creates in the database, whatever its code shows.
 
 `--target-series 19.0` checks every module given to `check` as if its manifest named 19.0, against
 the core on the addons path, or the one fetched below when none is given, so a port shows what that

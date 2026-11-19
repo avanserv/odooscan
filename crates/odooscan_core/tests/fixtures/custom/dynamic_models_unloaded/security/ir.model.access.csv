@@ -1,0 +1,3 @@
+id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
+access_unloaded_holder,unloaded holder,model_unloaded_holder,base.group_user,1,0,0,0
+access_ghost_unloaded,ghost unloaded,model_ghost_unloaded,base.group_user,1,0,0,0

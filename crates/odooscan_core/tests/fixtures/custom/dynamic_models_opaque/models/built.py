@@ -13,6 +13,7 @@ class OpaqueHolder(models.Model):
     _name = "opaque.holder"
 
     large_id = fields.Many2one("bad.generated.large")
+    ghost_id = fields.Many2one("ghost.opaque")
 
     def _built_records(self):
         return self.env["opaque.built"].search([])

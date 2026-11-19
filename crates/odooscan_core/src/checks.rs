@@ -28,7 +28,7 @@ use crate::index::{
 };
 use crate::mentions::HOOK_PREFIXES;
 use crate::module_state::UPGRADE_DIRS;
-use crate::project::{ASSET_EXTENSIONS, Module, SourceFile, code_loaded};
+use crate::project::{ASSET_EXTENSIONS, Loading, Module, SourceFile, code_loaded, loading};
 use crate::routing::{ClassAt, Endpoint, Origin};
 use crate::rules::{Severity, rule};
 use crate::series::{self, Series};
@@ -309,7 +309,7 @@ pub fn check_module<'m>(index: &Index<'m>, mi: usize, series: Option<Series>) ->
             setup: &setup,
             installs: &installs,
             loaded: &loaded,
-            dynamic: module.python.iter().any(|f| f.facts.dynamic_models),
+            dynamic: names_models_at_runtime(module),
             built: &built,
             scope_built: &scope_built,
             partial: index.partial_scope(&scope),
@@ -342,12 +342,21 @@ fn served(rel: &str) -> bool {
     dir != "tests" && !UPGRADE_DIRS.contains(&dir)
 }
 
-/// Whether the model classes of a file of a module join its registry build. A test class exists
-/// only in a test run, code under an upgrade directory loads outside `odoo.addons` so its class
-/// joins no module's build, and examples are no module code.
+/// Whether the model classes of a file of a module join its registry build, which takes
+/// `module_to_models[module.name]` alone (18.0 `odoo/modules/registry.py:290`; 20.0
+/// `odoo/orm/registry.py:449`). A test class exists only in a test run, an upgrade script loads
+/// outside `odoo.addons` so its class joins no module's build, and examples are no module code.
 fn builds_models(rel: &str) -> bool {
-    let dir = rel.split('/').next().unwrap_or_default();
-    dir != "tests" && dir != "examples" && !UPGRADE_DIRS.contains(&dir)
+    loading(rel) == Loading::Module && rel.split('/').next() != Some("examples")
+}
+
+/// Whether the module code of `module` builds a model name at runtime, so its models and their ids
+/// cannot be listed.
+fn names_models_at_runtime(module: &Module) -> bool {
+    module
+        .python
+        .iter()
+        .any(|f| builds_models(&f.rel) && f.facts.dynamic_models)
 }
 
 /// The paths a route spells out, none when it leaves them to the route it overrides or computes
@@ -2150,7 +2159,8 @@ struct Ctx<'a, 'm> {
     installs: &'a Scope,
     /// `installs`, short of what loads after the module.
     loaded: &'a Scope,
-    /// The module builds model names at runtime, so its models and their ids cannot be listed.
+    /// The module builds model names at runtime outside tests, examples and upgrade scripts, so its
+    /// models and their ids cannot be listed.
     dynamic: bool,
     /// What the module may build, outside tests, examples and upgrade scripts.
     built: &'a BuiltModels<'m>,
@@ -7923,6 +7933,8 @@ mod tests {
         assert!(builds_models("a.py"));
         assert!(builds_models("models/examples/a.py"));
         assert!(!builds_models("tests/common.py"));
+        assert!(!builds_models("tests.py"));
+        assert!(builds_models("models/tests.py"));
         assert!(!builds_models("examples/a.py"));
         assert!(!builds_models("migrations/18.0.1.0.0/pre-a.py"));
         assert!(!builds_models("upgrades/18.0.1.0.0/post-a.py"));
