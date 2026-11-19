@@ -603,8 +603,11 @@ custom/field_classes/models/lens_tables.py:10:5: OD226 _auto = False leaves x.le
 custom/field_classes/models/lens_tables.py:21:5: OD226 _auto = False leaves x.lens.currency without a table, and nothing creates the view x_lens_currency_rel; create it in init(), or drop _auto = False
 custom/field_classes/views/lens_views.xml:7:45: OD312 x.lens has no method 'embedding'
 custom/field_classes14/data/badges.xml:2:5: OD324 x.badge.old.label is required and has no default, so creating this record fails if the column is NOT NULL; give the field a value
+custom/field_classes_migrated/models/handler.py:13:30: OD210 'handler': x.migrated.handler has no field 'handler'
 custom/field_classes_plain/models/handler.py:14:23: OD210 'handler': x.plain.handler has no field 'handler'
 custom/field_classes_plain/models/handler.py:15:30: OD210 'grid': x.plain.handler has no field 'grid'
+custom/field_classes_tested/models/handler.py:13:30: OD210 'handler': x.tested.handler has no field 'handler'
+custom/field_classes_tested/tests/test_handler.py:2:6: OD518 'odoo.addons.field_classes.orm.vector' comes from module field_classes; add it to depends
 custom/field_ids_after/data/refs.xml:9:9: OD301 module field_ids_broken defines no XML id 'field_ids_broken.field_field_ids_gone_name'
 custom/field_ids_after/models/bin.py:18:22: OD301 module field_ids_broken defines no XML id 'field_ids_broken.field_field_ids_gone_name'
 custom/field_ids_away/__manifest__.py:4:17: OD520 module 'base' already comes with 'field_ids_old', also in depends
