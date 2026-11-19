@@ -3,6 +3,8 @@
 //! those whose outcome depends on the module's series or on every merged definition of a field. A
 //! predicate that meets code it cannot follow answers so that the rule stays silent.
 
+use std::cell::Cell;
+
 use ruff_python_ast::comparable::ComparableExpr;
 use ruff_python_ast::helpers::{Truthiness, is_constant};
 use ruff_python_ast::visitor::{self, Visitor};
@@ -568,7 +570,9 @@ fn guards<'s>(i: &'s ast::StmtIf, sides: &[Side<'s>]) -> Vec<Vec<Side<'s>>> {
 /// record: each block is walked up to the first statement that fills, that call, a `raise`, or a
 /// compound statement making one on every path. A `break` or `continue` in a loop among them stays
 /// in it, and only a `return` or a `raise` there reaches the walk around the loop.
-struct Exits {
+struct Exits<'a> {
+    /// The walk it serves, which tells what assigns the field and which writes of it succeed.
+    paths: Paths<'a>,
     /// In the loop over `self` itself, where a `break` leaves it and a `continue` ends the
     /// iteration; in a nested loop, both only skip the rest of its body.
     outer: bool,
@@ -581,37 +585,32 @@ struct Exits {
     skips: bool,
     /// A path leaves the loop it is in by a `break`.
     breaks: bool,
+    /// A path leaves the loop it is in by a `break` with no `finally` that fills on the way out.
+    unfilled_break: bool,
     /// A path stops by a `continue` of the loop over `self`, a `raise`, or an exception leaving a
     /// `while True:` loop with no `break` of its own and a body that does not fill, instead of
     /// filling, which matters only to a `finally` around it, since that still runs.
     ends: bool,
 }
 
-impl Exits {
-    fn new(nested: bool) -> Self {
+impl<'a> Exits<'a> {
+    fn new(nested: bool, paths: Paths<'a>) -> Self {
         Self {
+            paths,
             outer: !nested,
             in_loop: false,
             leaves: false,
             skips: false,
             breaks: false,
+            unfilled_break: false,
             ends: false,
         }
     }
 
-    /// Whether `body`, the body of a nested loop, may `break` before or within its first statement
-    /// that fills. `steps` joins a branch that assigns and then breaks into the path that goes on,
-    /// which a later call then fills.
-    fn breaks_unfilled(body: &[Stmt]) -> bool {
-        let mut exits = Exits::new(true);
-        exits.body(body);
-        exits.breaks
-    }
-
     /// Whether `stmts` may `break` the loop they are in, or `return`, before their first statement
     /// that fills.
-    fn leaves_unfilled(stmts: &[Stmt]) -> bool {
-        let mut exits = Exits::new(true);
+    fn leaves_unfilled(stmts: &[Stmt], paths: Paths<'a>) -> bool {
+        let mut exits = Exits::new(true, paths);
         exits.body(stmts);
         exits.breaks || exits.leaves
     }
@@ -632,7 +631,7 @@ impl Exits {
                 self.ends = true;
                 true
             }
-            Stmt::With(w) => self.body(&w.body) && !may_swallow(w),
+            Stmt::With(w) => self.body(&w.body) && !may_swallow(w, self.paths),
             Stmt::If(i) => {
                 let body = self.body(&i.body);
                 self.every(i.elif_else_clauses.iter().map(|c| &c.body[..])) && body
@@ -648,9 +647,11 @@ impl Exits {
     }
 
     /// A `try` fills when its body or `else` does and so does each handler, or when its `finally`
-    /// does. The `finally` still runs after a path that ends early, so its jumps count then.
+    /// does. The `finally` still runs after a path that ends early, so its jumps count then, and
+    /// one that fills runs before a `break` in the `try` leaves.
     fn tried(&mut self, t: &ast::StmtTry) -> bool {
         let outer = (std::mem::take(&mut self.skips), std::mem::take(&mut self.ends));
+        let unfilled_break = std::mem::take(&mut self.unfilled_break);
         let main = self.body(&t.body) || self.body(&t.orelse);
         let handlers = self.every(t.handlers.iter().map(|h| match h {
             ast::ExceptHandler::ExceptHandler(h) => &h.body[..],
@@ -659,12 +660,15 @@ impl Exits {
         let early = self.skips || self.ends;
         self.skips |= outer.0;
         self.ends |= outer.1;
-        (filled && !early) || self.body(&t.finalbody) || filled
+        let inner = std::mem::replace(&mut self.unfilled_break, unfilled_break);
+        let finally = !(filled && !early) && self.body(&t.finalbody);
+        self.unfilled_break |= inner && !finally;
+        filled || finally
     }
 
     /// A loop that is not `endless` may run no iteration, so it never fills, and only such a loop
     /// runs its `else`. An endless one fills when no `break` of its own comes before the first
-    /// statement of its body that fills, walked as `breaks_unfilled` walks it: a `continue` there
+    /// statement of its body that fills, walked as `Paths::endless` walks it: a `continue` there
     /// restarts the body, which then fills first, and one with no such `break` either ends past a
     /// fill or is left by a `return` or an exception alone, so unless its body fills, a path ends
     /// there as at a `raise`.
@@ -677,12 +681,13 @@ impl Exits {
             self.in_loop,
             std::mem::take(&mut self.skips),
             std::mem::take(&mut self.breaks),
+            std::mem::take(&mut self.unfilled_break),
         );
         self.outer = false;
         self.in_loop = !endless;
         let filled = self.body(body);
         let breaks = self.breaks;
-        (self.outer, self.in_loop, self.skips, self.breaks) = saved;
+        (self.outer, self.in_loop, self.skips, self.breaks, self.unfilled_break) = saved;
         if !endless {
             self.body(orelse);
             return false;
@@ -703,6 +708,7 @@ impl Exits {
                 self.leaves |= self.outer;
                 self.skips = true;
                 self.breaks = true;
+                self.unfilled_break = true;
             }
             Stmt::Continue(_) if !self.in_loop && self.outer => self.ends = true,
             Stmt::Continue(_) if !self.in_loop => self.skips = true,
@@ -725,13 +731,17 @@ pub(crate) fn suppress_call(expr: &Expr) -> Option<&ast::ExprCall> {
 }
 
 /// Whether the body of a `with` under `contextlib.suppress` may raise what it swallows: by a call,
-/// a bare `raise`, or a `raise` of a class a `suppress` argument names, outside the body of a `try`
-/// whose handlers catch every class named. False for any other `with`.
-fn may_swallow(w: &ast::StmtWith) -> bool {
+/// an attribute or a subscript, read or written (a field write may run `write()`), binary
+/// arithmetic (`+=` too), an `assert`, a bare `raise`, or a `raise` of a class a `suppress`
+/// argument names, outside the body of a `try` whose handlers catch every class named. False for
+/// any other `with`. A write of the field `paths` walks with a constant its type takes is taken to
+/// succeed.
+fn may_swallow(w: &ast::StmtWith, paths: Paths<'_>) -> bool {
     let calls = w.items.iter().filter_map(|i| suppress_call(&i.context_expr));
     let classes: Vec<&Expr> = calls.flat_map(|c| c.arguments.args.iter()).collect();
     let mut points = RaisePoints {
         classes: &classes,
+        paths,
         found: false,
     };
     if !classes.is_empty() {
@@ -743,6 +753,8 @@ fn may_swallow(w: &ast::StmtWith) -> bool {
 struct RaisePoints<'c> {
     /// The arguments of the `suppress` calls, each a class or a tuple of them.
     classes: &'c [&'c Expr],
+    /// The walk of the field whose write with a constant its type takes is taken to succeed.
+    paths: Paths<'c>,
     found: bool,
 }
 
@@ -757,6 +769,12 @@ impl RaisePoints<'_> {
         };
         let name = python::tail_name(class).unwrap_or_default();
         self.classes.iter().any(|arg| python::names_error(arg, name))
+    }
+
+    /// Whether `a` writes the field with a constant that `Paths::takes` finds it takes.
+    fn safe_write(&self, a: &ast::StmtAssign) -> bool {
+        let field = |t: &Expr| matches!(t, Expr::Attribute(_) | Expr::Subscript(_)) && self.paths.writes(t);
+        matches!(&a.targets[..], [t] if field(t)) && self.paths.takes(&a.value)
     }
 
     /// Whether some handler of `t` catches each named class. An argument that is no class name may
@@ -775,6 +793,8 @@ impl<'a> Visitor<'a> for RaisePoints<'_> {
         match stmt {
             Stmt::FunctionDef(_) | Stmt::ClassDef(_) => {}
             Stmt::Raise(r) => self.found |= self.raised(r.exc.as_deref()),
+            Stmt::Assert(_) | Stmt::AugAssign(_) => self.found = true,
+            Stmt::Assign(a) if self.safe_write(a) => {}
             Stmt::Try(t) if self.shields(t) => {
                 (t.handlers.iter()).for_each(|ast::ExceptHandler::ExceptHandler(h)| self.visit_body(&h.body));
                 self.visit_body(&t.orelse);
@@ -786,7 +806,7 @@ impl<'a> Visitor<'a> for RaisePoints<'_> {
 
     fn visit_expr(&mut self, expr: &'a Expr) {
         match expr {
-            Expr::Call(_) => self.found = true,
+            Expr::Call(_) | Expr::BinOp(_) | Expr::Attribute(_) | Expr::Subscript(_) => self.found = true,
             Expr::Lambda(_) => {}
             _ => visitor::walk_expr(self, expr),
         }
@@ -813,6 +833,9 @@ struct Paths<'a> {
     /// In a `while True:` body, with no `break` or `return` before a fill after the statement
     /// walked, so an exception that a `contextlib.suppress` there swallows starts the body again.
     restarts: bool,
+    /// Set when a path through the body of the `while True:` loop walked, outside any loop within
+    /// it, assigns the field and then leaves the loop by a `break` before any fill.
+    assigned_break: Option<&'a Cell<bool>>,
     ftype: &'a str,
 }
 
@@ -824,6 +847,7 @@ impl<'a> Paths<'a> {
             nested: false,
             jumping_finally: false,
             restarts: false,
+            assigned_break: None,
             ftype,
         }
     }
@@ -831,7 +855,7 @@ impl<'a> Paths<'a> {
     /// The paths of a statement that `rest` follows in its block.
     fn at(&self, rest: &[Stmt]) -> Self {
         Self {
-            restarts: self.restarts && !Exits::leaves_unfilled(rest),
+            restarts: self.restarts && !Exits::leaves_unfilled(rest, *self),
             ..*self
         }
     }
@@ -868,7 +892,7 @@ impl<'a> Paths<'a> {
 
     /// In a nested loop, a `break` only leaves that loop.
     fn exits<'s>(&self, rest: impl IntoIterator<Item = &'s [Stmt]>, flow: Flow) -> Flow {
-        let mut exits = Exits::new(self.nested);
+        let mut exits = Exits::new(self.nested, *self);
         rest.into_iter().for_each(|stmts| {
             exits.body(stmts);
         });
@@ -892,12 +916,21 @@ impl<'a> Paths<'a> {
     /// `Filled` when every path through `rest` fills before any jump. Under a `finally` that may
     /// jump, a path ending the iteration by a `continue` or a `raise` does not fill.
     fn after(&self, rest: &[Stmt], flow: Flow) -> Flow {
-        let mut exits = Exits::new(self.nested);
+        let mut exits = Exits::new(self.nested, *self);
         let filled = exits.body(rest) && !exits.skips && !(self.jumping_finally && exits.ends);
+        self.note_break(flow, &exits);
         match flow {
             _ if exits.leaves => Flow::Left,
             Flow::Assigned if filled => Flow::Filled,
             flow => flow,
+        }
+    }
+
+    /// Sets `assigned_break` when the statements after one ending as `flow`, walked as `exits`,
+    /// may `break` after an assignment and before any fill.
+    fn note_break(&self, flow: Flow, exits: &Exits<'_>) {
+        if let (Flow::Assigned, true, Some(cell)) = (flow, exits.unfilled_break, self.assigned_break) {
+            cell.set(true);
         }
     }
 
@@ -937,7 +970,7 @@ impl<'a> Paths<'a> {
             return self.steps(&w.body, sides);
         }
         match self.steps(&w.body, &mut vec![]) {
-            (Flow::Filled, continued) if !self.restarts && may_swallow(w) => (Flow::Assigned, continued),
+            (Flow::Filled, continued) if !self.restarts && may_swallow(w, *self) => (Flow::Assigned, continued),
             ends => ends,
         }
     }
@@ -951,10 +984,11 @@ impl<'a> Paths<'a> {
         let inner = Paths {
             nested: true,
             restarts: endless,
+            assigned_break: None,
             ..*self
         };
-        let looped = if endless && !Exits::breaks_unfilled(body) {
-            inner.steps(body, &mut vec![]).0
+        let looped = if endless {
+            inner.endless(body)
         } else {
             inner.block(body)
         };
@@ -972,13 +1006,46 @@ impl<'a> Paths<'a> {
         }
     }
 
-    /// A nested loop may run no iteration, and its `else` runs unless a `break` leaves it, so the
-    /// body only counts when every `break` assigns first: then the `else` decides, or for an
-    /// endless `while`, which only a `break` leaves, the body. A `continue` there only starts the
-    /// next iteration, so the paths that do not `continue` decide, unless a `break` may come before
-    /// the first statement that fills. A `break` that does not assign is taken to go on after the loop,
-    /// as is the body of any other loop that may `continue`, and a `return` leaves the method from
-    /// any depth.
+    /// How the body of a `while True:` loop ends, which only a `break`, a `return` or an exception
+    /// leaves. When a `break` may come before the first statement that fills, `broken` decides.
+    /// Otherwise each `break` follows a fill, and falling through or a `continue` restarts the
+    /// body, so it fills, unless a `finally` that may jump catches a path that ends first. A body
+    /// with no `break` never ends.
+    fn endless(&self, body: &[Stmt]) -> Flow {
+        let mut exits = Exits::new(true, *self);
+        exits.body(body);
+        if exits.breaks {
+            return self.broken(body);
+        }
+        match self.steps(body, &mut vec![]).0 {
+            Flow::Left => Flow::Left,
+            _ if breaks_own(body) && !(self.jumping_finally && exits.ends) => Flow::Filled,
+            flow => flow,
+        }
+    }
+
+    /// How the body of a `while True:` loop that may `break` before it fills ends. `block` joins a
+    /// path that assigns the field and then breaks, with no fill between and no `finally` that
+    /// fills on the way out, into the path that goes on, which a later fill may complete. When
+    /// `assigned_break` finds such a path, the body assigns at best.
+    fn broken(&self, body: &[Stmt]) -> Flow {
+        let assigned_break = Cell::new(false);
+        let walk = Paths {
+            assigned_break: Some(&assigned_break),
+            ..*self
+        };
+        let flow = walk.block(body);
+        if assigned_break.get() {
+            flow.max(Flow::Assigned)
+        } else {
+            flow
+        }
+    }
+
+    /// A `return` leaves the method from any depth, and a `break` that does not assign goes on
+    /// after the loop. Otherwise a loop that is not endless may run no iteration, so its `else`
+    /// decides, while an endless one runs no `else` and its body, as `endless` reads it, assigns at
+    /// worst, since a path that goes on starts it again.
     fn after_loop(&self, looped: Flow, orelse: &[Stmt], endless: bool) -> Flow {
         match looped {
             Flow::Left => Flow::Left,
@@ -1059,11 +1126,15 @@ impl<'a> Paths<'a> {
 
     /// The paths to walk the body, `else` and handlers of `t` with, given how its `finally` ends.
     /// The `else` and `finally` run after the body, so they too must not leave before a fill for
-    /// an exception swallowed there to start the loop again.
+    /// an exception swallowed there to start the loop again. A `finally` that fills runs before a
+    /// `break` there leaves, so no such `break` is an `assigned_break`.
     fn in_try(&self, t: &ast::StmtTry, finally: Flow) -> Self {
         Self {
             jumping_finally: self.jumping_finally || finally > Flow::Open,
-            restarts: self.restarts && !Exits::leaves_unfilled(&t.orelse) && !Exits::leaves_unfilled(&t.finalbody),
+            restarts: self.restarts
+                && !Exits::leaves_unfilled(&t.orelse, *self)
+                && !Exits::leaves_unfilled(&t.finalbody, *self),
+            assigned_break: self.assigned_break.filter(|_| finally != Flow::Filled),
             ..*self
         }
     }
@@ -1521,6 +1592,7 @@ mod tests {
             "rec.f = 1\nwhile True:\n    if rec.d:\n        break\n    self._fill_f()\n    break\nreturn",
             "rec.f = 1\nwhile True:\n    if rec.d:\n        return\n    self._fill_f()\n    break",
             "rec.f = 1\nwhile True:\n    try:\n        self._fill_f()\n    except ValueError:\n        break\n    break\nreturn",
+            "while True:\n    try:\n        self._fill_f()\n    except ValueError:\n        break\n    break\nreturn",
             "rec.f = 1\nwhile True:\n    if rec.c:\n        continue\n    else:\n        self._fill_f()\n    break\nreturn",
             "while True:\n    if rec.c == 1:\n        continue\n    else:\n        self._fill_f()\n    break\nrec.f = 1\nreturn",
             "while True:\n    match rec.c:\n        case 1:\n            continue\n        case _:\n            self._fill_f()\n    break\nrec.f = 1\nreturn",
@@ -1579,6 +1651,7 @@ mod tests {
             "rec.f = 1\nwhile True:\n    pass\nreturn",
             "rec.f = 1\nwhile True:\n    pass\nbreak",
             "rec.f = 1\nwhile True:\n    if rec.a:\n        rec.g = 1\nreturn",
+            "while True:\n    if rec.a:\n        rec.g = 1\nreturn",
             "rec.f = 1\nwhile True:\n    for line in rec.line_ids:\n        break\nreturn",
             "rec.f = 1\nwhile 1:\n    pass\nreturn",
             "rec.f = 1\nwhile True:\n    pass\nelse:\n    break",
@@ -1598,6 +1671,7 @@ mod tests {
             "while True:\n    rec.f = 1\n    if rec.a:\n        break\nreturn",
             "while True:\n    if rec.a:\n        break\n    rec.f = 1",
             "rec.f = 1\nwhile True:\n    if rec.a:\n        return",
+            "while True:\n    if rec.a:\n        return",
             "while True:\n    rec.f = 1\n    if rec.a:\n        return",
             "try:\n    while True:\n        rec.f = 1\n        if rec.a:\n            raise ValueError()\nfinally:\n    break",
             "rec.f = 1\ntry:\n    while True:\n        raise ValueError()\nfinally:\n    break",
@@ -1624,6 +1698,8 @@ mod tests {
             "with suppress(ValueError):\n    rec.f = 1\n    raise ValueError('x')\nreturn",
             "with suppress(ValueError):\n    rec.f = 1\n    raise\nreturn",
             "with suppress(Exception):\n    rec.f = 1\n    raise UserError('x')\nreturn",
+            "with suppress(ValueError):\n    rec.f = 1\n    raise UserError('x')\nreturn",
+            "with suppress(ValueError):\n    while True:\n        rec.f = 1\nreturn",
             "with suppress(KeyError):\n    rec.f = 1\n    if rec.a:\n        continue\n    self._fill_f()\nreturn",
             "with suppress(ValueError):\n    rec.f = 1\n    try:\n        while True:\n            foo()\n    except Exception:\n        self._fill_f()\nreturn",
             "with suppress(ValueError):\n    rec.f = 1\n    try:\n        while True:\n            foo()\n    except KeyError:\n        raise UserError('x')\nreturn",
@@ -1640,9 +1716,9 @@ mod tests {
             "with suppress(ValueError):\n    rec.f = 1\n    match rec.a:\n        case 1:\n            self._fill_f()\n        case _:\n            self._fill_f()\nif rec.c:\n    rec.f = 2",
             "with suppress(ValueError):\n    rec.f = 1\n    try:\n        self._fill_f()\n    except ValueError:\n        self._fill_f()\nif rec.c:\n    rec.f = 2",
             "with suppress(KeyError):\n    rec.f = 1\n    if rec.a:\n        continue\nself._fill_f()\nreturn",
-            "with suppress(ValueError):\n    rec.f = 1\n    raise UserError('x')\nreturn",
-            "with suppress(ValueError):\n    rec.f = 1\n    try:\n        while True:\n            foo()\n    except Exception:\n        raise UserError('x')\nreturn",
-            "with suppress(ValueError):\n    while True:\n        rec.f = 1\nreturn",
+            "with suppress(ValueError):\n    rec.f = False\n    raise UserError('x')\nreturn",
+            "with suppress(ValueError):\n    rec.f = False\n    try:\n        while True:\n            foo()\n    except Exception:\n        raise UserError('x')\nreturn",
+            "with suppress(ValueError):\n    while True:\n        rec.f = False\nreturn",
             "with suppress(ValueError):\n    rec.f = int(rec.a)",
             "rec.f = 1\nwith suppress(ValueError):\n    raise UserError('x')\nreturn",
         ];
@@ -1666,6 +1742,129 @@ mod tests {
         ];
         for stmts in assigned {
             assert!(!unassigned(&format!("for rec in self:\n{}", indent(&stmts))), "{stmts}");
+        }
+    }
+
+    #[test]
+    fn a_while_true_loop_restarts_until_a_break_leaves_it() {
+        let retry = "try:\n    self._fill_f()\n    break\nexcept ValueError:\n    pass";
+        let suppressed = "with suppress(ValueError):\n    self._fill_f()\n    break";
+        let reported = [
+            format!("{retry}\nrec.f = 1\nreturn"),
+            format!("while rec.a:\n{}rec.f = 1\nreturn", indent(retry)),
+            format!("for line in rec.line_ids:\n{}rec.f = 1\nreturn", indent(retry)),
+            format!("rec.f = False\n{suppressed}\nreturn"),
+            format!("while rec.a:\n    rec.f = False\n{}return", indent(suppressed)),
+            format!("while True:\n{}    if rec.tries > 3:\n        break\nrec.f = 1\nreturn", indent(retry)),
+            format!("while True:\n    rec.f = False\n    if rec.tries > 3:\n        break\n{}return", indent(suppressed)),
+            format!("while True:\n    if rec.tries > 3:\n        rec.f = False\n        break\n{}return", indent(suppressed)),
+            "while True:\n    if rec.tries > 3:\n        rec.f = False\n        break\n    self._fill_f()\n    break\nreturn"
+                .to_owned(),
+            format!("while True:\n    if rec.tries > 3:\n        rec.f = False\n        break\n{}return", indent(retry)),
+            format!(
+                "while True:\n    if rec.tries > 3:\n        if rec.a:\n            rec.f = 1\n        else:\n            rec.f = 2\n        break\n{}return",
+                indent(suppressed)
+            ),
+            format!("while True:\n    if rec.tries > 3:\n        with rec.lock():\n            rec.f = 1\n        break\n{}return", indent(suppressed)),
+            format!(
+                "while True:\n    if rec.tries > 3:\n        try:\n            rec.f = 1\n        except ValueError:\n            rec.f = 2\n        break\n{}return",
+                indent(suppressed)
+            ),
+            format!(
+                "while True:\n    if rec.tries > 3:\n        try:\n            rec.f = False\n        except ValueError:\n            pass\n        break\n{}return",
+                indent(suppressed)
+            ),
+            "while True:\n    try:\n        with suppress(ValueError):\n            self._fill_f()\n            break\n        foo()\n    except KeyError:\n        break\nreturn"
+                .to_owned(),
+            format!("while True:\n    if rec.c:\n        return\n{}", indent(retry)),
+            "try:\n    while True:\n        rec.f = 1\n        try:\n            self._fill_f()\n            break\n        except ValueError:\n            raise UserError('x')\nfinally:\n    break"
+                .to_owned(),
+            "try:\n    while True:\n        rec.f = 1\n        try:\n            foo()\n        except ValueError:\n            pass\nfinally:\n    break"
+                .to_owned(),
+            "try:\n    while True:\n        rec.f = 1\n        if rec.c:\n            raise ValueError()\n        self._fill_f()\n        break\nfinally:\n    break"
+                .to_owned(),
+        ];
+        for stmts in reported {
+            assert!(unassigned(&format!("for rec in self:\n{}", indent(&stmts))), "{stmts}");
+        }
+        let assigned = [
+            format!("while True:\n{}rec.f = 1\nreturn", indent(retry)),
+            format!("while True:\n    rec.f = False\n{}return", indent(suppressed)),
+            format!("while True:\n    rec.f = False\n{}return", indent(retry)),
+            "while True:\n    if rec.ready:\n        self._fill_f()\n        break\nrec.f = 1\nreturn".to_owned(),
+            format!("while True:\n{}    rec.tries += 1\nrec.f = 1\nreturn", indent(retry)),
+            "while True:\n    try:\n        self._fill_f()\n        break\n    except ValueError:\n        raise UserError('x')\nrec.f = 1\nreturn"
+                .to_owned(),
+            format!(
+                "while True:\n    for line in rec.line_ids:\n        if line.a:\n            break\n{}rec.f = 1\nreturn",
+                indent(retry)
+            ),
+            format!("try:\n    while True:\n{}finally:\n    break", indent(&indent(retry))),
+            "while True:\n    try:\n        if rec.c:\n            break\n    finally:\n        self._fill_f()\nif rec.d:\n    return"
+                .to_owned(),
+            "while True:\n    if rec.a:\n        self._fill_f()\n    if not rec.a:\n        self._fill_f()\n    break\nreturn"
+                .to_owned(),
+            "while True:\n    if rec.a:\n        self._fill_f()\n    with rec.lock():\n        if not rec.a:\n            self._fill_f()\n    break\nreturn"
+                .to_owned(),
+            "while True:\n    for line in rec.line_ids:\n        self._fill_f()\n    if not rec.line_ids:\n        self._fill_f()\n    break\nreturn"
+                .to_owned(),
+            "while True:\n    if rec.line_ids:\n        for line in rec.line_ids:\n            self._fill_f()\n    else:\n        self._fill_f()\n    break\nreturn"
+                .to_owned(),
+            "while True:\n    if rec.a:\n        self._fill_f()\n    try:\n        if not rec.a:\n            self._fill_f()\n    finally:\n        rec.g = 1\n    break\nreturn"
+                .to_owned(),
+            "while True:\n    if rec.c:\n        rec.f = 1\n    if rec.a:\n        self._fill_f()\n    with rec.lock():\n        if not rec.a:\n            self._fill_f()\n    break\nreturn"
+                .to_owned(),
+            "while True:\n    try:\n        rec.f = 1\n        if rec.c:\n            break\n    finally:\n        self._fill_f()\nreturn"
+                .to_owned(),
+            format!(
+                "while True:\n    if rec.tries > 3:\n        try:\n            rec.f = False\n            break\n        finally:\n            self._fill_f()\n{}return",
+                indent(suppressed)
+            ),
+        ];
+        let paired = [
+            "if rec.a:\n    self._fill_f()\nif not rec.a:\n    self._fill_f()",
+            "for line in rec.line_ids:\n    self._fill_f()\nif not rec.line_ids:\n    self._fill_f()",
+            "if rec.a:\n    self._fill_f()\nwith rec.lock():\n    if not rec.a:\n        self._fill_f()",
+        ];
+        let then = ["rec.f = False", "_logger.info('%s', rec)", "rec.message_post()"];
+        let filled_first = paired
+            .iter()
+            .flat_map(|fill| then.map(|then| format!("{fill}\n{then}\nbreak")));
+        let seeded = "if rec.line_ids:\n    for line in rec.line_ids:\n        self._fill_f()\n    rec.f = False\n    break\nelse:\n    self._fill_f()\n    break";
+        let assigned = assigned.into_iter().chain(
+            filled_first
+                .chain([seeded.to_owned()])
+                .map(|body| format!("while True:\n{}return", indent(&body))),
+        );
+        for stmts in assigned {
+            assert!(!unassigned(&format!("for rec in self:\n{}", indent(&stmts))), "{stmts}");
+        }
+    }
+
+    #[test]
+    fn an_attribute_subscript_arithmetic_or_assert_may_raise_under_suppress() {
+        let reported = [
+            "with suppress(IndexError):\n    while True:\n        rec.f = rec.vals[i]\n        i += 1\nreturn",
+            "with suppress(IndexError):\n    while True:\n        rec.f = 1\n        v = vals[i]\nreturn",
+            "with suppress(AttributeError):\n    while True:\n        rec.f = 1\n        v = rec.partner.name\nreturn",
+            "with suppress(ZeroDivisionError):\n    while True:\n        rec.f = 1\n        v = 1 / i\nreturn",
+            "with suppress(ZeroDivisionError):\n    while True:\n        rec.f = 1\n        i /= 0\nreturn",
+            "with suppress(AssertionError):\n    while True:\n        rec.f = 1\n        assert i\nreturn",
+            "with suppress(AttributeError):\n    while True:\n        rec.f = False\n        rec.g = 2\nreturn",
+            "with suppress(KeyError):\n    while True:\n        rec.f = False\n        vals[i] = 2\nreturn",
+            "with suppress(ValueError):\n    while True:\n        rec.f = 'draft'\n        v = i\nreturn",
+            "with suppress(ValueError):\n    while True:\n        rec['f'] = 'draft'\n        v = i\nreturn",
+            "with suppress(ValueError):\n    while True:\n        rec.f, v = False, i\nreturn",
+        ];
+        for stmts in reported {
+            assert!(unassigned(&format!("for rec in self:\n{}", indent(stmts))), "{stmts}");
+        }
+        let assigned = [
+            "with suppress(IndexError):\n    while True:\n        rec.f = False\n        v = i\nreturn",
+            "with suppress(KeyError):\n    while True:\n        rec['f'] = False\n        v = i\nreturn",
+        ];
+        for stmts in assigned {
+            assert!(!unassigned(&format!("for rec in self:\n{}", indent(stmts))), "{stmts}");
         }
     }
 
