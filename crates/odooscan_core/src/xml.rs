@@ -1533,13 +1533,13 @@ fn old_names(node: Node, view: &mut ViewFact) {
 }
 
 /// Whether the `<attribute>` spec `node` meets a parent's `t-esc` once renamed. A `t-out` spec
-/// setting plain text replaces the parent's value either way, but a non-empty `add` or `remove`
-/// joins it (`x,y`, not `y`) and an empty one deletes it (20.0
+/// setting plain text replaces the parent's value either way, but a non-empty `add` joins it
+/// (`x,y`, not `y`), and a non-empty `remove` or an empty spec may delete it (20.0
 /// `odoo/tools/template_inheritance.py:256-311`).
 fn meets_escape(node: Node) -> bool {
     let name = node.attribute("name").unwrap_or_default();
-    let text = !filled(node, "add") && !filled(node, "remove") && !node.text().unwrap_or_default().is_empty();
-    OUT_BESIDE_ESCAPE.contains(&name) || (name == "t-out" && !text)
+    let plain = !filled(node, "add") && !filled(node, "remove") && !node.text().unwrap_or_default().is_empty();
+    OUT_BESIDE_ESCAPE.contains(&name) || (name == "t-out" && !plain)
 }
 
 /// OD325 on `node`. Through 19.0, `_compile_directive_out` renders the first of `t-out`, `t-field`,
@@ -4289,6 +4289,8 @@ mod tests {
             r#"<attribute name="t-out">b</attribute>"#,
             r#"<attribute name="t-out" add="">b</attribute>"#,
             r#"<attribute name="t-out" separator=" ">b</attribute>"#,
+            r#"<attribute name="t-out"> </attribute>"#,
+            r#"<attribute name="t-out"><![CDATA[b]]></attribute>"#,
         ] {
             assert_eq!(noted(&set(spec)), none, "{spec}");
         }

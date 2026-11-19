@@ -37,13 +37,13 @@ Removing the last `@api.multi` of a file can leave `api` imported and unused; th
 [OD219](rules/OD219.md), which `track_visibility=` needed just as much.
 
 A rename in a view is left alone while another view in its inheritance tree finds the element by
-its old name, sets `t-esc` or `t-field` on it, or adds to, removes from or empties its `t-out`:
-the first would stop the install, `t-out` would hide the value of the second, and the third would
-join the renamed value or delete it. A `<tree>` spec and a `<tree>` it may find both stay, even in
-checked modules: `--exclude`, the baseline or a file left unwritten could fix one without the
-other. Only the views of the scan are known: a module installed beside it that extends one of its
-views by `tree` or `t-esc` breaks once the view is fixed, so pass such modules with
-`--addons-path`.
+its old name, sets `t-esc` or `t-field` on it, or adds to, removes from or empties its `t-out`: the
+first would stop the install, and `t-out` would hide the value of the second. Adding to `t-out`
+would join the renamed value, and removing from or emptying it may delete it. A `<tree>` spec and
+a `<tree>` it may find both stay, even in checked modules: `--exclude`, the baseline or a file left
+unwritten could fix one without the other. Only the views of the scan are known: a module installed
+beside it that extends one of its views by `tree` or `t-esc` breaks once the view is fixed, so pass
+such modules with `--addons-path`.
 
 ## What is fixed
 
