@@ -215,6 +215,52 @@ class SuperNestedDynamic(models.Model):
         return Meta
 
 
+class SuperNestedRebound(models.Model):
+    _inherit = "bad.super"
+
+    def _nest_closure(self):
+        def build():
+            class Closed(type(self)):
+                def _closed(self):
+                    return super()._closure_gone()
+
+            return Closed
+
+        return build
+
+    def _nest_rebound(self):
+        class After(type(self)):
+            def _after(self):
+                return super()._after_gone()
+
+        self = self.env["res.partner"]
+
+        class Rebound(type(self)):
+            def _rebound(self):
+                return super()._rebound_gone()
+
+        return After, Rebound
+
+    def _nest_shadow(self):
+        def helper(self):
+            class Shadow(type(self)):
+                def _shadow(self):
+                    return super()._shadow_gone()
+
+            return Shadow
+
+        return helper
+
+    def _nest_with(self, records):
+        with records as self:
+
+            class Within(type(self)):
+                def _within(self):
+                    return super()._with_gone()
+
+        return Within
+
+
 class SuperClassBody(models.Model):
     _inherit = "bad.super"
 

@@ -1929,13 +1929,15 @@ custom/supers/models/supers.py:122:24: OD211 '__seal' is private to class SuperS
 custom/supers/models/supers.py:176:53: OD211 no parent class of bad.super defines '_explicit_gone', so this super() call fails
 custom/supers/models/supers.py:197:32: OD211 no class of bad.super defines '_dynamic_gone', so this super() call fails
 custom/supers/models/supers.py:201:32: OD211 no class of bad.super defines '_class_gone', so this super() call fails
-custom/supers/models/supers.py:223:20: OD140 super() without arguments runs in a class body, where it has no class or instance, so it raises; move the call into a method
-custom/supers/models/supers.py:224:22: OD140 super() without arguments runs in a class body, where it has no class or instance, so it raises; move the call into a method
-custom/supers/models/supers.py:245:17: OD211 no parent class of bad.super defines '_neg_other', so this super() call fails
-custom/supers/models/supers.py:253:21: OD211 no parent class of bad.super defines '_class_other', so this super() call fails
-custom/supers/models/supers.py:254:59: OD211 no parent class of bad.super defines '_and_other', so this super() call fails
-custom/supers/models/supers.py:265:24: OD211 no parent class of bad.super defines '_populate_sizes', so this super() call fails
-custom/supers/models/supers.py:272:24: OD211 '__lid' is private to class SuperSealLater: this super() call looks up '_SuperSealFirst__lid', which no parent class of bad.super defines, so it fails
+custom/supers/models/supers.py:225:36: OD211 no class of bad.super defines '_closure_gone', so this super() call fails
+custom/supers/models/supers.py:234:32: OD211 no class of bad.super defines '_after_gone', so this super() call fails
+custom/supers/models/supers.py:269:20: OD140 super() without arguments runs in a class body, where it has no class or instance, so it raises; move the call into a method
+custom/supers/models/supers.py:270:22: OD140 super() without arguments runs in a class body, where it has no class or instance, so it raises; move the call into a method
+custom/supers/models/supers.py:291:17: OD211 no parent class of bad.super defines '_neg_other', so this super() call fails
+custom/supers/models/supers.py:299:21: OD211 no parent class of bad.super defines '_class_other', so this super() call fails
+custom/supers/models/supers.py:300:59: OD211 no parent class of bad.super defines '_and_other', so this super() call fails
+custom/supers/models/supers.py:311:24: OD211 no parent class of bad.super defines '_populate_sizes', so this super() call fails
+custom/supers/models/supers.py:318:24: OD211 '__lid' is private to class SuperSealLater: this super() call looks up '_SuperSealFirst__lid', which no parent class of bad.super defines, so it fails
 custom/test_imports/static/src/widget.js:4:24: OD605 no indexed bundle defines template 'test_imports.Gone'
 custom/test_imports/static/src/widget_patch.js:7:22: OD602 neither Widget nor its parents have 'prepare', so super.prepare() fails
 custom/test_imports/static/tests/widget.test.js:3:10: OD601 '@web/../tests/web_test_helpers' does not export 'mountGone'

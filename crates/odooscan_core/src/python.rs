@@ -1272,13 +1272,15 @@ fn caught_lookups(t: &ast::StmtTry, settled: bool) -> Vec<Option<Subject>> {
 /// method defines, only an explicit `super(Class, self)` outside the class's functions and lambdas
 /// is the method's. When `records`, `dynamic` holds the calls of the methods of a class that
 /// subclasses the type of the method's records, which the model's classes answer, each with the
-/// method that makes it.
+/// method that makes it. `rebound` is set where the method's first parameter may no longer hold
+/// its records, so that `type(self)` there names another object's class.
 struct SuperCalls<'a> {
     calls: Vec<SuperCall<'a>>,
     guards: Vec<Guard<'a>>,
     outer: Outer<'a>,
     nested: bool,
     records: bool,
+    rebound: bool,
     dynamic: Vec<(&'a str, SuperCall<'a>)>,
 }
 
@@ -1301,18 +1303,80 @@ impl<'a> SuperCalls<'a> {
             outer,
             nested: false,
             records,
+            rebound: false,
             dynamic: vec![],
         }
     }
 
-    /// Reads the `super()` calls of each method of `stmt` when it is a class whose bases are all the
-    /// type of the records: Odoo builds that type from every class of the model, so their MRO
-    /// answers the call.
-    fn dynamic_class(&mut self, stmt: &'a Stmt) {
-        let Stmt::ClassDef(class) = stmt else {
+    /// A store to the first parameter, a comprehension's target included though Python scopes it to
+    /// the comprehension, rebinds it from there on: the walk follows source order, and a later
+    /// `type(self)` may name whatever the name now holds, such as `self.env[name]`'s model.
+    fn note_store(&mut self, expr: &Expr) {
+        if let Expr::Name(name) = expr
+            && name.ctx.is_store()
+            && self.outer.this == Some(name.id.as_str())
+        {
+            self.rebound = true;
+        }
+    }
+
+    /// Visits a class or function statement, returning whether it was one. Its head runs where it
+    /// stands, so a `:=` there rebinds the first parameter for what follows; a name its body binds
+    /// stays in its scope, and a function taking a parameter of that name shadows it there.
+    fn visit_scope(&mut self, stmt: &'a Stmt) -> bool {
+        match stmt {
+            Stmt::ClassDef(class) => self.visit_class(class),
+            Stmt::FunctionDef(func) => self.visit_function(func),
+            _ => return false,
+        }
+        true
+    }
+
+    /// Reads the bases after the decorators, which Python evaluates first.
+    fn visit_class(&mut self, class: &'a ast::StmtClassDef) {
+        for decorator in &class.decorator_list {
+            self.visit_decorator(decorator);
+        }
+        self.dynamic_class(class);
+        if let Some(arguments) = &class.arguments {
+            self.visit_arguments(arguments);
+        }
+        let nested = std::mem::replace(&mut self.nested, true);
+        self.visit_scoped(&class.body, false);
+        self.nested = nested;
+    }
+
+    /// A function in a nested class body runs only its decorators and parameters there, its body
+    /// running later as the class's.
+    fn visit_function(&mut self, func: &'a ast::StmtFunctionDef) {
+        for decorator in &func.decorator_list {
+            self.visit_decorator(decorator);
+        }
+        self.visit_parameters(&func.parameters);
+        if self.nested {
             return;
-        };
-        if !self.records || !self.outer.subclassed_by(class) {
+        }
+        if let Some(type_params) = &func.type_params {
+            self.visit_type_params(type_params);
+        }
+        if let Some(returns) = &func.returns {
+            self.visit_annotation(returns);
+        }
+        let shadows = self.outer.this.is_some_and(|this| func.parameters.includes(this));
+        self.visit_scoped(&func.body, shadows);
+    }
+
+    fn visit_scoped(&mut self, body: &'a [Stmt], shadows: bool) {
+        let rebound = self.rebound;
+        self.rebound |= shadows;
+        self.visit_body(body);
+        self.rebound = rebound;
+    }
+
+    /// Reads the `super()` calls of each method of `class` when its bases are all the type of the
+    /// records: Odoo builds that type from every class of the model, so their MRO answers the call.
+    fn dynamic_class(&mut self, class: &'a ast::StmtClassDef) {
+        if !self.records || self.rebound || !self.outer.subclassed_by(class) {
             return;
         }
         for def in class.body.iter().filter_map(Stmt::as_function_def_stmt) {
@@ -1594,8 +1658,7 @@ impl<'a> Visitor<'a> for SuperCalls<'a> {
     }
 
     fn visit_stmt(&mut self, stmt: &'a Stmt) {
-        self.dynamic_class(stmt);
-        if visit_method_stmt(self, stmt) {
+        if self.visit_scope(stmt) {
             return;
         }
         match stmt {
@@ -1605,6 +1668,7 @@ impl<'a> Visitor<'a> for SuperCalls<'a> {
     }
 
     fn visit_expr(&mut self, expr: &'a Expr) {
+        self.note_store(expr);
         match expr {
             Expr::If(branch) => self.visit_ternary(branch),
             Expr::BoolOp(all) => self.visit_bool_op(all),
@@ -7279,6 +7343,55 @@ mod tests {
         assert_eq!(called, ["write", "a", "b", "__getattr__", "c"]);
         assert!(class.super_calls.is_empty());
         assert!(class.extended.is_empty());
+    }
+
+    #[test]
+    fn a_rebound_or_shadowed_self_names_no_model_class() {
+        let nest = |class: &str, base: &str, call: &str| {
+            format!("class {class}({base}):\n    def m(s):\n        return super().{call}()\n")
+        };
+        let indent = |src: &str, depth: usize| -> String {
+            src.lines()
+                .map(|line| format!("{}{line}\n", " ".repeat(depth)))
+                .collect()
+        };
+        let under =
+            |head: &str, class: &str, call: &str| format!("{head}\n{}", indent(&nest(class, "type(self)", call), 4));
+        let method = |name: &str, body: String| format!("    def {name}(self):\n{}", indent(&body, 8));
+        let m = [
+            nest("A", "type(self)", "a"),
+            under("def helper(self):", "B", "b"),
+            under("def closure():", "C", "c"),
+            under("class Holder:\n    self = 1", "D", "d"),
+            nest("E", "self.__class__", "e"),
+            under("for self in self:", "F", "f"),
+        ]
+        .concat();
+        let src = [
+            "class X(models.Model):\n    _name = 'x'\n".to_owned(),
+            method("m", m),
+            method("n", format!("self = self.env['y']\n{}", nest("G", "type(self)", "g"))),
+            method("o", under("with x as self:", "H", "h")),
+            method("p", under("if (self := y):", "I", "i")),
+            method("q", format!("self |= y\n{}", nest("J", "type(self)", "j"))),
+            method("r", format!("[x for self in y]\n{}", nest("K", "type(self)", "k"))),
+            method(
+                "s",
+                format!("def f(x=(self := y)):\n    pass\n{}", nest("L", "type(self)", "l")),
+            ),
+            method(
+                "t",
+                format!(
+                    "class Meta(metaclass=(self := y)):\n    pass\n{}",
+                    nest("M", "type(self)", "m")
+                ),
+            ),
+            method("u", format!("@(self := y)\n{}", nest("N", "type(self)", "n"))),
+        ]
+        .concat();
+        let class = &analyze(&src, None).classes[0];
+        let called: Vec<_> = class.model_super_calls.iter().map(|c| c.value.as_str()).collect();
+        assert_eq!(called, ["a", "c", "e"], "{src}");
     }
 
     #[test]
