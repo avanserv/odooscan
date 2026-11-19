@@ -7928,8 +7928,8 @@ mod tests {
     use rustc_hash::FxHashSet;
 
     use super::{
-        CACHE_KEY_GLOBALS, MEMBER_SERIES, MagicEra, Merged, Paths, REPORT_TAG, applies, builds_models, bundle_list,
-        cache_global, cached_member, callable_attr, check_module, csv_label, derived_label, exported_text,
+        CACHE_KEY_GLOBALS, MEMBER_SERIES, MagicEra, Merged, Paths, REPORT_TAG, Reach, applies, builds_models,
+        bundle_list, cache_global, cached_member, callable_attr, check_module, csv_label, derived_label, exported_text,
         fetches_own_view, field_name, has_last_update, hoot_adds, keeps_set, labels_before_ondelete, lacks_domain,
         lone_add_applied, magic_era, no_access_message, page_miss, parent_path_children, patch_form,
         public_write_message, qweb_asset_glob, reads_model_access, reads_requires, shadowed_member, static_only,
@@ -8406,6 +8406,66 @@ mod tests {
         assert_eq!(od230(None), 1);
         assert_eq!(od230(Some(4)), 0, "a module main sees");
         assert_eq!(od230(Some(3)), 0, "a module whose scope holds a class of the model");
+    }
+
+    #[test]
+    fn a_selection_add_follows_base_in_a_module_with_empty_depends() {
+        // In 18.0 `aaa` does not reach `base`, yet Odoo loads `base` alone first, so the field has
+        // only 'a' when `aaa` adds 'b' without an ondelete policy.
+        let python = |source: &str| crate::project::SourceFile {
+            path: std::path::PathBuf::new(),
+            rel: "models/thing.py".to_owned(),
+            rank: None,
+            demo: false,
+            facts: analyze(source, Series::parse("18.0")),
+            suppressions: Default::default(),
+            mentions: Default::default(),
+        };
+        let mut modules = vec![
+            crate::project::module("base", "{}"),
+            crate::project::module("aaa", "{'version': '18.0.1.0.0'}"),
+        ];
+        modules[0].python.push(python(
+            "class T(models.Model):\n    _name = 'x.thing'\n\n    state = fields.Selection([('a', 'A')], required=True)\n",
+        ));
+        modules[1].python.push(python(
+            "class U(models.Model):\n    _inherit = 'x.thing'\n\n    state = fields.Selection(selection_add=[('b', 'B')])\n",
+        ));
+        let index = Index::build(&modules, None);
+        let diags = check_module(&index, index.by_name["aaa"], Series::parse("18.0"));
+        let lines = diags.iter().filter(|(_, d)| d.code == "OD216").map(|(_, d)| d.pos.line);
+        assert_eq!(lines.collect::<Vec<_>>(), [4]);
+    }
+
+    #[test]
+    fn base_counts_a_module_with_empty_depends_among_its_dependents() {
+        // In 18.0 `aaa` does not reach `base`, yet Odoo loads `base` alone first, so `aaa`'s import
+        // runs once `base` has loaded.
+        let python = |rel: &str, source: &str| crate::project::SourceFile {
+            path: std::path::PathBuf::new(),
+            rel: rel.to_owned(),
+            rank: None,
+            demo: false,
+            facts: analyze(source, Series::parse("18.0")),
+            suppressions: Default::default(),
+            mentions: Default::default(),
+        };
+        let mut modules = vec![
+            crate::project::module("base", "{}"),
+            crate::project::module("aaa", "{'version': '18.0.1.0.0'}"),
+        ];
+        modules[0].python.push(python("__init__.py", ""));
+        modules[0].python.push(python(
+            "models/thing.py",
+            "class T(models.Model):\n    _name = 'x.thing'\n",
+        ));
+        modules[1]
+            .python
+            .push(python("__init__.py", "from odoo.addons.base.models import thing\n"));
+        let index = Index::build(&modules, None);
+        let reach = Reach::of(&index, index.by_name["base"]);
+        assert_eq!(reach.dependents.keys().copied().collect::<Vec<_>>(), ["aaa"]);
+        assert!(reach.dependent_only("models/thing.py"));
     }
 
     #[test]
