@@ -527,13 +527,19 @@ fn generic_origin(base: &Expr) -> &Expr {
 /// The field type a base class proves through the names the file imports from the ORM's packages:
 /// `Field` makes the subclass a type of its own. A bare `Char` proves nothing unless so imported,
 /// as other libraries name classes after field types.
-fn proven_type(base: &Expr, class: &str, imported: &[(&str, String)]) -> Option<String> {
+fn proven_type(base: &Expr, class: &str, imported: &[(String, String)]) -> Option<String> {
     let path = module_state::imported_path(base, imported)?;
     match path.split('.').collect::<Vec<_>>().as_slice() {
         [_, "fields", "Field"] => Some(class.to_owned()),
         [_, "fields", ftype] if FIELD_TYPES.contains(ftype) => Some((*ftype).to_owned()),
         _ => None,
     }
+}
+
+/// The names the imports among `top` bind from `ORM_PACKAGES`, each with its dotted path.
+fn orm_names(top: &[&Stmt]) -> Vec<(String, String)> {
+    let names = ORM_PACKAGES.iter().flat_map(|p| module_state::imported_names(top, p));
+    names.map(|(local, path)| (local.to_owned(), path)).collect()
 }
 
 /// The field classes of `facts`, including those that reach the ORM through other classes among
@@ -2184,6 +2190,8 @@ struct UnreadClass {
 /// What the header of a class of a file that does not parse says, as `class_fact` reads it.
 struct UnreadHeader {
     kind: Option<ModelKind>,
+    /// `PyVisitor::orm_base` holds.
+    proven: bool,
     cached: bool,
     own_body_names: bool,
     file_model_base: bool,
@@ -2242,9 +2250,7 @@ impl UnreadFile<'_, '_, '_> {
         };
         let header = self.header(tokens);
         let class_name = self.src[name.range()].to_owned();
-        if let Some(kind) = header.kind {
-            self.visitor.kinds.insert(class_name.clone(), kind);
-        }
+        self.visitor.record_kind(&class_name, header.kind, header.proven);
         let at = self.classes.len();
         self.classes.push(UnreadClass {
             fact: ClassFact {
@@ -2270,9 +2276,10 @@ impl UnreadFile<'_, '_, '_> {
         }
     }
 
-    /// What the header of a `class` statement, from its first token, says once it parses alone. A
-    /// header that does not parse proves no kind and may reach the ORM.
-    fn header(&self, tokens: &[Token]) -> UnreadHeader {
+    /// What the header of a `class` statement, from its first token, says once it parses alone,
+    /// which also joins the class to `naming_bases` as `class_fact` does. A header that does not
+    /// parse proves no kind and may reach the ORM.
+    fn header(&mut self, tokens: &[Token]) -> UnreadHeader {
         let colon = tokens.iter().find(|t| t.kind() == TokenKind::Colon);
         let header =
             colon.map(|colon| format!("{}: pass", &self.src[TextRange::new(tokens[0].start(), colon.start())]));
@@ -2280,15 +2287,18 @@ impl UnreadFile<'_, '_, '_> {
         let Some(Stmt::ClassDef(class)) = parsed.as_ref().and_then(|parsed| parsed.suite().first()) else {
             return UnreadHeader {
                 kind: None,
+                proven: false,
                 cached: false,
                 own_body_names: false,
                 file_model_base: false,
                 may_reach_orm: true,
             };
         };
+        self.visitor.join_naming_bases(class);
         let kind = model_kind(class, &self.visitor.kinds);
         UnreadHeader {
             kind,
+            proven: self.visitor.orm_base(class),
             cached: on_cached_model(class),
             own_body_names: self.visitor.own_body_names(class, kind),
             file_model_base: self.visitor.file_model_base(class),
@@ -2305,6 +2315,8 @@ impl UnreadFile<'_, '_, '_> {
             self.class(tokens);
         } else if starts_def(tokens) {
             self.defs.extend(opens.then_some(self.depth));
+        } else if self.open.is_empty() {
+            self.import(tokens);
         } else {
             self.attribute(tokens);
         }
@@ -2314,6 +2326,22 @@ impl UnreadFile<'_, '_, '_> {
                 .find(|t| matches!(t.kind(), TokenKind::Newline | TokenKind::EndOfFile));
             self.inline_end = end.map_or(self.inline_end, Ranged::start);
         }
+    }
+
+    /// Reads an import outside any class or function, which parses alone up to its end, for the
+    /// names it binds from `ORM_PACKAGES`, as `PyVisitor::new` reads those of a file that parses.
+    fn import(&mut self, tokens: &[Token]) {
+        if !self.defs.is_empty() || !matches!(tokens[0].kind(), TokenKind::Import | TokenKind::From) {
+            return;
+        }
+        let Some(end) = tokens.iter().find(|t| ends_statement(t.kind())) else {
+            return;
+        };
+        let Ok(parsed) = parse_module(&self.src[TextRange::new(tokens[0].start(), end.start())]) else {
+            return;
+        };
+        let top: Vec<&Stmt> = parsed.suite().iter().collect();
+        self.visitor.orm_names.extend(orm_names(&top));
     }
 
     /// Reads a statement of the innermost class whose block holds it, unless one of its methods
@@ -2901,16 +2929,17 @@ struct Naming {
     /// `_name` is a literal that tests false, which from saas~18.1 Odoo replaces with the dotted
     /// class name whatever `_inherit` holds.
     falsy_name: bool,
-    /// A base of the class is a model class of its file, whose attributes name the class before
-    /// saas~14.4.
+    /// `PyVisitor::file_model_base` holds: a class of its file names the class before saas~14.4.
     file_model_base: bool,
     /// The literal start of the names `_name` may build.
     built_start: Option<String>,
     /// Odoo may register the class, so a name it reads as another model may be built.
     registers: bool,
-    /// A base of the class is an ORM model class and Odoo names the class from its own body, even
-    /// without `_name` or `_inherit`. Before saas~14.4, or in an unknown series, a class whose base
-    /// is a model class of its file takes its name from that base's attributes instead.
+    /// The class is on a proven Odoo base and named from its own body, even without `_name` or
+    /// `_inherit`: from saas~14.4 always, before it or in an unknown series only when
+    /// `PyVisitor::file_model_base` does not hold for it. Before saas~14.4 Odoo reads the name of a
+    /// class for which it holds through that base; the scan does not follow it and gives the class
+    /// no name.
     own_body_names: bool,
     /// The body binds `_name`, `_inherit` or `_register` where the scan does not read it, or sets
     /// `_register` to a value only a run tells, which may name the class otherwise or keep it out
@@ -3519,7 +3548,12 @@ struct PyVisitor<'a, 'ast> {
     /// The names the file binds to a collection of literals at import.
     collections: Vec<&'ast str>,
     /// The names the file's imports from `ORM_PACKAGES` bind at import, each with its dotted path.
-    orm_names: Vec<(&'ast str, String)>,
+    orm_names: Vec<(String, String)>,
+    /// The model classes of the file that `orm_base` proves Odoo's, by class name.
+    proven_models: FxHashSet<String>,
+    /// The classes of the file that bind `_name` or `_inherit` in their body, or derive from one
+    /// that does, by class name. Before saas~14.4 Odoo reads both through the bases of a class.
+    naming_bases: FxHashSet<String>,
     /// The start of the method name in each `super()` call of the overridden method made by an
     /// override that the visitor reports through an `Override` row of `api_table`. `api_calls` skips
     /// the `Method` row of the same name at those calls, since it would report the same form again.
@@ -3576,10 +3610,9 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
                 .is_some_and(|(_, path)| path.ends_with("._")),
             domain_joins: taint::domain_joins(&odoo_imports),
             collections: module_state::collections(&top),
-            orm_names: ORM_PACKAGES
-                .iter()
-                .flat_map(|package| module_state::imported_names(&top, package))
-                .collect(),
+            orm_names: orm_names(&top),
+            proven_models: FxHashSet::default(),
+            naming_bases: FxHashSet::default(),
             covered_supers: FxHashSet::default(),
         }
     }
@@ -3602,6 +3635,7 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
     }
 
     fn class_fact(&mut self, class: &ast::StmtClassDef) -> Option<ClassFact> {
+        self.join_naming_bases(class);
         let kind = model_kind(class, &self.kinds);
         if kind.is_none() && !declares_model(class) {
             self.field_class(class);
@@ -3612,9 +3646,7 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
             file_model_base: self.file_model_base(class),
             ..Naming::default()
         };
-        if let Some(kind) = kind {
-            self.kinds.insert(class.name.to_string(), kind);
-        }
+        self.record_kind(&class.name, kind, self.orm_base(class));
         let (plain_bases, plain_sources) = self.plain_bases(class);
         let (opaque_bases, base_methods) = self.read_bases(class, &plain_bases, &plain_sources);
         let mut fact = ClassFact {
@@ -3642,21 +3674,56 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
         self.named_model(fact, naming, may_reach_orm(class))
     }
 
-    /// Whether `class`, of `kind`, is an ORM class that Odoo names from its own body: from
-    /// saas~14.4 any, else one with no base that is a model class of the file, whose `_name` and
-    /// `_inherit` it would read.
+    /// Whether `class`, of `kind`, is on a proven Odoo base and named from its own body: from
+    /// saas~14.4 always, before it or in an unknown series only when `file_model_base` does not hold
+    /// for it. Before saas~14.4 Odoo reads the name of a class for which it holds through that base,
+    /// while the scan gives such a class no name.
     fn own_body_names(&self, class: &ast::StmtClassDef, kind: Option<ModelKind>) -> bool {
         let own_body = self.series.is_some_and(|s| s >= OWN_BODY_NAMING) || !self.file_model_base(class);
-        kind.is_some() && own_body
+        kind.is_some() && self.orm_base(class) && own_body
     }
 
-    /// Whether a base of `class` is a model class of its file.
+    /// Whether `class` is on a proven Odoo base and a base of it is a class of its file whose
+    /// `_name` and `_inherit` Odoo reads through it before saas~14.4: a proven model class, or one
+    /// of `naming_bases`.
     fn file_model_base(&self, class: &ast::StmtClassDef) -> bool {
-        class
+        let mut bases = class.bases().iter().filter_map(tail_name);
+        self.orm_base(class) && bases.any(|b| self.proven_models.contains(b) || self.naming_bases.contains(b))
+    }
+
+    /// Whether a base of `class` is an Odoo model class: one the file imports from
+    /// `ORM_PACKAGES` under a name `orm_kind` knows, or a model class of the file this proves. A
+    /// class of another library may share the name, and only `MetaModel` names a class.
+    fn orm_base(&self, class: &ast::StmtClassDef) -> bool {
+        class.bases().iter().any(|base| {
+            let imported = module_state::imported_path(base, &self.orm_names);
+            tail_name(base).is_some_and(|b| self.proven_models.contains(b))
+                || imported.is_some_and(|path| path.rsplit('.').next().and_then(orm_kind).is_some())
+        })
+    }
+
+    /// Records the class `name` among the model classes of the file when its header gives it a
+    /// `kind`, and among the proven ones when `proven`.
+    fn record_kind(&mut self, name: &str, kind: Option<ModelKind>, proven: bool) {
+        let Some(kind) = kind else {
+            return;
+        };
+        self.kinds.insert(name.to_owned(), kind);
+        if proven {
+            self.proven_models.insert(name.to_owned());
+        }
+    }
+
+    /// Adds `class` to `naming_bases` when a base of it is one.
+    fn join_naming_bases(&mut self, class: &ast::StmtClassDef) {
+        if class
             .bases()
             .iter()
             .filter_map(tail_name)
-            .any(|b| self.kinds.contains_key(b))
+            .any(|b| self.naming_bases.contains(b))
+        {
+            self.naming_bases.insert(class.name.to_string());
+        }
     }
 
     /// The `plain_bases` of `class`, and the `plain_sources` beside them.
@@ -3927,13 +3994,7 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
     fn class_attrs(&mut self, targets: &[Expr], value: &Expr, fact: &mut ClassFact, naming: &mut Naming) {
         for target in targets.iter().filter_map(Expr::as_name_expr) {
             match target.id.as_str() {
-                "_name" => {
-                    naming.named = true;
-                    naming.name = str_lit(value).map(str::to_owned);
-                    naming.falsy_name = record_eval::falsy(value);
-                    naming.built_start = built_name_start(value);
-                }
-                "_inherit" => naming.inherit = self.inherit(value, fact, naming.name.as_deref()),
+                name @ ("_name" | "_inherit") => self.naming_attr(name, value, fact, naming),
                 "_order" | "_fold_name" | "_rec_name" | "_active_name" => {
                     naming.term(&target.id, self.term_fields(value));
                 }
@@ -3951,6 +4012,19 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
                 _ => self.attr_or_field(target, value, fact),
             }
         }
+    }
+
+    /// Reads `_name` or `_inherit`, either of which makes the class one of `naming_bases`.
+    fn naming_attr(&mut self, name: &str, value: &Expr, fact: &mut ClassFact, naming: &mut Naming) {
+        self.naming_bases.insert(fact.class_name.clone());
+        if name == "_inherit" {
+            naming.inherit = self.inherit(value, fact, naming.name.as_deref());
+            return;
+        }
+        naming.named = true;
+        naming.name = str_lit(value).map(str::to_owned);
+        naming.falsy_name = record_eval::falsy(value);
+        naming.built_start = built_name_start(value);
     }
 
     /// The string keys of `_columns`, each a field of unread type: the entry may be any column,
@@ -5652,6 +5726,9 @@ impl<'ast> Visitor<'ast> for PyVisitor<'_, 'ast> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The imports that prove the ORM bases the class-name tests use.
+    const ORM_IMPORTS: &str = "from odoo import fields, models\nfrom odoo.osv import osv\n";
 
     /// The body of a method `r` that creates a public attachment.
     const PUBLIC_CREATE: &str = "    def r(self):\n        d = request.params.get('d')\n        self.env['x.y']._m(d)\n        \
@@ -7747,7 +7824,7 @@ class U(HttpCase):
     /// The facts of a file that ends in a Python 2 `print`: unread, with OD000 when `body` is not
     /// Python 2 either.
     fn unparsed(body: &str) -> PyFacts {
-        let facts = analyze(&format!("{body}\nprint 'x'\n"), Series::parse("10.0"));
+        let facts = analyze(&format!("{ORM_IMPORTS}{body}\nprint 'x'\n"), Series::parse("10.0"));
         assert_eq!(facts.diags.len() + usize::from(facts.python2.is_some()), 1);
         facts
     }
@@ -7941,7 +8018,7 @@ class U(HttpCase):
     #[test]
     fn a_file_that_does_not_parse_names_a_nameless_class_as_its_series_does() {
         let named = |body: &str, series: &str| {
-            let facts = analyze(&format!("{body}\nprint 'x'\n"), Series::parse(series));
+            let facts = analyze(&format!("{ORM_IMPORTS}{body}\nprint 'x'\n"), Series::parse(series));
             let models: Vec<_> = facts.classes.iter().map(|c| c.model.clone()).collect();
             (models, facts.dynamic_models)
         };
@@ -8051,15 +8128,17 @@ class U(HttpCase):
     #[test]
     fn a_file_that_does_not_parse_names_a_list_inherit_as_its_series_does() {
         let named = |series: &str| {
-            let src = "class FooBar(models.Model):\n    _inherit = ['mail.thread']\nprint 'x'\n";
-            let facts = analyze(src, Series::parse(series));
+            let src = format!("{ORM_IMPORTS}class FooBar(models.Model):\n    _inherit = ['mail.thread']\nprint 'x'\n");
+            let facts = analyze(&src, Series::parse(series));
             let class = &facts.classes[0];
             (class.model.clone(), class.new_model)
         };
         assert_eq!(named("10.0"), ("mail.thread".to_owned(), false));
         assert_eq!(named("20.0"), ("foo.bar".to_owned(), true));
-        let src = "class FooBar(models.Model):\n    _name = False\n    _inherit = ['mail.thread']\nprint 'x'\n";
-        let facts = analyze(src, Series::parse("20.0"));
+        let src = format!(
+            "{ORM_IMPORTS}class FooBar(models.Model):\n    _name = False\n    _inherit = ['mail.thread']\nprint 'x'\n"
+        );
+        let facts = analyze(&src, Series::parse("20.0"));
         assert_eq!(facts.classes[0].model, "foo.bar");
     }
 
@@ -8108,7 +8187,7 @@ class U(HttpCase):
     #[test]
     fn names_a_class_without_name_as_its_series_does() {
         let named = |body: &str, series: Option<&str>| {
-            let src = format!("class ResPartnerX(models.Model):\n{body}\n");
+            let src = format!("{ORM_IMPORTS}class ResPartnerX(models.Model):\n{body}\n");
             let facts = analyze(&src, series.and_then(Series::parse));
             let class = facts.classes.first();
             class.map(|c| (c.model.clone(), c.new_model, facts.dynamic_models))
@@ -8222,7 +8301,8 @@ class U(HttpCase):
 
     #[test]
     fn names_a_class_on_a_model_class_of_its_file_from_saas_14_4() {
-        let src = "class A(models.Model):\n    _name = 'a'\n\nclass B(A):\n    x = fields.Char()\n";
+        let src =
+            &format!("{ORM_IMPORTS}class A(models.Model):\n    _name = 'a'\n\nclass B(A):\n    x = fields.Char()\n");
         let model_of = |src: &str, class: &str, series: Option<&str>| {
             let facts = analyze(src, series.and_then(Series::parse));
             facts
@@ -8240,7 +8320,7 @@ class U(HttpCase):
         ] {
             assert_eq!(model_of(src, "B", series).as_deref(), want, "{series:?}");
         }
-        let direct = "class C(models.Model):\n    x = fields.Char()\n";
+        let direct = &format!("{ORM_IMPORTS}class C(models.Model):\n    x = fields.Char()\n");
         assert_eq!(model_of(direct, "C", Some("14.0")).as_deref(), Some("C"));
         // An unknown series may be one from saas~14.4, which names `B` verbatim, then dotted from
         // saas~18.1.
@@ -8258,7 +8338,7 @@ class U(HttpCase):
             "_register = False",
             "if X:\n        _inherit = []",
         ] {
-            let src = format!("class A(models.Model):\n    _name = 'a'\n\nclass B(A):\n    {body}\n");
+            let src = format!("{ORM_IMPORTS}class A(models.Model):\n    _name = 'a'\n\nclass B(A):\n    {body}\n");
             let facts = analyze(&src, None);
             assert_eq!(
                 (facts.dynamic_models, facts.built_model_names),
@@ -8274,7 +8354,8 @@ class U(HttpCase):
         assert_eq!(unread(src), (true, vec!["B".to_owned(), "b".to_owned()]));
         // From saas~18.1 a falsy `_name` gives the dotted class name, which an unknown series may be.
         for name in ["''", "False"] {
-            let falsy = format!("class A(models.Model):\n    _name = 'a'\n\nclass B(A):\n    _name = {name}\n");
+            let falsy =
+                format!("{ORM_IMPORTS}class A(models.Model):\n    _name = 'a'\n\nclass B(A):\n    _name = {name}\n");
             let built = |series: Option<&str>| {
                 let facts = analyze(&falsy, series.and_then(Series::parse));
                 (facts.dynamic_models, facts.built_model_names)
@@ -8356,7 +8437,7 @@ class U(HttpCase):
     #[test]
     fn adds_the_reading_not_taken_of_a_class_of_unknown_series() {
         let read = |body: &str, series: Option<&str>| {
-            let src = format!("class ResPartnerX(models.Model):\n{body}\n");
+            let src = format!("{ORM_IMPORTS}class ResPartnerX(models.Model):\n{body}\n");
             let facts = analyze(&src, series.and_then(Series::parse));
             assert!(
                 facts.built_model_starts.is_empty(),
@@ -8379,6 +8460,80 @@ class U(HttpCase):
         // Each reading needs this parent from `depends`, so the module does not build it.
         assert_eq!(read("    _inherit = ['res.partner.x', 'a']", None), (true, vec![]));
         assert_eq!(read("    _inherit = ('a', 'res.partner.x')", None), (true, vec![]));
+    }
+
+    /// The facts of `src` in a module of `series`, read whole and, with a Python 2 `print` after
+    /// it, unparsed.
+    fn both_readers(src: &str, series: Option<&str>) -> [PyFacts; 2] {
+        [src.to_owned(), format!("{src}print 'x'\n")].map(|src| analyze(&src, series.and_then(Series::parse)))
+    }
+
+    #[test]
+    fn names_a_nameless_class_only_on_a_proven_odoo_base() {
+        let models = |src: &str, series: &str| {
+            both_readers(src, Some(series)).map(|f| f.classes.iter().map(|c| c.model.clone()).collect::<Vec<_>>())
+        };
+        let peewee_chain = "from peewee import Model\n\nclass Base(Model):\n    pass\n\nclass Item(Base):\n    pass\n";
+        for src in [
+            "from peewee import Model\n\nclass Item(Model):\n    price = 1\n",
+            "import peewee\n\nclass Item(peewee.Model):\n    pass\n",
+            "class Item(Model):\n    pass\n",
+            peewee_chain,
+            "def load():\n    from odoo.models import Model\n\nclass Item(Model):\n    pass\n",
+        ] {
+            assert_eq!(models(src, "18.0"), [Vec::<String>::new(), vec![]], "{src}");
+        }
+        for facts in both_readers(peewee_chain, None) {
+            assert!(!facts.dynamic_models && facts.built_model_names.is_empty());
+        }
+        let item = || [vec!["Item".to_owned()], vec!["Item".to_owned()]];
+        for src in [
+            "import odoo\n\nclass Item(odoo.models.Model):\n    pass\n",
+            "from odoo.models import Model\n\nclass Item(Model):\n    pass\n",
+            "try:\n    from odoo import models\nexcept ImportError:\n    pass\n\nclass Item(models.Model):\n    pass\n",
+        ] {
+            assert_eq!(models(src, "18.0"), item(), "{src}");
+        }
+        let osv = "from openerp.osv import osv\n\nclass Item(osv.osv):\n    pass\n";
+        assert_eq!(models(osv, "10.0"), item());
+        let named = "from peewee import Model\n\nclass Item(Model):\n    _name = 'x'\n";
+        assert_eq!(models(named, "18.0"), [vec!["x".to_owned()], vec!["x".to_owned()]]);
+    }
+
+    #[test]
+    fn names_no_class_on_a_plain_naming_base_before_saas_14_4() {
+        let foo = "class Foo(Base, models.Model):\n    x = fields.Char()\n";
+        let read = |base: &str, series: Option<&str>| {
+            let facts = both_readers(&format!("{ORM_IMPORTS}{base}\n{foo}"), series);
+            facts.map(|f| {
+                let model = f
+                    .classes
+                    .iter()
+                    .find(|c| c.class_name == "Foo")
+                    .map(|c| c.model.clone());
+                (model, f.dynamic_models, f.built_model_names)
+            })
+        };
+        let none = (None, false, vec![]);
+        let named = (Some("Foo".to_owned()), false, vec![]);
+        let readings = (None, true, vec!["Foo".to_owned(), "foo".to_owned()]);
+        for base in [
+            "class Base:\n    _inherit = ['res.partner']\n",
+            "class Base(object):\n    _name = 'base.thing'\n",
+            "class Root:\n    _inherit = ['res.partner']\n\nclass Base(Root):\n    pass\n",
+        ] {
+            for (series, want) in [
+                (Some("14.0"), &none),
+                (Some("saas~14.3"), &none),
+                (Some("saas~14.4"), &named),
+                (Some("18.0"), &named),
+                (None, &readings),
+            ] {
+                assert_eq!(read(base, series), [want.clone(), want.clone()], "{base} at {series:?}");
+            }
+        }
+        let helper = "class Base:\n    def helper(self):\n        pass\n";
+        assert_eq!(read(helper, Some("14.0")), [named.clone(), named]);
     }
 
     #[test]

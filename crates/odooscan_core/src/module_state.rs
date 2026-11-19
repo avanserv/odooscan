@@ -188,8 +188,8 @@ pub(crate) fn dotted(expr: &Expr) -> String {
 }
 
 /// The dotted path of what `expr` names, when it starts from one of the imported `names`.
-pub(crate) fn imported_path(expr: &Expr, names: &[(&str, String)]) -> Option<String> {
-    let (_, source) = names.iter().find(|(name, _)| root(expr) == Some(name))?;
+pub(crate) fn imported_path<N: AsRef<str>>(expr: &Expr, names: &[(N, String)]) -> Option<String> {
+    let (_, source) = names.iter().find(|(name, _)| root(expr) == Some(name.as_ref()))?;
     let rest = dotted(expr)
         .split_once('.')
         .map_or(String::new(), |(_, rest)| format!(".{rest}"));
