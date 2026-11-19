@@ -848,9 +848,10 @@ fn a_seriesless_web_runs_the_owl_of_the_module_checked() {
 
 #[test]
 fn a_legacy_manifest_dependency_gets_od503_where_odoo_cannot_read_or_install_it() {
-    // Only `legacy_depends_modern` names a series, so the default one decides how the Odoo of the
-    // others reads them; the 18.0 module cannot install either dependency whatever that is. The
-    // `*_retired` ones set `installable` to False, which only the Odoo that reads them sees.
+    // `legacy_depends_modern` and `legacy_depends_ten` name a series, so the default one decides
+    // how the Odoo of the others reads them; the 18.0 module cannot install either dependency
+    // whatever that is. The `*_retired` ones set `installable` to False, which only the Odoo that
+    // reads them sees. `python2_eval` holds Python 2 that only the `eval` of 9.0 reads.
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
     let scan_as = |series: &str| {
         scan(&ScanOptions {
@@ -877,18 +878,29 @@ fn a_legacy_manifest_dependency_gets_od503_where_odoo_cannot_read_or_install_it(
     };
     let eval = "eval_manifest/__openerp__.py:1:1: 9.0 evaluates the manifest, which odooscan reads only as literal \
                 key/value pairs; this module is not indexed";
-    let user = root.join("legacy_depends/custom/legacy_depends_user");
-    let modern = root.join("legacy_depends/custom/legacy_depends_modern");
-    let user = user.to_str().unwrap();
-    let modern = modern.to_str().unwrap();
+    let python2_eval = "python2_eval/__openerp__.py:4:17: Python 2 syntax, which 9.0 runs; this module is not indexed";
+    let module = |name: &str| {
+        root.join("legacy_depends/custom")
+            .join(name)
+            .to_str()
+            .unwrap()
+            .to_owned()
+    };
+    let user = &module("legacy_depends_user");
+    let modern = &module("legacy_depends_modern");
+    let ten_module = &module("legacy_depends_ten");
 
     let nine = scan_as("9.0");
-    assert_eq!(
-        od503(&nine, user),
-        [retired("python2_retired"), retired("eval_retired")]
-    );
+    let nine_user = [
+        retired("python2_retired"),
+        retired("eval_retired"),
+        unreadable("pairless_manifest"),
+        unreadable("unhashable_manifest"),
+    ];
+    assert_eq!(od503(&nine, user), nine_user);
     assert_eq!(od503(&nine, modern), unreadable_both);
-    for notice in [python2("9.0").as_str(), eval] {
+    assert_eq!(od503(&nine, ten_module), [unreadable("python2_eval")]);
+    for notice in [python2("9.0").as_str(), eval, python2_eval] {
         assert!(
             nine.notices.iter().any(|n| n == notice),
             "{notice}: {:#?}",
@@ -900,14 +912,34 @@ fn a_legacy_manifest_dependency_gets_od503_where_odoo_cannot_read_or_install_it(
         unreadable("eval_manifest"),
         retired("python2_retired"),
         unreadable("eval_retired"),
+        unreadable("pairless_manifest"),
+        unreadable("unhashable_manifest"),
+        unreadable("python2_eval"),
     ];
     assert_eq!(od503(&ten, user), ten_user);
     assert_eq!(od503(&ten, modern), unreadable_both);
+    assert_eq!(od503(&ten, ten_module), [unreadable("python2_eval")]);
     assert!(ten.notices.contains(&python2("10.0")), "{:#?}", ten.notices);
     let eighteen = scan_as("18.0");
-    let all = ["python2_manifest", "eval_manifest", "python2_retired", "eval_retired"].map(unreadable);
+    let all = [
+        "python2_manifest",
+        "eval_manifest",
+        "python2_retired",
+        "eval_retired",
+        "pairless_manifest",
+        "unhashable_manifest",
+        "python2_eval",
+    ]
+    .map(unreadable);
     assert_eq!(od503(&eighteen, user), all);
     assert_eq!(od503(&eighteen, modern), unreadable_both);
+    // Whether a 10.0 module reads `python2_manifest` when the default series is 18.0 is left to
+    // how a version-less manifest is classified, so only `python2_eval` is pinned here.
+    let ten_on_eighteen = od503(&eighteen, ten_module);
+    assert!(
+        ten_on_eighteen.contains(&unreadable("python2_eval")),
+        "{ten_on_eighteen:#?}"
+    );
 }
 
 #[test]

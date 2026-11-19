@@ -60,6 +60,16 @@ type Edit = (TextRange, Cow<'static, str>);
 
 /// `code` with each Python 2 form its tokens show replaced by Python 3 of the same length.
 pub(crate) fn rewrite(code: &str) -> String {
+    rewritten(code, false)
+}
+
+/// `code` rewritten as `rewrite` does, but read as `ast.literal_eval` reads Python 2: `True` and
+/// `False` stay, `ur"x"` becomes `r"x" `, and a backtick `repr` becomes a set, which it refuses.
+pub(crate) fn rewrite_expression(code: &str) -> String {
+    rewritten(code, true)
+}
+
+fn rewritten(code: &str, literals: bool) -> String {
     let parsed = parse_unchecked(code, Mode::Module.into());
     let tokens: Vec<&Token> = parsed.tokens().iter().filter(|t| !t.kind().is_trivia()).collect();
     let mut forms = Forms {
@@ -67,6 +77,7 @@ pub(crate) fn rewrite(code: &str) -> String {
         print_function: imports_print_function(code, &tokens),
         tokens,
         backtick_open: false,
+        literals,
     };
     let mut out = code.to_owned();
     for i in 0..forms.tokens.len() {
@@ -83,6 +94,8 @@ struct Forms<'a> {
     tokens: Vec<&'a Token>,
     print_function: bool,
     backtick_open: bool,
+    /// Whether literals stay literals, as `rewrite_expression` keeps them.
+    literals: bool,
 }
 
 impl Forms<'_> {
@@ -99,7 +112,9 @@ impl Forms<'_> {
             TokenKind::Less => self.not_equal(i),
             TokenKind::Unknown => self.unknown(token),
             // Python 2 lets a name be bound to either.
-            TokenKind::True | TokenKind::False => Some((token.range(), self.text(token).to_ascii_uppercase().into())),
+            TokenKind::True | TokenKind::False if !self.literals => {
+                Some((token.range(), self.text(token).to_ascii_uppercase().into()))
+            }
             TokenKind::Def | TokenKind::Lambda => return self.tuple_parameters(i),
             _ => None,
         };
@@ -140,14 +155,23 @@ impl Forms<'_> {
         (suffix && self.text(token).eq_ignore_ascii_case("l")).then(|| (token.range(), "0".into()))
     }
 
-    /// `ur"x"` becomes `+r"x"`.
+    /// `ur"x"` becomes `+r"x"`, or `r"x" ` when literals stay, as `literal_eval` refuses a signed
+    /// string and a leading space would indent a statement.
     fn ur_prefix(&self, i: usize) -> Option<Edit> {
         let token = self.tokens[i];
         let string = self
             .next(i)
-            .is_some_and(|t| t.kind() == TokenKind::String && t.start() == token.end());
-        (string && self.text(token).eq_ignore_ascii_case("ur"))
-            .then(|| (TextRange::at(token.start(), TextSize::new(1)), "+".into()))
+            .filter(|t| t.kind() == TokenKind::String && t.start() == token.end())?;
+        if !self.text(token).eq_ignore_ascii_case("ur") {
+            return None;
+        }
+        let u = TextRange::at(token.start(), TextSize::new(1));
+        if !self.literals {
+            return Some((u, "+".into()));
+        }
+        let range = TextRange::new(token.start(), string.end());
+        let text = &self.code[TextRange::new(u.end(), string.end())];
+        Some((range, format!("{text} ").into()))
     }
 
     /// `<>` becomes `!=`.
@@ -169,7 +193,9 @@ impl Forms<'_> {
         let text = self.text(token);
         if text == "`" {
             self.backtick_open = !self.backtick_open;
-            return Some((token.range(), if self.backtick_open { "(" } else { ")" }.into()));
+            let delimiters = if self.literals { ["{", "}"] } else { ["(", ")"] };
+            let delimiter = delimiters[usize::from(!self.backtick_open)];
+            return Some((token.range(), delimiter.into()));
         }
         is_octal(text).then(|| (TextRange::at(token.start(), TextSize::new(1)), "1".into()))
     }
@@ -378,6 +404,17 @@ mod tests {
     fn a_column_past_expanded_tabs_maps_back() {
         let (pos, _) = remaining_error("if a:\n\t  x = 089\n", TEN).unwrap();
         assert_eq!((pos.line, pos.col), (2, 8));
+    }
+
+    #[test]
+    fn an_expression_rewrite_keeps_its_literals() {
+        let src = "{'a': ur'x', 'b': True, 'c': False, 'd': 0755, 'e': `1`}";
+        assert_eq!(
+            rewrite_expression(src),
+            "{'a': r'x' , 'b': True, 'c': False, 'd': 1755, 'e': {1}}"
+        );
+        assert_eq!(rewrite(src), "{'a': +r'x', 'b': TRUE, 'c': FALSE, 'd': 1755, 'e': (1)}");
+        assert_eq!(rewrite_expression("ur'''a\nb'''\n"), "r'''a\nb''' \n");
     }
 
     #[test]

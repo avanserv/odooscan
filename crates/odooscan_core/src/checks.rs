@@ -8255,7 +8255,16 @@ mod tests {
         assert_eq!(message(Some(OdooReads::AsPython2), "11.0").as_deref(), unreadable);
         assert_eq!(message(Some(OdooReads::AsExpression), "9.0"), None);
         assert_eq!(message(Some(OdooReads::AsExpression), "10.0").as_deref(), unreadable);
-        for reads in [OdooReads::AsPython2, OdooReads::AsExpression] {
+        assert_eq!(message(Some(OdooReads::AsPython2Expression), "9.0"), None);
+        assert_eq!(
+            message(Some(OdooReads::AsPython2Expression), "10.0").as_deref(),
+            unreadable
+        );
+        for reads in [
+            OdooReads::AsPython2,
+            OdooReads::AsExpression,
+            OdooReads::AsPython2Expression,
+        ] {
             assert_eq!(
                 unknown_dependency("x", Some(reads), false, None).as_deref(),
                 unreadable,
@@ -8275,6 +8284,7 @@ mod tests {
         assert_eq!(message(None, "18.0").as_deref(), retired);
         assert_eq!(message(Some(OdooReads::AsPython2), "9.0").as_deref(), retired);
         assert_eq!(message(Some(OdooReads::AsExpression), "9.0").as_deref(), retired);
+        assert_eq!(message(Some(OdooReads::AsPython2Expression), "9.0").as_deref(), retired);
         assert_eq!(message(Some(OdooReads::AsPython2), "11.0").as_deref(), unreadable);
         assert_eq!(message(Some(OdooReads::No), "11.0").as_deref(), unreadable);
         assert_eq!(message(Some(OdooReads::AsExpression), "10.0").as_deref(), unreadable);
