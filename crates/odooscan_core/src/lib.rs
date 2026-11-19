@@ -108,6 +108,13 @@ impl Diagnostic {
         };
         let flow = steps(&d.flow);
         let related = steps(&d.related);
+        // A test holds each rule's page to a facts row rendered from SEVERITY_BY_FINDING, so an
+        // unlisted severity would go undocumented.
+        debug_assert!(
+            d.severity.is_none_or(|s| rule(d.code).may_carry(s)),
+            "{} carries a severity rules.rs SEVERITY_BY_FINDING does not list",
+            d.code
+        );
         Self {
             code: d.code,
             severity: d.severity.unwrap_or_else(|| rule(d.code).severity_for(series)),
@@ -375,6 +382,14 @@ mod tests {
         let raw = || RawDiag::new("OD222", facts::Pos { line: 3, col: 5 }, "");
         assert_eq!(at(raw()), Severity::Warning);
         assert_eq!(at(raw().with_severity(Some(Severity::Error))), Severity::Error);
+    }
+
+    #[test]
+    #[cfg(debug_assertions)]
+    #[should_panic(expected = "OD218 carries a severity")]
+    fn a_finding_severity_its_rule_does_not_list_panics() {
+        let raw = RawDiag::new("OD218", facts::Pos { line: 3, col: 5 }, "").with_severity(Some(Severity::Error));
+        Diagnostic::new(PathBuf::from("models/site.py"), &raw, Series::parse("18.0"));
     }
 
     #[test]

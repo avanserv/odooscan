@@ -102,6 +102,13 @@ const SEVERITY_BY_SERIES: &[(&str, &str, Severity)] = &[
     ("OD222", ">=saas~16.4", Severity::Error),
 ];
 
+/// Severities a single finding may carry over its rule's, as (code, series range, severity,
+/// condition), the condition worded as the rule's page words it. From saas~12.5 a `check_company`
+/// field with no domain, or a false one, gets one on its comodel's `company_id` (commit
+/// `504b5fe5a961`), which a comodel without that field cannot evaluate.
+const SEVERITY_BY_FINDING: &[(&str, &str, Severity, &str)] =
+    &[("OD222", ">=saas~12.5", Severity::Error, "with no domain or a false one")];
+
 impl Rule {
     /// The severity of this rule's findings in a module of `module_series`, unless a finding
     /// carries its own, which replaces it.
@@ -110,6 +117,14 @@ impl Rule {
             .iter()
             .find(|(code, spec, _)| *code == self.code && module_series.is_some_and(|s| series::matches(spec, s)))
             .map_or(self.severity, |(_, _, severity)| *severity)
+    }
+
+    /// Whether a finding of this rule may carry `severity` as its own, which then replaces the
+    /// one the module's series gives.
+    pub fn may_carry(&self, severity: Severity) -> bool {
+        SEVERITY_BY_FINDING
+            .iter()
+            .any(|(code, _, s, _)| *code == self.code && *s == severity)
     }
 
     /// The kind of a finding of this rule at `severity`, the one the diagnostic carries, since a
@@ -664,6 +679,9 @@ mod tests {
     fn facts_row(r: &Rule) -> String {
         let since = |spec: &str| spec.strip_prefix(">=").unwrap_or(spec).to_owned();
         let mut severity = format!("{:?}", r.severity);
+        for (_, spec, s, condition) in SEVERITY_BY_FINDING.iter().filter(|(code, ..)| *code == r.code) {
+            severity += &format!(", {s:?} {condition} from {}", since(spec));
+        }
         for (_, spec, s) in SEVERITY_BY_SERIES.iter().filter(|(code, ..)| *code == r.code) {
             severity += &format!(", {s:?} from {}", since(spec));
         }
@@ -689,6 +707,24 @@ mod tests {
             errors.push(format!("{}: the facts row must read `{expected}`, not {row:?}", r.code));
         }
         errors
+    }
+
+    #[test]
+    fn the_company_check_row_names_the_error_a_finding_carries() {
+        let od222 = rule("OD222");
+        let row = "| Correctness | Warning, Error with no domain or a false one from saas~12.5, Error from saas~16.4 | saas~12.5 and later | yes |";
+        assert_eq!(facts_row(od222), row);
+        let page = |row: &str| format!("# OD222 check-company-without-company\n\n| Category |\n| --- |\n{row}\n");
+        assert!(page_errors(od222, &page(row)).is_empty());
+        let old = "| Correctness | Warning, Error from saas~16.4 | saas~12.5 and later | yes |";
+        assert!(!page_errors(od222, &page(old)).is_empty());
+    }
+
+    #[test]
+    fn only_a_listed_rule_may_carry_its_own_severity() {
+        assert!(rule("OD222").may_carry(Severity::Error));
+        assert!(!rule("OD222").may_carry(Severity::Info));
+        assert!(!rule("OD218").may_carry(Severity::Error));
     }
 
     #[test]
