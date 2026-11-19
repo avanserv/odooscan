@@ -23,11 +23,43 @@ pub fn help_url(code: &str) -> String {
     format!("{DOCS}rules/{code}/")
 }
 
-/// The page with its links to other rule pages made absolute, for a reader outside the site.
-fn help_markdown(doc: &str) -> String {
-    RULES.iter().fold(doc.to_owned(), |doc, r| {
-        doc.replace(&format!("]({}.md)", r.code), &format!("]({})", help_url(r.code)))
-    })
+/// The page of rule `code` with its links into the rules section made absolute, for a reader
+/// outside the site: SARIF viewers and `oscn explain`.
+pub fn help_markdown(code: &str, doc: &str) -> String {
+    let mut out = String::with_capacity(doc.len());
+    let mut rest = doc;
+    while let Some(at) = rest.find("](") {
+        let (head, tail) = rest.split_at(at + 2);
+        out.push_str(head);
+        rest = tail;
+        if let Some(end) = rest.find(')')
+            && let Some(url) = absolute(code, &rest[..end])
+        {
+            out.push_str(&url);
+            rest = &rest[end..];
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
+/// The site URL of a link target on the page of `code`: `ODxxx.md`, `index.md` or a same-page
+/// anchor. Any other target gives `None` and stays as written, whether absolute, a relative form
+/// this does not map, or not a link at all, such as `](float(amount)` in a code block.
+fn absolute(code: &str, target: &str) -> Option<String> {
+    let (path, anchor) = match target.split_once('#') {
+        Some((path, anchor)) => (path, format!("#{anchor}")),
+        None => (target, String::new()),
+    };
+    let page = match path {
+        "" if !anchor.is_empty() => help_url(code),
+        "index.md" => format!("{DOCS}rules/"),
+        _ => help_url(
+            path.strip_suffix(".md")
+                .filter(|stem| RULES.iter().any(|r| r.code == *stem))?,
+        ),
+    };
+    Some(format!("{page}{anchor}"))
 }
 
 pub fn print_statistics(out: &mut impl Write, diags: &[&Diagnostic]) {
@@ -97,7 +129,7 @@ pub fn sarif(diags: &[&Diagnostic], rel: &dyn Fn(&Path) -> String) -> serde_json
                 "name": r.name,
                 "shortDescription": {"text": r.summary},
                 "helpUri": help_url(r.code),
-                "help": {"text": r.doc, "markdown": help_markdown(r.doc)},
+                "help": {"text": r.doc, "markdown": help_markdown(r.code, r.doc)},
                 "properties": {"category": r.category},
             })
         })
@@ -525,10 +557,41 @@ bad_sale/i18n/fr.po:10:1: OD803 22 of 40 messages are untranslated, so Odoo show
 
     #[test]
     fn help_markdown_makes_rule_links_absolute() {
-        let md = help_markdown("is [OD201](OD201.md) instead");
+        let md = help_markdown(
+            "OD312",
+            "is [OD201](OD201.md), [x](OD312.md#what-it-reports), [JS](index.md#od6-javascript-and-owl) \
+             and [why](#why-it-matters)",
+        );
         assert_eq!(
             md,
-            "is [OD201](https://avanserv.github.io/odooscan/rules/OD201/) instead"
+            "is [OD201](https://avanserv.github.io/odooscan/rules/OD201/), \
+             [x](https://avanserv.github.io/odooscan/rules/OD312/#what-it-reports), \
+             [JS](https://avanserv.github.io/odooscan/rules/#od6-javascript-and-owl) \
+             and [why](https://avanserv.github.io/odooscan/rules/OD312/#why-it-matters)"
         );
+    }
+
+    #[test]
+    fn help_markdown_keeps_other_targets() {
+        let doc = "[s](https://example.com/a.md#b) F[f](float(x)) [n](OD999.md) [open](OD201.md";
+        assert_eq!(help_markdown("OD312", doc), doc);
+    }
+
+    /// An inline link the site resolves but a SARIF viewer cannot, such as a future
+    /// `../fixing.md`, would otherwise go dead outside the site without a test noticing.
+    /// Reference-style definitions and targets without `.md` are not checked.
+    #[test]
+    fn every_rule_page_reads_absolute_outside_the_site() {
+        for r in RULES {
+            let md = help_markdown(r.code, r.doc);
+            for target in md.split("](").skip(1) {
+                assert!(
+                    !target.starts_with('#') && !target.split(')').next().unwrap().contains(".md"),
+                    "{}: ]({}",
+                    r.code,
+                    target.lines().next().unwrap()
+                );
+            }
+        }
     }
 }

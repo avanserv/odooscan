@@ -45,4 +45,5 @@ when the settings are invalid, writing a file `--fix` rewrites fails, or the cor
 `--target-series` can be neither fetched nor found in the cache.
 
 `oscn explain OD203`, or `oscn explain unresolved-field-path`, prints a rule's page: what it
-reports, why Odoo fails on it, and an example of the fix. [Rules](rules/index.md) lists every one.
+reports, why Odoo fails on it, and an example of the fix, its links pointing to the site.
+[Rules](rules/index.md) lists every one.
