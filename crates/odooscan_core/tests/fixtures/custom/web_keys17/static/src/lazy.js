@@ -1,3 +1,4 @@
+/** @odoo-module **/
 import { registry } from "@web/core/registry";
 
 const actionRegistry = registry.category("actions");

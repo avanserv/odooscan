@@ -887,7 +887,11 @@ custom/legacy_require16/static/src/js/counter.js:8:27: OD601 no file of module w
 custom/legacy_require16/static/src/js/counter.js:9:28: OD601 'legacy_require_lib.tools' comes from module legacy_require_lib, which is not in depends
 custom/legacy_require16/static/src/js/late_tag.js:3:44: OD601 no file of module web provides '@web/late_gone'
 custom/legacy_require16/static/src/js/spaced_tag.js:4:24: OD601 no file of module web provides '@web/spaced_gone'
+custom/legacy_require16/static/src/js/uses_plain.js:2:23: OD601 '@legacy_require16/js/plain_target' names legacy_require16/static/src/js/plain_target.js, which this series does not load as an ES module: use the name its odoo.define() registers, 'legacy_require16.plain_target'
+custom/legacy_require17/static/src/js/counter.js:8:42: OD601 no file of module web provides '@web/listed_gone'
 custom/legacy_require17/static/src/js/uses_alias.js:2:18: OD601 'legacy_require17.spaced' does not export 'gone'
+custom/legacy_require172/static/src/js/plain_import.js:2:22: OD601 no file of module web provides '@web/plain_import_gone'
+custom/legacy_require172/static/src/js/uses_ignored.js:2:25: OD601 '@legacy_require172/js/ignored' names legacy_require172/static/src/js/ignored.js, which this series does not load as an ES module: drop ignore from its @odoo-module tag
 custom/legacy_rpc16/static/src/js/partner_card.js:5:58: OD604 model 'res.partner' has no method 'action_card_gone'
 custom/legacy_rpc16/static/src/js/partner_widget.js:9:32: OD603 no indexed module defines model 'x.missing'
 custom/legacy_rpc16/static/src/js/partner_widget.js:10:59: OD604 model 'res.partner' has no method 'action_gone'
@@ -1110,8 +1114,8 @@ custom/owl_api16/static/src/js/panel.js:17:14: OD613 Owl 2's Component has no tr
 custom/owl_api16/static/src/js/panel.js:22:26: OD613 Owl 2's Component has no trigger(), so this.trigger() in Header throws; pass a callback in props, or use the env bus
 custom/owl_api16/static/src/js/shim.js:6:42: OD613 Owl 2 has no 'hooks', so the script reads undefined; import each hook, such as useState, from @odoo/owl
 custom/owl_api16/static/src/js/shim.js:8:24: OD613 Owl 2 has no 'hooks', so the script reads undefined; import each hook, such as useState, from @odoo/owl
-custom/owl_api17/static/src/js/save_button.js:6:14: OD613 Owl 2's Component has no trigger(), so this.trigger() in SaveButton throws; pass a callback in props, or use the env bus
-custom/owl_api17/static/src/js/save_button.js:12:14: OD613 Owl 2's Component has no trigger(), so this.trigger() in NoteController throws; pass a callback in props, or use the env bus
+custom/owl_api17/static/src/js/save_button.js:7:14: OD613 Owl 2's Component has no trigger(), so this.trigger() in SaveButton throws; pass a callback in props, or use the env bus
+custom/owl_api17/static/src/js/save_button.js:13:14: OD613 Owl 2's Component has no trigger(), so this.trigger() in NoteController throws; pass a callback in props, or use the env bus
 custom/owl_props/static/src/xml/board.xml:5:14: OD615 <Card> leaves out 'title', which Card requires, so Owl throws when it renders the tag in debug mode; pass it, or make it optional
 custom/owl_props/static/src/xml/board.xml:5:19: OD614 Card declares no prop 'titel', so Owl throws when it renders <Card> in debug mode; fix the name, or declare the prop
 custom/owl_props/static/src/xml/board.xml:6:39: OD614 ListCard declares no prop 'titel', so Owl throws when it renders <ListCard> in debug mode; fix the name, or declare the prop

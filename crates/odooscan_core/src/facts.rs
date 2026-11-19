@@ -1457,7 +1457,8 @@ impl DataFacts {
 pub enum Annotation {
     #[default]
     None,
-    /// `@odoo-module`: an ES module from saas~14.3 on, when unannotated files are still scripts.
+    /// `@odoo-module`: an ES module from saas~14.3 on, when unannotated files are scripts up to
+    /// saas~17.1.
     Module,
     /// `@odoo-module ignore`, from saas~17.2: never an ES module, such as a library under `static/src`.
     Ignore,

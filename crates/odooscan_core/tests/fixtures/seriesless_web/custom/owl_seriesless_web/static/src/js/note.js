@@ -1,3 +1,4 @@
+/** @odoo-module **/
 import { patch } from "@web/core/utils/patch";
 import { Panel } from "@web/core/panel";
 import { FormController } from "@web/views/form/form_controller";

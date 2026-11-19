@@ -820,7 +820,7 @@ fn a_seriesless_web_runs_the_owl_of_the_module_checked() {
         ..Default::default()
     });
     let found: Vec<_> = report.diagnostics.iter().map(|d| (d.code, d.line)).collect();
-    assert_eq!(found, [("OD613", 7), ("OD613", 13), ("OD602", 19), ("OD602", 25)]);
+    assert_eq!(found, [("OD613", 8), ("OD613", 14), ("OD602", 20), ("OD602", 26)]);
 }
 
 #[test]

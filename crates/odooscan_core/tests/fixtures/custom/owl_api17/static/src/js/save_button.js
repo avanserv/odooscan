@@ -1,3 +1,4 @@
+/** @odoo-module **/
 import { Component } from "@odoo/owl";
 import { FormController } from "@web/views/form/form_controller";
 
