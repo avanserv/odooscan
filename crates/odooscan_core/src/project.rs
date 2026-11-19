@@ -45,13 +45,18 @@ impl<T> SourceFile<T> {
     /// `addons/barcodes_gs1_nomenclature/__manifest__.py:19-20` do. A script is a test also by the
     /// bundles that load it: ask `Index::js_test` for those.
     pub fn in_tests(&self) -> bool {
-        self.rel.starts_with("static/tests/")
-            || self.rel.strip_prefix("static/src/").is_some_and(|rest| {
-                let mut dirs = rest.split('/');
-                dirs.next_back();
-                dirs.any(|d| d == "tests")
-            })
+        test_path(&self.rel)
     }
+}
+
+/// `SourceFile::in_tests` of a file at `rel`.
+fn test_path(rel: &str) -> bool {
+    rel.starts_with("static/tests/")
+        || rel.strip_prefix("static/src/").is_some_and(|rest| {
+            let mut dirs = rest.split('/');
+            dirs.next_back();
+            dirs.any(|d| d == "tests")
+        })
 }
 
 impl SourceFile<()> {
@@ -99,6 +104,12 @@ pub struct Module {
     /// A file whose text may name a method could not be read: Python, XML or CSV that does not
     /// decode, or a script or template under `static/src` that is not UTF-8.
     pub lost_text: bool,
+    /// One of the files of `lost_text` is one the scan cannot read at all, so none of its words is
+    /// known.
+    pub unread_text: bool,
+    /// The hook names of the files of `lost_text` that do not decode, scripts under a test path
+    /// aside, as `Loss::undecoded` reads them. A script only a test bundle loads still counts.
+    pub lost_mentions: Vec<Mentions>,
     /// The words of every file of a checked module read with text, the manifest included; none
     /// for an indexed one.
     pub words: Words,
@@ -168,6 +179,8 @@ pub(crate) fn module(name: &str, manifest: &str) -> Module {
         static_assets: vec![],
         outside_assets: vec![],
         lost_text: false,
+        unread_text: false,
+        lost_mentions: vec![],
         words: Words::default(),
     }
 }
@@ -677,6 +690,8 @@ fn read_module(
         static_assets: vec![],
         outside_assets: vec![],
         lost_text: false,
+        unread_text: false,
+        lost_mentions: vec![],
         words: Words::default(),
     }))
 }
@@ -689,6 +704,51 @@ fn ranks(manifest: &Manifest, series: Option<Series>) -> FxHashMap<String, usize
         ranks.entry(normalize(file)).or_insert(i);
     }
     ranks
+}
+
+/// What the scan lost of the text of some files that may name a method.
+#[derive(Default)]
+struct Loss {
+    /// One does not decode or cannot be read.
+    text: bool,
+    /// One cannot be read at all.
+    unread: bool,
+    /// The hook names of those that do not decode, as `Loss::undecoded` reads them.
+    mentions: Vec<Mentions>,
+}
+
+impl Loss {
+    fn unread() -> Self {
+        Self {
+            text: true,
+            unread: true,
+            mentions: vec![],
+        }
+    }
+
+    /// A file that does not decode, read as UTF-16 or UTF-32 when `decode::wide_text` takes it, and
+    /// otherwise with each byte that is not UTF-8 replaced, which keeps every ASCII byte, so every
+    /// hook name, in place.
+    fn undecoded(bytes: &[u8]) -> Self {
+        let text = decode::wide_text(bytes).map_or_else(|| String::from_utf8_lossy(bytes), Cow::Owned);
+        Self {
+            text: true,
+            unread: false,
+            mentions: vec![Mentions::scan(&text)],
+        }
+    }
+
+    fn add(&mut self, other: Self) {
+        self.text |= other.text;
+        self.unread |= other.unread;
+        self.mentions.extend(other.mentions);
+    }
+
+    fn into_module(self, module: &mut Module) {
+        module.lost_text |= self.text;
+        module.unread_text |= self.unread;
+        module.lost_mentions.extend(self.mentions);
+    }
 }
 
 /// What reading a file of a module takes, besides the file.
@@ -707,22 +767,22 @@ type ParsedFile = Result<SourceFile<PyFacts>, SourceFile<DataFacts>>;
 
 impl ModuleContext<'_> {
     /// Reads `path`, none when it cannot be read or is Python that does not decode and that Odoo does
-    /// not refuse, whether its text is lost, and its words in a checked module. A data file that does
+    /// not refuse, what of its text is lost, and its words in a checked module. A data file that does
     /// not decode stays, since what it may define matters to the rules; one that decodes but does
     /// not parse keeps its text.
-    fn file(&self, path: PathBuf) -> (Option<ParsedFile>, bool, Words) {
+    fn file(&self, path: PathBuf) -> (Option<ParsedFile>, Loss, Words) {
         let Ok(bytes) = std::fs::read(&path) else {
-            return (None, true, Words::default());
+            return (None, Loss::unread(), Words::default());
         };
         let Some(text) = decoded(&path, &bytes, self.series) else {
-            return (self.undecoded(path, &bytes), true, Words::default());
+            return (self.undecoded(path, &bytes), Loss::undecoded(&bytes), Words::default());
         };
         let words = if self.checked {
             Words::scan(&text)
         } else {
             Words::default()
         };
-        (self.parsed(path, &text, &bytes), false, words)
+        (self.parsed(path, &text, &bytes), Loss::default(), words)
     }
 
     fn parsed(&self, path: PathBuf, text: &str, bytes: &[u8]) -> Option<ParsedFile> {
@@ -852,8 +912,9 @@ fn parse_module_files(module: &mut Module, default_series: Option<Series>, taint
     let files = module_files(&module.dir);
     let parsed: Vec<_> = files.into_par_iter().map(|path| context.file(path)).collect();
     let mut words = Vec::with_capacity(parsed.len() + 2);
-    for (file, lost, file_words) in parsed {
-        module.lost_text |= lost;
+    let mut loss = Loss::default();
+    for (file, file_loss, file_words) in parsed {
+        loss.add(file_loss);
         words.push(file_words);
         match file {
             Some(Ok(py)) => module.python.push(py),
@@ -864,16 +925,18 @@ fn parse_module_files(module: &mut Module, default_series: Option<Series>, taint
     module
         .data
         .sort_by_key(|f| (f.rank.unwrap_or(usize::MAX), f.rel.clone()));
-    let (mut js, lost_js, js_words) = parse_static_files(&module.dir, "src", "js", checked, js::analyze, None);
+    let (mut js, js_loss, js_words) = parse_static_files(&module.dir, "src", "js", checked, js::analyze, None);
     // `static_words` reads the words of tests already, and a test that does not decode hides no hook
     // name, as `hook_mentions` takes no name from a test.
     let (tests, _, _) = parse_static_files(&module.dir, "tests", "js", checked, js::analyze, None);
     js.extend(tests);
     module.js = js;
-    let (templates, lost_templates, template_words) =
+    let (templates, template_loss, template_words) =
         parse_static_files(&module.dir, "src", "xml", checked, owl::analyze, Some(owl::undecoded));
     module.templates = templates;
-    module.lost_text |= lost_js || lost_templates;
+    loss.add(js_loss);
+    loss.add(template_loss);
+    loss.into_module(module);
     words.extend([js_words, template_words]);
     if checked {
         words.push(static_words(&module.dir));
@@ -984,9 +1047,9 @@ fn mark_unread(entries: &mut [TemplateEntry], python: &[SourceFile<PyFacts>], di
     }
 }
 
-/// The files of `extension` under `static/<folder>`, whether one of them could not be read, and
-/// their words when the module is checked. One that is not UTF-8 is kept with the facts
-/// `undecoded` gives, and dropped without it.
+/// The files of `extension` under `static/<folder>`, what of their text is lost, and their words
+/// when the module is checked. One that is not UTF-8 is kept with the facts `undecoded` gives, and
+/// dropped without it.
 fn parse_static_files<T: Send>(
     dir: &Path,
     folder: &str,
@@ -994,46 +1057,71 @@ fn parse_static_files<T: Send>(
     checked: bool,
     analyze: fn(&str) -> T,
     undecoded: Option<fn() -> T>,
-) -> (Vec<SourceFile<T>>, bool, Words) {
+) -> (Vec<SourceFile<T>>, Loss, Words) {
     let paths = static_files(dir, folder, extension);
-    let count = paths.len();
     let read: Vec<_> = paths
         .into_par_iter()
-        .filter_map(|path| static_file(dir, path, checked, analyze, undecoded))
+        .map(|path| static_file(dir, path, checked, analyze, undecoded))
         .collect();
-    let lost = read.len() < count || read.iter().any(|(_, _, lost)| *lost);
-    let (mut files, words): (Vec<_>, Vec<_>) = read.into_iter().map(|(file, words, _)| (file, words)).unzip();
+    let mut files = Vec::with_capacity(read.len());
+    let mut loss = Loss::default();
+    let mut words = Vec::with_capacity(read.len());
+    for (file, file_loss, file_words) in read {
+        files.extend(file);
+        loss.add(file_loss);
+        words.push(file_words);
+    }
     files.sort_by(|a, b| a.rel.cmp(&b.rel));
-    (files, lost, Words::merge(&words))
+    (files, loss, Words::merge(&words))
 }
 
-/// A file of `parse_static_files`, its words, and whether its text is lost.
+/// A file of `parse_static_files`, none when it cannot be read or is not UTF-8 without `undecoded`,
+/// what of its text is lost, and its words.
 fn static_file<T>(
     dir: &Path,
     path: PathBuf,
     checked: bool,
     analyze: fn(&str) -> T,
     undecoded: Option<fn() -> T>,
-) -> Option<(SourceFile<T>, Words, bool)> {
-    let rel = normalize(&path.strip_prefix(dir).ok()?.to_string_lossy());
-    let bytes = std::fs::read(&path).ok()?;
-    // Odoo decodes assets as UTF-8 whatever they declare (18.0 `odoo/addons/base/models/assetsbundle.py:776`).
-    let text = String::from_utf8(bytes).ok();
-    let facts = match &text {
-        Some(text) => analyze(text),
-        None => undecoded?(),
+) -> (Option<SourceFile<T>>, Loss, Words) {
+    let rel = path.strip_prefix(dir).ok().map(|rel| normalize(&rel.to_string_lossy()));
+    let (Some(rel), Ok(bytes)) = (rel, std::fs::read(&path)) else {
+        return (None, Loss::unread(), Words::default());
     };
-    let checked_text = text.as_deref().filter(|_| checked);
+    // Odoo decodes assets as UTF-8 whatever they declare (18.0 `odoo/addons/base/models/assetsbundle.py:776`).
+    let Ok(text) = std::str::from_utf8(&bytes) else {
+        let mut loss = Loss::undecoded(&bytes);
+        // `hook_mentions` takes no name from a test script, which runs on a mock server. Only the
+        // path tells one here: the bundles that load the script are not known yet.
+        if path.extension().is_some_and(|e| e == "js") && test_path(&rel) {
+            loss.mentions.clear();
+        }
+        let file = undecoded.map(|facts| SourceFile {
+            rel,
+            rank: None,
+            demo: false,
+            suppressions: Suppressions::default(),
+            facts: facts(),
+            mentions: Mentions::default(),
+            path,
+        });
+        return (file, loss, Words::default());
+    };
+    let checked_text = checked.then_some(text);
     let file = SourceFile {
         rel,
         rank: None,
         demo: false,
         suppressions: checked_text.map(Suppressions::parse).unwrap_or_default(),
-        facts,
-        mentions: text.as_deref().map(Mentions::scan).unwrap_or_default(),
+        facts: analyze(text),
+        mentions: Mentions::scan(text),
         path,
     };
-    Some((file, checked_text.map(Words::scan).unwrap_or_default(), text.is_none()))
+    (
+        Some(file),
+        Loss::default(),
+        checked_text.map(Words::scan).unwrap_or_default(),
+    )
 }
 
 #[cfg(test)]
@@ -1111,6 +1199,57 @@ mod tests {
         };
         assert!(!lost("encoded_broken"));
         assert!(lost("orphan_hooks_lost"));
+        assert!(lost("encoded_lost_csv"));
+        assert!(lost("encoded_python"));
+        let dir = scratch("lost-xml");
+        let module = written(&dir, "lost_xml", "{'version': '18.0.1.0.0', 'data': ['data/a.xml']}");
+        std::fs::create_dir_all(module.join("data")).unwrap();
+        std::fs::write(module.join("data/a.xml"), b"<odoo><!-- \xE9 --></odoo>").unwrap();
+        let modules = load(&[module], &[], None, None, &TaintTable::default()).modules;
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(modules[0].lost_text && !modules[0].unread_text);
+    }
+
+    #[test]
+    fn a_file_that_does_not_decode_keeps_the_hook_names_it_spells() {
+        let dir = scratch("lost-mentions");
+        let module = written(&dir, "lost_mentions", "{'version': '18.0.1.0.0'}");
+        std::fs::create_dir_all(module.join("models")).unwrap();
+        std::fs::create_dir_all(module.join("static/src")).unwrap();
+        let python = b"# -*- coding: latin-1 -*-\nX = '\xE9'\nY = '_compute_after'\n";
+        std::fs::write(module.join("models/a.py"), python).unwrap();
+        std::fs::write(module.join("static/src/b.js"), b"// \xE9 _inverse_after\n").unwrap();
+        std::fs::create_dir_all(module.join("static/src/tests")).unwrap();
+        std::fs::write(module.join("static/src/tests/c.js"), b"// \xE9 _search_in_test\n").unwrap();
+        let wide = "\u{FEFF}<odoo><!-- \u{E9} _onchange_wide --></odoo>";
+        let wide: Vec<u8> = wide.encode_utf16().flat_map(u16::to_le_bytes).collect();
+        std::fs::write(module.join("models/d.xml"), wide).unwrap();
+        let modules = load(&[module], &[], None, None, &TaintTable::default()).modules;
+        let _ = std::fs::remove_dir_all(&dir);
+        let mut names: Vec<_> = modules[0].lost_mentions.iter().flat_map(|m| &m.names).collect();
+        names.sort();
+        assert_eq!(names, ["_compute_after", "_inverse_after", "_onchange_wide"]);
+        assert!(modules[0].lost_text && !modules[0].unread_text);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_file_the_scan_cannot_open_is_unread() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = scratch("unread-text");
+        let module = written(&dir, "unread_text", "{'version': '18.0.1.0.0'}");
+        std::fs::create_dir_all(module.join("models")).unwrap();
+        let path = module.join("models/a.py");
+        std::fs::write(&path, "X = 1\n").unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o000)).unwrap();
+        if std::fs::read(&path).is_ok() {
+            let _ = std::fs::remove_dir_all(&dir);
+            eprintln!("skipped: this user reads a file without permissions, as root does");
+            return;
+        }
+        let modules = load(&[module], &[], None, None, &TaintTable::default()).modules;
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(modules[0].lost_text && modules[0].unread_text);
     }
 
     #[test]

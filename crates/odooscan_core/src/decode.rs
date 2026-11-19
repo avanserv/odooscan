@@ -85,11 +85,45 @@ fn utf8_codec(label: &[u8]) -> bool {
 /// stands for, or one the declaration names other than UTF-8.
 pub fn xml_refused(bytes: &[u8]) -> Option<Pos> {
     let pos = invalid_utf8(bytes)?;
-    let wide =
-        bytes.starts_with(b"\xFE\xFF") || bytes.starts_with(b"\xFF\xFE") || bytes.iter().take(4).any(|&b| b == 0);
+    let wide = wide_units(bytes).is_some();
     let declared = DECLARED_ENCODING.captures(bytes).map(|c| c[1].to_ascii_uppercase());
     let utf8 = declared.is_none_or(|label| label == b"UTF-8" || label == b"UTF8");
     (!wide && utf8).then_some(pos)
+}
+
+/// The width and the order of the code units of a UTF-16 or UTF-32 file, as its BOM or the place of
+/// a NUL among its first four bytes says, true for big-endian; none for a file in neither.
+fn wide_units(bytes: &[u8]) -> Option<(usize, bool)> {
+    match bytes {
+        [0, 0, 0xFE, 0xFF, ..] | [0, 0, 0, _, ..] => Some((4, true)),
+        [0xFF, 0xFE, 0, 0, ..] | [_, 0, 0, 0, ..] => Some((4, false)),
+        [0xFE, 0xFF, ..] => Some((2, true)),
+        [0xFF, 0xFE, ..] => Some((2, false)),
+        _ => Some((2, bytes.iter().take(4).position(|&b| b == 0)? % 2 == 0)),
+    }
+}
+
+/// The text of a UTF-16 or UTF-32 file, each unit that is no character replaced, none for a file in
+/// neither. A NUL beside every ASCII byte hides each word of the bytes read as UTF-8.
+pub fn wide_text(bytes: &[u8]) -> Option<String> {
+    let (width, big) = wide_units(bytes)?;
+    let fold = |unit: u32, &byte: &u8| unit << 8 | u32::from(byte);
+    let units = bytes.chunks_exact(width).map(|unit| {
+        if big {
+            unit.iter().fold(0, fold)
+        } else {
+            unit.iter().rev().fold(0, fold)
+        }
+    });
+    let text = match width {
+        2 => char::decode_utf16(units.map(|u| u16::try_from(u).unwrap_or(0xFFFD)))
+            .map(|c| c.unwrap_or(char::REPLACEMENT_CHARACTER))
+            .collect(),
+        _ => units
+            .map(|u| char::from_u32(u).unwrap_or(char::REPLACEMENT_CHARACTER))
+            .collect(),
+    };
+    Some(text)
 }
 
 /// Whether the Odoo of `series` reads a data CSV as strict UTF-8, an unknown series, which a
@@ -382,6 +416,47 @@ mod tests {
         assert_eq!(xml_refused(b"\xFE\xFF\x00<\x00o"), None);
         assert_eq!(xml_refused(b"<\x00?\x00\xE9\x00"), None);
         assert_eq!(xml_refused("<odoo>é</odoo>".as_bytes()), None);
+    }
+
+    #[test]
+    fn a_wide_file_reads_in_the_units_its_bom_or_its_nuls_say() {
+        let utf16 = |big: bool, text: &str| -> Vec<u8> {
+            let units = text.encode_utf16();
+            units
+                .flat_map(|u| if big { u.to_be_bytes() } else { u.to_le_bytes() })
+                .collect()
+        };
+        let utf32 = |big: bool, text: &str| -> Vec<u8> {
+            let units = text.chars().map(u32::from);
+            units
+                .flat_map(|u| if big { u.to_be_bytes() } else { u.to_le_bytes() })
+                .collect()
+        };
+        let text = "\u{FEFF}<a>\u{E9}_compute_x\u{1F600}</a>";
+        for wide in [
+            utf16(true, text),
+            utf16(false, text),
+            utf32(true, text),
+            utf32(false, text),
+        ] {
+            assert_eq!(wide_text(&wide).as_deref(), Some(text));
+        }
+        let bare = "<a>_compute_x</a>";
+        for wide in [
+            utf16(true, bare),
+            utf16(false, bare),
+            utf32(true, bare),
+            utf32(false, bare),
+        ] {
+            assert_eq!(wide_text(&wide).as_deref(), Some(bare));
+        }
+        assert_eq!(wide_text(&utf16(false, "\u{E9}<a/>")).as_deref(), Some("\u{E9}<a/>"));
+        assert_eq!(
+            wide_text(b"\xFF\xFE\x00\xD8a\x00").as_deref(),
+            Some("\u{FEFF}\u{FFFD}a")
+        );
+        assert_eq!(wide_text(b"<a>\xE9</a>"), None);
+        assert_eq!(wide_text(b""), None);
     }
 
     #[test]

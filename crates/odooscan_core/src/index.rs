@@ -2008,6 +2008,8 @@ pub struct Index<'m> {
     /// The hook names and the prefixes of built ones that any file of any module mentions.
     hook_names: FxHashSet<&'m str>,
     hook_prefixes: Vec<&'m str>,
+    /// The modules in the scope of a module with a file the scan cannot read at all.
+    unread_reach: Vec<bool>,
     /// The modules whose manifest odooscan rejects, so none of them is in `modules`; `build` leaves
     /// it empty for the caller to fill.
     pub rejected: FxHashMap<String, OdooReads>,
@@ -2096,6 +2098,7 @@ impl<'m> Index<'m> {
             models,
             hook_names,
             hook_prefixes,
+            unread_reach: Vec::new(),
             rejected: FxHashMap::default(),
             uninstallable: FxHashSet::default(),
         };
@@ -2108,7 +2111,18 @@ impl<'m> Index<'m> {
         index.view_types = index.view_types();
         index.client_views = index.client_views();
         index.data_fields = index.data_fields(default_series);
+        index.unread_reach = index.unread_reach();
         index
+    }
+
+    /// The union of the scopes of the modules with `unread_text`.
+    fn unread_reach(&self) -> Vec<bool> {
+        let mut reach = vec![false; self.modules.len()];
+        for (mi, _) in self.modules.iter().enumerate().filter(|(_, m)| m.unread_text) {
+            let scope = self.scope(mi);
+            reach.iter_mut().zip(&scope.visible).for_each(|(r, v)| *r |= v);
+        }
+        reach
     }
 
     /// The fields the `ir.model.fields` records of the files Odoo loads add.
@@ -4092,11 +4106,17 @@ impl<'m> Index<'m> {
         self.hook_names.contains(name) || self.hook_prefixes.iter().any(|p| name.starts_with(p))
     }
 
-    /// Whether `module`, a module in its scope or a module with it in its scope has a file whose
-    /// text the scan cannot read, which may name a hook method of `module`.
-    pub fn lost_mentions(&self, module: usize) -> bool {
-        let mut lost = self.modules.iter().enumerate().filter(|(_, m)| m.lost_text);
-        lost.any(|(mi, _)| self.scope(module).sees(mi) || self.scope(mi).sees(module))
+    /// Whether a module `scope` sees has a file the scan cannot read at all, which may name any hook
+    /// method of a module of `scope`.
+    pub fn unread_in(&self, scope: &Scope) -> bool {
+        let mut modules = self.modules.iter().enumerate();
+        modules.any(|(mi, m)| scope.sees(mi) && m.unread_text)
+    }
+
+    /// Whether a module with a class of `model` is in the scope of a module with a file the scan
+    /// cannot read at all, which may name any hook method of `model` once both are installed.
+    pub fn unread_beside(&self, model: &str) -> bool {
+        self.classes(model).iter().any(|&(mi, _)| self.unread_reach[mi])
     }
 
     /// Whether a class in scope of `model` or of a model it inherits by `_inherit` defines `method`.
@@ -4581,8 +4601,8 @@ fn defines_for(class: &ClassFact, method: &str, caller: &ClassFact) -> bool {
         && class.methods.iter().any(|m| m == method)
 }
 
-/// What `Index::names_hook` reads: the union of the mentions of every file of `modules` but the
-/// test scripts in `tests`, which run on a mock server.
+/// What `Index::names_hook` reads: the union of the mentions of every file of `modules`, those that
+/// do not decode included, but the test scripts in `tests`, which run on a mock server.
 fn hook_mentions<'m>(modules: &'m [Module], tests: &Loaded) -> (FxHashSet<&'m str>, Vec<&'m str>) {
     let files = modules.iter().enumerate().flat_map(|(mi, m)| {
         let python = m.python.iter().map(|f| &f.mentions);
@@ -4592,6 +4612,7 @@ fn hook_mentions<'m>(modules: &'m [Module], tests: &Loaded) -> (FxHashSet<&'m st
             .chain(m.data.iter().map(|f| &f.mentions))
             .chain(scripts.map(|(_, f)| &f.mentions))
             .chain(m.templates.iter().map(|f| &f.mentions))
+            .chain(&m.lost_mentions)
     });
     let mut names = FxHashSet::default();
     let mut prefixes: Vec<&str> = vec![];
@@ -6125,20 +6146,62 @@ mod tests {
         }
     }
 
-    #[test]
-    fn a_lost_text_hides_the_hooks_of_the_modules_it_sees_and_that_see_it() {
+    /// `main` sees `owner`, which `sibling` extends and `stranger` does not see.
+    fn hook_modules() -> Vec<Module> {
         let manifest = |depends: &str| format!("{{'version': '18.0.1.0', 'depends': [{depends}]}}");
-        let mut modules = [
+        let mut modules = vec![
             module("base", &manifest("")),
-            module("low", &manifest("'base'")),
-            module("main", &manifest("'low'")),
+            module("owner", &manifest("'base'")),
+            module("main", &manifest("'owner'")),
             module("heir", &manifest("'main'")),
-            module("side", &manifest("'base'")),
+            module("sibling", &manifest("'owner'")),
+            module("stranger", &manifest("'base'")),
         ];
-        modules[2].lost_text = true;
+        for (mi, key, model) in [
+            (1, "_name", "owned"),
+            (4, "_inherit", "owned"),
+            (5, "_name", "stranger"),
+        ] {
+            let source = format!("class Hook(models.Model):\n    {key} = '{model}.hook'\n");
+            modules[mi].python.push(python_18(&source));
+        }
+        modules
+    }
+
+    #[test]
+    fn an_unread_file_hides_the_hooks_of_the_scopes_it_is_in_and_of_the_models_it_reaches() {
+        let mut modules = hook_modules();
+        modules[2].unread_text = true;
         let index = Index::build(&modules, None);
-        let lost: Vec<_> = (0..modules.len()).filter(|&mi| index.lost_mentions(mi)).collect();
-        assert_eq!(lost, [0, 1, 2, 3]);
+        let unread: Vec<_> = (0..modules.len())
+            .filter(|&mi| index.unread_in(&index.scope(mi)))
+            .collect();
+        assert_eq!(unread, [2, 3]);
+        assert!(index.unread_beside("owned.hook"));
+        assert!(!index.unread_beside("stranger.hook"));
+    }
+
+    #[test]
+    fn an_unread_file_of_an_always_installed_module_is_in_every_scope() {
+        let mut modules = hook_modules();
+        let mut auto = module("auto", "{'depends': ['base'], 'auto_install': True}");
+        auto.unread_text = true;
+        modules.push(auto);
+        let index = Index::build(&modules, None);
+        assert!((0..modules.len()).all(|mi| index.unread_in(&index.scope(mi))));
+        assert!(!index.unread_beside("stranger.hook"));
+    }
+
+    #[test]
+    fn a_file_that_does_not_decode_hides_only_the_hooks_it_names() {
+        let mut modules = hook_modules();
+        modules[2].lost_text = true;
+        modules[2].lost_mentions.push(Mentions::scan("x._compute_named()"));
+        let index = Index::build(&modules, None);
+        assert!(index.names_hook("_compute_named"));
+        assert!(!index.names_hook("_compute_other"));
+        assert!(!(0..modules.len()).any(|mi| index.unread_in(&index.scope(mi))));
+        assert!(!index.unread_beside("owned.hook"));
     }
 
     #[test]

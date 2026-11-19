@@ -314,6 +314,7 @@ pub fn check_module<'m>(index: &Index<'m>, mi: usize, series: Option<Series>) ->
             scope_built: &scope_built,
             partial: index.partial_scope(&scope),
             lost: index.lost_scope(&scope),
+            unread_text: index.unread_in(&scope),
             series,
             grants: &grants,
         };
@@ -2163,6 +2164,8 @@ struct Ctx<'a, 'm> {
     /// A module in scope loads a data file the scan cannot read, which may hold a model, a field, an
     /// XML id, a view element, an access row or a value of a record, but no Python or JS.
     lost: bool,
+    /// A module in scope has a file the scan cannot read at all, which may name any method.
+    unread_text: bool,
     series: Option<Series>,
     /// The access rows in scope that let public or portal users at a model.
     grants: &'a Grants<'m>,
@@ -3158,7 +3161,8 @@ impl<'m> Ctx<'_, 'm> {
             || class.defs.is_empty()
             || self.hides_parents(class)
             || self.index.hidden_method_parents(&class.model, self.scope)
-            || self.index.lost_mentions(self.mi)
+            || self.unread_text
+            || self.index.unread_beside(&class.model)
         {
             return;
         }
@@ -7736,11 +7740,12 @@ mod tests {
 
     use super::{
         CACHE_KEY_GLOBALS, MEMBER_SERIES, MagicEra, Merged, Paths, REPORT_TAG, applies, builds_models, bundle_list,
-        cache_global, cached_member, callable_attr, csv_label, derived_label, exported_text, fetches_own_view,
-        field_name, has_last_update, hoot_adds, keeps_set, labels_before_ondelete, lacks_domain, lone_add_applied,
-        magic_era, no_access_message, page_miss, parent_path_children, patch_form, public_write_message,
-        qweb_asset_glob, reads_model_access, reads_requires, shadowed_member, static_only, stores_parent_path,
-        tuple_add_refused, tuple_checked, tuple_listed, unknown_dependency, unmatched_asset, warns_on_labels,
+        cache_global, cached_member, callable_attr, check_module, csv_label, derived_label, exported_text,
+        fetches_own_view, field_name, has_last_update, hoot_adds, keeps_set, labels_before_ondelete, lacks_domain,
+        lone_add_applied, magic_era, no_access_message, page_miss, parent_path_children, patch_form,
+        public_write_message, qweb_asset_glob, reads_model_access, reads_requires, shadowed_member, static_only,
+        stores_parent_path, tuple_add_refused, tuple_checked, tuple_listed, unknown_dependency, unmatched_asset,
+        warns_on_labels,
     };
     use crate::facts::{AccessRow, DefinitionSource, JsName, OptionValue, Perms, Pos, Spanned, UNREAD_TYPE};
     use crate::index::Index;
@@ -8148,6 +8153,44 @@ mod tests {
         );
         assert!(shadows("_clear_cache_name", Some("20.0")).is_none());
         assert!(shadows("_cached_data_fields", Some("18.0")).is_none());
+    }
+
+    #[test]
+    fn a_file_the_scan_cannot_read_at_all_hides_od230_in_its_scope_and_beside_the_model() {
+        let manifest = |depends: &str| format!("{{'version': '18.0.1.0', 'depends': [{depends}]}}");
+        let python = |source: &str| crate::project::SourceFile {
+            path: std::path::PathBuf::new(),
+            rel: String::new(),
+            rank: None,
+            demo: false,
+            facts: analyze(source, Series::parse("18.0")),
+            suppressions: Default::default(),
+            mentions: Default::default(),
+        };
+        let hook = "class B(models.Model):\n    _inherit = 'owned.hook'\n\n    def _compute_x(self):\n        pass\n";
+        let od230 = |unread: Option<usize>| {
+            // `main` extends the model of `owner` and sees `other`; `sibling` extends `owner` alone.
+            let mut modules = vec![
+                crate::project::module("base", &manifest("")),
+                crate::project::module("owner", &manifest("'base'")),
+                crate::project::module("main", &manifest("'owner', 'other'")),
+                crate::project::module("sibling", &manifest("'owner'")),
+                crate::project::module("other", &manifest("'base'")),
+            ];
+            modules[1]
+                .python
+                .push(python("class A(models.Model):\n    _name = 'owned.hook'\n"));
+            modules[2].python.push(python(hook));
+            if let Some(mi) = unread {
+                modules[mi].unread_text = true;
+            }
+            let index = Index::build(&modules, None);
+            let diags = check_module(&index, 2, Series::parse("18.0"));
+            diags.iter().filter(|(_, d)| d.code == "OD230").count()
+        };
+        assert_eq!(od230(None), 1);
+        assert_eq!(od230(Some(4)), 0, "a module main sees");
+        assert_eq!(od230(Some(3)), 0, "a module whose scope holds a class of the model");
     }
 
     #[test]
