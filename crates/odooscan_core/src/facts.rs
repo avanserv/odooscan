@@ -1560,11 +1560,14 @@ pub enum Static {
     Components,
 }
 
-/// A change to the `props` or `components` of the class `binding` names, other than a literal
-/// assignment.
+/// A change to the `props` or `components` of a class, other than a literal assignment: the class
+/// `binding` names, or the one reached from it through the keys of `through`.
 #[derive(Debug, PartialEq, Eq)]
 pub struct StaticWrite {
     pub binding: String,
+    /// The `components` keys that lead from the class `binding` names to the class written, as
+    /// `Y` in `X.components.Y.props.z = 1`.
+    pub through: Vec<String>,
     pub member: Static,
     /// The write changes the object the member holds, which a subclass without its own shares
     /// with the class that declares it, rather than the member itself.

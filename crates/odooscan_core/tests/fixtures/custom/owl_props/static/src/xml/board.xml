@@ -52,4 +52,11 @@
             <Card title.weird="'Order'"/>
         </div>
     </t>
+
+    <t t-name="owl_props.Rack">
+        <div class="o_rack">
+            <Card title="'Order'" titel="'Order'"/>
+            <Hook title="'Order'" extra="'x'"/>
+        </div>
+    </t>
 </templates>
