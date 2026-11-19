@@ -58,6 +58,27 @@ fn base_creates_none_of_its_ids() {
 }
 
 #[test]
+fn base_builds_only_custom_models_in_its_own_check() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+    // core/base builds `_name` from data in IrModelCustom, which must not let it name a model of
+    // project, a module that depends on it.
+    let report = scan(&ScanOptions {
+        paths: vec![root.join("core/base")],
+        addons_paths: vec![root.join("core")],
+        default_series: Series::parse("18.0"),
+        target_series: None,
+        ..Default::default()
+    });
+    let found: Vec<_> = report
+        .diagnostics
+        .iter()
+        .filter(|d| d.code == "OD201")
+        .map(|d| (d.path.strip_prefix(&root).unwrap().display().to_string(), d.line))
+        .collect();
+    assert_eq!(found, [("core/base/models/res_partner.py".to_string(), 250)]);
+}
+
+#[test]
 fn series_notice_only_without_default() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
     let notices = |default_series| {

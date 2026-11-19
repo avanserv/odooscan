@@ -247,6 +247,9 @@ class IrSequence(models.Model):
 class IrModelCustom(models.Model):
     _inherit = "ir.model"
 
+    dependent_project_id = fields.Many2one("project.project")
+    custom_card_id = fields.Many2one("x_custom_card")
+
     def _custom_class(self, data):
         class CustomModel(models.Model):
             _name = data["model"]
