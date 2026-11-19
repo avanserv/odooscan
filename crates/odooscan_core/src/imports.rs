@@ -87,6 +87,7 @@ impl<'a> Collect<'_> {
             names: names.iter().map(|a| self.spanned(a)).collect(),
             from,
             deferred: self.deferred,
+            typing: self.typing,
             guard: self.guard,
         }
     }
@@ -470,7 +471,7 @@ impl Addon {
     fn defines(&self, path: &[String]) -> Option<&[String]> {
         let at = path.join("/");
         let file = if at.is_empty() {
-            "__init__.py".to_owned()
+            ROOT.to_owned()
         } else if self.files.contains_key(&format!("{at}/__init__.py")) {
             format!("{at}/__init__.py")
         } else {
@@ -514,6 +515,13 @@ impl Fault {
         }
     }
 }
+
+/// The file Odoo imports a module by.
+pub(crate) const ROOT: &str = "__init__.py";
+
+/// Where a file first runs while its addon loads: the imports on the way from the root, each as
+/// the importing statement and the file's place among those it runs.
+pub type RunKey = Vec<(Pos, usize)>;
 
 /// The imports of every module of the scan.
 #[derive(Debug, Default)]
@@ -595,6 +603,42 @@ impl Graph {
             }
         }
         Some(seen)
+    }
+
+    /// When loading `addon` first runs each file its root `__init__.py` reaches, as keys that sort
+    /// in that order: Python runs a module's imports depth first, each once, an import in a
+    /// function only when called and one under `if TYPE_CHECKING:` never. None where `reached` is
+    /// none, and for an addon the scan lost or does not know.
+    pub fn run_order(&self, addon: &str) -> Option<FxHashMap<String, RunKey>> {
+        let files = &self.addons.get(addon).filter(|a| !a.lost)?.files;
+        self.reached(addon, &[ROOT])?;
+        let mut order = FxHashMap::default();
+        if files.contains_key(ROOT) {
+            order.insert(ROOT.to_owned(), vec![]);
+            self.run_from(addon, ROOT, &mut order);
+        }
+        Some(order)
+    }
+
+    /// Gives each file `rel` of `addon` runs first the key of `rel` and where the import runs it.
+    fn run_from(&self, addon: &str, rel: &str, order: &mut FxHashMap<String, RunKey>) {
+        let Some(Some(imports)) = self.addons[addon].files.get(rel) else {
+            return;
+        };
+        let mut facts: Vec<&ImportFact> = imports.list.iter().filter(|f| !f.deferred && !f.typing).collect();
+        facts.sort_by_key(|f| f.pos);
+        for fact in facts {
+            let targets = self.targets(addon, rel, fact).into_iter().enumerate();
+            for (i, (_, file)) in targets.filter(|(_, (to, _))| to == addon) {
+                if order.contains_key(&file) {
+                    continue;
+                }
+                let mut key = order[rel].clone();
+                key.push((fact.pos, i));
+                order.insert(file.clone(), key);
+                self.run_from(addon, &file, order);
+            }
+        }
     }
 
     /// The modules of addons `fact` of file `rel` imports by their path, each with what the addon
@@ -740,7 +784,7 @@ impl Graph {
         let mut located = Located::default();
         located
             .files
-            .extend(files.files.get_key_value("__init__.py").map(|(k, _)| k.clone()));
+            .extend(files.files.get_key_value(ROOT).map(|(k, _)| k.clone()));
         let mut dir = String::new();
         for (i, segment) in path.iter().enumerate() {
             let at = if dir.is_empty() {
@@ -773,7 +817,7 @@ impl Graph {
         };
         let dir = path.join("/");
         let init = if dir.is_empty() {
-            "__init__.py".to_owned()
+            ROOT.to_owned()
         } else {
             format!("{dir}/__init__.py")
         };
@@ -1068,6 +1112,23 @@ mod tests {
         let flags: Vec<(bool, ImportGuard)> = imports(src).list.iter().map(|f| (f.deferred, f.guard)).collect();
         let (no, any) = (ImportGuard::Unguarded, ImportGuard::Any);
         assert_eq!(flags, [(true, any), (true, any), (true, no)]);
+    }
+
+    #[test]
+    fn only_an_import_the_type_checking_branch_holds_is_typing() {
+        for (src, expected) in [
+            ("if typing.TYPE_CHECKING:\n    import a\n", true),
+            (
+                "if TYPE_CHECKING:\n    if x:\n        try:\n            import a\n        except KeyError:\n            pass\n",
+                true,
+            ),
+            ("if TYPE_CHECKING:\n    def f():\n        import a\n", true),
+            ("if TYPE_CHECKING:\n    pass\nelse:\n    import a\n", false),
+            ("if TYPE_CHECKING:\n    pass\nelif x:\n    import a\n", false),
+            ("if not TYPE_CHECKING:\n    import a\n", false),
+        ] {
+            assert_eq!(imports(src).list[0].typing, expected, "{src}");
+        }
     }
 
     #[test]
@@ -1625,6 +1686,79 @@ mod tests {
         );
         let faults: Vec<_> = found.into_iter().map(|(addon, .., f)| (addon, f.len())).collect();
         assert_eq!(faults, [("lost".to_owned(), 0), ("lib".to_owned(), 1)]);
+    }
+
+    /// The files `addon` runs, in the order of their keys.
+    fn run_order(graph: &Graph, addon: &str) -> Option<Vec<String>> {
+        let mut order: Vec<_> = graph.run_order(addon)?.into_iter().collect();
+        order.sort_by(|a, b| a.1.cmp(&b.1));
+        Some(order.into_iter().map(|(file, _)| file).collect())
+    }
+
+    #[test]
+    fn the_run_order_is_depth_first_by_import_and_skips_function_imports() {
+        let g = graph(&[(
+            "shop",
+            false,
+            &[
+                ("__init__.py", Some("from .models import sale\nfrom . import b, a\n")),
+                ("models/__init__.py", Some("from . import stock\n")),
+                ("models/sale.py", Some("from . import tax\n")),
+                ("models/stock.py", Some("")),
+                ("models/tax.py", Some("")),
+                ("a.py", Some("def load():\n    from . import late\n")),
+                ("b.py", Some("from . import a\n")),
+                ("late.py", Some("")),
+            ],
+        )]);
+        assert_eq!(
+            run_order(&g, "shop").unwrap(),
+            owned(&[
+                "__init__.py",
+                "models/__init__.py",
+                "models/stock.py",
+                "models/sale.py",
+                "models/tax.py",
+                "b.py",
+                "a.py"
+            ])
+        );
+    }
+
+    #[test]
+    fn the_run_order_skips_type_checking_imports_but_not_guarded_ones() {
+        let g = graph(&[(
+            "shop",
+            false,
+            &[
+                ("__init__.py", Some("from . import a, c, b\n")),
+                (
+                    "a.py",
+                    Some("from typing import TYPE_CHECKING\nif TYPE_CHECKING:\n    from . import b\n"),
+                ),
+                ("b.py", Some("")),
+                (
+                    "c.py",
+                    Some("try:\n    from . import d\nexcept ImportError:\n    pass\n"),
+                ),
+                ("d.py", Some("")),
+            ],
+        )]);
+        assert_eq!(
+            run_order(&g, "shop").unwrap(),
+            owned(&["__init__.py", "a.py", "c.py", "d.py", "b.py"])
+        );
+    }
+
+    #[test]
+    fn the_run_order_is_unknown_past_an_unparsed_or_lost_file() {
+        let files: &[(&str, Option<&str>)] = &[("__init__.py", Some("from . import a\n")), ("a.py", None)];
+        assert!(graph(&[("shop", false, files)]).run_order("shop").is_none());
+        let mut g = graph(&[("shop", false, &[("__init__.py", Some(""))])]);
+        assert_eq!(run_order(&g, "shop").unwrap(), owned(&["__init__.py"]));
+        g.addons.get_mut("shop").unwrap().lost = true;
+        assert!(g.run_order("shop").is_none());
+        assert!(g.run_order("gone").is_none());
     }
 
     #[test]

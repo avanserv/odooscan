@@ -19,7 +19,7 @@ use crate::facts::{
     ViewFact, WrittenValue, XmlDef, XmlRef,
 };
 use crate::grants::{self, AttachmentGrant, Grant, Grants};
-use crate::imports::{AddonImport, Fault, Graph};
+use crate::imports::{AddonImport, Fault, Graph, ROOT};
 use crate::index::{
     ACTION_REGISTRY, BASE_MODEL_METHODS, CACHED_MODEL_SINCE, Export, FIELD_REGISTRY, FieldDef, FieldInfo, Index,
     JsSpec, JsTarget, PathError, Placed, PropSchema, RELATIONAL_TYPES, SERVICE_REGISTRY, Scope, Status, TOUR_REGISTRY,
@@ -1714,7 +1714,7 @@ fn unloaded(rel: &str, ignored: Option<&str>, series: Option<Series>) -> String 
 /// import any file of this one. A module outside the dependents is OD518's when it imports one.
 fn unimported_files<'m>(index: &Index<'m>, mi: usize, out: &mut Out<'m>) {
     let module = &index.modules[mi];
-    if module.lost_text || !module.python.iter().any(|f| f.rel == "__init__.py") {
+    if module.lost_text || !module.python.iter().any(|f| f.rel == ROOT) {
         return;
     }
     if index.has_unread_dependent(mi) {
@@ -1750,14 +1750,13 @@ impl<'a> Reach<'a> {
     fn of(index: &'a Index, mi: usize) -> Self {
         let graph = &index.imports;
         let name = index.modules[mi].name.as_str();
-        let mut starts = vec!["__init__.py"];
+        let mut starts = vec![ROOT];
         let mut dependents: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
         for (file, importer) in graph.elsewhere(name) {
-            match index.by_name.get(importer) {
-                Some(&d) if index.loads_after(d, mi) && !index.loads_after(mi, d) => {
-                    dependents.entry(importer).or_default().push(file);
-                }
-                _ => starts.push(file),
+            if index.imports_later(importer, mi) {
+                dependents.entry(importer).or_default().push(file);
+            } else {
+                starts.push(file);
             }
         }
         let early = graph.reached(name, &starts);
@@ -2247,24 +2246,45 @@ impl<'m> Ctx<'_, 'm> {
 
     /// A dependency outside the index may load a model the scope does not reach, or define one no
     /// indexed module does.
-    fn model_ref(&self, out: &mut Out<'m>, path: &'m Path, model: &Spanned<String>, extender: Option<usize>) {
-        match self.index.model_status(&model.value, self.scope, extender) {
+    fn model_ref(
+        &self,
+        out: &mut Out<'m>,
+        path: &'m Path,
+        model: &Spanned<String>,
+        extender: Option<(usize, &ClassFact)>,
+    ) {
+        let name = &model.value;
+        let late = || self.late_introducer(name, extender);
+        match self.index.model_status(name, self.scope, extender) {
             Status::Visible => {}
-            Status::Hidden(_) if self.partial || self.scope_built.fit(&model.value) => {}
-            Status::Hidden(m) => out.push(
-                path,
-                "OD202",
-                model.pos,
-                format!("model '{}' comes from module {m}; add it to depends", model.value),
-            ),
+            Status::Hidden(_) if self.partial || self.scope_built.fit(name) => {}
+            Status::Hidden(m) => {
+                let message =
+                    late().unwrap_or_else(|| format!("model '{name}' comes from module {m}; add it to depends"));
+                out.push(path, "OD202", model.pos, message);
+            }
             Status::Missing if self.dynamic || self.partial => {}
-            Status::Missing => out.push(
-                path,
-                "OD201",
-                model.pos,
-                format!("no indexed module defines model '{}'", model.value),
-            ),
+            Status::Missing => {
+                let message = late().unwrap_or_else(|| format!("no indexed module defines model '{name}'"));
+                out.push(path, "OD201", model.pos, message);
+            }
         }
+    }
+
+    /// The message for parent `model` of class `extender` when a class of its module introduces
+    /// the model: one `model_status` did not count, so one built after the extender, and moving
+    /// the extender below it is the fix wherever else Odoo would find the model.
+    fn late_introducer(&self, model: &str, extender: Option<(usize, &ClassFact)>) -> Option<String> {
+        let (e, _) = extender?;
+        let (_, c) = self
+            .index
+            .classes(model)
+            .iter()
+            .find(|(mi, c)| *mi == e && c.new_model)?;
+        Some(format!(
+            "model '{model}' is not in the registry yet: class {} of this module introduces it after this class",
+            c.class_name
+        ))
     }
 
     /// `model_ref` for a data file. An unread file in scope may hold the `ir.model` record of a model
@@ -2938,7 +2958,7 @@ impl<'m> Ctx<'_, 'm> {
 
     fn class(&self, out: &mut Out<'m>, path: &'m Path, class: &ClassFact) {
         for parent in &class.inherit {
-            self.model_ref(out, path, parent, Some(self.mi));
+            self.model_ref(out, path, parent, Some((self.mi, class)));
         }
         for field in &class.fields {
             self.field(out, path, class, field);
@@ -6618,7 +6638,7 @@ fn is_shell(index: &Index, mi: usize) -> bool {
         && module
             .python
             .iter()
-            .all(|f| f.path == module.manifest_path || f.rel == "__init__.py")
+            .all(|f| f.path == module.manifest_path || f.rel == ROOT)
 }
 
 fn sets_parent_store(class: &ClassFact) -> bool {
