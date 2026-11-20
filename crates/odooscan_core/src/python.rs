@@ -1948,10 +1948,10 @@ fn is_own_table(value: &Expr) -> bool {
     }
 }
 
-/// The calls of a function body, those of the functions it nests among them.
+/// The calls under the nodes it visits, those of the functions and lambdas they nest among them.
 #[derive(Default)]
-struct Calls<'a> {
-    calls: Vec<&'a ast::ExprCall>,
+pub(crate) struct Calls<'a> {
+    pub(crate) calls: Vec<&'a ast::ExprCall>,
 }
 
 impl<'a> Visitor<'a> for Calls<'a> {
