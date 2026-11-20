@@ -644,29 +644,34 @@ fn import_patches_without_base_take_the_advice_of_the_path() {
 }
 
 #[test]
-fn a_version_of_another_series_is_refused_under_a_default_series_only() {
+fn a_default_series_judges_only_a_version_naming_none() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
     let refused = |default_series| {
         let report = scan(&ScanOptions {
-            paths: vec![
-                root.join("custom/legacy17"),
-                root.join("custom/manifest_version_refused"),
-            ],
+            paths: ["legacy16", "legacy17", "migration_folders", "manifest_version_refused"]
+                .into_iter()
+                .map(|m| root.join("custom").join(m))
+                .collect(),
             addons_paths: vec![root.join("core")],
             default_series,
             ..Default::default()
         });
-        let mut modules: Vec<_> = report
+        let mut found: Vec<_> = report
             .diagnostics
             .iter()
             .filter(|d| d.code == "OD509")
-            .filter_map(|d| d.path.parent()?.file_name()?.to_str().map(str::to_owned))
+            .filter_map(|d| Some((d.path.parent()?.file_name()?.to_str()?.to_owned(), d.message.clone())))
             .collect();
-        modules.sort();
-        modules
+        found.sort();
+        found
     };
-    assert_eq!(refused(None), ["manifest_version_refused"]);
-    assert_eq!(refused(Series::parse("18.0")), ["legacy17", "manifest_version_refused"]);
+    let modules = |found: &[(String, String)]| found.iter().map(|(m, _)| m.clone()).collect::<Vec<_>>();
+    assert_eq!(modules(&refused(None)), ["manifest_version_refused"]);
+    assert_eq!(modules(&refused(Series::parse("18.0"))), ["manifest_version_refused"]);
+    // `1.0-beta` names no series, so the flag stands for it.
+    let fallback = refused(Series::parse("17.0"));
+    assert_eq!(modules(&fallback), ["manifest_version_refused"]);
+    assert!(fallback[0].1.contains("Odoo 17.0"), "{}", fallback[0].1);
 }
 
 #[test]
@@ -789,8 +794,9 @@ fn migration_folders_take_the_module_series() {
     // `v1.1` takes `migrate(env, version)`, yet Odoo never imports it, so it is OD514's alone.
     let own = ["1.3", "18.0.1.3.0", "19.0.1.0", "v1.1"].map(|f| ("OD514", f.to_owned()));
     assert_eq!(migration_findings(None, None), own);
-    // The manifest names 18.0, so `--odoo-version 16.0` does not stand for its series.
+    // The manifest names 18.0, so `--odoo-version` does not stand for its series.
     assert_eq!(migration_findings(Series::parse("16.0"), None), own);
+    assert_eq!(migration_findings(Series::parse("17.0"), None), own);
 }
 
 #[test]

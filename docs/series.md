@@ -5,9 +5,8 @@ series. The series is the first two parts of a five-part manifest version, so `1
 18.0. Pass `--odoo-version 18.0` for modules whose version does not name one. Those modules
 otherwise get only the rules that carry no range. `oscn rules --odoo-version 18.0` lists the
 rules whose range does not exclude that series. A listed rule may still stay silent on it, as its
-page says. [OD509](rules/OD509.md) and [OD514](rules/OD514.md) read the flag for every module:
-under it, OD509 reports a version that names another series, since that Odoo will not install it,
-and OD514 compares migration folders with the version as that Odoo reads it.
+page says. [OD509](rules/OD509.md) reports a version that names another series under
+`--target-series` alone, since the Odoo of the target will not install it.
 
 A series is spelled as Odoo names it, in a manifest version, in `--odoo-version` and in
 `--target-series` below: `18.0`, `saas~18.1`, or `9.saas~10` for a SaaS release before 11.0, so
