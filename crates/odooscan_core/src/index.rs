@@ -5694,6 +5694,30 @@ mod tests {
     }
 
     #[test]
+    fn an_override_in_base_overrides_no_module_with_empty_depends() {
+        // In 18.0 `aaa` does not reach `base`, yet Odoo loads `base` alone first, so `base`'s `act`
+        // overrides nothing of `aaa`'s.
+        let mut modules = [module("base", "{}"), module("aaa", "{'version': '18.0.1.0.0'}")];
+        modules[0].python.push(python_18(
+            "class T(models.Model):\n    _name = 'x.thing'\n\n    def act(self, a):\n        pass\n",
+        ));
+        modules[1].python.push(python_18(
+            "class U(models.Model):\n    _inherit = 'x.thing'\n\n    def act(self):\n        pass\n",
+        ));
+        let index = Index::build(&modules, None);
+        let [base, aaa] = ["base", "aaa"].map(|name| index.by_name[name]);
+        let merged = index.merged_classes("x.thing", &index.scope(aaa));
+        assert_eq!(merged.len(), 2);
+        let parents = |mi: usize| {
+            let class = merged.iter().find(|(m, _)| *m == mi).unwrap().1;
+            let found = index.method_parents(mi, class, &merged, "act").unwrap();
+            found.into_iter().map(|(m, _)| m).collect::<Vec<_>>()
+        };
+        assert_eq!(parents(base), Vec::<usize>::new());
+        assert_eq!(parents(aaa), [base]);
+    }
+
+    #[test]
     fn an_entry_alone_brings_what_no_other_entry_or_base_does() {
         let manifest = |depends: &str, extra: &str| format!("{{'depends': [{depends}]{extra}}}");
         let modules = [
