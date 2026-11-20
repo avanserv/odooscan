@@ -32,3 +32,15 @@ class DomainRebound(DomainTwice):
 
     def x_lookup(self):
         return self.search([("stamp", "=", "a")])
+
+
+class Base(Base):
+    _inherit = "base"
+
+
+class DomainReport(models.Model):
+    _name = "domain.report"
+    _description = "View that nothing creates"
+    _auto = False
+
+    label = fields.Char()

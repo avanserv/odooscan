@@ -5511,7 +5511,8 @@ fn keeps_set(series: Option<Series>, earlier: DefClass<'_>, last: DefClass<'_>) 
 /// where a module in scope depends on a module that is not indexed. None runs on a model whose
 /// class with `_name` is out of scope, or where a class of it, or of a model it inherits or
 /// delegates to, has a plain Python base class or an `_inherit` element that is not a literal, a
-/// parent whose fields the scan cannot see.
+/// parent whose fields the scan cannot see. A plain base of a class of `base` that is a class
+/// merged into the model, as in `class Base(Base)`, is seen and does not skip it.
 impl<'m> Ctx<'_, 'm> {
     fn registry(&self, out: &mut Out<'m>) {
         if self.partial {
@@ -6942,26 +6943,36 @@ impl<'m> Ctx<'_, 'm> {
     }
 
     /// Whether `model` needs no relation or something may give it `table`: no class of it or of a
-    /// model it inherits has a field, `base` apart, so it stores nothing; a class of those, in any
-    /// indexed module but for one that does not parse outside the scope, defines `init()` or
-    /// `_auto_init()`, sets a table query, creates a view whose whole name is `self._table` or has
-    /// a parent the scan cannot see; another model, or a field in scope that may be a Many2many,
+    /// model it inherits has a field, `base` apart, so it stores nothing; a class of those
+    /// `creates_view_of` the model; another model, or a field in scope that may be a Many2many,
     /// has that table; an indexed module creates a view of that name in Python or SQL; or this
     /// module, not a dependency, creates a view it names at runtime or has a Many2many that may be
     /// stored in a table the scan cannot name. `table_models` leaves out an abstract model.
     fn view_made(&self, model: &str, table: &str) -> bool {
-        let creates = |c: &ClassFact| {
-            c.hidden_parents() || c.own_view || c.methods.iter().any(|m| VIEW_MAKERS.contains(&m.as_str()))
-        };
-        let chain = self.index.chain_read_from(model, self.scope);
+        let mut chain = self.index.chain_read_from(model, self.scope);
+        // Outside the scope a class of `base` may not be installed, so it neither runs its `init()`
+        // nor reads as the parent of another class.
+        chain.retain(|&(mi, c)| c.model != "base" || self.scope.sees(mi));
         let own = || chain.iter().filter(|(_, c)| c.model != "base");
         own().all(|(_, c)| c.fields.is_empty())
-            || chain.iter().any(|(_, c)| creates(c))
+            || chain.iter().any(|&(mi, c)| self.creates_view_of(mi, c, &chain))
             || self.index.table_models(table) != [model]
             || self.index.relation_table(table, self.scope)
             || self.index.creates_view(table)
             || self.module.python.iter().any(|f| f.facts.creates_any_view)
             || self.unread_rows()
+    }
+
+    /// Whether class `c` of module `mi` may give its model's table: it defines `init()` or
+    /// `_auto_init()`, sets a table query, creates a view whose whole name is `self._table`, or has
+    /// a parent the scan does not read as a class of `chain`, the `chain_read_from` of the model
+    /// without the classes of `base` out of scope. Odoo runs the `init()` of a class of `base` on
+    /// every model of the registry (18.0 `odoo/modules/registry.py:597-598`, 20.0
+    /// `odoo/orm/registry.py:842-843`).
+    fn creates_view_of(&self, mi: usize, c: &ClassFact, chain: &[(usize, &'m ClassFact)]) -> bool {
+        self.index.unread_parents(mi, c, chain, &c.plain_sources)
+            || c.own_view
+            || c.methods.iter().any(|m| VIEW_MAKERS.contains(&m.as_str()))
     }
 
     /// Whether a field of this module's own classes may be a stored Many2many whose table the scan
@@ -8268,6 +8279,39 @@ mod tests {
         assert_eq!(od230(None), 1);
         assert_eq!(od230(Some(4)), 0, "a module main sees");
         assert_eq!(od230(Some(3)), 0, "a module whose scope holds a class of the model");
+    }
+
+    #[test]
+    fn a_class_of_base_out_of_scope_is_no_read_parent_of_a_view_model() {
+        let manifest = |depends: &str| format!("{{'version': '18.0.1.0', 'depends': [{depends}]}}");
+        let python = |source: &str| crate::project::SourceFile {
+            path: std::path::PathBuf::new(),
+            rel: String::new(),
+            rank: None,
+            demo: false,
+            facts: analyze(source, Series::parse("18.0")),
+            suppressions: Default::default(),
+            mentions: Default::default(),
+        };
+        let report = "class R(models.Model):\n    _name = 'report.x'\n    _auto = False\n    label = fields.Char()\n";
+        let maker = "class Base(models.AbstractModel):\n    _inherit = 'base'\n\n    def init(self):\n        pass\n";
+        let od226 = |heir: &str| {
+            let mut modules = vec![
+                crate::project::module("base", &manifest("")),
+                crate::project::module("main", &manifest("'base'")),
+                crate::project::module("heir", &manifest("'main'")),
+            ];
+            modules[0]
+                .python
+                .push(python("class B(models.Model):\n    _name = 'base'\n"));
+            modules[1].python.push(python(report));
+            modules[2].python.push(python(&format!("{maker}\n{heir}")));
+            let index = Index::build(&modules, None);
+            let diags = check_module(&index, 1, Series::parse("18.0"));
+            diags.iter().filter(|(_, d)| d.code == "OD226").count()
+        };
+        assert_eq!(od226(""), 1);
+        assert_eq!(od226("class ReportX(Base):\n    _inherit = 'report.x'\n"), 0);
     }
 
     #[test]
