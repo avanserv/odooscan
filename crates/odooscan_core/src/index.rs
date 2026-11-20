@@ -3260,7 +3260,8 @@ impl<'m> Index<'m> {
 
     /// Per unindexed dependency, by name, the checked modules whose scope reaches it while none of
     /// their own `depends` is unindexed. Those get no OD503, yet `partial_scope` silences rules in
-    /// them; one with an OD503 of its own would stay silent after indexing just this dependency.
+    /// them; one with an unindexed `depends` of its own, which OD503 or the notice on that
+    /// dependency's manifest names, would stay silent after indexing just this dependency.
     pub fn deep_gaps(&self) -> BTreeMap<&'m str, Vec<&'m str>> {
         let mut gaps: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
         for (mi, module) in self.modules.iter().enumerate().filter(|(_, m)| m.checked) {

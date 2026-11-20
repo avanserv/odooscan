@@ -429,8 +429,8 @@ pub fn load(
 }
 
 /// The checked manifests of `rejected` that get OD000, by path, and a sorted notice for each other
-/// one: its module is not loaded, so the modules that depend on it get OD503. A manifest the Odoo
-/// of its series may read gets a notice alone, as a Python 2 file does.
+/// one: its module is not indexed. A module depending on it gets OD503 unless the Odoo of that
+/// module's series reads the manifest, as 9.0 does a Python 2 file; then this notice alone names it.
 fn rejected_manifests(rejected: Vec<Rejected>) -> (Vec<Broken>, Vec<String>) {
     let mut broken = vec![];
     let mut notices = vec![];

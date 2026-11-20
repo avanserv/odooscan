@@ -268,8 +268,9 @@ pub fn scan(opts: &ScanOptions) -> Report {
 }
 
 /// One notice per module the index lacks that a checked module reaches only through its
-/// dependencies: OD503 tells each module that names an unindexed one, and this tells the rest. Without `base`
-/// the cross-module rules are off, so nothing is silenced by the gap alone.
+/// dependencies: OD503, or the notice on a manifest the dependent's Odoo reads but odooscan does
+/// not, tells each module that names an unindexed one, and this tells the rest. Without `base` the cross-module
+/// rules are off, so nothing is silenced by the gap alone.
 fn deep_gap_notices(index: &index::Index) -> Vec<String> {
     if !index.has_base {
         return vec![];
