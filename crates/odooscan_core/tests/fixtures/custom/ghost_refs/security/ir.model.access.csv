@@ -5,3 +5,5 @@ access_refs_child,refs child,model_refs_child,base.group_user,1,0,0,0
 access_refs_heir,refs heir,model_refs_heir,base.group_user,1,0,0,0
 access_refs_kid,refs kid,model_refs_kid,base.group_user,1,0,0,0
 access_refs_cub,refs cub,model_refs_cub,base.group_user,1,0,0,0
+access_refs_mid,refs mid,model_refs_mid,base.group_user,1,0,0,0
+access_refs_grand,refs grand,model_refs_grand,base.group_user,1,0,0,0

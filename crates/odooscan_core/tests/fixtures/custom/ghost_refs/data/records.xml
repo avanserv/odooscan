@@ -15,4 +15,22 @@
     <record id="lantern_one" model="ghost.lantern">
         <field name="wick">lit</field>
     </record>
+    <record id="refs_kid_form" model="ir.ui.view">
+        <field name="name">refs.kid.form</field>
+        <field name="model">refs.kid</field>
+        <field name="arch" type="xml">
+            <form>
+                <field name="wick"/>
+            </form>
+        </field>
+    </record>
+    <record id="refs_cub_form" model="ir.ui.view">
+        <field name="name">refs.cub.form</field>
+        <field name="model">refs.cub</field>
+        <field name="arch" type="xml">
+            <form>
+                <field name="wick"/>
+            </form>
+        </field>
+    </record>
 </odoo>
