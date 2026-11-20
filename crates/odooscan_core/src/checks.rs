@@ -1026,8 +1026,8 @@ fn loaded_script<'m>(
         .extend(file.facts.diags.iter().map(|d| (file.path.as_path(), d.clone())));
 }
 
-/// The server refuses to dispatch what a button may not call either, and from 19.0 a method bound to
-/// no records. A model that is not a literal leaves only what `BaseModel` refuses whatever the model.
+/// The server refuses to dispatch what a button may not call. A model that is not a literal leaves
+/// only what `BaseModel` refuses whatever the model.
 fn private_rpc<'m>(
     index: &Index<'m>,
     scope: &Scope,
@@ -1035,16 +1035,13 @@ fn private_rpc<'m>(
     out: &mut Out<'m>,
     file: &'m SourceFile<JsFacts>,
 ) {
+    let partial = index.partial_scope(scope);
     for call in &file.facts.orm_calls {
         let model = call.model.as_ref().map(|m| m.value.as_str());
         let Some(method) = call.method.as_ref() else {
             continue;
         };
-        let reason = if index.refused_call(model, &method.value, scope, series) {
-            "is private"
-        } else if index.unbound_method(model, &method.value, scope, series) {
-            "is a class method, a static method or a partial"
-        } else {
+        let Some(reason) = refusal(index, model, &method.value, scope, series, partial) else {
             continue;
         };
         let message = format!(
@@ -1052,6 +1049,25 @@ fn private_rpc<'m>(
             method.value
         );
         out.push(&file.path, "OD607", method.pos, message);
+    }
+}
+
+/// Why Odoo refuses to call `name` from a button or over RPC, if it does. With a `partial` scope a
+/// module outside the index may bind a known model's `name` to the records as a plain method.
+fn refusal(
+    index: &Index,
+    model: Option<&str>,
+    name: &str,
+    scope: &Scope,
+    series: Option<Series>,
+    partial: bool,
+) -> Option<&'static str> {
+    if index.refused_call(model, name, scope, series) {
+        Some("is private")
+    } else if !(partial && model.is_some()) && index.unbound_method(model, name, scope, series) {
+        Some("is a class method, a static method or a partial")
+    } else {
+        None
     }
 }
 
@@ -2952,7 +2968,8 @@ impl<'m> Ctx<'_, 'm> {
 
     /// A refused method is OD607's, whether the model has it or not.
     fn orm_method(&self, out: &mut Out<'m>, path: &'m Path, call: &OrmCall, model: &str) {
-        let refused = |name: &str| self.index.refused_rpc(Some(model), name, self.scope, self.series);
+        let refused =
+            |name: &str| refusal(self.index, Some(model), name, self.scope, self.series, self.partial).is_some();
         let Some(method) = call
             .method
             .as_ref()
@@ -4580,12 +4597,13 @@ impl<'m> Ctx<'_, 'm> {
         }
     }
 
-    /// A refused name needs no lookup of the model, so it is reported even on a model the scan
-    /// cannot see whole.
+    /// A private name needs no lookup of the model, so it is reported even on a model the scan
+    /// cannot see whole. An unbound one reads the model's classes, short of a hidden parent or a
+    /// dependency outside the index.
     fn button(&self, out: &mut Out<'m>, path: &'m Path, model: &str, method: &Spanned<String>) {
         let name = &method.value;
-        if self.index.refused_call(Some(model), name, self.scope, self.series) {
-            let message = format!("method '{name}' of {model} is private, so Odoo refuses to call it from a button");
+        if let Some(reason) = refusal(self.index, Some(model), name, self.scope, self.series, self.partial) {
+            let message = format!("method '{name}' of {model} {reason}, so Odoo refuses to call it from a button");
             out.push(path, "OD313", method.pos, message);
         } else if let Some(message) = self.method_gap(model, name) {
             out.push(path, "OD312", method.pos, message);

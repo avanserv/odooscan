@@ -1,0 +1,13 @@
+<odoo>
+    <record id="tally_form" model="ir.ui.view">
+        <field name="name">button.tally.form</field>
+        <field name="model">button.tally</field>
+        <field name="arch" type="xml">
+            <form>
+                <button type="object" name="action_tally"/>
+                <button type="object" name="is_transient"/>
+                <button type="object" name="_tally_reset"/>
+            </form>
+        </field>
+    </record>
+</odoo>

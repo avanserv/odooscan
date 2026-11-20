@@ -282,6 +282,9 @@ custom/button_mixin/views/mixin.xml:7:69: OD316 invisible names 'hooked': button
 custom/button_partial/__manifest__.py:4:25: OD503 module 'ghost_enterprise' is not on the addons path
 custom/button_partial/views/partial.xml:8:45: OD313 method '_from_enterprise' of button.visit is private, so Odoo refuses to call it from a button
 custom/button_partial/views/partial.xml:23:36: OD210 'no_partial': button.visit has no field 'no_partial'
+custom/button_partial19/__manifest__.py:4:24: OD503 module 'ghost_enterprise' is not on the addons path
+custom/button_partial19/static/src/tally_calls.js:5:51: OD607 method 'is_transient' is a class method, a static method or a partial, so the server refuses to call it over RPC
+custom/button_partial19/views/tallies.xml:9:45: OD313 method '_tally_reset' of button.tally is private, so Odoo refuses to call it from a button
 custom/button_private/views/desks.xml:7:45: OD313 method 'ensure_one' of button.desk is private, so Odoo refuses to call it from a button
 custom/button_private/views/desks.xml:8:45: OD313 method 'init' of button.desk is private, so Odoo refuses to call it from a button
 custom/button_private/views/desks.xml:9:45: OD313 method 'with_context' of button.desk is private, so Odoo refuses to call it from a button
@@ -1082,6 +1085,10 @@ custom/modern19/static/src/base_calls.js:7:45: OD607 method 'x_tier_scale' is a 
 custom/modern19/static/src/base_calls.js:8:45: OD607 method 'x_tier_label' is a class method, a static method or a partial, so the server refuses to call it over RPC
 custom/modern19/views/cards.xml:8:21: OD326 the kanban-box template is renamed card
 custom/modern19/views/cards.xml:19:13: OD307 t-raw renders unescaped HTML; use t-out and wrap trusted HTML in Markup
+custom/modern19/views/cards.xml:62:49: OD313 method 'x_tier_count' of res.partner is a class method, a static method or a partial, so Odoo refuses to call it from a button
+custom/modern19/views/cards.xml:63:49: OD313 method 'x_tier_scale' of res.partner is a class method, a static method or a partial, so Odoo refuses to call it from a button
+custom/modern19/views/cards.xml:64:49: OD313 method 'x_tier_label' of res.partner is a class method, a static method or a partial, so Odoo refuses to call it from a button
+custom/modern19/views/cards.xml:68:49: OD313 method 'is_transient' of res.partner is a class method, a static method or a partial, so Odoo refuses to call it from a button
 custom/modern20/data/calls.xml:7:7: OD320 res.partner has no method 'pool'
 custom/modern20/models/lamp.py:14:7: OD401 model 'modern.booth' has no ir.access rule with a group, so only the superuser can use it
 custom/modern20/models/lamp.py:21:7: OD401 model 'modern.kiosk' has no ir.access rule with a group, so only the superuser can use it
@@ -1122,6 +1129,7 @@ custom/modern20/views/pages.xml:52:9: OD325 the server no longer knows t-esc and
 custom/modern20/views/pages.xml:62:9: OD325 the server no longer knows t-esc and renders nothing for it; write t-out
 custom/modern20/views/pages.xml:77:13: OD325 the server no longer knows t-esc and renders nothing for it; write t-out
 custom/modern20/views/tariff.xml:7:45: OD313 method 'get_all' of modern.tariff is private, so Odoo refuses to call it from a button
+custom/modern20/views/tariff.xml:8:45: OD313 method 'is_transient' of modern.tariff is a class method, a static method or a partial, so Odoo refuses to call it from a button
 custom/modifiers17/views/jobs.xml:7:47: OD317 invisible reads field 'state', which the view does not show
 custom/modifiers17/views/jobs.xml:54:47: OD317 invisible reads field 'note', which the view does not show
 custom/modifiers17/views/jobs.xml:76:51: OD317 invisible reads field 'phase', which the view does not show

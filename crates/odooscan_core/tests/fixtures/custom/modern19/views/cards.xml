@@ -53,4 +53,21 @@
             </kanban>
         </field>
     </record>
+
+    <record id="partner_tier_form" model="ir.ui.view">
+        <field name="model">res.partner</field>
+        <field name="arch" type="xml">
+            <form>
+                <header>
+                    <button type="object" name="x_tier_count" string="Count"/>
+                    <button type="object" name="x_tier_scale" string="Scale"/>
+                    <button type="object" name="x_tier_label" string="Label"/>
+                    <button type="object" name="x_tier_open" string="Open"/>
+                    <button type="object" name="x_tier_mark" string="Mark"/>
+                    <button type="object" name="x_tier_kind" string="Kind"/>
+                    <button type="object" name="is_transient" string="Transient"/>
+                </header>
+            </form>
+        </field>
+    </record>
 </odoo>

@@ -5,6 +5,7 @@
         <field name="arch" type="xml">
             <form>
                 <button type="object" name="get_all"/>
+                <button type="object" name="is_transient"/>
             </form>
         </field>
     </record>
