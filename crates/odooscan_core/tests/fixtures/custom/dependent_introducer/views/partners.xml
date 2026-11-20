@@ -1,0 +1,17 @@
+<odoo>
+    <record id="partner_lit" model="res.partner">
+        <field name="name">Lit</field>
+        <field name="lamp_glow">Warm</field>
+        <field name="lamp_shade">Linen</field>
+    </record>
+    <record id="partner_view_form" model="ir.ui.view">
+        <field name="name">res.partner.lamp.form</field>
+        <field name="model">res.partner</field>
+        <field name="arch" type="xml">
+            <form>
+                <field name="lamp_glow"/>
+                <field name="lamp_shade"/>
+            </form>
+        </field>
+    </record>
+</odoo>

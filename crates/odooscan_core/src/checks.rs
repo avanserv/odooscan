@@ -2363,6 +2363,30 @@ impl<'m> Ctx<'_, 'm> {
             if self.lost && (self.module.lost_data() || self.may_add_field(model)))
     }
 
+    /// Where `field` of `model`, found only outside the scope in module `named`, comes from.
+    /// `Index::field` names the first module that defines the field, which need not be the one whose
+    /// advice fixes the read (`Index::field_source`), so the clause picks again.
+    fn field_clause(&self, model: &str, field: &str, named: &'m str) -> String {
+        let (module, later) = self
+            .index
+            .field_source(model, field, self.scope, self.mi)
+            .unwrap_or((named, false));
+        source_clause(module, later)
+    }
+
+    /// The message of `e` on `path`, a field outside the scope worded by `field_clause`.
+    fn path_message(&self, e: &PathError<'m>, path: &str) -> String {
+        match e {
+            PathError::Hidden { segment, model, module } => {
+                format!(
+                    "'{path}': field '{segment}' of {model} {}",
+                    self.field_clause(model, segment, module)
+                )
+            }
+            _ => e.message(path),
+        }
+    }
+
     /// A dependency outside the index may load a model the scope does not reach, or define one no
     /// indexed module does. `class` is the class that lists `model` as a parent.
     fn model_ref(&self, out: &mut Out<'m>, path: &'m Path, model: &Spanned<String>, class: Option<&ClassFact>) {
@@ -2391,9 +2415,7 @@ impl<'m> Ctx<'_, 'm> {
     /// `odoo/modules/loading.py:407-409`, 20.0 `:359-361`).
     fn missing_model(&self, model: &str, class: Option<&ClassFact>) -> String {
         match self.index.dependent_introducer(model, self.mi) {
-            Some(m) => {
-                format!("model '{model}' comes from module {m}, which depends on this module and so loads after it")
-            }
+            Some(m) => format!("model '{model}' {}", source_clause(m, true)),
             None => self.undefined_model(model, Some((self.mi, class))),
         }
     }
@@ -4541,7 +4563,7 @@ impl<'m> Ctx<'_, 'm> {
             if let Err(e) = self.index.resolve_path(model, &joined, self.scope)
                 && !self.may_hide(&e, self.ahead_built)
             {
-                out.push(path, "OD304", field.pos, e.message(&joined));
+                out.push(path, "OD304", field.pos, self.path_message(&e, &joined));
             }
         }
     }
@@ -5026,17 +5048,27 @@ impl<'m> Ctx<'_, 'm> {
                     field.pos,
                     format!("{} has no field '{fname}'", record.model.value),
                 ),
-                Err(Some(m)) => out.push(
-                    path,
-                    "OD309",
-                    field.pos,
-                    format!(
-                        "field '{fname}' of {} comes from module {m}, which is not in depends",
-                        record.model.value
-                    ),
-                ),
+                Err(Some(m)) => {
+                    let clause = self.field_clause(&record.model.value, fname, m);
+                    out.push(
+                        path,
+                        "OD309",
+                        field.pos,
+                        format!("field '{fname}' of {} {clause}", record.model.value),
+                    );
+                }
             }
         }
+    }
+}
+
+/// Where a model or field that only module `m` outside the scope defines comes from. One that loads
+/// after this module (`later`, see `Index::follows`) is none `depends` can add: it would make a cycle.
+fn source_clause(m: &str, later: bool) -> String {
+    if later {
+        format!("comes from module {m}, which depends on this module and so loads after it")
+    } else {
+        format!("comes from module {m}, which is not in depends")
     }
 }
 

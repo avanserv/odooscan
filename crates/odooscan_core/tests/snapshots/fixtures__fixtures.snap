@@ -426,9 +426,14 @@ custom/delegate_levels/models/levels.py:32:42: OD207 'middle_rank' is a Integer 
 custom/dependent_introducer/models/lamps.py:5:16: OD201 model 'dependent.lamp' comes from module dependent_introducer_heir, which depends on this module and so loads after it
 custom/dependent_introducer/models/lamps.py:11:16: OD201 no indexed module defines model 'dependent.ghost'
 custom/dependent_introducer/models/lamps.py:20:33: OD201 model 'dependent.socket' comes from module dependent_introducer_heir, which depends on this module and so loads after it
+custom/dependent_introducer/views/partners.xml:4:9: OD309 field 'lamp_glow' of res.partner comes from module dependent_introducer_heir, which depends on this module and so loads after it
+custom/dependent_introducer/views/partners.xml:5:9: OD309 field 'lamp_shade' of res.partner comes from module dependent_introducer_side, which is not in depends
+custom/dependent_introducer/views/partners.xml:12:17: OD304 'lamp_glow': field 'lamp_glow' of res.partner comes from module dependent_introducer_heir, which depends on this module and so loads after it
+custom/dependent_introducer/views/partners.xml:13:17: OD304 'lamp_shade': field 'lamp_shade' of res.partner comes from module dependent_introducer_side, which is not in depends
 custom/dependent_introducer/views/sockets.xml:2:5: OD201 model 'dependent.socket' comes from module dependent_introducer_heir, which depends on this module and so loads after it
-custom/dependent_introducer/views/sockets.xml:5:33: OD201 model 'dependent.socket' comes from module dependent_introducer_heir, which depends on this module and so loads after it
-custom/dependent_introducer/views/sockets.xml:9:9: OD201 model 'dependent.socket' comes from module dependent_introducer_heir, which depends on this module and so loads after it
+custom/dependent_introducer/views/sockets.xml:7:33: OD201 model 'dependent.socket' comes from module dependent_introducer_heir, which depends on this module and so loads after it
+custom/dependent_introducer/views/sockets.xml:11:9: OD201 model 'dependent.socket' comes from module dependent_introducer_heir, which depends on this module and so loads after it
+custom/dependent_introducer/views/sockets.xml:14:17: OD304 'name': field 'name' of dependent.socket comes from module dependent_introducer_heir, which depends on this module and so loads after it
 custom/dependent_introducer_heir/models/heir.py:19:16: OD201 no indexed class introduces model 'dependent.ghost'; module dependent_introducer only extends it
 custom/depends_unused/__manifest__.py:5:9: OD520 module 'base' already comes with 'sale', also in depends
 custom/depends_unused/__manifest__.py:6:9: OD520 module 'mail' already comes with 'sale', also in depends
