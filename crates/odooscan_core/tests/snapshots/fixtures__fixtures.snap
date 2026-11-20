@@ -1105,6 +1105,7 @@ custom/orphan_hooks_ext/models/orphan_hook.py:25:9: OD230 no parent class of orp
 custom/orphan_hooks_ext/models/orphan_hook.py:28:9: OD230 no parent class of orphan.hook defines '_search_hook_spread' and no file names it, so Odoo never runs it
 custom/orphan_hooks_ext/models/orphan_hook.py:31:9: OD230 no parent class of orphan.hook defines 'onchange_hook_legacy' and no file names it, so Odoo never runs it
 custom/orphan_hooks_ext/models/orphan_hook.py:79:24: OD211 no parent class of orphan.hook defines '_compute_hook_super', so this super() call fails
+custom/orphan_hooks_lost/models/lost_hook.py:12:9: OD230 no parent class of lost.hook defines '_compute_hook_unnamed' and no file names it, so Odoo never runs it
 custom/owl_api153/static/src/js/counter.js:2:26: OD613 Owl 2 has no 'hooks', so the script reads undefined; import each hook, such as useState, from @odoo/owl
 custom/owl_api16/static/src/js/legacy_panel.js:9:18: OD613 Owl 2's Component has no trigger(), so this.trigger() in LegacyPanel throws; pass a callback in props, or use the env bus
 custom/owl_api16/static/src/js/panel.js:2:20: OD613 Owl 2 has no 'tags', so the script reads undefined; import xml from @odoo/owl

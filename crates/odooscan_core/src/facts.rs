@@ -544,7 +544,8 @@ impl Signature {
     }
 
     /// Whether a call through an instance that passes `count` arguments by position, and none by
-    /// name, fills every parameter the `def` requires.
+    /// name, fits the `def`: it has room for them, as `*args` or that many positional parameters,
+    /// and every parameter they leave unfilled has a default.
     pub fn takes_positional(&self, count: usize) -> bool {
         let room = self.var_positional.is_some() || self.positional.len() >= count;
         let filled = |p: &Param| p.default.is_some();
