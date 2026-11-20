@@ -684,6 +684,25 @@ fn selection_labels(ftype: &str, call: &ast::ExprCall, args: &[Expr]) -> Vec<Opt
         .collect()
 }
 
+/// The values of a literal `selection_add` given as a one-item tuple or list, which Odoo labels
+/// from the values the field already has.
+fn unlabelled_adds(ftype: &str, call: &ast::ExprCall) -> Vec<String> {
+    if ftype != "Selection" {
+        return vec![];
+    }
+    let items = match keyword(call, "selection_add") {
+        Some(Expr::List(l)) => &l.elts,
+        Some(Expr::Tuple(t)) => &t.elts,
+        _ => return vec![],
+    };
+    let lone = |item: &Expr| match item {
+        Expr::Tuple(t) if t.elts.len() == 1 => str_lit(&t.elts[0]).map(str::to_owned),
+        Expr::List(l) if l.elts.len() == 1 => str_lit(&l.elts[0]).map(str::to_owned),
+        _ => None,
+    };
+    items.iter().filter_map(lone).collect()
+}
+
 /// A literal label, translated or not.
 fn label(expr: &Expr) -> Option<String> {
     match expr {
@@ -3865,6 +3884,7 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
             related: None,
             methods: vec![],
             labels: vec![],
+            unlabelled: vec![],
             domain: vec![],
             domain_string: false,
             options: vec![],
@@ -4137,6 +4157,7 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
             related: kw_str("related").map(|s| self.spanned(s)),
             methods: methods(&options),
             labels: selection_labels(ftype, call, args.unwrap_or_default()),
+            unlabelled: unlabelled_adds(ftype, call),
             domain: keyword(call, "domain").map(|d| self.domain(d)).unwrap_or_default(),
             domain_string: keyword(call, "domain").is_some_and(|d| matches!(d, Expr::StringLiteral(_))),
             options,
@@ -5653,6 +5674,18 @@ mod tests {
         assert_eq!(f.labels, [literal("Ay")]);
         assert_eq!(field("fields.Selection('_list')").labels, []);
         assert_eq!(field("fields.Char('[]')").labels, []);
+    }
+
+    #[test]
+    fn reads_the_selection_add_values_without_a_label() {
+        let f = field("fields.Selection(selection_add=[('a', 'A'), ('b',), ['c']])");
+        assert_eq!(f.unlabelled, ["b", "c"]);
+        assert_eq!(
+            field("fields.Selection(selection_add=(('d',), ('e', 'E')))").unlabelled,
+            ["d"]
+        );
+        assert!(field("fields.Selection([('f',)], string='F')").unlabelled.is_empty());
+        assert!(field("fields.Char(selection_add=[('g',)])").unlabelled.is_empty());
     }
 
     #[test]

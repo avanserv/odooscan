@@ -121,7 +121,7 @@ base class: only Python knows its fields and methods, so a rule whose page says 
 | [OD213](OD213.md) | `required-many2one-set-null` | A required Many2one declares ondelete='set null'. |
 | [OD214](OD214.md) | `many2many-table-clash` | Two Many2many fields of a model to one comodel get the same table. |
 | [OD215](OD215.md) | `many2many-table-too-long` | A Many2many's relation table name is longer than PostgreSQL allows. |
-| [OD216](OD216.md) | `selection-add-without-ondelete` | selection_add leaves a value of a required Selection with ondelete 'set null'. |
+| [OD216](OD216.md) | `selection-add-without-ondelete` | The selection_add of a required Selection is a tuple, adds a new value without a label, or leaves a value with ondelete 'set null'. |
 | [OD217](OD217.md) | `parent-store-without-path` | A model sets _parent_store without an indexed parent_path field. |
 | [OD218](OD218.md) | `delegation-field-not-required` | A field that delegates to a parent model is not required with ondelete cascade or restrict. |
 | [OD219](OD219.md) | `tracking-without-mail-thread` | A field sets tracking on a model that does not inherit mail.thread, which Odoo ignores. |
