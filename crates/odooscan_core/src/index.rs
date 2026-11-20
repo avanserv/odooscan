@@ -3300,7 +3300,10 @@ impl<'m> Index<'m> {
     }
 
     /// Whether a class in scope of `model`, or of a model it inherits or delegates to, may get fields
-    /// from a parent the scan cannot read.
+    /// from a parent the scan cannot read. `unread_delegate` covers a delegate the scan cannot read:
+    /// Odoo adds each field of an `_inherits` parent that the model lacks (18.0
+    /// `odoo/models.py:3559-3587`, 20.0 `odoo/orm/model_classes.py:512-540`), so a gate on whether
+    /// `model` has a field asks both.
     pub fn hidden_field_parents(&self, model: &str, scope: &Scope) -> bool {
         self.unread_bases(model, scope, true, |c| &c.opaque_bases)
     }
