@@ -1663,6 +1663,17 @@ pub(crate) fn in_static(module: &str, parts: &[&str]) -> bool {
 /// Files of a kind.
 type Loaded = FxHashSet<bundles::File>;
 
+/// The modules that load a file of `loaded` the scan cannot read, sorted.
+fn template_losers(modules: &[Module], loaded: &Loaded) -> Vec<usize> {
+    let unread = loaded
+        .iter()
+        .filter(|&&(mi, fi)| modules[mi].templates[fi].facts.unreadable);
+    let mut losers: Vec<usize> = unread.map(|&(mi, _)| mi).collect();
+    losers.sort_unstable();
+    losers.dedup();
+    losers
+}
+
 /// The bundles each loaded script is in, as indices into the sorted bundle names.
 type ScriptBundles = FxHashMap<bundles::File, Vec<usize>>;
 
@@ -2002,6 +2013,8 @@ pub struct Index<'m> {
     js_bundles: ScriptBundles,
     test_scripts: Loaded,
     templates_loaded: Loaded,
+    /// The modules that load a template file the scan cannot read, sorted.
+    template_losers: Vec<usize>,
     always_installed: Vec<bool>,
     /// Each module's place in `load_order`.
     load_rank: Vec<usize>,
@@ -2075,6 +2088,7 @@ impl<'m> Index<'m> {
         let models_with_access = access_models(modules, &model_by_xmlid, default_series);
         let (bundle_names, js_bundles, templates_loaded) = loaded_static(modules, &by_name, default_series);
         let test_scripts = test_scripts(modules, &bundle_names, &js_bundles);
+        let template_losers = template_losers(modules, &templates_loaded);
         let (hook_names, hook_prefixes) = hook_mentions(modules, &test_scripts);
         let imports = imports::Graph::of_modules(modules, default_series);
         let unread_dependent = unread_dependents(modules, &by_name, &imports, default_series);
@@ -2105,6 +2119,7 @@ impl<'m> Index<'m> {
             js_bundles,
             test_scripts,
             templates_loaded,
+            template_losers,
             always_installed: always_installed(modules, &by_name, default_series),
             load_rank: load_rank(modules, &by_name, default_series),
             unread_dependent,
@@ -2459,13 +2474,26 @@ impl<'m> Index<'m> {
         (called, set)
     }
 
-    /// The classes that render the template `name`, or None when another template may hold its
-    /// elements: one that calls it, or a primary child. A class outside the index may render it too.
-    pub fn template_owners(&self, name: &str) -> Option<&[(JsTarget, &'m JsClass)]> {
-        if self.templates_called.contains(name) || self.templates.has_children(name) {
+    /// The classes that render the template `name`, read for a node of it that `module` loads, or
+    /// None when another template may hold its elements: one that calls it, a primary child, or one
+    /// in a file the scan cannot read (`loses_template`). A class outside the index may render it too.
+    pub fn template_owners(&self, name: &str, module: usize) -> Option<&[(JsTarget, &'m JsClass)]> {
+        let shared = self.templates_called.contains(name) || self.templates.has_children(name);
+        if shared || self.loses_template(name, module) {
             return None;
         }
         self.owners.get(name).map(Vec::as_slice)
+    }
+
+    /// Whether a module that loads a template file the scan cannot read may know the template
+    /// `name`: its scope holds `module` or a module defining `name`. With no readable definer, a loser
+    /// in the scope of `module` counts too, as its file may define `name`. The file names nothing the
+    /// scan reads, so a module that cannot know the template is not taken to call, inherit or extend it.
+    fn loses_template(&self, name: &str, module: usize) -> bool {
+        let undefined = self.templates.definers(name).next().is_none();
+        let known = || self.templates.definers(name).chain(std::iter::once(module));
+        let mut losers = self.template_losers.iter();
+        losers.any(|&loser| (undefined && self.sees(module, loser)) || known().any(|m| self.sees(loser, m)))
     }
 
     /// Whether a node of the template `name` sets attributes, which may give an element any prop.
@@ -3296,8 +3324,7 @@ impl<'m> Index<'m> {
     /// Whether a module of `set` loads a template file the scan cannot read. Its `t-inherit` is
     /// unread too, so it may extend any template tree.
     fn loses_templates(&self, set: &[bool]) -> bool {
-        let mut files = self.templates_loaded.iter();
-        files.any(|&(mi, fi)| set[mi] && self.modules[mi].templates[fi].facts.unreadable)
+        self.template_losers.iter().any(|&mi| set[mi])
     }
 
     /// Whether a module of `set` loads a view of one of `models`, a view without one matching None.
@@ -6424,15 +6451,7 @@ mod tests {
 
     #[test]
     fn a_template_spec_locates_in_a_set_that_loads_an_unreadable_template() {
-        let file = |text: &str| SourceFile {
-            path: PathBuf::new(),
-            rel: "static/src/a.xml".to_owned(),
-            rank: None,
-            demo: false,
-            facts: crate::owl::analyze(text),
-            suppressions: Default::default(),
-            mentions: Mentions::default(),
-        };
+        let file = |text: &str| template_file("static/src/a.xml", text);
         let manifest = |name: &str, depends: &str, bundled: bool| {
             let assets = if bundled {
                 format!("'assets': {{'web.assets_backend': ['{name}/static/src/*.xml']}}")
@@ -6475,15 +6494,7 @@ mod tests {
 
     #[test]
     fn lost_templates_reads_the_scope() {
-        let file = |text: &str| SourceFile {
-            path: PathBuf::new(),
-            rel: "static/src/a.xml".to_owned(),
-            rank: None,
-            demo: false,
-            facts: crate::owl::analyze(text),
-            suppressions: Default::default(),
-            mentions: Mentions::default(),
-        };
+        let file = |text: &str| template_file("static/src/a.xml", text);
         let manifest = |name: &str, depends: &str, bundled: bool| {
             let assets = if bundled {
                 format!("'assets': {{'web.assets_backend': ['{name}/static/src/*.xml']}}")
@@ -6768,6 +6779,18 @@ mod tests {
         assert!(!index.js_test(0, 1), "no bundle loads it");
         assert!(index.js_test(0, 2), "only test bundles load it");
         assert!(index.js_test(0, 3), "its path makes it a test");
+    }
+
+    fn template_file(rel: &str, text: &str) -> SourceFile<crate::facts::TemplateFacts> {
+        SourceFile {
+            path: PathBuf::new(),
+            rel: rel.to_owned(),
+            rank: None,
+            demo: false,
+            facts: crate::owl::analyze(text),
+            suppressions: Default::default(),
+            mentions: Mentions::default(),
+        }
     }
 
     fn script(rel: &str, text: &str) -> SourceFile<crate::facts::JsFacts> {
@@ -7262,13 +7285,9 @@ Order.components.Card = null;
 "#,
             ),
         ];
-        sale.templates = vec![SourceFile {
-            path: PathBuf::new(),
-            rel: "static/src/order.xml".to_owned(),
-            rank: None,
-            demo: false,
-            facts: crate::owl::analyze(
-                r#"<templates>
+        sale.templates = vec![template_file(
+            "static/src/order.xml",
+            r#"<templates>
 <t t-name="sale.Order"><Card title="1"/></t>
 <t t-name="sale.Called"/>
 <t t-name="sale.Caller"><t t-call="sale.Called"/></t>
@@ -7278,10 +7297,7 @@ Order.components.Card = null;
     <xpath expr="//Card" position="attributes"><attribute name="body">x</attribute></xpath>
 </t>
 </templates>"#,
-            ),
-            suppressions: Default::default(),
-            mentions: Mentions::default(),
-        }];
+        )];
         [web, sale]
     }
 
@@ -7290,22 +7306,22 @@ Order.components.Card = null;
         let modules = props_modules();
         let index = Index::build(&modules, None);
         let owners: Vec<_> = index
-            .template_owners("sale.Order")
+            .template_owners("sale.Order", 1)
             .unwrap()
             .iter()
             .map(|(_, c)| c.name.as_str())
             .collect();
         assert_eq!(owners, ["Order", "SubOrder", "Lazy"]);
         assert!(
-            index.template_owners("sale.Called").is_none(),
+            index.template_owners("sale.Called", 1).is_none(),
             "a template another calls"
         );
         assert!(
-            index.template_owners("sale.Parent").is_none(),
+            index.template_owners("sale.Parent", 1).is_none(),
             "a template with a primary child"
         );
         assert!(
-            index.template_owners("sale.Caller").is_none(),
+            index.template_owners("sale.Caller", 1).is_none(),
             "a template no class renders"
         );
         assert!(index.template_sets_attributes("sale.Order"));
@@ -7337,6 +7353,39 @@ Order.components.Card = null;
         ] {
             assert_eq!(child(owner, tag), None, "{owner} {tag}");
         }
+    }
+
+    #[test]
+    fn an_unreadable_template_file_hides_the_owners() {
+        let unclosed = r#"<templates><t t-inherit="sale.Order" t-inherit-mode="extension"><xpath expr="//Card">"#;
+        // Whether `name`, read by `sale`, keeps its owners when `loser` loads the unclosed file, the
+        // extra module depending on `depends` and bundling its own files or not.
+        let owned = |name: &str, loser: &str, depends: &str, bundled: bool| {
+            let [web, sale] = props_modules();
+            let assets = if bundled {
+                "'assets': {'b': ['extra/static/src/*']}, "
+            } else {
+                ""
+            };
+            let extra = module(
+                "extra",
+                &format!("{{'version': '18.0.1.0', {assets}'depends': ['{depends}']}}"),
+            );
+            let mut modules = [web, sale, extra];
+            let at = modules.iter().position(|m| m.name == loser).unwrap();
+            let lost = template_file("static/src/lost.xml", unclosed);
+            modules[at].templates.push(lost);
+            let index = Index::build(&modules, None);
+            index.template_owners(name, 1).is_some()
+        };
+        assert!(!owned("sale.Order", "sale", "web", true), "the template's own module");
+        assert!(!owned("sale.Order", "extra", "sale", true), "a module depending on it");
+        assert!(owned("sale.Order", "extra", "sale", false), "an unbundled file");
+        assert!(owned("sale.Order", "extra", "web", true), "outside its dependents");
+        assert!(owned("sale.Order", "web", "web", true), "a dependency of its module");
+        // `web.Card` has no readable definer, so the unread file of a dependency may define it.
+        assert!(!owned("web.Card", "web", "web", true), "a dependency, no definer");
+        assert!(owned("web.Card", "extra", "web", true), "outside the reader's scope");
     }
 
     #[test]

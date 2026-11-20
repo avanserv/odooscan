@@ -3067,7 +3067,7 @@ impl<'m> Ctx<'_, 'm> {
         let Some(name) = t.name.as_ref().or(t.inherit.as_ref().map(|i| &i.value)) else {
             return;
         };
-        let Some(owners) = self.index.template_owners(name).filter(|o| !o.is_empty()) else {
+        let Some(owners) = self.index.template_owners(name, self.mi).filter(|o| !o.is_empty()) else {
             return;
         };
         let sets_attributes = self.index.template_sets_attributes(name);

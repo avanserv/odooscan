@@ -1257,6 +1257,8 @@ custom/partial_sites/views/sites.xml:75:20: OD311 template 'partial_sites.lent_b
 custom/partial_sites/views/sites.xml:87:35: OD311 template 'partial_sites_dependent.block' comes from module partial_sites_dependent, which is not in depends
 custom/project_fork/data/projects.xml:7:9: OD309 field 'allow_timesheets' of project.project comes from module hr_timesheet, which is not in depends
 custom/project_fork/models/task.py:4:7: OD209 module project already defines model 'project.task', and this class replaces it; extend it with _inherit = 'project.task'
+custom/props_read/static/src/board.xml:8:14: OD615 <Card> leaves out 'title', which Card requires, so Owl throws when it renders the tag in debug mode; pass it, or make it optional
+custom/props_read/static/src/board.xml:8:19: OD614 Card declares no prop 'titel', so Owl throws when it renders <Card> in debug mode; fix the name, or declare the prop
 custom/public193/controllers/main.py:12:9: OD717 route parameter 'upload' reaches the content of sudo().create(), which public=True lets anyone download; keep it private and share it with generate_access_token()
 custom/public193/controllers/main.py:16:16: OD717 route parameter 'upload' reaches the content of sudo()._upload_file(), which public=True lets anyone download; keep it private and share it with generate_access_token()
 custom/public_grant/controllers/main.py:8:9: OD717 route parameter 'upload' reaches the content of create(), which public=True lets anyone download; keep it private and share it with generate_access_token()
