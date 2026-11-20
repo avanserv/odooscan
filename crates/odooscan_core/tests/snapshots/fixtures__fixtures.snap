@@ -971,6 +971,7 @@ custom/legacy_require14/static/src/js/kept.js:4:21: OD601 no file of module web 
 custom/legacy_require14/static/src/js/restored.js:4:21: OD601 no file of module web provides '@web/restored_gone'
 custom/legacy_require14/static/src/js/rpc.js:8:22: OD610 html() renders its argument as HTML unescaped; check that no user input reaches it, or use text()
 custom/legacy_require14/static/src/js/rpc.js:9:39: OD603 no indexed module defines model 'x.gone14'
+custom/legacy_require14/static/src/js/uses_plain.js:4:21: OD601 '@legacy_require14/js/plain_target' names legacy_require14/static/src/js/plain_target.js, but this series has no ES modules: register it with odoo.define() and use that name
 custom/legacy_require16/static/src/js/counter.js:8:27: OD601 no file of module web provides '@web/gone'
 custom/legacy_require16/static/src/js/counter.js:9:28: OD601 'legacy_require_lib.tools' comes from module legacy_require_lib, which is not in depends
 custom/legacy_require16/static/src/js/late_tag.js:3:44: OD601 no file of module web provides '@web/late_gone'
@@ -978,6 +979,7 @@ custom/legacy_require16/static/src/js/spaced_tag.js:4:24: OD601 no file of modul
 custom/legacy_require16/static/src/js/uses_plain.js:2:23: OD601 '@legacy_require16/js/plain_target' names legacy_require16/static/src/js/plain_target.js, which this series does not load as an ES module: use the name its odoo.define() registers, 'legacy_require16.plain_target'
 custom/legacy_require17/static/src/js/counter.js:8:42: OD601 no file of module web provides '@web/listed_gone'
 custom/legacy_require17/static/src/js/uses_alias.js:2:18: OD601 'legacy_require17.spaced' does not export 'gone'
+custom/legacy_require17/static/src/js/uses_plain.js:2:23: OD601 '@legacy_require17/js/plain_import' names legacy_require17/static/src/js/plain_import.js, which this series does not load as an ES module: put @odoo-module in its first comment
 custom/legacy_require172/static/src/js/plain_import.js:2:22: OD601 no file of module web provides '@web/plain_import_gone'
 custom/legacy_require172/static/src/js/uses_ignored.js:2:25: OD601 '@legacy_require172/js/ignored' names legacy_require172/static/src/js/ignored.js, which this series does not load as an ES module: drop ignore from its @odoo-module tag
 custom/legacy_rpc16/static/src/js/partner_card.js:5:58: OD604 model 'res.partner' has no method 'action_card_gone'
