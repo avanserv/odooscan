@@ -2037,14 +2037,27 @@ impl<'m> Ctx<'_, 'm> {
     }
 
     /// Whether `model` may hold a field it lacks: this module builds it at runtime, or a parent the
-    /// scan cannot read may give it the field. For a model only modules outside the scope define,
-    /// any class of it, its parents or `base` in any indexed module is judged, since any may be
-    /// installed.
+    /// scan cannot read may give it the field.
     fn may_lack(&self, model: &str) -> bool {
-        self.built_here(model)
-            || self.index.hidden_field_parents(model, self.scope)
-            || self.index.unread_delegate(model, self.scope)
-            || self.index.hidden_outside(model, self.scope)
+        self.built_here(model) || self.parents_may_give(model, self.scope)
+    }
+
+    /// Whether a parent the scan cannot read, of a class in `scope` of `model` or of a model it
+    /// inherits or delegates to, may give `model` a field. For a model only modules outside `scope`
+    /// define, any class of it, its parents or `base` in any indexed module is judged, since any
+    /// may be installed.
+    fn parents_may_give(&self, model: &str, scope: &Scope) -> bool {
+        self.index.hidden_field_parents(model, scope)
+            || self.index.unread_delegate(model, scope)
+            || self.index.hidden_outside(model, scope)
+    }
+
+    /// Whether `e` is a field missing from a model that a parent the scan cannot read, on `scope`,
+    /// may give. Odoo merges every parent's fields and the `_inherits` ones before it resolves any
+    /// path, so this holds at setup too (18.0 `odoo/models.py:3653-3657`, `:3699`,
+    /// `odoo/modules/registry.py:341`, `:345`; 20.0 `odoo/orm/model_classes.py:395-399`, `:458`).
+    fn missing_given(&self, e: &PathError<'_>, scope: &Scope) -> bool {
+        matches!(e, PathError::Missing { model, .. } if self.parents_may_give(model, scope))
     }
 
     /// Whether a data file the scan cannot read may add the field a path lacks. A dependency's file
@@ -2189,10 +2202,15 @@ impl<'m> Ctx<'_, 'm> {
         module != self.module.name && !self.partial && !seen
     }
 
+    /// OD203 on a path that fails on the scope, judged at the model where it fails. A parent the
+    /// scan cannot read explains only a missing field, as `may_hide` does: a field found from a
+    /// module outside `depends` is still absent when this one loads, and one found there that is not
+    /// relational keeps its type whatever the parents add.
     fn path(&self, out: &mut Out<'m>, file: &'m Path, model: &str, path: &Spanned<String>) {
         if let Err(e) = self.index.resolve_path(model, &path.value, self.scope)
             && !self.may_supply(&e)
             && !self.lost_field(&e)
+            && !self.missing_given(&e, self.scope)
         {
             out.push(file, "OD203", path.pos, e.message(&path.value));
         }
@@ -2229,12 +2247,14 @@ impl<'m> Ctx<'_, 'm> {
     /// OD203 on a path Odoo resolves as it sets up the model or as `_auto_init` reads it, when a
     /// failure refuses the install.
     /// The module's own data files load after that, so only an unread file of a module `setup_scope`
-    /// records may add the field, and not to a model the module defines whole.
+    /// records may add the field, and not to a model the module defines whole. A parent the scan
+    /// cannot read is weighed on the setup scope, as `missing_given` says.
     fn setup_path(&self, out: &mut Out<'m>, file: &'m Path, model: &str, path: &Spanned<String>) {
         if let Err(e) = self.index.resolve_path(model, &path.value, self.setup)
             && !self.may_supply(&e)
             && !matches!(&e, PathError::Missing { model, .. }
                 if self.index.lost_scope(self.setup) && self.may_add_field(model))
+            && !self.missing_given(&e, self.setup)
         {
             out.push(file, "OD203", path.pos, e.message(&path.value));
         }
