@@ -1742,8 +1742,10 @@ impl Scope {
 
 pub enum Status<'m> {
     Visible,
-    /// Defined only by modules outside the scope. A model names the module that introduces it,
-    /// anything else its first definer.
+    /// Defined only by modules outside the scope. Names, for a model, the module that introduces it,
+    /// or the first module the index lists for it when no class sets `_name`; for a template, view,
+    /// registry key or field widget, the first module the index lists as defining it; for a method,
+    /// the module of the first class in the model's inheritance chain that defines it.
     Hidden(&'m str),
     Missing,
 }
