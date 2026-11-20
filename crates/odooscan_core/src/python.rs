@@ -1,6 +1,7 @@
 use std::collections::BTreeSet;
 
 use ruff_python_ast::comparable::ComparableArguments;
+use ruff_python_ast::helpers::any_over_expr;
 use ruff_python_ast::token::{Token, TokenKind};
 use ruff_python_ast::visitor::{self, Visitor};
 use ruff_python_ast::{self as ast, BoolOp, CmpOp, Expr, Operator, Stmt, UnaryOp};
@@ -2885,8 +2886,8 @@ const INIT_COLUMN_START: Series = Series { major: 9, minor: 10 };
 /// `_init_column()` no more (20.0, not saas~19.4).
 const INIT_STORAGE_START: Series = Series { major: 20, minor: 0 };
 
-/// What a class body says that waits until the whole body is read: the name of its model and the
-/// fields its term attributes name.
+/// What a class body says that only its last binding of an attribute decides, held until the
+/// whole body is read.
 #[derive(Default)]
 struct Naming {
     /// The class assigns `_name`, a literal or not.
@@ -2906,9 +2907,13 @@ struct Naming {
     /// of the registry.
     hidden_naming: bool,
     inherit: InheritShape,
-    /// `_columns` hides a key. Waits here for the name: `_inherit` assigns `inherit_unknown`, in any
-    /// order in the class, and the name reads that flag for what `_inherit` lists.
+    /// The last `_columns` hides a key. Waits here for the name: `_inherit` assigns `inherit_unknown`,
+    /// in any order in the class, and the name reads that flag for what `_inherit` lists.
     columns_hidden: bool,
+    /// Where the last `_columns` spells each key, so that a later one drops the fields it gave.
+    columns: Vec<Pos>,
+    /// The literal pairs of the last `_inherits` dict, which `settle` adds to the delegate fields'.
+    inherits: Vec<(String, String)>,
     /// The fields each of `_order`, `_fold_name`, `_parent_name`, `_rec_name` and `_active_name`
     /// names, at the slot of its first assignment with the value of its last, which Python binds.
     terms: Vec<(String, Vec<Spanned<String>>)>,
@@ -2933,6 +2938,18 @@ impl Naming {
         match self.terms.iter_mut().find(|(n, _)| n == name) {
             Some((_, held)) => *held = fields,
             None => self.terms.push((name.to_owned(), fields)),
+        }
+    }
+
+    /// Gives `fact` what the last binding of each attribute held once the class body is read.
+    fn settle(&mut self, fact: &mut ClassFact) {
+        for (name, fields) in std::mem::take(&mut self.terms) {
+            term_fields(fact, &name).extend(fields);
+        }
+        for pair in std::mem::take(&mut self.inherits) {
+            if !fact.inherits.contains(&pair) {
+                fact.inherits.push(pair);
+            }
         }
     }
 }
@@ -3603,9 +3620,7 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
                 conditional_methods(stmt, &mut fact);
             }
         }
-        for (name, fields) in std::mem::take(&mut naming.terms) {
-            term_fields(&mut fact, &name).extend(fields);
-        }
+        naming.settle(&mut fact);
         fact.unassigned_computes = self.unassigned_computes(class, &fact);
         self.named_model(fact, naming, may_reach_orm(class))
     }
@@ -3694,6 +3709,8 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
 
     /// `fact` with the model what a class says about it gives, when that gives one.
     fn named_model(&mut self, mut fact: ClassFact, mut naming: Naming, may_reach_orm: bool) -> Option<ClassFact> {
+        // Read here rather than at `_name`, as only the last binding names the model.
+        self.facts.dynamic_models |= naming.named && naming.name.is_none();
         // `registered` counts a non-literal `_register` in, which is safe for a class that has a
         // name but would give one to a class Odoo may leave out of the registry.
         naming.hidden_naming |= fact
@@ -3839,7 +3856,6 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
                     naming.named = true;
                     naming.name = str_lit(value).map(str::to_owned);
                     naming.built_start = built_name_start(value);
-                    self.facts.dynamic_models |= naming.name.is_none();
                 }
                 "_inherit" => naming.inherit = self.inherit(value, fact, naming.name.as_deref()),
                 "_order" | "_fold_name" | "_rec_name" | "_active_name" => {
@@ -3854,7 +3870,7 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
                 "_rec_names_search" => {
                     fact.rec_names_search = strings(value).into_iter().map(|s| self.spanned(s)).collect();
                 }
-                "_inherits" => self.inherits(value, fact),
+                "_inherits" => self.inherits(value, fact, naming),
                 "_columns" if self.series.is_none_or(|s| s < COLUMNS_END) => self.columns(value, fact, naming),
                 _ => self.attr_or_field(target, value, fact),
             }
@@ -3862,15 +3878,23 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
     }
 
     /// The string keys of `_columns`, each a field of unread type: the entry may be any column,
-    /// computed or relational, so only its name is certain.
+    /// computed or relational, so only its name is certain. They replace those of an earlier
+    /// `_columns`, as the class keeps the last binding.
     fn columns(&self, value: &Expr, fact: &mut ClassFact, naming: &mut Naming) {
+        let earlier = std::mem::take(&mut naming.columns);
+        fact.fields.retain(|f| !earlier.contains(&f.pos));
         let Expr::Dict(dict) = value else {
             naming.columns_hidden = true;
             return;
         };
+        naming.columns_hidden = false;
         for item in &dict.items {
             match item.key.as_ref().and_then(Expr::as_string_literal_expr) {
-                Some(key) => fact.fields.push(self.column(key)),
+                Some(key) => {
+                    let column = self.column(key);
+                    naming.columns.push(column.pos);
+                    fact.fields.push(column);
+                }
                 None => naming.columns_hidden = true,
             }
         }
@@ -3961,13 +3985,21 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
         self.facts.attr_calls.extend(called.map(str::to_owned));
     }
 
-    /// The definition of each `(name, definition, message)` entry of a literal `_sql_constraints`.
+    /// The definition of each `(name, definition, message)` entry of a literal `_sql_constraints`,
+    /// in place of those of an earlier one, as the class keeps the last binding. A value the scan
+    /// does not read, or one that reads the earlier list, may keep its entries, so they stay.
     fn sql_constraints(&self, value: &Expr, fact: &mut ClassFact) {
         let entries = match value {
             Expr::List(l) => &l.elts,
             Expr::Tuple(t) => &t.elts,
             _ => return,
         };
+        if !any_over_expr(value, |e| {
+            e.as_name_expr().is_some_and(|n| n.id.as_str() == "_sql_constraints")
+        }) {
+            fact.definitions
+                .retain(|d| d.source != DefinitionSource::SqlConstraints);
+        }
         for entry in entries {
             if let Expr::Tuple(t) = entry
                 && let Some(definition) = t.elts.get(1)
@@ -4064,17 +4096,16 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
         InheritShape::of(value)
     }
 
-    /// A `delegate=True` field may come before the dict, which adds to the pairs it gave.
-    fn inherits(&mut self, value: &Expr, fact: &mut ClassFact) {
+    /// The last `_inherits` replaces an earlier one, while the `delegate=True` fields add to its
+    /// pairs at setup, wherever they stand: `Naming::settle` joins the two.
+    fn inherits(&mut self, value: &Expr, fact: &mut ClassFact, naming: &mut Naming) {
         let Expr::Dict(d) = value else {
             fact.inherits_unknown = true;
+            fact.delegations.clear();
+            naming.inherits.clear();
             return;
         };
-        for pair in str_pairs(d) {
-            if !fact.inherits.contains(&pair) {
-                fact.inherits.push(pair);
-            }
-        }
+        naming.inherits = str_pairs(d);
         let entries: Vec<_> = d
             .items
             .iter()
@@ -7469,6 +7500,27 @@ class U(HttpCase):
     }
 
     #[test]
+    fn keeps_the_last_inherits_beside_the_delegate_fields() {
+        let read = |body: &str| {
+            let facts = analyze(&format!("class X(models.Model):\n    _name = 'x'\n{body}"), None);
+            let class = facts.classes.into_iter().next().unwrap();
+            let delegations: Vec<_> = class.delegations.into_iter().map(|(parent, _)| parent).collect();
+            (class.inherits, delegations, class.inherits_unknown)
+        };
+        let pair = |parent: &str, field: &str| (parent.to_owned(), field.to_owned());
+        let twice = "    _inherits = {'a': 'a_id'}\n    _inherits = {'b': 'b_id'}\n";
+        assert_eq!(read(twice), (vec![pair("b", "b_id")], vec!["b".to_owned()], false));
+        let then_name = "    _inherits = {'a': 'a_id'}\n    _inherits = PARENTS\n";
+        assert_eq!(read(then_name), (vec![], vec![], true));
+        let then_dict = "    _inherits = PARENTS\n    _inherits = {'a': 'a_id'}\n";
+        assert_eq!(read(then_dict), (vec![pair("a", "a_id")], vec!["a".to_owned()], false));
+        let delegate = format!("    c_id = fields.Many2one('c', delegate=True)\n{twice}");
+        assert_eq!(read(&delegate).0, [pair("c", "c_id"), pair("b", "b_id")]);
+        let delegate_then_name = format!("    c_id = fields.Many2one('c', delegate=True)\n{then_name}");
+        assert_eq!(read(&delegate_then_name), (vec![pair("c", "c_id")], vec![], true));
+    }
+
+    #[test]
     fn marks_a_many2one_that_may_delegate_to_an_unread_parent() {
         let unknown = |field: &str| {
             let facts = analyze(
@@ -7585,6 +7637,27 @@ class U(HttpCase):
         for columns in ["{}", "{'a': MADE}", "{'a' 'b': MADE}"] {
             assert_eq!(unknown(columns, "9.0"), [false, false], "{columns}");
         }
+    }
+
+    #[test]
+    fn keeps_the_keys_of_the_last_columns() {
+        let read = |body: &str| {
+            let class = analyze(
+                &format!("class X(orm.Model):\n    _inherit = 'x'\n{body}"),
+                Series::parse("9.0"),
+            )
+            .classes
+            .remove(0);
+            let names: Vec<_> = class.fields.into_iter().map(|f| f.name).collect();
+            (names, class.inherit_unknown)
+        };
+        let twice =
+            "    _columns = {'a': fields.char('A')}\n    b = fields.Char()\n    _columns = {'c': fields.char('C')}\n";
+        assert_eq!(read(twice), (vec!["b".to_owned(), "c".to_owned()], false));
+        let hidden_first = "    _columns = COLUMNS\n    _columns = {'a': fields.char('A')}\n";
+        assert_eq!(read(hidden_first), (vec!["a".to_owned()], false));
+        let hidden_last = "    _columns = {'a': fields.char('A')}\n    _columns = COLUMNS\n";
+        assert_eq!(read(hidden_last), (vec![], true));
     }
 
     #[test]
@@ -7729,6 +7802,10 @@ class U(HttpCase):
         for (body, models) in cases {
             assert_eq!(unread(body), (models, false, vec![]), "{body}");
         }
+        let settled = "class X(models.Model):\n    _name = MODEL\n    _name = 'a'";
+        assert_eq!(unread(settled), (vec![new.clone()], false, vec![]));
+        let built = "class X(models.Model):\n    _name = 'a'\n    _name = MODEL";
+        assert_eq!(unread(built), (vec![], true, vec![String::new()]));
         for body in [
             "class X(models.Model):\n    x, _name = y = 'a', 'b'",
             "class X(models.Model): x = 1; _name, _d = 'a', 'b'",
@@ -8090,6 +8167,9 @@ class U(HttpCase):
         }
         assert_eq!(starts("    _name = MODEL\n    _register = REGISTER"), [""]);
         assert_eq!(starts("    _name = MODEL\n    _name = 'a'"), [""; 0]);
+        let dynamic = |body: &str| analyze(&format!("class X(models.Model):\n{body}\n"), None).dynamic_models;
+        assert!(!dynamic("    _name = MODEL\n    _name = 'a'"));
+        assert!(dynamic("    _name = 'a'\n    _name = MODEL"));
         let bare = analyze("class Helper:\n    _name = None\n", None);
         assert!(bare.built_model_starts.is_empty());
         assert!(bare.dynamic_models);
@@ -8722,6 +8802,27 @@ env.cr.execute('SELECT a.module FROM t a')
         let unread = "class X(models.Model):\n    _name = 'x'\n    _sql_constraints = [\n        \
                       (KEY, 'check(x > %s)' % N, ''),\n        ('k', 'check(x > %s)', ''),\n    ]\n";
         assert_eq!(found(&analyze(unread, None)), ["SqlConstraints k 5 -"]);
+    }
+
+    #[test]
+    fn keeps_the_definitions_of_the_last_sql_constraints() {
+        let found = |body: &str| -> Vec<String> {
+            let src = format!("class X(models.Model):\n    _name = 'x'\n{body}");
+            let definitions = analyze(&src, None).classes.remove(0).definitions;
+            let key = |d: &Definition| format!("{:?} {}", d.source, d.key.as_deref().unwrap_or("?"));
+            definitions.iter().map(key).collect()
+        };
+        let twice = "    _sql_constraints = [('a_uniq', 'unique(a)', '')]\n    \
+                     _sql_constraints = [('b_uniq', 'unique(b)', '')]\n";
+        assert_eq!(found(twice), ["SqlConstraints b_uniq"]);
+        let then_name = "    _sql_constraints = [('a_uniq', 'unique(a)', '')]\n    \
+                         _c_index = models.Index('(c)')\n    _sql_constraints = CONSTRAINTS\n";
+        assert_eq!(found(then_name), ["SqlConstraints a_uniq", "TableObject _c_index"]);
+        let first = "    _sql_constraints = [('a_uniq', 'unique(a)', '')]\n";
+        let added = format!("{first}    _sql_constraints = _sql_constraints + [('b_uniq', 'unique(b)', '')]\n");
+        assert_eq!(found(&added), ["SqlConstraints a_uniq"]);
+        let starred = format!("{first}    _sql_constraints = [*_sql_constraints, ('b_uniq', 'unique(b)', '')]\n");
+        assert_eq!(found(&starred), ["SqlConstraints a_uniq", "SqlConstraints b_uniq"]);
     }
 
     #[test]

@@ -29,3 +29,12 @@ class Legacy9ColumnsUser(models.Model):
     code = fields.Char(related="holder_id.code")
     parent_ghost = fields.Char(related="holder_id.parent_id.ghost")
     ghost = fields.Char(related="holder_id.ghost")
+
+
+# The class keeps the last _columns, so sequence is no field of it.
+class Legacy9ColumnsTwice(orm.Model):
+    _name = "legacy9.columns.twice"
+    _order = "sequence"
+
+    _columns = {"sequence": columns.integer("Sequence")}
+    _columns = {"code": columns.char("Code")}

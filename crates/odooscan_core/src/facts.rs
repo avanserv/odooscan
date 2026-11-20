@@ -207,13 +207,14 @@ pub struct ClassFact {
     /// Read from the tokens of a file that does not parse, so the model and `table` are known and
     /// nothing else.
     pub unread: bool,
-    /// `_inherits` and `delegate=True` fields: parent model to delegating field.
+    /// The last `_inherits` of the class body and its `delegate=True` fields: parent model to
+    /// delegating field.
     pub inherits: Vec<(String, String)>,
-    /// The `_inherits` entries whose key and field are literals: parent model to delegating field,
-    /// at the entry.
+    /// The entries of the last `_inherits` whose key and field are literals: parent model to
+    /// delegating field, at the entry.
     pub delegations: Vec<(String, Spanned<String>)>,
-    /// `_inherits` is not a dict, or has an entry that is not two string literals, so which fields
-    /// it names is unknown.
+    /// The last `_inherits` is not a dict, or has an entry that is not two string literals, so which
+    /// fields it names is unknown.
     pub inherits_unknown: bool,
     /// A Many2one may delegate to a parent `inherits` lacks: its comodel or its `delegate` is not a
     /// literal. Apart from `inherits_unknown`, which says the `_inherits` entries are unknown, as

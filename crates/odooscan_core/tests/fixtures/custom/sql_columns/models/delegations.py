@@ -387,3 +387,17 @@ class ParcelChute(models.Model):
     def x_chute_columns(self):
         self.env.cr.execute("SELECT c.x_chute_load FROM parcel_chute c")
         return self.env.cr.fetchall()
+
+
+# The class keeps the last _inherits, so parcel.box lends parcel.terminal no field.
+class ParcelTerminal(models.Model):
+    _name = "parcel.terminal"
+    _description = "Parcel terminal"
+    _inherits = {"parcel.box": "x_old_terminal_id"}
+    _inherits = {"parcel.depot": "x_terminal_depot_id"}
+
+    def x_terminal_columns(self):
+        self.env.cr.execute(
+            "SELECT t.x_old_terminal_id, t.weight_uom_id, t.x_terminal_depot_id, t.name FROM parcel_terminal t"
+        )
+        return self.env.cr.fetchall()
