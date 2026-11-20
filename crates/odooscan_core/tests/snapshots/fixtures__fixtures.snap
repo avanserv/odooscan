@@ -634,27 +634,25 @@ custom/field_classes/models/lens.py:51:30: OD210 'opaque': x.lens has no field '
 custom/field_classes/models/lens_summary.py:11:5: OD225 x.lens.summary.note is stored, but the view x_lens_summary selects no column note for it; select one AS note in init()
 custom/field_classes/models/lens_tables.py:10:5: OD226 _auto = False leaves x.lens.partner without a table, and nothing creates the view res_partner_x_lens_rel; create it in init(), or drop _auto = False
 custom/field_classes/models/lens_tables.py:21:5: OD226 _auto = False leaves x.lens.currency without a table, and nothing creates the view x_lens_currency_rel; create it in init(), or drop _auto = False
-custom/field_classes/models/seal.py:8:13: OD205 'photo' is a Image field elsewhere and is redefined here as Binary
 custom/field_classes/models/seal.py:9:12: OD205 'kind' is a Reference field elsewhere and is redefined here as Selection
 custom/field_classes/models/seal.py:10:11: OD205 'ref' is a Many2oneReference field elsewhere and is redefined here as Integer
 custom/field_classes/models/seal.py:11:12: OD205 'back' is a Selection field elsewhere and is redefined here as Reference
-custom/field_classes/models/seal.py:23:13: OD205 'photo' is a Binary field elsewhere and is redefined here as Image
+custom/field_classes/models/seal.py:13:12: OD205 'code' is a Integer field elsewhere and is redefined here as Char
 custom/field_classes/models/seal.py:24:12: OD205 'kind' is a Selection field elsewhere and is redefined here as Reference
 custom/field_classes/models/seal.py:25:11: OD205 'ref' is a Integer field elsewhere and is redefined here as Many2oneReference
 custom/field_classes/models/seal.py:26:12: OD205 'back' is a Reference field elsewhere and is redefined here as Selection
+custom/field_classes/models/seal.py:27:12: OD205 'code' is a Char field elsewhere and is redefined here as Integer
 custom/field_classes/views/lens_views.xml:7:45: OD312 x.lens has no method 'embedding'
 custom/field_classes14/data/badges.xml:2:5: OD324 x.badge.old.label is required and has no default, so creating this record fails if the column is NOT NULL; give the field a value
 custom/field_classes14/data/seals.xml:2:5: OD324 x.seal.old.kind is required and has no default, so creating this record fails if the column is NOT NULL; give the field a value
 custom/field_classes14/data/seals.xml:2:5: OD324 x.seal.old.ref is required and has no default, so creating this record fails if the column is NOT NULL; give the field a value
 custom/field_classes14/data/seals.xml:4:28: OD322 x.seal.old.kind has no value 'res.partner,1'
-custom/field_classes14/models/seal.py:8:13: OD205 'photo' is a Binary field elsewhere and is redefined here as Image
 custom/field_classes14/models/seal.py:9:12: OD205 'kind' is a Selection field elsewhere and is redefined here as Reference
 custom/field_classes14/models/seal.py:10:11: OD205 'ref' is a Integer field elsewhere and is redefined here as Many2oneReference
 custom/field_classes14/models/seal.py:11:12: OD205 'back' is a Reference field elsewhere and is redefined here as Selection
-custom/field_classes14/models/seal.py:24:13: OD205 'photo' is a Image field elsewhere and is redefined here as Binary
-custom/field_classes14/models/seal.py:25:12: OD205 'kind' is a Reference field elsewhere and is redefined here as Selection
-custom/field_classes14/models/seal.py:26:11: OD205 'ref' is a Many2oneReference field elsewhere and is redefined here as Integer
-custom/field_classes14/models/seal.py:27:12: OD205 'back' is a Selection field elsewhere and is redefined here as Reference
+custom/field_classes14/models/seal.py:24:12: OD205 'kind' is a Reference field elsewhere and is redefined here as Selection
+custom/field_classes14/models/seal.py:25:11: OD205 'ref' is a Many2oneReference field elsewhere and is redefined here as Integer
+custom/field_classes14/models/seal.py:26:12: OD205 'back' is a Selection field elsewhere and is redefined here as Reference
 custom/field_classes_migrated/models/handler.py:13:30: OD210 'handler': x.migrated.handler has no field 'handler'
 custom/field_classes_plain/models/handler.py:14:23: OD210 'handler': x.plain.handler has no field 'handler'
 custom/field_classes_plain/models/handler.py:15:30: OD210 'grid': x.plain.handler has no field 'grid'

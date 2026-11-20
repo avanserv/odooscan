@@ -2101,7 +2101,7 @@ fn ids_repeated_across_files<'m>(module: &'m Module, series: Option<Series>, out
     }
 }
 
-/// An Image field is a Binary one to Odoo, which compares field types by that name.
+/// The field class that sets the `type` attribute Odoo compares, which Image inherits from Binary.
 fn odoo_type(ftype: &str) -> &str {
     if ftype == "Image" { "Binary" } else { ftype }
 }
@@ -3549,17 +3549,15 @@ impl<'m> Ctx<'_, 'm> {
     }
 
     /// A type another class of the same model in scope gives the field, when it differs from this
-    /// one's. A new model, or one delegating through `_inherits`, may give a parent's field any type.
+    /// one's as Odoo names types. A new model, or one delegating through `_inherits`, may give a
+    /// parent's field any type.
     fn other_type(&self, class: &ClassFact, field: &FieldFact) -> Option<&'m str> {
-        if field.ftype == UNREAD_TYPE {
-            return None;
-        }
         self.index
             .field_defs(&class.model, &field.name, Some(self.scope))
             .into_iter()
             .filter(|(_, c, _)| !std::ptr::eq(*c, class) && c.model == class.model)
             .map(|(_, _, f)| f.ftype.as_str())
-            .find(|t| *t != field.ftype && *t != UNREAD_TYPE)
+            .find(|t| types_differ(t, &field.ftype))
     }
 
     fn data(&self, out: &mut Out<'m>) {
@@ -8029,8 +8027,8 @@ mod tests {
         fetches_own_view, field_name, has_last_update, hoot_adds, keeps_set, labels_at_end, labels_before_ondelete,
         lacks_domain, lone_add_applied, magic_era, may_label, no_access_message, page_miss, parent_path_children,
         patch_form, public_write_message, qweb_asset_glob, reads_model_access, reads_requires, shadowed_member,
-        static_only, stores_parent_path, tuple_add_refused, tuple_checked, tuple_listed, unknown_dependency,
-        unmatched_asset, warns_on_labels,
+        static_only, stores_parent_path, tuple_add_refused, tuple_checked, tuple_listed, types_differ,
+        unknown_dependency, unmatched_asset, warns_on_labels,
     };
     use crate::facts::{AccessRow, DefinitionSource, JsName, OptionValue, Perms, Pos, Spanned, UNREAD_TYPE};
     use crate::index::Index;
@@ -8071,6 +8069,17 @@ mod tests {
         assert_eq!(keeps_set(None, char, ("Integer", &["Integer".to_owned()])), Some(false));
         let unread = (UNREAD_TYPE, unread.as_slice());
         assert_eq!(keeps_set(None, unread, unread), Some(true));
+    }
+
+    #[test]
+    fn field_types_differ_by_the_type_odoo_gives_each_class() {
+        assert!(!types_differ("Binary", "Image"));
+        assert!(!types_differ("Image", "Binary"));
+        assert!(types_differ("Char", "Integer"));
+        assert!(types_differ("Selection", "Reference"));
+        assert!(types_differ("Integer", "Many2oneReference"));
+        assert!(!types_differ(UNREAD_TYPE, "Char"));
+        assert!(!types_differ("Char", UNREAD_TYPE));
     }
 
     #[test]
