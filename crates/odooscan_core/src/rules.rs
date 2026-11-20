@@ -42,12 +42,11 @@ impl Kind {
     }
 }
 
-/// Index rules whose finding means the modules in scope lack the model, field, column, method, id,
-/// template, element, selection value, component prop, widget, client action, service, tour or
-/// module the code names, or no longer take or call a method it overrides or hooks: on a port, what
-/// the target core dropped, renamed or reshaped. An inherited or related field whose type the module
-/// no longer matches, a required field a data record leaves unset, a required prop a template leaves
-/// out, or a script its page lacks, counts too.
+/// Index rules whose finding means the scope lacks what the code names (on a port, what the target
+/// core dropped, renamed or reshaped): a model, field, column, method, id, template, element,
+/// selection value, component prop, widget, client action, service, tour, module, Python package or
+/// file, or imported name; an override or hook that no longer fits its parent; an inherited or
+/// related field of another type; a required field or prop left unset; or a script a page lacks.
 const UPSTREAM: &[&str] = &[
     "OD201", "OD202", "OD203", "OD204", "OD205", "OD206", "OD207", "OD210", "OD211", "OD212", "OD224", "OD227",
     "OD229", "OD230", "OD301", "OD302", "OD304", "OD309", "OD310", "OD311", "OD312", "OD314", "OD316", "OD320",
