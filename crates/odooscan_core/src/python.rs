@@ -1594,7 +1594,8 @@ impl UnreadFile<'_, '_, '_> {
     }
 
     /// Opens a class, which takes the kind of its header as a parsed class does. A body on the
-    /// header line opens no block, and the reader does not see what it binds.
+    /// header line opens no block, so each of its statements is read here, through `member`, as a
+    /// statement of the class body.
     fn class(&mut self, tokens: &[Token]) {
         let [_, name, ..] = tokens else {
             return;
@@ -1604,10 +1605,7 @@ impl UnreadFile<'_, '_, '_> {
         if let Some(kind) = header.kind {
             self.visitor.kinds.insert(class_name.clone(), kind);
         }
-        let opens = opens_block(tokens);
-        if opens {
-            self.open.push(self.classes.len());
-        }
+        let at = self.classes.len();
         self.classes.push(UnreadClass {
             fact: ClassFact {
                 kind: header.kind.unwrap_or(ModelKind::Model),
@@ -1615,13 +1613,19 @@ impl UnreadFile<'_, '_, '_> {
             },
             naming: Naming {
                 own_body_names: header.own_body_names,
-                hidden_naming: !opens,
                 ..Naming::default()
             },
             depth: self.depth,
             inherit_start: None,
             may_reach_orm: header.may_reach_orm,
         });
+        if opens_block(tokens) {
+            self.open.push(at);
+        } else {
+            for start in inline_starts(tokens) {
+                self.member(at, &tokens[start..]);
+            }
+        }
     }
 
     /// What the header of a `class` statement, from its first token, says once it parses alone. A
@@ -1667,8 +1671,8 @@ impl UnreadFile<'_, '_, '_> {
     }
 
     /// Reads a statement of the innermost class whose block holds it, unless one of its methods
-    /// does. Odoo reads only what the class body binds at its end, so a naming binding the chain
-    /// reader does not take, or that a deeper block makes, hides the name.
+    /// does. Odoo reads only what the class body binds at its end, so a naming binding that a
+    /// deeper block makes hides the name.
     fn attribute(&mut self, tokens: &[Token]) {
         let Some(at) = self
             .open
@@ -1683,28 +1687,55 @@ impl UnreadFile<'_, '_, '_> {
         if self.defs.iter().any(|&def| def > depth && def < self.depth) {
             return;
         }
-        let read = self.depth == depth + 1 && self.chain(at, tokens);
+        if self.depth == depth + 1 {
+            self.member(at, tokens);
+        } else if binds_naming_statement(self.src, tokens) {
+            self.classes[at].naming.hidden_naming = true;
+        }
+    }
+
+    /// Reads a statement the body of the class at `at` holds directly. A compound one binds only in
+    /// the body it holds, which the chain reader does not take, so a naming binding there hides the
+    /// name.
+    fn member(&mut self, at: usize, tokens: &[Token]) {
+        let read = !starts_compound(tokens[0].kind()) && self.chain(at, tokens);
         if !read && binds_naming_statement(self.src, tokens) {
             self.classes[at].naming.hidden_naming = true;
         }
     }
 
-    /// Reads a chain of assignments to names, `a = b = value`, that binds a `NAMING_ATTRS` name of
-    /// the class at `at`, and whether it did.
+    /// Reads an assignment, `a = b = value` or `a: T = value`, of the class at `at`, as the parsed
+    /// path reads its targets: a `NAMING_ATTRS` name alone, or annotated as the only target, takes the
+    /// value, and a target of another form hides the name when it binds a `NAMING_BINDINGS` name
+    /// whole. Whether the statement assigns at all.
     fn chain(&mut self, at: usize, tokens: &[Token]) -> bool {
-        let pairs = tokens.as_chunks::<2>().0.iter().take_while(|pair| is_target(pair));
-        let names = |pair: &&[Token; 2]| NAMING_ATTRS.contains(&&self.src[pair[0].range()]);
-        let targets: Vec<_> = pairs.clone().filter(names).map(|pair| pair[0].range()).collect();
-        let (Some(value), false) = (tokens.get(pairs.count() * 2), targets.is_empty()) else {
+        let line: Vec<&Token> = tokens
+            .iter()
+            .filter(|t| !t.kind().is_trivia())
+            .take_while(|t| !ends_statement(t.kind()))
+            .collect();
+        let parts = chain_parts(&line);
+        let Some((value, targets @ [_, ..])) = parts.split_last() else {
             return false;
         };
         let Some(end) = tokens.iter().find(|t| ends_statement(t.kind())) else {
             return false;
         };
-        let parsed = parse_expression_range(self.src, TextRange::new(value.start(), end.start()));
-        let unparsed = hidden_value(value.range());
-        let value = parsed.as_ref().map_or(&unparsed, |parsed| parsed.expr());
+        let mut names = vec![];
         for target in targets {
+            match target_name(target, targets.len() == 1) {
+                Some(name) => names.extend(NAMING_ATTRS.contains(&&self.src[name.range()]).then_some(name.range())),
+                None => self.classes[at].naming.hidden_naming |= target_binds_naming(self.src, target),
+            }
+        }
+        if names.is_empty() {
+            return true;
+        }
+        let range = TextRange::new(value.first().map_or(end.start(), |t| t.start()), end.start());
+        let parsed = parse_expression_range(self.src, range);
+        let unparsed = hidden_value(range);
+        let value = parsed.as_ref().map_or(&unparsed, |parsed| parsed.expr());
+        for target in names {
             if let Ok(target) = parse_expression_range(self.src, target) {
                 self.assignment(at, target.expr(), value);
             }
@@ -1760,9 +1791,52 @@ fn hidden_value(range: TextRange) -> Expr {
     })
 }
 
-/// Whether a pair of tokens opens an assignment: a name and `=`.
-fn is_target([name, equal]: &[Token; 2]) -> bool {
-    name.kind() == TokenKind::Identifier && equal.kind() == TokenKind::Equal
+/// The parts of a simple statement split at each `=` outside brackets: its targets, then its
+/// value. A `lambda` ends the split, as its defaults spell `=` too.
+fn chain_parts<'l, 't>(line: &'l [&'t Token]) -> Vec<&'l [&'t Token]> {
+    let mut parts = vec![];
+    let mut start = 0;
+    let mut nesting = 0isize;
+    for (at, token) in line.iter().enumerate() {
+        match token.kind() {
+            TokenKind::Lambda => break,
+            TokenKind::Equal if nesting == 0 => {
+                parts.push(&line[start..at]);
+                start = at + 1;
+            }
+            kind => nesting += bracket_step(kind),
+        }
+    }
+    parts.push(&line[start..]);
+    parts
+}
+
+/// The name a target of an assignment binds as the parsed path reads it: one name, or one name
+/// with an annotation when it is the only target.
+fn target_name<'t>(target: &[&'t Token], alone: bool) -> Option<&'t Token> {
+    let name = match target {
+        [name] => name,
+        [name, colon, ..] if alone && colon.kind() == TokenKind::Colon => name,
+        _ => return None,
+    };
+    (name.kind() == TokenKind::Identifier).then_some(*name)
+}
+
+/// Whether a target binds a `NAMING_BINDINGS` name whole, alone or in a tuple or list, rather than
+/// an item or an attribute of it. An annotation binds nothing, so the scan stops at its colon.
+fn target_binds_naming(src: &str, target: &[&Token]) -> bool {
+    let mut nesting = 0isize;
+    let end = target.iter().position(|t| {
+        nesting += bracket_step(t.kind());
+        nesting == 0 && t.kind() == TokenKind::Colon
+    });
+    let target = &target[..end.unwrap_or(target.len())];
+    let mut groups = vec![];
+    (0..target.len()).any(|at| {
+        let prev = at.checked_sub(1).map(|prev| target[prev].kind());
+        step_groups(&mut groups, target[at].kind(), prev);
+        !groups.contains(&false) && names_whole(src, target, at)
+    })
 }
 
 /// Whether the token after one of `kind` starts a statement.
@@ -1823,6 +1897,14 @@ fn binds_naming_statement(src: &str, tokens: &[Token]) -> bool {
     if !starts_compound(tokens[0].kind()) {
         return binds_naming_tokens(src, tokens);
     }
+    inline_starts(tokens)
+        .into_iter()
+        .any(|at| binds_naming_tokens(src, &tokens[at..]))
+}
+
+/// Where each statement of the body a compound statement, from its first token, holds on its
+/// header line starts: after the colon that ends the header, then after each `;`.
+fn inline_starts(tokens: &[Token]) -> Vec<usize> {
     let line = tokens
         .iter()
         .position(|t| matches!(t.kind(), TokenKind::Newline | TokenKind::EndOfFile))
@@ -1833,11 +1915,11 @@ fn binds_naming_statement(src: &str, tokens: &[Token]) -> bool {
         nesting == 0 && t.kind() == TokenKind::Colon
     });
     let Some(colon) = colon else {
-        return false;
+        return vec![];
     };
     (colon + 1..line)
         .filter(|&at| at == colon + 1 || tokens[at - 1].kind() == TokenKind::Semi)
-        .any(|at| binds_naming_tokens(src, &tokens[at..]))
+        .collect()
 }
 
 /// Whether the targets of a statement, before an `=` or an augmented operator outside brackets,
@@ -6076,9 +6158,32 @@ class U(HttpCase):
                 "class X(models.Model):\n    class Meta:\n        _name = 'b'\n    _name = 'a'",
                 vec![new.clone(), ("b".to_owned(), true)],
             ),
+            ("class X(models.Model):\n    _name: str = 'a'", vec![new.clone()]),
+            ("class X(models.Model):\n    x.y = _name = 'a'", vec![new.clone()]),
+            ("class X(models.Model):\n    d['k'] = _name = 'a'", vec![new.clone()]),
+            ("class X(models.Model):\n    _name = x.y = 'a'", vec![new.clone()]),
+            ("class X(models.Model): _name = 'a'", vec![new.clone()]),
+            (
+                "class X(models.Model):\n    class Meta: pass\n    _name = 'a'",
+                vec![new.clone()],
+            ),
+            (
+                "class X(models.Model):\n    class Inner(object): pass; _name = 'a'",
+                vec![own.clone(), new.clone()],
+            ),
+            ("class X(models.Model):\n    _name: str", vec![own.clone()]),
+            ("class X(models.Model):\n    x.y: int = 1", vec![own.clone()]),
+            ("class X(models.Model):\n    x.y: _name = 1", vec![own.clone()]),
         ];
         for (body, models) in cases {
             assert_eq!(unread(body), (models, false, vec![]), "{body}");
+        }
+        for body in [
+            "class X(models.Model):\n    x, _name = y = 'a', 'b'",
+            "class X(models.Model): x = 1; _name, _d = 'a', 'b'",
+            "class X(models.Model):\n    _inherit += ['a']",
+        ] {
+            assert_eq!(unread(body), (vec![], false, vec![]), "{body}");
         }
     }
 
@@ -6103,7 +6208,6 @@ class U(HttpCase):
             "class X(models.Model):\n    _name.x = 1",
             "class X(models.Model):\n    x._name = 1",
             "class X(models.Model):\n    def f(self): x = 1; _name = 'a'",
-            "class X(models.Model):\n    class Inner(object): pass; _name = 'a'",
             "class X(models.Model):\n    _inherit = []",
         ] {
             assert_eq!(unread(body), (vec![("X".to_owned(), true)], false, vec![]), "{body}");
@@ -6138,11 +6242,14 @@ class U(HttpCase):
             (models, facts.dynamic_models)
         };
         let lamp = |model: &str, dynamic: bool| (vec![model.to_owned()], dynamic);
-        for attrs in ["wattage = fields.Integer()", "_inherit = []"] {
-            let body = format!("class DeskLamp(models.Model):\n    {attrs}");
-            assert_eq!(named(&body, "10.0"), lamp("DeskLamp", false), "{body}");
-            assert_eq!(named(&body, "20.0"), lamp("desk.lamp", false), "{body}");
-            assert_eq!(named(&body, "unknown"), lamp("DeskLamp", true), "{body}");
+        for body in [
+            "class DeskLamp(models.Model):\n    wattage = fields.Integer()",
+            "class DeskLamp(models.Model):\n    _inherit = []",
+            "class DeskLamp(models.Model): pass",
+        ] {
+            assert_eq!(named(body, "10.0"), lamp("DeskLamp", false), "{body}");
+            assert_eq!(named(body, "20.0"), lamp("desk.lamp", false), "{body}");
+            assert_eq!(named(body, "unknown"), lamp("DeskLamp", true), "{body}");
         }
         let derived = "class X(models.Model):\n    _name = 'a'\n\n\nclass Y(X):\n    pass";
         assert_eq!(named(derived, "10.0"), lamp("a", false));
@@ -6159,9 +6266,7 @@ class U(HttpCase):
             "class X(models.Model):\n    (_name, _d) = 'a', 'b'",
             "class X(`models.Model`):\n    pass",
             "class X(models.Model):\n    _name, _d = 'a', 'b'",
-            "class X(models.Model):\n    _name: str = 'a'",
             "class X(models.Model):\n    _inherit += ['a']",
-            "class X(models.Model): pass",
         ] {
             assert_eq!(named(body, "10.0"), (vec![], false), "{body}");
         }
@@ -6185,7 +6290,8 @@ class U(HttpCase):
                 hidden(vec![a.clone()], ""),
             ),
             ("class X(models.Model):\n    _inherit = ['a'", hidden(vec![], "")),
-            ("class X(models.Model):\n    _name = x.y = 'a'", hidden(vec![], "")),
+            ("class X(models.Model):\n    _name: str = MODEL", hidden(vec![], "")),
+            ("class X(models.Model):\n    x.y = _name = MODEL", hidden(vec![], "")),
         ];
         for (body, expected) in cases {
             assert_eq!(unread(body), expected, "{body}");
