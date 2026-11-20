@@ -29,7 +29,7 @@ use crate::mentions::HOOK_PREFIXES;
 use crate::module_state::UPGRADE_DIRS;
 use crate::project::{ASSET_EXTENSIONS, Module, SourceFile, code_loaded};
 use crate::routing::{ClassAt, Endpoint, Origin};
-use crate::rules::rule;
+use crate::rules::{Severity, rule};
 use crate::series::{self, Series};
 use crate::xml::{LOCATOR, QWEB, UNKNOWN_CONTEXT};
 use crate::{domain, flows, manifest, modifier, module_state, po, python};
@@ -6244,7 +6244,10 @@ impl<'m> Ctx<'_, 'm> {
     /// From saas~16.4 Odoo gives a relational field with `check_company` a domain on the comodel's
     /// `company_id`, through the comodel's `_check_company_domain`, which fails on a comodel without
     /// one. From 18.0 it builds that domain only for a model that has a company field, is
-    /// `res.company`, or for a company-dependent field.
+    /// `res.company`, or for a company-dependent field. Before saas~16.4 `_description_domain`
+    /// hard-codes a domain on the comodel's `company_id` for a field without a domain of its own,
+    /// which fails the same way, so a finding on such a field is an error, as every one is from
+    /// saas~16.4.
     fn check_company(&self, out: &mut Out<'m>, path: &'m Path, field: &Field<'m>, own: &FieldFact) {
         if !RELATIONAL_TYPES.contains(&own.ftype.as_str())
             || !field.is("check_company", &OptionValue::Bool(true))
@@ -6265,7 +6268,11 @@ impl<'m> Ctx<'_, 'm> {
             "'{}' has check_company=True, but {comodel} has no company_id field to check; remove check_company",
             own.name
         );
-        out.push(path, "OD222", pos_of(own, "check_company"), message);
+        let diag = RawDiag::new("OD222", pos_of(own, "check_company"), message);
+        out.diags.push((
+            path,
+            diag.with_severity(lacks_domain(field.get("domain")).then_some(Severity::Error)),
+        ));
     }
 
     /// Whether the comodel is introduced in scope with no `company_id` anywhere, and nothing but
@@ -6286,6 +6293,12 @@ impl<'m> Ctx<'_, 'm> {
                 .iter()
                 .any(|name| self.index.field(field.model, name, self.scope).is_ok())
     }
+}
+
+/// Whether Python takes a field's `domain` as false, so that Odoo before saas~16.4 gives the field
+/// the comodel's `company_id` domain instead; an unreadable domain counts as its own.
+fn lacks_domain(domain: Merged) -> bool {
+    truth(domain) == Some(false)
 }
 
 /// Whether the field is computed by `method` with dependencies it takes from the method, and is
@@ -7599,14 +7612,16 @@ mod tests {
     use rustc_hash::FxHashSet;
 
     use super::{
-        CACHE_KEY_GLOBALS, MEMBER_SERIES, MagicEra, REPORT_TAG, applies, builds_models, bundle_list, cache_global,
-        cached_member, callable_attr, csv_label, derived_label, es_module, exported_text, fetches_own_view, field_name,
-        has_last_update, hoot_adds, keeps_set, labels_before_ondelete, lone_add_applied, magic_era, no_access_message,
-        page_miss, parent_path_children, patch_form, public_write_message, reads_model_access, reads_requires,
-        shadowed_member, static_only, stores_parent_path, tuple_add_refused, tuple_checked, tuple_listed,
-        unknown_dependency, unmatched_asset, warns_on_labels,
+        CACHE_KEY_GLOBALS, MEMBER_SERIES, MagicEra, Merged, REPORT_TAG, applies, builds_models, bundle_list,
+        cache_global, cached_member, callable_attr, csv_label, derived_label, es_module, exported_text,
+        fetches_own_view, field_name, has_last_update, hoot_adds, keeps_set, labels_before_ondelete, lacks_domain,
+        lone_add_applied, magic_era, no_access_message, page_miss, parent_path_children, patch_form,
+        public_write_message, reads_model_access, reads_requires, shadowed_member, static_only, stores_parent_path,
+        tuple_add_refused, tuple_checked, tuple_listed, unknown_dependency, unmatched_asset, warns_on_labels,
     };
-    use crate::facts::{AccessRow, Annotation, DefinitionSource, JsName, Perms, Pos, Spanned, UNREAD_TYPE};
+    use crate::facts::{
+        AccessRow, Annotation, DefinitionSource, JsName, OptionValue, Perms, Pos, Spanned, UNREAD_TYPE,
+    };
     use crate::manifest::OdooReads;
     use crate::series::Series;
 
@@ -7642,6 +7657,18 @@ mod tests {
         assert_eq!(keeps_set(None, char, ("Integer", &["Integer".to_owned()])), Some(false));
         let unread = (UNREAD_TYPE, unread.as_slice());
         assert_eq!(keeps_set(None, unread, unread), Some(true));
+    }
+
+    #[test]
+    fn a_domain_python_takes_as_false_is_lacking() {
+        assert!(lacks_domain(Merged::Unset));
+        assert!(lacks_domain(Merged::Known(&OptionValue::Falsy)));
+        assert!(lacks_domain(Merged::Known(&OptionValue::Bool(false))));
+        assert!(lacks_domain(Merged::Known(&OptionValue::Strs(vec![]))));
+        assert!(!lacks_domain(Merged::Known(&OptionValue::Strs(vec![
+            "code".to_owned()
+        ]))));
+        assert!(!lacks_domain(Merged::Unknown));
     }
 
     #[test]

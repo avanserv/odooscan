@@ -102,6 +102,8 @@ const SEVERITY_BY_SERIES: &[(&str, &str, Severity)] = &[
 ];
 
 impl Rule {
+    /// The severity of this rule's findings in a module of `module_series`, unless a finding
+    /// carries its own, which replaces it.
     pub fn severity_for(&self, module_series: Option<Series>) -> Severity {
         SEVERITY_BY_SERIES
             .iter()
