@@ -25,3 +25,10 @@ class Wiring(models.AbstractModel):
     _inherit = "dependent.wiring"
 
     gauge = fields.Integer()
+
+
+class Partner(models.Model):
+    _inherit = "res.partner"
+
+    lamp_glow = fields.Char()
+    lamp_shade = fields.Char()

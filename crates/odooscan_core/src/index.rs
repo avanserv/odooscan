@@ -4186,11 +4186,46 @@ impl<'m> Index<'m> {
                 comodel: data.comodel.map(str::to_owned),
             }));
         }
-        let python = self.field_defs(model, field, None).first().map(|(mi, _, _)| *mi);
+        let definer = self.outside_definer(model, field, scope, |_| true);
+        Err(definer.map(|mi| self.modules[mi].name.as_str()))
+    }
+
+    /// The module that defines `field` of `model` outside `scope`: of the modules with a class that
+    /// defines it, the first `prefer` keeps, else the first, else that of a record that adds it.
+    fn outside_definer(
+        &self,
+        model: &str,
+        field: &str,
+        scope: &Scope,
+        prefer: impl Fn(usize) -> bool,
+    ) -> Option<usize> {
+        let defs = self.field_defs(model, field, None);
+        let python = defs
+            .iter()
+            .map(|(mi, _, _)| *mi)
+            .find(|&mi| prefer(mi))
+            .or(defs.first().map(|(mi, _, _)| *mi));
         // A record in scope that has not loaded yet is no matter of `depends`.
         let elsewhere = |f: &DataField| !scope.sees(f.module);
-        let definer = python.or_else(|| self.data_field(model, field, None, true, elsewhere).map(|d| d.module));
-        Err(definer.map(|mi| self.modules[mi].name.as_str()))
+        python.or_else(|| self.data_field(model, field, None, true, elsewhere).map(|d| d.module))
+    }
+
+    /// The module to name for `field` of `model` when `field` finds it only outside `scope`, and
+    /// whether it loads after module `reader` (`follows`). One that does not goes first, as adding it
+    /// to `depends` may fix the read, which a dependent of `reader` never does. On a model only
+    /// modules loading after `reader` introduce, no module `reader` may depend on gives the field,
+    /// so one of those goes first rather than, say, one that adds the field to `base`.
+    pub fn field_source(&self, model: &str, field: &str, scope: &Scope, reader: usize) -> Option<(&'m str, bool)> {
+        let late = self.introduced_after(model, reader);
+        let mi = self.outside_definer(model, field, scope, |mi| self.follows(mi, reader) == late)?;
+        Some((self.modules[mi].name.as_str(), self.follows(mi, reader)))
+    }
+
+    /// Whether a class introduces `model` and every such class is of a module that loads after
+    /// module `e`.
+    fn introduced_after(&self, model: &str, e: usize) -> bool {
+        let mut introducers = self.classes(model).iter().filter(|(_, c)| c.new_model).peekable();
+        introducers.peek().is_some() && introducers.all(|(mi, _)| self.follows(*mi, e))
     }
 
     /// The comodel of a field built as `ftype` from the definitions of `merge` Odoo keeps: the one
@@ -6608,6 +6643,39 @@ mod tests {
         assert_eq!(index.dependent_introducer("zz.lamp", aa), Some("zz"));
         assert_eq!(status("aa.lamp", zz, Some(zz)), "visible");
         assert_eq!(index.dependent_introducer("aa.lamp", zz), None);
+    }
+
+    #[test]
+    fn a_field_source_prefers_a_module_that_loads_first() {
+        let manifest = |depends: &str| format!("{{'version': '18.0.1.0', 'depends': [{depends}]}}");
+        let mut modules = [
+            module("base", &manifest("")),
+            module("main", &manifest("'base'")),
+            module("heir", &manifest("'main'")),
+            module("side", &manifest("'base'")),
+        ];
+        let sources = [
+            "class B(models.Model):\n    _name = 'res.partner'\n",
+            "class L(models.Model):\n    _name = 'main.lamp'\n",
+            "class L(models.Model):\n    _inherit = 'main.lamp'\n    glow = fields.Char()\n    shade = fields.Char()\n\n\
+             class H(models.Model):\n    _name = 'heir.lamp'\n    wick = fields.Char()\n",
+            "class L(models.Model):\n    _inherit = 'main.lamp'\n    shade = fields.Char()\n\n\
+             class B(models.Model):\n    _inherit = 'base'\n    wick = fields.Char()\n",
+        ];
+        for (module, source) in modules.iter_mut().zip(sources) {
+            module.python.push(python_18(source));
+        }
+        let index = Index::build(&modules, None);
+        let main = index.by_name["main"];
+        let scope = index.scope(main);
+        let source = |model: &str, field: &str| index.field_source(model, field, &scope, main);
+        assert_eq!(source("main.lamp", "glow"), Some(("heir", true)));
+        assert_eq!(source("main.lamp", "shade"), Some(("side", false)));
+        // `heir.lamp` is not there while `main` loads, whatever adds `wick` to `base`.
+        assert_eq!(source("heir.lamp", "wick"), Some(("heir", true)));
+        assert_eq!(source("main.lamp", "wick"), Some(("side", false)));
+        assert_eq!(source("main.lamp", "flame"), None);
+        assert!(matches!(index.field("main.lamp", "shade", &scope), Err(Some("heir"))));
     }
 
     #[test]
