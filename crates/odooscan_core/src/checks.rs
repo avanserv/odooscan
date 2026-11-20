@@ -927,7 +927,7 @@ fn es_modules<'a, 'm>(
     series: Option<Series>,
 ) -> impl Iterator<Item = (usize, &'m SourceFile<JsFacts>)> + 'a {
     let js = index.modules[mi].js.iter().enumerate();
-    js.filter(move |(fi, f)| index.js_loaded(mi, *fi) && es_module(series, f.facts.annotation))
+    js.filter(move |(fi, f)| index.js_loaded(mi, *fi) && es_module(series, f.facts.annotation(series)))
 }
 
 /// The module's scripts that a bundle loads as they are, which register through `odoo.define()`.
@@ -937,7 +937,7 @@ fn legacy_scripts<'a, 'm>(
     series: Option<Series>,
 ) -> impl Iterator<Item = (usize, &'m SourceFile<JsFacts>)> + 'a {
     let js = index.modules[mi].js.iter().enumerate();
-    js.filter(move |(fi, f)| index.js_loaded(mi, *fi) && !es_module(series, f.facts.annotation))
+    js.filter(move |(fi, f)| index.js_loaded(mi, *fi) && !es_module(series, f.facts.annotation(series)))
 }
 
 /// The first series whose Hoot mocks `@web/core/utils/functions`, adding `clearMemoizeCaches`

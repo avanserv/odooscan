@@ -1450,15 +1450,24 @@ impl DataFacts {
     }
 }
 
-/// What the leading comment of a JS file says about it.
+/// What `@odoo-module` says about a JS file where Odoo's pattern finds it: on the first non-blank
+/// line, which opens a comment, the tag coming anywhere later on that line. Before saas~17.2 the tag
+/// may also start a later line that only whitespace separates from the first.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Annotation {
     #[default]
     None,
-    /// `@odoo-module`: an ES module from 15.0 on, when unannotated files are still scripts.
+    /// `@odoo-module`: an ES module from saas~14.3 on, when unannotated files are still scripts.
     Module,
-    /// `@odoo-module ignore`: never an ES module, such as a library under `static/src`.
+    /// `@odoo-module ignore`, from saas~17.2: never an ES module, such as a library under `static/src`.
     Ignore,
+}
+
+/// `@odoo-module` and what follows it, under one series' reading of Odoo's pattern.
+#[derive(Debug, Default)]
+pub struct ModuleTag {
+    pub annotation: Annotation,
+    pub alias: Option<JsAlias>,
 }
 
 /// `@odoo-module alias=<name>`, a second module name Odoo registers for the file, as written: which
@@ -1588,8 +1597,11 @@ pub struct OrmCall {
 
 #[derive(Debug, Default)]
 pub struct JsFacts {
-    pub annotation: Annotation,
-    pub alias: Option<JsAlias>,
+    /// The tag as Odoo reads it from saas~17.2; `JsFacts::annotation` and `JsFacts::alias` pick
+    /// a series' reading.
+    pub tag: ModuleTag,
+    /// The tag as Odoo reads it before saas~17.2.
+    pub early_tag: ModuleTag,
     /// Every module specifier the file imports or re-exports from, at its first use.
     pub specifiers: Vec<Spanned<String>>,
     pub names: Vec<JsName>,

@@ -1307,7 +1307,7 @@ fn js_paths(
             let target = JsTarget {
                 module: mi,
                 file: fi,
-                opaque: file.facts.annotation == Annotation::Ignore,
+                opaque: file.facts.annotation(series) == Annotation::Ignore,
             };
             if let Some(path) = js_module_path(&module.name, &file.rel) {
                 if let Some(dir) = path.strip_suffix("/index") {
@@ -1320,7 +1320,7 @@ fn js_paths(
             }
             // An alias stands for the default export, whose names only a run tells, unless it proxies:
             // it has `default=`, and before saas~17.2 one of `false`, `False` or `0`.
-            if let Some((name, proxies)) = file.facts.alias.as_ref().and_then(|a| a.registered(series)) {
+            if let Some((name, proxies)) = file.facts.alias(series).and_then(|a| a.registered(series)) {
                 claim(
                     name,
                     JsTarget {

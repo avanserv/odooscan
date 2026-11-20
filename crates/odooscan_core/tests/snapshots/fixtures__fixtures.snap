@@ -885,7 +885,9 @@ custom/legacy_require14/static/src/js/rpc.js:8:22: OD610 html() renders its argu
 custom/legacy_require14/static/src/js/rpc.js:9:39: OD603 no indexed module defines model 'x.gone14'
 custom/legacy_require16/static/src/js/counter.js:8:27: OD601 no file of module web provides '@web/gone'
 custom/legacy_require16/static/src/js/counter.js:9:28: OD601 'legacy_require_lib.tools' comes from module legacy_require_lib, which is not in depends
-custom/legacy_require17/static/src/js/counter.js:8:42: OD601 no file of module web provides '@web/listed_gone'
+custom/legacy_require16/static/src/js/late_tag.js:3:44: OD601 no file of module web provides '@web/late_gone'
+custom/legacy_require16/static/src/js/spaced_tag.js:4:24: OD601 no file of module web provides '@web/spaced_gone'
+custom/legacy_require17/static/src/js/uses_alias.js:2:18: OD601 'legacy_require17.spaced' does not export 'gone'
 custom/legacy_rpc16/static/src/js/partner_card.js:5:58: OD604 model 'res.partner' has no method 'action_card_gone'
 custom/legacy_rpc16/static/src/js/partner_widget.js:9:32: OD603 no indexed module defines model 'x.missing'
 custom/legacy_rpc16/static/src/js/partner_widget.js:10:59: OD604 model 'res.partner' has no method 'action_gone'
