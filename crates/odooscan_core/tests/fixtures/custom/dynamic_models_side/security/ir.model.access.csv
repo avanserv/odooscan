@@ -4,3 +4,4 @@ access_side_huge,side huge,model_bad_generated_huge,base.group_user,1,0,0,0
 access_side_order,side order,model_side_order,base.group_user,1,0,0,0
 access_side_order_line,side order line,model_side_order_line,base.group_user,1,0,0,0
 access_sideline_note,sideline note,model_sideline_note,base.group_user,1,0,0,0
+access_x_side_note,x side note,model_x_side_note,base.group_user,1,0,0,0

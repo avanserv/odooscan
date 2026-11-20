@@ -242,3 +242,13 @@ class IrSequence(models.Model):
 
     def next_by_code(self, sequence_code):
         return sequence_code
+
+
+class IrModelCustom(models.Model):
+    _inherit = "ir.model"
+
+    def _custom_class(self, data):
+        class CustomModel(models.Model):
+            _name = data["model"]
+
+        return CustomModel

@@ -29,3 +29,9 @@ class SidelineNote(models.Model):
     _name = "sideline.note"
 
     name = fields.Char()
+
+
+class SideNote(models.Model):
+    _name = "x_side_note"
+
+    name = fields.Char()
