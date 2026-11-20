@@ -176,7 +176,7 @@ custom/bad_sale/models/models.py:64:12: OD205 'name' is a Char field elsewhere a
 custom/bad_sale/models/models.py:72:19: OD131 == between secrets takes longer the more of the secret a guess gets right, which lets a caller find it a character at a time; compare them with consteq() or hmac.compare_digest()
 custom/bad_sale/models/projects.py:7:34: OD202 model 'project.project' comes from module project; add it to depends
 custom/bad_sale/models/projects.py:8:31: OD202 model 'project.task' comes from module project; add it to depends
-custom/bad_sale/models/projects.py:9:36: OD202 model 'account.analytic.line' comes from module hr_timesheet; add it to depends
+custom/bad_sale/models/projects.py:9:36: OD202 model 'account.analytic.line' comes from module analytic; add it to depends
 custom/bad_sale/models/queries.py:15:13: OD137 write() of the same values on each record of the loop updates them one at a time; write them once on the whole recordset
 custom/bad_sale/models/queries.py:20:13: OD134 search() runs the same query on each pass of the loop; run it once before the loop
 custom/bad_sale/models/queries.py:21:13: OD134 search_count() runs a query for each record of the loop, keyed on order_id; count them all at once with _read_group() grouped by order_id
@@ -429,6 +429,7 @@ custom/dependent_introducer/models/lamps.py:20:33: OD201 model 'dependent.socket
 custom/dependent_introducer/views/sockets.xml:2:5: OD201 model 'dependent.socket' comes from module dependent_introducer_heir, which depends on this module and so loads after it
 custom/dependent_introducer/views/sockets.xml:5:33: OD201 model 'dependent.socket' comes from module dependent_introducer_heir, which depends on this module and so loads after it
 custom/dependent_introducer/views/sockets.xml:9:9: OD201 model 'dependent.socket' comes from module dependent_introducer_heir, which depends on this module and so loads after it
+custom/dependent_introducer_heir/models/heir.py:19:16: OD201 no indexed class introduces model 'dependent.ghost'; module dependent_introducer only extends it
 custom/depends_unused/__manifest__.py:5:9: OD520 module 'base' already comes with 'sale', also in depends
 custom/depends_unused/__manifest__.py:6:9: OD520 module 'mail' already comes with 'sale', also in depends
 custom/depends_unused/__manifest__.py:7:9: OD521 nothing of module 'sale' is used, nor of what only it brings
@@ -740,21 +741,27 @@ custom/ghost_parents/models/parents.py:15:16: OD201 no indexed module defines mo
 custom/ghost_parents/views/functions.xml:4:42: OD314 parent.bench has no method 'action_ghost'
 custom/ghost_parents_heir/models/shelf.py:7:32: OD204 parent.shelf has no method '_compute_note'
 custom/ghost_refs/data/records.xml:13:39: OD321 'ghost_refs.refs_one' is a record of refs.thing, but refs.holder.partner_id takes res.partner
+custom/ghost_refs/data/records.xml:15:5: OD201 no indexed class introduces model 'ghost.lantern'; module ghost_refs_side only extends it
 custom/ghost_refs/models/ghost_thing.py:6:16: OD201 no indexed module defines model 'ghost.thing'
 custom/ghost_refs/models/ghost_thing.py:21:16: OD201 no indexed module defines model 'ghost.thing'
 custom/ghost_refs/models/refs.py:15:24: OD211 no parent class of refs.thing defines 'action_go', so this super() call fails
 custom/ghost_refs/models/refs.py:17:9: OD230 no parent class of refs.thing defines '_compute_spare' and no file names it, so Odoo never runs it
 custom/ghost_refs/models/refs.py:27:9: OD229 this override takes no 'stamp' by position, which action_sign(self, stamp) in module ghost_refs requires, so a call that passes it fails
-custom/ghost_refs/models/refs.py:36:34: OD202 model 'ghost.lantern' comes from module ghost_refs_side; add it to depends
+custom/ghost_refs/models/refs.py:36:34: OD201 no indexed class introduces model 'ghost.lantern'; module ghost_refs_side only extends it
 custom/ghost_refs/models/refs.py:37:39: OD202 model 'side.lantern' comes from module ghost_refs_side; add it to depends
 custom/ghost_refs/models/refs.py:39:45: OD203 'side_lantern_id.wick': field 'wick' of side.lantern comes from module ghost_refs_side, which is not in depends
 custom/ghost_refs/models/refs.py:41:46: OD208 inverse 'tag' on refs.thing is a Char field, not a Many2one
-custom/ghost_refs/models/refs.py:50:34: OD202 model 'ghost.lantern' comes from module ghost_refs_side; add it to depends
+custom/ghost_refs/models/refs.py:50:34: OD201 no indexed class introduces model 'ghost.lantern'; module ghost_refs_side only extends it
 custom/ghost_refs/models/refs.py:59:34: OD202 model 'side.lantern' comes from module ghost_refs_side; add it to depends
 custom/ghost_refs/models/refs.py:60:33: OD203 'glow': refs.heir has no field 'glow'
-custom/ghost_refs/models/refs.py:66:17: OD202 model 'ghost.lantern' comes from module ghost_refs_side; add it to depends
+custom/ghost_refs/models/refs.py:66:17: OD201 no indexed class introduces model 'ghost.lantern'; module ghost_refs_side only extends it
 custom/ghost_refs/models/refs.py:74:17: OD202 model 'side.lantern' comes from module ghost_refs_side; add it to depends
 custom/ghost_refs/models/refs.py:76:33: OD203 'glow': refs.cub has no field 'glow'
+custom/ghost_refs/models/refs.py:84:25: OD206 no indexed class introduces model 'ghost.lantern'; module ghost_refs_side only extends it
+custom/ghost_refs/models/refs.py:84:78: OD206 no indexed module defines model 'ghost.thing'
+custom/ghost_refs/static/src/lookup.js:3:30: OD603 no indexed class introduces model 'ghost.lantern'; module ghost_refs_side only extends it
+custom/ghost_refs/static/src/lookup.js:4:30: OD603 model 'side.lantern' comes from module ghost_refs_side, which is not in depends
+custom/ghost_refs/static/src/lookup.js:5:30: OD603 no indexed module defines model 'ghost.thing'
 custom/ghost_refs_side/models/lantern.py:6:16: OD201 no indexed module defines model 'ghost.lantern'
 custom/html_sinks/static/src/debug.js:2:5: OD611 console.log() is a debugging leftover that writes to every user's console; remove it
 custom/html_sinks/static/src/debug.js:3:5: OD612 debugger pauses the script in every browser with the developer tools open; remove it
@@ -1819,6 +1826,7 @@ custom/sibling_extensions/models/siblings.py:5:16: OD201 no indexed module defin
 custom/sibling_extensions/models/siblings.py:9:16: OD201 no indexed module defines model 'ghost.lamp'
 custom/sibling_extensions/models/siblings.py:13:16: OD202 model 'project.task' comes from module project; add it to depends
 custom/sibling_extensions/models/siblings.py:17:16: OD202 model 'project.task' comes from module project; add it to depends
+custom/sibling_extensions_heir/models/lamp.py:5:16: OD201 no indexed class introduces model 'ghost.lamp'; module sibling_extensions only extends it
 custom/signatures_ext/models/bad_signature.py:11:9: OD229 this override takes no 'line' by position, which _prepare(self, order, line) in module signatures requires, so a call that passes it fails
 custom/signatures_ext/models/bad_signature.py:14:9: OD229 this override requires 'extra', which _stamp(self, order) in module signatures does not take, so a call made for the parent fails
 custom/signatures_ext/models/bad_signature.py:17:9: OD229 this override requires 'style', which _render(self, *, mode=None) in module signatures does not take, so a call made for the parent fails

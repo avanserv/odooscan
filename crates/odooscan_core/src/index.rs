@@ -13,7 +13,7 @@ use crate::facts::{
 use crate::js::{self, OWL_MODULE};
 use crate::manifest::{AutoInstall, DEPENDS_BASE};
 use crate::mentions::{HOOK_PREFIXES, Words};
-use crate::project::{Module, SourceFile, Unindexed, code_loaded};
+use crate::project::{Module, SourceFile, Unindexed, builds_model_name, code_loaded, names_models_at_runtime};
 use crate::series::{self, Series};
 use crate::{bundles, imports, routing};
 
@@ -1921,9 +1921,10 @@ impl Scope {
 pub enum Status<'m> {
     Visible,
     /// Defined only by modules outside the scope. Names, for a model, the module that introduces it,
-    /// or the first module the index lists for it when no class sets `_name`; for a template, view,
-    /// registry key or field widget, the first module the index lists as defining it; for a method,
-    /// the module of the first class in the model's inheritance chain that defines it.
+    /// else the first module the index lists among the extenders `model_status` takes for a source;
+    /// for a template, view, registry key or field widget, the first module the index lists as
+    /// defining it; for a method, the module of the first class in the model's inheritance chain that
+    /// defines it.
     Hidden(&'m str),
     Missing,
 }
@@ -3553,27 +3554,59 @@ impl<'m> Index<'m> {
         self.model_by_xmlid.get(id).copied()
     }
 
-    /// Whether `model` is defined in scope for code of module `reader`, and for its class when a
-    /// class lists it as a parent. Odoo builds a module's classes in the order Python creates them
-    /// (18.0 `odoo/modules/registry.py:290-292`, 20.0 `odoo/orm/registry.py:449-451`), and building
-    /// one whose parent is not in the registry yet fails (18.0 `odoo/models.py:759-761`, 20.0
-    /// `odoo/orm/model_classes.py:208-210`), so an introducer of the class's module counts unless
-    /// `builds_before` puts it after the class. A module that loads after the reader's (`follows`)
-    /// has none of its classes count (`dependent_introducer` names it). Naming it as the source
-    /// would ask for a cycle in `depends`, or, for a reader in `base`, for a module Odoo loads only
-    /// once `base` has loaded alone (18.0 `odoo/modules/loading.py:407-409`, 20.0 `:359-361`). A
-    /// reader of None counts every class.
+    /// Whether `model` is defined in scope for module `reader` (None counts every class), and for
+    /// its class when a class lists it as a parent. Odoo builds a module's classes in the order
+    /// Python creates them (18.0 `odoo/modules/registry.py:290-292`, 20.0
+    /// `odoo/orm/registry.py:449-451`), and building one whose parent is not in the registry yet
+    /// fails (18.0 `odoo/models.py:759-761`, 20.0 `odoo/orm/model_classes.py:208-210`), so an
+    /// introducer of the class's module counts unless `builds_before` puts it after the class. A
+    /// module that loads after the reader's (`follows`) has none of its classes count
+    /// (`dependent_introducer` names it): naming it would ask for a cycle in `depends`, or, from
+    /// `base`, for a module Odoo loads once `base` has loaded alone (18.0
+    /// `odoo/modules/loading.py:407-409`, 20.0 `:359-361`). With no introducer among the counted
+    /// classes, only an extender whose scope may hide one (`may_hide_introducer`) is a source, else
+    /// the model is missing.
     pub fn model_status(&self, model: &str, scope: &Scope, reader: Option<(usize, Option<&ClassFact>)>) -> Status<'m> {
-        let classes = self.models.get(model).map(Vec::as_slice).unwrap_or_default();
+        let classes = self.classes(model);
         let others = || classes.iter().filter(|(mi, c)| self.counts(*mi, c, reader));
-        if others().any(|(mi, _)| scope.sees(*mi)) {
-            Status::Visible
-        } else if let Some((first, _)) = others().next() {
-            let mi = self.introducer(others()).unwrap_or(*first);
-            Status::Hidden(&self.modules[mi].name)
-        } else {
-            Status::Missing
+        let introducer = self.introducer(others());
+        // A class-less reader in a module that extends the model: the `_inherit` there gets the finding.
+        if introducer.is_none() && others().any(|(mi, _)| reader.is_some_and(|(e, _)| *mi == e)) {
+            return Status::Visible;
         }
+        let mut first = None;
+        let sources = others().map(|(mi, _)| *mi);
+        for mi in sources.filter(|&mi| introducer.is_some() || self.may_hide_introducer(model, mi)) {
+            if scope.sees(mi) {
+                return Status::Visible;
+            }
+            first = first.or(Some(mi));
+        }
+        match introducer.or(first) {
+            Some(mi) => Status::Hidden(&self.modules[mi].name),
+            None => Status::Missing,
+        }
+    }
+
+    /// Whether the scope of module `mi` may introduce `model` out of the scan's sight: a module in it
+    /// depends on one the index does not hold or has a file the scan cannot read at all, `mi` names a
+    /// model at runtime (`names_models_at_runtime`, which covers a Python file that does not parse),
+    /// or another module in it builds a name `model` fits (`builds_model_name`).
+    fn may_hide_introducer(&self, model: &str, mi: usize) -> bool {
+        let scope = self.scope(mi);
+        let mut seen = self.modules.iter().enumerate().filter(|(i, _)| scope.sees(*i));
+        self.partial_scope(&scope)
+            || names_models_at_runtime(&self.modules[mi])
+            || seen.any(|(i, m)| m.unread_text || (i != mi && builds_model_name(m, model)))
+    }
+
+    /// The first-loaded module other than `except` with a class of `model` that `model_status`
+    /// counts for `reader`: with no introducer, one that only extends the model.
+    pub fn extender(&self, model: &str, except: usize, reader: Option<(usize, Option<&ClassFact>)>) -> Option<&'m str> {
+        let classes = self.classes(model).iter();
+        let extenders = classes.filter(|(mi, c)| *mi != except && self.counts(*mi, c, reader));
+        let first = self.first_loaded(extenders.map(|(mi, _)| (*mi, ())));
+        first.map(|(mi, _)| self.modules[mi].name.as_str())
     }
 
     /// Whether class `c` of module `mi` puts its model in the registry for `model_status`.
@@ -6428,9 +6461,63 @@ mod tests {
         assert_eq!(status("res.partner", main, Some((main, Some("P1")))), "visible");
         assert_eq!(status("main.lamp", main, Some((main, Some("X0")))), "missing");
         assert_eq!(status("main.lamp", main, Some((main, Some("X")))), "visible");
-        assert_eq!(status("ghost.lamp", main, None), "visible");
+        // No class introduces ghost.lamp, so Odoo can build none of its extensions.
+        assert_eq!(status("ghost.lamp", main, None), "missing");
         assert_eq!(status("side.thing", main, None), "visible");
-        assert_eq!(status("ghost.lamp", heir, Some((heir, Some("G")))), "visible");
+        assert_eq!(status("ghost.lamp", heir, Some((heir, Some("G")))), "missing");
+        assert_eq!(status("ghost.lamp", main, Some((main, None))), "visible");
+        assert_eq!(index.extender("ghost.lamp", main, None), Some("heir"));
+        // `heir` loads after `main`, so its extension is not one `main` could have named.
+        let g1 = Some((main, Some(class(main, "G1"))));
+        assert_eq!(index.extender("ghost.lamp", main, g1), None);
+        assert_eq!(
+            index.extender("ghost.lamp", heir, Some((heir, Some(class(heir, "G"))))),
+            Some("main")
+        );
+    }
+
+    #[test]
+    fn an_extender_whose_scope_may_hide_the_introducer_is_a_source() {
+        let manifest = |depends: &str| format!("{{'version': '18.0.1.0', 'depends': [{depends}]}}");
+        let extends = |model: &str| python_18(&format!("class E(models.Model):\n    _inherit = '{model}'\n"));
+        let mut modules = [
+            module("base", &manifest("")),
+            module("partial", &manifest("'base', 'unindexed'")),
+            module("runtime", &manifest("'base'")),
+            module("built_heir", &manifest("'runtime'")),
+            module("unread", &manifest("'base'")),
+            module("plain", &manifest("'base'")),
+            module("main", &manifest("'base'")),
+            module("over", &manifest("'partial'")),
+        ];
+        modules[1].python.push(extends("ghost.ticket"));
+        modules[2].python.push(python_18(
+            "class R(models.Model):\n    _name = 'ghost.kind.' + KIND\n\n\
+             class E(models.Model):\n    _inherit = 'ghost.desk'\n",
+        ));
+        modules[3].python.push(extends("ghost.kind.lamp"));
+        modules[3].python.push(extends("other.lamp"));
+        modules[4].python.push(extends("ghost.note"));
+        modules[4].unread_text = true;
+        modules[5].python.push(extends("ghost.plain"));
+        let index = Index::build(&modules, None);
+        let status = |model: &str, mi: usize| {
+            let reader = Some((mi, None));
+            match index.model_status(model, &index.scope(mi), reader) {
+                Status::Visible => "visible".to_owned(),
+                Status::Hidden(m) => format!("hidden {m}"),
+                Status::Missing => "missing".to_owned(),
+            }
+        };
+        let (main, over) = (index.by_name["main"], index.by_name["over"]);
+        assert_eq!(status("ghost.ticket", main), "hidden partial");
+        assert_eq!(status("ghost.ticket", over), "visible");
+        assert_eq!(status("ghost.desk", main), "hidden runtime");
+        // A dependency's runtime name hides only the models it fits.
+        assert_eq!(status("ghost.kind.lamp", main), "hidden built_heir");
+        assert_eq!(status("other.lamp", main), "missing");
+        assert_eq!(status("ghost.note", main), "hidden unread");
+        assert_eq!(status("ghost.plain", main), "missing");
     }
 
     #[test]
