@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<templates xml:space="preserve">
+    <t t-name="props_smear.Card">
+        <span t-esc="props.title"/>
+    </t>
+    <t t-name="props_smear.Board">
+        <div class="o_board">
+            <Card titel="'x'"/>
+        </div>
+    </t>
+</templates>

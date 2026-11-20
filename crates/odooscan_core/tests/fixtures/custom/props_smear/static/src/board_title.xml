@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<templates xml:space="preserve">
+    <t t-inherit="props_smear.Board" t-inherit-mode="extension">
+        <xpath expr="//Card" position="attributes">
+            <attribute name="title">'Café'</attribute>
+        </xpath>
+    </t>
+</templates>
