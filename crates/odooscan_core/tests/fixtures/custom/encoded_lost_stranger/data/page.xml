@@ -6,4 +6,8 @@
         <field name="name">Lost model</field>
         <field name="res_model">x_lost_model</field>
     </record>
+    <record id="lost_stray_action" model="ir.actions.act_window">
+        <field name="name">Lost stray</field>
+        <field name="res_model">lost.stray</field>
+    </record>
 </odoo>

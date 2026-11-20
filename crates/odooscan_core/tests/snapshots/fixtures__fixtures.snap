@@ -486,7 +486,10 @@ custom/domains20/controllers/main.py:11:20: OD715 route parameter 'filters' reac
 custom/dynamic_models/models/generated.py:37:38: OD203 'no_generated_user': bad.generated.user has no field 'no_generated_user'
 custom/dynamic_models/views/large.xml:39:17: OD304 'scale': bad.generated.user has no field 'scale'
 custom/dynamic_models_heir/models/heir.py:8:32: OD202 model 'side.order' comes from module dynamic_models_side; add it to depends
+custom/dynamic_models_heir/models/heir.py:10:32: OD201 no indexed module defines model 'heir.ghost'
+custom/dynamic_models_heir/models/heir.py:16:22: OD206 no indexed module defines model 'heir.ghost'
 custom/dynamic_models_heir/static/src/heir.js:4:30: OD603 model 'side.order' comes from module dynamic_models_side, which is not in depends
+custom/dynamic_models_heir/static/src/heir.js:6:30: OD603 no indexed module defines model 'heir.ghost'
 custom/dynamic_models_opaque/views/holder.xml:7:17: OD304 'no_holder_field': opaque.holder has no field 'no_holder_field'
 custom/dynamic_models_outside/models/built.py:14:32: OD202 model 'bad.generated.large' comes from module dynamic_models_side; add it to depends
 custom/dynamic_models_outside/models/built.py:17:25: OD206 no indexed module defines model 'outside.test.model'
@@ -548,7 +551,7 @@ custom/encoded_lost_partners/data/res.partner.csv:2:17: OD000 the file is not UT
 custom/encoded_lost_side/data/refs.xml:9:38: OD321 'encoded_lost.ledger_blank' is a record of encoded.ledger, but res.partner.parent_id takes res.partner
 custom/encoded_lost_side/data/refs.xml:12:29: OD322 encoded.ledger.stage has no value 'nope'
 custom/encoded_lost_stranger/data/page.xml:3:20: OD311 template 'encoded_lost.page' comes from module encoded_lost, which is not in depends
-custom/encoded_lost_stranger/data/page.xml:7:33: OD201 no indexed module defines model 'x_lost_model'
+custom/encoded_lost_stranger/data/page.xml:11:33: OD201 no indexed module defines model 'lost.stray'
 custom/encoded_lost_stranger/models/visit.py:4:7: OD401 model 'encoded.visit' has no ir.model.access rule, so only the superuser can use it
 custom/encoded_ok/data/latin1.xml:5:9: OD309 res.country has no field 'no_such_field'
 custom/encoded_ok/data/refs.xml:12:9: OD301 module encoded_ok defines no XML id 'encoded_ok.country_gone'

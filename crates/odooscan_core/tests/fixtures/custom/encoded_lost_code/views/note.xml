@@ -35,8 +35,8 @@
         <field name="domain_force">[('no_note_rule', '=', 1)]</field>
     </record>
     <record id="lost_model_form" model="ir.ui.view">
-        <field name="name">x_lost_model.form</field>
-        <field name="model">x_lost_model</field>
+        <field name="name">lost.model.form</field>
+        <field name="model">lost.model</field>
         <field name="arch" type="xml">
             <form>
                 <field name="x_name"/>
@@ -45,6 +45,6 @@
     </record>
     <record id="lost_model_action" model="ir.actions.act_window">
         <field name="name">Lost model</field>
-        <field name="res_model">x_lost_model</field>
+        <field name="res_model">lost.model</field>
     </record>
 </odoo>
