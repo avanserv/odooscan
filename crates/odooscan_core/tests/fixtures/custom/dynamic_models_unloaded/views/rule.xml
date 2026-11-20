@@ -1,0 +1,7 @@
+<odoo>
+    <record id="rule_unloaded_holder" model="ir.rule">
+        <field name="name">by a field no class of the holder gives</field>
+        <field name="model_id" ref="model_unloaded_holder"/>
+        <field name="domain_force">[('no_unloaded_field', '=', 1)]</field>
+    </record>
+</odoo>

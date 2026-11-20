@@ -1,0 +1,7 @@
+<odoo>
+    <record id="rule_opaque_holder" model="ir.rule">
+        <field name="name">by a field no listed class of the holder gives</field>
+        <field name="model_id" ref="model_opaque_holder"/>
+        <field name="domain_force">[('no_opaque_field', '=', 1)]</field>
+    </record>
+</odoo>

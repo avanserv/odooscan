@@ -1,2 +1,3 @@
 id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
 access_opaque_holder,opaque holder,model_opaque_holder,base.group_user,1,0,0,0
+access_ghost_opaque,ghost opaque,model_ghost_opaque,base.group_user,1,0,0,0
