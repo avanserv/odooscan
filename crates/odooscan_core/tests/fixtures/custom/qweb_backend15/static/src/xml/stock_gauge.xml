@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<templates xml:space="preserve">
+    <t t-name="qweb_backend15.StockGauge">
+        <div class="o_stock_gauge" t-esc="widget.level"/>
+    </t>
+</templates>

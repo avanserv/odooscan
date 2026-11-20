@@ -1155,6 +1155,7 @@ custom/public_grant_domain/security/ir.access.csv:2:1: OD402 base.group_portal g
 custom/public_grant_public/controllers/main.py:14:9: OD717 route parameter 'upload' reaches the content of create(), which public=True lets anyone download; keep it private and share it with generate_access_token()
 custom/public_grant_public/controllers/main.py:20:9: OD717 route parameter 'upload' reaches the content of create(), which public=True lets anyone download; keep it private and share it with generate_access_token()
 custom/public_grant_public/security/ir.access.csv:2:1: OD402 base.group_public gets write, create or unlink on ir.attachment; public and portal access should be read-only and go through controllers
+custom/qweb_backend15/__manifest__.py:5:5: OD505 Odoo ignores the qweb key, so the templates it lists that no bundle loads are missing; list them under the bundle of the page that renders them, web.assets_qweb for the web client
 custom/qweb_bundle_unloaded/__manifest__.py:8:9: OD506 Odoo no longer loads web.assets_qweb, so the templates it lists that no other bundle loads are missing; list them under web.assets_backend
 custom/qweb_bundle_unloaded/data/ir.asset.csv:2:1: OD506 Odoo no longer loads web.assets_qweb, so the templates this ir.asset record adds that no other bundle loads are missing; set its bundle to web.assets_backend
 custom/qweb_bundle_unloaded/static/src/main/main.xml:4:20: OD605 no indexed bundle defines template 'qweb_bundle_unloaded.Old'
@@ -1201,7 +1202,7 @@ custom/qweb_partial/__manifest__.py:4:24: OD503 module 'ghost_enterprise' is not
 custom/qweb_partial/views/partial.xml:5:20: OD311 no indexed module defines template 'web.layot'
 custom/qweb_partial/views/partial.xml:23:35: OD311 no indexed module defines template 'web.layot_report'
 custom/qweb_partial/views/partial.xml:28:24: OD311 no indexed module defines template 'web.layot_inside_enterprise'
-custom/qweb_unindexed/__manifest__.py:5:5: OD505 Odoo ignores the qweb key, so the templates it lists that no bundle loads are missing; list them under web.assets_qweb in assets
+custom/qweb_unindexed/__manifest__.py:5:5: OD505 Odoo ignores the qweb key, so the templates it lists that no bundle loads are missing; list them under the bundle of the page that renders them, web.assets_qweb for the web client
 custom/qweb_unindexed/__manifest__.py:6:36: OD513 'qweb_unindexed/static/src/xml/*.xml' matches no js, css, scss, sass, less or xml file under qweb_unindexed/static/, so Odoo adds nothing
 custom/record_required/data/creates.xml:2:5: OD324 rr.thing.name is required and has no default, so creating this record fails if the column is NOT NULL; give the field a value
 custom/record_required/data/creates.xml:3:5: OD324 rr.thing.name is required and has no default, so creating this record fails if the column is NOT NULL; give the field a value
@@ -1544,7 +1545,7 @@ custom/saas132/models/wizards.py:4:7: OD401 model 'saas.later.pass.wizard' has n
 custom/saas132/security/ir.model.access.csv:2:1: OD402 no group limits this row, so every user, public and portal included, gets write, create or unlink on model_saas_later_note_wizard; name a group
 custom/saas132/security/ir.model.access.csv:3:1: OD402 base.group_portal gets write, create or unlink on model_saas_later_note_wizard; public and portal access should be read-only and go through controllers
 custom/saas133/models/res_partner.py:10:9: OD223 _compute_monogram() can leave 'monogram' unassigned on a record, so reading it raises ValueError; assign it on every path through the loop, False when there is no value
-custom/saas143/__manifest__.py:6:5: OD505 Odoo ignores the qweb key, so the templates it lists that no bundle loads are missing; list them under web.assets_qweb in assets
+custom/saas143/__manifest__.py:6:5: OD505 Odoo ignores the qweb key, so the templates it lists that no bundle loads are missing; list them under the bundle of the page that renders them, web.assets_qweb for the web client
 custom/saas143/models/badge.py:9:60: OD218 'currency_id' has delegate=True, so it must be required with ondelete 'cascade' or 'restrict'; give it required=True
 custom/saas143/models/badge.py:14:54: OD218 'view_id' has delegate=True, so it must be required with ondelete 'cascade' or 'restrict'; give it required=True
 custom/saas143/models/badge.py:15:53: OD218 'model_id' has delegate=True, so it must be required with ondelete 'cascade' or 'restrict'; give it ondelete="cascade"
