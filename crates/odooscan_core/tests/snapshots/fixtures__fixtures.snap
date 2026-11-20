@@ -886,6 +886,7 @@ custom/manifest_data_repeated/__manifest__.py:7:34: OD512 './data/shelves.xml' i
 custom/manifest_depends_implied/__manifest__.py:4:17: OD520 module 'base' already comes with 'mail_digest', also in depends
 custom/manifest_depends_implied/__manifest__.py:4:25: OD520 module 'mail' already comes with 'mail_digest', also in depends
 custom/manifest_depends_self/__manifest__.py:4:25: OD510 module manifest_depends_self depends on itself, so Odoo never loads it
+custom/manifest_depends_seriesless_20/__manifest__.py:4:41: OD520 module 'base' already comes with 'manifest_depends_lib', also in depends
 custom/manifest_latin1/__manifest__.py:4:19: OD000 the manifest is not UTF-8
 custom/manifest_license_empty_14/__manifest__.py:5:16: OD507 the manifest's license is empty, so Odoo records no license for the module
 custom/manifest_license_missing/__manifest__.py:1:1: OD507 the manifest names no license, which Odoo reads as LGPL-3

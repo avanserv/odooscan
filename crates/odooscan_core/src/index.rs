@@ -2756,20 +2756,27 @@ impl<'m> Index<'m> {
         found
     }
 
-    /// The modules `module` may use, as `scope_of` reads them.
+    /// The modules `module` may use, as `scope_of` reads them in the series of `module`
+    /// (`series_of`).
     pub fn scope(&self, module: usize) -> Scope {
         let visible = scope_of(
             self.modules,
             &self.by_name,
             &self.always_installed,
             [module],
-            self.default_series,
+            self.series_of(module),
         );
         Scope {
             records: visible.clone(),
             visible,
             demo: false,
         }
+    }
+
+    /// The series of `module`, else `default_series`, under which a dependency naming no series reads
+    /// its `depends`: it installs on the same Odoo as the module that depends on it.
+    fn series_of(&self, module: usize) -> Option<Series> {
+        self.modules[module].series.or(self.default_series)
     }
 
     /// A scope that sees every indexed module, as on a database that installs them all.
@@ -2802,9 +2809,11 @@ impl<'m> Index<'m> {
     /// as Odoo installs one when the last of its triggers comes in, so long as one trigger lies
     /// outside scope. One whose triggers all lie in scope owes nothing to the test, and an unguarded
     /// id of it reports. A module with `countries` joins too: the scan cannot see the companies.
+    /// `series` is the checked module's own, else the default: the `named` modules read their
+    /// `depends` and triggers in it.
     pub fn guard_scope(&self, module: usize, named: impl IntoIterator<Item = usize>, series: Option<Series>) -> Scope {
         let scope = self.scope(module).visible;
-        let (proven, _) = depends_closure(self.modules, &self.by_name, named, self.default_series);
+        let (proven, _) = depends_closure(self.modules, &self.by_name, named, series);
         let seeds = scope.iter().zip(proven).map(|(&a, b)| a || b).collect();
         let in_scope = |name: &str| self.by_name.get(name).is_some_and(|&mi| scope[mi]);
         let owed = |m: &Module| triggers(m, series).is_none_or(|t| !t.into_iter().all(in_scope));
@@ -2837,7 +2846,7 @@ impl<'m> Index<'m> {
     /// loads after has not run its data files yet on the database that installs both. A failure
     /// there refuses the install whatever the file order.
     pub fn setup_scope(&self, module: usize) -> Scope {
-        let (mut records, _) = depends_closure(self.modules, &self.by_name, [module], self.default_series);
+        let (mut records, _) = depends_closure(self.modules, &self.by_name, [module], self.series_of(module));
         for (mi, held) in records.iter_mut().enumerate() {
             *held |= self.always_installed[mi] && self.loads_before(mi, module);
         }
@@ -2879,8 +2888,17 @@ impl<'m> Index<'m> {
         self.unread_dependent[module]
     }
 
-    /// Whether `from` depends on `to`, directly or through other modules, as `read_depends` reads them.
+    /// Whether Odoo loads `from` after `to` on every database that installs both: `from` reaches
+    /// `to`, or `to` is `base`, which Odoo loads ahead of every other module on every series (18.0
+    /// `odoo/modules/loading.py:407-409`) whatever `depends` a dependency naming no series reads.
+    pub fn loads_after(&self, from: usize, to: usize) -> bool {
+        from != to && (self.modules[to].name == "base" || self.reaches(from, to))
+    }
+
+    /// Whether `from` depends on `to`, directly or through other modules, as `read_depends` reads
+    /// them in the series of `from` (`series_of`), so that `sees` agrees with `scope`.
     pub fn reaches(&self, from: usize, to: usize) -> bool {
+        let series = self.series_of(from);
         let mut seen = vec![false; self.modules.len()];
         let mut stack = vec![from];
         while let Some(m) = stack.pop() {
@@ -2890,7 +2908,7 @@ impl<'m> Index<'m> {
             if std::mem::replace(&mut seen[m], true) {
                 continue;
             }
-            stack.extend(read_depends(&self.modules[m], self.default_series).filter_map(|d| self.by_name.get(d)));
+            stack.extend(read_depends(&self.modules[m], series).filter_map(|d| self.by_name.get(d)));
         }
         false
     }
@@ -2940,11 +2958,12 @@ impl<'m> Index<'m> {
     /// the module (OD504), whose closure holds the module's own and so is taken from no other.
     pub fn sole_brought(&self, module: usize) -> Vec<(usize, Vec<bool>)> {
         let depends = &self.modules[module].manifest.depends;
+        let series = self.series_of(module);
         let closures: Vec<Option<(usize, Vec<bool>, bool)>> = depends
             .iter()
             .map(|d| {
                 let &mi = self.by_name.get(d.value.as_str())?;
-                let (closure, complete) = depends_closure(self.modules, &self.by_name, [mi], self.default_series);
+                let (closure, complete) = depends_closure(self.modules, &self.by_name, [mi], series);
                 Some((mi, closure, complete)).filter(|(_, closure, _)| !closure[module])
             })
             .collect();
@@ -3149,7 +3168,7 @@ impl<'m> Index<'m> {
     /// indexed, is another module, and does not lead back to `module`.
     fn candidate_closure(&self, module: usize, name: &str) -> Option<(usize, Vec<bool>)> {
         let &mi = self.by_name.get(name).filter(|&&mi| mi != module)?;
-        let (closure, _) = depends_closure(self.modules, &self.by_name, [mi], self.default_series);
+        let (closure, _) = depends_closure(self.modules, &self.by_name, [mi], self.series_of(module));
         (!closure[module]).then_some((mi, closure))
     }
 
@@ -3285,10 +3304,9 @@ impl<'m> Index<'m> {
     /// keep the order of `entries` (for OD229, the chain order of `merged_classes`), since Odoo's
     /// tie order between independent modules is unknown.
     pub fn first_loaded<T>(&self, entries: impl IntoIterator<Item = (usize, T)>) -> Option<(usize, T)> {
-        let loads_after = |first: usize, next: usize| first != next && self.reaches(first, next);
         entries
             .into_iter()
-            .reduce(|first, next| if loads_after(first.0, next.0) { next } else { first })
+            .reduce(|first, next| if self.loads_after(first.0, next.0) { next } else { first })
     }
 
     /// Every class of `model` and of the models it inherits from: see `model_chain`.
@@ -3349,7 +3367,7 @@ impl<'m> Index<'m> {
 
     /// The signature of each definition of `method`, among `merged` (`merged_classes` of the model of
     /// `class`, of module `mi`), that `class` overrides: those of other modules, short of one that
-    /// depends on `mi`, and of classes above `class` in its file, whose name mangles `method` alike.
+    /// loads after `mi`, and of classes above `class` in its file, whose name mangles `method` alike.
     /// The order of the files of `mi` is that of the imports, which is not indexed, so its other files
     /// count neither way. None when one of them has no signature to compare, as a class whose plain
     /// base binds `method` has unless it defines `method` itself.
@@ -3365,7 +3383,7 @@ impl<'m> Index<'m> {
             if m == mi {
                 above.iter().any(|a| std::ptr::eq(a, c))
             } else {
-                !self.reaches(m, mi)
+                !self.loads_after(m, mi)
             }
         };
         merged
@@ -4903,6 +4921,55 @@ mod tests {
         assert_eq!(implied("trigger"), []);
         assert_eq!(implied("unindexed"), []);
         assert_eq!(implied("twice"), []);
+    }
+
+    #[test]
+    fn a_seriesless_dependency_reads_in_its_dependents_series() {
+        let modules = [
+            module("base", "{}"),
+            module("lib", "{'version': '1.0'}"),
+            module("old", "{'version': '18.0.1.0.0', 'depends': ['lib', 'base']}"),
+            module("new", "{'version': '20.0.1.0.0', 'depends': ['lib', 'base']}"),
+            module("via", "{'version': '18.0.1.0.0', 'depends': ['lib']}"),
+            module("via20", "{'version': '20.0.1.0.0', 'depends': ['lib']}"),
+            module("bare", "{'depends': ['lib', 'base']}"),
+        ];
+        let index = Index::build(&modules, None);
+        let at = |name: &str| index.by_name[name];
+        assert_eq!(index.implied_depends(at("old")), []);
+        assert_eq!(index.implied_depends(at("new")), [(1, 0)]);
+        assert_eq!(index.implied_depends(at("bare")), [(1, 0)]);
+        assert!(!index.reaches(at("via"), at("base")));
+        assert!(index.reaches(at("via20"), at("base")));
+        let sole: Vec<usize> = index.sole_brought(at("old")).into_iter().map(|(d, _)| d).collect();
+        assert_eq!(sole, [0]);
+        let index = Index::build(&modules, Series::parse("18.0"));
+        let at = |name: &str| index.by_name[name];
+        assert_eq!(index.implied_depends(at("bare")), []);
+        assert_eq!(index.implied_depends(at("new")), [(1, 0)]);
+    }
+
+    #[test]
+    fn base_loads_ahead_of_a_module_whose_depends_never_reach_it() {
+        let modules = [
+            module("aaa", "{'version': '18.0.1.0.0'}"),
+            module("base", "{}"),
+            module("lib", "{'version': '1.0'}"),
+            module("via", "{'version': '18.0.1.0.0', 'depends': ['lib']}"),
+        ];
+        for series in [None, Series::parse("18.0")] {
+            let index = Index::build(&modules, series);
+            let at = |name: &str| index.by_name[name];
+            for name in ["aaa", "via"] {
+                assert!(!index.reaches(at(name), at("base")), "{name} {series:?}");
+                assert!(index.loads_after(at(name), at("base")), "{name} {series:?}");
+                assert!(!index.loads_after(at("base"), at(name)), "{name} {series:?}");
+                let entries = [(at(name), name), (at("base"), "base")];
+                assert_eq!(index.first_loaded(entries), Some((at("base"), "base")), "{series:?}");
+            }
+            assert!(!index.loads_after(at("base"), at("base")));
+            assert!(index.loads_after(at("via"), at("lib")) && !index.loads_after(at("lib"), at("via")));
+        }
     }
 
     #[test]
