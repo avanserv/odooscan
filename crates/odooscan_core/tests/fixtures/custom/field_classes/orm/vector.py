@@ -29,6 +29,6 @@ class Subseries(Series[int]):
     pass
 
 
-# field_classes_dep has a Many2one of this name, so the scan cannot tell which one a call means.
+# orm/mark.py has a Many2one of this name, so the scan cannot tell which one a call means.
 class Mark(fields.Char):
     pass

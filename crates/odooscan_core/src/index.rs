@@ -1255,7 +1255,11 @@ const COUNTRY_GATE: Series = Series { major: 17, minor: 1 };
 /// `base`, and what Odoo always installs with it. `default_series` stands in for a manifest version
 /// without a series, as no checked module is at hand to lend its own.
 /// The manifest `countries` key is ignored on purpose, because Odoo creates a database without reading it.
-fn always_installed(modules: &[Module], by_name: &FxHashMap<&str, usize>, default_series: Option<Series>) -> Vec<bool> {
+pub(crate) fn always_installed(
+    modules: &[Module],
+    by_name: &FxHashMap<&str, usize>,
+    default_series: Option<Series>,
+) -> Vec<bool> {
     let seeds = modules.iter().map(|m| m.name == "base").collect();
     install_closure(modules, by_name, seeds, default_series, |_| true)
 }
@@ -1352,6 +1356,21 @@ fn depends_closure(
         }
     }
     (reached, complete)
+}
+
+/// The modules `seeds` may use: their `depends` closure as `read_depends` reads them by `series`.
+/// Every module `always` marks is seeded with them, as Odoo installs those wherever `base` is; they
+/// are closed under `depends`, so they add no others.
+pub(crate) fn scope_of(
+    modules: &[Module],
+    by_name: &FxHashMap<&str, usize>,
+    always: &[bool],
+    seeds: impl IntoIterator<Item = usize>,
+    series: Option<Series>,
+) -> Vec<bool> {
+    let always = (0..modules.len()).filter(|&mi| always[mi]);
+    let (visible, _) = depends_closure(modules, by_name, seeds.into_iter().chain(always), series);
+    visible
 }
 
 /// Whether each module is a depend, direct or not, of a module whose imports the scan cannot read in full.
@@ -2721,14 +2740,13 @@ impl<'m> Index<'m> {
         found
     }
 
-    /// The modules `module` may use. Every always-installed module is seeded with it, as Odoo
-    /// installs those wherever `base` is; they are closed under `depends`, so they add no others.
+    /// The modules `module` may use, as `scope_of` reads them.
     pub fn scope(&self, module: usize) -> Scope {
-        let always = (0..self.modules.len()).filter(|&mi| self.always_installed(mi));
-        let (visible, _) = depends_closure(
+        let visible = scope_of(
             self.modules,
             &self.by_name,
-            std::iter::once(module).chain(always),
+            &self.always_installed,
+            [module],
             self.default_series,
         );
         Scope {

@@ -542,6 +542,8 @@ custom/field_classes/models/lens.py:49:23: OD210 'embeding': x.lens has no field
 custom/field_classes/models/lens.py:50:23: OD210 'link.missing': res.partner has no field 'missing'
 custom/field_classes/models/lens.py:51:30: OD210 'opaque': x.lens has no field 'opaque'
 custom/field_classes/views/lens_views.xml:7:45: OD312 x.lens has no method 'embedding'
+custom/field_classes_plain/models/handler.py:14:23: OD210 'handler': x.plain.handler has no field 'handler'
+custom/field_classes_plain/models/handler.py:15:30: OD210 'grid': x.plain.handler has no field 'grid'
 custom/field_ids_after/data/refs.xml:9:9: OD301 module field_ids_broken defines no XML id 'field_ids_broken.field_field_ids_gone_name'
 custom/field_ids_after/models/bin.py:18:22: OD301 module field_ids_broken defines no XML id 'field_ids_broken.field_field_ids_gone_name'
 custom/field_ids_away/__manifest__.py:4:17: OD520 module 'base' already comes with 'field_ids_old', also in depends

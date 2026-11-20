@@ -661,7 +661,7 @@ pub struct FieldClass {
     pub name: String,
     /// The field type a base of the ORM's `fields` proves.
     pub ftype: Option<String>,
-    /// The last name of each other base, which only the whole scan can resolve.
+    /// The last name of each other base, which only the scope of a module that calls it can resolve.
     pub bases: Vec<String>,
 }
 
@@ -771,7 +771,7 @@ pub struct PyFacts {
     pub classes: Vec<ClassFact>,
     pub field_classes: Vec<FieldClass>,
     /// The last name of each call a class attribute holds where the class counted it as a method:
-    /// it declares a field instead when the scan finds a field class of that name.
+    /// it declares a field instead when its module's scope holds a field class of that name.
     pub attr_calls: Vec<String>,
     pub controllers: Vec<ControllerFact>,
     /// A route of the file sits in a class whose bases the whole scan may hold, so its routing
