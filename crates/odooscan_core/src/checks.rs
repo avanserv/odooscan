@@ -7132,10 +7132,11 @@ impl<'m> Ctx<'_, 'm> {
 
     /// Whether `model` needs no relation or something may give it `table`: no class of it or of a
     /// model it inherits has a field, `base` apart, so it stores nothing; a class of those
-    /// `creates_view_of` the model; another model, or a field in scope that may be a Many2many,
-    /// has that table; an indexed module creates a view of that name in Python or SQL; or this
-    /// module, not a dependency, creates a view it names at runtime or has a Many2many that may be
-    /// stored in a table the scan cannot name. `table_models` leaves out an abstract model.
+    /// `creates_view_of` the model; another model, or a field in scope that may be a stored
+    /// Many2many, has that table; an indexed module creates a view of that name in Python or SQL;
+    /// this module, not a dependency, creates a view it names at runtime; or a Many2many keeps its
+    /// rows in a table the scan cannot name, as `unread_rows` reads it. `table_models` leaves out an
+    /// abstract model.
     fn view_made(&self, model: &str, table: &str) -> bool {
         let mut chain = self.index.chain_read_from(model, self.scope);
         // Outside the scope a class of `base` may not be installed, so it neither runs its `init()`
@@ -7163,13 +7164,15 @@ impl<'m> Ctx<'_, 'm> {
             || c.methods.iter().any(|m| VIEW_MAKERS.contains(&m.as_str()))
     }
 
-    /// Whether a field of this module's own classes may be a stored Many2many whose table the scan
-    /// cannot name, which may then be any. A dependency's does not count, as `**kwargs` may hide a
-    /// `related` that keeps the field from storing anything.
+    /// Whether a field that may be a Many2many keeps its rows in a table the scan cannot name, which
+    /// may then be any: a field of this module's own classes that Odoo may store, or one in scope
+    /// that it surely stores. A dependency's field Odoo may not store does not count: its `**kwargs`
+    /// may hide a `related`, as `**related_employee_field(...)` does in 20.0
+    /// `addons/hr/models/res_users.py:120` and `:154`, and counting it would silence every dependent.
     fn unread_rows(&self) -> bool {
         let unread = |f: &FieldFact| f.rows.as_ref().is_some_and(|r| r.unread) && f.may_be_stored();
         let classes = self.module.python.iter().flat_map(|f| &f.facts.classes);
-        classes.flat_map(|c| &c.fields).any(unread)
+        classes.flat_map(|c| &c.fields).any(unread) || self.index.stored_unread_rows(self.scope)
     }
 
     /// The view the `init()` of `model` creates, when its text spells the names of the columns. The

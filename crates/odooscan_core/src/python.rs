@@ -7272,6 +7272,30 @@ mod tests {
     }
 
     #[test]
+    fn a_field_is_proven_stored_only_when_nothing_may_unset_store() {
+        for (call, stored) in [
+            ("fields.Many2many('p.q')", true),
+            ("fields.Many2many('p.q', store=True)", true),
+            ("fields.Many2many('p.q', store=STORE)", false),
+            ("fields.Many2many('p.q', store=False)", false),
+            ("fields.Many2many('p.q', related='a.b')", false),
+            ("fields.Many2many('p.q', related=PATH)", false),
+            ("fields.Many2many('p.q', related='')", true),
+            ("fields.Many2many('p.q', compute='_c')", false),
+            ("fields.Many2many('p.q', compute=None)", true),
+            ("fields.Many2many('p.q', related='a.b', store=True)", true),
+            ("fields.Many2many('p.q', store=True, **kw)", false),
+            ("fields.Many2many('p.q', *args)", true),
+        ] {
+            assert_eq!(field(call).proven_stored(), stored, "{call}");
+        }
+        let known = FieldClasses::from_iter([own(pair("Tags", "Many2many"))]);
+        let src = "class X(models.Model):\n    _name = 'x'\n    f = Tags('p.q', store=True)\n";
+        let facts = analyze_with(src, None, &known, &TaintTable::default(), Scope::default());
+        assert!(!facts.classes[0].fields[0].proven_stored());
+    }
+
+    #[test]
     fn only_a_keyword_the_call_may_hide_keeps_a_related_field_stored() {
         let known = FieldClasses::from_iter([
             kind("Pair", UNREAD_TYPE, &["Char", "Many2many"]),

@@ -226,6 +226,17 @@ impl FieldFact {
             None => self.keywords_hidden || !(proven("related") || proven("compute")),
         }
     }
+
+    /// Whether Odoo surely stores the field: the call hides no keyword, and gives a true `store`, or
+    /// none beside no `related` or `compute` that may be true.
+    pub fn proven_stored(&self) -> bool {
+        let unset = |name: &&str| self.option(name).is_none_or(|o| o.value.truth() == Some(false));
+        match self.option("store") {
+            _ if self.keywords_hidden => false,
+            Some(store) => store.value.truth() == Some(true),
+            None => ["related", "compute"].iter().all(unset),
+        }
+    }
 }
 
 /// The fields a literal domain names, and the model it filters.

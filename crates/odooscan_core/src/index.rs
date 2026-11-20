@@ -4009,8 +4009,10 @@ impl<'m> Index<'m> {
         })
     }
 
-    /// Whether a field of a module in `scope` that may be a Many2many keeps its rows in `table`,
-    /// which it names with `relation`, or which Odoo names after the tables of its model and comodel.
+    /// Whether a field of a module in `scope` that may be a stored Many2many keeps its rows in
+    /// `table`, which it names with `relation`, or which Odoo names after the tables of its model and
+    /// comodel. Odoo gives a field it does not store no table (18.0 `odoo/fields.py:4989-5009`, 20.0
+    /// `odoo/orm/fields_relational.py:1318-1340`).
     pub fn relation_table(&self, table: &str, scope: &Scope) -> bool {
         let named = |model: &str, field: &FieldFact| match field.rows.as_ref().and_then(|r| r.table.as_ref()) {
             Some(Rows::Relation(relation)) => relation == table,
@@ -4021,10 +4023,21 @@ impl<'m> Index<'m> {
             }
             None => false,
         };
-        self.models
-            .values()
-            .flatten()
-            .any(|(mi, class)| scope.sees(*mi) && class.fields.iter().any(|f| named(&class.model, f)))
+        self.scoped_fields(scope)
+            .any(|(model, field)| field.may_be_stored() && named(model, field))
+    }
+
+    /// Whether a field of a module in `scope` surely stored keeps its rows in a table the scan cannot
+    /// name, which may then be any.
+    pub fn stored_unread_rows(&self, scope: &Scope) -> bool {
+        self.scoped_fields(scope)
+            .any(|(_, f)| f.rows.as_ref().is_some_and(|r| r.unread) && f.proven_stored())
+    }
+
+    /// The fields of the classes of modules in `scope`, each with the model of its class.
+    fn scoped_fields<'a>(&'a self, scope: &'a Scope) -> impl Iterator<Item = (&'m str, &'m FieldFact)> + 'a {
+        let classes = self.models.values().flatten().filter(|(mi, _)| scope.sees(*mi));
+        classes.flat_map(|(_, class)| class.fields.iter().map(|f| (class.model.as_str(), f)))
     }
 
     /// Whether a class of `model` or of a model it inherits, or an `ir.model.fields` record, in any
