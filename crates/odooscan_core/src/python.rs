@@ -1543,6 +1543,13 @@ struct UnreadClass {
     may_reach_orm: bool,
 }
 
+/// What the header of a class of a file that does not parse says, as `class_fact` reads it.
+struct UnreadHeader {
+    kind: Option<ModelKind>,
+    own_body_names: bool,
+    may_reach_orm: bool,
+}
+
 /// A file that does not parse, walked over its tokens. Each assignment to a `NAMING_ATTRS` name
 /// parses alone, so it reads as the class body of a file that parses does. It parses in place in the file,
 /// as `PyVisitor` hands every offset to a `Locator` of the file, which panics inside a character.
@@ -1553,6 +1560,10 @@ struct UnreadFile<'s, 'a, 'ast> {
     /// The classes whose block is open, by their place in `classes`.
     open: Vec<usize>,
     classes: Vec<UnreadClass>,
+    /// How many blocks enclose each `def` whose block is open.
+    defs: Vec<usize>,
+    /// The end of the last line a compound statement holds its body on, which that statement reads.
+    inline_end: TextSize,
 }
 
 impl UnreadFile<'_, '_, '_> {
@@ -1579,45 +1590,116 @@ impl UnreadFile<'_, '_, '_> {
         let classes = &self.classes;
         let depth = self.depth;
         self.open.retain(|&at| classes[at].depth < depth);
+        self.defs.retain(|&def| def < depth);
     }
 
+    /// Opens a class, which takes the kind of its header as a parsed class does. A body on the
+    /// header line opens no block, and the reader does not see what it binds.
     fn class(&mut self, tokens: &[Token]) {
         let [_, name, ..] = tokens else {
             return;
         };
-        self.open.push(self.classes.len());
+        let header = self.header(tokens);
+        let class_name = self.src[name.range()].to_owned();
+        if let Some(kind) = header.kind {
+            self.visitor.kinds.insert(class_name.clone(), kind);
+        }
+        let opens = opens_block(tokens);
+        if opens {
+            self.open.push(self.classes.len());
+        }
         self.classes.push(UnreadClass {
-            fact: ClassFact::new(self.visitor.loc.pos(name.start()), self.src[name.range()].to_owned()),
-            naming: Naming::default(),
+            fact: ClassFact {
+                kind: header.kind.unwrap_or(ModelKind::Model),
+                ..ClassFact::new(self.visitor.loc.pos(name.start()), class_name)
+            },
+            naming: Naming {
+                own_body_names: header.own_body_names,
+                hidden_naming: !opens,
+                ..Naming::default()
+            },
             depth: self.depth,
             inherit_start: None,
-            may_reach_orm: header_reaches_orm(self.src, tokens),
+            may_reach_orm: header.may_reach_orm,
         });
     }
 
-    fn statement(&mut self, tokens: &[Token]) {
-        if tokens[0].kind() == TokenKind::Class {
-            self.class(tokens);
-        } else {
-            self.attribute(tokens);
+    /// What the header of a `class` statement, from its first token, says once it parses alone. A
+    /// header that does not parse proves no kind and may reach the ORM.
+    fn header(&self, tokens: &[Token]) -> UnreadHeader {
+        let colon = tokens.iter().find(|t| t.kind() == TokenKind::Colon);
+        let header =
+            colon.map(|colon| format!("{}: pass", &self.src[TextRange::new(tokens[0].start(), colon.start())]));
+        let parsed = header.and_then(|header| parse_module(&header).ok());
+        let Some(Stmt::ClassDef(class)) = parsed.as_ref().and_then(|parsed| parsed.suite().first()) else {
+            return UnreadHeader {
+                kind: None,
+                own_body_names: false,
+                may_reach_orm: true,
+            };
+        };
+        let kind = model_kind(class, &self.visitor.kinds);
+        UnreadHeader {
+            kind,
+            own_body_names: self.visitor.own_body_names(class, kind),
+            may_reach_orm: may_reach_orm(class),
         }
     }
 
-    /// Reads an assignment to a `NAMING_ATTRS` name of the class whose body the statement sits in.
+    fn statement(&mut self, tokens: &[Token]) {
+        if tokens[0].start() < self.inline_end {
+            return;
+        }
+        let opens = opens_block(tokens);
+        if tokens[0].kind() == TokenKind::Class {
+            self.class(tokens);
+        } else if starts_def(tokens) {
+            self.defs.extend(opens.then_some(self.depth));
+        } else {
+            self.attribute(tokens);
+        }
+        if starts_compound(tokens[0].kind()) && !opens {
+            let end = tokens
+                .iter()
+                .find(|t| matches!(t.kind(), TokenKind::Newline | TokenKind::EndOfFile));
+            self.inline_end = end.map_or(self.inline_end, Ranged::start);
+        }
+    }
+
+    /// Reads a statement of the innermost class whose block holds it, unless one of its methods
+    /// does. Odoo reads only what the class body binds at its end, so a naming binding the chain
+    /// reader does not take, or that a deeper block makes, hides the name.
     fn attribute(&mut self, tokens: &[Token]) {
-        let body = self.open.last().copied();
-        let Some(at) = body.filter(|&at| self.classes[at].depth + 1 == self.depth) else {
+        let Some(at) = self
+            .open
+            .iter()
+            .rev()
+            .copied()
+            .find(|&at| self.classes[at].depth < self.depth)
+        else {
             return;
         };
+        let depth = self.classes[at].depth;
+        if self.defs.iter().any(|&def| def > depth && def < self.depth) {
+            return;
+        }
+        let read = self.depth == depth + 1 && self.chain(at, tokens);
+        if !read && binds_naming_statement(self.src, tokens) {
+            self.classes[at].naming.hidden_naming = true;
+        }
+    }
+
+    /// Reads a chain of assignments to names, `a = b = value`, that binds a `NAMING_ATTRS` name of
+    /// the class at `at`, and whether it did.
+    fn chain(&mut self, at: usize, tokens: &[Token]) -> bool {
         let pairs = tokens.as_chunks::<2>().0.iter().take_while(|pair| is_target(pair));
         let names = |pair: &&[Token; 2]| NAMING_ATTRS.contains(&&self.src[pair[0].range()]);
         let targets: Vec<_> = pairs.clone().filter(names).map(|pair| pair[0].range()).collect();
         let (Some(value), false) = (tokens.get(pairs.count() * 2), targets.is_empty()) else {
-            return;
+            return false;
         };
-        let ends = |t: &&Token| matches!(t.kind(), TokenKind::Newline | TokenKind::Semi | TokenKind::EndOfFile);
-        let Some(end) = tokens.iter().find(ends) else {
-            return;
+        let Some(end) = tokens.iter().find(|t| ends_statement(t.kind())) else {
+            return false;
         };
         let parsed = parse_expression_range(self.src, TextRange::new(value.start(), end.start()));
         let unparsed = hidden_value(value.range());
@@ -1627,6 +1709,7 @@ impl UnreadFile<'_, '_, '_> {
                 self.assignment(at, target.expr(), value);
             }
         }
+        true
     }
 
     fn assignment(&mut self, at: usize, target: &Expr, value: &Expr) {
@@ -1690,15 +1773,153 @@ pub(crate) fn opens_statement(kind: TokenKind) -> bool {
     )
 }
 
-/// Whether a `class` statement of a file that does not parse, from its first token, may reach the
-/// ORM. A header that does not parse either may.
-fn header_reaches_orm(src: &str, tokens: &[Token]) -> bool {
-    let colon = tokens.iter().find(|t| t.kind() == TokenKind::Colon);
-    let header = colon.map(|colon| format!("{}: pass", &src[TextRange::new(tokens[0].start(), colon.start())]));
-    let parsed = header.and_then(|header| parse_module(&header).ok());
-    match parsed.as_ref().and_then(|parsed| parsed.suite().first()) {
-        Some(Stmt::ClassDef(class)) => may_reach_orm(class),
-        _ => true,
+/// Whether a token of `kind` ends a simple statement.
+fn ends_statement(kind: TokenKind) -> bool {
+    matches!(kind, TokenKind::Newline | TokenKind::Semi | TokenKind::EndOfFile)
+}
+
+/// Whether a statement, from its first token, is a `def` or an `async def`.
+fn starts_def(tokens: &[Token]) -> bool {
+    match tokens {
+        [first, ..] if first.kind() == TokenKind::Def => true,
+        [first, second, ..] => first.kind() == TokenKind::Async && second.kind() == TokenKind::Def,
+        _ => false,
+    }
+}
+
+/// Whether a compound statement, from its first token, ends its line with the colon of its
+/// header, so that an indented block holds its body.
+fn opens_block(tokens: &[Token]) -> bool {
+    let line = tokens
+        .iter()
+        .filter(|t| !t.kind().is_trivia())
+        .take_while(|t| t.kind() != TokenKind::Newline);
+    line.last().is_some_and(|t| t.kind() == TokenKind::Colon)
+}
+
+/// Whether a statement starting with a token of `kind` is compound, so that a colon ends its header.
+fn starts_compound(kind: TokenKind) -> bool {
+    use TokenKind as K;
+    matches!(
+        kind,
+        K::Async
+            | K::Class
+            | K::Def
+            | K::Elif
+            | K::Else
+            | K::Except
+            | K::Finally
+            | K::For
+            | K::If
+            | K::Try
+            | K::While
+            | K::With
+    )
+}
+
+/// Whether a statement binds a `NAMING_BINDINGS` name by its targets or, when compound, by those of
+/// a statement of the body it holds on its header line.
+fn binds_naming_statement(src: &str, tokens: &[Token]) -> bool {
+    if !starts_compound(tokens[0].kind()) {
+        return binds_naming_tokens(src, tokens);
+    }
+    let line = tokens
+        .iter()
+        .position(|t| matches!(t.kind(), TokenKind::Newline | TokenKind::EndOfFile))
+        .unwrap_or(tokens.len());
+    let mut nesting = 0usize;
+    let colon = tokens[..line].iter().position(|t| {
+        nesting = nesting.saturating_add_signed(bracket_step(t.kind()));
+        nesting == 0 && t.kind() == TokenKind::Colon
+    });
+    let Some(colon) = colon else {
+        return false;
+    };
+    (colon + 1..line)
+        .filter(|&at| at == colon + 1 || tokens[at - 1].kind() == TokenKind::Semi)
+        .any(|at| binds_naming_tokens(src, &tokens[at..]))
+}
+
+/// Whether the targets of a statement, before an `=` or an augmented operator outside brackets,
+/// bind a `NAMING_BINDINGS` name whole, alone or in a tuple or list, rather than an item or an
+/// attribute of it. A `lambda` ends them, as its defaults spell `=` too.
+fn binds_naming_tokens(src: &str, tokens: &[Token]) -> bool {
+    let line: Vec<&Token> = tokens
+        .iter()
+        .filter(|t| !t.kind().is_trivia())
+        .take_while(|t| !ends_statement(t.kind()) && t.kind() != TokenKind::Lambda)
+        .collect();
+    // Whether each open bracket groups targets, rather than subscripting or calling.
+    let mut groups = vec![];
+    let mut named = false;
+    for (at, token) in line.iter().enumerate() {
+        let kind = token.kind();
+        step_groups(&mut groups, kind, at.checked_sub(1).map(|prev| line[prev].kind()));
+        named |= !groups.contains(&false) && names_whole(src, &line, at);
+        if groups.is_empty() && kind.as_augmented_assign_operator().is_some() {
+            return named;
+        }
+        if groups.is_empty() && named && kind == TokenKind::Equal {
+            return true;
+        }
+    }
+    false
+}
+
+/// Moves the brackets open in the targets of a statement past a token of `kind` after one of
+/// `prev`. A bracket groups targets unless it follows a value it subscripts or calls; a brace never
+/// does.
+fn step_groups(groups: &mut Vec<bool>, kind: TokenKind, prev: Option<TokenKind>) {
+    match kind {
+        TokenKind::Lpar | TokenKind::Lsqb => groups.push(!prev.is_some_and(ends_value)),
+        TokenKind::Lbrace => groups.push(false),
+        TokenKind::Rpar | TokenKind::Rsqb | TokenKind::Rbrace => {
+            groups.pop();
+        }
+        _ => {}
+    }
+}
+
+/// Whether a token of `kind` may end a value, so that a bracket after it subscripts or calls it.
+fn ends_value(kind: TokenKind) -> bool {
+    use TokenKind as K;
+    matches!(
+        kind,
+        K::Case
+            | K::Complex
+            | K::FStringEnd
+            | K::Float
+            | K::Identifier
+            | K::Int
+            | K::Match
+            | K::Rbrace
+            | K::Rpar
+            | K::Rsqb
+            | K::String
+            | K::TStringEnd
+            | K::Type
+    )
+}
+
+/// Whether the token at `at` is a `NAMING_BINDINGS` name standing whole: not an attribute of a value,
+/// and not a value whose attribute, item or call follows.
+fn names_whole(src: &str, line: &[&Token], at: usize) -> bool {
+    let kind = |at: Option<usize>| at.and_then(|at| line.get(at)).map(|t| t.kind());
+    line[at].kind() == TokenKind::Identifier
+        && NAMING_BINDINGS.contains(&&src[line[at].range()])
+        && kind(at.checked_sub(1)) != Some(TokenKind::Dot)
+        && !matches!(
+            kind(Some(at + 1)),
+            Some(TokenKind::Dot | TokenKind::Lsqb | TokenKind::Lpar)
+        )
+}
+
+/// How far a token moves the bracket nesting.
+fn bracket_step(kind: TokenKind) -> isize {
+    match kind {
+        TokenKind::Lpar | TokenKind::Lsqb | TokenKind::Lbrace => 1,
+        TokenKind::Rpar | TokenKind::Rsqb | TokenKind::Rbrace => -1,
+        _ => 0,
     }
 }
 
@@ -1711,6 +1932,8 @@ fn unread_facts(src: &str, visitor: PyVisitor<'_, '_>) -> PyFacts {
         depth: 0,
         open: vec![],
         classes: vec![],
+        defs: vec![],
+        inline_end: TextSize::default(),
     };
     file.read();
     file.into_facts()
@@ -1860,9 +2083,12 @@ fn hides_naming(stmt: &Stmt) -> bool {
     }
 }
 
+/// The class attributes a binding of which `class_attrs` does not read hides what names the class.
+const NAMING_BINDINGS: [&str; 3] = ["_name", "_inherit", "_register"];
+
 fn binds_naming(target: &Expr) -> bool {
     match target {
-        Expr::Name(n) => matches!(n.id.as_str(), "_name" | "_inherit" | "_register"),
+        Expr::Name(n) => NAMING_BINDINGS.contains(&n.id.as_str()),
         Expr::Tuple(t) => t.elts.iter().any(binds_naming),
         Expr::List(l) => l.elts.iter().any(binds_naming),
         Expr::Starred(s) => binds_naming(&s.value),
@@ -2474,11 +2700,6 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
                 conditional_methods(stmt, &mut fact);
             }
         }
-        // `registered` counts a non-literal `_register` in, which is safe for a class that has a
-        // name but would give one to a class Odoo may leave out of the registry.
-        naming.hidden_naming |= fact
-            .attr("_register")
-            .is_some_and(|r| matches!(r.value, OptionValue::Other));
         for (name, fields) in std::mem::take(&mut naming.terms) {
             match name.as_str() {
                 "_order" | "_fold_name" | "_parent_name" => fact.order_fields.extend(fields),
@@ -2519,6 +2740,11 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
 
     /// `fact` with the model what a class says about it gives, when that gives one.
     fn named_model(&mut self, mut fact: ClassFact, mut naming: Naming, may_reach_orm: bool) -> Option<ClassFact> {
+        // `registered` counts a non-literal `_register` in, which is safe for a class that has a
+        // name but would give one to a class Odoo may leave out of the registry.
+        naming.hidden_naming |= fact
+            .attr("_register")
+            .is_some_and(|r| matches!(r.value, OptionValue::Other));
         naming.registers = fact.registered() && may_reach_orm;
         if naming.registers {
             self.facts.built_model_starts.extend(naming.built_start.take());
@@ -5861,14 +6087,83 @@ class U(HttpCase):
         for body in [
             "import os",
             "_name = 'a'",
-            "class X(models.Model):\n    name = fields.Char()",
-            "class X(models.Model):\n    def f(self):\n        _name = 'a'",
             "class X(models.Model):\n    if True:\n        _name = 'a'",
-            "class X(models.Model):\n    pass\n\n\ndef f():\n    _inherit = 'a'",
-            "class X(models.Model):\n    x = '_name = 1'",
-            "class X(models.Model):\n    _inherit = []",
         ] {
             assert_eq!(unread(body), (vec![], false, vec![]), "{body}");
+        }
+        for body in [
+            "class X(models.Model):\n    name = fields.Char()",
+            "class X(models.Model):\n    def f(self):\n        _name = 'a'",
+            "class X(models.Model):\n    async def f(self):\n        _name = 'a'",
+            "class X(models.Model):\n    pass\n\n\ndef f():\n    _inherit = 'a'",
+            "class X(models.Model):\n    x = '_name = 1'",
+            "class X(models.Model):\n    x = f(_name=1)",
+            "class X(models.Model):\n    x = lambda _name=1: _name",
+            "class X(models.Model):\n    d[_name] = 1",
+            "class X(models.Model):\n    _name.x = 1",
+            "class X(models.Model):\n    x._name = 1",
+            "class X(models.Model):\n    def f(self): x = 1; _name = 'a'",
+            "class X(models.Model):\n    class Inner(object): pass; _name = 'a'",
+            "class X(models.Model):\n    _inherit = []",
+        ] {
+            assert_eq!(unread(body), (vec![("X".to_owned(), true)], false, vec![]), "{body}");
+        }
+    }
+
+    #[test]
+    fn a_file_that_does_not_parse_reads_the_base_kind() {
+        let kind = |header: &str| unparsed(&format!("class X({header}):\n    _name = 'a'")).classes[0].kind;
+        for (header, expected) in [
+            ("models.Model", ModelKind::Model),
+            ("osv.osv", ModelKind::Model),
+            ("models.TransientModel", ModelKind::Transient),
+            ("osv.osv_memory", ModelKind::Transient),
+            ("models.AbstractModel", ModelKind::Abstract),
+            ("osv_abstract", ModelKind::Abstract),
+            ("Mixin, models.TransientModel", ModelKind::Transient),
+            ("Mixin", ModelKind::Model),
+            ("`models.TransientModel`", ModelKind::Model),
+        ] {
+            assert_eq!(kind(header), expected, "{header}");
+        }
+        let src = "class X(models.TransientModel):\n    _name = 'a'\n\n\nclass Y(X):\n    _name = 'b'";
+        assert_eq!(unparsed(src).classes[1].kind, ModelKind::Transient);
+    }
+
+    #[test]
+    fn a_file_that_does_not_parse_names_a_nameless_class_as_its_series_does() {
+        let named = |body: &str, series: &str| {
+            let facts = analyze(&format!("{body}\nprint 'x'\n"), Series::parse(series));
+            let models: Vec<_> = facts.classes.iter().map(|c| c.model.clone()).collect();
+            (models, facts.dynamic_models)
+        };
+        let lamp = |model: &str, dynamic: bool| (vec![model.to_owned()], dynamic);
+        for attrs in ["wattage = fields.Integer()", "_inherit = []"] {
+            let body = format!("class DeskLamp(models.Model):\n    {attrs}");
+            assert_eq!(named(&body, "10.0"), lamp("DeskLamp", false), "{body}");
+            assert_eq!(named(&body, "20.0"), lamp("desk.lamp", false), "{body}");
+            assert_eq!(named(&body, "unknown"), lamp("DeskLamp", true), "{body}");
+        }
+        let derived = "class X(models.Model):\n    _name = 'a'\n\n\nclass Y(X):\n    pass";
+        assert_eq!(named(derived, "10.0"), lamp("a", false));
+        assert_eq!(named(derived, "20.0"), (vec!["a".to_owned(), "y".to_owned()], false));
+        for body in [
+            "class X(Mixin):\n    pass",
+            "class X(object):\n    pass",
+            "class X(models.Model):\n    _register = False",
+            "class X(models.Model):\n    _register = REG",
+            "class X(models.Model):\n    if FLAG:\n        _name = 'a'",
+            "class X(models.Model):\n    for _ in range(1):\n        _inherit = 'a'",
+            "class X(models.Model):\n    while FLAG:\n        _inherit = 'a'",
+            "class X(models.Model):\n    if FLAG: pass; _name = 'a'",
+            "class X(models.Model):\n    (_name, _d) = 'a', 'b'",
+            "class X(`models.Model`):\n    pass",
+            "class X(models.Model):\n    _name, _d = 'a', 'b'",
+            "class X(models.Model):\n    _name: str = 'a'",
+            "class X(models.Model):\n    _inherit += ['a']",
+            "class X(models.Model): pass",
+        ] {
+            assert_eq!(named(body, "10.0"), (vec![], false), "{body}");
         }
     }
 

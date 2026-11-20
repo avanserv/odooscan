@@ -1,0 +1,5 @@
+id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
+access_unread_kinds_wizard,Unread wizard,model_unread_kinds_wizard,,1,1,1,1
+access_unread_kinds_note,Unread note,model_unread_kinds_note,,1,1,1,0
+access_unread_kinds_desk,Unread desk,model_unread_kinds_desk,,1,1,0,0
+access_unread_kinds_lamp,Unread lamp,model_UnreadKindsLamp,base.group_user,1,1,1,1
