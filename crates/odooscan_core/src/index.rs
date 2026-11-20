@@ -6,9 +6,9 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::facts::{
     ActionFact, Annotation, ArchElement, ArchEmptied, ArchSubview, ArchValued, BaseSource, ClassFact, ComponentItem,
-    DataFacts, FieldFact, FlowSummary, Heritage, JsClass, JsFacts, JsName, ModelKind, OptionValue, PropItem, PyFacts,
-    Receiver, RecordWrite, ReportFact, RouteKey, RuleFact, ServerFact, Signature, Static, StaticWrite, UNREAD_TYPE,
-    ViewFact, WrittenValue, mangled,
+    DataFacts, FieldFact, FlowSummary, Heritage, JsClass, JsFacts, JsName, ModelKind, OptionValue, OwlTemplate,
+    PropItem, PyFacts, Receiver, RecordWrite, ReportFact, RouteKey, RuleFact, ServerFact, Signature, Static,
+    StaticWrite, UNREAD_TYPE, ViewFact, WrittenValue, mangled,
 };
 use crate::js::{self, OWL_MODULE};
 use crate::manifest::{AutoInstall, DEPENDS_BASE, OdooReads};
@@ -3235,6 +3235,13 @@ impl<'m> Index<'m> {
         modules.any(|(mi, other)| set[mi] && other.lost_views())
     }
 
+    /// Whether a module of `set` loads a template file the scan cannot read. Its `t-inherit` is
+    /// unread too, so it may extend any template tree.
+    fn loses_templates(&self, set: &[bool]) -> bool {
+        let mut files = self.templates_loaded.iter();
+        files.any(|&(mi, fi)| set[mi] && self.modules[mi].templates[fi].facts.unreadable)
+    }
+
     /// Whether a module of `set` loads a view of one of `models`, a view without one matching None.
     /// Read from the data files the view index reads, so a view without an XML id counts.
     fn has_view_of(&self, set: &[bool], models: &[Option<&str>]) -> bool {
@@ -3250,12 +3257,13 @@ impl<'m> Index<'m> {
     /// Whether a spec of a loaded view or template of `module` locates an element that, of the
     /// modules of `scope`, only those of `set` add to the tree it extends. A spec locating what no
     /// readable view outside `set` adds counts too, when `set` extends the tree with a view whose arch
-    /// the scan did not read, or loads a data file it cannot read that may hold one: Odoo combines
-    /// every extension below the root. A spec on a tree whose way up to the root the index does not
-    /// hold counts, as it may locate what `set` adds, unless it is a view tree whose views the index
-    /// holds all the way up, each naming its parent in a form the scan reads, with an arch it did not
-    /// read on the way: that spec counts only when `set` loads a view of a model on the way, or a
-    /// data file it cannot read that may hold a view.
+    /// the scan did not read, or loads a data file it cannot read that may hold one, or a template
+    /// file it cannot read, which may extend any template tree: Odoo combines every extension below
+    /// the root. A spec on a tree whose way up to the root the index does not hold counts, as it may
+    /// locate what `set` adds, unless it is a view tree whose views the index holds all the way up,
+    /// each naming its parent in a form the scan reads, with an arch it did not read on the way:
+    /// that spec counts only when `set` loads a view of a model on the way, or a data file it cannot
+    /// read that may hold a view.
     pub fn locates_in(&self, module: usize, set: &[bool], scope: &Scope) -> bool {
         let m = &self.modules[module];
         let name = m.name.as_str();
@@ -3265,17 +3273,20 @@ impl<'m> Index<'m> {
         let templates = m.templates.iter().enumerate();
         let templates = templates.filter(|&(fi, _)| self.template_loaded(module, fi));
         let mut templates = templates.flat_map(|(_, f)| &f.facts.templates);
+        let lost_templates = self.loses_templates(set);
         views.any(|v| self.view_locates_in(v, name, set, scope, lost_views))
-            || templates.any(|t| {
-                let Some(parent) = t.inherit.as_ref().filter(|_| !t.arch.locators.is_empty()) else {
-                    return false;
-                };
-                let elements = t.arch.locators.iter().map(|l| l.value.clone()).collect();
-                // A template file that does not parse leaves no mark to tell an unread branch by,
-                // and a template has no model to tell the trees `set` may add to.
-                let sole = self.sole(&self.templates, set, scope, false, parent.value.clone(), elements);
-                sole.unwrap_or(true)
-            })
+            || templates.any(|t| self.template_locates_in(t, set, scope, lost_templates))
+    }
+
+    /// `locates_in` for the template `t`. `lost` says `set` loads a template file the scan cannot
+    /// read, which may extend any tree, as a template has no model to tell the trees it may add to.
+    fn template_locates_in(&self, t: &OwlTemplate, set: &[bool], scope: &Scope, lost: bool) -> bool {
+        let Some(parent) = t.inherit.as_ref().filter(|_| !t.arch.locators.is_empty()) else {
+            return false;
+        };
+        let elements = t.arch.locators.iter().map(|l| l.value.clone()).collect();
+        let sole = self.sole(&self.templates, set, scope, lost, parent.value.clone(), elements);
+        sole.unwrap_or(true)
     }
 
     /// `locates_in` for the view `v` of the module `name`. On a tree whose arch the scan did not read
@@ -6012,6 +6023,57 @@ mod tests {
         let page = format!(r#"<template id="prov_page" inherit_id="base.other_page">{spec}</template>"#);
         assert!(locates(&template, &page, None));
         assert!(!locates(&template, &partner, None));
+    }
+
+    #[test]
+    fn a_template_spec_locates_in_a_set_that_loads_an_unreadable_template() {
+        let file = |text: &str| SourceFile {
+            path: PathBuf::new(),
+            rel: "static/src/a.xml".to_owned(),
+            rank: None,
+            demo: false,
+            facts: crate::owl::analyze(text),
+            suppressions: Default::default(),
+            mentions: Mentions::default(),
+        };
+        let manifest = |name: &str, depends: &str, bundled: bool| {
+            let assets = if bundled {
+                format!("'assets': {{'web.assets_backend': ['{name}/static/src/*.xml']}}")
+            } else {
+                String::new()
+            };
+            format!("{{'version': '18.0.1.0.0', 'depends': [{depends}], {assets}}}")
+        };
+        let extension =
+            |parent: &str, spec: &str| format!(r#"<t t-inherit="{parent}" t-inherit-mode="extension">{spec}</t>"#);
+        // Whether main's spec on `o_smudge_panel` locates in `member`, smudge's file bundled or not
+        // and naming `parent`.
+        let locates = |member: &str, bundled: bool, parent: &str| {
+            let mut modules = [
+                module("web", &manifest("web", "", true)),
+                module("smudge", &manifest("smudge", "'web'", bundled)),
+                module("spark", &manifest("spark", "'web'", true)),
+                module("main", &manifest("main", "'smudge', 'spark'", true)),
+            ];
+            let root = r#"<templates><t t-name="web.Root"><div class="o_root"/></t></templates>"#;
+            modules[0].templates.push(file(root));
+            let unclosed = r#"<xpath expr="//div" position="inside">"#;
+            modules[1].templates.push(file(&extension(parent, unclosed)));
+            let adds = r#"<xpath expr="//div[hasclass('o_root')]" position="inside">"#;
+            let adds = format!(r#"{adds}<div class="o_spark_panel"/></xpath>"#);
+            modules[2].templates.push(file(&extension("web.Root", &adds)));
+            let spec = r#"<xpath expr="//div[hasclass('o_smudge_panel')]" position="inside"><span/></xpath>"#;
+            modules[3].templates.push(file(&extension("web.Root", spec)));
+            let index = Index::build(&modules, None);
+            let main = index.by_name["main"];
+            let set: Vec<bool> = modules.iter().map(|m| m.name == member).collect();
+            index.locates_in(main, &set, &index.scope(main))
+        };
+        assert!(locates("smudge", true, "web.Root"));
+        // The unread file's `t-inherit` is unread too, so it counts for every tree.
+        assert!(locates("smudge", true, "web.Other"));
+        assert!(!locates("spark", true, "web.Root"));
+        assert!(!locates("smudge", false, "web.Root"));
     }
 
     #[test]
