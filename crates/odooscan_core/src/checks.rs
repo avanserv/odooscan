@@ -3026,6 +3026,8 @@ impl<'m> Ctx<'_, 'm> {
                 "template '{}' comes from module {m}, which is not in depends",
                 name.value
             ),
+            // A template file the scan cannot read may define any name.
+            Status::Missing if self.index.lost_templates(self.scope) => return false,
             Status::Missing => format!("no indexed bundle defines template '{}'", name.value),
         };
         out.push(path, "OD605", name.pos, message);
@@ -3106,6 +3108,8 @@ impl<'m> Ctx<'_, 'm> {
             let sees = |m| self.scope.sees(m);
             self.index.templates.tree(root, self.index.modules, sees)
         });
+        // A template file the scan cannot read may extend any tree, its `t-inherit` unread too.
+        let lost = self.index.lost_templates(self.scope);
         for locator in &arch.locators {
             let e = &locator.value;
             if tree.visible.contains(e) {
@@ -3121,6 +3125,7 @@ impl<'m> Ctx<'_, 'm> {
             };
             let message = match tree.hidden.get(e) {
                 Some(m) => format!("{element} is added by module {m}, which is not in depends"),
+                None if lost => continue,
                 None => format!("no {element} in template {} or the templates that extend it", tree.root),
             };
             out.push(path, "OD606", locator.pos, message);
