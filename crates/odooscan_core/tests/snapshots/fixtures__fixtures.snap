@@ -428,6 +428,13 @@ custom/delegate_levels/models/levels.py:32:42: OD207 'middle_rank' is a Integer 
 custom/dependent_introducer/models/lamps.py:5:16: OD201 model 'dependent.lamp' comes from module dependent_introducer_heir, which depends on this module and so loads after it
 custom/dependent_introducer/models/lamps.py:11:16: OD201 no indexed module defines model 'dependent.ghost'
 custom/dependent_introducer/models/lamps.py:20:33: OD201 model 'dependent.socket' comes from module dependent_introducer_heir, which depends on this module and so loads after it
+custom/dependent_introducer/models/lamps.py:27:33: OD201 model 'dependent.socket' comes from module dependent_introducer_heir, which depends on this module and so loads after it
+custom/dependent_introducer/models/lamps.py:28:39: OD203 'parent_id.lamp_glow': field 'lamp_glow' of res.partner comes from module dependent_introducer_heir, which depends on this module and so loads after it
+custom/dependent_introducer/models/lamps.py:29:40: OD203 'parent_id.lamp_shade': field 'lamp_shade' of res.partner comes from module dependent_introducer_side, which is not in depends
+custom/dependent_introducer/models/lamps.py:30:43: OD203 'socket_id.lamp_watts': field 'lamp_watts' of dependent.socket comes from module dependent_introducer_heir, which depends on this module and so loads after it
+custom/dependent_introducer/models/lamps.py:31:54: OD210 'lamp_glow': field 'lamp_glow' of res.partner comes from module dependent_introducer_heir, which depends on this module and so loads after it
+custom/dependent_introducer/models/lamps.py:32:57: OD210 'lamp_shade': field 'lamp_shade' of res.partner comes from module dependent_introducer_side, which is not in depends
+custom/dependent_introducer/models/lamps.py:34:19: OD203 'lamp_glow': field 'lamp_glow' of res.partner comes from module dependent_introducer_heir, which depends on this module and so loads after it
 custom/dependent_introducer/views/partners.xml:4:9: OD309 field 'lamp_glow' of res.partner comes from module dependent_introducer_heir, which depends on this module and so loads after it
 custom/dependent_introducer/views/partners.xml:5:9: OD309 field 'lamp_shade' of res.partner comes from module dependent_introducer_side, which is not in depends
 custom/dependent_introducer/views/partners.xml:12:17: OD304 'lamp_glow': field 'lamp_glow' of res.partner comes from module dependent_introducer_heir, which depends on this module and so loads after it
@@ -457,15 +464,15 @@ custom/domain_bases/models/domain_local.py:44:5: OD226 _auto = False leaves doma
 custom/domain_bases/models/domain_models.py:23:23: OD210 'whole_id.no_past_base': domain.whole has no field 'no_past_base'
 custom/domain_bases/models/domain_models.py:53:30: OD210 'no_chained': domain.chained has no field 'no_chained'
 custom/domain_bases/models/domain_models.py:99:23: OD210 'label.no_past_char': domain.found.label is not a relational field, so the path cannot continue
-custom/domain_bases/models/domain_models.py:100:30: OD210 'side_stamp': field 'side_stamp' of domain.found comes from module domain_bases_side, which is not in depends
+custom/domain_bases/models/domain_models.py:100:30: OD210 'side_stamp': field 'side_stamp' of domain.found comes from module domain_bases_side, which depends on this module and so loads after it
 custom/domain_bases/models/domain_models.py:108:58: OD210 'no_field_domain': domain.whole has no field 'no_field_domain'
 custom/domain_bases/models/domain_models.py:111:23: OD210 'no_search': domain.whole has no field 'no_search'
 custom/domain_bases/models/domain_paths.py:7:39: OD203 'whole_id.no_past_hidden': domain.whole has no field 'no_past_hidden'
 custom/domain_bases/models/domain_paths.py:32:14: OD203 'no_whole_order': domain.whole has no field 'no_whole_order'
 custom/domain_bases/models/domain_paths.py:41:19: OD203 'no_chained_onchange': domain.chained has no field 'no_chained_onchange'
-custom/domain_bases/models/domain_paths.py:48:14: OD203 'side_stamp': field 'side_stamp' of domain.found comes from module domain_bases_side, which is not in depends
+custom/domain_bases/models/domain_paths.py:48:14: OD203 'side_stamp': field 'side_stamp' of domain.found comes from module domain_bases_side, which depends on this module and so loads after it
 custom/domain_bases/models/domain_paths.py:49:26: OD203 'label.no_past_search': domain.found.label is not a relational field, so the path cannot continue
-custom/domain_bases/models/domain_paths.py:51:38: OD203 'side_stamp': field 'side_stamp' of domain.found comes from module domain_bases_side, which is not in depends
+custom/domain_bases/models/domain_paths.py:51:38: OD203 'side_stamp': field 'side_stamp' of domain.found comes from module domain_bases_side, which depends on this module and so loads after it
 custom/domain_bases/models/domain_paths.py:54:18: OD203 'label.no_past_depends': domain.found.label is not a relational field, so the path cannot continue
 custom/domain_bases/models/domain_plain.py:24:30: OD210 'no_fieldless': domain.fieldless has no field 'no_fieldless'
 custom/domain_bases/models/domain_plain.py:33:30: OD210 'stamp': domain.holding has no field 'stamp'

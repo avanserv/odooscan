@@ -32,3 +32,9 @@ class Partner(models.Model):
 
     lamp_glow = fields.Char()
     lamp_shade = fields.Char()
+
+
+class SocketWatts(models.Model):
+    _inherit = "dependent.socket"
+
+    lamp_watts = fields.Integer()
