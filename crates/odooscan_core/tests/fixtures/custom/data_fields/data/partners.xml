@@ -5,4 +5,7 @@
         <field name="x_unloaded" eval="True"/>
         <field name="x_demo" eval="True"/>
     </record>
+    <record id="leaf_unknown_kind" model="data.ticket.leaf">
+        <field name="kind">nope</field>
+    </record>
 </odoo>

@@ -144,6 +144,11 @@
         <field name="ttype">many2one</field>
         <field name="relation">data.ticket</field>
     </record>
+    <record id="field_x_copy_note" model="ir.model.fields">
+        <field name="name">x_copy_note</field>
+        <field name="model_id" ref="model_data_ticket_copy"/>
+        <field name="ttype">char</field>
+    </record>
 
     <record id="base.model_res_partner" model="ir.model">
         <field name="field_id">

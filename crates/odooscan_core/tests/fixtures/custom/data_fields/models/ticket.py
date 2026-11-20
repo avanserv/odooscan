@@ -85,3 +85,41 @@ class DataTicketReport(models.Model):
         self.env.cr.execute(
             "CREATE OR REPLACE VIEW data_ticket_report AS (SELECT t.id, t.x_column AS name FROM data_ticket t)"
         )
+
+
+class DataTicketCopyColumns(models.Model):
+    _inherit = "data.ticket.copy"
+
+    _x_column_index = models.Index("(x_column)")
+    _x_copy_note_index = models.Index("(x_copy_note)")
+
+    def _x_copy_columns(self):
+        return self.env.execute_query(SQL("SELECT c.x_column, c.x_copy_note FROM data_ticket_copy c"))
+
+
+class DataTicketBase(models.Model):
+    _name = "data.ticket.base"
+    _description = "Ticket base"
+
+    kind = fields.Selection([("open", "Open")])
+
+
+class DataTicketMid(models.Model):
+    _name = "data.ticket.mid"
+    _description = "Ticket mid"
+    _inherits = {"data.ticket.base": "base_id"}
+
+    base_id = fields.Many2one("data.ticket.base", required=True, ondelete="cascade")
+
+
+class DataTicketLeaf(models.Model):
+    _name = "data.ticket.leaf"
+    _description = "Ticket leaf"
+    _inherits = {"data.ticket.mid": "mid_id"}
+
+    mid_id = fields.Many2one("data.ticket.mid", required=True, ondelete="cascade")
+
+    _kind_index = models.Index("(kind)")
+
+    def _leaf_kinds(self):
+        return self.env.execute_query(SQL("SELECT l.kind FROM data_ticket_leaf l"))

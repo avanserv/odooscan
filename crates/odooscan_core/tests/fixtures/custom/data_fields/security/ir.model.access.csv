@@ -3,3 +3,6 @@ access_data_ticket,data.ticket,model_data_ticket,base.group_user,1,0,0,0
 access_data_ticket_line,data.ticket.line,model_data_ticket_line,base.group_user,1,0,0,0
 access_data_ticket_copy,data.ticket.copy,model_data_ticket_copy,base.group_user,1,0,0,0
 access_data_ticket_report,data.ticket.report,model_data_ticket_report,base.group_user,1,0,0,0
+access_data_ticket_base,data.ticket.base,model_data_ticket_base,base.group_user,1,0,0,0
+access_data_ticket_mid,data.ticket.mid,model_data_ticket_mid,base.group_user,1,0,0,0
+access_data_ticket_leaf,data.ticket.leaf,model_data_ticket_leaf,base.group_user,1,0,0,0

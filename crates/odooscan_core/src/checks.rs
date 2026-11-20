@@ -3367,7 +3367,7 @@ impl<'m> Ctx<'_, 'm> {
     /// Whether a class has a default for `name` that no `Field` tells: a hook of a parent class whose
     /// model has the field, or the `_defaults` of a series that reads them.
     fn parent_fills(&self, classes: &[(usize, &'m ClassFact)], name: &str) -> bool {
-        let hooked = |c: &ClassFact| fills_on_create(c) && self.index.defines_field(&c.model, name, self.scope);
+        let hooked = |c: &ClassFact| fills_on_create(c) && self.index.defines_field(&c.model, name, self.scope, true);
         let legacy = self.series.is_none_or(|s| s < DEFAULTS_GONE);
         classes
             .iter()
@@ -6387,7 +6387,7 @@ impl<'m> Ctx<'_, 'm> {
     /// What a table lacks for a name no field of `model` in scope has, unless a module outside the
     /// scope defines it or an `ir.model.fields` record adds it.
     fn undefined_column(&self, model: &'m str, name: &str) -> Option<Lack<'m>> {
-        if self.index.defines_field(model, name, self.scope) {
+        if self.index.defines_field(model, name, self.scope, false) {
             return None;
         }
         if let Some((parent, via)) = self.delegated_field(model, name) {
@@ -6395,7 +6395,7 @@ impl<'m> Ctx<'_, 'm> {
         }
         let suggested = format!("{name}_id");
         let stored = matches!(self.column(model, &suggested), Column::Present)
-            && self.index.defines_field(model, &suggested, self.scope);
+            && self.index.defines_field(model, &suggested, self.scope, false);
         Some(Lack::Undefined(stored.then_some(suggested)))
     }
 
@@ -6464,15 +6464,21 @@ impl<'m> Ctx<'_, 'm> {
         !unlogged_at_introduction || self.some_class(model, |c| c.attr("_log_access").is_some() && !unlogged(c))
     }
 
-    /// The model `model` delegates to that has the field `name`, with the field that delegates to
-    /// it, among the `_inherits` entries and `delegate=True` fields of the classes it merges: the
-    /// first whose field the merged `_inherits` may still name, else the first.
+    /// The model `model` delegates to that has the field `name`, by a class or an `ir.model.fields`
+    /// record, with the field that delegates to it, among the `_inherits` entries and
+    /// `delegate=True` fields of the classes it merges: the first whose field the merged `_inherits`
+    /// may still name, else the first.
     fn delegated_field(&self, model: &str, name: &str) -> Option<(&'m str, &'m str)> {
         let classes = self.index.merged_classes(model, self.scope);
         let pairs: Vec<(&'m str, &'m str)> = classes
             .iter()
             .flat_map(|(_, c)| &c.inherits)
-            .filter(|(parent, _)| !self.index.field_defs(parent, name, None).is_empty())
+            .filter(|(parent, _)| {
+                // `defines_field` takes the parent's classes without `_inherits`, so a field a
+                // grandparent declares in Python needs `field_defs`.
+                !self.index.field_defs(parent, name, None).is_empty()
+                    || self.index.defines_field(parent, name, self.scope, true)
+            })
             .map(|(parent, via)| (parent.as_str(), via.as_str()))
             .collect();
         let holds = |&&(_, via): &&(&str, &str)| self.inherits_entry(model, via) != Some(false);
