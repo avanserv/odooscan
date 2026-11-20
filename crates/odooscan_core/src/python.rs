@@ -2322,6 +2322,13 @@ const DOTTED_CLASS_NAME: Series = Series { major: 18, minor: 1 };
 /// class takes its name from that base's attributes.
 const OWN_BODY_NAMING: Series = Series { major: 14, minor: 4 };
 
+/// The first series whose `Field.__set_name__` refuses an owner that is no model (18.0
+/// `odoo/fields.py:388`, 20.0 `odoo/orm/fields.py:403`) and whose setup reads only the
+/// `_field_definitions` of model classes (18.0 `odoo/models.py:3653-3657`, 20.0
+/// `odoo/orm/model_classes.py:395-399`). Before it, setup takes every `Field` member through the
+/// MRO, which an `__init_subclass__` of a plain base may add.
+const MODEL_CLASS_FIELDS: Series = Series { major: 14, minor: 4 };
+
 /// The first series whose metaclass makes no fields of `_columns`, which that of 9.0 to 9.saas~11
 /// still does.
 const COLUMNS_END: Series = Series { major: 10, minor: 0 };
@@ -2549,10 +2556,10 @@ struct Fieldless<'a> {
     binds: Vec<&'a str>,
 }
 
-/// Each class that can give a subclass no field, by name. Only a class at the top of the file
-/// counts, and only until something rebinds its name: a fallback beside an import names a class
-/// the file cannot tell.
-fn fieldless_classes(body: &[Stmt]) -> FxHashMap<&str, Fieldless<'_>> {
+/// Each class that can give a subclass no field on `series`, by name. Only a class at the top of
+/// the file counts, and only until something rebinds its name: a fallback beside an import names a
+/// class the file cannot tell.
+fn fieldless_classes(body: &[Stmt], series: Option<Series>) -> FxHashMap<&str, Fieldless<'_>> {
     let mut classes = FxHashMap::default();
     for stmt in body {
         let mut bound = BoundNames::default();
@@ -2561,7 +2568,7 @@ fn fieldless_classes(body: &[Stmt]) -> FxHashMap<&str, Fieldless<'_>> {
             classes.remove(name);
         }
         if let Stmt::ClassDef(class) = stmt
-            && holds_no_field(class)
+            && holds_no_field(class, series)
         {
             let binds = class_binds(&class.body)
                 .into_iter()
@@ -2600,19 +2607,41 @@ fn binds_init(class: &ast::StmtClassDef) -> bool {
     class_binds(module_state::top_level(&class.body)).contains(&"__init__")
 }
 
-/// Whether a class can give a subclass no field: no base but `object` to get one from, nothing that
-/// runs on creating it, and a body of methods and literals. Any other value may be a field, of a
-/// class the index does not know, and a `_name` or an `_inherit` passes on to the subclass.
-fn holds_no_field(class: &ast::StmtClassDef) -> bool {
+/// Whether a class can give a subclass no field on `series`: no base but `object` to get one from,
+/// nothing that runs on creating it, and a body `no_field_stmt` reads. A `_name`, an `_inherit` or
+/// an `_inherits` may pass on to the subclass: Odoo reads `_inherits` through the MRO (18.0
+/// `odoo/models.py:826-835`, 20.0 `odoo/orm/model_classes.py:291-300`), which reaches the plain
+/// base when it comes before the ORM base.
+fn holds_no_field(class: &ast::StmtClassDef, series: Option<Series>) -> bool {
     let plain = !may_reach_orm(class) && class.decorator_list.is_empty() && !declares_model(class);
-    plain && class.arguments.as_ref().is_none_or(|a| a.keywords.is_empty()) && class.body.iter().all(no_field_stmt)
+    let model_fields = series.is_some_and(|s| s >= MODEL_CLASS_FIELDS);
+    plain
+        && class.arguments.as_ref().is_none_or(|a| a.keywords.is_empty())
+        && !class_binds(&class.body).contains(&"_inherits")
+        && class.body.iter().all(|stmt| no_field_stmt(stmt, model_fields))
 }
 
-fn no_field_stmt(stmt: &Stmt) -> bool {
+/// Whether a statement of a plain class body gives no field. Where only model classes hold fields
+/// (`model_fields`), neither a value nor a method does; before, any value but a literal may be a
+/// field of a class the index does not know, and `__init_subclass__` may add one to the subclass.
+/// An assignment to anything but a name may bind a name `class_binds` cannot see, on any series.
+fn no_field_stmt(stmt: &Stmt, model_fields: bool) -> bool {
     match stmt {
-        Stmt::FunctionDef(_) | Stmt::Pass(_) | Stmt::AnnAssign(ast::StmtAnnAssign { value: None, .. }) => true,
+        Stmt::FunctionDef(func) => model_fields || func.name.as_str() != "__init_subclass__",
+        Stmt::Pass(_) | Stmt::AnnAssign(ast::StmtAnnAssign { value: None, .. }) => true,
         Stmt::Expr(e) => matches!(*e.value, Expr::StringLiteral(_) | Expr::EllipsisLiteral(_)),
-        _ => assigned(stmt).is_some_and(|(_, value)| literal(value)),
+        _ => assigned(stmt)
+            .is_some_and(|(targets, value)| targets.iter().all(names_only) && (model_fields || literal(value))),
+    }
+}
+
+fn names_only(target: &Expr) -> bool {
+    match target {
+        Expr::Name(_) => true,
+        Expr::Tuple(t) => t.elts.iter().all(names_only),
+        Expr::List(l) => l.elts.iter().all(names_only),
+        Expr::Starred(s) => names_only(&s.value),
+        _ => false,
     }
 }
 
@@ -2932,7 +2961,7 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
             scope,
             facts: PyFacts::default(),
             kinds: FxHashMap::default(),
-            fieldless: fieldless_classes(body),
+            fieldless: fieldless_classes(body, series),
             top_bindings: top_bindings(body),
             guarded: vec![],
             holders: GuardHolders::default(),
@@ -6371,6 +6400,36 @@ class U(HttpCase):
             let class = facts.classes.last().unwrap();
             assert_eq!(class.opaque_bases.len(), 1, "{layout}");
             assert!(class.base_methods.is_empty(), "{layout}");
+        }
+    }
+
+    #[test]
+    fn reads_a_plain_base_by_series() {
+        let class = "class X(Layout, models.Model):\n    _name = 'x'\n";
+        let opaque = |layout: &str, series| {
+            let facts = analyze(&format!("{layout}{class}"), Series::parse(series));
+            facts.classes.last().unwrap().opaque_bases.len() == 1
+        };
+        for layout in [
+            "class Layout:\n    sizes = {'a': 1}\n",
+            "class Layout:\n    kinds = {'a', 'b'}\n",
+            "class Layout:\n    log = logging.getLogger(__name__)\n",
+            "class Layout:\n    name = fields.Char()\n",
+            "class Layout:\n    def __init_subclass__(cls, **kwargs):\n        super().__init_subclass__(**kwargs)\n",
+        ] {
+            assert!(!opaque(layout, "saas~14.4"), "{layout}");
+            assert!(opaque(layout, "saas~14.3"), "{layout}");
+            assert!(opaque(layout, ""), "{layout}");
+        }
+        for layout in [
+            "class Layout:\n    _inherits = {'res.partner': 'partner_id'}\n",
+            "class Layout:\n    vars()['action_go'] = go\n",
+            "class Layout:\n    vars()['action_go'] = 'go'\n",
+            "class Layout:\n    size, vars()['action_go'] = 1, 'go'\n",
+        ] {
+            for series in ["saas~14.4", "saas~14.3", ""] {
+                assert!(opaque(layout, series), "{layout} {series}");
+            }
         }
     }
 

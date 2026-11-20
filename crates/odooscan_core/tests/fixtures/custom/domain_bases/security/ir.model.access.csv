@@ -32,3 +32,6 @@ access_domain_module,domain.module,model_domain_module,base.group_user,1,0,0,0
 access_domain_reimported,domain.reimported,model_domain_reimported,base.group_user,1,0,0,0
 access_domain_assigned,domain.assigned,model_domain_assigned,base.group_user,1,0,0,0
 access_domain_shadowed,domain.shadowed,model_domain_shadowed,base.group_user,1,0,0,0
+access_domain_valued,domain.valued,model_domain_valued,base.group_user,1,0,0,0
+access_domain_hooked,domain.hooked,model_domain_hooked,base.group_user,1,0,0,0
+access_domain_delegating,domain.delegating,model_domain_delegating,base.group_user,1,0,0,0

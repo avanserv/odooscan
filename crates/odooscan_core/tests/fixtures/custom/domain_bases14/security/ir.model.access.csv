@@ -1,0 +1,4 @@
+id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
+access_old_valued,old.valued,model_old_valued,base.group_user,1,0,0,0
+access_old_hooked,old.hooked,model_old_hooked,base.group_user,1,0,0,0
+access_old_held,old.held,model_old_held,base.group_user,1,0,0,0

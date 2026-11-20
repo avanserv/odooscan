@@ -1,3 +1,6 @@
+# A library the scan does not read, which may give desk.case.shared an indexed team_id.
+from desk_layouts import Layout
+
 from odoo import fields, models
 
 OWNER_MODEL = "desk.team"
@@ -94,10 +97,6 @@ class DeskCaseReport(models.Model):
     _table_query = "SELECT id, team_id FROM desk_case"
 
     team_id = fields.Many2one("desk.team")
-
-
-class Layout:
-    note = fields.Char()
 
 
 class DeskCaseShared(models.Model, Layout):

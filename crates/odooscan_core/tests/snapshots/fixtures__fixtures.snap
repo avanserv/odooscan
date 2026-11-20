@@ -432,7 +432,10 @@ custom/domain_bases/models/domain_models.py:99:23: OD210 'label.no_past_char': d
 custom/domain_bases/models/domain_models.py:100:30: OD210 'side_stamp': field 'side_stamp' of domain.found comes from module domain_bases_side, which is not in depends
 custom/domain_bases/models/domain_models.py:108:58: OD210 'no_field_domain': domain.whole has no field 'no_field_domain'
 custom/domain_bases/models/domain_models.py:111:23: OD210 'no_search': domain.whole has no field 'no_search'
-custom/domain_bases/models/domain_plain.py:22:30: OD210 'no_fieldless': domain.fieldless has no field 'no_fieldless'
+custom/domain_bases/models/domain_plain.py:24:30: OD210 'no_fieldless': domain.fieldless has no field 'no_fieldless'
+custom/domain_bases/models/domain_plain.py:33:30: OD210 'stamp': domain.holding has no field 'stamp'
+custom/domain_bases/models/domain_plain.py:64:30: OD210 'no_valued': domain.valued has no field 'no_valued'
+custom/domain_bases/models/domain_plain.py:72:30: OD210 'no_hooked': domain.hooked has no field 'no_hooked'
 custom/domain_bases/security/ir.rule.csv:3:1: OD210 'no_csv_rule': domain.whole has no field 'no_csv_rule'
 custom/domain_bases/security/rules.xml:10:36: OD210 'no_xml_rule': domain.whole has no field 'no_xml_rule'
 custom/domain_bases/views/domains.xml:10:9: OD210 'no_action': domain.whole has no field 'no_action'
@@ -443,6 +446,9 @@ custom/domain_bases/views/domains.xml:43:17: OD210 'no_filter_group': domain.who
 custom/domain_bases/views/domains.xml:56:25: OD304 'whole_id.no_view_past_base': domain.whole has no field 'no_view_past_base'
 custom/domain_bases/views/domains.xml:85:17: OD304 'no_chained': domain.chained has no field 'no_chained'
 custom/domain_bases/views/domains.xml:94:17: OD304 'no_fieldless_view': domain.fieldless has no field 'no_fieldless_view'
+custom/domain_bases/views/domains.xml:104:17: OD304 'stamp': domain.holding has no field 'stamp'
+custom/domain_bases15/views/plain.xml:7:17: OD304 'no_valued': plain.valued has no field 'no_valued'
+custom/domain_bases15/views/plain.xml:16:17: OD304 'no_hooked': plain.hooked has no field 'no_hooked'
 custom/domain_bases_outside/models/outside.py:11:43: OD210 'no_outside_whole': domain.whole has no field 'no_outside_whole'
 custom/domain_bases_outside/models/outside.py:12:50: OD210 'hidden_id.stamp': field 'hidden_id' of domain.whole comes from module domain_bases, which is not in depends
 custom/domain_bases_outside/views/views.xml:4:9: OD202 model 'domain.hidden' comes from module domain_bases; add it to depends
@@ -1805,7 +1811,7 @@ custom/unversioned_logs/models/orchard.py:8:5: OD217 drift.orchard sets _parent_
 custom/unversioned_logs/models/orchard.py:11:32: OD220 'title' has the label 'Label' of field 'name' of drift.orchard, so Odoo logs a warning and users cannot tell them apart; give it another string
 custom/unversioned_logs/models/probes.py:39:39: OD224 s.create_uid: drift_sensor has no such column, since drift.sensor.create_uid is not created, as drift.sensor sets _log_access to False; drop it from the query, or log access on the model
 custom/unversioned_logs/models/probes.py:59:58: OD218 'country_id' has delegate=True, so it must be required with ondelete 'cascade' or 'restrict'; give it ondelete="cascade"
-custom/view_modifiers/models/tickets.py:77:17: OD201 no indexed module defines model 'modifier.ghost'
+custom/view_modifiers/models/tickets.py:76:17: OD201 no indexed module defines model 'modifier.ghost'
 custom/view_modifiers/views/chained.xml:7:47: OD316 invisible names 'no_chained_stamp': modifier.chained has no field 'no_chained_stamp'
 custom/view_modifiers/views/chained.xml:18:47: OD316 invisible names 'no_noted_flag': modifier.noted has no field 'no_noted_flag'
 custom/view_modifiers/views/chained.xml:56:47: OD316 invisible names 'no_chained_flag': modifier.ticket has no field 'no_chained_flag'

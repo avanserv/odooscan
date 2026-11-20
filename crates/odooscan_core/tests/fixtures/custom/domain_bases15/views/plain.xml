@@ -1,0 +1,20 @@
+<odoo>
+    <record id="view_plain_valued_form" model="ir.ui.view">
+        <field name="name">plain.valued.form</field>
+        <field name="model">plain.valued</field>
+        <field name="arch" type="xml">
+            <form>
+                <field name="no_valued"/>
+            </form>
+        </field>
+    </record>
+    <record id="view_plain_hooked_form" model="ir.ui.view">
+        <field name="name">plain.hooked.form</field>
+        <field name="model">plain.hooked</field>
+        <field name="arch" type="xml">
+            <form>
+                <field name="no_hooked"/>
+            </form>
+        </field>
+    </record>
+</odoo>
