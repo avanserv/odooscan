@@ -4711,7 +4711,7 @@ impl<'m> Index<'m> {
     /// registry model: see `has_introducer`. A parent only a module outside the scope names is not
     /// there when the reader runs. `base` may have no indexed introducer, so a field a module
     /// outside `depends` adds through `_inherit = 'base'` stays reported as that module's.
-    fn unintroduced_parent_defines(&self, model: &str, field: &str, scope: &Scope) -> bool {
+    pub fn unintroduced_parent_defines(&self, model: &str, field: &str, scope: &Scope) -> bool {
         self.chain(model, Some(scope), true)
             .iter()
             .flat_map(|(_, c)| {
@@ -6324,6 +6324,10 @@ mod tests {
         for model in ["refs.child", "refs.kid"] {
             assert!(index.resolve_path(model, "wick", &scope).is_ok(), "{model}");
             assert!(index.unread_delegate(model, &scope), "{model}");
+            assert!(index.unintroduced_parent_defines(model, "wick", &scope), "{model}");
+        }
+        for model in ["refs.heir", "refs.cub"] {
+            assert!(!index.unintroduced_parent_defines(model, "wick", &scope), "{model}");
         }
         for model in ["ghost.thing", "refs.heir"] {
             assert!(!index.unread_delegate(model, &scope), "{model}");

@@ -33,4 +33,19 @@
             </form>
         </field>
     </record>
+    <record id="refs_kid_wick" model="refs.kid">
+        <field name="wick">lit</field>
+    </record>
+    <record id="refs_child_wick" model="refs.child">
+        <field name="wick">lit</field>
+    </record>
+    <record id="refs_grand_wick" model="refs.grand">
+        <field name="wick">lit</field>
+    </record>
+    <record id="refs_cub_wick" model="refs.cub">
+        <field name="wick">lit</field>
+    </record>
+    <record id="refs_heir_wick" model="refs.heir">
+        <field name="wick">lit</field>
+    </record>
 </odoo>
