@@ -1799,6 +1799,7 @@ custom/signatures_ext/models/bad_signature.py:67:9: OD229 this override requires
 custom/signatures_ext/models/bad_signature.py:86:9: OD229 this override takes no 'line' by position, which _twice(self, order, line) in module signatures requires, so a call that passes it fails
 custom/signatures_ext/models/bad_signature.py:92:9: OD229 this override takes no 'line' by position, which _ordered(self, order, line) in module signatures requires, so a call that passes it fails
 custom/signatures_ext/models/mixed_signature.py:8:9: OD229 this override takes no 'line' by position, which _prepare(self, order, line) in module signatures requires, so a call that passes it fails
+custom/signatures_ext/models/private_signature.py:16:9: OD229 this override takes no 'line' by position, which __stamp(self, order, line) in module signatures requires, so a call that passes it fails
 custom/signatures_side/models/bad_signature.py:14:9: OD229 this override takes no 'order' by position, which __vouch(self, order) in module signatures requires, so a call that passes it fails
 custom/soft_guards/models/soft_partner.py:9:48: OD210 'code': field 'code' of soft.thing comes from module soft_guards_side, which is not in depends
 custom/soft_guards/models/soft_partner.py:46:52: OD210 'code': field 'code' of soft.thing comes from module soft_guards_side, which is not in depends

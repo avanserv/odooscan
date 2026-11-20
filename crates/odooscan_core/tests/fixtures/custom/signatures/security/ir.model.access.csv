@@ -3,3 +3,4 @@ access_bad_signature,bad.signature,model_bad_signature,base.group_user,1,1,1,1
 access_hidden_signature,hidden.signature,model_hidden_signature,base.group_user,1,1,1,1
 access_mixed_signature,mixed.signature,model_mixed_signature,base.group_user,1,1,1,1
 access_starred_signature,starred.signature,model_starred_signature,base.group_user,1,1,1,1
+access_private_signature,private.signature,model_private_signature,base.group_user,1,1,1,1
