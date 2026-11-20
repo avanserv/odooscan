@@ -141,4 +141,14 @@
         <field name="model_id" ref="model_desk_case"/>
         <field name="domain_force">['|', ('company_id', '=', False), ('company_id', 'in', company_ids)]</field>
     </record>
+    <record id="rule_visa_unread_override_replaces" model="ir.rule">
+        <field name="name">Visas by badge</field>
+        <field name="model_id" ref="model_desk_visa"/>
+        <field name="domain_force">[('badge', '=', 'a')]</field>
+    </record>
+    <record id="rule_permit_badge" model="ir.rule">
+        <field name="name">Permits by badge</field>
+        <field name="model_id" ref="model_desk_permit"/>
+        <field name="domain_force">[('badge', '=', 'a')]</field>
+    </record>
 </odoo>

@@ -4,6 +4,7 @@ OWNER_MODEL = "desk.team"
 DELEGATED = True
 BADGE_KEY = "badge_unique"
 SERIAL_KEY = "serial_unique"
+MIN_LEVEL = 1
 
 
 class DeskTeam(models.Model):
@@ -210,3 +211,21 @@ class DeskToken(models.Model):
 
     level = fields.Integer()
     serial = fields.Char()
+
+
+class DeskVisa(models.Model):
+    _name = "desk.visa"
+    _description = "Desk visa"
+    _inherit = ["desk.code.mixin"]
+    _sql_constraints = [("badge_unique", "check(level > %s)" % MIN_LEVEL, "Above the minimum.")]
+
+    level = fields.Integer()
+
+
+class DeskPermit(models.Model):
+    _name = "desk.permit"
+    _description = "Desk permit"
+    _inherit = ["desk.code.mixin"]
+    _sql_constraints = [("badge_unique", "unique(badge, level)", "One per badge and level.")]
+
+    level = fields.Integer()

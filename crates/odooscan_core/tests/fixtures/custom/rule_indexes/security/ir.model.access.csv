@@ -16,3 +16,5 @@ access_desk_badge,desk.badge,model_desk_badge,base.group_user,1,0,0,0
 access_desk_pass,desk.pass,model_desk_pass,base.group_user,1,0,0,0
 access_desk_card,desk.card,model_desk_card,base.group_user,1,0,0,0
 access_desk_token,desk.token,model_desk_token,base.group_user,1,0,0,0
+access_desk_visa,desk.visa,model_desk_visa,base.group_user,1,0,0,0
+access_desk_permit,desk.permit,model_desk_permit,base.group_user,1,0,0,0
