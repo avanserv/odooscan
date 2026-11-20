@@ -437,6 +437,17 @@ fn from_imports(body: &[Stmt]) -> Vec<String> {
         .collect()
 }
 
+/// Whether only a failed import can raise in a body: every top-level statement is an import, or one
+/// that cannot raise (`pass`, a docstring, a literal `__all__`).
+fn only_imports_raise(body: &[Stmt]) -> bool {
+    body.iter().all(|s| match s {
+        Stmt::Import(_) | Stmt::ImportFrom(_) | Stmt::Pass(_) => true,
+        Stmt::Expr(e) => e.value.is_string_literal_expr(),
+        Stmt::Assign(a) => matches!(&a.targets[..], [Expr::Name(n)] if n.id.as_str() == "__all__") && literal(&a.value),
+        _ => false,
+    })
+}
+
 fn under_package(module: &str, package: &str) -> bool {
     module
         .strip_prefix(package)
@@ -1227,6 +1238,22 @@ pub(crate) fn names_error(expr: &Expr, error: &str) -> bool {
         Expr::Tuple(types) => types.iter().any(|t| names_error(t, error)),
         _ => matches!(tail_name(expr), Some(n) if n == error || n == "Exception" || n == "BaseException"),
     }
+}
+
+/// Whether an exception class, or a tuple of them, holds a base of every error.
+fn names_every_error(expr: &Expr) -> bool {
+    match expr {
+        Expr::Tuple(types) => types.iter().any(names_every_error),
+        _ => matches!(tail_name(expr), Some("Exception" | "BaseException")),
+    }
+}
+
+/// Whether a handler runs only once an import of its `try` body failed. One that catches the import
+/// error by name alone does. One that catches every error, bare or through a base alone or in a
+/// tuple, does only where nothing but an import can raise in the body (`quiet_body`).
+fn runs_on_failed_import(handler: &ast::ExceptHandler, quiet_body: bool) -> bool {
+    let ast::ExceptHandler::ExceptHandler(h) = handler;
+    imports::catches_import(handler) && (quiet_body || h.type_.as_deref().is_some_and(|t| !names_every_error(t)))
 }
 
 /// What a `try` proves when it looks something up, catches what the lookup raises and skips from
@@ -5685,8 +5712,8 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
 
     /// Whether the import is a fallback that never runs where it would fail or warn: one of a
     /// removed package behind a `try` that catches the `ImportError`, or any in a handler that runs
-    /// only when the `try` failed to import the replacement. One that still loads warns all the
-    /// same.
+    /// only when the `try` failed to import the replacement, as `runs_on_failed_import` reads it.
+    /// One that still loads warns all the same.
     fn falls_back(&self, row: &api_table::Row, code: &str) -> bool {
         (code == "OD126" && self.import_shims > 0)
             || row
@@ -6188,13 +6215,14 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
         self.visit_body(&t.finalbody);
     }
 
-    /// A handler that catches a failed import runs only where an import of the `try` body failed,
-    /// so it sees what the body imports in `failed_imports`.
+    /// A handler that runs only where an import of the `try` body failed, as `runs_on_failed_import`
+    /// reads it, sees what the body imports in `failed_imports`.
     fn visit_handlers(&mut self, t: &'ast ast::StmtTry) {
         let tried = from_imports(&t.body);
+        let quiet_body = only_imports_raise(&t.body);
         for handler in &t.handlers {
             let depth = self.failed_imports.len();
-            if imports::catches_import(handler) {
+            if runs_on_failed_import(handler, quiet_body) {
                 self.failed_imports.extend(tried.iter().cloned());
             }
             self.visit_except_handler(handler);
@@ -11240,19 +11268,60 @@ env.cr.execute('SELECT a.module FROM t a')
     #[test]
     fn an_import_a_try_of_the_replacement_falls_back_to_is_silent() {
         let handler = |tried: &str, caught: &str| {
-            format!("try:\n{tried}\nexcept {caught}:\n    from odoo.osv import expression\n")
+            let except = format!("except {caught}");
+            format!(
+                "try:\n{tried}\n{}:\n    from odoo.osv import expression\n",
+                except.trim_end()
+            )
         };
         let domain = "    from odoo.fields import Domain";
+        let built = format!("{domain}\n    DOMAIN = build()");
         let after = |tail: &str| {
             format!("try:\n{domain}\nexcept ImportError:\n    pass\n{tail}from odoo.osv import expression\n")
         };
+        let nested = |outer: &str, inner: &str| {
+            format!(
+                "try:\n{outer}\nexcept Exception:\n    try:\n    {inner}\n    except Exception:\n        \
+                 from odoo.osv import expression\n"
+            )
+        };
+        let finally =
+            |handled: &str, last: &str| format!("try:\n{domain}\nexcept Exception:\n{handled}\nfinally:\n{last}\n");
+        let osv = "    from odoo.osv import expression";
+        let silent = [
+            handler(&format!("{domain}\n    import lxml"), "Exception"),
+            handler(
+                &format!("{domain}\n    pass\n    \"\"\"Domain or expression.\"\"\""),
+                "Exception",
+            ),
+            handler(
+                &format!("{domain}\n    __all__ = [\"Domain\", (\"x\", 1)]"),
+                "Exception",
+            ),
+            handler(&built, "ImportError"),
+            handler(&built, "ModuleNotFoundError"),
+            finally(osv, "    pass"),
+            nested(domain, "    x = build()"),
+            nested(&built, domain),
+        ];
         let reported = [
             handler("    from odoo import fields", "ImportError"),
             handler("    if fields:\n        from odoo.fields import Domain", "ImportError"),
             handler("    import lxml", "ImportError"),
             handler(domain, "ValueError"),
+            handler(&built, "Exception"),
+            handler(&built, "BaseException"),
+            handler(&built, ""),
+            handler(&built, "(KeyError, BaseException)"),
+            handler(&built, "(ImportError, Exception)"),
+            handler(&built, "(ModuleNotFoundError, BaseException)"),
+            handler(&format!("{domain}\n    __all__ = names()"), "Exception"),
+            handler(&format!("{domain}\n    __all__ += [\"Domain\"]"), "Exception"),
+            handler(&format!("{domain}\n    f\"{{build()}}\""), "Exception"),
             after("else:\n    "),
             after(""),
+            finally("    pass", osv),
+            nested(&built, &format!("{domain}\n        x = build()")),
         ];
         for (series, code) in [("19.0", "OD125"), ("saas~19.1", "OD126")] {
             for caught in [
@@ -11260,12 +11329,18 @@ env.cr.execute('SELECT a.module FROM t a')
                 "ModuleNotFoundError",
                 "(ImportError, KeyError)",
                 "Exception",
+                "BaseException",
+                "",
+                "(KeyError, Exception)",
             ] {
                 assert_eq!(
                     codes(&handler(domain, caught), Series::parse(series)),
                     [""; 0],
                     "{caught} {series}"
                 );
+            }
+            for src in &silent {
+                assert_eq!(codes(src, Series::parse(series)), [""; 0], "{src} {series}");
             }
             for src in &reported {
                 assert_eq!(codes(src, Series::parse(series)), [code], "{src} {series}");
