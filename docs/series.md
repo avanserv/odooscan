@@ -23,12 +23,12 @@ also count as built at runtime for a class of unknown series with no `_name` and
 empty one, on a proven Odoo base, and with a base that is a model class of its file, a class of its
 file that binds `_name` or `_inherit`, or a class of its file that derives from such a class: the
 scan leaves it unnamed, while saas~14.4 names it after itself. A proven Odoo base is a model class
-the file imports at its top level from `odoo` or `openerp`, or a model class of the file that
-derives from one. Models built at runtime in code outside the top-level `tests/`, a root
-`tests.py`, `examples/`, `migrations/` and `upgrades/` act as with a `_name` given by
-an expression: a model id that no indexed module defines is not reported, [OD201](rules/OD201.md)
-skips a model no indexed module defines, and [OD604](rules/OD604.md) checks no method the module's
-scripts call.
+the file imports from `odoo` or `openerp` by an import bound when the class statement runs, as
+[OD209](rules/OD209.md) describes, or a model class of the file that derives from one. Models built
+at runtime in code outside the top-level `tests/`, a root `tests.py`, `examples/`, `migrations/` and
+`upgrades/` act as with a `_name` given by an expression: a model id that no indexed module defines
+is not reported, [OD201](rules/OD201.md) skips a model no indexed module defines, and
+[OD604](rules/OD604.md) checks no method the module's scripts call.
 
 [OD201](rules/OD201.md), [OD206](rules/OD206.md) and [OD603](rules/OD603.md) stay silent on a model
 no indexed module defines, and [OD202](rules/OD202.md) and OD603 on one only a module missing from

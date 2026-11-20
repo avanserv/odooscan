@@ -1,0 +1,20 @@
+<odoo>
+    <record id="desk_post_view_form" model="ir.ui.view">
+        <field name="name">desk.post.form</field>
+        <field name="model">desk.post</field>
+        <field name="arch" type="xml">
+            <form>
+                <field name="display_name"/>
+            </form>
+        </field>
+    </record>
+    <record id="desk_pin_view_form" model="ir.ui.view">
+        <field name="name">desk.pin.form</field>
+        <field name="model">desk.pin</field>
+        <field name="arch" type="xml">
+            <form>
+                <field name="display_name"/>
+            </form>
+        </field>
+    </record>
+</odoo>

@@ -2,6 +2,7 @@ use std::collections::BTreeSet;
 
 use ruff_python_ast::comparable::ComparableArguments;
 use ruff_python_ast::helpers::any_over_expr;
+use ruff_python_ast::statement_visitor::{self, StatementVisitor};
 use ruff_python_ast::token::{Token, TokenKind};
 use ruff_python_ast::visitor::{self, Visitor};
 use ruff_python_ast::{self as ast, BoolOp, CmpOp, Expr, Operator, Stmt, UnaryOp};
@@ -562,6 +563,20 @@ fn proven_type(base: &Expr, class: &str, imported: &[(String, String)]) -> Optio
         [_, "fields", "Field"] => Some(class.to_owned()),
         [_, "fields", ftype] if FIELD_TYPES.contains(ftype) => Some((*ftype).to_owned()),
         _ => None,
+    }
+}
+
+/// The imports of a module outside any class or function, in any block there, in source order.
+#[derive(Default)]
+struct ModuleImports<'a>(Vec<&'a Stmt>);
+
+impl<'a> StatementVisitor<'a> for ModuleImports<'a> {
+    fn visit_stmt(&mut self, stmt: &'a Stmt) {
+        match stmt {
+            Stmt::Import(_) | Stmt::ImportFrom(_) => self.0.push(stmt),
+            Stmt::FunctionDef(_) | Stmt::ClassDef(_) => {}
+            _ => statement_visitor::walk_stmt(self, stmt),
+        }
     }
 }
 
@@ -2367,6 +2382,9 @@ struct UnreadFile<'s, 'a, 'ast> {
     classes: Vec<UnreadClass>,
     /// How many blocks enclose each `def` whose block is open.
     defs: Vec<usize>,
+    /// Whether the walk reads only the imports outside any class or function, for
+    /// `PyVisitor::module_orm_names`, ahead of the walk that reads the classes.
+    imports_only: bool,
     /// The end of the last line a compound statement holds its body on, which that statement reads.
     inline_end: TextSize,
 }
@@ -2375,6 +2393,17 @@ impl UnreadFile<'_, '_, '_> {
     fn read(&mut self) {
         let parsed = parse_unchecked(self.src, Mode::Module.into());
         let tokens = parsed.tokens();
+        self.imports_only = true;
+        self.walk(tokens);
+        self.visitor.module_orm_names = std::mem::take(&mut self.visitor.orm_names);
+        self.imports_only = false;
+        self.depth = 0;
+        self.defs.clear();
+        self.inline_end = TextSize::default();
+        self.walk(tokens);
+    }
+
+    fn walk(&mut self, tokens: &[Token]) {
         let mut starts = true;
         for (i, token) in tokens.iter().enumerate() {
             match token.kind() {
@@ -2405,7 +2434,16 @@ impl UnreadFile<'_, '_, '_> {
         let [_, name, ..] = tokens else {
             return;
         };
+        // A class in a function is taken to run once the module has, so every import of the module
+        // proves its bases, as for a parsed class.
+        let in_def = !self.defs.is_empty();
+        if in_def {
+            self.visitor.swap_orm_names();
+        }
         let header = self.header(tokens);
+        if in_def {
+            self.visitor.swap_orm_names();
+        }
         let class_name = self.src[name.range()].to_owned();
         self.visitor.record_kind(None, &class_name, header.kind, header.proven);
         let at = self.classes.len();
@@ -2470,10 +2508,10 @@ impl UnreadFile<'_, '_, '_> {
             return;
         }
         let opens = opens_block(tokens);
-        if tokens[0].kind() == TokenKind::Class {
-            self.class(tokens);
-        } else if starts_def(tokens) {
+        if self.opens_scope(tokens) {
             self.defs.extend(opens.then_some(self.depth));
+        } else if tokens[0].kind() == TokenKind::Class {
+            self.class(tokens);
         } else if self.open.is_empty() {
             self.import(tokens);
         } else {
@@ -2487,10 +2525,33 @@ impl UnreadFile<'_, '_, '_> {
         }
     }
 
-    /// Reads an import outside any class or function, which parses alone up to its end, for the
-    /// names it binds from `ORM_PACKAGES`, as `PyVisitor::new` reads those of a file that parses.
+    /// Whether the statement `tokens` starts is a `def`, or a `class` on the walk that reads only
+    /// imports, whose block `defs` keeps.
+    fn opens_scope(&self, tokens: &[Token]) -> bool {
+        starts_def(tokens) || (self.imports_only && tokens[0].kind() == TokenKind::Class)
+    }
+
+    /// Reads the imports `ModuleImports` would give `PyVisitor` of a file that parses, at the
+    /// point a parsed walk reaches them: outside any class or function, alone or in the body a
+    /// one-line compound statement or `case` holds on its header line.
     fn import(&mut self, tokens: &[Token]) {
-        if !self.defs.is_empty() || !matches!(tokens[0].kind(), TokenKind::Import | TokenKind::From) {
+        if !self.defs.is_empty() {
+            return;
+        }
+        let kind = tokens[0].kind();
+        if (starts_compound(kind) || kind == TokenKind::Case) && !opens_block(tokens) {
+            for start in inline_starts(tokens) {
+                self.import_statement(&tokens[start..]);
+            }
+        } else {
+            self.import_statement(tokens);
+        }
+    }
+
+    /// Reads an import from its first token, which parses alone up to its end, for the names it
+    /// binds from `ORM_PACKAGES`.
+    fn import_statement(&mut self, tokens: &[Token]) {
+        if !matches!(tokens[0].kind(), TokenKind::Import | TokenKind::From) {
             return;
         }
         let Some(end) = tokens.iter().find(|t| ends_statement(t.kind())) else {
@@ -2973,6 +3034,7 @@ fn unread_facts(src: &str, visitor: PyVisitor<'_, '_>) -> PyFacts {
         open: vec![],
         classes: vec![],
         defs: vec![],
+        imports_only: false,
         inline_end: TextSize::default(),
     };
     file.read();
@@ -3988,8 +4050,17 @@ struct PyVisitor<'a, 'ast> {
     domain_joins: Vec<&'ast str>,
     /// The names the file binds to a collection of literals at import.
     collections: Vec<&'ast str>,
-    /// The names the file's imports from `ORM_PACKAGES` bind at import, each with its dotted path.
+    /// The names that prove the base of the class the walk is at, each with its dotted path: what
+    /// the imports of `orm_imports` the walk has passed bind from `ORM_PACKAGES`, and inside a
+    /// function `module_orm_names`. A base must be bound when its class statement runs, which at
+    /// module level is once, as the module runs; a function is taken to run once the module has.
     orm_names: Vec<(String, String)>,
+    /// What every import of `orm_imports` binds from `ORM_PACKAGES`, which `swap_orm_names` puts in
+    /// `orm_names` for the body of a function.
+    module_orm_names: Vec<(String, String)>,
+    /// Where each import outside any class or function starts, in any block there, as
+    /// `ModuleImports` gives them.
+    orm_imports: FxHashSet<TextSize>,
     /// The model classes of the file that `orm_base` proves Odoo's, by class name.
     proven_models: FxHashSet<String>,
     /// The classes of the file that bind `_name` or `_inherit` in their body, or derive from one
@@ -4012,6 +4083,8 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
     ) -> Self {
         let top = module_state::top_level(body);
         let odoo_imports = module_state::odoo_names(&top);
+        let mut module_imports = ModuleImports::default();
+        module_imports.visit_body(body);
         Self {
             loc,
             series,
@@ -4052,7 +4125,9 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
                 .is_some_and(|(_, path)| path.ends_with("._")),
             domain_joins: taint::domain_joins(&odoo_imports),
             collections: module_state::collections(&top),
-            orm_names: orm_names(&top),
+            orm_names: vec![],
+            module_orm_names: orm_names(&module_imports.0),
+            orm_imports: module_imports.0.iter().map(|stmt| stmt.start()).collect(),
             proven_models: FxHashSet::default(),
             naming_bases: FxHashSet::default(),
             covered_supers: FxHashSet::default(),
@@ -4146,6 +4221,19 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
             tail_name(base).is_some_and(|b| self.proven_models.contains(b))
                 || imported.is_some_and(|path| path.rsplit('.').next().and_then(orm_kind).is_some())
         })
+    }
+
+    /// Adds what `stmt` binds from `ORM_PACKAGES` to `orm_names` when it is one of `orm_imports`.
+    fn bind_orm_names(&mut self, stmt: &Stmt) {
+        if self.orm_imports.contains(&stmt.start()) {
+            self.orm_names.extend(orm_names(&[stmt]));
+        }
+    }
+
+    /// Swaps `orm_names` and `module_orm_names`, on entering and on leaving a function outside any
+    /// other.
+    fn swap_orm_names(&mut self) {
+        std::mem::swap(&mut self.orm_names, &mut self.module_orm_names);
     }
 
     /// Records the class `name` among the model classes of the file when its header gives it a
@@ -6130,6 +6218,7 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
     fn enter_function(&mut self, func: &'ast ast::StmtFunctionDef, model: bool) -> FunctionState<'ast> {
         let outermost = self.query_vars.is_none();
         let names = if outermost {
+            self.swap_orm_names();
             self.query_vars = Some(QueryVars::of(func));
             std::mem::take(&mut self.holders.names)
         } else {
@@ -6169,6 +6258,7 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
         self.change_check = saved.change_check;
         self.holders.names = saved.names;
         if saved.outermost {
+            self.swap_orm_names();
             self.query_vars = None;
         }
     }
@@ -6259,7 +6349,10 @@ impl<'ast> Visitor<'ast> for PyVisitor<'_, 'ast> {
             Stmt::Try(t) => return self.visit_try(t),
             Stmt::For(f) => return self.visit_for(f, stmt),
             Stmt::Assign(a) => self.session_uid(a),
-            Stmt::Import(_) | Stmt::ImportFrom(_) => self.api_imports(stmt),
+            Stmt::Import(_) | Stmt::ImportFrom(_) => {
+                self.api_imports(stmt);
+                self.bind_orm_names(stmt);
+            }
             _ => {}
         }
         visitor::walk_stmt(self, stmt);
@@ -7267,6 +7360,16 @@ mod tests {
             let src = format!("{head}\nclass V({base}):\n    pass\n");
             assert!(classes(&[src.as_str()]).is_empty(), "{head} {base}");
         }
+    }
+
+    #[test]
+    fn a_field_class_proves_its_type_only_from_a_fields_import_bound_when_it_runs() {
+        let class = "class F(fields.Char):\n    pass\n";
+        let import = "from odoo import fields\n";
+        assert!(classes(&[format!("{class}{import}").as_str()]).is_empty());
+        assert_eq!(classes(&[format!("{import}{class}").as_str()]), [pair("F", "Char")]);
+        let in_def = format!("def load():\n    class F(fields.Char):\n        pass\n{import}");
+        assert_eq!(classes(&[in_def.as_str()]), [pair("F", "Char")]);
     }
 
     #[test]
@@ -9664,6 +9767,40 @@ class U(HttpCase):
         assert_eq!(models(osv, "10.0"), item());
         let named = "from peewee import Model\n\nclass Item(Model):\n    _name = 'x'\n";
         assert_eq!(models(named, "18.0"), [vec!["x".to_owned()], vec!["x".to_owned()]]);
+    }
+
+    #[test]
+    fn proves_a_base_only_from_an_import_bound_when_the_class_statement_runs() {
+        let models = |src: &str| {
+            both_readers(src, Some("18.0")).map(|f| f.classes.iter().map(|c| c.model.clone()).collect::<Vec<_>>())
+        };
+        let class = "class Item(Model):\n    pass\n";
+        let import = "from odoo.models import Model";
+        let below = [
+            format!("{class}\n{import}\n"),
+            format!("{class}\nfor _ in range(1):\n    {import}\n"),
+            format!("class Outer:\n    class Item(Model):\n        pass\n\n{import}\n"),
+        ];
+        for src in below {
+            assert_eq!(models(&src), [Vec::<String>::new(), vec![]], "{src}");
+        }
+        let item = [vec!["Item".to_owned()], vec!["Item".to_owned()]];
+        for src in [
+            format!("try: {import}\nexcept ImportError: Model = object\n\n{class}"),
+            format!("if FLAG: {import}\n\n{class}"),
+            format!("if FLAG: pass\nelse: {import}\n\n{class}"),
+            format!("with ctx(): {import}\n\n{class}"),
+            format!("for _ in range(1):\n    {import}\n\n{class}"),
+            format!("for _ in range(1): {import}\n\n{class}"),
+            format!("while FLAG:\n    {import}\n    break\n\n{class}"),
+            format!("for _ in range(1):\n    pass\nelse:\n    {import}\n\n{class}"),
+            format!("match FLAG:\n    case 1:\n        {import}\n\n{class}"),
+            format!("match FLAG:\n    case 1: {import}\n\n{class}"),
+            format!("def load():\n    class Item(Model):\n        pass\n\n{import}\n"),
+            format!("class Outer:\n    def load(self):\n        class Item(Model):\n            pass\n\n{import}\n"),
+        ] {
+            assert_eq!(models(&src), item, "{src}");
+        }
     }
 
     #[test]
