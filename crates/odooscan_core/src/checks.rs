@@ -12,10 +12,10 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use crate::facts::{
     AccessRow, ActionFact, ActionValue, ActionViewId, Annotation, ArchElement, ArchModifier, ArchSubview, ArchWidget,
     ClassBase, ClassFact, ComponentTag, DataFacts, Definition, DefinitionSource, DomainFact, FieldFact, FieldWrite,
-    Flag, FunctionCall, GuardedRef, JsClass, JsFacts, JsName, MethodDef, Migrate, ModelKind, OptionValue, OrmCall,
-    OwlTemplate, Pos, PyFacts, RawDiag, RecordFact, RecordWrite, Refusal, ReportFact, RouteDef, RouteKey, RuleFact,
-    ServerFact, Signature, Spanned, SqlColumn, SqlView, Subject, TemplateEntry, UNREAD_TYPE, ViewFact, WrittenValue,
-    XmlDef, XmlRef,
+    Flag, FunctionCall, GuardedRef, ImportFact, ImportGuard, JsClass, JsFacts, JsName, MethodDef, Migrate, ModelKind,
+    OptionValue, OrmCall, OwlTemplate, Pos, PyFacts, RawDiag, RecordFact, RecordWrite, Refusal, ReportFact, RouteDef,
+    RouteKey, RuleFact, ServerFact, Signature, Spanned, SqlColumn, SqlView, Subject, TemplateEntry, UNREAD_TYPE,
+    ViewFact, WrittenValue, XmlDef, XmlRef,
 };
 use crate::grants::{self, AttachmentGrant, Grant, Grants};
 use crate::imports::{AddonImport, Fault, Graph};
@@ -2249,9 +2249,8 @@ impl<'m> Ctx<'_, 'm> {
 
     /// OD518 on an import of a module outside `depends` that runs as the module loads, and OD519
     /// on what an import names that its module lacks. Upgrade scripts are no module code, an IoT
-    /// handler runs on the box, and a failed import in a `try` catching it or under a `suppress()`
-    /// that may changes nothing, nor does any import under `if TYPE_CHECKING:`, a function defined
-    /// there included.
+    /// handler runs on the box, nothing under `if TYPE_CHECKING:` runs, a function defined there
+    /// included, and an import under a guard catching `ImportError` is covered for both rules.
     fn addon_imports(&self, out: &mut Out<'m>) {
         for file in &self.module.python {
             let dir = file.rel.split_once('/').map(|(dir, _)| dir);
@@ -2260,20 +2259,28 @@ impl<'m> Ctx<'_, 'm> {
                 continue;
             };
             let loads = dir != Some(IOT_DIR);
-            for fact in imports.list.iter().filter(|f| !f.guarded) {
-                for import in self.index.imports.addon_imports(&file.rel, fact) {
-                    if loads && !fact.deferred && self.outside_depends(&import.addon) {
-                        let message = format!(
-                            "'{}' comes from module {}; add it to depends",
-                            import.text, import.addon
-                        );
-                        out.push(&file.path, "OD518", import.pos, message);
-                    }
-                    for fault in &import.faults {
-                        let (pos, message) = unresolved_import(&import, fault);
-                        out.push(&file.path, "OD519", pos, message);
-                    }
-                }
+            for fact in imports.list.iter().filter(|f| f.guard != ImportGuard::Any) {
+                self.fact_imports(out, file, fact, loads);
+            }
+        }
+    }
+
+    /// OD518 and OD519 on the addon imports of `fact` of `file`. A guard of either kind covers OD518,
+    /// as the module loads either way, but OD519 only on a fault the guard catches: one catching
+    /// only `ModuleNotFoundError` lets a missing name through.
+    fn fact_imports(&self, out: &mut Out<'m>, file: &'m SourceFile<PyFacts>, fact: &ImportFact, loads: bool) {
+        let checks_depends = loads && !fact.deferred && fact.guard == ImportGuard::Unguarded;
+        for import in self.index.imports.addon_imports(&file.rel, fact) {
+            if checks_depends && self.outside_depends(&import.addon) {
+                let message = format!(
+                    "'{}' comes from module {}; add it to depends",
+                    import.text, import.addon
+                );
+                out.push(&file.path, "OD518", import.pos, message);
+            }
+            for fault in import.faults.iter().filter(|f| !f.guarded_by(fact.guard)) {
+                let (pos, message) = unresolved_import(&import, fault);
+                out.push(&file.path, "OD519", pos, message);
             }
         }
     }

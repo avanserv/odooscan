@@ -691,6 +691,8 @@ custom/imports_old/__init__.py:1:53: OD519 'openerp.addons.base.models' does not
 custom/imports_partial/__manifest__.py:5:25: OD503 module 'ghost_enterprise' is not on the addons path
 custom/imports_user/models/guarded.py:22:47: OD519 'odoo.addons.imports_lib.tools' does not define 'shelf_height'
 custom/imports_user/models/guarded.py:23:10: OD518 'odoo.addons.project.models.project' comes from module project; add it to depends
+custom/imports_user/models/guarded.py:26:47: OD519 'odoo.addons.imports_lib.tools' does not define 'shelf_label'
+custom/imports_user/models/guarded.py:31:47: OD519 'odoo.addons.imports_lib.tools' does not define 'shelf_color'
 custom/imports_user/models/reader.py:3:58: OD519 'odoo.addons.imports_lib.models' does not define 'PartnerShelves'
 custom/imports_user/models/reader.py:7:6: OD519 no file of module imports_lib provides 'odoo.addons.imports_lib.wizard'
 custom/imports_user/models/reader.py:8:6: OD518 'odoo.addons.project.models.project' comes from module project; add it to depends
