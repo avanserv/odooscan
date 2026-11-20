@@ -278,6 +278,7 @@ custom/button_delegate/views/delegate.xml:12:39: OD314 res.users has no method '
 custom/button_delegate/views/delegate.xml:13:39: OD314 res.users has no method 'action_contact'
 custom/button_delegate/views/delegate.xml:20:34: OD320 res.users has no method 'action_contcat'
 custom/button_mixin/models/hooks.py:19:17: OD201 no indexed module defines model 'ghost.mixin'
+custom/button_mixin/views/mixin.xml:7:69: OD316 invisible names 'hooked': button.plain has no field 'hooked'
 custom/button_partial/__manifest__.py:4:25: OD503 module 'ghost_enterprise' is not on the addons path
 custom/button_partial/views/partial.xml:8:45: OD313 method '_from_enterprise' of button.visit is private, so Odoo refuses to call it from a button
 custom/button_partial/views/partial.xml:23:36: OD210 'no_partial': button.visit has no field 'no_partial'
@@ -1154,6 +1155,8 @@ custom/record_required/data/creates.xml:26:5: OD324 rr.named.code is required an
 custom/record_required/data/creates.xml:27:5: OD324 rr.legacy.code is required and has no default, so creating this record fails if the column is NOT NULL; give the field a value
 custom/record_required/data/creates.xml:28:5: OD324 rr.legacy.hidden.code is required and has no default, so creating this record fails if the column is NOT NULL; give the field a value
 custom/record_required/data/creates.xml:29:5: OD324 rr.blind.name is required and has no default, so creating this record fails if the column is NOT NULL; give the field a value
+custom/record_required/data/creates.xml:30:5: OD324 rr.chained.stamp is required and has no default, so creating this record fails if the column is NOT NULL; give the field a value
+custom/record_required/data/creates.xml:31:5: OD324 rr.noted.name is required and has no default, so creating this record fails if the column is NOT NULL; give the field a value
 custom/record_required/data/delegates.xml:5:5: OD324 rr.parent.label is required and has no default, so creating this record fails if the column is NOT NULL; give the field a value
 custom/record_required/data/delegates.xml:15:5: OD324 rr.parent.label is required and has no default, so creating this record fails if the column is NOT NULL; give the field a value
 custom/record_required/data/delegates.xml:22:5: OD324 rr.parent.label is required and has no default, so creating this record fails if the column is NOT NULL; give the field a value
@@ -1258,6 +1261,8 @@ custom/record_values/data/references.xml:45:37: OD321 'record_values.parent_1' i
 custom/record_values/data/references.xml:46:29: OD322 rv.thing.state has no value 'zz'
 custom/record_values/data/references.xml:50:37: OD321 'record_values.parent_1' is a record of rv.parent, but rv.thing.other_id takes rv.other
 custom/record_values/data/references.xml:54:44: OD321 'record_values.other_1' is a record of rv.other, but rv.thing.blended_heir_id takes rv.blended.heir
+custom/record_values/data/references.xml:58:37: OD321 'record_values.parent_1' is a record of rv.parent, but rv.chained.other_id takes rv.other
+custom/record_values/data/references.xml:59:29: OD322 rv.chained.state has no value 'zz'
 custom/record_values/data/replaced.xml:4:5: OD323 XML id 'replaced_later' is already defined in data/silent.xml, and this definition overwrites the fields both name; remove the copy when the two say the same thing, or rename one when both are meant to exist
 custom/record_values/data/rv.thing.csv:1:1: OD309 rv.thing has no field 'line_ids/other_id'
 custom/record_values/data/rv.thing.csv:7:1: OD321 'record_values.other_1' is a record of rv.other, but rv.thing.parent_id takes rv.parent
@@ -1277,8 +1282,8 @@ custom/record_values/data/targets.xml:11:5: OD201 no indexed module defines mode
 custom/record_values/data/unloaded.xml:1:1: OD502 'data/unloaded.xml' is not in the manifest's data or demo, so Odoo never loads it
 custom/record_values/demo/rewrites.xml:8:38: OD321 'record_values.other_1' is a record of rv.other, but rv.thing.parent_id takes rv.parent
 custom/record_values/demo/rewrites.xml:9:29: OD322 rv.thing.state has no value 'c'
-custom/record_values/models/things.py:124:31: OD202 model 'rv.side.only' comes from module record_values_side; add it to depends
-custom/record_values/models/things.py:130:50: OD132 _() runs at import, where no language is known, so the text stays untranslated; use _lt(), or a plain string for a field attribute
+custom/record_values/models/things.py:121:31: OD202 model 'rv.side.only' comes from module record_values_side; add it to depends
+custom/record_values/models/things.py:127:50: OD132 _() runs at import, where no language is known, so the text stays untranslated; use _lt(), or a plain string for a field attribute
 custom/record_values_ext/data/extended.xml:12:35: OD321 'record_values.other_1' is a record of rv.other, but rv.thing.new_id takes rv.parent
 custom/record_values_ext/data/extended.xml:13:39: OD321 'record_values.other_1' is a record of rv.other, but rv.thing.retyped_id takes rv.parent
 custom/record_values_ext/data/extended.xml:14:33: OD322 rv.thing.new_state has no value 'zz'
@@ -1800,7 +1805,11 @@ custom/unversioned_logs/models/orchard.py:8:5: OD217 drift.orchard sets _parent_
 custom/unversioned_logs/models/orchard.py:11:32: OD220 'title' has the label 'Label' of field 'name' of drift.orchard, so Odoo logs a warning and users cannot tell them apart; give it another string
 custom/unversioned_logs/models/probes.py:39:39: OD224 s.create_uid: drift_sensor has no such column, since drift.sensor.create_uid is not created, as drift.sensor sets _log_access to False; drop it from the query, or log access on the model
 custom/unversioned_logs/models/probes.py:59:58: OD218 'country_id' has delegate=True, so it must be required with ondelete 'cascade' or 'restrict'; give it ondelete="cascade"
-custom/view_modifiers/models/tickets.py:75:17: OD201 no indexed module defines model 'modifier.ghost'
+custom/view_modifiers/models/tickets.py:77:17: OD201 no indexed module defines model 'modifier.ghost'
+custom/view_modifiers/views/chained.xml:7:47: OD316 invisible names 'no_chained_stamp': modifier.chained has no field 'no_chained_stamp'
+custom/view_modifiers/views/chained.xml:18:47: OD316 invisible names 'no_noted_flag': modifier.noted has no field 'no_noted_flag'
+custom/view_modifiers/views/chained.xml:56:47: OD316 invisible names 'no_chained_flag': modifier.ticket has no field 'no_chained_flag'
+custom/view_modifiers/views/chained.xml:61:21: OD304 'noted_ids.no_noted_column': modifier.noted has no field 'no_noted_column'
 custom/view_modifiers/views/extensions.xml:9:21: OD316 readonly names 'stat': modifier.ticket has no field 'stat'
 custom/view_modifiers/views/extensions.xml:11:50: OD316 invisible names 'stat': modifier.ticket has no field 'stat'
 custom/view_modifiers/views/extensions.xml:12:44: OD315 invalid required expression: Expected an expression

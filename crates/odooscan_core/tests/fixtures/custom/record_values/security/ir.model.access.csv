@@ -11,3 +11,5 @@ access_rv_parent,rv.parent,model_rv_parent,base.group_user,1,0,0,0
 access_rv_child,rv.child,model_rv_child,base.group_user,1,0,0,0
 access_rv_line,rv.line,model_rv_line,base.group_user,1,0,0,0
 access_rv_thing,rv.thing,model_rv_thing,base.group_user,1,0,0,0
+access_rv_stamped,rv.stamped,model_rv_stamped,base.group_user,1,0,0,0
+access_rv_chained,rv.chained,model_rv_chained,base.group_user,1,0,0,0

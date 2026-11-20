@@ -18,6 +18,8 @@
     <record id="thing_by_context" model="rr.thing" context="{'default_name': 'x'}"/>
     <record id="view_on_a_view" model="rr.view"/>
     <record id="hidden_empty" model="rr.hidden"/>
+    <record id="filled_empty" model="rr.filled"/>
+    <record id="holder_empty" model="rr.holder"/>
     <record id="unread_child_empty" model="rr.unread.child"/>
     <record id="hook_default_get" model="rr.hook.default_get"/>
     <record id="hook_create" model="rr.hook.create"/>

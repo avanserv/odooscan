@@ -33,3 +33,9 @@ access_rr_loop_b,rr.loop.b,model_rr_loop_b,base.group_user,1,0,0,0
 access_rr_child_default,rr.child.default,model_rr_child_default,base.group_user,1,0,0,0
 access_rr_grandchild_default,rr.grandchild.default,model_rr_grandchild_default,base.group_user,1,0,0,0
 access_rr_child_shadow,rr.child.shadow,model_rr_child_shadow,base.group_user,1,0,0,0
+access_rr_stamped,rr.stamped,model_rr_stamped,base.group_user,1,0,0,0
+access_rr_chained,rr.chained,model_rr_chained,base.group_user,1,0,0,0
+access_rr_noted,rr.noted,model_rr_noted,base.group_user,1,0,0,0
+access_rr_filled,rr.filled,model_rr_filled,base.group_user,1,0,0,0
+access_rr_held,rr.held,model_rr_held,base.group_user,1,0,0,0
+access_rr_holder,rr.holder,model_rr_holder,base.group_user,1,0,0,0
