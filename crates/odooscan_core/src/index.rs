@@ -3874,10 +3874,10 @@ impl<'m> Index<'m> {
     /// `method`. A parent it delegates to does not count, since `super()` follows the class bases,
     /// which Odoo builds from `_inherit` and `base`. Modules outside the scope count: an override of
     /// a method from a module that is not in depends is called only by that module. A property or
-    /// plain value of `BaseModel` is no parent method: calling it raises `TypeError`.
+    /// plain value of `BaseModel` is no parent method: calling it raises `TypeError`. A class defines
+    /// a `__name` for `except` only under a class name that mangles alike, as Python renames it per class.
     pub fn has_parent_method(&self, model: &str, method: &str, except: &ClassFact, series: Option<Series>) -> bool {
-        let parent =
-            |c: &ClassFact| c.base_binds(method) || (!std::ptr::eq(c, except) && c.methods.iter().any(|m| m == method));
+        let parent = |c: &ClassFact| c.base_binds(method) || defines_for(c, method, except);
         base_parent_method(method, series) || self.chain_classes(model).iter().any(|(_, c)| parent(c))
     }
 
@@ -4355,6 +4355,13 @@ fn mangles_alike(method: &str, a: &str, b: &str) -> bool {
     !method.starts_with("__") || method.ends_with("__") || a.trim_start_matches('_') == b.trim_start_matches('_')
 }
 
+/// Whether `class`, other than `caller`, defines `method` under the name `caller`'s call looks up.
+fn defines_for(class: &ClassFact, method: &str, caller: &ClassFact) -> bool {
+    !std::ptr::eq(class, caller)
+        && mangles_alike(method, &caller.class_name, &class.class_name)
+        && class.methods.iter().any(|m| m == method)
+}
+
 /// What `Index::names_hook` reads: the union of the mentions of every file of `modules` but the
 /// test scripts in `tests`, which run on a mock server.
 fn hook_mentions<'m>(modules: &'m [Module], tests: &Loaded) -> (FxHashSet<&'m str>, Vec<&'m str>) {
@@ -4417,6 +4424,22 @@ mod tests {
         assert!(mangles_alike("_seal", "Foo", "Bar"));
         assert!(mangles_alike("__seal", "__", "_"));
         assert!(!mangles_alike("__seal", "__", "Foo"));
+    }
+
+    #[test]
+    fn a_private_super_call_finds_only_a_class_of_its_name() {
+        let mut modules = [module("base", "{'version': '18.0.1.0'}")];
+        modules[0].python.push(python_18(
+            "class Seal(models.Model):\n    _name = 'seal.box'\n\n    def __seal(self):\n        return 1\n\n    def _seal(self):\n        return 1\n\n\
+             class Other(models.Model):\n    _inherit = 'seal.box'\n\n    def __seal(self):\n        return 2\n\n    def _seal(self):\n        return 2\n\n\
+             class _Seal(models.Model):\n    _inherit = 'seal.box'\n\n    def __seal(self):\n        return 3\n",
+        ));
+        let index = Index::build(&modules, None);
+        let classes = &modules[0].python[0].facts.classes;
+        let series = Series::parse("18.0");
+        assert!(!index.has_parent_method("seal.box", "__seal", &classes[1], series));
+        assert!(index.has_parent_method("seal.box", "__seal", &classes[2], series));
+        assert!(index.has_parent_method("seal.box", "_seal", &classes[1], series));
     }
 
     #[test]
