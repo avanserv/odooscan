@@ -12,4 +12,7 @@
     <record id="holder_refs" model="refs.holder">
         <field name="partner_id" ref="refs_one"/>
     </record>
+    <record id="lantern_one" model="ghost.lantern">
+        <field name="wick">lit</field>
+    </record>
 </odoo>

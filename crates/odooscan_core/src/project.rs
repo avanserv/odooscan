@@ -642,6 +642,38 @@ pub(crate) fn loading(rel: &str) -> Loading {
     }
 }
 
+/// Whether the model classes of a file of a module join its registry build, which takes
+/// `module_to_models[module.name]` alone (18.0 `odoo/modules/registry.py:290`; 20.0
+/// `odoo/orm/registry.py:449`). A test class exists only in a test run, an upgrade script loads
+/// outside `odoo.addons` so its class joins no module's build, and examples are no module code.
+pub(crate) fn builds_models(rel: &str) -> bool {
+    loading(rel) == Loading::Module && rel.split('/').next() != Some("examples")
+}
+
+/// Whether the module code of `module` builds a model name at runtime, so its models and their ids
+/// cannot be listed. Never for `base`: the only models it builds at runtime are the custom ones
+/// `BuiltModels::custom` reads, `x_` names that get no XML id of `base` (18.0
+/// `odoo/addons/base/models/ir_model.py:279`, `:494-500`, `:463-473`, `:482-483`).
+pub(crate) fn names_models_at_runtime(module: &Module) -> bool {
+    module.name != "base"
+        && module
+            .python
+            .iter()
+            .any(|f| builds_models(&f.rel) && f.facts.dynamic_models)
+}
+
+/// Whether the module code of `module` builds `model` at runtime by a whole name it spells or by a
+/// start that holds a dot, the names `BuiltModels::of_scope` takes from a module other than the one
+/// it reads the scope of. Never for `base`, as for `names_models_at_runtime`.
+pub(crate) fn builds_model_name(module: &Module, model: &str) -> bool {
+    let fits = |f: &SourceFile<PyFacts>| {
+        let starts = f.facts.built_model_starts.iter().filter(|s| s.contains('.'));
+        f.facts.built_model_names.iter().any(|n| n == model)
+            || starts.into_iter().any(|s| model.starts_with(s.as_str()))
+    };
+    module.name != "base" && module.python.iter().any(|f| builds_models(&f.rel) && fits(f))
+}
+
 /// The files of `module` that Odoo imports together and not with the module, by file index: its
 /// test files as one group, and each upgrade script alone.
 fn unloaded_groups(module: &Module) -> Vec<Vec<(usize, &SourceFile<PyFacts>)>> {
@@ -1281,6 +1313,19 @@ fn static_file<T>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_module_code_builds_models() {
+        assert!(builds_models("models/a.py"));
+        assert!(builds_models("a.py"));
+        assert!(builds_models("models/examples/a.py"));
+        assert!(!builds_models("tests/common.py"));
+        assert!(!builds_models("tests.py"));
+        assert!(builds_models("models/tests.py"));
+        assert!(!builds_models("examples/a.py"));
+        assert!(!builds_models("migrations/18.0.1.0.0/pre-a.py"));
+        assert!(!builds_models("upgrades/18.0.1.0.0/post-a.py"));
+    }
 
     #[test]
     fn a_file_is_a_test_under_static_tests_or_a_tests_folder_under_static_src() {

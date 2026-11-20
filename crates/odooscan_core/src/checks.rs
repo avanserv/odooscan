@@ -28,7 +28,9 @@ use crate::index::{
 };
 use crate::mentions::HOOK_PREFIXES;
 use crate::module_state::UPGRADE_DIRS;
-use crate::project::{ASSET_EXTENSIONS, Loading, Module, SourceFile, code_loaded, loading};
+use crate::project::{
+    ASSET_EXTENSIONS, Loading, Module, SourceFile, builds_models, code_loaded, loading, names_models_at_runtime,
+};
 use crate::routing::{ClassAt, Endpoint, Origin};
 use crate::rules::{Severity, rule};
 use crate::series::{self, Series};
@@ -346,26 +348,6 @@ pub fn check_module<'m>(index: &Index<'m>, mi: usize, series: Option<Series>) ->
 fn served(rel: &str) -> bool {
     let dir = rel.split('/').next().unwrap_or_default();
     dir != "tests" && !UPGRADE_DIRS.contains(&dir)
-}
-
-/// Whether the model classes of a file of a module join its registry build, which takes
-/// `module_to_models[module.name]` alone (18.0 `odoo/modules/registry.py:290`; 20.0
-/// `odoo/orm/registry.py:449`). A test class exists only in a test run, an upgrade script loads
-/// outside `odoo.addons` so its class joins no module's build, and examples are no module code.
-fn builds_models(rel: &str) -> bool {
-    loading(rel) == Loading::Module && rel.split('/').next() != Some("examples")
-}
-
-/// Whether the module code of `module` builds a model name at runtime, so its models and their ids
-/// cannot be listed. Never for `base`: the only models it builds at runtime are the custom ones
-/// `BuiltModels::custom` reads, `x_` names that get no XML id of `base` (18.0
-/// `odoo/addons/base/models/ir_model.py:279`, `:494-500`, `:463-473`, `:482-483`).
-fn names_models_at_runtime(module: &Module) -> bool {
-    module.name != "base"
-        && module
-            .python
-            .iter()
-            .any(|f| builds_models(&f.rel) && f.facts.dynamic_models)
 }
 
 /// The paths a route spells out, none when it leaves them to the route it overrides or computes
@@ -2396,7 +2378,7 @@ impl<'m> Ctx<'_, 'm> {
             }
             Status::Missing if self.partial || self.may_build(name, self.ahead_built) => {}
             Status::Missing => {
-                let message = late().unwrap_or_else(|| self.missing_model(name));
+                let message = late().unwrap_or_else(|| self.missing_model(name, class));
                 out.push(path, "OD201", model.pos, message);
             }
         }
@@ -2407,12 +2389,27 @@ impl<'m> Ctx<'_, 'm> {
     /// the model. One that depends on this module would make a cycle in `depends`; for `base`, every
     /// other module loads after it, since Odoo loads `base` alone first (18.0
     /// `odoo/modules/loading.py:407-409`, 20.0 `:359-361`).
-    fn missing_model(&self, model: &str) -> String {
+    fn missing_model(&self, model: &str, class: Option<&ClassFact>) -> String {
         match self.index.dependent_introducer(model, self.mi) {
             Some(m) => {
                 format!("model '{model}' comes from module {m}, which depends on this module and so loads after it")
             }
-            None => format!("no indexed module defines model '{model}'"),
+            None => self.undefined_model(model, Some((self.mi, class))),
+        }
+    }
+
+    /// The message for `model` when no class `model_status` counts for `reader` introduces it. Odoo
+    /// refuses to extend a model absent from the registry, and `env[...]` raises `KeyError` for one
+    /// (18.0 `odoo/modules/registry.py:232-234`, 20.0 `odoo/orm/registry.py:392-394`), so a module
+    /// that only extends it is no source to depend on: the message names one, unless only this
+    /// module's own classes or classes `model_status` skips for `reader` hold it. Those keep the
+    /// plain text, since a baseline keys on the message.
+    fn undefined_model(&self, model: &str, reader: Option<(usize, Option<&ClassFact>)>) -> String {
+        match self.index.extender(model, self.mi, reader) {
+            Some(m) if !self.index.has_introducer(model) => {
+                format!("no indexed class introduces model '{model}'; module {m} only extends it")
+            }
+            _ => format!("no indexed module defines model '{model}'"),
         }
     }
 
@@ -2667,8 +2664,7 @@ impl<'m> Ctx<'_, 'm> {
             .filter(|m| m.value.contains('.') && !self.scope_built.fit(&m.value))
         {
             if matches!(self.index.model_status(&model.value, self.scope, None), Status::Missing) {
-                let message = format!("no indexed module defines model '{}'", model.value);
-                out.push(path, "OD206", model.pos, message);
+                out.push(path, "OD206", model.pos, self.undefined_model(&model.value, None));
             }
         }
     }
@@ -2985,7 +2981,7 @@ impl<'m> Ctx<'_, 'm> {
                 format!("model '{}' comes from module {m}, which is not in depends", model.value)
             }
             Status::Missing if !self.may_build(&model.value, self.scope_built) => {
-                format!("no indexed module defines model '{}'", model.value)
+                self.undefined_model(&model.value, None)
             }
             _ => return,
         };
@@ -8000,8 +7996,8 @@ mod tests {
     use rustc_hash::FxHashSet;
 
     use super::{
-        CACHE_KEY_GLOBALS, MEMBER_SERIES, MagicEra, Merged, Paths, REPORT_TAG, Reach, applies, builds_models,
-        bundle_list, cache_global, cached_member, callable_attr, check_module, csv_label, derived_label, exported_text,
+        CACHE_KEY_GLOBALS, MEMBER_SERIES, MagicEra, Merged, Paths, REPORT_TAG, Reach, applies, bundle_list,
+        cache_global, cached_member, callable_attr, check_module, csv_label, derived_label, exported_text,
         fetches_own_view, field_name, has_last_update, hoot_adds, keeps_set, labels_at_end, labels_before_ondelete,
         lacks_domain, lone_add_applied, magic_era, may_label, no_access_message, page_miss, parent_path_children,
         patch_form, public_write_message, qweb_asset_glob, reads_model_access, reads_requires, shadowed_member,
@@ -8123,19 +8119,6 @@ mod tests {
             "code".to_owned()
         ]))));
         assert!(!lacks_domain(Merged::Unknown));
-    }
-
-    #[test]
-    fn only_module_code_builds_models() {
-        assert!(builds_models("models/a.py"));
-        assert!(builds_models("a.py"));
-        assert!(builds_models("models/examples/a.py"));
-        assert!(!builds_models("tests/common.py"));
-        assert!(!builds_models("tests.py"));
-        assert!(builds_models("models/tests.py"));
-        assert!(!builds_models("examples/a.py"));
-        assert!(!builds_models("migrations/18.0.1.0.0/pre-a.py"));
-        assert!(!builds_models("upgrades/18.0.1.0.0/post-a.py"));
     }
 
     #[test]

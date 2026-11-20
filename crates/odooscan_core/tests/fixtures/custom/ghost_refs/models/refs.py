@@ -74,3 +74,11 @@ class RefsCub(models.Model):
     _inherit = ["side.lantern"]
 
     flame = fields.Char(related="glow")
+
+
+class RefsLookup(models.AbstractModel):
+    _name = "refs.lookup"
+    _description = "Refs lookup"
+
+    def _lanterns(self):
+        return self.env["ghost.lantern"], self.env["side.lantern"], self.env["ghost.thing"]
