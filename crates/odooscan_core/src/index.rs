@@ -1407,9 +1407,10 @@ fn unread_dependents(
     marked
 }
 
-/// Module indices in the order Odoo loads them: by depth in the `depends` graph as `read_depends`
-/// reads it by `series`, then by name. The passes end at the deepest module, or at the module count
-/// when a cycle keeps deepening.
+/// Module indices in the order Odoo loads them: `base` first, as Odoo loads it alone before marking
+/// the rest (18.0 `odoo/modules/loading.py:407-409`, `:444`; 20.0 `:359-361`, `:399`), then by depth
+/// in the `depends` graph as `read_depends` reads it by `series`, then by name. The passes end at the
+/// deepest module, or at the module count when a cycle keeps deepening.
 fn load_order(modules: &[Module], by_name: &FxHashMap<&str, usize>, series: Option<Series>) -> Vec<usize> {
     let mut depth = vec![0_usize; modules.len()];
     for _ in modules {
@@ -1425,7 +1426,7 @@ fn load_order(modules: &[Module], by_name: &FxHashMap<&str, usize>, series: Opti
         }
     }
     let mut order: Vec<usize> = (0..modules.len()).collect();
-    order.sort_unstable_by_key(|&mi| (depth[mi], modules[mi].name.as_str()));
+    order.sort_unstable_by_key(|&mi| (modules[mi].name != "base", depth[mi], modules[mi].name.as_str()));
     order
 }
 
@@ -4868,7 +4869,7 @@ mod tests {
     }
 
     #[test]
-    fn an_empty_depends_ranks_after_base_from_saas_18_2() {
+    fn an_empty_depends_reads_as_base_from_saas_18_2() {
         let modules = [module("base", "{}"), module("bare", "{}"), module("aaa", "{}")];
         let closure = |index: &Index, mi: usize| {
             let (reached, complete) = depends_closure(&modules, &index.by_name, [mi], index.default_series);
@@ -4880,14 +4881,23 @@ mod tests {
         for name in ["18.0", "saas~18.1"] {
             let index = Index::build(&modules, Series::parse(name));
             assert_eq!(closure(&index, 1), (vec!["bare"], true), "{name}");
-            assert!(index.loads_before(2, 0) && !index.reaches(1, 0), "{name}");
+            assert!(!index.reaches(1, 0), "{name}");
         }
         for series in [Series::parse("saas~18.2"), Series::parse("20.0"), None] {
             let index = Index::build(&modules, series);
             assert_eq!(closure(&index, 1), (vec!["base", "bare"], true), "{series:?}");
             assert_eq!(closure(&index, 0), (vec!["base"], true), "{series:?}");
-            assert!(index.loads_before(0, 1) && index.loads_before(0, 2), "{series:?}");
             assert!(index.reaches(1, 0) && !index.reaches(0, 1), "{series:?}");
+        }
+        // Odoo loads `base` alone before the rest whatever their `depends` read.
+        for series in ["18.0", "saas~18.1", "saas~18.2", "20.0"]
+            .map(Series::parse)
+            .into_iter()
+            .chain([None])
+        {
+            let index = Index::build(&modules, series);
+            assert!(index.loads_before(0, 2) && index.loads_before(0, 1), "{series:?}");
+            assert!(!index.loads_before(2, 0), "{series:?}");
         }
         // Odoo installs `base` on every database, so leaving it out of the scan loses nothing.
         let unbased = &modules[1..];
@@ -4896,6 +4906,36 @@ mod tests {
             depends_closure(unbased, &by_name, [0], Series::parse("20.0")),
             (vec![true, false], true)
         );
+    }
+
+    #[test]
+    fn base_loads_first_whatever_the_depends_of_the_rest() {
+        let data_file = |id: &str, kind: &str| SourceFile {
+            path: PathBuf::new(),
+            rel: "data/partner.xml".to_owned(),
+            rank: Some(0),
+            demo: false,
+            facts: xml::analyze(
+                &format!(
+                    r#"<odoo><record id="{id}" model="res.partner"><field name="type">{kind}</field></record></odoo>"#
+                ),
+                Series::parse("18.0"),
+            ),
+            suppressions: Default::default(),
+            mentions: Mentions::default(),
+        };
+        let mut modules = [
+            module("base", "{'version': '18.0.1.0.0'}"),
+            module("abc", "{'version': '18.0.1.0.0'}"),
+        ];
+        modules[0].data.push(data_file("partner_root", "contact"));
+        modules[1].data.push(data_file("base.partner_root", "invoice"));
+        for series in [Series::parse("18.0"), Series::parse("saas~18.1"), None] {
+            let index = Index::build(&modules, series);
+            assert!(index.loads_before(0, 1) && !index.loads_before(1, 0), "{series:?}");
+            let order = index.value_writes["base.partner_root"].iter().map(|w| w.module);
+            assert_eq!(order.collect::<Vec<_>>(), [0, 1], "{series:?}");
+        }
     }
 
     #[test]
