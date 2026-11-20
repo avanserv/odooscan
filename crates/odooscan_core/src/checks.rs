@@ -2633,7 +2633,7 @@ impl<'m> Ctx<'_, 'm> {
         for file in &self.module.python {
             let path = file.path.as_path();
             for class in file.facts.classes.iter().filter(|c| !c.unread) {
-                self.class(out, path, class);
+                self.class(out, path, &file.rel, class);
             }
             if !UPGRADE_DIRS.contains(&file.rel.split('/').next().unwrap_or_default()) {
                 self.sql_columns(out, path, &file.facts.sql_columns);
@@ -3132,7 +3132,7 @@ impl<'m> Ctx<'_, 'm> {
         }
     }
 
-    fn class(&self, out: &mut Out<'m>, path: &'m Path, class: &ClassFact) {
+    fn class(&self, out: &mut Out<'m>, path: &'m Path, rel: &str, class: &ClassFact) {
         for parent in &class.inherit {
             self.model_ref(out, path, parent, Some(class));
         }
@@ -3161,15 +3161,18 @@ impl<'m> Ctx<'_, 'm> {
         self.super_calls(out, path, class);
         self.override_signatures(out, path, class);
         self.orphan_hooks(out, path, class);
-        if self.lacks_access(class) {
+        if self.lacks_access(rel, class) {
             out.push(path, "OD401", class.pos, no_access_message(&class.model, self.series));
         }
     }
 
     /// Whether `class` makes a model that needs an access row and has none. A data file the scan
-    /// cannot read may hold that row, in the scope or in a module that depends on this one.
-    fn lacks_access(&self, class: &ClassFact) -> bool {
-        class.new_model
+    /// cannot read may hold that row, in the scope or in a module that depends on this one. A class
+    /// of the top-level `tests/` or a root `tests.py` is imported only for a test run, after Odoo
+    /// has built the module's models, so it never reaches the access check.
+    fn lacks_access(&self, rel: &str, class: &ClassFact) -> bool {
+        loading(rel) != Loading::Tests
+            && class.new_model
             && class.kind != ModelKind::Abstract
             && class.registered()
             && !ignores_access(Some(class.kind), self.series)
@@ -8541,6 +8544,35 @@ mod tests {
         assert_eq!(od230(None), 1);
         assert_eq!(od230(Some(4)), 0, "a module main sees");
         assert_eq!(od230(Some(3)), 0, "a module whose scope holds a class of the model");
+    }
+
+    #[test]
+    fn a_model_class_of_test_code_needs_no_access_row() {
+        let od401 = |rel: &str| {
+            let mut modules = vec![
+                crate::project::module("base", "{}"),
+                crate::project::module("m", "{'version': '18.0.1.0', 'depends': ['base']}"),
+            ];
+            modules[1].python.push(crate::project::SourceFile {
+                path: std::path::PathBuf::new(),
+                rel: rel.to_owned(),
+                rank: None,
+                demo: false,
+                facts: analyze("class C(models.Model):\n    _name = 'm.c'\n", Series::parse("18.0")),
+                suppressions: Default::default(),
+                mentions: Default::default(),
+            });
+            let index = Index::build(&modules, None);
+            let diags = check_module(&index, 1, Series::parse("18.0"));
+            diags.iter().filter(|(_, d)| d.code == "OD401").count()
+        };
+        for rel in ["models/a.py", "a.py", "models/tests/a.py"] {
+            assert_eq!(od401(rel), 1, "{rel}");
+        }
+        // Odoo imports only the top-level `tests` package, and only for a test run.
+        for rel in ["tests/test_a.py", "tests.py"] {
+            assert_eq!(od401(rel), 0, "{rel}");
+        }
     }
 
     #[test]
