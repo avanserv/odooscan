@@ -3070,12 +3070,12 @@ impl<'m> Ctx<'_, 'm> {
     /// Whether a parent of `class` may be out of the index's sight: a plain Python base of this class,
     /// an `_inherit` element that is not a literal in any class of the model or of a model it
     /// inherits, a class in scope in a file that does not parse, a module that is not indexed, a
-    /// model nobody indexes, and for a mixin, every model that inherits it.
+    /// model no class introduces, and for a mixin, every model that inherits it.
     fn hides_parents(&self, class: &ClassFact) -> bool {
         !class.plain_bases.is_empty()
             || self.partial
             || class.kind == ModelKind::Abstract
-            || !self.index.has_model(&class.model)
+            || !self.index.has_introducer(&class.model)
             || self
                 .index
                 .chain_read_from(&class.model, self.scope)
@@ -3217,7 +3217,7 @@ impl<'m> Ctx<'_, 'm> {
         }
         self.model_field(out, path, class, field);
         if let (Some(comodel), Some(inverse)) = (&field.comodel, &field.inverse_name)
-            && index.has_model(&comodel.value)
+            && index.has_introducer(&comodel.value)
         {
             self.setup_path(out, path, &comodel.value, inverse);
             self.inverse(out, path, comodel, inverse);

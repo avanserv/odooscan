@@ -1,0 +1,7 @@
+id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
+access_refs_thing,refs thing,model_refs_thing,base.group_user,1,0,0,0
+access_refs_holder,refs holder,model_refs_holder,base.group_user,1,0,0,0
+access_refs_child,refs child,model_refs_child,base.group_user,1,0,0,0
+access_refs_heir,refs heir,model_refs_heir,base.group_user,1,0,0,0
+access_refs_kid,refs kid,model_refs_kid,base.group_user,1,0,0,0
+access_refs_cub,refs cub,model_refs_cub,base.group_user,1,0,0,0
