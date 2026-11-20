@@ -2368,8 +2368,8 @@ impl UnreadFile<'_, '_, '_> {
         }
         if self.depth == depth + 1 {
             self.member(at, tokens);
-        } else if binds_naming_statement(self.src, tokens) {
-            self.classes[at].naming.hidden_naming = true;
+        } else {
+            self.classes[at].naming.hidden |= binds_naming_statement(self.src, tokens);
         }
     }
 
@@ -2378,8 +2378,13 @@ impl UnreadFile<'_, '_, '_> {
     /// holds, by `del`, or by an augmented assignment, which `augmented` reads.
     fn member(&mut self, at: usize, tokens: &[Token]) {
         let read = !starts_compound(tokens[0].kind()) && self.chain(at, tokens);
-        if !read && binds_naming_statement(self.src, tokens) {
-            self.classes[at].naming.hidden_naming = true;
+        let hidden = if read {
+            HiddenNaming::default()
+        } else {
+            binds_naming_statement(self.src, tokens)
+        };
+        if hidden.any() {
+            self.classes[at].naming.hidden |= hidden;
             self.augmented(at, tokens);
         }
     }
@@ -2434,14 +2439,23 @@ impl UnreadFile<'_, '_, '_> {
             return false;
         };
         let mut names = vec![];
+        let mut hidden = HiddenNaming::default();
         for target in targets {
             match target_name(target, targets.len() == 1) {
                 Some(name) => names.extend(NAMING_ATTRS.contains(&&self.src[name.range()]).then_some(name.range())),
-                None => self.classes[at].naming.hidden_naming |= target_binds_naming(self.src, target),
+                None => hidden |= target_binds_naming(self.src, target),
             }
         }
+        self.read_chain(at, names, value, end);
+        // After `read_chain`, which reads a plain `=` again, as `PyVisitor::class_fact` does.
+        self.classes[at].naming.hidden |= hidden;
+        true
+    }
+
+    /// Reads `value`, up to `end`, into each of `names` of the class at `at`.
+    fn read_chain(&mut self, at: usize, names: Vec<TextRange>, value: &[&Token], end: &Token) {
         if names.is_empty() {
-            return true;
+            return;
         }
         let range = TextRange::new(value.first().map_or(end.start(), |t| t.start()), end.start());
         let parsed = parse_expression_range(self.src, range);
@@ -2452,7 +2466,6 @@ impl UnreadFile<'_, '_, '_> {
                 self.assignment(at, target.expr(), value);
             }
         }
-        true
     }
 
     fn assignment(&mut self, at: usize, target: &Expr, value: &Expr) {
@@ -2537,9 +2550,9 @@ fn target_name<'t>(target: &[&'t Token], alone: bool) -> Option<&'t Token> {
     (name.kind() == TokenKind::Identifier).then_some(*name)
 }
 
-/// Whether a target binds a `NAMING_BINDINGS` name whole, alone or in a tuple or list, rather than
-/// an item or an attribute of it. An annotation binds nothing, so the scan stops at its colon.
-fn target_binds_naming(src: &str, target: &[&Token]) -> bool {
+/// The `NAMING_BINDINGS` names a target binds whole, alone or in a tuple or list, rather than an
+/// item or an attribute of them. An annotation binds nothing, so the scan stops at its colon.
+fn target_binds_naming(src: &str, target: &[&Token]) -> HiddenNaming {
     let mut nesting = 0isize;
     let end = target.iter().position(|t| {
         nesting += bracket_step(t.kind());
@@ -2547,11 +2560,15 @@ fn target_binds_naming(src: &str, target: &[&Token]) -> bool {
     });
     let target = &target[..end.unwrap_or(target.len())];
     let mut groups = vec![];
-    (0..target.len()).any(|at| {
+    let mut hidden = HiddenNaming::default();
+    for at in 0..target.len() {
         let prev = at.checked_sub(1).map(|prev| target[prev].kind());
         step_groups(&mut groups, target[at].kind(), prev);
-        !groups.contains(&false) && names_whole(src, target, at)
-    })
+        if !groups.contains(&false) {
+            hidden |= names_whole(src, target, at);
+        }
+    }
+    hidden
 }
 
 /// Whether the token after one of `kind` starts a statement.
@@ -2606,23 +2623,26 @@ fn starts_compound(kind: TokenKind) -> bool {
     )
 }
 
-/// Whether a statement binds a `NAMING_BINDINGS` name by its targets or, when compound, by those of
-/// its header or of a statement of the body it holds on its header line.
-fn binds_naming_statement(src: &str, tokens: &[Token]) -> bool {
+/// The `NAMING_BINDINGS` names a statement binds by its targets or, when compound, by those of its
+/// header or of a statement of the body it holds on its header line.
+fn binds_naming_statement(src: &str, tokens: &[Token]) -> HiddenNaming {
     if !starts_compound(tokens[0].kind()) {
         return binds_naming_simple(src, tokens);
     }
     let end = header_colon(tokens).unwrap_or_else(|| line_end(tokens));
     let header: Vec<&Token> = tokens[..end].iter().filter(|t| !t.kind().is_trivia()).collect();
-    let mut targets = for_target(&header).into_iter().chain(as_targets(&header));
-    targets.any(|target| target_binds_naming(src, target))
-        || inline_starts(tokens)
-            .into_iter()
-            .any(|at| binds_naming_simple(src, &tokens[at..]))
+    let targets = for_target(&header).into_iter().chain(as_targets(&header));
+    let inline = inline_starts(tokens)
+        .into_iter()
+        .map(|at| binds_naming_simple(src, &tokens[at..]));
+    targets
+        .map(|target| target_binds_naming(src, target))
+        .chain(inline)
+        .collect()
 }
 
-/// Whether a simple statement binds a `NAMING_BINDINGS` name by the targets it assigns or deletes.
-fn binds_naming_simple(src: &str, tokens: &[Token]) -> bool {
+/// The `NAMING_BINDINGS` names a simple statement binds by the targets it assigns or deletes.
+fn binds_naming_simple(src: &str, tokens: &[Token]) -> HiddenNaming {
     let line: Vec<&Token> = tokens
         .iter()
         .filter(|t| !t.kind().is_trivia())
@@ -2698,10 +2718,10 @@ fn inline_starts(tokens: &[Token]) -> Vec<usize> {
         .collect()
 }
 
-/// Whether the targets of a statement, before an `=` or an augmented operator outside brackets,
-/// bind a `NAMING_BINDINGS` name whole, alone or in a tuple or list, rather than an item or an
-/// attribute of it. A `lambda` ends them, as its defaults spell `=` too.
-fn binds_naming_tokens(src: &str, tokens: &[Token]) -> bool {
+/// The `NAMING_BINDINGS` names the targets of a statement, each before an `=` or an augmented
+/// operator outside brackets, bind whole, alone or in a tuple or list, rather than an item or an
+/// attribute of them. A `lambda` ends them, as its defaults spell `=` too.
+fn binds_naming_tokens(src: &str, tokens: &[Token]) -> HiddenNaming {
     let line: Vec<&Token> = tokens
         .iter()
         .filter(|t| !t.kind().is_trivia())
@@ -2709,19 +2729,23 @@ fn binds_naming_tokens(src: &str, tokens: &[Token]) -> bool {
         .collect();
     // Whether each open bracket groups targets, rather than subscripting or calling.
     let mut groups = vec![];
-    let mut named = false;
+    let mut bound = HiddenNaming::default();
+    // What the part since the last `=` names, a target only once an `=` or an operator follows.
+    let mut part = HiddenNaming::default();
     for (at, token) in line.iter().enumerate() {
         let kind = token.kind();
         step_groups(&mut groups, kind, at.checked_sub(1).map(|prev| line[prev].kind()));
-        named |= !groups.contains(&false) && names_whole(src, &line, at);
-        if groups.is_empty() && kind.as_augmented_assign_operator().is_some() {
-            return named;
+        if !groups.contains(&false) {
+            part |= names_whole(src, &line, at);
         }
-        if groups.is_empty() && named && kind == TokenKind::Equal {
-            return true;
+        if groups.is_empty() && kind.as_augmented_assign_operator().is_some() {
+            return bound | part;
+        }
+        if groups.is_empty() && kind == TokenKind::Equal {
+            bound |= std::mem::take(&mut part);
         }
     }
-    false
+    bound
 }
 
 /// Moves the brackets open in the targets of a statement past a token of `kind` after one of
@@ -2759,17 +2783,21 @@ fn ends_value(kind: TokenKind) -> bool {
     )
 }
 
-/// Whether the token at `at` is a `NAMING_BINDINGS` name standing whole: not an attribute of a value,
-/// and not a value whose attribute, item or call follows.
-fn names_whole(src: &str, line: &[&Token], at: usize) -> bool {
+/// The `NAMING_BINDINGS` name the token at `at` is, when it stands whole: not an attribute of a
+/// value, and not a value whose attribute, item or call follows.
+fn names_whole(src: &str, line: &[&Token], at: usize) -> HiddenNaming {
     let kind = |at: Option<usize>| at.and_then(|at| line.get(at)).map(|t| t.kind());
-    line[at].kind() == TokenKind::Identifier
-        && NAMING_BINDINGS.contains(&&src[line[at].range()])
+    let whole = line[at].kind() == TokenKind::Identifier
         && kind(at.checked_sub(1)) != Some(TokenKind::Dot)
         && !matches!(
             kind(Some(at + 1)),
             Some(TokenKind::Dot | TokenKind::Lsqb | TokenKind::Lpar)
-        )
+        );
+    if whole {
+        HiddenNaming::of(&src[line[at].range()])
+    } else {
+        HiddenNaming::default()
+    }
 }
 
 /// How far a token moves the bracket nesting.
@@ -2966,46 +2994,98 @@ fn term_fields<'f>(fact: &'f mut ClassFact, name: &str) -> &'f mut Vec<Spanned<S
     }
 }
 
-/// Whether a statement of a class body binds an attribute that names the class or keeps it out of
-/// the registry where `class_attrs` does not read it: in a tuple, list or starred target, in the
+/// The attributes a statement of a class body binds that name the class or keep it out of the
+/// registry where `class_attrs` does not read them: in a tuple, list or starred target, in the
 /// block or the header of a compound statement, or by `+=` or `del`.
-fn hides_naming(stmt: &Stmt) -> bool {
+fn hides_naming(stmt: &Stmt) -> HiddenNaming {
     match assigned(stmt) {
-        Some((targets, _)) => targets.iter().filter(|t| !t.is_name_expr()).any(binds_naming),
+        Some((targets, _)) => targets.iter().filter(|t| !t.is_name_expr()).map(binds_naming).collect(),
         None => module_state::bound(std::slice::from_ref(stmt))
             .into_iter()
-            .any(binds_naming_in_place),
+            .map(binds_naming_in_place)
+            .collect(),
     }
 }
 
-/// Whether a statement binds a `NAMING_BINDINGS` name where it stands, by a target it assigns or
+/// The `NAMING_BINDINGS` names a statement binds where it stands, by a target it assigns or
 /// deletes, a header target or an `except ... as` name, and not in a block it holds.
-fn binds_naming_in_place(stmt: &Stmt) -> bool {
-    module_state::targets(stmt).into_iter().any(binds_naming) || handler_binds_naming(stmt)
+fn binds_naming_in_place(stmt: &Stmt) -> HiddenNaming {
+    let targets: HiddenNaming = module_state::targets(stmt).into_iter().map(binds_naming).collect();
+    targets | handler_binds_naming(stmt)
 }
 
-fn handler_binds_naming(stmt: &Stmt) -> bool {
+fn handler_binds_naming(stmt: &Stmt) -> HiddenNaming {
     let Stmt::Try(t) = stmt else {
-        return false;
+        return HiddenNaming::default();
     };
-    t.handlers.iter().any(|handler| {
-        let ast::ExceptHandler::ExceptHandler(h) = handler;
-        h.name
-            .as_ref()
-            .is_some_and(|name| NAMING_BINDINGS.contains(&name.as_str()))
-    })
+    t.handlers
+        .iter()
+        .filter_map(|handler| {
+            let ast::ExceptHandler::ExceptHandler(h) = handler;
+            h.name.as_ref().map(|name| HiddenNaming::of(name.as_str()))
+        })
+        .collect()
 }
 
 /// The class attributes a binding of which `class_attrs` does not read hides what names the class.
 const NAMING_BINDINGS: [&str; 3] = ["_name", "_inherit", "_register"];
 
-fn binds_naming(target: &Expr) -> bool {
+/// Which of `NAMING_BINDINGS` a class body binds where neither reader takes the value. Each hides
+/// the name differently, as `PyVisitor::model_name` tells.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct HiddenNaming {
+    name: bool,
+    inherit: bool,
+    register: bool,
+}
+
+impl HiddenNaming {
+    /// The attribute a binding of `binding` hides, none when it is not one of `NAMING_BINDINGS`.
+    fn of(binding: &str) -> Self {
+        let [name, inherit, register] = NAMING_BINDINGS.map(|n| n == binding);
+        Self {
+            name,
+            inherit,
+            register,
+        }
+    }
+
+    fn any(self) -> bool {
+        self.name || self.inherit || self.register
+    }
+}
+
+impl std::ops::BitOr for HiddenNaming {
+    type Output = Self;
+
+    fn bitor(self, other: Self) -> Self {
+        Self {
+            name: self.name || other.name,
+            inherit: self.inherit || other.inherit,
+            register: self.register || other.register,
+        }
+    }
+}
+
+impl std::ops::BitOrAssign for HiddenNaming {
+    fn bitor_assign(&mut self, other: Self) {
+        *self = *self | other;
+    }
+}
+
+impl FromIterator<HiddenNaming> for HiddenNaming {
+    fn from_iter<I: IntoIterator<Item = Self>>(iter: I) -> Self {
+        iter.into_iter().fold(Self::default(), |all, one| all | one)
+    }
+}
+
+fn binds_naming(target: &Expr) -> HiddenNaming {
     match target {
-        Expr::Name(n) => NAMING_BINDINGS.contains(&n.id.as_str()),
-        Expr::Tuple(t) => t.elts.iter().any(binds_naming),
-        Expr::List(l) => l.elts.iter().any(binds_naming),
+        Expr::Name(n) => HiddenNaming::of(n.id.as_str()),
+        Expr::Tuple(t) => t.elts.iter().map(binds_naming).collect(),
+        Expr::List(l) => l.elts.iter().map(binds_naming).collect(),
         Expr::Starred(s) => binds_naming(&s.value),
-        _ => false,
+        _ => HiddenNaming::default(),
     }
 }
 
@@ -3059,10 +3139,10 @@ struct Naming {
     /// class for which it holds through that base; the scan does not follow it and gives the class
     /// no name.
     own_body_names: bool,
-    /// The body binds `_name`, `_inherit` or `_register` where the scan does not read it, or sets
-    /// `_register` to a value only a run tells, which may name the class otherwise or keep it out
-    /// of the registry.
-    hidden_naming: bool,
+    /// What the body binds of `_name`, `_inherit` or `_register` where the scan does not read it,
+    /// with `_register` set to a value only a run tells, which may name the class otherwise or keep
+    /// it out of the registry. A later plain `=` to `_name` or `_inherit` reads that one again.
+    hidden: HiddenNaming,
     inherit: InheritShape,
     /// The last `_columns` hides a key. Waits here for the name: `_inherit` assigns `inherit_unknown`,
     /// in any order in the class, and the name reads that flag for what `_inherit` lists.
@@ -3096,14 +3176,23 @@ impl Naming {
         self.built_start = Some(start.unwrap_or_default());
     }
 
+    /// Whether Odoo names the class from its own body. A hidden `_inherit` does not stop it, as a
+    /// falsy `_name` from saas~18.1 names the class whatever `_inherit` holds, while
+    /// `PyVisitor::model_name` gives a class without `_name` no name when `_inherit` is hidden.
     fn named_after_class(&self) -> bool {
-        self.own_body_names && self.registers && !self.hidden_naming
+        self.own_body_names && self.shows_name()
     }
 
     /// Whether a series from saas~14.4 names the class from its own body while an earlier one reads
-    /// its name through a base of its file.
+    /// its name through a base of its file, as far as `named_after_class` tells.
     fn named_by_file_base(&self) -> bool {
-        self.file_model_base && self.registers && !self.hidden_naming
+        self.file_model_base && self.shows_name()
+    }
+
+    /// Whether Odoo registers the class under a name its body may hold: neither `_name` nor
+    /// `_register` is hidden.
+    fn shows_name(&self) -> bool {
+        self.registers && !self.hidden.name && !self.hidden.register
     }
 
     fn term(&mut self, name: &str, fields: Vec<Spanned<String>>) {
@@ -3790,7 +3879,6 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
             ..ClassFact::new(self.loc.at(&class.name), class.name.to_string())
         };
         for stmt in &class.body {
-            naming.hidden_naming |= hides_naming(stmt);
             if let Some((targets, value)) = assigned(stmt) {
                 self.class_attrs(targets, value, &mut fact, &mut naming);
             } else if let Stmt::FunctionDef(func) = stmt {
@@ -3799,6 +3887,9 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
                 self.augmented_naming(stmt, &mut fact, &mut naming);
                 conditional_methods(stmt, &mut fact);
             }
+            // After `class_attrs`, which reads a plain `=` again, so that `_name = (_name, d) = v`
+            // stays hidden.
+            naming.hidden |= hides_naming(stmt);
         }
         naming.settle(&mut fact);
         fact.unassigned_computes = self.unassigned_computes(class, &fact);
@@ -3933,7 +4024,7 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
         self.facts.dynamic_models |= naming.named && naming.name.is_none() && !naming.falsy_name;
         // `registered` counts a non-literal `_register` in, which is safe for a class that has a
         // name but would give one to a class Odoo may leave out of the registry.
-        naming.hidden_naming |= fact
+        naming.hidden.register |= fact
             .attr("_register")
             .is_some_and(|r| matches!(r.value, OptionValue::Other));
         naming.registers = fact.registered() && may_reach_orm;
@@ -3971,10 +4062,11 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
     /// `_inherit` and the class name. An unknown series reads it as before saas~18.1, and a class
     /// that the two readings name apart makes the file's models dynamic. A list with a non-literal
     /// entry hides the name before saas~18.1 and whether the model is new from it, so the class
-    /// extends its first literal entry, while an augmented `_inherit` gives no name. With no
-    /// `_inherit`, or an empty one, only a class that `Naming::named_after_class` accepts gets the
-    /// name of the class; in an unknown series, one that `Naming::named_by_file_base` accepts records
-    /// both names a series from saas~14.4 may give it.
+    /// extends its first literal entry. Without a `_name` the scan reads, a class whose body hides
+    /// `_name` or `_inherit`, or augments `_inherit`, gets no name. With no `_inherit`, or an empty
+    /// one, only a class that `Naming::named_after_class` accepts gets the name of the class; in an
+    /// unknown series, one that `Naming::named_by_file_base` accepts records both names a series
+    /// from saas~14.4 may give it.
     fn model_name(&mut self, class_name: &str, naming: &Naming, fact: &ClassFact) -> Option<String> {
         let first = || fact.inherit.first().map(|i| i.value.clone());
         if naming.falsy_name {
@@ -3982,6 +4074,9 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
         }
         if naming.named {
             return naming.name.clone().or_else(first);
+        }
+        if naming.hidden.name || naming.hidden.inherit {
+            return None;
         }
         let Some(count) = naming.listed(fact.inherit_unknown) else {
             if self.series.is_none() && naming.named_by_file_base() {
@@ -4014,12 +4109,14 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
     /// class it names from its own body the dotted class name instead, a reading an unknown series
     /// records, also for a class the scan reads through a base of its file. Otherwise an empty
     /// string names the model, and any other literal leaves the file's models dynamic and the class
-    /// extending its first `_inherit` entry.
+    /// extending its first `_inherit` entry, none when augmented. A hidden `_inherit` does not stop
+    /// the dotted name, while a hidden `_name` or `_register` does.
     fn falsy_named(&mut self, class_name: &str, naming: &Naming, fact: &ClassFact) -> Option<String> {
+        let listed = !matches!(naming.inherit, InheritShape::Added);
         let earlier = naming
             .name
             .clone()
-            .or_else(|| fact.inherit.first().map(|i| i.value.clone()));
+            .or_else(|| fact.inherit.first().filter(|_| listed).map(|i| i.value.clone()));
         if naming.named_after_class() && self.series.is_none_or(|s| s >= DOTTED_CLASS_NAME) {
             return self.series_name(class_name, earlier, naming, fact);
         }
@@ -4187,9 +4284,11 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
     fn naming_attr(&mut self, name: &str, value: &Expr, fact: &mut ClassFact, naming: &mut Naming) {
         self.naming_bases.insert(fact.class_name.clone());
         if name == "_inherit" {
+            naming.hidden.inherit = false;
             naming.inherit = self.inherit(value, fact, naming.name.as_deref());
             return;
         }
+        naming.hidden.name = false;
         naming.named = true;
         naming.name = str_lit(value).map(str::to_owned);
         naming.falsy_name = record_eval::falsy(value);
@@ -5915,6 +6014,35 @@ mod tests {
         "    _inherit = ['a']\n    _inherit += ['b']",
         "    _name = 'a'\n    _name += '.b'",
     ];
+
+    /// Class bodies that hide `_name` or `_inherit` beside a binding of them the readers take, which
+    /// names no class either.
+    const HIDING_READ_BODIES: [&str; 6] = [
+        "    _inherit = ['x', 'y']\n    _name, _d = 'a', 'b'",
+        "    _inherit = ['a']\n    for _name in NAMES: pass",
+        "    _inherit = ['a']\n    if FLAG:\n        _name = 'b'",
+        "    _inherit = ['a']\n    with f() as _inherit:\n        pass",
+        "    _inherit = 'a'\n    for _ in range(1):\n        _inherit = 'b'",
+        "    _inherit = (_inherit, d) = ['a', 'b']",
+    ];
+
+    /// Class bodies that bind a naming attribute where neither reader takes the value, yet some
+    /// series names: a later plain `=` replaces the hidden binding, and a falsy `_name` reads no
+    /// `_inherit` entry from saas~18.1.
+    const SERIES_NAMED_BODIES: [&str; 7] = [
+        "    for _ in range(1):\n        _inherit = 'b'\n    _inherit = 'a'",
+        "    _name = None\n    _inherit = ['a']\n    _inherit += ['b']",
+        "    _name = False\n    _inherit = ['a', 'b']\n    if FLAG:\n        _inherit = 'c'",
+        "    _name = False\n    _inherit = ['a', 'b']\n    if FLAG:\n        _name = 'c'",
+        "    _name = False\n    _inherit = ['a', 'b']\n    [_register] = [False]",
+        "    _name = False\n    _inherit = ['a', 'b']\n    if FLAG:\n        _inherit = _name = 'c'",
+        "    for _name in NAMES: pass\n    _name = False\n    _inherit = ['a', 'b']",
+    ];
+
+    /// Class bodies that read `_name` and hide it in one statement, which names no class but leaves
+    /// the file's models dynamic. The second holds only while the hidden binding outlasts the plain
+    /// one: read alone, its falsy value names the class after itself from saas~18.1.
+    const HIDDEN_NAME_READS: [&str; 2] = ["    _name = (_name, d) = ['a', 'b']", "    _name = [*_name] = ()"];
 
     /// Class bodies whose headers bind no naming attribute, so that the class is named after itself.
     const NAMING_BODIES: [&str; 2] = ["    for x in NAMES: pass", "    with f(_name) as x:\n        pass"];
@@ -8189,6 +8317,7 @@ class U(HttpCase):
         }
         for body in HIDING_BODIES
             .into_iter()
+            .chain(HIDING_READ_BODIES)
             .chain(["    async for _name in NAMES:\n        pass"])
         {
             // `_name +=` builds a name from the literal it held.
@@ -8261,6 +8390,7 @@ class U(HttpCase):
         }
         for body in HIDING_BODIES
             .into_iter()
+            .chain(HIDING_READ_BODIES)
             .chain(["    async for _name in NAMES:\n        pass"])
         {
             let src = format!("class X(models.Model):\n{body}");
@@ -8509,10 +8639,21 @@ class U(HttpCase):
                 "    _inherit += ['b']\n    _inherit = ['c']",
                 [&model("c", false, false), &derived, &derived, &model("c", false, true)],
             ),
+            (SERIES_NAMED_BODIES[0], [&extended; 4]),
+            (SERIES_NAMED_BODIES[1], [&None, &derived, &derived, &None]),
+            (SERIES_NAMED_BODIES[2], [&falsy, &derived, &derived, &falsy]),
+            (SERIES_NAMED_BODIES[3], [&falsy; 4]),
+            (SERIES_NAMED_BODIES[4], [&falsy; 4]),
+            (SERIES_NAMED_BODIES[5], [&falsy; 4]),
+            (SERIES_NAMED_BODIES[6], [&falsy, &derived, &derived, &falsy]),
         ];
         let unknown = model("ResPartnerX", true, true);
         let headers = NAMING_BODIES.map(|body| (body, [&verbatim, &derived, &derived, &unknown]));
-        let hiding = HIDING_BODIES.map(|body| (body, [&None; 4]));
+        let hiding = HIDING_BODIES
+            .into_iter()
+            .chain(HIDING_READ_BODIES)
+            .chain(HIDDEN_NAME_READS)
+            .map(|body| (body, [&None; 4]));
         for (body, expected) in cases.into_iter().chain(headers).chain(hiding) {
             for (series, want) in [Some("18.0"), Some("saas~18.1"), Some("20.0"), None]
                 .into_iter()
@@ -8556,8 +8697,40 @@ class U(HttpCase):
             "    _inherit = ['a']\n    _inherit *= 2",
             "    _inherit = ['a']\n    (_inherit) += ['b']",
         ];
-        for body in HIDING_BODIES.into_iter().chain(NAMING_BODIES).chain(more) {
+        for body in HIDING_BODIES
+            .into_iter()
+            .chain(HIDING_READ_BODIES)
+            .chain(NAMING_BODIES)
+            .chain(more)
+        {
             assert_eq!(read(body, ""), read(body, "print 'x'\n"), "{body}");
+        }
+        let readings = |body: &str, series: Option<&str>| {
+            both_readers(&format!("{ORM_IMPORTS}class X(models.Model):\n{body}\n"), series).map(|facts| {
+                let models: Vec<_> = facts.classes.iter().map(|c| (c.model.clone(), c.new_model)).collect();
+                let built = (facts.built_model_starts, facts.built_model_names);
+                (models, facts.dynamic_models, built)
+            })
+        };
+        for body in HIDING_READ_BODIES
+            .into_iter()
+            .chain(HIDDEN_NAME_READS)
+            .chain(SERIES_NAMED_BODIES)
+        {
+            for series in [Some("18.0"), Some("saas~18.1"), Some("20.0"), None] {
+                let [parsed, unread] = readings(body, series);
+                assert_eq!(parsed, unread, "{body} at {series:?}");
+            }
+        }
+        // An unknown series records no reading of a one-entry `_inherit` beside a hidden `_name` or
+        // `_inherit`, so the file's models stay static and OD206 still reports a reference to them.
+        for body in [
+            "    _inherit = ['a']\n    for _name in NAMES: pass",
+            "    _inherit = ['a']\n    with f() as _inherit:\n        pass",
+        ] {
+            for reading in readings(body, None) {
+                assert_eq!(reading, (vec![], false, (vec![], vec![])), "{body}");
+            }
         }
         // Only the unread reader takes an `_inherit` it does not read for one that builds the name,
         // and a `+=` after it keeps that.
