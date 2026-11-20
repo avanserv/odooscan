@@ -361,6 +361,9 @@ custom/data_fields/__init__.py:5:30: OD224 t.x_column: data_ticket has no such c
 custom/data_fields/data/partners.xml:5:9: OD309 res.partner has no field 'x_unloaded'
 custom/data_fields/data/partners.xml:6:9: OD309 res.partner has no field 'x_demo'
 custom/data_fields/data/partners.xml:9:28: OD322 data.ticket.leaf.kind has no value 'nope'
+custom/data_fields/data/partners.xml:15:31: OD322 data.ticket.card.x_grade has no value 'high'
+custom/data_fields/data/partners.xml:16:39: OD321 'data_fields.line_owner' is a record of data.ticket.line, but data.ticket.card.x_owner_id takes data.ticket.base
+custom/data_fields/data/partners.xml:23:31: OD322 data.ticket.badge.x_grade has no value 'high'
 custom/data_fields/data/unlisted.xml:1:1: OD502 'data/unlisted.xml' is not in the manifest's data or demo, so Odoo never loads it
 custom/data_fields/models/partner.py:7:39: OD203 'x_thing': res.partner has no field 'x_thing'
 custom/data_fields/models/ticket.py:9:17: OD203 'x_text': data.ticket has no field 'x_text'
@@ -381,6 +384,7 @@ custom/data_fields/models/ticket.py:122:34: OD227 kind: data_ticket_leaf has no 
 custom/data_fields/models/ticket.py:125:53: OD224 l.kind: data_ticket_leaf has no such column, since kind is a field of data.ticket.mid, which data.ticket.leaf reaches through _inherits; join data_ticket_mid on mid_id
 custom/data_fields/models/ticket.py:144:39: OD224 t.x_column: data_ticket has no such column, since data.ticket has no field x_column; name the column of a stored field of data.ticket
 custom/data_fields/models/ticket.py:147:39: OD224 t.x_column: data_ticket has no such column, since data.ticket has no field x_column; name the column of a stored field of data.ticket
+custom/data_fields/models/ticket.py:176:37: OD227 x_grade: data_ticket_card has no such column, since x_grade is a field of data.ticket.stage, which data.ticket.card reaches through _inherits; declare the definition on data.ticket.stage
 custom/data_fields/security/rules.xml:16:36: OD210 'x_unloaded': res.partner has no field 'x_unloaded'
 custom/data_fields/security/rules.xml:21:36: OD210 'x_demo': res.partner has no field 'x_demo'
 custom/data_fields/security/rules.xml:26:36: OD210 'x_partner_id.no_partner_field': res.partner has no field 'no_partner_field'

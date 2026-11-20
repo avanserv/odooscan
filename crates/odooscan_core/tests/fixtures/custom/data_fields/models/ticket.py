@@ -148,3 +148,56 @@ class DataTicketSetup(models.Model):
 
     def _init_column(self, column_name):
         self.env.cr.execute("SELECT t.x_column FROM data_ticket t")
+
+
+class DataTicketNote(models.Model):
+    _name = "data.ticket.note"
+    _description = "Ticket note"
+
+    name = fields.Char()
+
+
+class DataTicketStage(models.Model):
+    _name = "data.ticket.stage"
+    _description = "Ticket stage"
+
+    x_grade = fields.Selection([("low", "Low")])
+    x_owner_id = fields.Many2one("data.ticket.base")
+
+
+class DataTicketCard(models.Model):
+    _name = "data.ticket.card"
+    _description = "Ticket card"
+    _inherits = {"data.ticket.note": "note_id", "data.ticket.stage": "stage_id"}
+
+    note_id = fields.Many2one("data.ticket.note", required=True, ondelete="cascade")
+    stage_id = fields.Many2one("data.ticket.stage", required=True, ondelete="cascade")
+
+    _x_grade_index = models.Index("(x_grade)")
+
+
+class DataTicketSlip(models.Model):
+    _name = "data.ticket.slip"
+    _description = "Ticket slip"
+    _inherits = {"data.ticket.stage": "stage_id", "data.ticket.note": "note_id"}
+
+    stage_id = fields.Many2one("data.ticket.stage", required=True, ondelete="cascade")
+    note_id = fields.Many2one("data.ticket.note", required=True, ondelete="cascade")
+
+
+class DataTicketBadge(models.Model):
+    _name = "data.ticket.badge"
+    _description = "Ticket badge"
+    _inherits = {"data.ticket.note": "note_id", "data.ticket.stage": "stage_id"}
+
+    stage_id = fields.Many2one("data.ticket.stage", delegate=True, required=True, ondelete="cascade")
+    note_id = fields.Many2one("data.ticket.note", required=True, ondelete="cascade")
+
+
+class DataTicketLabel(models.Model):
+    _name = "data.ticket.label"
+    _description = "Ticket label"
+    _inherits = {"data.ticket.stage": "stage_id", "data.ticket.note": "note_id"}
+
+    note_id = fields.Many2one("data.ticket.note", delegate=True, required=True, ondelete="cascade")
+    stage_id = fields.Many2one("data.ticket.stage", required=True, ondelete="cascade")

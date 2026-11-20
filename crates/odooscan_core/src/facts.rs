@@ -255,8 +255,8 @@ pub struct ClassFact {
     /// Read from the tokens of a file that does not parse, so the model and `table` are known and
     /// nothing else.
     pub unread: bool,
-    /// The last `_inherits` of the class body and its `delegate=True` fields: parent model to
-    /// delegating field.
+    /// The last `_inherits` of the class body in dict order, then the `delegate=True` fields that
+    /// repeat no entry: parent model to delegating field.
     pub inherits: Vec<(String, String)>,
     /// The entries of the last `_inherits` whose key and field are literals: parent model to
     /// delegating field, at the entry.

@@ -158,4 +158,16 @@
             </record>
         </field>
     </record>
+
+    <record id="field_x_grade" model="ir.model.fields">
+        <field name="name">x_grade</field>
+        <field name="model_id" ref="model_data_ticket_note"/>
+        <field name="ttype">char</field>
+    </record>
+    <record id="field_x_owner_id" model="ir.model.fields">
+        <field name="name">x_owner_id</field>
+        <field name="model_id" ref="model_data_ticket_note"/>
+        <field name="ttype">many2one</field>
+        <field name="relation">data.ticket.line</field>
+    </record>
 </odoo>
