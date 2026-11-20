@@ -508,20 +508,20 @@ custom/dynamic_models_outside/models/built.py:14:32: OD202 model 'bad.generated.
 custom/dynamic_models_outside/models/built.py:17:25: OD206 no indexed module defines model 'outside.test.model'
 custom/dynamic_models_outside/static/src/large.js:3:30: OD603 model 'bad.generated.large' comes from module dynamic_models_side, which is not in depends
 custom/dynamic_models_outside/views/large.xml:4:9: OD202 model 'bad.generated.large' comes from module dynamic_models_side; add it to depends
-custom/dynamic_models_outside/views/large.xml:7:17: OD304 'name': field 'name' of bad.generated.large comes from module sql_base_entries, which is not in depends
+custom/dynamic_models_outside/views/large.xml:7:17: OD304 'name': field 'name' of bad.generated.large comes from module dynamic_models_side, which is not in depends
 custom/dynamic_models_plain/models/holder.py:7:32: OD202 model 'bad.generated.large' comes from module dynamic_models_side; add it to depends
 custom/dynamic_models_plain/models/holder.py:8:41: OD203 'large_id.no_plain_size': bad.generated.large has no field 'no_plain_size'
-custom/dynamic_models_plain/models/holder.py:9:38: OD203 'large_id.name': field 'name' of bad.generated.large comes from module sql_base_entries, which is not in depends
+custom/dynamic_models_plain/models/holder.py:9:38: OD203 'large_id.name': field 'name' of bad.generated.large comes from module dynamic_models_side, which is not in depends
 custom/dynamic_models_plain/models/holder.py:12:25: OD206 no indexed module defines model 'bad.generated.small'
-custom/dynamic_models_plain/models/holder.py:20:37: OD203 'note_id.name': field 'name' of x_side_note comes from module sql_base_entries, which is not in depends
+custom/dynamic_models_plain/models/holder.py:20:37: OD203 'note_id.name': field 'name' of x_side_note comes from module dynamic_models_side, which is not in depends
 custom/dynamic_models_plain/static/src/large.js:3:30: OD603 model 'bad.generated.large' comes from module dynamic_models_side, which is not in depends
 custom/dynamic_models_plain/views/large.xml:4:9: OD202 model 'bad.generated.large' comes from module dynamic_models_side; add it to depends
-custom/dynamic_models_plain/views/large.xml:7:17: OD304 'name': field 'name' of bad.generated.large comes from module sql_base_entries, which is not in depends
-custom/dynamic_models_plain/views/large.xml:19:17: OD304 'name': field 'name' of x_side_note comes from module sql_base_entries, which is not in depends
-custom/dynamic_models_plain/views/large.xml:27:9: OD210 'name': field 'name' of x_side_note comes from module sql_base_entries, which is not in depends
+custom/dynamic_models_plain/views/large.xml:7:17: OD304 'name': field 'name' of bad.generated.large comes from module dynamic_models_side, which is not in depends
+custom/dynamic_models_plain/views/large.xml:19:17: OD304 'name': field 'name' of x_side_note comes from module dynamic_models_side, which is not in depends
+custom/dynamic_models_plain/views/large.xml:27:9: OD210 'name': field 'name' of x_side_note comes from module dynamic_models_side, which is not in depends
 custom/dynamic_models_settled/data/records.xml:2:5: OD201 no indexed module defines model 'ghost.settled'
 custom/dynamic_models_short_user/models/user.py:8:32: OD202 model 'side.order' comes from module dynamic_models_side; add it to depends
-custom/dynamic_models_short_user/models/user.py:9:38: OD203 'order_id.name': field 'name' of side.order comes from module sql_base_entries, which is not in depends
+custom/dynamic_models_short_user/models/user.py:9:38: OD203 'order_id.name': field 'name' of side.order comes from module dynamic_models_side, which is not in depends
 custom/dynamic_models_short_user/static/src/short.js:3:30: OD603 model 'side.order' comes from module dynamic_models_side, which is not in depends
 custom/dynamic_models_unbuilt/models/proxies.py:27:32: OD202 model 'bad.generated.large' comes from module dynamic_models_side; add it to depends
 custom/dynamic_models_unbuilt/models/proxies.py:30:25: OD206 no indexed module defines model 'unbuilt.proxy'
