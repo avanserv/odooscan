@@ -227,3 +227,32 @@ class SuperClassBody(models.Model):
                 return super().get("x")
 
         return Holder
+
+
+class SuperGuardForms(models.Model):
+    _inherit = "bad.super"
+
+    def _guard_forms(self):
+        if not hasattr(super(), "_neg_gone"):
+            return None
+        super()._neg_gone()
+        if not hasattr(super(), "_else_gone"):
+            pass
+        else:
+            super()._else_gone()
+        if not hasattr(super(), "_neg_check"):
+            return None
+        super()._neg_other()
+        if hasattr(super(), "_and_gone") and super()._and_gone():
+            pass
+        if hasattr(super(SuperGuardForms, self), "_cross_gone"):
+            super()._cross_gone()
+        if hasattr(super(), "_sudo_gone"):
+            super(SuperGuardForms, self.sudo())._sudo_gone()
+        if hasattr(super(SuperGuardLater, self), "_class_other"):
+            super()._class_other()
+        return hasattr(super(), "_and_check") and super()._and_other()
+
+
+class SuperGuardLater(models.Model):
+    _inherit = "bad.super"
