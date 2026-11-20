@@ -8,7 +8,7 @@ use crate::facts::{
     ActionFact, Annotation, ArchElement, ArchEmptied, ArchSubview, ArchValued, BaseSource, ClassFact, ComponentItem,
     DataFacts, FieldFact, FlowSummary, Heritage, JsClass, JsFacts, JsName, ModelKind, OptionValue, OwlTemplate,
     PropItem, PyFacts, Receiver, RecordWrite, ReportFact, RouteKey, Rows, RuleFact, ServerFact, Signature, Static,
-    StaticWrite, UNREAD_TYPE, ViewFact, WrittenValue, mangled,
+    StaticWrite, UNREAD_TYPE, ViewFact, WrittenValue, mangled, private_name,
 };
 use crate::js::{self, OWL_MODULE};
 use crate::manifest::{AutoInstall, DEPENDS_BASE, OdooReads};
@@ -393,8 +393,8 @@ const BASE_MODEL_EXTRA: &[&str] = &[
 ];
 
 /// The members of `BASE_MODEL_EXTRA` that Odoo binds to a property or a plain value, never a
-/// method, in every series that has them (`_populate_sizes` and `_populate_dependencies` 14.0 to
-/// 17.0, the `_transient_max_*` pair on `TransientModel` from 19.0): none of their values is
+/// method, in every series that has them (`BASE_VALUE_SERIES` dates those `BaseModel` lacks in some,
+/// and from saas~18.3 the `_transient_max_*` pair is on `TransientModel`): none of their values is
 /// callable, so a `super()` call to one raises `TypeError`. They stay in `BASE_MODEL_EXTRA`, since a
 /// field must not replace them either (OD116) and a button finds them as `getattr` does.
 const BASE_MODEL_VALUES: &[&str] = &[
@@ -412,6 +412,20 @@ const BASE_MODEL_VALUES: &[&str] = &[
     "_transient_max_hours",
     "_uid",
     "ids",
+];
+
+/// The members of `BASE_MODEL_VALUES` that `BaseModel` lacks in some series, by the range that has
+/// them; every other one holds from 9.0. `d0bb596f1d51` adds `_origin`, `4c0182dafa58` and
+/// `052f4aad1e08` add and drop the `_populate_*` pair, `1c8a95809852` adds `_ondelete_methods`,
+/// `8a34849b5c2a` adds `_table_sql`. 9.0 sets the `_transient_max_*` pair on the registry class of a
+/// transient model alone, which `super()` skips; 10.0 binds it on `BaseModel` and saas~18.3 moves it
+/// to `TransientModel` (20.0 `odoo/orm/models_transient.py:23-25`).
+const BASE_VALUE_SERIES: &[(&str, &[&str])] = &[
+    (">=saas~12.4", &["_origin"]),
+    (">=saas~13.2,<18.0", &["_populate_dependencies", "_populate_sizes"]),
+    (">=saas~14.1", &["_ondelete_methods"]),
+    (">=saas~17.1", &["_table_sql"]),
+    (">=10.0,<saas~18.3", &["_transient_max_count", "_transient_max_hours"]),
 ];
 
 /// Whether `super()` finds `method` as a method of `BaseModel` or `object` in `series`.
@@ -637,6 +651,13 @@ pub(crate) fn cached_model_method(name: &str, series: Option<Series>) -> bool {
 /// unknown. A series before it may have a class of its own named so, whose values are not these.
 pub(crate) fn cached_model_value(name: &str, series: Option<Series>) -> bool {
     CACHED_MODEL_VALUES.contains(&name) && series.is_none_or(|s| s >= CACHED_MODEL_SINCE)
+}
+
+/// Whether `BaseModel` binds `name` to a property or a plain value in `series`. A module of unknown
+/// series has only the values of every series.
+pub(crate) fn base_model_value(name: &str, series: Option<Series>) -> bool {
+    let range = BASE_VALUE_SERIES.iter().find(|(_, names)| names.contains(&name));
+    BASE_MODEL_VALUES.contains(&name) && range.is_none_or(|(spec, _)| series.is_some_and(|s| series::matches(spec, s)))
 }
 
 /// The public methods of `BaseModel` that `BASE_MODEL_METHODS` lacks, by the range of series that
@@ -4139,6 +4160,23 @@ impl<'m> Index<'m> {
             || (cached_model_method(method, series) && self.cached_model(model))
     }
 
+    /// The class, other than `except`, of `model` or of a model it inherits that defines the `__name`
+    /// `method`, which Python mangles with that class's name, so `except`'s `super()` call misses it.
+    /// Of several, the first in `chain_classes` order. A class named all underscores binds the name
+    /// unmangled, so it owns nothing private.
+    pub fn private_owner(&self, model: &str, method: &str, except: &ClassFact) -> Option<&'m str> {
+        if !mangled(method) {
+            return None;
+        }
+        let owns = |c: &ClassFact| {
+            !std::ptr::eq(c, except)
+                && private_name(method, &c.class_name) != method
+                && c.methods.iter().any(|m| m == method)
+        };
+        let owner = self.chain_classes(model).into_iter().find(|(_, c)| owns(c));
+        owner.map(|(_, c)| c.class_name.as_str())
+    }
+
     /// Whether a class of `model` or of a model it inherits, in any indexed module, is on
     /// `CachedModel`, which then sits in the MRO of the model's registry class. A `super()` call from
     /// a class past it in that MRO misses its members; the callers do not read the order, so they
@@ -4738,11 +4776,11 @@ mod tests {
 
     use super::{
         BASE_MODEL_DUNDERS, BASE_MODEL_EXTRA, BASE_MODEL_METHODS, BASE_MODEL_VALUES, BASE_PRIVATE_METHODS,
-        BASE_RPC_METHODS, CACHED_MODEL_VALUES, CACHED_PRIVATE_METHODS, Export, FIELD_CLASSES, FieldHolder,
-        FieldSpelling, Index, JsSpec, OLD_BASE_METHODS, OWL_COMPONENT, OWL1_COMPONENT, PlacedWrite, Scope, Status,
-        TagFix, XmlIdDef, absolute_import, base_parent_method, base_private_method, base_rpc_method, class_file,
-        depends_closure, field_id_prefixes, fold_writes, js_module_path, last_text, mangles_alike, old_base_method,
-        test_bundle, triggers, unseen_table_id,
+        BASE_RPC_METHODS, BASE_VALUE_SERIES, CACHED_MODEL_VALUES, CACHED_PRIVATE_METHODS, Export, FIELD_CLASSES,
+        FieldHolder, FieldSpelling, Index, JsSpec, OLD_BASE_METHODS, OWL_COMPONENT, OWL1_COMPONENT, PlacedWrite, Scope,
+        Status, TagFix, XmlIdDef, absolute_import, base_model_value, base_parent_method, base_private_method,
+        base_rpc_method, class_file, depends_closure, field_id_prefixes, fold_writes, js_module_path, last_text,
+        mangles_alike, old_base_method, test_bundle, triggers, unseen_table_id,
     };
     use crate::mentions::{Mentions, Words};
     use crate::project::{Module, SourceFile, module};
@@ -4772,20 +4810,66 @@ mod tests {
         assert!(!mangles_alike("__seal", "__", "Foo"));
     }
 
-    #[test]
-    fn a_private_super_call_finds_only_a_class_of_its_name() {
+    /// `seal.box`, whose classes each define `__seal`: `__` binds it unmangled, and `_Seal` mangles
+    /// it as `Seal` does.
+    fn seal_box() -> [Module; 1] {
         let mut modules = [module("base", "{'version': '18.0.1.0'}")];
         modules[0].python.push(python_18(
             "class Seal(models.Model):\n    _name = 'seal.box'\n\n    def __seal(self):\n        return 1\n\n    def _seal(self):\n        return 1\n\n\
+             class __(models.Model):\n    _inherit = 'seal.box'\n\n    def __seal(self):\n        return 0\n\n\
              class Other(models.Model):\n    _inherit = 'seal.box'\n\n    def __seal(self):\n        return 2\n\n    def _seal(self):\n        return 2\n\n\
              class _Seal(models.Model):\n    _inherit = 'seal.box'\n\n    def __seal(self):\n        return 3\n",
         ));
+        modules
+    }
+
+    #[test]
+    fn a_private_super_call_finds_only_a_class_of_its_name() {
+        let modules = seal_box();
         let index = Index::build(&modules, None);
         let classes = &modules[0].python[0].facts.classes;
         let series = Series::parse("18.0");
-        assert!(!index.has_parent_method("seal.box", "__seal", &classes[1], series));
-        assert!(index.has_parent_method("seal.box", "__seal", &classes[2], series));
-        assert!(index.has_parent_method("seal.box", "_seal", &classes[1], series));
+        assert!(!index.has_parent_method("seal.box", "__seal", &classes[2], series));
+        assert!(index.has_parent_method("seal.box", "__seal", &classes[3], series));
+        assert!(index.has_parent_method("seal.box", "_seal", &classes[2], series));
+    }
+
+    #[test]
+    fn a_private_name_names_the_class_that_owns_it() {
+        let modules = seal_box();
+        let index = Index::build(&modules, None);
+        let seal = &modules[0].python[0].facts.classes[0];
+        assert_eq!(index.private_owner("seal.box", "__seal", seal), Some("Other"));
+        assert_eq!(index.private_owner("seal.box", "_seal", seal), None);
+    }
+
+    #[test]
+    fn a_base_value_is_worded_only_in_the_series_that_binds_it() {
+        let value = |name: &str, series: Option<&str>| base_model_value(name, series.and_then(Series::parse));
+        assert!(value("ids", Some("9.0")) && value("ids", Some("20.0")) && value("ids", None));
+        assert!(value("_origin", Some("saas~12.4")) && !value("_origin", Some("saas~12.3")));
+        assert!(value("_populate_sizes", Some("saas~13.2")) && !value("_populate_sizes", Some("saas~13.1")));
+        assert!(value("_populate_dependencies", Some("saas~17.4")) && !value("_populate_dependencies", Some("18.0")));
+        assert!(!value("_populate_sizes", None));
+        assert!(value("_ondelete_methods", Some("saas~14.1")) && !value("_ondelete_methods", Some("14.0")));
+        assert!(value("_table_sql", Some("saas~17.1")) && !value("_table_sql", Some("17.0")));
+        assert!(value("_transient_max_count", Some("10.0")) && !value("_transient_max_count", Some("9.saas~11")));
+        assert!(value("_transient_max_hours", Some("saas~18.2")) && !value("_transient_max_hours", Some("saas~18.3")));
+        assert!(!value("create", Some("18.0")) && !value("create", None));
+    }
+
+    #[test]
+    fn value_series_rows_parse_and_name_values() {
+        for (spec, names) in BASE_VALUE_SERIES {
+            for clause in spec.split(',') {
+                let bound = clause.trim_start_matches(['<', '>', '=']);
+                assert!(Series::parse(bound).is_some(), "{spec}");
+                assert!(bound.starts_with("saas~") || bound.ends_with(".0"), "{spec}");
+            }
+            for name in *names {
+                assert!(BASE_MODEL_VALUES.contains(name), "{name}");
+            }
+        }
     }
 
     #[test]

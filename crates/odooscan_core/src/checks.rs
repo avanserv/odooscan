@@ -16,15 +16,15 @@ use crate::facts::{
     FunctionCall, GuardedRef, ImportFact, ImportGuard, JsClass, JsFacts, JsName, MethodDef, Migrate, ModelKind,
     OptionValue, OrmCall, OwlTemplate, Pos, PyFacts, RawDiag, RecordFact, RecordWrite, Refusal, ReportFact, RouteDef,
     RouteKey, RuleFact, ServerFact, Signature, Spanned, SqlColumn, SqlView, Subject, TemplateEntry, UNREAD_TYPE,
-    ViewFact, WrittenValue, XmlDef, XmlRef,
+    ViewFact, WrittenValue, XmlDef, XmlRef, private_name,
 };
 use crate::grants::{self, AttachmentGrant, Grant, Grants};
 use crate::imports::{AddonImport, Fault, Graph, ROOT};
 use crate::index::{
     ACTION_REGISTRY, BASE_MODEL_METHODS, CACHED_MODEL_SINCE, Export, FIELD_REGISTRY, FieldDef, FieldInfo, Index,
     JsSpec, JsTarget, PathError, Placed, PropSchema, RELATIONAL_TYPES, SERVICE_REGISTRY, Scope, Status, TOUR_REGISTRY,
-    TagFix, VIEW_WIDGET_REGISTRY, ViewTree, asset_glob_set, cached_model_method, cached_model_value, dated_member,
-    full_id, in_static, js_lookup, js_url, loaded_data, located, normal_parts, wildcard,
+    TagFix, VIEW_WIDGET_REGISTRY, ViewTree, asset_glob_set, base_model_value, cached_model_method, cached_model_value,
+    dated_member, full_id, in_static, js_lookup, js_url, loaded_data, located, normal_parts, wildcard,
 };
 use crate::mentions::HOOK_PREFIXES;
 use crate::module_state::UPGRADE_DIRS;
@@ -3243,18 +3243,32 @@ impl<'m> Ctx<'_, 'm> {
         };
         let own = |call: &&Spanned<String>| class.methods.contains(&call.value);
         for call in class.model_super_calls.iter().filter(|c| !own(c) && !parent(c)) {
-            let message = format!(
-                "no class of {} defines '{}', so this super() call fails",
-                class.model, call.value
-            );
+            let message = self.orphan_super_message(class, &call.value, true);
             out.push(path, "OD211", call.pos, message);
         }
         for call in class.super_calls.iter().filter(|c| !parent(c)) {
-            let message = format!(
-                "no parent class of {} defines '{}', so this super() call fails",
-                class.model, call.value
-            );
+            let message = self.orphan_super_message(class, &call.value, false);
             out.push(path, "OD211", call.pos, message);
+        }
+    }
+
+    /// Why a `super()` call from `class` to `name` finds no method, `whole` when any class of the model
+    /// answers it. Only the value and the private name are worded apart: baselines key on the
+    /// message v0.15.0 printed for every other call.
+    fn orphan_super_message(&self, class: &ClassFact, name: &str, whole: bool) -> String {
+        if base_model_value(name, self.series) {
+            return format!(
+                "'{name}' is a property or plain value of BaseModel, not a method, so this super() call raises TypeError"
+            );
+        }
+        let parents = if whole { "class" } else { "parent class" };
+        let model = &class.model;
+        match self.index.private_owner(model, name, class) {
+            Some(owner) => format!(
+                "'{name}' is private to class {owner}: this super() call looks up '{}', which no {parents} of {model} defines, so it fails",
+                private_name(name, &class.class_name)
+            ),
+            None => format!("no {parents} of {model} defines '{name}', so this super() call fails"),
         }
     }
 
