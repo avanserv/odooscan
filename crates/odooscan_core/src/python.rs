@@ -1561,6 +1561,19 @@ impl<'a> Visitor<'a> for SuperCalls<'a> {
     }
 }
 
+/// Whether the method `func` of `class` calls the definition it overrides through `super()`, as
+/// `method_fact` reads it.
+fn extends(class: &str, func: &ast::StmtFunctionDef) -> bool {
+    let mut calls = SuperCalls::new(Outer::new(class, func), false);
+    calls.visit_body(&func.body);
+    calls_own(func.name.as_str(), &calls.calls)
+}
+
+/// Whether `calls`, the `super()` calls of the method `name`, reach the definition it overrides.
+fn calls_own(name: &str, calls: &[SuperCall]) -> bool {
+    calls.iter().any(|(called, ..)| *called == name)
+}
+
 /// Whether any `super()` call of the method `func` of `class` appears in its body. One in a nested
 /// function counts. In a nested class, one in its head counts, and in its body only an explicit
 /// `super(Class, self)` outside its functions and lambdas, as a bare `super()` names that class.
@@ -1958,15 +1971,21 @@ fn orm_result(method: &str) -> &'static str {
 }
 
 /// The method of the class that computes the field, unless it calls super(), whose implementation
-/// may assign the field.
+/// may assign the field. The last definition in source order wins, and one in an `if`, `try` or
+/// `with` block may not run, so the class's method is then unknown.
 fn compute_method<'c>(class: &'c ast::StmtClassDef, field: &FieldFact) -> Option<&'c ast::StmtFunctionDef> {
     let Some(OptionValue::Str(name)) = field.option("compute").map(|o| &o.value) else {
         return None;
     };
-    let func = class.body.iter().rev().find_map(|stmt| match stmt {
-        Stmt::FunctionDef(f) if f.name.as_str() == name => Some(f),
-        _ => None,
-    })?;
+    let last = module_state::top_level(&class.body)
+        .into_iter()
+        .rev()
+        .find(|stmt| matches!(stmt, Stmt::FunctionDef(f) if f.name.as_str() == name))?;
+    let func = class
+        .body
+        .iter()
+        .find(|stmt| std::ptr::eq(*stmt, last))?
+        .as_function_def_stmt()?;
     (!calls_super(class.name.as_str(), func)).then_some(func)
 }
 
@@ -1986,6 +2005,17 @@ fn class_methods(class: &ast::StmtClassDef) -> Vec<(&ast::StmtFunctionDef, Curso
     class
         .body
         .iter()
+        .filter_map(Stmt::as_function_def_stmt)
+        .map(|f| (f, CursorUse::scan_nested(f)))
+        .collect()
+}
+
+/// The methods the `if`, `try` and `with` blocks of a class body define, each with what it and its
+/// closures do with cursors.
+fn branch_methods(class: &ast::StmtClassDef) -> Vec<(&ast::StmtFunctionDef, CursorUse<'_>)> {
+    let blocks = class.body.iter().filter(|stmt| !stmt.is_function_def_stmt());
+    blocks
+        .flat_map(|stmt| module_state::top_level(std::slice::from_ref(stmt)))
         .filter_map(Stmt::as_function_def_stmt)
         .map(|f| (f, CursorUse::scan_nested(f)))
         .collect()
@@ -2685,12 +2715,17 @@ fn method_name(func: &ast::StmtFunctionDef, fact: &mut ClassFact) {
 }
 
 /// The method names an `if`, `try` or `with` block of a class body binds. Such a branch often
-/// serves another series, so its body stays out of the checks: `name_get` there must not report.
+/// serves another series, so the per-method checks and the OD211 `super()` lookup skip its body:
+/// `name_get` there must not report. One that calls its own name through `super()` still extends
+/// it, whichever series runs it, and OD122 reads its writes through `branch_methods`.
 fn conditional_methods(stmt: &Stmt, fact: &mut ClassFact) {
     let unread = FieldClasses::default();
     for stmt in module_state::top_level(std::slice::from_ref(stmt)) {
         if let Stmt::FunctionDef(func) = stmt {
             method_name(func, fact);
+            if extends(&fact.class_name, func) {
+                fact.extended.push(func.name.to_string());
+            }
         } else if let Some((targets, _)) = assigned(stmt).filter(|(_, value)| may_be_method(value, &unread)) {
             let names = targets.iter().filter_map(Expr::as_name_expr);
             fact.methods.extend(names.map(|name| name.id.to_string()));
@@ -3654,7 +3689,7 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
         calls.visit_body(&func.body);
         self.method_checks(func, fact, &calls.calls);
         self.override_checks(func, &calls.calls);
-        if calls.calls.iter().any(|(name, ..)| *name == func.name.as_str()) {
+        if calls_own(func.name.as_str(), &calls.calls) {
             fact.extended.push(func.name.to_string());
         }
         // A guarded call cannot fail, so only OD211 skips it: OD119 and OD223 still see an override.
@@ -5068,8 +5103,9 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
     }
 
     /// OD122 on each literal write statement a method of the class runs without invalidating the
-    /// cache itself or through another method of the class.
-    fn sql_write_checks(&mut self, methods: &[(&ast::StmtFunctionDef, CursorUse)], fact: Option<&ClassFact>) {
+    /// cache itself or through another method of the class. A method in an `if`, `try` or `with`
+    /// block counts both ways: whichever series runs it, a stale cache stays stale.
+    fn sql_write_checks(&mut self, methods: &[&(&ast::StmtFunctionDef, CursorUse)], fact: Option<&ClassFact>) {
         let invalidating: Vec<&str> = methods
             .iter()
             .filter(|(_, uses)| uses.invalidates)
@@ -5164,7 +5200,9 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
         let orm = model_kind(class, &self.kinds).is_some();
         let fact = self.class_fact(class);
         let methods = class_methods(class);
-        self.sql_write_checks(&methods, fact.as_ref());
+        let branches = branch_methods(class);
+        let all: Vec<_> = methods.iter().chain(&branches).collect();
+        self.sql_write_checks(&all, fact.as_ref());
         let setup = if orm || fact.is_some() {
             setup_methods(&methods, &setup_roots(fact.as_ref(), self.series))
         } else {
@@ -5743,6 +5781,58 @@ mod tests {
         assert_eq!(class.private_methods, ["_hidden"]);
         assert!(class.super_calls.is_empty());
         assert!(!facts.diags.iter().any(|d| d.code == "OD106"));
+    }
+
+    #[test]
+    fn a_conditional_block_extends_a_method_it_calls_through_super() {
+        let facts = analyze(
+            "class X(models.Model):\n    _inherit = 'x'\n    if a:\n        \
+             def write(self, vals):\n            return super().write(vals)\n    \
+             try:\n        import b\n    except ImportError:\n        \
+             def unlink(self):\n            return True\n",
+            None,
+        );
+        assert_eq!(facts.classes[0].extended, ["write"]);
+    }
+
+    /// The compute methods that may leave `name` unassigned when `body` follows its field, computed
+    /// by `_compute_name`, in a class of `x`.
+    fn branch_computes(body: &str) -> Vec<String> {
+        let src =
+            format!("class X(models.Model):\n    _name = 'x'\n    name = fields.Char(compute='_compute_name')\n{body}");
+        let facts = analyze(&src, None);
+        let computes = &facts.classes[0].unassigned_computes;
+        computes.iter().map(|c| c.0.value.clone()).collect()
+    }
+
+    #[test]
+    fn a_compute_is_its_last_definition_unless_a_block_holds_it() {
+        let top = "    def _compute_name(self):\n        for rec in self:\n            if rec.id:\n                \
+                   rec.name = 'x'\n";
+        let branch = "    if a:\n        def _compute_name(self):\n            for rec in self:\n                \
+                      rec.name = 'x'\n";
+        assert!(branch_computes(branch).is_empty());
+        assert!(branch_computes(&format!("{top}{branch}")).is_empty());
+        assert_eq!(branch_computes(&format!("{branch}{top}")), ["_compute_name"]);
+    }
+
+    #[test]
+    fn a_conditional_block_holds_sql_writes_and_invalidations() {
+        let facts = analyze(
+            "class X(models.Model):\n    _inherit = 'x'\n    \
+             def _mark(self):\n        self.env.cr.execute('UPDATE x SET a = 1')\n        self._forget()\n    \
+             try:\n        import b\n    except ImportError:\n        \
+             def _forget(self):\n            self.invalidate_model()\n    \
+             with c:\n        def _unmark(self):\n            self.env.cr.execute('UPDATE x SET a = 0')\n",
+            None,
+        );
+        let lines: Vec<_> = facts
+            .diags
+            .iter()
+            .filter(|d| d.code == "OD122")
+            .map(|d| d.pos.line)
+            .collect();
+        assert_eq!(lines, [13]);
     }
 
     /// The field classes of one file per source, sorted.
