@@ -252,3 +252,13 @@ class IrModelCustom(models.Model):
             _name = data["model"]
 
         return CustomModel
+
+
+class IrAsset(models.Model):
+    _name = "ir.asset"
+
+    name = fields.Char(required=True)
+    bundle = fields.Char(required=True)
+    directive = fields.Char()
+    path = fields.Char(required=True)
+    active = fields.Boolean()

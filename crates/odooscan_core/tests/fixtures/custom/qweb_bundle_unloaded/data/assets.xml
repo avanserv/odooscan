@@ -1,0 +1,20 @@
+<odoo>
+    <record id="asset_shared_templates" model="ir.asset">
+        <field name="name">Shared templates</field>
+        <field name="bundle">web.assets_qweb</field>
+        <field name="path">qweb_bundle_unloaded/static/src/main/shared.xml</field>
+    </record>
+
+    <record id="asset_drop_old_templates" model="ir.asset">
+        <field name="name">Drop old templates</field>
+        <field name="bundle">web.assets_qweb</field>
+        <field name="directive">remove</field>
+        <field name="path">qweb_bundle_unloaded/static/src/old.xml</field>
+    </record>
+
+    <record id="asset_backend_templates" model="ir.asset">
+        <field name="name">Backend templates</field>
+        <field name="bundle">web.assets_backend</field>
+        <field name="path">qweb_bundle_unloaded/static/src/ext.xml</field>
+    </record>
+</odoo>

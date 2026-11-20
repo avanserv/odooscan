@@ -10,4 +10,10 @@
             <div class="o_legacy_banner"/>
         </xpath>
     </template>
+
+    <record id="asset_widget_templates" model="ir.asset">
+        <field name="name">Legacy widget templates</field>
+        <field name="bundle">web.assets_qweb</field>
+        <field name="path">legacy16/static/src/xml/widget.xml</field>
+    </record>
 </odoo>

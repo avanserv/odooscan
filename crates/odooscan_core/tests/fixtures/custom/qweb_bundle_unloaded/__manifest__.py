@@ -2,6 +2,7 @@
     "name": "QWeb bundle unloaded",
     "version": "18.0.1.0.0",
     "depends": ["web"],
+    "data": ["data/ir.asset.csv", "data/assets.xml"],
     "assets": {
         "web.assets_backend": ["qweb_bundle_unloaded/static/src/main/*.xml"],
         "web.assets_qweb": [

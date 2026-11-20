@@ -9,7 +9,7 @@ use globset::GlobSet;
 use regex::Regex;
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use crate::bundles::XML_IN_BUNDLES;
+use crate::bundles::{self, XML_IN_BUNDLES};
 use crate::facts::{
     AccessRow, ActionFact, ActionValue, ActionViewId, Annotation, ArchElement, ArchModifier, ArchSubview, ArchWidget,
     ClassBase, ClassFact, ComponentTag, DataFacts, Definition, DefinitionSource, DomainFact, FieldFact, FieldWrite,
@@ -1570,6 +1570,52 @@ fn unread_template_lists<'m>(module: &'m Module, series: Option<Series>, out: &m
                 "Odoo no longer loads web.assets_qweb, so the templates it lists that no other bundle loads are missing; list them under web.assets_backend",
             );
         }
+    }
+    qweb_asset_records(module, series, &others, out);
+}
+
+/// OD506 on an `ir.asset` record of a loaded file that adds to `web.assets_qweb` a file no bundle
+/// of the manifest loads: Odoo fills a bundle from the records whose `bundle` is its name, as
+/// written (18.0 `odoo/addons/base/models/ir_asset.py:179`, 20.0 `:175`).
+fn qweb_asset_records<'m>(module: &'m Module, series: Option<Series>, others: &GlobSet, out: &mut Out<'m>) {
+    for file in module.data.iter().filter(|f| f.rank.is_some()) {
+        for write in &file.facts.writes {
+            if let Some(glob) = qweb_asset_glob(write, series)
+                && lost(module, &[glob], others)
+            {
+                out.push(
+                    &file.path,
+                    "OD506",
+                    write.pos,
+                    "Odoo no longer loads web.assets_qweb, so the templates this ir.asset record adds that no other bundle loads are missing; set its bundle to web.assets_backend",
+                );
+            }
+        }
+    }
+}
+
+/// The glob `write` adds to a `web.assets_qweb` that loads no templates in `series`, read as the
+/// manifest's are: `include` and `remove` add nothing, a URL is no file, and a leading `/` goes.
+/// None when a value it needs is not a plain text.
+fn qweb_asset_glob(write: &RecordWrite, series: Option<Series>) -> Option<String> {
+    if write.model != "ir.asset" || bundles::loads_templates(&field_text(write, "bundle")?.value, series) {
+        return None;
+    }
+    let directive = write.fields.iter().find(|f| f.name == "directive").map(|f| &f.value);
+    let adds = match directive {
+        None => true,
+        Some(WrittenValue::Text(d)) => !matches!(d.value.as_str(), "include" | "remove"),
+        Some(_) => false,
+    };
+    let path = &field_text(write, "path")?.value;
+    (adds && !path.contains("://")).then(|| path.trim_start_matches('/').to_owned())
+}
+
+/// The text `write` sets `name` to, none when it sets no plain text.
+fn field_text<'w>(write: &'w RecordWrite, name: &str) -> Option<&'w Spanned<String>> {
+    match write.fields.iter().find(|f| f.name == name).map(|f| &f.value) {
+        Some(WrittenValue::Text(text)) => Some(text),
+        _ => None,
     }
 }
 
@@ -3368,8 +3414,7 @@ impl<'m> Ctx<'_, 'm> {
         if write.model != "ir.actions.client" || self.partial {
             return;
         }
-        let tag = write.fields.iter().find(|f| f.name == "tag").map(|f| &f.value);
-        if let Some(WrittenValue::Text(tag)) = tag
+        if let Some(tag) = field_text(write, "tag")
             && !tag.value.is_empty()
         {
             self.registry_key(out, path, ("OD331", ACTION_REGISTRY, "client action"), tag);
@@ -7655,8 +7700,9 @@ mod tests {
         cache_global, cached_member, callable_attr, csv_label, derived_label, es_module, exported_text,
         fetches_own_view, field_name, has_last_update, hoot_adds, keeps_set, labels_before_ondelete, lacks_domain,
         lone_add_applied, magic_era, no_access_message, page_miss, parent_path_children, patch_form,
-        public_write_message, reads_model_access, reads_requires, shadowed_member, static_only, stores_parent_path,
-        tuple_add_refused, tuple_checked, tuple_listed, unknown_dependency, unmatched_asset, warns_on_labels,
+        public_write_message, qweb_asset_glob, reads_model_access, reads_requires, shadowed_member, static_only,
+        stores_parent_path, tuple_add_refused, tuple_checked, tuple_listed, unknown_dependency, unmatched_asset,
+        warns_on_labels,
     };
     use crate::facts::{
         AccessRow, Annotation, DefinitionSource, JsName, OptionValue, Perms, Pos, Spanned, UNREAD_TYPE,
@@ -7699,6 +7745,35 @@ mod tests {
         assert_eq!(keeps_set(None, char, ("Integer", &["Integer".to_owned()])), Some(false));
         let unread = (UNREAD_TYPE, unread.as_slice());
         assert_eq!(keeps_set(None, unread, unread), Some(true));
+    }
+
+    #[test]
+    fn an_asset_record_adds_its_path_to_web_assets_qweb_from_16_0() {
+        let glob = |fields: &str, series: &str| {
+            let record = format!(r#"<odoo><record id="a" model="ir.asset">{fields}</record></odoo>"#);
+            let facts = crate::xml::analyze(&record, Series::parse(series));
+            qweb_asset_glob(&facts.writes[0], Series::parse(series))
+        };
+        let on = |bundle: &str, rest: &str| {
+            format!(r#"<field name="bundle">{bundle}</field><field name="path">/m/a.xml</field>{rest}"#)
+        };
+        let qweb = on("web.assets_qweb", "");
+        assert_eq!(glob(&qweb, "16.0").as_deref(), Some("m/a.xml"));
+        assert_eq!(glob(&qweb, "saas~15.4"), None);
+        assert_eq!(glob(&qweb, "unknown"), None);
+        let directive = |d: &str| on("web.assets_qweb", &format!(r#"<field name="directive">{d}</field>"#));
+        assert_eq!(glob(&directive("append"), "18.0").as_deref(), Some("m/a.xml"));
+        assert_eq!(glob(&directive("include"), "18.0"), None);
+        assert_eq!(glob(&directive("remove"), "18.0"), None);
+        let opaque = on("web.assets_qweb", r#"<field name="directive" eval="x"/>"#);
+        assert_eq!(glob(&opaque, "18.0"), None);
+        assert_eq!(glob(&on(" web.assets_qweb", ""), "18.0"), None);
+        assert_eq!(glob(&on("web.assets_backend", ""), "18.0"), None);
+        let url = r#"<field name="bundle">web.assets_qweb</field><field name="path">https://x.test/a.xml</field>"#;
+        assert_eq!(glob(url, "18.0"), None);
+        let other = r#"<odoo><record id="a" model="ir.ui.view"><field name="bundle">web.assets_qweb</field><field name="path">m/a.xml</field></record></odoo>"#;
+        let facts = crate::xml::analyze(other, Series::parse("18.0"));
+        assert_eq!(qweb_asset_glob(&facts.writes[0], Series::parse("18.0")), None);
     }
 
     #[test]
