@@ -441,6 +441,7 @@ custom/depends_unused_smudge/static/src/form_note.xml:4:9: OD606 no <div> with c
 custom/domain_bases/models/domain_delegates.py:74:30: OD210 'no_literal_stamp': domain.literal.delegate has no field 'no_literal_stamp'
 custom/domain_bases/models/domain_imports.py:14:30: OD210 'no_relative_stamp': domain.relative has no field 'no_relative_stamp'
 custom/domain_bases/models/domain_imports.py:23:30: OD210 'no_module_stamp': domain.module has no field 'no_module_stamp'
+custom/domain_bases/models/domain_imports.py:64:7: OD401 model 'domain.rebased' has no ir.model.access rule, so only the superuser can use it
 custom/domain_bases/models/domain_local.py:13:30: OD210 'no_base_class': domain.local has no field 'no_base_class'
 custom/domain_bases/models/domain_local.py:44:5: OD226 _auto = False leaves domain.report without a table, and nothing creates the view domain_report; create it in init(), or drop _auto = False
 custom/domain_bases/models/domain_models.py:23:23: OD210 'whole_id.no_past_base': domain.whole has no field 'no_past_base'

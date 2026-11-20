@@ -1794,15 +1794,6 @@ fn orm_kind(name: &str) -> Option<ModelKind> {
     }
 }
 
-/// The kind of the ORM base class, or of a model class `kinds` names earlier in the file.
-fn model_kind(class: &ast::StmtClassDef, kinds: &FxHashMap<String, ModelKind>) -> Option<ModelKind> {
-    class
-        .bases()
-        .iter()
-        .filter_map(tail_name)
-        .find_map(|name| orm_kind(name).or_else(|| kinds.get(name).copied()))
-}
-
 /// Whether a base of `class` is `CachedModel`, by its last name as `orm_kind` reads it.
 fn on_cached_model(class: &ast::StmtClassDef) -> bool {
     class
@@ -2310,7 +2301,7 @@ impl UnreadFile<'_, '_, '_> {
         };
         let header = self.header(tokens);
         let class_name = self.src[name.range()].to_owned();
-        self.visitor.record_kind(&class_name, header.kind, header.proven);
+        self.visitor.record_kind(None, &class_name, header.kind, header.proven);
         let at = self.classes.len();
         self.classes.push(UnreadClass {
             fact: ClassFact {
@@ -2356,7 +2347,7 @@ impl UnreadFile<'_, '_, '_> {
             };
         };
         self.visitor.join_naming_bases(class);
-        let kind = model_kind(class, &self.visitor.kinds);
+        let kind = self.visitor.model_kind(class);
         UnreadHeader {
             kind,
             proven: self.visitor.orm_base(class),
@@ -3320,9 +3311,11 @@ fn may_reach_orm(class: &ast::StmtClassDef) -> bool {
 }
 
 /// The names a statement of the module binds. It stops at a function or a class, whose body binds
-/// names of its own.
+/// names of its own. The second field, set by `scoped`, leaves out a comprehension's target, which
+/// Python binds in the comprehension's own scope, and a bare annotation, which binds nothing; a loop
+/// of `orm_queries` reads the target as a name its pass changes.
 #[derive(Default)]
-pub(crate) struct BoundNames<'a>(pub(crate) Vec<&'a str>);
+pub(crate) struct BoundNames<'a>(pub(crate) Vec<&'a str>, bool);
 
 impl<'a> Visitor<'a> for BoundNames<'a> {
     fn visit_stmt(&mut self, stmt: &'a Stmt) {
@@ -3331,6 +3324,7 @@ impl<'a> Visitor<'a> for BoundNames<'a> {
             Stmt::FunctionDef(func) => self.0.push(func.name.as_str()),
             Stmt::Import(import) => self.aliases(&import.names),
             Stmt::ImportFrom(import) => self.aliases(&import.names),
+            Stmt::AnnAssign(ann) if self.1 && ann.value.is_none() => {}
             _ => visitor::walk_stmt(self, stmt),
         }
     }
@@ -3343,9 +3337,25 @@ impl<'a> Visitor<'a> for BoundNames<'a> {
         }
         visitor::walk_expr(self, expr);
     }
+
+    fn visit_comprehension(&mut self, comprehension: &'a ast::Comprehension) {
+        if !self.1 {
+            return visitor::walk_comprehension(self, comprehension);
+        }
+        // A `:=` in a condition binds in the enclosing scope.
+        self.visit_expr(&comprehension.iter);
+        for condition in &comprehension.ifs {
+            self.visit_expr(condition);
+        }
+    }
 }
 
 impl<'a> BoundNames<'a> {
+    /// The names a statement binds in its own scope.
+    fn scoped() -> Self {
+        Self(vec![], true)
+    }
+
     pub(crate) fn aliases(&mut self, aliases: &'a [ast::Alias]) {
         for alias in aliases {
             let name = alias.asname.as_ref().unwrap_or(&alias.name);
@@ -3360,6 +3370,9 @@ enum TopBinding<'a> {
     Class(&'a ast::StmtClassDef),
     /// An import, with the level and the dotted path of what it names.
     Import { level: u32, path: String },
+    /// A class a statement nested in a block, such as an `if` or a `try`, defines, and nothing else
+    /// in that statement binds the name.
+    BlockClass,
     /// Anything else that binds the name, such as an assignment or a function, whose value the scan
     /// does not follow.
     Other,
@@ -3385,8 +3398,9 @@ fn may_bind(bound: &str, name: &str) -> bool {
     bound == name || bound == "*"
 }
 
-/// Each name each statement of the module body binds, in order. A name an `if`, a `try`, a `with`
-/// or an assignment binds is `Other`, since the scan does not follow which value it gets.
+/// Each name each statement of the module body binds, in order. A name an assignment binds, or an
+/// `if`, a `try` or a `with` binds other than by class definitions alone, is `Other`, since the scan
+/// does not follow which value it gets.
 fn top_bindings(body: &[Stmt]) -> Vec<TopBound<'_>> {
     let mut bound = vec![];
     for stmt in body {
@@ -3394,16 +3408,44 @@ fn top_bindings(body: &[Stmt]) -> Vec<TopBound<'_>> {
             Stmt::ClassDef(class) => vec![(class.name.as_str(), TopBinding::Class(class))],
             Stmt::Import(import) => import.names.iter().map(plain_import).collect(),
             Stmt::ImportFrom(import) => import.names.iter().map(|a| from_import(import, a)).collect(),
-            _ => {
-                let mut names = BoundNames::default();
-                names.visit_stmt(stmt);
-                names.0.into_iter().map(|n| (n, TopBinding::Other)).collect()
-            }
+            _ => block_bindings(stmt),
         };
         let end = stmt.end();
         bound.extend(names.into_iter().map(|(name, binding)| TopBound { name, end, binding }));
     }
     bound
+}
+
+/// Each name a block statement of the module body binds, as a `BlockClass` when only class
+/// definitions in it bind the name.
+fn block_bindings(stmt: &Stmt) -> Vec<(&str, TopBinding<'_>)> {
+    let mut names = BoundNames::scoped();
+    names.visit_stmt(stmt);
+    let mut classes = BlockClasses::default();
+    classes.visit_stmt(stmt);
+    let count = |bound: &[&str], name: &str| bound.iter().filter(|b| **b == name).count();
+    let binding = |name: &str| {
+        if count(&names.0, name) == count(&classes.0, name) {
+            TopBinding::BlockClass
+        } else {
+            TopBinding::Other
+        }
+    };
+    names.0.iter().map(|name| (*name, binding(name))).collect()
+}
+
+/// The names the class definitions of a statement bind, below which `BoundNames` stops alike.
+#[derive(Default)]
+struct BlockClasses<'a>(Vec<&'a str>);
+
+impl<'a> Visitor<'a> for BlockClasses<'a> {
+    fn visit_stmt(&mut self, stmt: &'a Stmt) {
+        match stmt {
+            Stmt::ClassDef(class) => self.0.push(class.name.as_str()),
+            Stmt::FunctionDef(_) => {}
+            _ => visitor::walk_stmt(self, stmt),
+        }
+    }
 }
 
 /// What an alias of `import a.b` binds: `a` itself without an `as`, else `a.b`.
@@ -3764,6 +3806,9 @@ struct PyVisitor<'a, 'ast> {
     facts: PyFacts,
     /// Model classes of the file by Python class name.
     kinds: FxHashMap<String, ModelKind>,
+    /// The kind of each model class of the parsed file by where the class starts, which a binding
+    /// of `top_bindings` finds it by.
+    class_kinds: FxHashMap<TextSize, ModelKind>,
     /// What `fieldless_classes` reads of the file.
     fieldless: FxHashMap<&'ast str, Fieldless<'ast>>,
     /// What `top_bindings` reads of the file.
@@ -3857,6 +3902,7 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
             scope,
             facts: PyFacts::default(),
             kinds: FxHashMap::default(),
+            class_kinds: FxHashMap::default(),
             fieldless: fieldless_classes(body, series),
             top_bindings: top_bindings(body),
             guarded: vec![],
@@ -3914,7 +3960,7 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
 
     fn class_fact(&mut self, class: &ast::StmtClassDef) -> Option<ClassFact> {
         self.join_naming_bases(class);
-        let kind = model_kind(class, &self.kinds);
+        let kind = self.model_kind(class);
         if kind.is_none() && !declares_model(class) {
             self.field_class(class);
             return None;
@@ -3924,7 +3970,7 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
             file_model_base: self.file_model_base(class),
             ..Naming::default()
         };
-        self.record_kind(&class.name, kind, self.orm_base(class));
+        self.record_kind(Some(class.start()), &class.name, kind, self.orm_base(class));
         let (plain_bases, plain_sources) = self.plain_bases(class);
         let (opaque_bases, base_methods) = self.read_bases(class, &plain_bases, &plain_sources);
         let mut fact = ClassFact {
@@ -3984,14 +4030,45 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
     }
 
     /// Records the class `name` among the model classes of the file when its header gives it a
-    /// `kind`, and among the proven ones when `proven`.
-    fn record_kind(&mut self, name: &str, kind: Option<ModelKind>, proven: bool) {
+    /// `kind`, by `start` too when it is a class of the parsed file, and among the proven ones when
+    /// `proven`.
+    fn record_kind(&mut self, start: Option<TextSize>, name: &str, kind: Option<ModelKind>, proven: bool) {
         let Some(kind) = kind else {
             return;
         };
         self.kinds.insert(name.to_owned(), kind);
+        if let Some(start) = start {
+            self.class_kinds.insert(start, kind);
+        }
         if proven {
             self.proven_models.insert(name.to_owned());
+        }
+    }
+
+    /// The kind of the ORM base class of `class`, or of a model class of the file a base names.
+    /// Odoo builds a model's class on the class that defines it, so the kind is what Python
+    /// inherits through the bases.
+    fn model_kind(&self, class: &ast::StmtClassDef) -> Option<ModelKind> {
+        class.bases().iter().find_map(|base| {
+            let name = tail_name(base)?;
+            orm_kind(name).or_else(|| self.file_kind(class, base, name))
+        })
+    }
+
+    /// The kind of the model class of the file that `base`, whose last name is `name`, names at
+    /// `class`. A class of the module body reads the root of `base` through its binding, whose
+    /// value an assignment or an import does not give, and the last model class named `name` above
+    /// it stands for a class in a block or nested in the bound one. A class below the module body,
+    /// or of a file that does not parse, whose bindings are not read, takes that class too.
+    fn file_kind(&self, class: &ast::StmtClassDef, base: &Expr, name: &str) -> Option<ModelKind> {
+        let by_name = || self.kinds.get(name).copied();
+        if !self.at_top(class) {
+            return by_name();
+        }
+        match self.binding_at(class, module_state::root(base)?)? {
+            TopBinding::Class(bound) if base.is_name_expr() => self.class_kinds.get(&bound.start()).copied(),
+            TopBinding::Class(_) | TopBinding::BlockClass => by_name(),
+            _ => None,
         }
     }
 
@@ -4029,11 +4106,7 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
         let Some(root) = module_state::root(base).filter(|_| self.at_top(class) && !dotted.contains("...")) else {
             return BaseSource::Unread;
         };
-        let bound = self
-            .top_bindings
-            .iter()
-            .rfind(|b| b.end <= class.start() && b.binds(root));
-        match bound.map(|b| &b.binding) {
+        match self.binding_at(class, root) {
             Some(TopBinding::Class(bound)) if base.is_name_expr() => BaseSource::Local(self.loc.at(&bound.name)),
             Some(TopBinding::Import { level, path }) => BaseSource::Imported {
                 level: *level,
@@ -4041,6 +4114,16 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
             },
             _ => BaseSource::Unread,
         }
+    }
+
+    /// What the last statement of the module body that binds `name` and ends before `class` binds
+    /// it to.
+    fn binding_at(&self, class: &ast::StmtClassDef, name: &str) -> Option<&TopBinding<'ast>> {
+        let bound = self
+            .top_bindings
+            .iter()
+            .rfind(|b| b.end <= class.start() && b.binds(name));
+        bound.map(|b| &b.binding)
     }
 
     /// Whether `class` is a statement of the module body.
@@ -5826,7 +5909,7 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
     }
 
     fn visit_class(&mut self, class: &'ast ast::StmtClassDef, stmt: &'ast Stmt) {
-        let orm = model_kind(class, &self.kinds).is_some();
+        let orm = self.model_kind(class).is_some();
         let fact = self.class_fact(class);
         let methods = class_methods(class);
         let branches = branch_methods(class);
@@ -7901,6 +7984,81 @@ class U(HttpCase):
             assert_eq!(class.kind, kind, "{base}");
             assert!(class.plain_bases.is_empty(), "{base}");
         }
+    }
+
+    #[test]
+    fn reads_the_kind_of_a_file_base_through_its_binding() {
+        let base = "class Base(models.AbstractModel):\n    _name = 'b'\n";
+        for (between, kind) in [
+            ("", ModelKind::Abstract),
+            ("Base = DomainOwn\n", ModelKind::Model),
+            ("from .common import Base\n", ModelKind::Model),
+            ("class Base:\n    pass\n", ModelKind::Model),
+            (
+                "class Base(models.TransientModel):\n    _name = 'c'\n",
+                ModelKind::Transient,
+            ),
+            (
+                "def make():\n    class Base(models.TransientModel):\n        _name = 'c'\n",
+                ModelKind::Abstract,
+            ),
+            ("[Base for Base in ()]\nBase: type\n", ModelKind::Abstract),
+            ("[b for b in () if (Base := b)]\n", ModelKind::Model),
+        ] {
+            let facts = analyze(&format!("{base}{between}class X(Base):\n    _name = 'x'\n"), None);
+            assert_eq!(facts.classes.last().unwrap().kind, kind, "{between}");
+        }
+        let rebound_below = format!("{base}class X(Base):\n    _name = 'x'\nBase = DomainOwn\n");
+        assert_eq!(analyze(&rebound_below, None).classes[1].kind, ModelKind::Abstract);
+        let dotted =
+            "import kit\nclass Layout(models.AbstractModel):\n    _name = 'y'\nclass X(kit.Layout):\n    _name = 'x'\n";
+        assert_eq!(analyze(dotted, None).classes[1].kind, ModelKind::Model);
+        let nested = "class Outer:\n    class Inner(models.AbstractModel):\n        _name = 'y'\nclass X(Outer.Inner):\n    _name = 'x'\n";
+        assert_eq!(analyze(nested, None).classes.last().unwrap().kind, ModelKind::Abstract);
+    }
+
+    #[test]
+    fn reads_the_kind_of_a_file_base_a_block_defines_by_name() {
+        let base = "class Base(models.AbstractModel):\n    _name = 'b'\n";
+        for (block, kind) in [
+            (
+                "if MADE:\n    class Base(models.AbstractModel):\n        _name = 'c'\n",
+                ModelKind::Abstract,
+            ),
+            (
+                "try:\n    class Base(models.TransientModel):\n        _name = 'c'\nexcept ValueError:\n    pass\n",
+                ModelKind::Transient,
+            ),
+            (
+                "if MADE:\n    class Base(models.AbstractModel):\n        _name = 'c'\nelse:\n    Base = DomainOwn\n",
+                ModelKind::Model,
+            ),
+        ] {
+            let facts = analyze(&format!("{base}{block}class X(Base):\n    _name = 'x'\n"), None);
+            assert_eq!(facts.classes.last().unwrap().kind, kind, "{block}");
+        }
+    }
+
+    #[test]
+    fn a_class_below_the_module_body_reads_a_file_base_by_name() {
+        let base = "class Base(models.AbstractModel):\n    _name = 'b'\nBase = DomainOwn\n";
+        for head in ["def make():\n", "if MADE:\n"] {
+            let facts = analyze(&format!("{base}{head}    class X(Base):\n        _name = 'x'\n"), None);
+            assert_eq!(facts.classes[1].kind, ModelKind::Abstract, "{head}");
+        }
+    }
+
+    #[test]
+    fn a_nameless_class_on_a_rebound_base_names_no_model() {
+        let models = |between: &str| {
+            let src = format!(
+                "{ORM_IMPORTS}class Base(models.AbstractModel):\n    _name = 'b'\n{between}class X(Base):\n    a = fields.Char()\n"
+            );
+            let facts = analyze(&src, Series::parse("20.0"));
+            facts.classes.into_iter().map(|c| c.model).collect::<Vec<_>>()
+        };
+        assert_eq!(models(""), ["b", "x"]);
+        assert_eq!(models("Base = DomainOwn\n"), ["b"]);
     }
 
     #[test]
