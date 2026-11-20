@@ -1,0 +1,2 @@
+id,name,model_id:id,group_id:id,operation,domain
+access_desk_lamp,Desk lamps,model_desk_lamp,base.group_user,rwcd,
