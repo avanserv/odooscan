@@ -1745,6 +1745,10 @@ impl<'a> MethodWalk<'a> for ClassBodySupers<'a> {
 
 impl<'a> Visitor<'a> for ClassBodySupers<'a> {
     fn visit_stmt(&mut self, stmt: &'a Stmt) {
+        // Python evaluates the value and type-parameter bounds of a `type` statement only when read.
+        if let Stmt::TypeAlias(_) = stmt {
+            return;
+        }
         if !visit_method_stmt(self, stmt) {
             visitor::walk_stmt(self, stmt);
         } else if let Stmt::FunctionDef(func) = stmt {
@@ -1781,8 +1785,9 @@ fn defers_annotations(body: &[Stmt]) -> bool {
     })
 }
 
-/// Whether the file binds the name `super` in any scope, which may shadow the builtin. A binding
-/// in an unrelated function counts too, erring toward silence.
+/// Whether the file binds the name `super` in any scope, a `match` capture or a type parameter
+/// included, which may shadow the builtin. A binding in an unrelated function, or a type parameter
+/// outside its annotation scope, counts too, erring toward silence. A star import does not count.
 #[derive(Default)]
 struct SuperBinding {
     found: bool,
@@ -1818,6 +1823,16 @@ impl<'a> Visitor<'a> for SuperBinding {
         let ast::ExceptHandler::ExceptHandler(h) = handler;
         self.found |= h.name.as_ref().is_some_and(|name| name.as_str() == "super");
         visitor::walk_except_handler(self, handler);
+    }
+
+    fn visit_pattern(&mut self, pattern: &'a ast::Pattern) {
+        self.found |= capture(pattern).is_some_and(|name| name.as_str() == "super");
+        visitor::walk_pattern(self, pattern);
+    }
+
+    fn visit_type_param(&mut self, type_param: &'a ast::TypeParam) {
+        self.found |= type_param.name().as_str() == "super";
+        visitor::walk_type_param(self, type_param);
     }
 }
 
@@ -7289,10 +7304,26 @@ mod tests {
             "class A:\n    def m(self):\n        def helper():\n            return super().a()\n        \
              class Inner(super().b(), metaclass=super().c()):\n            pass\n        \
              x: super().i() = [super().g() for _ in range(2)]\n        \
-             return super().d(), helper, Inner, x\n    \
+             def nested(d: super().h() = 1):\n            return d\n        \
+             return super().d(), helper, Inner, x, nested\n    \
              f = lambda self: super().e()\n    k = super(Base, obj).f()\n",
         );
         assert!(lines.is_empty(), "{lines:?}");
+    }
+
+    #[test]
+    fn an_annotation_in_a_local_class_is_reported() {
+        let lines = class_body_super_lines("def outer():\n    class L:\n        x: super().a() = 1\n    return L\n");
+        assert_eq!(lines, [3]);
+    }
+
+    #[test]
+    fn a_type_alias_in_a_class_body_is_not() {
+        let lines = class_body_super_lines(
+            "class A:\n    type X = super().a()\n    type Y[T: super().b()] = list[T]\n    \
+             z = super().c()\n",
+        );
+        assert_eq!(lines, [4]);
     }
 
     #[test]
@@ -7312,6 +7343,18 @@ mod tests {
             "import super\nclass A:\n    x = super().a()\n",
             "class A:\n    super = object\n    x = super().a()\n",
             "try:\n    pass\nexcept Exception as super:\n    pass\nclass A:\n    x = super().a()\n",
+            "def f(super):\n    return super\nclass A:\n    x = super().a()\n",
+            "match 1:\n    case super:\n        pass\nclass A:\n    x = super().a()\n",
+            "match 1:\n    case [*super]:\n        pass\nclass A:\n    x = super().a()\n",
+            "match 1:\n    case {**super}:\n        pass\nclass A:\n    x = super().a()\n",
+            "class B[super]:\n    pass\nclass A:\n    x = super().a()\n",
+            "def f[super]():\n    pass\nclass A:\n    x = super().a()\n",
+            "type T[super] = int\nclass A:\n    x = super().a()\n",
+            "match 1:\n    case int() as super:\n        pass\nclass A:\n    x = super().a()\n",
+            "match 1:\n    case C(x=super):\n        pass\nclass A:\n    x = super().a()\n",
+            "match 1:\n    case [1, (2 | super)]:\n        pass\nclass A:\n    x = super().a()\n",
+            "class B[*super]:\n    pass\nclass A:\n    x = super().a()\n",
+            "class B[**super]:\n    pass\nclass A:\n    x = super().a()\n",
         ] {
             let lines = class_body_super_lines(src);
             assert!(lines.is_empty(), "{src}: {lines:?}");
