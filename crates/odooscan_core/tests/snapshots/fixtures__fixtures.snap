@@ -1063,6 +1063,7 @@ custom/model_attributes/models/zone.py:9:5: OD217 garden.zone sets _parent_store
 custom/model_attributes/models/zone.py:22:5: OD217 garden.area sets _parent_store but its parent_path field has no index, which Odoo logs as an error; add index=True to it
 custom/model_attributes/models/zone.py:31:5: OD217 garden.terrace sets _parent_store but its parent_path field has no index, which Odoo logs as an error; add index=True to it
 custom/modern19/data/calls.xml:7:7: OD320 res.partner has no method 'pool'
+custom/modern19/models/heirs.py:7:16: OD109 self._uid is deprecated; use self.env.uid
 custom/modern19/models/partner.py:6:5: OD110 _sql_constraints is ignored; declare models.Constraint, models.Index or models.UniqueIndex attributes instead
 custom/modern19/models/partner.py:9:9: OD109 self._cr is deprecated; use self.env.cr
 custom/modern19/models/partner.py:9:9: OD122 UPDATE on res_partner bypasses the ORM, so records this transaction already read keep stale values; call flush_model() before the query and invalidate_model() after it (flush() and invalidate_cache() before 16.0)

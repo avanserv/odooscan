@@ -243,6 +243,10 @@ pub struct ClassFact {
     /// The model is not among the class's `_inherit`, so the class defines it.
     pub new_model: bool,
     pub kind: ModelKind,
+    /// The header gives `kind`: a base is an ORM model class or a model class of the file. A class
+    /// without one has a fact only for its literal `_name` or `_inherit`, so its `self` need not be
+    /// a recordset.
+    pub on_model_base: bool,
     /// A base of the class is `CachedModel`, whose members the model gets beside those of
     /// `BaseModel`.
     pub cached: bool,
@@ -398,6 +402,7 @@ impl ClassFact {
             model: String::new(),
             new_model: false,
             kind: ModelKind::Model,
+            on_model_base: false,
             cached: false,
             inherit: vec![],
             inherit_unknown: false,
@@ -992,6 +997,9 @@ pub struct PyFacts {
     /// OD120 on each name an `ormcache` key reads that the method does not bind, keyed by the name:
     /// `checks.rs` drops those that Odoo's cache module defines in the module's series.
     pub cache_key_names: Vec<(String, RawDiag)>,
+    /// OD109 in a class with no ORM base or fact, keyed by the imported sources of its plain bases:
+    /// `checks.rs` keeps those where the index resolves one to a model class.
+    pub imported_base_shortcuts: Vec<(Vec<BaseSource>, RawDiag)>,
     /// What OD123 reports, whose advice depends on whether the index knows the object as a model
     /// class.
     pub import_patches: Vec<ImportPatch>,

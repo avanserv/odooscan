@@ -716,7 +716,7 @@ fn a_diff_writes_nothing_and_a_second_fix_changes_nothing() {
 
     let (code, _, stderr) = run(check_in(&dir, &[&checked[..], &["--fix"]].concat()));
     assert_eq!(code, Some(1), "{stderr}");
-    assert!(stderr.contains("fixed 21 diagnostics in 9 files"), "{stderr}");
+    assert!(stderr.contains("fixed 22 diagnostics in 10 files"), "{stderr}");
     let fixed = contents(&dir);
     let (_, _, stderr) = run(check_in(&dir, &[&checked[..], &["--fix"]].concat()));
     assert!(stderr.contains("fixed 0 diagnostics in 0 files"), "{stderr}");

@@ -92,6 +92,17 @@ expression: diff
          self.env["res.company"].recompute()
          self.invalidate_cache()
          self.refresh()
+--- a/custom/modern19/models/heirs.py
++++ b/custom/modern19/models/heirs.py
+@@ -4,7 +4,7 @@
+ 
+ class ModernNoteHeir(ModernNote):
+     def _x_author(self):
+-        return self._uid
++        return self.env.uid
+ 
+ 
+ class ModernCursorHeir(ModernCursorHolder):
 --- a/custom/modern19/models/partner.py
 +++ b/custom/modern19/models/partner.py
 @@ -6,7 +6,7 @@
