@@ -82,3 +82,51 @@ class RefsLookup(models.AbstractModel):
 
     def _lanterns(self):
         return self.env["ghost.lantern"], self.env["side.lantern"], self.env["ghost.thing"]
+
+
+# Only ghost_refs_side defines wick here. Through ghost.lantern, whose introducer may give it too,
+# it reads as unknown; through side.lantern it comes from a module outside depends.
+class RefsChildWick(models.Model):
+    _inherit = "refs.child"
+
+    wick_copy = fields.Char(related="wick")
+
+
+class RefsKidWick(models.Model):
+    _inherit = "refs.kid"
+
+    wick_copy = fields.Char(related="wick")
+
+
+class RefsHeirWick(models.Model):
+    _inherit = "refs.heir"
+
+    wick_copy = fields.Char(related="wick")
+
+
+class RefsCubWick(models.Model):
+    _inherit = "refs.cub"
+
+    wick_copy = fields.Char(related="wick")
+
+
+class RefsMid(models.Model):
+    _name = "refs.mid"
+    _description = "Refs mid"
+    _inherit = ["ghost.lantern"]
+
+
+class RefsGrand(models.Model):
+    _name = "refs.grand"
+    _description = "Refs grand"
+    _inherits = {"refs.mid": "mid_id"}
+
+    mid_id = fields.Many2one("refs.mid", required=True, ondelete="cascade")
+    wick_copy = fields.Char(related="wick")
+
+
+class RefsHolderWick(models.Model):
+    _inherit = "refs.holder"
+
+    kid_id = fields.Many2one("refs.kid", domain="[('wick', '=', 'lit')]")
+    cub_id = fields.Many2one("refs.cub", domain="[('wick', '=', 'lit')]")

@@ -4581,8 +4581,8 @@ impl<'m> Index<'m> {
         self.classes(model).iter().any(|(_, c)| c.new_model)
     }
 
-    /// Follows a dotted field path from `model`. Paths through models no class introduces are
-    /// accepted.
+    /// Follows a dotted field path from `model`. Paths through models no class introduces, or
+    /// through a field such a model supplies as a parent, are accepted.
     pub fn resolve_path(&self, model: &str, path: &str, scope: &Scope) -> Result<(), PathError<'m>> {
         let mut model = model.to_owned();
         let segments: Vec<&str> = path.split('.').collect();
@@ -4610,18 +4610,42 @@ impl<'m> Index<'m> {
         Ok(())
     }
 
+    /// `segment` of `model`, or `Ok(None)` for unknown when a field only outside the scope comes
+    /// from a parent no class introduces: its introducer outside the scan may give the field too.
+    /// See `unintroduced_parent_defines`.
     fn step(&self, model: &str, segment: &str, scope: &Scope) -> Result<Option<FieldInfo<'m>>, PathError<'m>> {
-        self.field(model, segment, scope).map_err(|module| match module {
-            None => PathError::Missing {
+        match self.field(model, segment, scope) {
+            Err(Some(_)) if self.unintroduced_parent_defines(model, segment, scope) => Ok(None),
+            Err(None) => Err(PathError::Missing {
                 segment: segment.to_owned(),
                 model: model.to_owned(),
-            },
-            Some(module) => PathError::Hidden {
+            }),
+            Err(Some(module)) => Err(PathError::Hidden {
                 segment: segment.to_owned(),
                 model: model.to_owned(),
                 module,
-            },
-        })
+            }),
+            Ok(info) => Ok(info),
+        }
+    }
+
+    /// Whether a class of a parent no class introduces defines `field`, where a class in scope of
+    /// `model`, or of a model it inherits or delegates to, names the parent. Odoo builds a model on
+    /// the registry class of each `_inherit` parent (18.0 `odoo/models.py:759-768`; 20.0
+    /// `odoo/orm/model_classes.py:208-217`) and copies an `_inherits` parent's fields from the
+    /// registry model: see `has_introducer`. A parent only a module outside the scope names is not
+    /// there when the reader runs. `base` may have no indexed introducer, so a field a module
+    /// outside `depends` adds through `_inherit = 'base'` stays reported as that module's.
+    fn unintroduced_parent_defines(&self, model: &str, field: &str, scope: &Scope) -> bool {
+        self.chain(model, Some(scope), true)
+            .iter()
+            .flat_map(|(_, c)| {
+                let delegates = c.inherits.iter().map(|(parent, _)| parent.as_str());
+                c.inherit.iter().map(|i| i.value.as_str()).chain(delegates)
+            })
+            .filter(|parent| *parent != "base" && !self.has_introducer(parent))
+            .flat_map(|parent| self.classes(parent))
+            .any(|(_, c)| c.fields.iter().any(|f| f.name == field))
     }
 
     /// The model a view applies to, following `inherit_id` when the view does not name one.
@@ -6196,20 +6220,26 @@ mod tests {
             .push(python_18("class P(models.Model):\n    _name = 'res.partner'\n"));
         modules[1].python.push(python_18(
             "class G(models.AbstractModel):\n    _inherit = 'ghost.lantern'\n    wick = fields.Char()\n\n\
-             class S(models.AbstractModel):\n    _name = 'side.lantern'\n    wick = fields.Char()\n",
+             class S(models.AbstractModel):\n    _name = 'side.lantern'\n    wick = fields.Char()\n\n\
+             class U(models.Model):\n    _name = 'refs.cub'\n    _inherit = ['refs.cub', 'ghost.lantern']\n",
         ));
         modules[2].python.push(python_18(
             "class G(models.Model):\n    _inherit = 'ghost.thing'\n\n\
              class R(models.Model):\n    _name = 'refs.thing'\n\n\
              class C(models.Model):\n    _name = 'refs.child'\n    _inherits = {'ghost.lantern': 'lantern_id'}\n\n\
              class H(models.Model):\n    _name = 'refs.heir'\n    _inherits = {'side.lantern': 'lantern_id'}\n\n\
-             class K(models.Model):\n    _name = 'refs.kid'\n    _inherit = ['ghost.lantern']\n",
+             class K(models.Model):\n    _name = 'refs.kid'\n    _inherit = ['ghost.lantern']\n\n\
+             class U(models.Model):\n    _name = 'refs.cub'\n    _inherit = ['side.lantern']\n",
         ));
         let index = Index::build(&modules, None);
         let scope = index.scope(index.by_name["main"]);
         assert!(index.resolve_path("ghost.thing", "wick", &scope).is_ok());
         assert!(index.resolve_path("refs.thing", "wick", &scope).is_err());
+        for model in ["refs.heir", "refs.cub"] {
+            assert!(index.resolve_path(model, "wick", &scope).is_err(), "{model}");
+        }
         for model in ["refs.child", "refs.kid"] {
+            assert!(index.resolve_path(model, "wick", &scope).is_ok(), "{model}");
             assert!(index.unread_delegate(model, &scope), "{model}");
         }
         for model in ["ghost.thing", "refs.heir"] {

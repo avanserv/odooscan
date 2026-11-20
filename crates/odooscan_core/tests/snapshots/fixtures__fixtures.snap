@@ -742,6 +742,7 @@ custom/ghost_parents/views/functions.xml:4:42: OD314 parent.bench has no method 
 custom/ghost_parents_heir/models/shelf.py:7:32: OD204 parent.shelf has no method '_compute_note'
 custom/ghost_refs/data/records.xml:13:39: OD321 'ghost_refs.refs_one' is a record of refs.thing, but refs.holder.partner_id takes res.partner
 custom/ghost_refs/data/records.xml:15:5: OD201 no indexed class introduces model 'ghost.lantern'; module ghost_refs_side only extends it
+custom/ghost_refs/data/records.xml:32:17: OD304 'wick': field 'wick' of refs.cub comes from module ghost_refs_side, which is not in depends
 custom/ghost_refs/models/ghost_thing.py:6:16: OD201 no indexed module defines model 'ghost.thing'
 custom/ghost_refs/models/ghost_thing.py:21:16: OD201 no indexed module defines model 'ghost.thing'
 custom/ghost_refs/models/refs.py:15:24: OD211 no parent class of refs.thing defines 'action_go', so this super() call fails
@@ -759,6 +760,10 @@ custom/ghost_refs/models/refs.py:74:17: OD202 model 'side.lantern' comes from mo
 custom/ghost_refs/models/refs.py:76:33: OD203 'glow': refs.cub has no field 'glow'
 custom/ghost_refs/models/refs.py:84:25: OD206 no indexed class introduces model 'ghost.lantern'; module ghost_refs_side only extends it
 custom/ghost_refs/models/refs.py:84:78: OD206 no indexed module defines model 'ghost.thing'
+custom/ghost_refs/models/refs.py:104:37: OD203 'wick': field 'wick' of refs.heir comes from module ghost_refs_side, which is not in depends
+custom/ghost_refs/models/refs.py:110:37: OD203 'wick': field 'wick' of refs.cub comes from module ghost_refs_side, which is not in depends
+custom/ghost_refs/models/refs.py:116:17: OD201 no indexed class introduces model 'ghost.lantern'; module ghost_refs_side only extends it
+custom/ghost_refs/models/refs.py:132:49: OD210 'wick': field 'wick' of refs.cub comes from module ghost_refs_side, which is not in depends
 custom/ghost_refs/static/src/lookup.js:3:30: OD603 no indexed class introduces model 'ghost.lantern'; module ghost_refs_side only extends it
 custom/ghost_refs/static/src/lookup.js:4:30: OD603 model 'side.lantern' comes from module ghost_refs_side, which is not in depends
 custom/ghost_refs/static/src/lookup.js:5:30: OD603 no indexed module defines model 'ghost.thing'
