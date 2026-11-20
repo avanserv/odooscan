@@ -416,6 +416,12 @@ custom/delegate_levels/models/levels.py:20:42: OD207 'rank_number' is a Integer 
 custom/delegate_levels/models/levels.py:30:39: OD203 'holder.name': level.bottom.holder is not a relational field, so the path cannot continue
 custom/delegate_levels/models/levels.py:31:42: OD207 'rank_number' is a Integer field related to 'rank', which is a Char field
 custom/delegate_levels/models/levels.py:32:42: OD207 'middle_rank' is a Integer field related to 'middle_id.rank', which is a Char field
+custom/dependent_introducer/models/lamps.py:5:16: OD201 model 'dependent.lamp' comes from module dependent_introducer_heir, which depends on this module and so loads after it
+custom/dependent_introducer/models/lamps.py:11:16: OD201 no indexed module defines model 'dependent.ghost'
+custom/dependent_introducer/models/lamps.py:20:33: OD201 model 'dependent.socket' comes from module dependent_introducer_heir, which depends on this module and so loads after it
+custom/dependent_introducer/views/sockets.xml:2:5: OD201 model 'dependent.socket' comes from module dependent_introducer_heir, which depends on this module and so loads after it
+custom/dependent_introducer/views/sockets.xml:5:33: OD201 model 'dependent.socket' comes from module dependent_introducer_heir, which depends on this module and so loads after it
+custom/dependent_introducer/views/sockets.xml:9:9: OD201 model 'dependent.socket' comes from module dependent_introducer_heir, which depends on this module and so loads after it
 custom/depends_unused/__manifest__.py:5:9: OD520 module 'base' already comes with 'sale', also in depends
 custom/depends_unused/__manifest__.py:6:9: OD520 module 'mail' already comes with 'sale', also in depends
 custom/depends_unused/__manifest__.py:7:9: OD521 nothing of module 'sale' is used, nor of what only it brings
@@ -1416,7 +1422,7 @@ custom/record_values/data/targets.xml:11:5: OD201 no indexed module defines mode
 custom/record_values/data/unloaded.xml:1:1: OD502 'data/unloaded.xml' is not in the manifest's data or demo, so Odoo never loads it
 custom/record_values/demo/rewrites.xml:8:38: OD321 'record_values.other_1' is a record of rv.other, but rv.thing.parent_id takes rv.parent
 custom/record_values/demo/rewrites.xml:9:29: OD322 rv.thing.state has no value 'c'
-custom/record_values/models/things.py:121:31: OD202 model 'rv.side.only' comes from module record_values_side; add it to depends
+custom/record_values/models/things.py:121:31: OD201 model 'rv.side.only' comes from module record_values_side, which depends on this module and so loads after it
 custom/record_values/models/things.py:127:50: OD132 _() runs at import, where no language is known, so the text stays untranslated; use _lt(), or a plain string for a field attribute
 custom/record_values_ext/data/extended.xml:12:35: OD321 'record_values.other_1' is a record of rv.other, but rv.thing.new_id takes rv.parent
 custom/record_values_ext/data/extended.xml:13:39: OD321 'record_values.other_1' is a record of rv.other, but rv.thing.retyped_id takes rv.parent

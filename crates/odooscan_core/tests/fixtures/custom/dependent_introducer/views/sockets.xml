@@ -1,0 +1,14 @@
+<odoo>
+    <record id="socket_spare" model="dependent.socket"/>
+    <record id="socket_action" model="ir.actions.act_window">
+        <field name="name">Sockets</field>
+        <field name="res_model">dependent.socket</field>
+    </record>
+    <record id="socket_view_form" model="ir.ui.view">
+        <field name="name">dependent.socket.form</field>
+        <field name="model">dependent.socket</field>
+        <field name="arch" type="xml">
+            <form/>
+        </field>
+    </record>
+</odoo>

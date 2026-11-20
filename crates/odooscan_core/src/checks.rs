@@ -2245,17 +2245,11 @@ impl<'m> Ctx<'_, 'm> {
     }
 
     /// A dependency outside the index may load a model the scope does not reach, or define one no
-    /// indexed module does.
-    fn model_ref(
-        &self,
-        out: &mut Out<'m>,
-        path: &'m Path,
-        model: &Spanned<String>,
-        extender: Option<(usize, &ClassFact)>,
-    ) {
+    /// indexed module does. `class` is the class that lists `model` as a parent.
+    fn model_ref(&self, out: &mut Out<'m>, path: &'m Path, model: &Spanned<String>, class: Option<&ClassFact>) {
         let name = &model.value;
-        let late = || self.late_introducer(name, extender);
-        match self.index.model_status(name, self.scope, extender) {
+        let late = || class.and_then(|_| self.late_introducer(name));
+        match self.index.model_status(name, self.scope, Some((self.mi, class))) {
             Status::Visible => {}
             Status::Hidden(_) if self.partial || self.scope_built.fit(name) => {}
             Status::Hidden(m) => {
@@ -2265,22 +2259,33 @@ impl<'m> Ctx<'_, 'm> {
             }
             Status::Missing if self.dynamic || self.partial => {}
             Status::Missing => {
-                let message = late().unwrap_or_else(|| format!("no indexed module defines model '{name}'"));
+                let message = late().unwrap_or_else(|| self.missing_model(name));
                 out.push(path, "OD201", model.pos, message);
             }
         }
     }
 
-    /// The message for parent `model` of class `extender` when a class of its module introduces
-    /// the model: one `model_status` did not count, so one built after the extender, and moving
-    /// the extender below it is the fix wherever else Odoo would find the model.
-    fn late_introducer(&self, model: &str, extender: Option<(usize, &ClassFact)>) -> Option<String> {
-        let (e, _) = extender?;
+    /// The OD201 message for `model` when no class of this module introduces it: a module that
+    /// depends on this one loads after it, so its class is not in the registry when this module
+    /// needs the model, and adding it to `depends` would make a cycle.
+    fn missing_model(&self, model: &str) -> String {
+        match self.index.dependent_introducer(model, self.mi) {
+            Some(m) => {
+                format!("model '{model}' comes from module {m}, which depends on this module and so loads after it")
+            }
+            None => format!("no indexed module defines model '{model}'"),
+        }
+    }
+
+    /// The message for `model` as a parent of a class of this module when another class of it
+    /// introduces the model: `model_status` did not count that one, so Odoo builds it after the
+    /// class, and moving the class below it is the fix wherever else Odoo would find the model.
+    fn late_introducer(&self, model: &str) -> Option<String> {
         let (_, c) = self
             .index
             .classes(model)
             .iter()
-            .find(|(mi, c)| *mi == e && c.new_model)?;
+            .find(|(mi, c)| *mi == self.mi && c.new_model)?;
         Some(format!(
             "model '{model}' is not in the registry yet: class {} of this module introduces it after this class",
             c.class_name
@@ -2290,7 +2295,7 @@ impl<'m> Ctx<'_, 'm> {
     /// `model_ref` for a data file. An unread file in scope may hold the `ir.model` record of a model
     /// no class defines, but not the class of one a module outside `depends` defines.
     fn data_model_ref(&self, out: &mut Out<'m>, path: &'m Path, model: &Spanned<String>) {
-        let status = self.index.model_status(&model.value, self.scope, None);
+        let status = self.index.model_status(&model.value, self.scope, Some((self.mi, None)));
         if !(self.lost && matches!(status, Status::Missing)) {
             self.model_ref(out, path, model, None);
         }
@@ -2958,7 +2963,7 @@ impl<'m> Ctx<'_, 'm> {
 
     fn class(&self, out: &mut Out<'m>, path: &'m Path, class: &ClassFact) {
         for parent in &class.inherit {
-            self.model_ref(out, path, parent, Some((self.mi, class)));
+            self.model_ref(out, path, parent, Some(class));
         }
         for field in &class.fields {
             self.field(out, path, class, field);
@@ -4819,7 +4824,8 @@ impl<'m> Ctx<'_, 'm> {
             return;
         }
         if !matches!(
-            self.index.model_status(&record.model.value, self.scope, None),
+            self.index
+                .model_status(&record.model.value, self.scope, Some((self.mi, None))),
             Status::Visible
         ) {
             self.data_model_ref(out, path, &record.model);
@@ -8261,6 +8267,72 @@ mod tests {
         assert_eq!(od230(None), 1);
         assert_eq!(od230(Some(4)), 0, "a module main sees");
         assert_eq!(od230(Some(3)), 0, "a module whose scope holds a class of the model");
+    }
+
+    #[test]
+    fn a_model_only_a_dependent_introduces_takes_the_gates_of_an_unknown_model() {
+        let manifest = |depends: &str| format!("{{'version': '18.0.1.0', 'depends': [{depends}]}}");
+        let python = |source: &str| crate::project::SourceFile {
+            path: std::path::PathBuf::new(),
+            rel: "models/main.py".to_owned(),
+            rank: None,
+            demo: false,
+            facts: analyze(source, Series::parse("18.0")),
+            suppressions: Default::default(),
+            mentions: Default::default(),
+        };
+        let data = |rank: usize, facts: crate::facts::DataFacts| crate::project::SourceFile {
+            path: std::path::PathBuf::new(),
+            rel: format!("data/{rank}.xml"),
+            rank: Some(rank),
+            demo: false,
+            facts,
+            suppressions: Default::default(),
+            mentions: Default::default(),
+        };
+        let wiring = "class W(models.AbstractModel):\n    _name = 'w.wiring'\n    socket_id = fields.Many2one('dependent.socket')\n";
+        let record = r#"<odoo><record id="spare" model="dependent.socket"/></odoo>"#;
+        // `builder` may build any `dependent.` model, which silences an OD202 but not an OD201.
+        let findings = |builds: bool, dynamic: bool, lost: bool| {
+            let mut modules = vec![
+                crate::project::module("base", &manifest("")),
+                crate::project::module("builder", &manifest("'base'")),
+                crate::project::module("main", &manifest("'builder'")),
+                crate::project::module("heir", &manifest("'main'")),
+            ];
+            if builds {
+                modules[1].python.push(python(
+                    "class B(models.AbstractModel):\n    _name = 'dependent.%s' % KIND\n",
+                ));
+            }
+            modules[2].python.push(python(wiring));
+            if dynamic {
+                modules[2]
+                    .python
+                    .push(python("class D(models.Model):\n    _name = 'other.%s' % KIND\n"));
+            }
+            let facts = crate::xml::analyze(record, Series::parse("18.0"));
+            modules[2].data.push(data(0, facts));
+            if lost {
+                let unreadable = crate::facts::DataFacts {
+                    unreadable: true,
+                    ..Default::default()
+                };
+                modules[2].data.push(data(1, unreadable));
+            }
+            modules[3]
+                .python
+                .push(python("class S(models.Model):\n    _name = 'dependent.socket'\n"));
+            let index = Index::build(&modules, None);
+            let diags = check_module(&index, 2, Series::parse("18.0"));
+            let codes = diags.iter().map(|(_, d)| (d.code, d.pos.line));
+            codes
+                .filter(|(code, _)| code.starts_with("OD20") && *code < "OD203")
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(findings(true, false, false), [("OD201", 3), ("OD201", 1)]);
+        assert_eq!(findings(false, true, false), []);
+        assert_eq!(findings(false, false, true), [("OD201", 3)]);
     }
 
     #[test]

@@ -3491,17 +3491,17 @@ impl<'m> Index<'m> {
         self.model_by_xmlid.get(id).copied()
     }
 
-    /// Whether `model` is defined in scope for class `extender` of a module, when one lists it as a
-    /// parent. Odoo builds a module's classes in the order Python creates them (18.0
-    /// `odoo/modules/registry.py:290-292`, 20.0 `odoo/orm/registry.py:449-451`), and building one
-    /// whose parent is not in the registry yet fails (18.0 `odoo/models.py:759-761`, 20.0
-    /// `odoo/orm/model_classes.py:208-210`), so an introducer of the extender's module counts
-    /// unless `builds_before` puts it after the extender.
-    /// A module that depends on the extender's loads after it, so none of its classes count, and
-    /// naming it as the source would ask for a cycle in `depends`.
-    pub fn model_status(&self, model: &str, scope: &Scope, extender: Option<(usize, &ClassFact)>) -> Status<'m> {
+    /// Whether `model` is defined in scope for code of module `reader`, and for its class when a
+    /// class lists it as a parent. Odoo builds a module's classes in the order Python creates them
+    /// (18.0 `odoo/modules/registry.py:290-292`, 20.0 `odoo/orm/registry.py:449-451`), and building
+    /// one whose parent is not in the registry yet fails (18.0 `odoo/models.py:759-761`, 20.0
+    /// `odoo/orm/model_classes.py:208-210`), so an introducer of the class's module counts unless
+    /// `builds_before` puts it after the class. A module that depends on the reader's loads after
+    /// it, so none of its classes count (`dependent_introducer` names it), and naming it as the
+    /// source would ask for a cycle in `depends`. A reader of None counts every class.
+    pub fn model_status(&self, model: &str, scope: &Scope, reader: Option<(usize, Option<&ClassFact>)>) -> Status<'m> {
         let classes = self.models.get(model).map(Vec::as_slice).unwrap_or_default();
-        let others = || classes.iter().filter(|(mi, c)| self.counts(*mi, c, extender));
+        let others = || classes.iter().filter(|(mi, c)| self.counts(*mi, c, reader));
         if others().any(|(mi, _)| scope.sees(*mi)) {
             Status::Visible
         } else if let Some((first, _)) = others().next() {
@@ -3513,14 +3513,25 @@ impl<'m> Index<'m> {
     }
 
     /// Whether class `c` of module `mi` puts its model in the registry for `model_status`.
-    fn counts(&self, mi: usize, c: &ClassFact, extender: Option<(usize, &ClassFact)>) -> bool {
-        match extender {
-            Some((e, class)) if mi == e => c.new_model && !self.builds_before(e, class, c),
-            // `loads_before` first, as a lookup: outside a cycle, which is OD504's, a module that
-            // reaches `e` loads after it.
-            Some((e, _)) => !(self.loads_before(e, mi) && self.reaches(mi, e)),
+    fn counts(&self, mi: usize, c: &ClassFact, reader: Option<(usize, Option<&ClassFact>)>) -> bool {
+        match reader {
+            Some((e, Some(class))) if mi == e => c.new_model && !self.builds_before(e, class, c),
+            Some((e, _)) => !self.follows(mi, e),
             None => true,
         }
+    }
+
+    /// Whether module `mi` depends on module `e` and so loads after it. `loads_before` goes first,
+    /// as a lookup: outside a cycle, which is OD504's, a module that reaches `e` loads after it.
+    fn follows(&self, mi: usize, e: usize) -> bool {
+        self.loads_before(e, mi) && self.reaches(mi, e)
+    }
+
+    /// The module that introduces `model` among those that depend on module `e`, which
+    /// `model_status` does not count for a reader in `e`.
+    pub fn dependent_introducer(&self, model: &str, e: usize) -> Option<&'m str> {
+        let dependents = self.classes(model).iter().filter(|(mi, _)| self.follows(*mi, e));
+        self.introducer(dependents).map(|mi| self.modules[mi].name.as_str())
     }
 
     /// Whether module `mi` builds its class `first` before its class `then`: in one file by place,
@@ -5935,24 +5946,85 @@ mod tests {
             let classes = modules[mi].python.iter().flat_map(|f| &f.facts.classes);
             classes.into_iter().find(|c| c.class_name == name).unwrap()
         };
-        let status = |model: &str, mi: usize, extender: Option<(usize, &str)>| {
+        let status = |model: &str, mi: usize, reader: Option<(usize, Option<&str>)>| {
             let scope = index.scope(mi);
-            match index.model_status(model, &scope, extender.map(|(e, name)| (e, class(e, name)))) {
+            let reader = reader.map(|(e, name)| (e, name.map(|name| class(e, name))));
+            match index.model_status(model, &scope, reader) {
                 Status::Visible => "visible".to_owned(),
                 Status::Hidden(m) => format!("hidden {m}"),
                 Status::Missing => "missing".to_owned(),
             }
         };
-        assert_eq!(status("ghost.lamp", main, Some((main, "G1"))), "missing");
-        assert_eq!(status("side.thing", main, Some((main, "S1"))), "hidden side");
-        assert_eq!(status("side.thing", main, Some((main, "T0"))), "hidden side");
-        assert_eq!(status("side.thing", main, Some((main, "T1"))), "visible");
-        assert_eq!(status("res.partner", main, Some((main, "P1"))), "visible");
-        assert_eq!(status("main.lamp", main, Some((main, "X0"))), "missing");
-        assert_eq!(status("main.lamp", main, Some((main, "X"))), "visible");
+        assert_eq!(status("ghost.lamp", main, Some((main, Some("G1")))), "missing");
+        assert_eq!(status("side.thing", main, Some((main, Some("S1")))), "hidden side");
+        assert_eq!(status("side.thing", main, Some((main, Some("T0")))), "hidden side");
+        assert_eq!(status("side.thing", main, Some((main, Some("T1")))), "visible");
+        assert_eq!(status("res.partner", main, Some((main, Some("P1")))), "visible");
+        assert_eq!(status("main.lamp", main, Some((main, Some("X0")))), "missing");
+        assert_eq!(status("main.lamp", main, Some((main, Some("X")))), "visible");
         assert_eq!(status("ghost.lamp", main, None), "visible");
         assert_eq!(status("side.thing", main, None), "visible");
-        assert_eq!(status("ghost.lamp", heir, Some((heir, "G"))), "visible");
+        assert_eq!(status("ghost.lamp", heir, Some((heir, Some("G")))), "visible");
+    }
+
+    #[test]
+    fn module_code_ignores_a_model_only_its_dependents_introduce() {
+        let manifest = |depends: &str| format!("{{'version': '18.0.1.0', 'depends': [{depends}]}}");
+        let mut modules = [
+            module("base", &manifest("")),
+            module("side", &manifest("'base'")),
+            module("main", &manifest("'base'")),
+            module("heir", &manifest("'main'")),
+            module("kin", &manifest("'heir'")),
+            module("aa", &manifest("'zz'")),
+            module("zz", &manifest("'aa'")),
+        ];
+        let sources = [
+            "class S(models.Model):\n    _name = 'shared.lamp'\n",
+            "class S(models.Model):\n    _name = 'side.thing'\n",
+            "class X0(models.Model):\n    _inherit = 'main.lamp'\n\n\
+             class L(models.Model):\n    _name = 'main.lamp'\n",
+            "class H(models.Model):\n    _name = 'heir.lamp'\n\n\
+             class T(models.Model):\n    _name = 'twin.lamp'\n\n\
+             class S(models.Model):\n    _name = 'shared.lamp'\n",
+            "class D(models.Model):\n    _name = 'deep.lamp'\n\n\
+             class T(models.Model):\n    _name = 'twin.lamp'\n",
+            "class A(models.Model):\n    _name = 'aa.lamp'\n",
+            "class Z(models.Model):\n    _name = 'zz.lamp'\n",
+        ];
+        for (module, source) in modules.iter_mut().zip(sources) {
+            module.python.push(python_18(source));
+        }
+        let index = Index::build(&modules, None);
+        let status = |model: &str, mi: usize, reader: Option<usize>| match index.model_status(
+            model,
+            &index.scope(mi),
+            reader.map(|e| (e, None)),
+        ) {
+            Status::Visible => "visible".to_owned(),
+            Status::Hidden(m) => format!("hidden {m}"),
+            Status::Missing => "missing".to_owned(),
+        };
+        let [main, heir, aa, zz] = ["main", "heir", "aa", "zz"].map(|name| index.by_name[name]);
+        // Without a class, the module's own introducer counts wherever it sits in the file.
+        assert_eq!(status("main.lamp", main, Some(main)), "visible");
+        assert_eq!(status("heir.lamp", main, Some(main)), "missing");
+        assert_eq!(status("heir.lamp", main, None), "hidden heir");
+        assert_eq!(index.dependent_introducer("heir.lamp", main), Some("heir"));
+        assert_eq!(status("deep.lamp", main, Some(main)), "missing");
+        assert_eq!(index.dependent_introducer("deep.lamp", main), Some("kin"));
+        assert_eq!(status("deep.lamp", heir, Some(heir)), "missing");
+        assert_eq!(index.dependent_introducer("deep.lamp", heir), Some("kin"));
+        assert_eq!(status("twin.lamp", main, Some(main)), "missing");
+        assert_eq!(index.dependent_introducer("twin.lamp", main), Some("heir"));
+        assert_eq!(status("shared.lamp", main, Some(main)), "visible");
+        assert_eq!(status("side.thing", main, Some(main)), "hidden side");
+        assert_eq!(index.dependent_introducer("side.thing", main), None);
+        // In a cycle, which is OD504's, `aa` loads first by name, so only `zz` counts as its dependent.
+        assert_eq!(status("zz.lamp", aa, Some(aa)), "missing");
+        assert_eq!(index.dependent_introducer("zz.lamp", aa), Some("zz"));
+        assert_eq!(status("aa.lamp", zz, Some(zz)), "visible");
+        assert_eq!(index.dependent_introducer("aa.lamp", zz), None);
     }
 
     #[test]
