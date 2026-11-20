@@ -199,7 +199,7 @@ fn main() -> ExitCode {
 
 fn explain(query: &str) -> ExitCode {
     if let Some(rule) = odooscan_core::rules::find(query) {
-        print!("{}", rule.doc);
+        print!("{}", output::help_markdown(rule.code, rule.doc));
         return ExitCode::SUCCESS;
     }
     eprintln!("error: no rule is called '{query}'");

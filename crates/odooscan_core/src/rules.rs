@@ -65,7 +65,8 @@ pub struct Rule {
     /// Rules that need the whole dependency graph are skipped when `base` is not indexed.
     pub needs_index: bool,
     pub summary: &'static str,
-    /// The rule's page in `docs/rules/`, embedded so that `oscn explain` and the site print the same text.
+    /// The rule's page in `docs/rules/`, embedded so that `oscn explain` and SARIF print the page
+    /// the site shows; `oscn explain` and SARIF `help.markdown` make its links absolute.
     pub doc: &'static str,
 }
 

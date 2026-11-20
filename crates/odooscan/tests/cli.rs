@@ -221,6 +221,18 @@ fn explain_accepts_a_name() {
 }
 
 #[test]
+fn explain_prints_absolute_links() {
+    let out = oscn(&["explain", "OD320"]);
+    assert_eq!(out.status.code(), Some(0));
+    let page = String::from_utf8(out.stdout).unwrap();
+    assert!(
+        page.contains("](https://avanserv.github.io/odooscan/rules/OD312/#what-it-reports)"),
+        "{page}"
+    );
+    assert!(!page.contains(".md#"), "{page}");
+}
+
+#[test]
 fn explain_rejects_an_unknown_code() {
     let out = oscn(&["explain", "OD999"]);
     assert_eq!(out.status.code(), Some(2));
