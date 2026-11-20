@@ -5039,24 +5039,22 @@ impl<'m> Ctx<'_, 'm> {
             .iter()
             .filter(|f| !popped_value(record, &f.value, self.series))
         {
-            let fname = field_name(&field.value, self.series);
-            match self.index.field(&record.model.value, fname, self.scope) {
-                Ok(_) => {}
-                Err(None) => out.push(
-                    path,
-                    "OD309",
-                    field.pos,
-                    format!("{} has no field '{fname}'", record.model.value),
-                ),
-                Err(Some(m)) => {
-                    let clause = self.field_clause(&record.model.value, fname, m);
-                    out.push(
-                        path,
-                        "OD309",
-                        field.pos,
-                        format!("field '{fname}' of {} {clause}", record.model.value),
-                    );
-                }
+            self.record_field(out, path, &record.model.value, field);
+        }
+    }
+
+    /// OD309 for one field a record of `model` sets. A field only outside the scope that comes
+    /// from a parent no class introduces is unknown, as in `Index::step`: that parent's introducer
+    /// outside the scan may give it too.
+    fn record_field(&self, out: &mut Out<'m>, path: &'m Path, model: &str, field: &Spanned<String>) {
+        let fname = field_name(&field.value, self.series);
+        match self.index.field(model, fname, self.scope) {
+            Ok(_) => {}
+            Err(Some(_)) if self.index.unintroduced_parent_defines(model, fname, self.scope) => {}
+            Err(None) => out.push(path, "OD309", field.pos, format!("{model} has no field '{fname}'")),
+            Err(Some(m)) => {
+                let clause = self.field_clause(model, fname, m);
+                out.push(path, "OD309", field.pos, format!("field '{fname}' of {model} {clause}"));
             }
         }
     }
