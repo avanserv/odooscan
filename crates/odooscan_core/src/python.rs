@@ -54,8 +54,17 @@ const FIELD_TYPES: &[&str] = &[
 /// The packages whose `fields` module holds the ORM's field classes, by series.
 const ORM_PACKAGES: &[&str] = &["odoo", "openerp"];
 
-/// The field classes a module's scope defines, by class name, each with its field type.
-pub type FieldClasses = FxHashMap<String, String>;
+/// The field classes a module's scope defines, by class name.
+pub type FieldClasses = FxHashMap<String, FieldKind>;
+
+/// What a call of a field class tells: its field type, and whether its chain below the ORM's base
+/// binds `__init__`. Odoo builds a field from the keywords `__init__` hands to `Field.__init__`, so
+/// an own one may give any attribute from any argument.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct FieldKind {
+    pub ftype: String,
+    pub own_init: bool,
+}
 
 /// Recordset methods whose first argument, or `domain`, is a domain on the recordset's model.
 const DOMAIN_METHODS: &[&str] = &[
@@ -465,9 +474,17 @@ fn field_call<'e>(expr: &'e Expr, known: &'e FieldClasses) -> Option<(&'e str, &
     let ftype = if FIELD_TYPES.contains(&name) {
         name
     } else {
-        known.get(name)?.as_str()
+        known.get(name)?.ftype.as_str()
     };
     Some((ftype, call))
+}
+
+/// The positional arguments of a field call the ORM maps to attributes, or None when the class's own
+/// `__init__` maps them: Odoo takes every attribute from the keywords that reach `Field.__init__`
+/// (18.0 `odoo/fields.py:333-336`), and only the ORM's own constructors name them by position.
+fn positional_args<'e>(call: &'e ast::ExprCall, known: &FieldClasses) -> Option<&'e [Expr]> {
+    let own = |name| !FIELD_TYPES.contains(&name) && known.get(name).is_some_and(|k| k.own_init);
+    (!tail_name(&call.func).is_some_and(own)).then_some(&call.arguments.args)
 }
 
 /// A base class without its type arguments: from 18.0 `Field` is generic, as in `Field[list]`.
@@ -492,8 +509,9 @@ fn proven_type(base: &Expr, class: &str, imported: &[(&str, String)]) -> Option<
 
 /// The field classes of `facts`, including those that reach the ORM through other classes among
 /// them, which may live in another file or module. A call names its class by name alone, so a name
-/// with two field types tells neither: it gets `UNREAD_TYPE`. A type only ever moves towards that,
-/// so the result does not depend on the order files are read in.
+/// with two field types tells neither: it gets `UNREAD_TYPE`, and a name with an own `__init__` in
+/// either chain is own. A kind only ever moves towards those, so the result does not depend on the
+/// order files are read in.
 pub fn field_classes<'f>(facts: impl Iterator<Item = &'f PyFacts>) -> FieldClasses {
     let classes: Vec<&FieldClass> = facts.flat_map(|f| &f.field_classes).collect();
     let mut known = FieldClasses::default();
@@ -502,24 +520,47 @@ pub fn field_classes<'f>(facts: impl Iterator<Item = &'f PyFacts>) -> FieldClass
         grew = false;
         for class in &classes {
             let inherited = class.bases.iter().filter_map(|base| known.get(base));
-            let types: Vec<String> = class.ftype.iter().chain(inherited).cloned().collect();
-            for ftype in types {
-                grew |= add_type(&mut known, &class.name, ftype);
+            let types = class.ftype.iter().chain(inherited.map(|k| &k.ftype));
+            let own_init = class.own_init || class.bases.iter().any(|b| known.get(b).is_some_and(|k| k.own_init));
+            let kinds: Vec<FieldKind> = types
+                .map(|t| FieldKind {
+                    ftype: t.clone(),
+                    own_init,
+                })
+                .collect();
+            for kind in kinds {
+                grew |= add_kind(&mut known, &class.name, kind);
             }
         }
     }
     known
 }
 
-/// Gives `name` the type `ftype`, and tells whether that changed what `known` holds.
-fn add_type(known: &mut FieldClasses, name: &str, ftype: String) -> bool {
-    let merged = match known.get(name) {
-        None => ftype,
-        Some(held) if *held == ftype || held == UNREAD_TYPE => return false,
-        Some(_) => UNREAD_TYPE.to_owned(),
+/// Gives `name` the kind `kind`, and tells whether that changed what `known` holds.
+fn add_kind(known: &mut FieldClasses, name: &str, kind: FieldKind) -> bool {
+    let held = known.get(name);
+    let kind = match held {
+        Some(h) => merged(h, kind),
+        None => kind,
     };
-    known.insert(name.to_owned(), merged);
+    if held == Some(&kind) {
+        return false;
+    }
+    known.insert(name.to_owned(), kind);
     true
+}
+
+/// The kind of a name that two classes give `held` and `new`.
+fn merged(held: &FieldKind, new: FieldKind) -> FieldKind {
+    let same = held.ftype == new.ftype || held.ftype == UNREAD_TYPE;
+    FieldKind {
+        ftype: if same {
+            held.ftype.clone()
+        } else {
+            UNREAD_TYPE.to_owned()
+        },
+        own_init: held.own_init || new.own_init,
+    }
 }
 
 /// The attributes a field type's constructor takes by position, in order.
@@ -581,7 +622,7 @@ fn first_strings(elts: &[Expr]) -> Option<Vec<String>> {
 }
 
 /// The labels of the lists a Selection gives, by position or as `selection` and `selection_add`.
-fn selection_labels(ftype: &str, call: &ast::ExprCall) -> Vec<Option<String>> {
+fn selection_labels(ftype: &str, call: &ast::ExprCall, args: &[Expr]) -> Vec<Option<String>> {
     if ftype != "Selection" {
         return vec![];
     }
@@ -595,11 +636,7 @@ fn selection_labels(ftype: &str, call: &ast::ExprCall) -> Vec<Option<String>> {
         Expr::List(l) => l.elts.get(1).map(label),
         _ => None,
     };
-    let lists = [
-        call.arguments.args.first(),
-        keyword(call, "selection"),
-        keyword(call, "selection_add"),
-    ];
+    let lists = [args.first(), keyword(call, "selection"), keyword(call, "selection_add")];
     lists
         .into_iter()
         .flatten()
@@ -2342,7 +2379,7 @@ fn fieldless_classes(body: &[Stmt]) -> FxHashMap<&str, Fieldless<'_>> {
         if let Stmt::ClassDef(class) = stmt
             && holds_no_field(class)
         {
-            let binds = class_binds(class)
+            let binds = class_binds(&class.body)
                 .into_iter()
                 .filter(|n| !n.starts_with("__"))
                 .collect();
@@ -2358,10 +2395,10 @@ fn fieldless_classes(body: &[Stmt]) -> FxHashMap<&str, Fieldless<'_>> {
     classes
 }
 
-/// The names the body of `class` binds with a `def` or an assignment.
-fn class_binds(class: &ast::StmtClassDef) -> Vec<&str> {
+/// The names `stmts` of a class body bind with a `def` or an assignment.
+fn class_binds<'s>(stmts: impl IntoIterator<Item = &'s Stmt>) -> Vec<&'s str> {
     let mut bound = BoundNames::default();
-    for stmt in &class.body {
+    for stmt in stmts {
         match stmt {
             Stmt::FunctionDef(func) => bound.0.push(func.name.as_str()),
             _ => assigned(stmt)
@@ -2371,6 +2408,12 @@ fn class_binds(class: &ast::StmtClassDef) -> Vec<&str> {
         }
     }
     bound.0
+}
+
+/// Whether the body of `class` binds `__init__` where it runs on creating the class, as in an `if`
+/// block, which a `def` nested in a method does not.
+fn binds_init(class: &ast::StmtClassDef) -> bool {
+    class_binds(module_state::top_level(&class.body)).contains(&"__init__")
 }
 
 /// Whether a class can give a subclass no field: no base but `object` to get one from, nothing that
@@ -2847,6 +2890,7 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
             name: name.to_owned(),
             ftype: None,
             bases: vec![],
+            own_init: binds_init(class),
         };
         for base in class.bases().iter().map(generic_origin) {
             match proven_type(base, name, &self.orm_names) {
@@ -3245,8 +3289,9 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
 
     fn field_fact(&mut self, target: &ast::ExprName, value: &Expr) -> Option<FieldFact> {
         let (ftype, call) = field_call(value, self.known)?;
+        let args = positional_args(call, self.known);
         let relational = matches!(ftype, "Many2one" | "One2many" | "Many2many");
-        let positional = |i: usize| call.arguments.args.get(i).and_then(|a| a.as_string_literal_expr());
+        let positional = |i: usize| args.and_then(|a| a.get(i)?.as_string_literal_expr());
         let kw_str = |k: &str| keyword(call, k).and_then(|e| e.as_string_literal_expr());
         let comodel = kw_str("comodel_name").or_else(|| relational.then(|| positional(0)).flatten());
         let inverse_name = kw_str("inverse_name").or_else(|| (ftype == "One2many").then(|| positional(1)).flatten());
@@ -3270,7 +3315,7 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
             let fix = tracked(call, k).then(|| self.loc.replace(k.range(), "tracking=True"));
             self.fixed_api_use(Kind::FieldOption("track_visibility"), k, fix);
         }
-        let options = self.options(ftype, call);
+        let options = self.options(ftype, call, args.unwrap_or_default());
         Some(FieldFact {
             name: target.id.to_string(),
             name_pos: self.loc.at(target),
@@ -3280,22 +3325,22 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
             inverse_name: inverse_name.map(|s| self.spanned(s)),
             related: kw_str("related").map(|s| self.spanned(s)),
             methods: methods(&options),
-            labels: selection_labels(ftype, call),
+            labels: selection_labels(ftype, call, args.unwrap_or_default()),
             domain: keyword(call, "domain").map(|d| self.domain(d)).unwrap_or_default(),
             domain_string: keyword(call, "domain").is_some_and(|d| matches!(d, Expr::StringLiteral(_))),
             options,
-            splat: hides_options(ftype, call),
+            splat: hides_options(ftype, call) || args.is_none(),
         })
     }
 
-    fn options(&self, ftype: &str, call: &ast::ExprCall) -> Vec<(String, Spanned<OptionValue>)> {
+    fn options(&self, ftype: &str, call: &ast::ExprCall, args: &[Expr]) -> Vec<(String, Spanned<OptionValue>)> {
         let spanned = |e: &Expr| Spanned {
             value: option_value(e),
             pos: self.loc.at(e),
         };
         let positional = positional_names(ftype)
             .iter()
-            .zip(call.arguments.args.iter().take_while(|a| !a.is_starred_expr()))
+            .zip(args.iter().take_while(|a| !a.is_starred_expr()))
             .map(|(name, e)| ((*name).to_owned(), spanned(e)));
         let keywords = call
             .arguments
@@ -4966,15 +5011,58 @@ mod tests {
     }
 
     /// The field classes of one file per source, sorted.
-    fn classes(sources: &[&str]) -> Vec<(String, String)> {
+    fn classes(sources: &[&str]) -> Vec<(String, FieldKind)> {
         let facts: Vec<PyFacts> = sources.iter().map(|src| analyze(src, None)).collect();
         let mut known: Vec<_> = field_classes(facts.iter()).into_iter().collect();
         known.sort();
         known
     }
 
-    fn pair(name: &str, ftype: &str) -> (String, String) {
-        (name.to_owned(), ftype.to_owned())
+    fn pair(name: &str, ftype: &str) -> (String, FieldKind) {
+        let kind = FieldKind {
+            ftype: ftype.to_owned(),
+            own_init: false,
+        };
+        (name.to_owned(), kind)
+    }
+
+    /// A field class whose chain binds its own `__init__`.
+    fn own(name: &str, ftype: &str) -> (String, FieldKind) {
+        let (name, kind) = pair(name, ftype);
+        (name, FieldKind { own_init: true, ..kind })
+    }
+
+    #[test]
+    fn a_class_or_a_base_that_binds_init_makes_the_class_own() {
+        let base = "from odoo import fields\nclass A(fields.Many2one):\n    def __init__(self, *a, **k):\n        \
+                    super().__init__(*a, **k)\nclass C(fields.Many2one):\n    def f(self):\n        \
+                    def __init__(self):\n            pass\n";
+        let derived = "class B(A):\n    pass\n";
+        let expected = [own("A", "Many2one"), own("B", "Many2one"), pair("C", "Many2one")];
+        assert_eq!(classes(&[base, derived]), expected);
+        assert_eq!(classes(&[derived, base]), expected);
+    }
+
+    #[test]
+    fn an_init_bound_in_a_block_or_by_assignment_counts() {
+        for body in [
+            "if a:\n        def __init__(self):\n            pass",
+            "__init__ = make",
+            "x, __init__ = pair",
+        ] {
+            let src = format!("from odoo import fields\nclass V(fields.Char):\n    {body}\n");
+            assert_eq!(classes(&[src.as_str()]), [own("V", "Char")], "{body}");
+        }
+    }
+
+    #[test]
+    fn a_name_with_one_own_class_is_own_whatever_the_file_order() {
+        let plain = "from odoo import fields\nclass V(fields.Char):\n    pass\n";
+        let with_init = "from odoo import fields\nclass V(fields.Char):\n    __init__ = make\n";
+        let sub = "class W(V):\n    pass\n";
+        let expected = [own("V", "Char"), own("W", "Char")];
+        assert_eq!(classes(&[plain, with_init, sub]), expected);
+        assert_eq!(classes(&[sub, with_init, plain]), expected);
     }
 
     #[test]
@@ -5035,6 +5123,31 @@ mod tests {
         assert!(c.comodel.is_none() && !d.splat);
         assert!(class.inherits.is_empty());
         assert!(class.delegate_unknown);
+    }
+
+    #[test]
+    fn a_field_with_its_own_init_gives_nothing_by_position() {
+        let known = FieldClasses::from_iter([
+            own("Company", "Many2one"),
+            own("Pick", "Selection"),
+            own("Lines", "One2many"),
+            pair("Link", "Many2one"),
+        ]);
+        let src = "class X(models.Model):\n    _name = 'x'\n    a = Company('Label')\n    \
+                   b = Company(comodel_name='p.q')\n    c = Pick([('a', 'A')])\n    d = Link('p.q')\n    \
+                   e = Lines('p.q', 'parent_id')\n    f = Company('res.partner', delegate=True)\n";
+        let facts = analyze_with(src, None, &known, &TaintTable::default(), Scope::default());
+        let class = &facts.classes[0];
+        let [a, b, c, d, e, f] = class.fields.as_slice() else {
+            panic!("{:?}", class.fields);
+        };
+        assert!(a.comodel.is_none() && a.option("string").is_none() && a.splat);
+        assert!(b.comodel.as_ref().is_some_and(|m| m.value == "p.q") && b.splat);
+        assert!(c.labels.is_empty() && c.option("selection").is_none());
+        assert!(d.comodel.as_ref().is_some_and(|m| m.value == "p.q") && !d.splat);
+        assert!(e.comodel.is_none() && e.inverse_name.is_none());
+        assert!(f.comodel.is_none());
+        assert!(class.inherits.is_empty() && class.delegate_unknown);
     }
 
     #[test]
