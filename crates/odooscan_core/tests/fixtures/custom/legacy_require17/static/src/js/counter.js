@@ -1,4 +1,4 @@
-/** @odoo-module ignore **/
+// Unannotated, so 17.0 loads it as is.
 odoo.define("legacy_require17.implicit", function (require) {
     "use strict";
 

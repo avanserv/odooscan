@@ -6,11 +6,11 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::facts::{
     ActionFact, Annotation, ArchElement, ArchEmptied, ArchSubview, ArchValued, BaseSource, ClassFact, ComponentItem,
-    DataFacts, FieldFact, FlowSummary, Heritage, JsClass, JsName, ModelKind, OptionValue, PropItem, PyFacts, Receiver,
-    RecordWrite, ReportFact, RouteKey, RuleFact, ServerFact, Signature, Static, StaticWrite, UNREAD_TYPE, ViewFact,
-    WrittenValue, mangled,
+    DataFacts, FieldFact, FlowSummary, Heritage, JsClass, JsFacts, JsName, ModelKind, OptionValue, PropItem, PyFacts,
+    Receiver, RecordWrite, ReportFact, RouteKey, RuleFact, ServerFact, Signature, Static, StaticWrite, UNREAD_TYPE,
+    ViewFact, WrittenValue, mangled,
 };
-use crate::js::OWL_MODULE;
+use crate::js::{self, OWL_MODULE};
 use crate::manifest::{AutoInstall, DEPENDS_BASE, OdooReads};
 use crate::mentions::{HOOK_PREFIXES, Words};
 use crate::project::{Module, SourceFile, code_loaded};
@@ -1266,6 +1266,22 @@ pub struct JsTarget {
     opaque: bool,
 }
 
+/// A script a path names whose series does not transpile it.
+#[derive(Debug, PartialEq, Eq)]
+pub struct Untranspiled<'m> {
+    pub rel: &'m str,
+    /// The change to its tag that makes Odoo transpile it, none before saas~14.3.
+    pub tag_fix: Option<TagFix>,
+    /// The name its `odoo.define()` registers, which a script can use instead of the path.
+    pub defined: Option<&'m str>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TagFix {
+    Annotate,
+    DropIgnore,
+}
+
 pub enum JsSpec {
     Found(JsTarget),
     /// The path is in an indexed module whose scripts are indexed, but no file provides it.
@@ -1280,6 +1296,13 @@ pub enum Export {
     Missing,
     /// Through an `export *` the index cannot follow.
     Unknown,
+}
+
+/// Whether the script's path and alias name it: only transpiling registers both (18.0
+/// `odoo/tools/js_transpiler.py:22-59`). On an unknown series every script claims them, so OD601
+/// does not report a name some series registers.
+fn transpiled_names(facts: &JsFacts, series: Option<Series>) -> bool {
+    series.is_none() || facts.es_module(series)
 }
 
 /// The files that claim each module name, in load order. Odoo keeps the first file that defines a
@@ -1309,7 +1332,9 @@ fn js_paths(
                 file: fi,
                 opaque: file.facts.annotation(series) == Annotation::Ignore,
             };
-            if let Some(path) = js_module_path(&module.name, &file.rel) {
+            if let Some(path) =
+                js_module_path(&module.name, &file.rel).filter(|_| transpiled_names(&file.facts, series))
+            {
                 if let Some(dir) = path.strip_suffix("/index") {
                     claim(dir, target);
                 }
@@ -1320,7 +1345,11 @@ fn js_paths(
             }
             // An alias stands for the default export, whose names only a run tells, unless it proxies:
             // it has `default=`, and before saas~17.2 one of `false`, `False` or `0`.
-            if let Some((name, proxies)) = file.facts.alias(series).and_then(|a| a.registered(series)) {
+            let alias = file
+                .facts
+                .alias(series)
+                .filter(|_| transpiled_names(&file.facts, series));
+            if let Some((name, proxies)) = alias.and_then(|a| a.registered(series)) {
                 claim(
                     name,
                     JsTarget {
@@ -2815,6 +2844,33 @@ impl<'m> Index<'m> {
             Some(&mi) if self.modules[mi].js.iter().any(|f| f.rel.starts_with(&folder)) => JsSpec::Missing(mi),
             _ => JsSpec::Outside,
         }
+    }
+
+    /// The script of module `mi` whose path the specifier names but which its series does not
+    /// transpile, with what would let a script load it. Call it only for a name no file
+    /// registers: it does not check that another `odoo.define()` leaves the name unregistered.
+    pub fn js_untranspiled(&self, mi: usize, from: &str, specifier: &str) -> Option<Untranspiled<'m>> {
+        let name = js_lookup(from, specifier)?.name;
+        let module = &self.modules[mi];
+        let series = module.series.or(self.default_series);
+        let names = |rel: &str| {
+            js_module_path(&module.name, rel)
+                .is_some_and(|p| p == name || p.strip_suffix("/index") == Some(name.as_ref()))
+        };
+        let file = module
+            .js
+            .iter()
+            .find(|f| names(&f.rel) && !transpiled_names(&f.facts, series))?;
+        let tag_fix = match file.facts.annotation(series) {
+            Annotation::Ignore => Some(TagFix::DropIgnore),
+            _ if js::transpiles(series) => Some(TagFix::Annotate),
+            _ => None,
+        };
+        Some(Untranspiled {
+            rel: &file.rel,
+            tag_fix,
+            defined: file.facts.defines.iter().find_map(|d| d.name.as_deref()),
+        })
     }
 
     /// Whether the file `target` exports `name`, following `export *`.
@@ -4536,7 +4592,7 @@ mod tests {
         BASE_MODEL_DUNDERS, BASE_MODEL_EXTRA, BASE_MODEL_METHODS, BASE_MODEL_VALUES, BASE_PRIVATE_METHODS,
         BASE_RPC_METHODS, CACHED_MODEL_VALUES, CACHED_PRIVATE_METHODS, Export, FIELD_CLASSES, FieldHolder,
         FieldSpelling, Index, JsSpec, OLD_BASE_METHODS, OWL_COMPONENT, OWL1_COMPONENT, PlacedWrite, Scope, Status,
-        XmlIdDef, absolute_import, base_parent_method, base_private_method, base_rpc_method, class_file,
+        TagFix, XmlIdDef, absolute_import, base_parent_method, base_private_method, base_rpc_method, class_file,
         depends_closure, field_id_prefixes, fold_writes, js_module_path, last_text, mangles_alike, old_base_method,
         test_bundle, triggers, unseen_table_id,
     };
@@ -6336,6 +6392,117 @@ registry.category("actions").add(tag, {});"#,
         assert!(export("web.views", "gone") == Export::Unknown);
     }
 
+    #[test]
+    fn a_path_names_a_script_odoo_transpiles() {
+        let found = |version: &str| {
+            let manifest = format!("{{'version': '{version}'}}");
+            let mut m = module("m", if version.is_empty() { "{}" } else { &manifest });
+            m.js = vec![
+                script("static/src/plain.js", "export const a = 1;"),
+                script("static/src/tagged.js", "// @odoo-module\nexport const a = 1;"),
+                script("static/src/ign.js", "// @odoo-module ignore\nexport const a = 1;"),
+                script(
+                    "static/src/defined.js",
+                    "// @odoo-module ignore\nodoo.define(\"@m/defined\", [], function () { return {}; });",
+                ),
+            ];
+            let modules = [m];
+            let index = Index::build(&modules, None);
+            let names = ["plain", "tagged", "ign", "defined"];
+            let resolves = |n: &&str| {
+                matches!(
+                    index.js_resolve("m/static/src/x.js", &format!("@m/{n}")),
+                    JsSpec::Found(_)
+                )
+            };
+            names.iter().map(|n| (*n, resolves(n))).collect::<Vec<_>>()
+        };
+        let expect = |plain: bool, ign: bool| vec![("plain", plain), ("tagged", true), ("ign", ign), ("defined", true)];
+        assert_eq!(found("16.0.1.0.0"), expect(false, true));
+        assert_eq!(found("17.0.1.0.0"), expect(false, true));
+        assert_eq!(found("saas~17.2.1.0.0"), expect(true, false));
+        assert_eq!(found(""), expect(true, true));
+    }
+
+    #[test]
+    fn an_alias_names_a_script_only_where_odoo_transpiles_it() {
+        // Module b does not depend on a, so a claim of `a.x` would read as a missing dependency.
+        let resolve = |version: &str| {
+            let mut a = module("a", &format!("{{'version': '{version}'}}"));
+            a.js = vec![script(
+                "static/src/x.js",
+                "// @odoo-module alias=a.x\nexport const x = 1;",
+            )];
+            let mut b = module("b", &format!("{{'version': '{version}'}}"));
+            b.js = vec![script(
+                "static/src/y.js",
+                "odoo.define(\"b.y\", [\"a.x\"], function () {});",
+            )];
+            let modules = [a, b];
+            let index = Index::build(&modules, None);
+            match index.js_resolve("b/static/src/y.js", "a.x") {
+                JsSpec::Found(t) => modules[t.module].name.clone(),
+                JsSpec::Missing(_) => "missing".to_owned(),
+                JsSpec::Outside => "outside".to_owned(),
+            }
+        };
+        assert_eq!(resolve("14.0.1.0.0"), "outside");
+        assert_eq!(resolve("saas~14.3.1.0.0"), "a");
+    }
+
+    #[test]
+    fn an_untranspiled_script_is_told_apart_from_a_missing_one() {
+        let untranspiled = |version: &str, rel: &str, text: &str, specifier: &str| {
+            let mut m = module("m", &format!("{{'version': '{version}'}}"));
+            m.js = vec![script(rel, text)];
+            let modules = [m];
+            let index = Index::build(&modules, None);
+            let found = index.js_untranspiled(0, "m/static/src/x.js", specifier);
+            found.map(|u| (u.rel.to_owned(), u.tag_fix, u.defined.map(str::to_owned)))
+        };
+        let expect = |rel: &str, fix: Option<TagFix>, defined: Option<&str>| {
+            Some((rel.to_owned(), fix, defined.map(str::to_owned)))
+        };
+        let define = "odoo.define(\"m.x\", [], function () {});";
+        let annotate = Some(TagFix::Annotate);
+        assert_eq!(
+            untranspiled("17.0.1.0.0", "static/src/plain.js", "", "@m/plain"),
+            expect("static/src/plain.js", annotate, None)
+        );
+        assert_eq!(
+            untranspiled("17.0.1.0.0", "static/src/dir/index.js", define, "./dir"),
+            expect("static/src/dir/index.js", annotate, Some("m.x"))
+        );
+        assert_eq!(
+            untranspiled("17.0.1.0.0", "static/tests/t.js", "", "@m/../tests/t"),
+            expect("static/tests/t.js", annotate, None)
+        );
+        assert_eq!(
+            untranspiled(
+                "saas~17.2.1.0.0",
+                "static/src/ign.js",
+                "// @odoo-module ignore\n",
+                "@m/ign"
+            ),
+            expect("static/src/ign.js", Some(TagFix::DropIgnore), None)
+        );
+        assert_eq!(
+            untranspiled(
+                "14.0.1.0.0",
+                "static/src/old.js",
+                &format!("// @odoo-module\n{define}"),
+                "@m/old"
+            ),
+            expect("static/src/old.js", None, Some("m.x"))
+        );
+        // Transpiled, so the path resolves and no untranspiled script stands behind it.
+        assert_eq!(
+            untranspiled("saas~17.2.1.0.0", "static/src/plain.js", "", "@m/plain"),
+            None
+        );
+        assert_eq!(untranspiled("17.0.1.0.0", "static/src/plain.js", "", "@m/gone"), None);
+    }
+
     /// The modules of an Owl test: `web` with three components, and `sale` with `order.js` reading
     /// them.
     fn owl_modules(web_version: &str, version: &str, order: &str) -> [Module; 2] {
@@ -6343,13 +6510,16 @@ registry.category("actions").add(tag, {});"#,
         web.js = vec![
             script(
                 "static/src/legacy/legacy_component.js",
-                "export class LegacyComponent extends owl.Component { trigger() {} }",
+                "// @odoo-module\nexport class LegacyComponent extends owl.Component { trigger() {} }",
             ),
             script(
                 "static/src/form.js",
-                "import { Component as C } from \"@odoo/owl\";\nexport class Form extends C {}",
+                "// @odoo-module\nimport { Component as C } from \"@odoo/owl\";\nexport class Form extends C {}",
             ),
-            script("static/src/panel.js", "export class Panel extends owl.Component {}"),
+            script(
+                "static/src/panel.js",
+                "// @odoo-module\nexport class Panel extends owl.Component {}",
+            ),
         ];
         let mut sale = module("sale", &format!("{{'version': '{version}', 'depends': ['web']}}"));
         sale.js = vec![script("static/src/order.js", order)];

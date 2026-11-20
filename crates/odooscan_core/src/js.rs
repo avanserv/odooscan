@@ -262,7 +262,30 @@ fn alias(text: &str, early: bool) -> Option<JsAlias> {
 /// The same commit drops the whitespace before the tag, and `5f2c50583600` adds `ignore`.
 const PERMISSIVE_TAG: Series = Series { major: 17, minor: 2 };
 
+/// The first series that transpiles `@odoo-module` scripts (18.0 `odoo/tools/js_transpiler.py:22`,
+/// 20.0 `:20`). 14.0 has no transpiler.
+const TRANSPILER: Series = Series { major: 14, minor: 3 };
+
+/// Whether the series has a transpiler, an unknown one taking the newer reading.
+pub fn transpiles(series: Option<Series>) -> bool {
+    series.is_none_or(|s| s >= TRANSPILER)
+}
+
 impl JsFacts {
+    /// Whether a bundle loads the script as an ES module: from saas~14.3, annotated, or from
+    /// saas~17.2 on, not marked `ignore` (commit `5f2c50583600`, 18.0
+    /// `odoo/tools/js_transpiler.py:675-690`, 20.0 `:702-717`). A script that is not one cannot use
+    /// `import`. On an unknown series only annotated ones are.
+    pub fn es_module(&self, series: Option<Series>) -> bool {
+        let unannotated = series.is_some_and(|s| s >= PERMISSIVE_TAG);
+        transpiles(series)
+            && match self.annotation(series) {
+                Annotation::Module => true,
+                Annotation::Ignore => false,
+                Annotation::None => unannotated,
+            }
+    }
+
     /// The series' reading of the tag. An unknown series takes the newer: its ES modules are a
     /// subset of the older's, so it reports fewer imports and the scripts it leaves are opaque.
     pub fn annotation(&self, series: Option<Series>) -> Annotation {
@@ -1523,6 +1546,26 @@ mod tests {
         let ignored = analyze("// @odoo-module ignore");
         assert_eq!(ignored.annotation(Series::parse("16.0")), Annotation::Module);
         assert_eq!(ignored.annotation(None), Annotation::Ignore);
+    }
+
+    #[test]
+    fn scripts_run_as_es_modules_from_the_transpiler_on() {
+        let at = |s: &str| Series::parse(s);
+        let (tagged, plain, ignored) = (
+            analyze("// @odoo-module"),
+            analyze("// x"),
+            analyze("// @odoo-module ignore"),
+        );
+        assert!(!tagged.es_module(at("saas~14.2")));
+        assert!(tagged.es_module(at("saas~14.3")));
+        assert!(tagged.es_module(None));
+        assert!(!plain.es_module(at("16.0")));
+        assert!(!plain.es_module(at("17.0")));
+        assert!(!plain.es_module(at("saas~17.1")));
+        assert!(plain.es_module(at("saas~17.2")));
+        assert!(!plain.es_module(None));
+        assert!(!ignored.es_module(at("saas~17.2")));
+        assert!(ignored.es_module(at("saas~17.1")));
     }
 
     #[test]

@@ -11,9 +11,9 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::bundles::{self, XML_IN_BUNDLES};
 use crate::facts::{
-    AccessRow, ActionFact, ActionValue, ActionViewId, Annotation, ArchElement, ArchModifier, ArchSubview, ArchWidget,
-    ClassBase, ClassFact, ComponentTag, DataFacts, Definition, DefinitionSource, DomainFact, FieldFact, FieldWrite,
-    Flag, FunctionCall, GuardedRef, ImportFact, ImportGuard, JsClass, JsFacts, JsName, MethodDef, Migrate, ModelKind,
+    AccessRow, ActionFact, ActionValue, ActionViewId, ArchElement, ArchModifier, ArchSubview, ArchWidget, ClassBase,
+    ClassFact, ComponentTag, DataFacts, Definition, DefinitionSource, DomainFact, FieldFact, FieldWrite, Flag,
+    FunctionCall, GuardedRef, ImportFact, ImportGuard, JsClass, JsFacts, JsName, MethodDef, Migrate, ModelKind,
     OptionValue, OrmCall, OwlTemplate, Pos, PyFacts, RawDiag, RecordFact, RecordWrite, Refusal, ReportFact, RouteDef,
     RouteKey, RuleFact, ServerFact, Signature, Spanned, SqlColumn, SqlView, Subject, TemplateEntry, UNREAD_TYPE,
     ViewFact, WrittenValue, XmlDef, XmlRef,
@@ -23,8 +23,8 @@ use crate::imports::{AddonImport, Fault, Graph};
 use crate::index::{
     ACTION_REGISTRY, BASE_MODEL_METHODS, CACHED_MODEL_SINCE, Export, FIELD_REGISTRY, FieldDef, FieldInfo, Index,
     JsSpec, JsTarget, PathError, Placed, PropSchema, RELATIONAL_TYPES, SERVICE_REGISTRY, Scope, Status, TOUR_REGISTRY,
-    VIEW_WIDGET_REGISTRY, ViewTree, asset_glob_set, cached_model_method, cached_model_value, dated_member, full_id,
-    in_static, js_lookup, js_url, loaded_data, located, normal_parts, wildcard,
+    TagFix, VIEW_WIDGET_REGISTRY, ViewTree, asset_glob_set, cached_model_method, cached_model_value, dated_member,
+    full_id, in_static, js_lookup, js_url, loaded_data, located, normal_parts, wildcard,
 };
 use crate::mentions::HOOK_PREFIXES;
 use crate::module_state::UPGRADE_DIRS;
@@ -881,26 +881,10 @@ fn qweb_view(index: &Index, module: &Module, view: &ViewFact) -> bool {
     root_kind(index, module, view).or(view.kind.as_deref()) == Some(QWEB)
 }
 
-/// The first series that transpiles `@odoo-module` scripts (18.0 `odoo/tools/js_transpiler.py:22`,
-/// 20.0 `:20`). 14.0 has no transpiler.
-const TRANSPILER: Series = Series { major: 14, minor: 3 };
-
 /// The first series whose loader waits only for the list given to `odoo.define()`, and no longer
 /// reads the factory's `require` calls (commit `517d3258f23a`; 18.0
 /// `addons/web/static/src/module_loader.js:47-66`).
 const LISTED_DEPS: Series = Series { major: 16, minor: 3 };
-
-/// Whether a bundle loads the script as an ES module: from saas~14.3, annotated, or from 17.0 on,
-/// not marked `ignore`. A script that is not one cannot use `import`.
-fn es_module(series: Option<Series>, annotation: Annotation) -> bool {
-    let unannotated = series.is_some_and(|s| s >= Series { major: 17, minor: 0 });
-    series.is_none_or(|s| s >= TRANSPILER)
-        && match annotation {
-            Annotation::Module => true,
-            Annotation::Ignore => false,
-            Annotation::None => unannotated,
-        }
-}
 
 /// Whether the loader waits for the `require` calls of a define given no list. On an unknown
 /// series it is not assumed to.
@@ -927,7 +911,7 @@ fn es_modules<'a, 'm>(
     series: Option<Series>,
 ) -> impl Iterator<Item = (usize, &'m SourceFile<JsFacts>)> + 'a {
     let js = index.modules[mi].js.iter().enumerate();
-    js.filter(move |(fi, f)| index.js_loaded(mi, *fi) && es_module(series, f.facts.annotation(series)))
+    js.filter(move |(fi, f)| index.js_loaded(mi, *fi) && f.facts.es_module(series))
 }
 
 /// The module's scripts that a bundle loads as they are, which register through `odoo.define()`.
@@ -937,7 +921,7 @@ fn legacy_scripts<'a, 'm>(
     series: Option<Series>,
 ) -> impl Iterator<Item = (usize, &'m SourceFile<JsFacts>)> + 'a {
     let js = index.modules[mi].js.iter().enumerate();
-    js.filter(move |(fi, f)| index.js_loaded(mi, *fi) && !es_module(series, f.facts.annotation(series)))
+    js.filter(move |(fi, f)| index.js_loaded(mi, *fi) && !f.facts.es_module(series))
 }
 
 /// The first series whose Hoot mocks `@web/core/utils/functions`, adding `clearMemoizeCaches`
@@ -2663,7 +2647,7 @@ impl<'m> Ctx<'_, 'm> {
         // The import works when any file that claims the name is in scope and on the page.
         let claims = self.index.js_claims(from, &specifier.value);
         let message = match self.index.js_resolve(from, &specifier.value) {
-            JsSpec::Missing(mi) => format!("no file of module {} provides '{}'", module(mi), specifier.value),
+            JsSpec::Missing(mi) => self.missing_js(mi, from, &specifier.value),
             JsSpec::Found(t) if !self.partial && !claims.iter().any(|c| self.scope.sees(c.module)) => format!(
                 "'{}' comes from module {}, which is not in depends",
                 specifier.value,
@@ -2673,6 +2657,29 @@ impl<'m> Ctx<'_, 'm> {
             JsSpec::Found(_) | JsSpec::Outside => return,
         };
         out.push(path, "OD601", specifier.pos, message);
+    }
+
+    /// OD601's message for a path no file of module `mi` registers, telling a file Odoo does not
+    /// transpile in this series apart from a missing one.
+    fn missing_js(&self, mi: usize, from: &str, specifier: &str) -> String {
+        let module = &self.index.modules[mi].name;
+        let Some(script) = self.index.js_untranspiled(mi, from, specifier) else {
+            return format!("no file of module {module} provides '{specifier}'");
+        };
+        // Transpiling a file that defines its own name exports nothing under the path, so only
+        // that name works for it.
+        let fix = match (script.defined, script.tag_fix) {
+            (Some(name), _) => format!("use the name its odoo.define() registers, '{name}'"),
+            (None, Some(TagFix::Annotate)) => "put @odoo-module in its first comment".to_owned(),
+            (None, Some(TagFix::DropIgnore)) => "drop ignore from its @odoo-module tag".to_owned(),
+            (None, None) => "register it with odoo.define() and use that name".to_owned(),
+        };
+        let why = if script.tag_fix.is_some() {
+            "which this series does not load as an ES module"
+        } else {
+            "but this series has no ES modules"
+        };
+        format!("'{specifier}' names {module}/{}, {why}: {fix}", script.rel)
     }
 
     /// A dependency outside the index, such as an Enterprise one, may add the target, or a bundle
@@ -7729,16 +7736,13 @@ mod tests {
 
     use super::{
         CACHE_KEY_GLOBALS, MEMBER_SERIES, MagicEra, Merged, Paths, REPORT_TAG, applies, builds_models, bundle_list,
-        cache_global, cached_member, callable_attr, csv_label, derived_label, es_module, exported_text,
-        fetches_own_view, field_name, has_last_update, hoot_adds, keeps_set, labels_before_ondelete, lacks_domain,
-        lone_add_applied, magic_era, no_access_message, page_miss, parent_path_children, patch_form,
-        public_write_message, qweb_asset_glob, reads_model_access, reads_requires, shadowed_member, static_only,
-        stores_parent_path, tuple_add_refused, tuple_checked, tuple_listed, unknown_dependency, unmatched_asset,
-        warns_on_labels,
+        cache_global, cached_member, callable_attr, csv_label, derived_label, exported_text, fetches_own_view,
+        field_name, has_last_update, hoot_adds, keeps_set, labels_before_ondelete, lacks_domain, lone_add_applied,
+        magic_era, no_access_message, page_miss, parent_path_children, patch_form, public_write_message,
+        qweb_asset_glob, reads_model_access, reads_requires, shadowed_member, static_only, stores_parent_path,
+        tuple_add_refused, tuple_checked, tuple_listed, unknown_dependency, unmatched_asset, warns_on_labels,
     };
-    use crate::facts::{
-        AccessRow, Annotation, DefinitionSource, JsName, OptionValue, Perms, Pos, Spanned, UNREAD_TYPE,
-    };
+    use crate::facts::{AccessRow, DefinitionSource, JsName, OptionValue, Perms, Pos, Spanned, UNREAD_TYPE};
     use crate::index::Index;
     use crate::manifest::OdooReads;
     use crate::python::analyze;
@@ -7829,18 +7833,6 @@ mod tests {
         assert!(!builds_models("examples/a.py"));
         assert!(!builds_models("migrations/18.0.1.0.0/pre-a.py"));
         assert!(!builds_models("upgrades/18.0.1.0.0/post-a.py"));
-    }
-
-    #[test]
-    fn scripts_run_as_es_modules_from_the_transpiler_on() {
-        let at = |s: &str| Series::parse(s);
-        assert!(!es_module(at("saas~14.2"), Annotation::Module));
-        assert!(es_module(at("saas~14.3"), Annotation::Module));
-        assert!(!es_module(at("saas~14.3"), Annotation::None));
-        assert!(!es_module(at("16.0"), Annotation::None));
-        assert!(es_module(at("17.0"), Annotation::None));
-        assert!(!es_module(at("17.0"), Annotation::Ignore));
-        assert!(es_module(None, Annotation::Module));
     }
 
     #[test]
