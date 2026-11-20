@@ -54,3 +54,20 @@ class ResPartnerBatch(models.Model):
         if self.env.context.get("no_copy"):
             return None
         return super().copy(default)
+
+
+class ResPartnerShims(models.Model):
+    _inherit = "res.partner"
+
+    def unlink(self):
+        class Shim(dict):
+            def unlink(self):
+                return super().unlink()
+
+        return Shim()
+
+    def copy(self, default=None):
+        class Copied(type(super().copy(default))):
+            pass
+
+        return Copied

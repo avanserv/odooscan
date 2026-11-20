@@ -717,6 +717,13 @@ struct SuperFinder {
 }
 
 impl<'a> Visitor<'a> for SuperFinder {
+    fn visit_stmt(&mut self, stmt: &'a Stmt) {
+        match stmt {
+            Stmt::ClassDef(class) => visit_class_head(self, class),
+            _ => visitor::walk_stmt(self, stmt),
+        }
+    }
+
     fn visit_expr(&mut self, expr: &'a Expr) {
         self.found |= matches!(expr, Expr::Call(c) if is_super(&c.func));
         if !self.found {
@@ -1238,19 +1245,21 @@ fn is_super(func: &Expr) -> bool {
     matches!(func, Expr::Name(n) if n.id.as_str() == "super")
 }
 
+/// Visits what a class statement inside a method runs in the method: its decorators and the
+/// arguments of its head, bases and keywords alike. Its body's calls belong to its own methods.
+fn visit_class_head<'a, V: Visitor<'a>>(visitor: &mut V, class: &'a ast::StmtClassDef) {
+    for decorator in &class.decorator_list {
+        visitor.visit_decorator(decorator);
+    }
+    if let Some(arguments) = &class.arguments {
+        visitor.visit_arguments(arguments);
+    }
+}
+
 impl<'a> Visitor<'a> for SuperCalls<'a> {
-    /// A class body's `super()` calls are not the method's. Its decorators and the arguments of its
-    /// head, bases and keywords alike, run in the method.
     fn visit_stmt(&mut self, stmt: &'a Stmt) {
         match stmt {
-            Stmt::ClassDef(class) => {
-                for decorator in &class.decorator_list {
-                    self.visit_decorator(decorator);
-                }
-                if let Some(arguments) = &class.arguments {
-                    self.visit_arguments(arguments);
-                }
-            }
+            Stmt::ClassDef(class) => visit_class_head(self, class),
             Stmt::If(branch) => {
                 self.visit_expr(&branch.test);
                 self.under(&branch.test, |calls| calls.visit_body(&branch.body));
@@ -1291,7 +1300,8 @@ impl<'a> Visitor<'a> for SuperCalls<'a> {
     }
 }
 
-/// Whether any `super()` call appears in the body, nested definitions included.
+/// Whether any `super()` call appears in the body. One in a nested function counts; one in the body
+/// of a nested class does not, though one in its decorators or bases does.
 fn calls_super(body: &[Stmt]) -> bool {
     let mut finder = SuperFinder::default();
     finder.visit_body(body);
@@ -5640,6 +5650,39 @@ mod tests {
         assert!(!class.methods.contains(&"_table_query".to_owned()));
         assert_eq!(facts.group_refs[0].id, "base.group_user");
         assert!(facts.diags.iter().any(|d| d.code == "OD104"));
+    }
+
+    #[test]
+    fn a_nested_class_body_hides_no_missing_super() {
+        let facts = analyze(
+            "class X(models.Model):\n    _name = 'x'\n    hint = fields.Char(compute='_compute_hint')\n    \
+             def write(self, vals):\n        class Inner(dict):\n            \
+             def write(self, vals):\n                return super().write(vals)\n        return Inner()\n    \
+             def create(self, vals):\n        @super().decorator()\n        class Inner:\n            pass\n        \
+             return Inner\n    \
+             def unlink(self):\n        class Inner(metaclass=super().meta()):\n            pass\n        \
+             return Inner\n    \
+             def copy(self, default=None):\n        def helper():\n            class Inner(dict):\n                \
+             def copy(self):\n                    return super().copy()\n            return Inner\n        \
+             return helper()\n    \
+             def default_get(self, fields_list):\n        def helper():\n            \
+             return super().default_get(fields_list)\n        return helper()\n    \
+             def _compute_hint(self):\n        class Inner(dict):\n            \
+             def get(self, key):\n                return super().get(key)\n        \
+             for rec in self:\n            if rec.name:\n                rec.hint = 'x'\n",
+            None,
+        );
+        let missing: Vec<_> = facts
+            .diags
+            .iter()
+            .filter(|d| d.code == "OD105")
+            .map(|d| d.message.split('(').next().unwrap_or_default())
+            .collect();
+        assert_eq!(missing, ["write", "copy"]);
+        let computes = &facts.classes[0].unassigned_computes;
+        assert_eq!(computes.len(), 1);
+        assert_eq!(computes[0].0.value, "_compute_hint");
+        assert_eq!(computes[0].1, ["hint"]);
     }
 
     #[test]
