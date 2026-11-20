@@ -4719,6 +4719,13 @@ const NO_RESTRICT_COMODELS: [&str; 7] = [
 /// class in the registry (`saas~12.5`).
 const SETUP_MAGIC: Series = Series { major: 12, minor: 5 };
 
+/// The first series whose registry builds a field as the class of its last definition, dropping a
+/// definition and every one before it unless that class is the definition's or derives from it
+/// (`saas~14.4`, commit `1ca2c7e457a6`; 18.0 `odoo/fields.py:415`, `odoo/models.py:3687`).
+/// Before, it walks back from the last definition while each one's class is the last one's or
+/// derives from it.
+const LAST_CLASS_MERGE: Series = Series { major: 14, minor: 4 };
+
 /// The first series whose model metaclass adds the magic fields to the class that introduces a
 /// model, rather than the setup of every model (`saas~14.4`).
 const METACLASS_MAGIC: Series = Series { major: 14, minor: 4 };
@@ -4785,8 +4792,8 @@ impl<'m> Listed<'m> {
     }
 }
 
-/// A field of a model as the registry builds it in scope: the definitions it merges, from the last
-/// one that changes the field's type.
+/// A field of a model as the registry builds it in scope: the definitions it merges, after the
+/// last one whose type or class drops what came before.
 struct Field<'m> {
     model: &'m str,
     defs: Vec<FieldDef<'m>>,
@@ -5088,6 +5095,39 @@ fn unassigned_message(method: &str, fields: &[&str]) -> String {
     )
 }
 
+/// The type of a field definition and the lineage of its class.
+type DefClass<'f> = (&'f str, &'f [String]);
+
+fn class_of(def: &FieldFact) -> DefClass<'_> {
+    (&def.ftype, &def.lineage)
+}
+
+/// Whether two definitions call one class, as far as the scan reads them.
+fn same_class(a: DefClass<'_>, b: DefClass<'_>) -> bool {
+    a.0 == b.0 && a.1.first() == b.1.first()
+}
+
+/// Whether the field class of lineage `class` is the one of `of` or derives from it.
+fn is_a(class: &[String], of: &[String]) -> bool {
+    class.first() == of.first() || of.first().is_some_and(|head| class.contains(head))
+}
+
+/// Whether the registry of `series` keeps what the definition `earlier` sets on a field whose last
+/// definition is `last`. None on an unknown series where the two ways disagree, as the field it
+/// builds is then unknown.
+fn keeps_set(series: Option<Series>, earlier: DefClass<'_>, last: DefClass<'_>) -> Option<bool> {
+    if earlier.0 != last.0 {
+        return Some(false);
+    }
+    let from_bound = is_a(last.1, earlier.1);
+    let before_bound = is_a(earlier.1, last.1);
+    match series {
+        Some(s) if s >= LAST_CLASS_MERGE => Some(from_bound),
+        Some(_) => Some(before_bound),
+        None => (from_bound == before_bound).then_some(from_bound),
+    }
+}
+
 /// Model and field definitions Odoo refuses, ignores or logs as wrong when it loads the registry,
 /// or that fail once used. Each rule reads every definition merged into the model, so none runs
 /// where a module in scope depends on a module that is not indexed. None runs on a model whose
@@ -5194,25 +5234,28 @@ impl<'m> Ctx<'_, 'm> {
         self.merge(model, defs)
     }
 
-    /// A field from its definitions in scope. None when the order of a definition that changes its
-    /// type against another one is unknown, or the type is not that of the last definitions.
+    /// A field from its definitions in scope. None when the order of a definition that drops what
+    /// came before against another one is unknown, the last definitions differ in type or class, or
+    /// the series is unknown and the two ways Odoo merged keep different definitions.
     fn merge(&self, model: &'m str, defs: Vec<FieldDef<'m>>) -> Option<Field<'m>> {
         let before = |a: &FieldDef<'m>, b: &FieldDef<'m>| self.before(model, a, b);
         let mut last = defs.iter().filter(|a| !defs.iter().any(|b| before(a, b)));
-        let ftype = &last.next()?.2.ftype;
-        if !last.all(|d| d.2.ftype == *ftype) {
+        let class = class_of(last.next()?.2);
+        if !last.all(|d| same_class(class_of(d.2), class)) {
             return None;
         }
-        let (same, other): (Vec<&FieldDef<'m>>, Vec<_>) = defs.iter().partition(|d| d.2.ftype == *ftype);
-        if same
+        let keeps: Vec<bool> = defs
             .iter()
-            .any(|s| other.iter().any(|o| !before(o, s) && !before(s, o)))
-        {
+            .map(|d| keeps_set(self.series, class_of(d.2), class))
+            .collect::<Option<_>>()?;
+        let (same, other): (Vec<_>, Vec<_>) = defs.iter().zip(keeps).partition(|(_, keep)| *keep);
+        let unordered = |s: &FieldDef<'m>, o: &FieldDef<'m>| !before(o, s) && !before(s, o);
+        if same.iter().any(|(s, _)| other.iter().any(|(o, _)| unordered(s, o))) {
             return None;
         }
-        // Odoo drops what the definitions before one of another type set.
-        let kept = same.into_iter().filter(|s| other.iter().all(|o| before(o, s)));
-        let defs: Vec<FieldDef<'m>> = kept.copied().collect();
+        // A definition Odoo does not keep drops what it and every one before it set.
+        let kept = same.iter().filter(|(s, _)| other.iter().all(|(o, _)| before(o, s)));
+        let defs: Vec<FieldDef<'m>> = kept.map(|(d, _)| **d).collect();
         let before = defs
             .iter()
             .map(|a| defs.iter().map(|b| before(a, b)).collect())
@@ -7311,11 +7354,11 @@ mod tests {
     use super::{
         CACHE_KEY_GLOBALS, MEMBER_SERIES, MagicEra, REPORT_TAG, applies, bundle_list, cache_global, callable_attr,
         csv_label, derived_label, es_module, exported_text, fetches_own_view, field_name, has_last_update, hoot_adds,
-        magic_era, no_access_message, page_miss, parent_path_children, patch_form, public_write_message,
+        keeps_set, magic_era, no_access_message, page_miss, parent_path_children, patch_form, public_write_message,
         reads_model_access, reads_requires, shadowed_member, static_only, stores_parent_path, tuple_checked,
         tuple_listed, unknown_dependency, unmatched_asset, warns_on_labels,
     };
-    use crate::facts::{AccessRow, Annotation, DefinitionSource, JsName, Perms, Pos, Spanned};
+    use crate::facts::{AccessRow, Annotation, DefinitionSource, JsName, Perms, Pos, Spanned, UNREAD_TYPE};
     use crate::manifest::OdooReads;
     use crate::series::Series;
 
@@ -7332,6 +7375,25 @@ mod tests {
             model_access: true,
             domain: None,
         }
+    }
+
+    #[test]
+    fn a_definition_keeps_what_it_sets_by_the_class_rule_of_the_series() {
+        let at = |s: &str| Series::parse(s);
+        let lineage = |names: &[&str]| names.iter().map(|n| (*n).to_owned()).collect::<Vec<_>>();
+        let (char, tag, unread) = (lineage(&["Char"]), lineage(&["Tag", "Char"]), lineage(&[]));
+        let char = ("Char", char.as_slice());
+        let tag = ("Char", tag.as_slice());
+        assert_eq!(keeps_set(at("saas~14.3"), char, tag), Some(false));
+        assert_eq!(keeps_set(at("saas~14.4"), char, tag), Some(true));
+        assert_eq!(keeps_set(at("20.0"), char, tag), Some(true));
+        assert_eq!(keeps_set(None, char, tag), None);
+        assert_eq!(keeps_set(at("14.0"), tag, char), Some(true));
+        assert_eq!(keeps_set(at("saas~14.4"), tag, char), Some(false));
+        assert_eq!(keeps_set(None, char, char), Some(true));
+        assert_eq!(keeps_set(None, char, ("Integer", &["Integer".to_owned()])), Some(false));
+        let unread = (UNREAD_TYPE, unread.as_slice());
+        assert_eq!(keeps_set(None, unread, unread), Some(true));
     }
 
     #[test]

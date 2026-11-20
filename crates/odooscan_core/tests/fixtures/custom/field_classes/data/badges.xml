@@ -1,0 +1,3 @@
+<odoo>
+    <record id="badge_bare" model="x.badge"/>
+</odoo>

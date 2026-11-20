@@ -1,3 +1,5 @@
+use std::collections::BTreeSet;
+
 use ruff_python_ast::comparable::ComparableArguments;
 use ruff_python_ast::token::{Token, TokenKind};
 use ruff_python_ast::visitor::{self, Visitor};
@@ -57,13 +59,15 @@ const ORM_PACKAGES: &[&str] = &["odoo", "openerp"];
 /// The field classes a module's scope defines, by class name.
 pub type FieldClasses = FxHashMap<String, FieldKind>;
 
-/// What a call of a field class tells: its field type, and whether its chain below the ORM's base
-/// binds `__init__`. Odoo builds a field from the keywords `__init__` hands to `Field.__init__`, so
-/// an own one may give any attribute from any argument.
+/// What a call of a field class tells: its field type, whether its chain below the ORM's base
+/// binds `__init__`, and the classes it derives from. Odoo builds a field from the keywords
+/// `__init__` hands to `Field.__init__`, so an own one may give any attribute from any argument.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct FieldKind {
     pub ftype: String,
     pub own_init: bool,
+    /// The ORM type a base proves and every known base with its own ancestors, by name.
+    pub ancestors: BTreeSet<String>,
 }
 
 /// Recordset methods whose first argument, or `domain`, is a domain on the recordset's model.
@@ -487,6 +491,17 @@ fn positional_args<'e>(call: &'e ast::ExprCall, known: &FieldClasses) -> Option<
     (!tail_name(&call.func).is_some_and(own)).then_some(&call.arguments.args)
 }
 
+/// The class a field call names, then the classes it derives from: `["Char"]` for `fields.Char`.
+/// The ORM's own classes resolve through `FIELD_TYPES`, so only a scanned class has ancestors.
+fn lineage(call: &ast::ExprCall, known: &FieldClasses) -> Vec<String> {
+    let Some(name) = tail_name(&call.func) else {
+        return vec![];
+    };
+    let kind = known.get(name).filter(|_| !FIELD_TYPES.contains(&name));
+    let ancestors = kind.into_iter().flat_map(|k| &k.ancestors).filter(|a| *a != name);
+    std::iter::once(name.to_owned()).chain(ancestors.cloned()).collect()
+}
+
 /// A base class without its type arguments: from 18.0 `Field` is generic, as in `Field[list]`.
 fn generic_origin(base: &Expr) -> &Expr {
     match base {
@@ -509,9 +524,9 @@ fn proven_type(base: &Expr, class: &str, imported: &[(&str, String)]) -> Option<
 
 /// The field classes of `facts`, including those that reach the ORM through other classes among
 /// them, which may live in another file or module. A call names its class by name alone, so a name
-/// with two field types tells neither: it gets `UNREAD_TYPE`, and a name with an own `__init__` in
-/// either chain is own. A kind only ever moves towards those, so the result does not depend on the
-/// order files are read in.
+/// with two field types tells neither: it gets `UNREAD_TYPE`, a name with an own `__init__` in
+/// either chain is own, and its ancestors are those of both. A kind only ever moves towards those,
+/// so the result does not depend on the order files are read in.
 pub fn field_classes<'f>(facts: impl Iterator<Item = &'f PyFacts>) -> FieldClasses {
     let classes: Vec<&FieldClass> = facts.flat_map(|f| &f.field_classes).collect();
     let mut known = FieldClasses::default();
@@ -519,21 +534,35 @@ pub fn field_classes<'f>(facts: impl Iterator<Item = &'f PyFacts>) -> FieldClass
     while grew {
         grew = false;
         for class in &classes {
-            let inherited = class.bases.iter().filter_map(|base| known.get(base));
-            let types = class.ftype.iter().chain(inherited.map(|k| &k.ftype));
-            let own_init = class.own_init || class.bases.iter().any(|b| known.get(b).is_some_and(|k| k.own_init));
-            let kinds: Vec<FieldKind> = types
-                .map(|t| FieldKind {
-                    ftype: t.clone(),
-                    own_init,
-                })
-                .collect();
-            for kind in kinds {
+            for kind in kinds_of(class, &known) {
                 grew |= add_kind(&mut known, &class.name, kind);
             }
         }
     }
     known
+}
+
+/// The kinds `class` gives its name, one per field type it proves or inherits from `known`.
+fn kinds_of(class: &FieldClass, known: &FieldClasses) -> Vec<FieldKind> {
+    let bases: Vec<(&String, &FieldKind)> = class
+        .bases
+        .iter()
+        .filter_map(|base| Some((base, known.get(base)?)))
+        .collect();
+    let own_init = class.own_init || bases.iter().any(|(_, k)| k.own_init);
+    let mut ancestors: BTreeSet<String> = class.ftype.iter().cloned().collect();
+    for (name, kind) in &bases {
+        ancestors.insert((*name).clone());
+        ancestors.extend(kind.ancestors.iter().cloned());
+    }
+    let types = class.ftype.iter().chain(bases.iter().map(|(_, k)| &k.ftype));
+    types
+        .map(|t| FieldKind {
+            ftype: t.clone(),
+            own_init,
+            ancestors: ancestors.clone(),
+        })
+        .collect()
 }
 
 /// Gives `name` the kind `kind`, and tells whether that changed what `known` holds.
@@ -560,6 +589,7 @@ fn merged(held: &FieldKind, new: FieldKind) -> FieldKind {
             UNREAD_TYPE.to_owned()
         },
         own_init: held.own_init || new.own_init,
+        ancestors: held.ancestors.union(&new.ancestors).cloned().collect(),
     }
 }
 
@@ -3059,6 +3089,7 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
             domain_string: false,
             options: vec![],
             splat: true,
+            lineage: vec![],
         }
     }
 
@@ -3330,6 +3361,7 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
             domain_string: keyword(call, "domain").is_some_and(|d| matches!(d, Expr::StringLiteral(_))),
             options,
             splat: hides_options(ftype, call) || args.is_none(),
+            lineage: lineage(call, self.known),
         })
     }
 
@@ -5018,17 +5050,23 @@ mod tests {
         known
     }
 
-    fn pair(name: &str, ftype: &str) -> (String, FieldKind) {
+    /// A field class of `ftype` that derives from `ancestors`.
+    fn kind(name: &str, ftype: &str, ancestors: &[&str]) -> (String, FieldKind) {
         let kind = FieldKind {
             ftype: ftype.to_owned(),
             own_init: false,
+            ancestors: ancestors.iter().map(|a| (*a).to_owned()).collect(),
         };
         (name.to_owned(), kind)
     }
 
-    /// A field class whose chain binds its own `__init__`.
-    fn own(name: &str, ftype: &str) -> (String, FieldKind) {
-        let (name, kind) = pair(name, ftype);
+    /// A field class that derives from the class of `ftype` alone.
+    fn pair(name: &str, ftype: &str) -> (String, FieldKind) {
+        kind(name, ftype, &[ftype])
+    }
+
+    /// The field class `name` of `kind`, marked as binding its own `__init__` in its chain.
+    fn own((name, kind): (String, FieldKind)) -> (String, FieldKind) {
         (name, FieldKind { own_init: true, ..kind })
     }
 
@@ -5038,7 +5076,11 @@ mod tests {
                     super().__init__(*a, **k)\nclass C(fields.Many2one):\n    def f(self):\n        \
                     def __init__(self):\n            pass\n";
         let derived = "class B(A):\n    pass\n";
-        let expected = [own("A", "Many2one"), own("B", "Many2one"), pair("C", "Many2one")];
+        let expected = [
+            own(pair("A", "Many2one")),
+            own(kind("B", "Many2one", &["A", "Many2one"])),
+            pair("C", "Many2one"),
+        ];
         assert_eq!(classes(&[base, derived]), expected);
         assert_eq!(classes(&[derived, base]), expected);
     }
@@ -5051,7 +5093,7 @@ mod tests {
             "x, __init__ = pair",
         ] {
             let src = format!("from odoo import fields\nclass V(fields.Char):\n    {body}\n");
-            assert_eq!(classes(&[src.as_str()]), [own("V", "Char")], "{body}");
+            assert_eq!(classes(&[src.as_str()]), [own(pair("V", "Char"))], "{body}");
         }
     }
 
@@ -5060,7 +5102,7 @@ mod tests {
         let plain = "from odoo import fields\nclass V(fields.Char):\n    pass\n";
         let with_init = "from odoo import fields\nclass V(fields.Char):\n    __init__ = make\n";
         let sub = "class W(V):\n    pass\n";
-        let expected = [own("V", "Char"), own("W", "Char")];
+        let expected = [own(pair("V", "Char")), own(kind("W", "Char", &["Char", "V"]))];
         assert_eq!(classes(&[plain, with_init, sub]), expected);
         assert_eq!(classes(&[sub, with_init, plain]), expected);
     }
@@ -5073,12 +5115,44 @@ mod tests {
         let expected = [
             pair("A", "A"),
             pair("B", "A"),
-            pair("C", "A"),
-            pair("D", "Char"),
+            kind("C", "A", &["A", "B"]),
+            kind("D", "Char", &["Char", "T"]),
             pair("T", "Char"),
         ];
         assert_eq!(classes(&[further, derived, base]), expected);
         assert_eq!(classes(&[base, derived, further]), expected);
+    }
+
+    #[test]
+    fn a_field_class_derives_from_its_bases_and_theirs_whatever_the_file_order() {
+        let base = "from odoo import fields\nclass A(fields.Char):\n    pass\n";
+        let derived = "class B(A):\n    pass\n";
+        let expected = [pair("A", "Char"), kind("B", "Char", &["A", "Char"])];
+        assert_eq!(classes(&[base, derived]), expected);
+        assert_eq!(classes(&[derived, base]), expected);
+        let other = "from odoo import fields\nclass Z(fields.Char):\n    pass\nclass V(Z):\n    pass\n";
+        let union = [
+            pair("A", "Char"),
+            kind("V", "Char", &["A", "Char", "Z"]),
+            pair("Z", "Char"),
+        ];
+        assert_eq!(classes(&[base, "class V(A):\n    pass\n", other]), union);
+    }
+
+    #[test]
+    fn a_field_call_names_its_class_then_what_it_derives_from() {
+        let known = FieldClasses::from_iter([pair("Tag", "Char")]);
+        let src = "class X(models.Model):\n    _name = 'x'\n    a = Tag(required=True)\n    b = fields.Char()\n    \
+                   _columns = {'c': 1}\n";
+        let facts = analyze_with(
+            src,
+            Series::parse("8.0"),
+            &known,
+            &TaintTable::default(),
+            Scope::default(),
+        );
+        let lineages: Vec<_> = facts.classes[0].fields.iter().map(|f| f.lineage.clone()).collect();
+        assert_eq!(lineages, [vec!["Tag", "Char"], vec!["Char"], vec![]]);
     }
 
     #[test]
@@ -5092,10 +5166,17 @@ mod tests {
         let char = "from odoo import fields\nclass V(fields.Char):\n    pass\n";
         let derived = "from odoo import fields\nclass A(fields.Char):\n    pass\nclass V(A):\n    pass\n";
         let sub = "class W(V):\n    pass\n";
-        let expected = [pair("V", UNREAD_TYPE), pair("W", UNREAD_TYPE)];
+        let expected = [
+            kind("V", UNREAD_TYPE, &["Char", "Text"]),
+            kind("W", UNREAD_TYPE, &["Char", "Text", "V"]),
+        ];
         assert_eq!(classes(&[text, char, sub]), expected);
         assert_eq!(classes(&[sub, char, text]), expected);
-        let by_base = [pair("A", "Char"), pair("V", UNREAD_TYPE), pair("W", UNREAD_TYPE)];
+        let by_base = [
+            pair("A", "Char"),
+            kind("V", UNREAD_TYPE, &["A", "Char", "Text"]),
+            kind("W", UNREAD_TYPE, &["A", "Char", "Text", "V"]),
+        ];
         assert_eq!(classes(&[sub, derived, text]), by_base);
         assert_eq!(classes(&[text, sub, derived]), by_base);
     }
@@ -5128,9 +5209,9 @@ mod tests {
     #[test]
     fn a_field_with_its_own_init_gives_nothing_by_position() {
         let known = FieldClasses::from_iter([
-            own("Company", "Many2one"),
-            own("Pick", "Selection"),
-            own("Lines", "One2many"),
+            own(pair("Company", "Many2one")),
+            own(pair("Pick", "Selection")),
+            own(pair("Lines", "One2many")),
             pair("Link", "Many2one"),
         ]);
         let src = "class X(models.Model):\n    _name = 'x'\n    a = Company('Label')\n    \
@@ -5155,7 +5236,12 @@ mod tests {
         let base =
             "from odoo import fields\nclass V(fields.Field[list]):\n    pass\nclass T(fields.Char[str]):\n    pass\n";
         let derived = "class Sub(V[int]):\n    pass\nclass Deep(pkg.Sub[int]):\n    pass\n";
-        let expected = [pair("Deep", "V"), pair("Sub", "V"), pair("T", "Char"), pair("V", "V")];
+        let expected = [
+            kind("Deep", "V", &["Sub", "V"]),
+            pair("Sub", "V"),
+            pair("T", "Char"),
+            pair("V", "V"),
+        ];
         assert_eq!(classes(&[derived, base]), expected);
     }
 
