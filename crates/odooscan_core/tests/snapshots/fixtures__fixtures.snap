@@ -356,6 +356,7 @@ custom/data_fields/data/partners.xml:5:9: OD309 res.partner has no field 'x_unlo
 custom/data_fields/data/partners.xml:6:9: OD309 res.partner has no field 'x_demo'
 custom/data_fields/data/partners.xml:9:28: OD322 data.ticket.leaf.kind has no value 'nope'
 custom/data_fields/data/unlisted.xml:1:1: OD502 'data/unlisted.xml' is not in the manifest's data or demo, so Odoo never loads it
+custom/data_fields/models/partner.py:7:39: OD203 'x_thing': res.partner has no field 'x_thing'
 custom/data_fields/models/ticket.py:9:17: OD203 'x_text': data.ticket has no field 'x_text'
 custom/data_fields/models/ticket.py:10:20: OD203 'x_active': data.ticket has no field 'x_active'
 custom/data_fields/models/ticket.py:16:14: OD212 Monetary field 'amount' has no currency: data.ticket has no currency_id, and the field names no currency_field

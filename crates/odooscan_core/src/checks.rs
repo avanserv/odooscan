@@ -2220,8 +2220,8 @@ impl<'m> Ctx<'_, 'm> {
     }
 
     /// OD203 on a path Odoo resolves as it sets up the model, when a failure refuses the install.
-    /// The module's own data files load after that, so only a dependency's unread file may add the
-    /// field, and not to a model the module defines whole.
+    /// The module's own data files load after that, so only an unread file of a module `setup_scope`
+    /// records may add the field, and not to a model the module defines whole.
     fn setup_path(&self, out: &mut Out<'m>, file: &'m Path, model: &str, path: &Spanned<String>) {
         if let Err(e) = self.index.resolve_path(model, &path.value, self.setup)
             && !self.may_supply(&e)
