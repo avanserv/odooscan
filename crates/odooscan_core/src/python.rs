@@ -415,6 +415,14 @@ fn imported_modules(stmt: &Stmt) -> Vec<String> {
     }
 }
 
+/// What the top-level absolute `from` imports of a body name, as `imported_modules` gives them.
+fn from_imports(body: &[Stmt]) -> Vec<String> {
+    body.iter()
+        .filter(|s| matches!(s, Stmt::ImportFrom(f) if f.level == 0))
+        .flat_map(imported_modules)
+        .collect()
+}
+
 fn under_package(module: &str, package: &str) -> bool {
     module
         .strip_prefix(package)
@@ -3439,6 +3447,9 @@ struct PyVisitor<'a, 'ast> {
     change_check: Option<ChangeCheck<'ast>>,
     /// How many enclosing `try` bodies have a handler that catches a failed import.
     import_shims: usize,
+    /// What the `from` imports of the `try` bodies name whose import-catching handlers enclose the
+    /// code, as `from_imports` gives them.
+    failed_imports: Vec<String>,
     /// How many enclosing classes and functions `@skip` decorates.
     skipped: usize,
     /// How many enclosing function and lambda bodies defer the code until a call, past import.
@@ -3498,6 +3509,7 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
             in_user_setter: false,
             change_check: None,
             import_shims: 0,
+            failed_imports: Vec::new(),
             skipped: 0,
             deferred: 0,
             odoo_names: odoo_imports.iter().map(|(local, _)| *local).collect(),
@@ -4941,21 +4953,31 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
     }
 
     /// One finding per import statement, for the first row whose package the statement imports and
-    /// whose stage the series has reached. Behind a `try` that catches the `ImportError`, the import
-    /// of a removed package is a fallback, while one that still loads warns all the same.
+    /// whose stage the series has reached, unless `falls_back` holds.
     fn api_imports(&mut self, stmt: &Stmt) {
         let modules = imported_modules(stmt);
         let found = api_table::ROWS.iter().find_map(|row| match row.kind {
             Kind::Import(package) if modules.iter().any(|m| under_package(m, package)) => {
-                api_table::stage(row, self.series)
+                api_table::stage(row, self.series).map(|stage| (row, stage))
             }
             _ => None,
         });
-        if let Some((code, message)) = found
-            && !(code == "OD126" && self.import_shims > 0)
+        if let Some((row, (code, message))) = found
+            && !self.falls_back(row, code)
         {
             self.diag(code, stmt, message);
         }
+    }
+
+    /// Whether the import is a fallback that never runs where it would fail or warn: one of a
+    /// removed package behind a `try` that catches the `ImportError`, or any in a handler that runs
+    /// only when the `try` failed to import the replacement. One that still loads warns all the
+    /// same.
+    fn falls_back(&self, row: &api_table::Row, code: &str) -> bool {
+        (code == "OD126" && self.import_shims > 0)
+            || row
+                .replaced_by
+                .is_some_and(|replacement| self.failed_imports.iter().any(|m| m == replacement))
     }
 
     fn request_attr(&mut self, a: &ast::ExprAttribute, expr: &Expr) {
@@ -5412,16 +5434,27 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
     /// The handlers run once the lookup has failed, and `finally` runs either way.
     fn visit_try(&mut self, t: &'ast ast::StmtTry) {
         let (within, after) = try_guards(t).unzip();
-        let shim = t
-            .handlers
-            .iter()
-            .any(|ast::ExceptHandler::ExceptHandler(h)| catches(h, "ImportError") || catches(h, "ModuleNotFoundError"));
+        let shim = t.handlers.iter().any(imports::catches_import);
         self.import_shims += usize::from(shim);
         self.guarded_by(within, |v| v.visit_body(&t.body));
         self.import_shims -= usize::from(shim);
-        t.handlers.iter().for_each(|h| self.visit_except_handler(h));
+        self.visit_handlers(t);
         self.guarded_by(after, |v| v.visit_body(&t.orelse));
         self.visit_body(&t.finalbody);
+    }
+
+    /// A handler that catches a failed import runs only where an import of the `try` body failed,
+    /// so it sees what the body imports in `failed_imports`.
+    fn visit_handlers(&mut self, t: &'ast ast::StmtTry) {
+        let tried = from_imports(&t.body);
+        for handler in &t.handlers {
+            let depth = self.failed_imports.len();
+            if imports::catches_import(handler) {
+                self.failed_imports.extend(tried.iter().cloned());
+            }
+            self.visit_except_handler(handler);
+            self.failed_imports.truncate(depth);
+        }
     }
 }
 
@@ -9622,6 +9655,42 @@ env.cr.execute('SELECT a.module FROM t a')
         assert_eq!(codes(&src("ValueError"), Series::parse("saas~19.1")), ["OD126"]);
         let fallback = "try:\n    import lxml\nexcept ImportError:\n    from odoo.osv import expression\n";
         assert_eq!(codes(fallback, Series::parse("saas~19.1")), ["OD126"]);
+    }
+
+    #[test]
+    fn an_import_a_try_of_the_replacement_falls_back_to_is_silent() {
+        let handler = |tried: &str, caught: &str| {
+            format!("try:\n{tried}\nexcept {caught}:\n    from odoo.osv import expression\n")
+        };
+        let domain = "    from odoo.fields import Domain";
+        let after = |tail: &str| {
+            format!("try:\n{domain}\nexcept ImportError:\n    pass\n{tail}from odoo.osv import expression\n")
+        };
+        let reported = [
+            handler("    from odoo import fields", "ImportError"),
+            handler("    if fields:\n        from odoo.fields import Domain", "ImportError"),
+            handler("    import lxml", "ImportError"),
+            handler(domain, "ValueError"),
+            after("else:\n    "),
+            after(""),
+        ];
+        for (series, code) in [("19.0", "OD125"), ("saas~19.1", "OD126")] {
+            for caught in [
+                "ImportError",
+                "ModuleNotFoundError",
+                "(ImportError, KeyError)",
+                "Exception",
+            ] {
+                assert_eq!(
+                    codes(&handler(domain, caught), Series::parse(series)),
+                    [""; 0],
+                    "{caught} {series}"
+                );
+            }
+            for src in &reported {
+                assert_eq!(codes(src, Series::parse(series)), [code], "{src} {series}");
+            }
+        }
     }
 
     /// `src` with the fixes of its `code` findings applied, and the findings left unfixed.
