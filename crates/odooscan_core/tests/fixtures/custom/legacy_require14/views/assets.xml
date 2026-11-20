@@ -5,6 +5,7 @@
             <script type="text/javascript" src="/legacy_require14/static/src/js/dropped.js"/>
             <script type="text/javascript" src="/legacy_require14/static/src/js/kept.js"/>
             <script type="text/javascript" src="/legacy_require14/static/src/js/module.js"/>
+            <script type="text/javascript" src="/legacy_require14/static/src/js/restored.js"/>
             <script type="text/javascript" src="/legacy_require14/static/src/js/rpc.js"/>
         </xpath>
     </template>
@@ -14,5 +15,12 @@
         <xpath expr="//script[@src='/legacy_require14/static/src/js/kept.js']" position="replace">
             <script type="text/javascript" src="/legacy_require14/static/src/js/kept.js"/>
         </xpath>
+        <xpath expr="//script[@src='/legacy_require14/static/src/js/restored.js']" position="replace">
+            <t t-call="legacy_require14.restored_scripts"/>
+        </xpath>
+    </template>
+
+    <template id="restored_scripts">
+        <script type="text/javascript" src="/legacy_require14/static/src/js/restored.js"/>
     </template>
 </odoo>

@@ -968,6 +968,7 @@ custom/legacy_patch16/static/src/js/form_patch.js:19:21: OD602 neither FormContr
 custom/legacy_require14/static/src/js/counter.js:6:25: OD601 no file of module web provides '@web/gone'
 custom/legacy_require14/static/src/js/counter.js:7:26: OD601 'legacy_require_lib.tools' comes from module legacy_require_lib, which is not in depends
 custom/legacy_require14/static/src/js/kept.js:4:21: OD601 no file of module web provides '@web/kept_gone'
+custom/legacy_require14/static/src/js/restored.js:4:21: OD601 no file of module web provides '@web/restored_gone'
 custom/legacy_require14/static/src/js/rpc.js:8:22: OD610 html() renders its argument as HTML unescaped; check that no user input reaches it, or use text()
 custom/legacy_require14/static/src/js/rpc.js:9:39: OD603 no indexed module defines model 'x.gone14'
 custom/legacy_require16/static/src/js/counter.js:8:27: OD601 no file of module web provides '@web/gone'
