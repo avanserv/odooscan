@@ -194,6 +194,7 @@ pub fn scan(opts: &ScanOptions) -> Report {
                 .to_owned(),
         );
     }
+    notices.extend(deep_gap_notices(&index));
     let mut diagnostics: Vec<Diagnostic> = modules
         .par_iter()
         .enumerate()
@@ -266,6 +267,36 @@ pub fn scan(opts: &ScanOptions) -> Report {
     }
 }
 
+/// One notice per module the index lacks that a checked module reaches only through its
+/// dependencies: OD503 tells each module that names an unindexed one, and this tells the rest. Without `base`
+/// the cross-module rules are off, so nothing is silenced by the gap alone.
+fn deep_gap_notices(index: &index::Index) -> Vec<String> {
+    if !index.has_base {
+        return vec![];
+    }
+    let gaps = index.deep_gaps().into_iter();
+    gaps.map(|(name, modules)| deep_gap_notice(name, &modules)).collect()
+}
+
+/// Names past this many are counted, as a large scan may reach the gap from hundreds of modules.
+const GAP_NAMES: usize = 5;
+
+fn deep_gap_notice(name: &str, modules: &[&str]) -> String {
+    let count = modules.len();
+    let (noun, verb) = if count == 1 {
+        ("module", "depends")
+    } else {
+        ("modules", "depend")
+    };
+    let mut listed = modules[..count.min(GAP_NAMES)].join(", ");
+    if count > GAP_NAMES {
+        listed = format!("{listed} and {} more", count - GAP_NAMES);
+    }
+    format!(
+        "module '{name}' is not indexed, so most cross-module rules stay silent in {count} {noun} that {verb} on it through other modules: {listed}; add its checkout to --addons-path"
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -310,6 +341,30 @@ mod tests {
             related(5).related_lines(usize::MAX).as_deref(),
             Some("lines 10, 20, 30, 40, 50")
         );
+    }
+
+    #[test]
+    fn a_deep_gap_notice_names_up_to_five_modules() {
+        assert_eq!(
+            deep_gap_notice("ghost_enterprise", &["partial_sites_dependent"]),
+            "module 'ghost_enterprise' is not indexed, so most cross-module rules stay silent in 1 module that depends on it through other modules: partial_sites_dependent; add its checkout to --addons-path"
+        );
+        assert_eq!(
+            deep_gap_notice("ghost", &["a", "b", "c", "d", "e", "f", "g"]),
+            "module 'ghost' is not indexed, so most cross-module rules stay silent in 7 modules that depend on it through other modules: a, b, c, d, e and 2 more; add its checkout to --addons-path"
+        );
+    }
+
+    #[test]
+    fn a_deep_gap_gets_no_notice_without_base() {
+        let manifest = |depends: &str| format!("{{'depends': [{depends}]}}");
+        let mut modules = vec![
+            project::module("mid", &manifest("'base', 'ghost'")),
+            project::module("top", &manifest("'mid'")),
+        ];
+        assert!(deep_gap_notices(&index::Index::build(&modules, None)).is_empty());
+        modules.insert(0, project::module("base", &manifest("")));
+        assert_eq!(deep_gap_notices(&index::Index::build(&modules, None)).len(), 1);
     }
 
     #[test]

@@ -20,7 +20,8 @@ modules build on. It is indexed but never reported on, and an Odoo source checko
 `addons` and `odoo/addons` directories. The variable `ODOOSCAN_ADDONS_PATH` sets the same thing.
 `oscn` expands a leading `~` in each entry and exits with status 2 when an entry is not a directory.
 Without `base` on the addons path, the [rules](rules/index.md) that need the index are off and a
-notice says so.
+notice says so. When a module that a checked module reaches only through its dependencies is not
+indexed, a notice names the checked modules where most of those rules stay silent.
 
 Other options:
 

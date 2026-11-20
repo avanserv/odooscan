@@ -1,4 +1,5 @@
 use std::borrow::Cow;
+use std::collections::{BTreeMap, BTreeSet};
 
 use globset::{GlobBuilder, GlobSet, GlobSetBuilder};
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -3175,12 +3176,38 @@ impl<'m> Index<'m> {
 
     /// Whether a module in `scope` depends on a module that is not indexed.
     pub fn partial_scope(&self, scope: &Scope) -> bool {
-        self.modules
-            .iter()
-            .enumerate()
-            .filter(|(mi, _)| scope.sees(*mi))
-            .flat_map(|(_, m)| &m.manifest.depends)
-            .any(|d| !self.by_name.contains_key(d.value.as_str()))
+        self.unindexed_depends(scope).next().is_some()
+    }
+
+    /// The `depends` names of the modules in `scope` that the index does not hold.
+    fn unindexed_depends<'s>(&'s self, scope: &'s Scope) -> impl Iterator<Item = &'m str> + 's {
+        let seen = self.modules.iter().enumerate().filter(|(mi, _)| scope.sees(*mi));
+        let names = seen.flat_map(|(_, m)| &m.manifest.depends).map(|d| d.value.as_str());
+        names.filter(|name| !self.by_name.contains_key(name))
+    }
+
+    /// Per unindexed dependency, by name, the checked modules whose scope reaches it while none of
+    /// their own `depends` is unindexed. Those get no OD503, yet `partial_scope` silences rules in
+    /// them; one with an OD503 of its own would stay silent after indexing just this dependency.
+    pub fn deep_gaps(&self) -> BTreeMap<&'m str, Vec<&'m str>> {
+        let mut gaps: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
+        for (mi, module) in self.modules.iter().enumerate().filter(|(_, m)| m.checked) {
+            for name in self.reached_gaps(mi) {
+                gaps.entry(name).or_default().push(module.name.as_str());
+            }
+        }
+        gaps.values_mut().for_each(|modules| modules.sort_unstable());
+        gaps
+    }
+
+    /// The unindexed dependencies the scope of module `mi` reaches, or none when one of its own
+    /// `depends` is unindexed.
+    fn reached_gaps(&self, mi: usize) -> BTreeSet<&'m str> {
+        let own = &self.modules[mi].manifest.depends;
+        if own.iter().any(|d| !self.by_name.contains_key(d.value.as_str())) {
+            return BTreeSet::new();
+        }
+        self.unindexed_depends(&self.scope(mi)).collect()
     }
 
     /// Whether a module whose records have loaded when the reader of `scope` runs loads a data file
@@ -4738,6 +4765,24 @@ mod tests {
         assert_eq!(sees(&index.guard_scope(1, [], series)), ["base", "main"]);
         assert_eq!(sees(&index.guard_scope(1, [3], series)), ["base", "main", "far"]);
         assert_eq!(sees(&index.install_scope(1, series)), ["base", "main", "own"]);
+    }
+
+    #[test]
+    fn a_deep_gap_names_the_checked_modules_without_their_own_od503() {
+        let manifest = |depends: &str| format!("{{'depends': [{depends}]}}");
+        let mut modules = [
+            module("base", &manifest("")),
+            module("mid", &manifest("'base', 'ghost'")),
+            module("top", &manifest("'mid'")),
+            module("far", &manifest("'top', 'ghost'")),
+            module("above", &manifest("'top'")),
+            module("side", &manifest("'top', 'spectre'")),
+        ];
+        modules[4].checked = false;
+        let index = Index::build(&modules, None);
+        let gaps: Vec<_> = index.deep_gaps().into_iter().collect();
+        assert_eq!(gaps, [("ghost", vec!["top"])]);
+        assert!(index.partial_scope(&index.scope(2)) && !index.partial_scope(&index.scope(0)));
     }
 
     #[test]

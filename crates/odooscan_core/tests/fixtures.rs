@@ -127,6 +127,29 @@ fn an_indexed_manifest_that_does_not_parse_gets_a_notice() {
 }
 
 #[test]
+fn a_gap_two_levels_down_gets_a_notice() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+    let report = scan(&ScanOptions {
+        paths: vec![root.join("custom")],
+        addons_paths: vec![root.join("core")],
+        ..Default::default()
+    });
+    let deep: Vec<_> = report
+        .notices
+        .iter()
+        .filter(|n| n.contains("through other modules"))
+        .collect();
+    // partial_sites_dependent reaches ghost_enterprise through partial_sites. depends_unused reaches
+    // it through prov_partial too, but its OD503 for ghost_unused already tells it.
+    assert_eq!(
+        deep,
+        [
+            "module 'ghost_enterprise' is not indexed, so most cross-module rules stay silent in 1 module that depends on it through other modules: partial_sites_dependent; add its checkout to --addons-path"
+        ]
+    );
+}
+
+#[test]
 fn an_ignored_manifest_error_is_silent() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
     let report = scan(&ScanOptions {
