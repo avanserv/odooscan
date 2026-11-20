@@ -1854,7 +1854,8 @@ const DOTTED_CLASS_NAME: Series = Series { major: 18, minor: 1 };
 /// still does.
 const COLUMNS_END: Series = Series { major: 10, minor: 0 };
 
-/// What a class body says about the name of its model.
+/// What a class body says that waits until the whole body is read: the name of its model and the
+/// fields its term attributes name.
 #[derive(Default)]
 struct Naming {
     /// The class assigns `_name`, a literal or not.
@@ -1869,6 +1870,18 @@ struct Naming {
     /// `_columns` hides a key. Waits here for the name: `_inherit` assigns `inherit_unknown`, in any
     /// order in the class, and the name reads that flag for what `_inherit` lists.
     columns_hidden: bool,
+    /// The fields each of `_order`, `_fold_name`, `_parent_name`, `_rec_name` and `_active_name`
+    /// names, at the slot of its first assignment with the value of its last, which Python binds.
+    terms: Vec<(String, Vec<Spanned<String>>)>,
+}
+
+impl Naming {
+    fn term(&mut self, name: &str, fields: Vec<Spanned<String>>) {
+        match self.terms.iter_mut().find(|(n, _)| n == name) {
+            Some((_, held)) => *held = fields,
+            None => self.terms.push((name.to_owned(), fields)),
+        }
+    }
 }
 
 /// The form of `_inherit`, which decides the name of a class without `_name`.
@@ -2404,6 +2417,13 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
                 conditional_methods(stmt, &mut fact);
             }
         }
+        for (name, fields) in std::mem::take(&mut naming.terms) {
+            match name.as_str() {
+                "_order" | "_fold_name" | "_parent_name" => fact.order_fields.extend(fields),
+                "_rec_name" | "_active_name" => fact.setup_fields.extend(fields),
+                other => unreachable!("naming term {other} has no field list"),
+            }
+        }
         fact.unassigned_computes = self.unassigned_computes(class, &fact);
         self.named_model(fact, naming, may_reach_orm(class))
     }
@@ -2560,8 +2580,15 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
                     self.facts.dynamic_models |= naming.name.is_none();
                 }
                 "_inherit" => naming.inherit = self.inherit(value, fact, naming.name.as_deref()),
-                "_order" | "_fold_name" => fact.order_fields.extend(self.term_fields(value)),
-                "_rec_name" | "_active_name" => fact.setup_fields.extend(self.term_fields(value)),
+                "_order" | "_fold_name" | "_rec_name" | "_active_name" => {
+                    naming.term(&target.id, self.term_fields(value));
+                }
+                // A field that must exist, as `_order` names, and the one `child_of` matches by
+                // `parent_path` from saas~18.1.
+                "_parent_name" => {
+                    naming.term(&target.id, self.term_fields(value));
+                    self.kept_attr(target, value, fact);
+                }
                 "_rec_names_search" => {
                     fact.rec_names_search = strings(value).into_iter().map(|s| self.spanned(s)).collect();
                 }
@@ -2613,12 +2640,6 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
         match target.id.as_str() {
             "_table" => fact.table = Some(option_value(value)),
             "_parent_store" | "_auto" | "_log_access" | "_register" | "_date_name" | "_defaults" => {
-                self.kept_attr(target, value, fact);
-            }
-            // A field that must exist, as `_order` names, and the one `child_of` matches by
-            // `parent_path` from saas~18.1.
-            "_parent_name" => {
-                fact.order_fields.extend(self.term_fields(value));
                 self.kept_attr(target, value, fact);
             }
             // Odoo registers a field under any attribute name, so a field so named replaces the
@@ -4430,6 +4451,35 @@ mod tests {
         assert_eq!(values(&class.rec_names_search), ["name", "partner_id.ref"]);
         let parent = class.attr("_parent_name").map(|a| &a.value);
         assert_eq!(parent, Some(&OptionValue::Str("up_id".to_owned())));
+    }
+
+    #[test]
+    fn reads_the_last_assignment_of_a_model_attribute() {
+        let class = |attrs: &str| {
+            let body = format!("class X(models.Model):\n    _name = 'x'\n{attrs}");
+            analyze(&body, None).classes.remove(0)
+        };
+        let values = |v: &[Spanned<String>]| v.iter().map(|s| s.value.clone()).collect::<Vec<_>>();
+        let twice = class(
+            "    _order = 'x_a'\n    _rec_name = 'x_b'\n    _parent_store = False\n    _parent_name = 'x_c'\n    \
+             _order = 'x_d, id'\n    _rec_name = 'x_e'\n    _parent_store = True\n    _parent_name = 'x_f'\n    \
+             _register = True\n    _register = False\n",
+        );
+        assert_eq!(values(&twice.order_fields), ["x_d", "id", "x_f"]);
+        assert_eq!(values(&twice.setup_fields), ["x_e"]);
+        assert_eq!(
+            twice.attr("_parent_store").map(|a| (&a.value, a.pos.line)),
+            Some((&OptionValue::Bool(true), 9))
+        );
+        assert_eq!(
+            twice.attr("_parent_name").map(|a| (&a.value, a.pos.line)),
+            Some((&OptionValue::Str("x_f".to_owned()), 10))
+        );
+        assert!(!twice.registered());
+        let unread = class("    _order = 'x_a'\n    _order = ORDER\n");
+        assert!(unread.order_fields.is_empty());
+        let branched = class("    _order = 'x_a'\n    if ODOO:\n        _order = 'x_b'\n");
+        assert_eq!(values(&branched.order_fields), ["x_a"]);
     }
 
     /// The method names of a model class with the body `body`.

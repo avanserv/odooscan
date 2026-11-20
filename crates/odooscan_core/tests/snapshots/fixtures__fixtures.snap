@@ -862,6 +862,7 @@ custom/model_attributes/models/bed.py:18:29: OD204 garden.bed has no method '_se
 custom/model_attributes/models/bed.py:20:31: OD204 garden.bed has no method '_selection_origins'
 custom/model_attributes/models/bed.py:24:53: OD203 'owner_model': garden.bed has no field 'owner_model'
 custom/model_attributes/models/bed.py:25:86: OD203 'parent_model': garden.bed has no field 'parent_model'
+custom/model_attributes/models/bed.py:38:14: OD203 'x_planted': garden.stage has no field 'x_planted'
 custom/model_attributes/models/delegates.py:11:58: OD228 'country_id' has delegate=True and no ondelete, so Odoo fails with AttributeError when it sets up the registry; give it ondelete="cascade"
 custom/model_attributes/models/delegates.py:12:58: OD228 'partner_id' has delegate=True and no ondelete, so Odoo fails with AttributeError when it sets up the registry; give it required=True, ondelete="cascade"
 custom/model_attributes/models/delegates.py:13:60: OD218 'currency_id' has delegate=True, so it must be required with ondelete 'cascade' or 'restrict'; give it ondelete="cascade"

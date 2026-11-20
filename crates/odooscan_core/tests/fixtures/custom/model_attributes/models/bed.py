@@ -34,6 +34,10 @@ class GardenStage(models.Model):
     _name = "garden.stage"
     _description = "Garden stage"
     _fold_name = "fold"
+    _order = "x_sowed"
+    _order = "x_planted"
+    _rec_name = "x_label"
+    _rec_name = "name"
 
     name = fields.Char()
     fold = fields.Boolean()
