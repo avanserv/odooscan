@@ -1605,6 +1605,7 @@ custom/route_unread/controllers/main.py:8:9: OD232 'drop' overrides the route of
 custom/route_unread/controllers/main.py:14:9: OD231 path '/route_auto/side' is also routed by Shared.side in module route_auto, so one of the two hides the other
 custom/route_widen/controllers/main.py:7:9: OD231 path '/route_widen/x' is also routed by Other.other_x in module route_widen_base, so one of the two hides the other
 custom/route_widen_bare/controllers/main.py:7:9: OD231 path '/route_widen/kept' is also routed by Other.other_kept in module route_widen_base, so one of the two hides the other
+custom/route_widen_pair/controllers/main.py:13:9: OD231 path '/route_widen/pair' is also routed by R.pair in module route_widen_pair, so one of the two hides the other
 custom/rpc_owner/static/src/owner_calls.js:3:36: OD603 model 'rpc.owner.lamp' comes from module rpc_owner_lamp, which is not in depends
 custom/rule_indexes/models/draft.py:8:1: OD000 unexpected EOF while parsing
 custom/rule_indexes/security/ir.rule.csv:2:1: OD407 desk.case.ref has no index, yet record rule rule_indexes.rule_case_ref filters reads of desk.case on it; add index=True to the field

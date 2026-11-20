@@ -155,34 +155,66 @@ impl Table {
     }
 
     /// The `methods` givers of `walks` below a route of `origins`, each with the methods of the
-    /// definitions its walk lays out before it.
+    /// definitions the walks holding it lay out before it, less the overrides of its own module.
     fn widenings<'t>(
         &'t self,
         walks: &[Vec<Option<Origin<'t>>>],
         givers: &[Origin<'t>],
         origins: &[Origin<'t>],
     ) -> Vec<Widening<'t>> {
-        let below = |g: &&Origin<'t>| origins.iter().any(|o| self.inherits(g.at, o.at.class));
+        let below = |g: &Origin<'t>| origins.iter().any(|o| self.inherits(g.at, o.at.class));
         let layer = |walk: &[Option<Origin<'t>>], route: &RouteDef| {
             walk.iter()
                 .position(|l| l.is_some_and(|o| std::ptr::eq(o.route, route)))
         };
         let widening = |origin: Origin<'t>| {
-            let (walk, at) = walks.iter().find_map(|w| Some((w, layer(w, origin.route)?)))?;
-            let before = last_given(&walk[..at], None, |r| &r.methods);
+            // The module's own overrides are left out, so `before` is the endpoint as the module
+            // found it and the module brings in a clash whichever of its overrides begins it.
+            let outside = |l: &&Option<Origin<'t>>| !l.is_some_and(|o| o.at.addon == origin.at.addon && below(&o));
+            let heads: Vec<Vec<_>> = walks
+                .iter()
+                .filter_map(|w| Some(w[..layer(w, origin.route)?].iter().filter(outside).copied().collect()))
+                .collect();
+            let before = (!heads.is_empty()).then(|| self.methods_before(heads.iter().map(Vec::as_slice)))?;
             Some(Widening { origin, before })
         };
-        givers.iter().filter(below).filter_map(|&g| widening(g)).collect()
+        givers
+            .iter()
+            .filter(|g| below(g))
+            .filter_map(|&g| widening(g))
+            .collect()
     }
 
-    /// A key over the walks of the leaves, with the routes that give it: the last giving layer of
-    /// each, less one a subclass of another overrides. None when one is a base the scan does not
-    /// read or the rest disagree or are not literal, and no value when no route gives it.
-    fn decide<'t, T: PartialEq>(
+    /// The union of the methods the kept givers of `heads` give, encoded as `Endpoint::methods` is.
+    /// Any of them may come last, since the leaves' order, which the scan cannot read, decides it.
+    fn methods_before<'w, 't: 'w>(
         &'t self,
-        walks: &[Vec<Option<Origin<'t>>>],
+        heads: impl IntoIterator<Item = &'w [Option<Origin<'t>>]>,
+    ) -> Option<Option<Vec<String>>> {
+        let kept = self.kept_givers(heads, |r| &r.methods)?;
+        if kept.is_empty() {
+            return Some(None);
+        }
+        let (mut union, mut every): (Vec<String>, _) = (vec![], false);
+        for giver in kept {
+            match &giver.route.methods {
+                RouteKey::Given(Some(methods)) => union.extend(methods.iter().cloned()),
+                RouteKey::Given(None) => every = true,
+                RouteKey::Absent | RouteKey::Unknown => return None,
+            }
+        }
+        union.sort_unstable();
+        union.dedup();
+        Some((!every).then_some(union))
+    }
+
+    /// The last giving layer of each of `walks`, less one a subclass of another overrides, none
+    /// when one is a base the scan does not read.
+    fn kept_givers<'w, 't: 'w, T>(
+        &'t self,
+        walks: impl IntoIterator<Item = &'w [Option<Origin<'t>>]>,
         key: impl Fn(&RouteDef) -> &RouteKey<T>,
-    ) -> Option<(Option<&'t T>, Vec<Origin<'t>>)> {
+    ) -> Option<Vec<Origin<'t>>> {
         let mut givers: Vec<Origin<'t>> = vec![];
         for walk in walks {
             match last_giver(walk, &key) {
@@ -193,7 +225,18 @@ impl Table {
             }
         }
         let overridden = |g: &&Origin<'t>| givers.iter().any(|o| self.inherits(o.at, g.at.class));
-        let kept: Vec<Origin<'t>> = givers.iter().filter(|g| !overridden(g)).copied().collect();
+        Some(givers.iter().filter(|g| !overridden(g)).copied().collect())
+    }
+
+    /// A key over the walks of the leaves, with the routes `kept_givers` keeps for it. None when
+    /// one is a base the scan does not read or they disagree or are not literal, and no value when
+    /// no route gives it.
+    fn decide<'t, T: PartialEq>(
+        &'t self,
+        walks: &[Vec<Option<Origin<'t>>>],
+        key: impl Fn(&RouteDef) -> &RouteKey<T>,
+    ) -> Option<(Option<&'t T>, Vec<Origin<'t>>)> {
+        let kept = self.kept_givers(walks.iter().map(Vec::as_slice), &key)?;
         let Some(first) = kept.first() else {
             return Some((None, kept));
         };
@@ -317,7 +360,8 @@ pub struct Endpoint<'t> {
 #[derive(Debug)]
 pub struct Widening<'t> {
     pub origin: Origin<'t>,
-    /// The methods the definitions before it give, read as `Endpoint::methods` is.
+    /// The methods the definitions before it give, less the overrides of its own module: the union
+    /// over every walk holding it, encoded as `Endpoint::methods` is.
     pub before: Option<Option<Vec<String>>>,
 }
 
@@ -954,6 +998,61 @@ mod tests {
         );
         assert_eq!(widened(""), []);
         assert_eq!(widened("'/b'"), []);
+    }
+
+    /// `T` on `/d` for POST and `X(T)` giving GET, then `more`.
+    fn diamond_base(more: &str) -> String {
+        format!(
+            "from odoo import http\n\nclass T(http.Controller):\n    @http.route('/d', methods=['POST'])\n    def x(self):\n        pass\n\nclass X(T):\n    @http.route(methods=['GET'])\n    def x(self):\n        pass\n{more}"
+        )
+    }
+
+    /// `G(T)` widening `x` to GET and POST, then the leaves `classes`.
+    fn diamond_leaves(imports: &str, classes: &[&str]) -> String {
+        let leaves: String = classes.iter().map(|c| format!("\nclass {c}:\n    pass\n")).collect();
+        format!(
+            "from odoo import http\nfrom odoo.addons.a.main import {imports}\n\nclass G(T):\n    @http.route(methods=['GET', 'POST'])\n    def x(self):\n        pass\n{leaves}"
+        )
+    }
+
+    /// The widenings of the endpoint of `x` in the scan of `files`, as class and methods before.
+    fn widened_x(files: &[(&str, &str, &str)]) -> Vec<(String, Option<Option<Vec<String>>>)> {
+        let scan = table(files);
+        let endpoints = endpoints_in(&scan, |_| true);
+        let x = endpoints.iter().find(|e| e.origins[0].route.method == "x").unwrap();
+        x.widened
+            .iter()
+            .map(|w| (w.origin.at.class.name.clone(), w.before.clone()))
+            .collect()
+    }
+
+    #[test]
+    fn a_widening_in_a_diamond_reads_before_it_what_every_walk_order_gives() {
+        let a = diamond_base("");
+        // Odoo merges ancestors first, so X comes after T and before G in either order of the leaves.
+        for leaves in [["L1(G, X)", "L2(G)"], ["L2(G)", "L1(G, X)"]] {
+            let b = diamond_leaves("T, X", &leaves);
+            let found = widened_x(&[("a", "main.py", &a), ("b", "main.py", &b)]);
+            assert_eq!(found, [("G".to_owned(), only(&["GET"]))], "{leaves:?}");
+        }
+        // X and Y both merge before G, and the leaves' order decides which of them comes last.
+        let a = diamond_base("\nclass Y(T):\n    @http.route(methods=['PUT'])\n    def x(self):\n        pass\n");
+        let b = diamond_leaves("T, X, Y", &["L1(G, X)", "L2(G, Y)"]);
+        let found = widened_x(&[("a", "main.py", &a), ("b", "main.py", &b)]);
+        assert_eq!(found, [("G".to_owned(), only(&["GET", "PUT"]))]);
+    }
+
+    #[test]
+    fn the_methods_before_a_widening_of_one_walk_are_those_it_lays_out() {
+        let ext = "from odoo import http\nfrom odoo.addons.shop.controllers.main import Shop\n\nclass Mid(Shop):\n    @http.route(methods=['GET', 'POST'])\n    def a(self):\n        pass\n\nclass Every(Mid):\n    @http.route(methods=None)\n    def a(self):\n        pass\n\nclass Unread(Every, Mixin):\n    @http.route(methods=VERBS)\n    def a(self):\n        pass\n";
+        let scan = table(&[SHOP, ("ext", "main.py", ext)]);
+        let walk = scan.walk(class_at(&scan, ("ext", "main.py"), ("Unread", 0)), "a");
+        assert_eq!(walk.len(), 5);
+        for end in 0..=walk.len() {
+            let head = &walk[..end];
+            let given = last_given(head, None, |r| &r.methods);
+            assert_eq!(scan.methods_before([head]), given, "{end}");
+        }
     }
 
     /// An endpoint as its method, paths, origin classes and request methods.
