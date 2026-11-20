@@ -2577,7 +2577,7 @@ impl<'m> Ctx<'_, 'm> {
         if let Err(e) = self.index.resolve_path(model, &path.value, self.scope)
             && !self.may_hide(&e, self.scope_built)
         {
-            out.push(file, "OD203", path.pos, e.message(&path.value));
+            out.push(file, "OD203", path.pos, self.path_message(&e, &path.value));
         }
     }
 
@@ -2627,7 +2627,7 @@ impl<'m> Ctx<'_, 'm> {
         if let Err(e) = self.index.resolve_path(model, &path.value, reach.scope)
             && !wider.may_hide(&e, reach.built)
         {
-            out.push(file, "OD210", path.pos, e.message(&path.value));
+            out.push(file, "OD210", path.pos, wider.path_message(&e, &path.value));
         }
     }
 
@@ -2644,7 +2644,7 @@ impl<'m> Ctx<'_, 'm> {
                 if self.index.lost_scope(self.setup) && self.may_add_field(model))
             && !self.unseen(&e, self.setup, self.ahead_built)
         {
-            out.push(file, "OD203", path.pos, e.message(&path.value));
+            out.push(file, "OD203", path.pos, self.path_message(&e, &path.value));
         }
     }
 
