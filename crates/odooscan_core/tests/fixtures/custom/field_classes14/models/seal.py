@@ -19,8 +19,7 @@ class SealOld(models.Model):
 class SealOldExtension(models.Model):
     _inherit = "x.seal.old"
 
-    # OD205 on both photo lines is the known Binary and Image false positive: Image keeps the binary
-    # type of Binary, but OD205 compares class names. The OD205 follow-up removes both lines.
+    # Image keeps the type of Binary, so photo gets no OD205.
     photo = fields.Binary(string="P")
     kind = fields.Selection([("plain", "Plain")], string="K")
     ref = fields.Integer(string="R")

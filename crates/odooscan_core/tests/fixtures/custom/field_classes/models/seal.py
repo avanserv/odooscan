@@ -10,6 +10,7 @@ class Seal(models.Model):
     ref = fields.Integer(required=True)
     back = fields.Reference([("res.partner", "Partner")], required=True)
     res_model = fields.Char()
+    code = fields.Char()
 
 
 # On 20.0 the registry keeps what a definition sets when the class of the last one derives from its
@@ -18,9 +19,9 @@ class Seal(models.Model):
 class SealExtension(models.Model):
     _inherit = "x.seal"
 
-    # OD205 on both photo lines is the known Binary and Image false positive: Image keeps the binary
-    # type of Binary, but OD205 compares class names. The OD205 follow-up removes both lines.
+    # Image keeps the type of Binary, so photo gets no OD205.
     photo = fields.Image(string="P")
     kind = fields.Reference([("res.partner", "Partner")], string="K")
     ref = fields.Many2oneReference(model_field="res_model", string="R")
     back = fields.Selection([("plain", "Plain")], string="B")
+    code = fields.Integer(string="C")
