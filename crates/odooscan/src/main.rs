@@ -267,11 +267,11 @@ fn finish(args: &CheckArgs, report: &Report, diags: &[&Diagnostic], cwd: &Path, 
     print(args, diags, cwd);
     print_summary(args, diags);
     eprintln!(
-        "{} diagnostics in {} modules ({} indexed, {} files) in {:.2?}",
-        diags.len(),
-        report.modules_checked,
+        "{} in {} ({} indexed, {}) in {:.2?}",
+        output::count(diags.len(), "diagnostic"),
+        output::count(report.modules_checked, "module"),
         report.modules_indexed,
-        report.files,
+        output::count(report.files, "file"),
         started.elapsed()
     );
     if diags.is_empty() {

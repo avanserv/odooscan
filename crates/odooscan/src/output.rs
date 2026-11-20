@@ -62,6 +62,12 @@ fn absolute(code: &str, target: &str) -> Option<String> {
     Some(format!("{page}{anchor}"))
 }
 
+/// `n` and `noun`, plural unless `n` is 1. Every noun the summary lines count is regular.
+pub fn count(n: usize, noun: &str) -> String {
+    let s = if n == 1 { "" } else { "s" };
+    format!("{n} {noun}{s}")
+}
+
 pub fn print_statistics(out: &mut impl Write, diags: &[&Diagnostic]) {
     let mut counts: Vec<(&str, usize)> = vec![];
     for d in diags {
@@ -380,6 +386,14 @@ mod tests {
      1  OD701  sql-injection-flow
 ";
         assert_eq!(String::from_utf8(out).unwrap(), expected);
+    }
+
+    #[test]
+    fn a_count_of_one_is_singular() {
+        assert_eq!(
+            [count(0, "file"), count(1, "file"), count(2, "file")],
+            ["0 files", "1 file", "2 files"]
+        );
     }
 
     #[test]

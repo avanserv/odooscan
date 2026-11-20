@@ -12,6 +12,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use odooscan_core::Diagnostic;
 use odooscan_core::fix::{self, Fix, Outcome};
 
+use crate::output::count;
+
 /// A file as the fixes of its findings rewrite it.
 struct Rewrite<'d> {
     path: &'d Path,
@@ -105,12 +107,18 @@ fn counted(diags: &[&Diagnostic], shown: usize) -> String {
     let files = fixable.iter().collect::<BTreeSet<_>>().len();
     let left = match files.saturating_sub(shown) {
         0 => String::new(),
-        n => format!(", {n} files left out of the diff"),
+        n => format!(", {} left out of the diff", count(n, "file")),
+    };
+    // The verb agrees with the noun next to it, so "0 of 1 diagnostic" takes it too.
+    let verb = match (fixable.len(), diags.len()) {
+        (1, _) | (0, 1) => "has",
+        _ => "have",
     };
     format!(
-        "{} of {} diagnostics have a fix, in {files} files{left}",
+        "{} of {} {verb} a fix, in {}{left}",
         fixable.len(),
-        diags.len()
+        count(diags.len(), "diagnostic"),
+        count(files, "file")
     )
 }
 
@@ -152,7 +160,7 @@ pub fn write(diags: &[&Diagnostic], rel: &dyn Fn(&Path) -> String) -> Result<boo
             }
         }
     }
-    eprintln!("fixed {fixed} diagnostics in {files} files");
+    eprintln!("fixed {} in {}", count(fixed, "diagnostic"), count(files, "file"));
     if failed { Err(ExitCode::from(2)) } else { Ok(files > 0) }
 }
 
@@ -305,13 +313,15 @@ fn regroup(file: &File, made: &Metadata, original: &Metadata) -> io::Result<Opti
 }
 
 /// Why the rewrite is left alone when `fchown` failed with `e` because the group cannot be given,
-/// or `e` when it failed otherwise.
+/// or `e` when it failed otherwise. EPERM names a group the user is not in. EINVAL names a group
+/// the user namespace does not map, which the user may still be in, so its notice says no more.
 #[cfg(unix)]
 fn ungiven(e: io::Error) -> io::Result<Option<&'static str>> {
-    match e.kind() {
-        io::ErrorKind::PermissionDenied | io::ErrorKind::InvalidInput => {
-            Ok(Some("belongs to a group its owner is not in"))
-        }
+    // EPERM and EINVAL have these numbers on Linux, macOS and the BSDs. Matching the number rather
+    // than the kind sends EACCES, which a security module may give, back as an error.
+    match e.raw_os_error() {
+        Some(1) => Ok(Some("belongs to a group its owner is not in")),
+        Some(22) => Ok(Some("belongs to a group the rewrite cannot be given")),
         _ => Err(e),
     }
 }
@@ -448,8 +458,15 @@ mod tests {
     #[test]
     fn an_unmapped_or_foreign_group_is_skipped() {
         let refused = |errno| ungiven(io::Error::from_raw_os_error(errno)).map_err(|e| e.raw_os_error());
-        let notice = Ok(Some("belongs to a group its owner is not in"));
-        assert_eq!((refused(22), refused(1), refused(5)), (notice, notice, Err(Some(5))));
+        assert_eq!(
+            (refused(22), refused(1), refused(13), refused(5)),
+            (
+                Ok(Some("belongs to a group the rewrite cannot be given")),
+                Ok(Some("belongs to a group its owner is not in")),
+                Err(Some(13)),
+                Err(Some(5))
+            )
+        );
     }
 
     /// No CLI run reaches a failure of `target` after `rewrite` read the file, so `show` gets one.
@@ -477,11 +494,20 @@ mod tests {
         };
         let diags = [&a, &b, &unfixable];
         assert_eq!(
-            (counted(&diags, 0), counted(&diags, 2)),
-            (
-                "2 of 3 diagnostics have a fix, in 2 files, 2 files left out of the diff".to_owned(),
-                "2 of 3 diagnostics have a fix, in 2 files".to_owned()
-            )
+            [
+                counted(&diags, 0),
+                counted(&diags, 2),
+                counted(&[&a], 0),
+                counted(&[&a, &unfixable], 1),
+                counted(&[&unfixable], 0)
+            ],
+            [
+                "2 of 3 diagnostics have a fix, in 2 files, 2 files left out of the diff",
+                "2 of 3 diagnostics have a fix, in 2 files",
+                "1 of 1 diagnostic has a fix, in 1 file, 1 file left out of the diff",
+                "1 of 2 diagnostics has a fix, in 1 file",
+                "0 of 1 diagnostic has a fix, in 0 files"
+            ]
         );
     }
 

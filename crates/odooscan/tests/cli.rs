@@ -722,7 +722,8 @@ fn a_diff_writes_nothing_and_a_second_fix_changes_nothing() {
     assert!(stderr.contains("fixed 0 diagnostics in 0 files"), "{stderr}");
     assert!(contents(&dir) == fixed, "the second --fix wrote");
 
-    let (_, stdout, _) = run(check_in(&dir, &checked));
+    let (_, stdout, stderr) = run(check_in(&dir, &checked));
+    assert!(stderr.contains(" modules ("), "{stderr}");
     let left = stdout.lines().filter(|l| FIXED.iter().any(|m| l.contains(m)));
     let left: Vec<&str> = left.filter(|l| !GUARDED.iter().any(|g| l.contains(g))).collect();
     assert!(left.is_empty(), "{left:?}");
@@ -757,12 +758,31 @@ fn load(models: &Path, files: &[&str]) {
 const AVERAGED: &str = "from odoo import fields, models\n\n\nclass X(models.Model):\n    _inherit = 'res.partner'\n\n    x = fields.Float(group_operator='avg')\n";
 
 #[test]
+fn the_summary_counts_one_of_each_in_the_singular() {
+    let dir = scratch("summary_singular");
+    // A manifest with no license is the module's one file and one finding, OD507.
+    let manifest = module(&dir, "lone", "18.0", &[])
+        .parent()
+        .unwrap()
+        .join("__manifest__.py");
+    let text = fs::read_to_string(&manifest).unwrap();
+    fs::write(&manifest, text.replace(", \"license\": \"LGPL-3\"", "")).unwrap();
+    let (code, _, stderr) = run(check_in(&dir, &["mods"]));
+    assert_eq!(code, Some(1), "{stderr}");
+    assert!(
+        stderr.contains("1 diagnostic in 1 module (1 indexed, 1 file) in "),
+        "{stderr}"
+    );
+}
+
+#[test]
 fn a_fix_keeps_the_bom_and_the_crlf_line_ends() {
     let dir = scratch("fix_bytes");
     let src = "\u{feff}from odoo import api, fields, models\r\n\r\n\r\nclass X(models.Model):\r\n    _inherit = 'res.partner'\r\n\r\n    x = fields.Float(group_operator='avg')\r\n\r\n    @api.multi\r\n    def f(self):\r\n        return self\r\n";
     let models = module(&dir, "bytes", "18.0", &[("x.py", src.as_bytes())]);
     let (code, _, stderr) = run(check_in(&dir, &["mods", "--fix"]));
     assert_eq!(code, Some(0), "{stderr}");
+    assert!(stderr.contains("fixed 2 diagnostics in 1 file\n"), "{stderr}");
     let expected = "\u{feff}from odoo import api, fields, models\r\n\r\n\r\nclass X(models.Model):\r\n    _inherit = 'res.partner'\r\n\r\n    x = fields.Float(aggregator='avg')\r\n\r\n    def f(self):\r\n        return self\r\n";
     assert_eq!(
         String::from_utf8(fs::read(models.join("x.py")).unwrap()).unwrap(),
@@ -940,6 +960,8 @@ fn a_fix_keeps_the_mode_and_leaves_nothing_beside_the_file() {
     fs::set_permissions(models.join("x.py"), fs::Permissions::from_mode(0o640)).unwrap();
     let (code, _, stderr) = run(check_in(&dir, &["mods", "--fix"]));
     assert_eq!(code, Some(0), "{stderr}");
+    assert!(stderr.contains("fixed 1 diagnostic in 1 file\n"), "{stderr}");
+    assert!(stderr.contains("0 diagnostics in 1 module (1 indexed, "), "{stderr}");
     let fixed = models.join("x.py");
     assert_eq!(
         fs::read_to_string(&fixed).unwrap(),
@@ -1021,7 +1043,7 @@ fn assert_skipped_by_diff((code, stdout, stderr): (Option<i32>, String, String),
     assert_eq!((code, stdout.as_str()), (Some(1), ""), "{stderr}");
     assert!(stderr.contains(notice), "{stderr}");
     assert!(
-        stderr.contains("1 of 1 diagnostics have a fix, in 1 files, 1 files left out of the diff"),
+        stderr.contains("1 of 1 diagnostic has a fix, in 1 file, 1 file left out of the diff"),
         "{stderr}"
     );
 }
