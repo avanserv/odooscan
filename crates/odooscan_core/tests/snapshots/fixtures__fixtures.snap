@@ -968,8 +968,11 @@ custom/modern19/models/upgrade.py:8:33: OD125 oldname= is ignored from saas~12.5
 custom/modern19/models/upgrade.py:14:39: OD109 self._context is deprecated; use self.env.context
 custom/modern19/models/upgrade.py:14:75: OD109 self._uid is deprecated; use self.env.uid
 custom/modern19/models/views.py:15:5: OD226 _auto = False leaves modern.gauge without a table, and nothing creates the view modern_gauge; create it in init(), or drop _auto = False
-custom/modern19/static/src/base_calls.js:4:45: OD604 model 'res.partner' has no method 'is_transient'
+custom/modern19/static/src/base_calls.js:4:45: OD607 method 'is_transient' is a class method, a static method or a partial, so the server refuses to call it over RPC
 custom/modern19/static/src/base_calls.js:5:45: OD604 model 'res.partner' has no method 'ids'
+custom/modern19/static/src/base_calls.js:6:45: OD607 method 'x_tier_count' is a class method, a static method or a partial, so the server refuses to call it over RPC
+custom/modern19/static/src/base_calls.js:7:45: OD607 method 'x_tier_scale' is a class method, a static method or a partial, so the server refuses to call it over RPC
+custom/modern19/static/src/base_calls.js:8:45: OD607 method 'x_tier_label' is a class method, a static method or a partial, so the server refuses to call it over RPC
 custom/modern19/views/cards.xml:8:21: OD326 the kanban-box template is renamed card
 custom/modern19/views/cards.xml:19:13: OD307 t-raw renders unescaped HTML; use t-out and wrap trusted HTML in Markup
 custom/modern20/data/calls.xml:7:7: OD320 res.partner has no method 'pool'
@@ -1002,6 +1005,7 @@ custom/modern20/static/src/base_calls.js:5:45: OD604 model 'res.partner' has no 
 custom/modern20/static/src/base_calls.js:6:45: OD604 model 'res.partner' has no method 'ids'
 custom/modern20/static/src/base_calls.js:7:47: OD607 method 'get_all' is private, so the server refuses to call it over RPC
 custom/modern20/static/src/base_calls.js:8:45: OD604 model 'res.partner' has no method 'get_all'
+custom/modern20/static/src/base_calls.js:9:51: OD607 method 'is_transient' is a class method, a static method or a partial, so the server refuses to call it over RPC
 custom/modern20/views/pages.xml:5:13: OD325 the server no longer knows t-esc and renders nothing for it; write t-out
 custom/modern20/views/pages.xml:6:13: OD307 t-raw renders unescaped HTML; use t-out and wrap trusted HTML in Markup
 custom/modern20/views/pages.xml:18:21: OD325 the server no longer knows t-esc and renders nothing for it; write t-out

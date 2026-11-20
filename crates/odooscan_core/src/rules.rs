@@ -361,7 +361,7 @@ rules! {
     "OD604" "unknown-rpc-method" Correctness Error None, true, "An ORM call from JS names a method its model does not have.";
     "OD605" "unknown-template" Correctness Error Some(">=17.0"), true, "A component, a t-inherit or a t-call names a template no indexed bundle defines.";
     "OD606" "unmatched-template-locator" Correctness Error Some(">=17.0"), true, "A template locates an element its parent templates do not have.";
-    "OD607" "private-rpc-method" Correctness Error None, false, "An ORM call from JS names a private method, which Odoo refuses to call over RPC.";
+    "OD607" "private-rpc-method" Correctness Error None, false, "An ORM call from JS names a method Odoo refuses to call over RPC.";
     // The loader starts a module only once every dependency is defined (18.0 and 20.0
     // `addons/web/static/src/module_loader.js:146`). The range stops at 18.0 because the page
     // templates before it were not checked (18.0 `addons/web/views/webclient_templates.xml:54`,

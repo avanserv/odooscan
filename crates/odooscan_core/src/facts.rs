@@ -218,6 +218,10 @@ pub struct ClassFact {
     pub defs: Vec<MethodDef>,
     /// Methods of the class decorated with `@api.private`.
     pub private_methods: Vec<String>,
+    /// The bindings of `methods` that Python does not bind to the records, one entry per binding: a
+    /// `def` decorated `@classmethod` or `@staticmethod`, and a name bound to a call of `partial`,
+    /// `classmethod` or `staticmethod`.
+    pub unbound_methods: Vec<String>,
     /// The undotted names given to `@api.onchange` and `@api.constrains`.
     pub paths: Vec<Spanned<String>>,
     /// The field paths each method decorated with `@api.depends` names, by method.
@@ -346,6 +350,7 @@ impl ClassFact {
             methods: vec![],
             defs: vec![],
             private_methods: vec![],
+            unbound_methods: vec![],
             paths: vec![],
             depends: vec![],
             order_fields: vec![],
@@ -394,6 +399,18 @@ impl ClassFact {
     /// which the class then has unless it binds the name itself.
     pub fn base_binds(&self, name: &str, caller: &str) -> bool {
         self.base_methods.contains(&private_name(name, caller))
+    }
+
+    /// Whether every binding of `name` on the class is in `unbound_methods`, None when neither the
+    /// class nor a plain base the scan reads binds it. A base binding the class does not shadow
+    /// counts as bound to the records, as only its name is indexed.
+    pub fn unbound(&self, name: &str) -> Option<bool> {
+        let bindings = self.methods.iter().filter(|m| *m == name).count();
+        let unbound = self.unbound_methods.iter().filter(|m| *m == name).count();
+        match bindings {
+            0 => self.base_binds(name, &self.class_name).then_some(false),
+            _ => Some(unbound == bindings),
+        }
     }
 
     /// The signature `name` has on the class, when every binding of it is a `def` of the body. The
