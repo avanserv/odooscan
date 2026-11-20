@@ -13,7 +13,7 @@ use crate::api_table::{self, Kind};
 use crate::facts::{
     BaseSource, ClassBase, ClassFact, Definition, DefinitionSource, DomainFact, FieldClass, FieldFact, FlowSummary,
     GuardedRef, MethodDef, ModelKind, OptionValue, Param, Pos, PyFacts, RawDiag, Receiver, Signature, Spanned,
-    SqlColumn, SqlView, Subject, UNREAD_TYPE, XmlRef,
+    SqlColumn, SqlView, Subject, UNREAD_TYPE, XmlRef, private_name,
 };
 use crate::fix::{self, Edit, Fix};
 use crate::placeholders::{self, Specs};
@@ -2488,10 +2488,16 @@ struct TopBound<'a> {
 }
 
 impl TopBound<'_> {
-    /// Whether the statement may bind `name`: a star import binds `*`, which may be any name.
+    /// Whether the statement may bind `name`.
     fn binds(&self, name: &str) -> bool {
-        self.name == name || self.name == "*"
+        may_bind(self.name, name)
     }
+}
+
+/// Whether a statement binding `bound` may bind `name`: a star import binds `*`, which may be any
+/// name.
+fn may_bind(bound: &str, name: &str) -> bool {
+    bound == name || bound == "*"
 }
 
 /// Each name each statement of the module body binds, in order. A name an `if`, a `try`, a `with`
@@ -2551,29 +2557,23 @@ fn from_import<'a>(import: &'a ast::StmtImportFrom, alias: &'a ast::Alias) -> (&
 /// A class of the file that can give a subclass no field.
 struct Fieldless<'a> {
     end: TextSize,
-    /// The names its body binds with a `def` or an assignment, but those starting with `__`: Python
-    /// mangles a private one with this class's name, and a dunder is the object protocol's.
+    /// The names its body binds with a `def` or an assignment, as written.
     binds: Vec<&'a str>,
 }
 
 /// Each class that can give a subclass no field on `series`, by name. Only a class at the top of
 /// the file counts, and only until something rebinds its name: a fallback beside an import names a
-/// class the file cannot tell.
+/// class the file cannot tell, and a star import may bind any name.
 fn fieldless_classes(body: &[Stmt], series: Option<Series>) -> FxHashMap<&str, Fieldless<'_>> {
     let mut classes = FxHashMap::default();
     for stmt in body {
         let mut bound = BoundNames::default();
         bound.visit_stmt(stmt);
-        for name in bound.0 {
-            classes.remove(name);
-        }
+        classes.retain(|name: &&str, _| !bound.0.iter().any(|b| may_bind(b, name)));
         if let Stmt::ClassDef(class) = stmt
             && holds_no_field(class, series)
         {
-            let binds = class_binds(&class.body)
-                .into_iter()
-                .filter(|n| !n.starts_with("__"))
-                .collect();
+            let binds = class_binds(&class.body);
             classes.insert(
                 class.name.as_str(),
                 Fieldless {
@@ -3131,7 +3131,7 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
         let mut binds = vec![];
         for (base, source) in plain_bases.iter().zip(sources) {
             match self.fieldless.get(base.as_str()).filter(|f| f.end <= class.start()) {
-                Some(fieldless) => binds.extend(fieldless.binds.iter().map(|n| (*n).to_owned())),
+                Some(fieldless) => binds.extend(fieldless.binds.iter().map(|n| private_name(n, base))),
                 None => opaque.push(source.clone()),
             }
         }
@@ -6364,9 +6364,14 @@ class U(HttpCase):
             ("class Layout:\n    pass\n", &[][..]),
             (
                 "class Layout(object):\n    \"\"\"Doc.\"\"\"\n    __slots__ = ()\n    kind: str\n    def a(self):\n        pass\n",
-                &["a"],
+                &["__slots__", "a"],
             ),
             ("class Layout:\n    ...\n", &[]),
+            ("from .mixins import *\nclass Layout:\n    pass\n", &[]),
+            (
+                "class Layout:\n    def __call__(self):\n        pass\n    def __seal(self):\n        pass\n",
+                &["__call__", "_Layout__seal"],
+            ),
             ("class Layout:\n    pass\nclass Layout:\n    size = 1\n", &["size"]),
         ] {
             let facts = analyze(&format!("{layout}{class}"), None);
@@ -6395,6 +6400,8 @@ class U(HttpCase):
             "class Layout:\n    pass\nfrom .mixins import Layout\n",
             "class Layout:\n    pass\nLayout = make(Layout)\n",
             "class Layout:\n    pass\nclass Layout:\n    name = fields.Char()\n",
+            "class Layout:\n    pass\nfrom .mixins import *\n",
+            "class Layout:\n    pass\ntry:\n    from .mixins import *\nexcept ImportError:\n    pass\n",
         ] {
             let facts = analyze(&format!("{layout}{class}"), None);
             let class = facts.classes.last().unwrap();

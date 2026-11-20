@@ -249,7 +249,8 @@ pub struct ClassFact {
     /// The module body binds the class name to this class last, so an import of the name from the
     /// file gets it.
     pub importable: bool,
-    /// The names the `plain_bases` the scan reads bind, other than those starting with `__`.
+    /// The names the `plain_bases` the scan reads bind, a `__name` as Python renames it with the
+    /// base's class name: see `private_name`.
     pub base_methods: Vec<String>,
     /// The value of `_table`, when the class sets it.
     pub table: Option<OptionValue>,
@@ -379,10 +380,10 @@ impl ClassFact {
         !self.plain_bases.is_empty() || self.inherit_unknown
     }
 
-    /// Whether a plain base the scan reads binds `name`, which the class then has unless it binds
-    /// the name itself.
-    pub fn base_binds(&self, name: &str) -> bool {
-        self.base_methods.iter().any(|m| m == name)
+    /// Whether a plain base the scan reads binds `name`, as a method of class `caller` writes it,
+    /// which the class then has unless it binds the name itself.
+    pub fn base_binds(&self, name: &str, caller: &str) -> bool {
+        self.base_methods.contains(&private_name(name, caller))
     }
 
     /// The signature `name` has on the class, when every binding of it is a `def` of the body. The
@@ -394,6 +395,21 @@ impl ClassFact {
             return None;
         }
         defs.next_back()?.signature.as_ref()
+    }
+}
+
+/// Whether Python renames `name` per class where a class body or method writes it: it starts
+/// with `__` and does not end with `__`, unlike a dunder of the object protocol.
+pub(crate) fn mangled(name: &str) -> bool {
+    name.starts_with("__") && !name.ends_with("__")
+}
+
+/// The name Python compiles `name` to where class `class` writes it: a `__name` gets `_` and the
+/// class name without its leading underscores in front, unless that leaves nothing.
+pub(crate) fn private_name(name: &str, class: &str) -> String {
+    match class.trim_start_matches('_') {
+        stripped if mangled(name) && !stripped.is_empty() => format!("_{stripped}{name}"),
+        _ => name.to_owned(),
     }
 }
 
@@ -1727,5 +1743,21 @@ mod tests {
     fn a_staticmethod_compares_without_the_bound_parameter() {
         assert_eq!(refusal("@staticmethod\n    def f(a, b)", "def f(self, a, b)"), None);
         assert_eq!(refusal("@staticmethod\n    def f(a)", "def f(self, a, b)"), lost("b"));
+    }
+
+    #[test]
+    fn mangles_only_a_name_with_two_leading_underscores_and_no_trailing_pair() {
+        assert!(mangled("__x_"));
+        for name in ["__call__", "__", "_x"] {
+            assert!(!mangled(name), "{name}");
+        }
+    }
+
+    #[test]
+    fn a_private_name_takes_the_class_name_without_its_leading_underscores() {
+        assert_eq!(private_name("__x", "_Steps"), "_Steps__x");
+        assert_eq!(private_name("__x", "__"), "__x");
+        assert_eq!(private_name("__call__", "Steps"), "__call__");
+        assert_eq!(private_name("_Steps__x", "Other"), "_Steps__x");
     }
 }

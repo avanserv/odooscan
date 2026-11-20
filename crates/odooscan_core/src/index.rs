@@ -8,7 +8,7 @@ use crate::facts::{
     ActionFact, Annotation, ArchElement, ArchEmptied, ArchSubview, ArchValued, BaseSource, ClassFact, ComponentItem,
     DataFacts, FieldFact, FlowSummary, Heritage, JsClass, JsName, ModelKind, OptionValue, PropItem, PyFacts, Receiver,
     RecordWrite, ReportFact, RouteKey, RuleFact, ServerFact, Signature, Static, StaticWrite, UNREAD_TYPE, ViewFact,
-    WrittenValue,
+    WrittenValue, mangled,
 };
 use crate::js::OWL_MODULE;
 use crate::manifest::{AutoInstall, DEPENDS_BASE, OdooReads};
@@ -3429,7 +3429,7 @@ impl<'m> Index<'m> {
     /// loads after `mi`, and of classes above `class` in its file, whose name mangles `method` alike.
     /// The order of the files of `mi` is that of the imports, which is not indexed, so its other files
     /// count neither way. None when one of them has no signature to compare, as a class whose plain
-    /// base binds `method` has unless it defines `method` itself.
+    /// base binds `method`, as `class` writes it, has unless it defines `method` itself.
     pub fn method_parents(
         &self,
         mi: usize,
@@ -3445,11 +3445,16 @@ impl<'m> Index<'m> {
                 !self.loads_after(m, mi)
             }
         };
+        let defines = |c: &ClassFact| {
+            mangles_alike(method, &class.class_name, &c.class_name) && c.methods.iter().any(|n| n == method)
+        };
         merged
             .iter()
-            .filter(|&&(m, c)| (c.methods.iter().any(|n| n == method) || c.base_binds(method)) && overridden(m, c))
-            .filter(|(_, c)| mangles_alike(method, &class.class_name, &c.class_name))
-            .map(|&(m, c)| c.signature(method).map(|s| (m, s)))
+            .filter(|&&(m, c)| overridden(m, c))
+            .filter_map(|&(m, c)| match defines(c) {
+                true => Some(c.signature(method).map(|s| (m, s))),
+                false => c.base_binds(method, &class.class_name).then_some(None),
+            })
             .collect()
     }
 
@@ -3869,15 +3874,15 @@ impl<'m> Index<'m> {
         Some(model)
     }
 
-    /// Whether `BaseModel`, `object`, a class other than `except`, of `model` or of a model it
-    /// inherits by `_inherit`, or a plain base a class of them reads, `except`'s included, defines
-    /// `method`. A parent it delegates to does not count, since `super()` follows the class bases,
-    /// which Odoo builds from `_inherit` and `base`. Modules outside the scope count: an override of
-    /// a method from a module that is not in depends is called only by that module. A property or
-    /// plain value of `BaseModel` is no parent method: calling it raises `TypeError`. A class defines
-    /// a `__name` for `except` only under a class name that mangles alike, as Python renames it per class.
+    /// Whether `super().method()` in class `except` of `model` finds a definition. It looks in
+    /// `BaseModel`, `object`, the classes of `model` and of the models it inherits by `_inherit`,
+    /// other than `except` itself, and the plain bases all of those classes read, `except`'s too. A
+    /// model it delegates to is not searched: Odoo builds the class bases from `_inherit` and `base`
+    /// alone. A module outside the scope is searched, as an override of its method is called only by
+    /// that module. A property or plain value of `BaseModel` does not count, as calling it raises
+    /// `TypeError`, and a `__name` counts only from a class or base whose name mangles it alike.
     pub fn has_parent_method(&self, model: &str, method: &str, except: &ClassFact, series: Option<Series>) -> bool {
-        let parent = |c: &ClassFact| c.base_binds(method) || defines_for(c, method, except);
+        let parent = |c: &ClassFact| c.base_binds(method, &except.class_name) || defines_for(c, method, except);
         base_parent_method(method, series) || self.chain_classes(model).iter().any(|(_, c)| parent(c))
     }
 
@@ -4352,7 +4357,7 @@ fn method_flows(modules: &[Module]) -> MethodFlows<'_> {
 /// to `_<class>__name`, with the class's leading underscores stripped, and leaves it as is in a class
 /// whose name is all underscores, so an extension of the same class name overrides it.
 fn mangles_alike(method: &str, a: &str, b: &str) -> bool {
-    !method.starts_with("__") || method.ends_with("__") || a.trim_start_matches('_') == b.trim_start_matches('_')
+    !mangled(method) || a.trim_start_matches('_') == b.trim_start_matches('_')
 }
 
 /// Whether `class`, other than `caller`, defines `method` under the name `caller`'s call looks up.
@@ -4440,6 +4445,28 @@ mod tests {
         assert!(!index.has_parent_method("seal.box", "__seal", &classes[1], series));
         assert!(index.has_parent_method("seal.box", "__seal", &classes[2], series));
         assert!(index.has_parent_method("seal.box", "_seal", &classes[1], series));
+    }
+
+    #[test]
+    fn a_private_super_call_finds_a_plain_base_of_its_name() {
+        let mut modules = [module("base", "{'version': '18.0.1.0'}")];
+        modules[0].python.push(python_18(
+            "class _Steps:\n    def __step(self):\n        return 1\n\n\n\
+             class Order(models.Model, _Steps):\n    _name = 'step.order'\n",
+        ));
+        modules[0].python.push(python_18(
+            "class Steps(models.Model):\n    _inherit = 'step.order'\n\n\
+             class Other(models.Model):\n    _inherit = 'step.order'\n",
+        ));
+        let index = Index::build(&modules, None);
+        let order = &modules[0].python[0].facts.classes[0];
+        let [steps, other] = &modules[0].python[1].facts.classes[..] else {
+            panic!("two classes");
+        };
+        let series = Series::parse("18.0");
+        assert!(index.has_parent_method("step.order", "__step", steps, series));
+        assert!(!index.has_parent_method("step.order", "__step", other, series));
+        assert!(!index.has_parent_method("step.order", "__step", order, series));
     }
 
     #[test]

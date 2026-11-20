@@ -11,3 +11,7 @@ class MixedSignature(models.Model):
     # Silent: the plain base binds _stamp, whose signature the scan does not read.
     def _stamp(self, order):
         return super()._stamp(order, False)
+
+    # Silent: the plain base binds __call__ too, as Python renames only a __name per class.
+    def __call__(self, order):
+        return super().__call__(order)

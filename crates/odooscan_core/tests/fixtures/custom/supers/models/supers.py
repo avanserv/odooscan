@@ -134,3 +134,35 @@ class _SuperSeal(models.Model):
 
     def __seal(self):
         return super().__seal()
+
+
+class SuperSteps:
+    def _step(self):
+        return 1
+
+    def __call__(self):
+        return 1
+
+    def __step(self):
+        return 1
+
+
+class SuperStepped(models.Model, SuperSteps):
+    _inherit = "bad.super"
+
+
+class SuperStepCall(models.Model):
+    _inherit = "bad.super"
+
+    def _step(self):
+        return super()._step()
+
+    def __call__(self):
+        return super().__call__()
+
+
+class _SuperSteps(models.Model):
+    _inherit = "bad.super"
+
+    def __step(self):
+        return super().__step()
