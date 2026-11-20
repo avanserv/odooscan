@@ -25,6 +25,16 @@ const AFTER_SET: &[&str] = &["FROM", "WHERE", "RETURNING"];
 /// Words after the `ADD` of `ALTER TABLE` that add a constraint, not a column.
 const ADDED_CONSTRAINTS: &[&str] = &["CONSTRAINT", "PRIMARY", "UNIQUE", "CHECK", "FOREIGN", "EXCLUDE"];
 
+/// A test assertion that expects the block it manages to fail. Whether Odoo rolls back such a
+/// block depends on the series and on the assertion. The variants are declared in the order of the
+/// series that exempts them, so `min()` tags a write that two of them enclose with the one that
+/// exempts it soonest.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) enum Expected {
+    Raises,
+    RaisesRegex,
+}
+
 /// A literal write statement a call runs.
 pub(crate) struct Write<'a> {
     pub call: &'a ast::ExprCall,
@@ -32,6 +42,26 @@ pub(crate) struct Write<'a> {
     pub table: String,
     /// The columns an `UPDATE` sets, when the text names each of them.
     pub columns: Option<Vec<String>>,
+    /// The assertion of a `with` whose body holds the call, outside any function or lambda in it.
+    pub expected: Option<Expected>,
+}
+
+/// The assertion a `with` item opens: a call of `self.assertRaises` or `self.assertRaisesRegex`.
+fn expected(item: &ast::WithItem) -> Option<Expected> {
+    let Expr::Call(call) = &item.context_expr else {
+        return None;
+    };
+    let Expr::Attribute(a) = &*call.func else {
+        return None;
+    };
+    if !matches!(&*a.value, Expr::Name(n) if n.id.as_str() == "self") {
+        return None;
+    }
+    match a.attr.as_str() {
+        "assertRaises" => Some(Expected::Raises),
+        "assertRaisesRegex" => Some(Expected::RaisesRegex),
+        _ => None,
+    }
 }
 
 /// What a name the function binds holds, as far as cursors go.
@@ -133,6 +163,8 @@ pub(crate) struct CursorUse<'a> {
     /// Whether each enclosing block ends by raising or exiting.
     leaving: Vec<bool>,
     read_only: u32,
+    /// The assertions of the enclosing `with` statements, up to the innermost function or lambda.
+    expecting: Vec<Expected>,
 }
 
 fn is_invalidation(method: &str, receiver: &Expr) -> bool {
@@ -221,6 +253,7 @@ impl<'a> CursorUse<'a> {
             scopes,
             leaving: vec![],
             read_only: 0,
+            expecting: vec![],
         }
     }
 
@@ -391,14 +424,17 @@ impl<'a> CursorUse<'a> {
         self.bind(target, held, opened);
     }
 
-    /// Visits a nested function or lambda, whose parameters hide the names the function binds.
+    /// Visits a nested function or lambda, whose parameters hide the names the function binds. It
+    /// may run after the `with` that defines it has ended, so no assertion holds its writes.
     fn nest(&mut self, parameters: Option<&'a ast::Parameters>, walk: impl FnOnce(&mut Self)) {
         let params = parameters
             .into_iter()
             .flat_map(|p| p.iter())
             .map(|p| (p.name().as_str(), Held::Given, false));
         self.scopes.push(params.collect());
+        let expecting = std::mem::take(&mut self.expecting);
         walk(self);
+        self.expecting = expecting;
         self.scopes.pop();
     }
 
@@ -465,22 +501,28 @@ impl<'a> CursorUse<'a> {
             None if opens_with(&text) => parse(&text).map(|query| query.writes).unwrap_or_default(),
             None => vec![],
         };
+        let expected = self.expecting.iter().min().copied();
         self.writes.extend(targets.into_iter().map(|t| Write {
             call,
             verb: t.verb,
             table: t.table,
             columns: t.columns,
+            expected,
         }));
     }
 
-    fn with(&mut self, w: &'a ast::StmtWith) {
+    fn with(&mut self, stmt: &'a Stmt, w: &'a ast::StmtWith) {
+        let depth = self.expecting.len();
         for item in &w.items {
             if let Some(name) = &item.optional_vars {
                 let given = is_cursor(&item.context_expr) && !self.own_cursor(&item.context_expr);
                 let opened = self.owns_cursor(&item.context_expr, true);
                 self.bind(name, if given { Held::Given } else { Held::Either }, opened);
             }
+            self.expecting.extend(expected(item));
         }
+        visitor::walk_stmt(self, stmt);
+        self.expecting.truncate(depth);
     }
 
     /// Each arm runs from the bindings before the `if`, and one that returns, raises, exits, breaks
@@ -663,7 +705,7 @@ impl<'a> Visitor<'a> for CursorUse<'a> {
                 value: Some(value),
                 ..
             }) => self.assign(target, value),
-            Stmt::With(w) => self.with(w),
+            Stmt::With(w) => return self.with(stmt, w),
             Stmt::Break(_) | Stmt::Continue(_) => self.jump(stmt.is_break_stmt()),
             _ => {}
         }
@@ -3018,6 +3060,43 @@ mod tests {
         assert!(
             tables("with registry.cursor() as cr:\n    api.Environment(cr, 1, {}).execute_query(SQL('DELETE FROM a'))")
                 .is_empty()
+        );
+    }
+
+    #[test]
+    fn tags_a_write_with_the_assertion_whose_with_holds_it() {
+        let expected = |body: &str| {
+            scanned(body, true, |uses| {
+                uses.writes.iter().map(|w| w.expected).collect::<Vec<_>>()
+            })
+        };
+        let write = "cr.execute('DELETE FROM a')";
+        assert_eq!(
+            expected(&format!("with self.assertRaises(E):\n    {write}\n{write}")),
+            [Some(Expected::Raises), None]
+        );
+        assert_eq!(
+            expected(&format!(
+                "with mute_logger('x'), self.assertRaisesRegex(E, 'y'):\n    {write}"
+            )),
+            [Some(Expected::RaisesRegex)]
+        );
+        assert_eq!(
+            expected(&format!(
+                "with self.assertRaisesRegex(E, 'y'):\n    with self.subTest():\n        with self.assertRaises(E):\n            \
+                 {write}"
+            )),
+            [Some(Expected::Raises)]
+        );
+        assert_eq!(
+            expected(&format!("with self.subTest(), other.assertRaises(E):\n    {write}")),
+            [None]
+        );
+        assert_eq!(
+            expected(&format!(
+                "with self.assertRaises(E):\n    def g():\n        {write}\n    h = lambda: {write}"
+            )),
+            [None, None]
         );
     }
 
