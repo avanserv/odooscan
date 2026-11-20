@@ -22,8 +22,8 @@ use crate::imports::{AddonImport, Fault, Graph};
 use crate::index::{
     ACTION_REGISTRY, BASE_MODEL_METHODS, CACHED_MODEL_SINCE, Export, FIELD_REGISTRY, FieldDef, FieldInfo, Index,
     JsSpec, JsTarget, PathError, Placed, PropSchema, RELATIONAL_TYPES, SERVICE_REGISTRY, Scope, Status, TOUR_REGISTRY,
-    VIEW_WIDGET_REGISTRY, ViewTree, asset_glob_set, base_private_method, cached_model_method, cached_model_value,
-    dated_member, full_id, in_static, js_lookup, js_url, loaded_data, located, normal_parts, wildcard,
+    VIEW_WIDGET_REGISTRY, ViewTree, asset_glob_set, cached_model_method, cached_model_value, dated_member, full_id,
+    in_static, js_lookup, js_url, loaded_data, located, normal_parts, wildcard,
 };
 use crate::mentions::HOOK_PREFIXES;
 use crate::module_state::UPGRADE_DIRS;
@@ -274,11 +274,11 @@ pub fn check_module<'m>(index: &Index<'m>, mi: usize, series: Option<Series>) ->
             out.push(&file.path, "OD000", e.pos, e.value.clone());
         }
     }
+    let scope = index.scope(mi);
     let scripts = module.js.iter().enumerate().filter(|(fi, _)| index.js_loaded(mi, *fi));
     for (_, file) in scripts.filter(|&(fi, _)| !index.js_test(mi, fi)) {
-        loaded_script(&mut out, file);
+        loaded_script(index, &scope, series, &mut out, file);
     }
-    let scope = index.scope(mi);
     // Odoo's own rows are needed to tell that none grants, so without `base` nothing does.
     let grants = index
         .has_base
@@ -975,16 +975,34 @@ fn bundle_list(names: &[&str]) -> String {
 
 /// The findings of a script a page loads: a script only the tests or no bundle load is no code the
 /// users run.
-fn loaded_script<'m>(out: &mut Out<'m>, file: &'m SourceFile<JsFacts>) {
-    private_rpc(out, file);
+fn loaded_script<'m>(
+    index: &Index<'m>,
+    scope: &Scope,
+    series: Option<Series>,
+    out: &mut Out<'m>,
+    file: &'m SourceFile<JsFacts>,
+) {
+    private_rpc(index, scope, series, out, file);
     out.diags
         .extend(file.facts.diags.iter().map(|d| (file.path.as_path(), d.clone())));
 }
 
-/// The server refuses to dispatch a method whose name starts with `_` to a model.
-fn private_rpc<'m>(out: &mut Out<'m>, file: &'m SourceFile<JsFacts>) {
-    let calls = file.facts.orm_calls.iter().filter_map(|c| c.method.as_ref());
-    for method in calls.filter(|m| m.value.starts_with('_')) {
+/// The server refuses to dispatch what a button may not call either. A model that is not a literal
+/// leaves only what `BaseModel` refuses whatever the model.
+fn private_rpc<'m>(
+    index: &Index<'m>,
+    scope: &Scope,
+    series: Option<Series>,
+    out: &mut Out<'m>,
+    file: &'m SourceFile<JsFacts>,
+) {
+    let calls = file.facts.orm_calls.iter().filter_map(|c| {
+        let model = c.model.as_ref().map(|m| m.value.as_str());
+        c.method
+            .as_ref()
+            .filter(|m| index.refused_call(model, &m.value, scope, series))
+    });
+    for method in calls {
         let message = format!(
             "method '{}' is private, so the server refuses to call it over RPC",
             method.value
@@ -2639,12 +2657,13 @@ impl<'m> Ctx<'_, 'm> {
         out.push(path, "OD603", model.pos, message);
     }
 
-    /// A private method is OD607's, whether the model has it or not.
+    /// A refused method is OD607's, whether the model has it or not.
     fn orm_method(&self, out: &mut Out<'m>, path: &'m Path, call: &OrmCall, model: &str) {
+        let refused = |name: &str| self.index.refused_call(Some(model), name, self.scope, self.series);
         let Some(method) = call
             .method
             .as_ref()
-            .filter(|m| !m.value.starts_with('_') && self.sees_methods(model))
+            .filter(|m| !refused(&m.value) && self.sees_methods(model))
         else {
             return;
         };
@@ -4252,16 +4271,11 @@ impl<'m> Ctx<'_, 'm> {
         }
     }
 
-    /// A leading `_` or a private method of `BaseModel` is private whatever the model defines, so it
-    /// needs no lookup, even on a model the scan cannot see whole. A private method of `CachedModel`
-    /// and `@api.private` count on any definition in scope, since Odoo walks the whole MRO.
+    /// A refused name needs no lookup of the model, so it is reported even on a model the scan
+    /// cannot see whole.
     fn button(&self, out: &mut Out<'m>, path: &'m Path, model: &str, method: &Spanned<String>) {
         let name = &method.value;
-        if name.starts_with('_')
-            || base_private_method(name, self.series)
-            || self.index.cached_private_method(model, name, self.scope, self.series)
-            || self.index.private_method(model, name, self.scope)
-        {
+        if self.index.refused_call(Some(model), name, self.scope, self.series) {
             let message = format!("method '{name}' of {model} is private, so Odoo refuses to call it from a button");
             out.push(path, "OD313", method.pos, message);
         } else if let Some(message) = self.method_gap(model, name) {

@@ -1,4 +1,4 @@
-from odoo import fields, models
+from odoo import api, fields, models
 
 
 class FormCardPrintable(models.AbstractModel):
@@ -6,6 +6,10 @@ class FormCardPrintable(models.AbstractModel):
     _description = "Printable form card"
 
     def action_print_card(self):
+        return True
+
+    @api.private
+    def action_stamp_card(self):
         return True
 
 
