@@ -160,9 +160,9 @@ pub struct FieldFact {
     /// a field of unread type arguments by position, which name no known attribute, or there is no
     /// call to read: a key of `_columns`.
     pub splat: bool,
-    /// The class the call names, then the scanned classes it derives from and the ORM type they
-    /// prove; empty for a key of `_columns`. Odoo keeps or drops a definition's attributes by its
-    /// class.
+    /// The class the call names, then the scanned classes it derives from, the ORM type they prove
+    /// and the ORM base of an ORM subclass among them, as `Binary` for `Image`; empty for a key of
+    /// `_columns`. Odoo keeps or drops a definition's attributes by its class.
     pub lineage: Vec<String>,
 }
 

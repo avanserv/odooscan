@@ -3711,7 +3711,7 @@ impl<'m> Ctx<'_, 'm> {
             return false;
         };
         let enclosing = self.written_field(model, field);
-        let Some(enclosing) = enclosing.filter(|f| f.defs[0].2.ftype == "One2many") else {
+        let Some(enclosing) = enclosing.filter(|f| f.ftype() == "One2many") else {
             return true;
         };
         !matches!(enclosing.get("inverse_name"), Merged::Known(OptionValue::Str(i)) if i != name)
@@ -3743,7 +3743,7 @@ impl<'m> Ctx<'_, 'm> {
         field: &Field<'m>,
         ids: &[Spanned<String>],
     ) {
-        if !RELATIONAL_TYPES.contains(&field.defs[0].2.ftype.as_str()) || field.stored() != Some(true) {
+        if !RELATIONAL_TYPES.contains(&field.ftype()) || field.stored() != Some(true) {
             return;
         }
         let Merged::Known(OptionValue::Str(comodel)) = field.get("comodel_name") else {
@@ -3781,7 +3781,7 @@ impl<'m> Ctx<'_, 'm> {
             field.get("validate"),
             Merged::Unset | Merged::Known(OptionValue::Bool(true))
         );
-        if field.defs[0].2.ftype != "Selection" || !validated {
+        if field.ftype() != "Selection" || !validated {
             return;
         }
         if field.get("related") != Merged::Unset || field.stored() != Some(true) {
@@ -5119,12 +5119,20 @@ impl<'m> Listed<'m> {
 /// last one whose type or class drops what came before.
 struct Field<'m> {
     model: &'m str,
+    /// The type of the last definition, which the registry builds the field as. From saas~14.4 an
+    /// earlier one it keeps may be of the ORM base of that type, as a Binary under an Image; before,
+    /// of an ORM subclass of it, as an Image under a Binary.
+    ftype: &'m str,
     defs: Vec<FieldDef<'m>>,
     /// `before[i][j]` when the registry certainly merges `defs[i]` before `defs[j]`.
     before: Vec<Vec<bool>>,
 }
 
 impl<'m> Field<'m> {
+    fn ftype(&self) -> &'m str {
+        self.ftype
+    }
+
     /// The definitions `pick` keeps that no other one it keeps certainly comes after.
     fn last(&self, pick: impl Fn(&FieldDef<'m>) -> bool) -> Vec<usize> {
         let picked: Vec<usize> = (0..self.defs.len()).filter(|&i| pick(&self.defs[i])).collect();
@@ -5450,11 +5458,17 @@ fn is_a(class: &[String], of: &[String]) -> bool {
     class.first() == of.first() || of.first().is_some_and(|head| class.contains(head))
 }
 
+/// Whether one of two field types is an ORM subclass of the other, as `Image` of `Binary`.
+fn orm_subclass(a: &str, b: &str) -> bool {
+    python::ORM_BASES.iter().any(|&pair| pair == (a, b) || pair == (b, a))
+}
+
 /// Whether the registry of `series` keeps what the definition `earlier` sets on a field whose last
 /// definition is `last`. None on an unknown series where the two ways disagree, as the field it
-/// builds is then unknown.
+/// builds is then unknown. A definition whose type is neither the last one's nor an ORM base or
+/// subclass of it is dropped.
 fn keeps_set(series: Option<Series>, earlier: DefClass<'_>, last: DefClass<'_>) -> Option<bool> {
-    if earlier.0 != last.0 {
+    if earlier.0 != last.0 && !orm_subclass(earlier.0, last.0) {
         return Some(false);
     }
     let from_bound = is_a(last.1, earlier.1);
@@ -5598,7 +5612,12 @@ impl<'m> Ctx<'_, 'm> {
             .iter()
             .map(|a| defs.iter().map(|b| before(a, b)).collect())
             .collect();
-        Some(Field { model, defs, before })
+        Some(Field {
+            model,
+            ftype: class.0,
+            defs,
+            before,
+        })
     }
 
     /// Whether the registry certainly merges definition `a` of a field of `model` before `b`.
@@ -5894,7 +5913,7 @@ impl<'m> Ctx<'_, 'm> {
         let Some(field) = self.merged(&class.model, &entry.value) else {
             return;
         };
-        if field.defs[0].2.ftype != "Many2one" {
+        if field.ftype() != "Many2one" {
             return;
         }
         if let Some(fix) = delegation_fix(&field, self.ondelete_defaulted(&field)) {
@@ -6068,7 +6087,7 @@ impl<'m> Ctx<'_, 'm> {
         let Some(other) = self.merged(field.model, name) else {
             return false;
         };
-        other.defs[0].2.ftype == "Many2many"
+        other.ftype() == "Many2many"
             && same_table(field, &other)
             && self
                 .first_def(&other)
@@ -7094,7 +7113,7 @@ fn company_dependent(field: &Field) -> bool {
 /// Whether a merged field has a column: x2many fields and fields not stored have none, and the
 /// column of a Binary or a company-dependent field depends on `attachment` or on the series.
 fn stored_column<'m>(field: &Field<'m>) -> Column<'m> {
-    let ftype = field.defs.first().map_or("", |d| d.2.ftype.as_str());
+    let ftype = field.ftype();
     match ftype {
         "One2many" | "Many2many" => Column::X2many(ftype),
         "Binary" | "Image" => Column::Present,
@@ -7108,7 +7127,7 @@ fn stored_column<'m>(field: &Field<'m>) -> Column<'m> {
 /// `attachment` or the series, as `stored_column` says, and its type is read, as an unread one may
 /// be an x2many.
 fn has_certain_column(field: &Field) -> bool {
-    let ftype = field.defs.first().map_or("", |d| d.2.ftype.as_str());
+    let ftype = field.ftype();
     let typed = !matches!(ftype, "One2many" | "Many2many" | "Binary" | "Image" | UNREAD_TYPE);
     typed && !company_dependent(field) && field.stored() == Some(true)
 }
@@ -7218,7 +7237,7 @@ impl<'m> Ctx<'_, 'm> {
         if transient || field.get("groups") != Merged::Unset || field.get("related") != Merged::Unset {
             return None;
         }
-        let ftype = field.defs.first().map_or("", |d| d.2.ftype.as_str());
+        let ftype = field.ftype();
         match exposure {
             Exposure::Html if ftype == "Html" && self.writable(field) => {
                 unsanitized(field).map(|(option, why)| (Some(option), why))
@@ -7560,7 +7579,7 @@ impl<'m> Ctx<'_, 'm> {
         let Some(field) = self.merged(model, name) else {
             return false;
         };
-        let ftype = field.defs.first().map_or("", |d| d.2.ftype.as_str());
+        let ftype = field.ftype();
         let unindexed = has_certain_column(&field)
             && INDEX_SERVED_TYPES.contains(&ftype)
             && self.untranslated(model, &field, ftype)
@@ -7786,6 +7805,30 @@ mod tests {
         assert_eq!(keeps_set(None, char, ("Integer", &["Integer".to_owned()])), Some(false));
         let unread = (UNREAD_TYPE, unread.as_slice());
         assert_eq!(keeps_set(None, unread, unread), Some(true));
+    }
+
+    #[test]
+    fn a_definition_keeps_what_it_sets_under_an_orm_subclass_by_the_class_rule() {
+        let at = |s: &str| Series::parse(s);
+        let lineage = |names: &[&str]| names.iter().map(|n| (*n).to_owned()).collect::<Vec<_>>();
+        let (binary, image, selection) = (
+            lineage(&["Binary"]),
+            lineage(&["Image", "Binary"]),
+            lineage(&["Selection"]),
+        );
+        let binary = ("Binary", binary.as_slice());
+        let image = ("Image", image.as_slice());
+        assert_eq!(keeps_set(at("20.0"), binary, image), Some(true));
+        assert_eq!(keeps_set(at("saas~14.4"), binary, image), Some(true));
+        assert_eq!(keeps_set(at("saas~14.3"), binary, image), Some(false));
+        assert_eq!(keeps_set(None, binary, image), None);
+        assert_eq!(keeps_set(at("14.0"), image, binary), Some(true));
+        assert_eq!(keeps_set(at("20.0"), image, binary), Some(false));
+        let selection = ("Selection", selection.as_slice());
+        assert_eq!(
+            keeps_set(None, selection, ("Integer", &["Integer".to_owned()])),
+            Some(false)
+        );
     }
 
     #[test]
