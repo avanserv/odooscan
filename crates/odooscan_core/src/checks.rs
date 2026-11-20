@@ -351,12 +351,15 @@ fn builds_models(rel: &str) -> bool {
 }
 
 /// Whether the module code of `module` builds a model name at runtime, so its models and their ids
-/// cannot be listed.
+/// cannot be listed. Never for `base`: the only models it builds at runtime are the custom ones
+/// `BuiltModels::custom` reads, `x_` names that get no XML id of `base` (18.0
+/// `odoo/addons/base/models/ir_model.py:279`, `:494-500`, `:463-473`, `:482-483`).
 fn names_models_at_runtime(module: &Module) -> bool {
-    module
-        .python
-        .iter()
-        .any(|f| builds_models(&f.rel) && f.facts.dynamic_models)
+    module.name != "base"
+        && module
+            .python
+            .iter()
+            .any(|f| builds_models(&f.rel) && f.facts.dynamic_models)
 }
 
 /// The paths a route spells out, none when it leaves them to the route it overrides or computes
@@ -2226,7 +2229,8 @@ struct Ctx<'a, 'm> {
     /// `installs`, short of what loads after the module.
     loaded: &'a Scope,
     /// The module builds model names at runtime outside tests, examples and upgrade scripts, so its
-    /// models and their ids cannot be listed.
+    /// models and their ids cannot be listed. Never `base`, whose runtime models `scope_built` reads
+    /// as `custom`.
     dynamic: bool,
     /// What the modules of `scope` may build, the module included, outside tests, examples and
     /// upgrade scripts, with `base` read as `custom`.
@@ -2275,8 +2279,9 @@ impl<'m> Ctx<'_, 'm> {
     /// Whether `model` may exist once the modules of `built` have built theirs, which Odoo does as
     /// each loads, ahead of the modules that depend on it (18.0 `odoo/modules/loading.py:156`,
     /// `:186`, `:195`; 20.0 `:142`, `:172`, `:181`). The module's own flag covers a class whose
-    /// `_name` is any expression, and its unparsed and unknown-series files; another module's start
-    /// is in `built` only when it holds a dot (`BuiltModels::of_scope`).
+    /// `_name` is any expression, and its unparsed and unknown-series files, never for `base`
+    /// (`names_models_at_runtime`). Another module's start is in `built` only when it holds a dot
+    /// (`BuiltModels::of_scope`).
     fn may_build(&self, model: &str, built: &BuiltModels<'_>) -> bool {
         self.dynamic || built.fit(model)
     }

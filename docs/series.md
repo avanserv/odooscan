@@ -42,11 +42,12 @@ shows, every name when it shows no literal start, and for a class of unknown ser
 another reading gives it, unless that name is one of the class's parents. Another module's start
 counts only when it contains a `.`, as model names usually do, so a helper that names the models of
 an always-installed module silences no other module. For these rules, `base` builds only names that
-start with `x_`, the custom models a user creates in the database, whatever its code shows. For
-OD203, OD210 and OD304, such a model holds beyond every model's fields only those whose names start
-with `x_` and those of the mixins `mail` adds to it when its `ir.model` row asks (`mail.thread`,
-`mail.activity.mixin` and `mail.thread.blacklist`; 18.0 `addons/mail/models/ir_model.py:101-116`,
-20.0 `:72-88`), or any field when `mail` is not indexed, as the database may still install it.
+start with `x_`, the custom models a user creates in the database, whatever its code shows, and it
+never counts as building models at runtime, its own check included. For OD203, OD210 and OD304,
+such a model holds beyond every model's fields only those whose names start with `x_` and those of
+the mixins `mail` adds to it when its `ir.model` row asks (`mail.thread`, `mail.activity.mixin` and
+`mail.thread.blacklist`; 18.0 `addons/mail/models/ir_model.py:101-116`, 20.0 `:72-88`), or any
+field when `mail` is not indexed, as the database may still install it.
 
 `--target-series 19.0` checks every module given to `check` as if its manifest named 19.0, against
 the core on the addons path, or the one fetched below when none is given, so a port shows what that
