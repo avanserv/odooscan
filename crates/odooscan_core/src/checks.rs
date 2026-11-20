@@ -568,26 +568,21 @@ fn public_write_message(row: &AccessRow, module: &str, series: Option<Series>) -
     })
 }
 
-/// What OD503 says of `dep`, a module the scan does not index, given how the Odoo of its series
-/// reads its manifest when odooscan rejects it and whether the manifest sets `installable` to
-/// false. Odoo records such a module `uninstallable`, a state its dependents' dependency rows take,
-/// and installing one raises only on an `unknown` dependency, yet the graph leaves the dependent
-/// out (18.0 `odoo/addons/base/models/ir_module.py:812`, `:1037`, `:391-396`,
-/// `odoo/modules/graph.py:85-104`; 20.0 `ir_module.py:835`, `:1089`, `:388-396`,
-/// `odoo/modules/module_graph.py:257-269`). None when the Odoo of `series`, the dependent's, reads
-/// an installable manifest odooscan rejects, since the notice on that manifest names the gap.
-fn unknown_dependency(
-    dep: &str,
-    rejected: Option<manifest::OdooReads>,
-    uninstallable: bool,
-    series: Option<Series>,
-) -> Option<String> {
+/// What OD503 says of `dep`, a module the scan does not index, given how the Odoo of the
+/// dependent's series takes its manifest when odooscan rejects it, and otherwise whether the
+/// manifest sets `installable` to false. Odoo records such a module `uninstallable`, a state its
+/// dependents' dependency rows take, and installing one raises only on an `unknown` dependency,
+/// yet the graph leaves the dependent out (18.0 `odoo/addons/base/models/ir_module.py:812`,
+/// `:1037`, `:391-396`, `odoo/modules/graph.py:85-104`; 20.0 `ir_module.py:835`, `:1089`,
+/// `:388-396`, `odoo/modules/module_graph.py:257-269`). None when that Odoo reads an installable
+/// manifest odooscan rejects, since the notice on that manifest names the gap.
+fn unknown_dependency(dep: &str, rejected: Option<manifest::Taken>, uninstallable: bool) -> Option<String> {
+    let retired = || format!("module '{dep}' is not installable: its manifest sets installable to False");
     match rejected {
-        Some(reads) if !reads.on(series) => Some(format!("Odoo cannot read the manifest of module '{dep}'")),
-        _ if uninstallable => Some(format!(
-            "module '{dep}' is not installable: its manifest sets installable to False"
-        )),
+        Some(taken) if !taken.reads => Some(format!("Odoo cannot read the manifest of module '{dep}'")),
+        Some(taken) if !taken.installable => Some(retired()),
         Some(_) => None,
+        None if uninstallable => Some(retired()),
         None => Some(format!("module '{dep}' is not on the addons path")),
     }
 }
@@ -2439,9 +2434,9 @@ impl<'m> Ctx<'_, 'm> {
         for dep in &self.module.manifest.depends {
             match self.index.by_name.get(dep.value.as_str()) {
                 None => {
-                    let rejected = self.index.rejected.get(dep.value.as_str()).copied();
+                    let rejected = self.index.rejected.get(dep.value.as_str()).map(|u| u.on(self.series));
                     let uninstallable = self.index.uninstallable.contains(dep.value.as_str());
-                    if let Some(message) = unknown_dependency(&dep.value, rejected, uninstallable, self.series) {
+                    if let Some(message) = unknown_dependency(&dep.value, rejected, uninstallable) {
                         out.push(manifest, "OD503", dep.pos, message);
                     }
                 }
@@ -8019,7 +8014,7 @@ mod tests {
     };
     use crate::facts::{AccessRow, DefinitionSource, JsName, OptionValue, Perms, Pos, Spanned, UNREAD_TYPE};
     use crate::index::Index;
-    use crate::manifest::OdooReads;
+    use crate::manifest::{OdooReads, Taken};
     use crate::python::analyze;
     use crate::routing::{Origin, Table};
     use crate::series::Series;
@@ -8244,10 +8239,19 @@ mod tests {
         }
     }
 
+    /// How the Odoo of `series` takes a manifest read as `reads` in its own series.
+    fn taken(reads: OdooReads, series: Option<Series>, installable: bool) -> Taken {
+        Taken {
+            reads: reads.on(series),
+            installable,
+        }
+    }
+
     #[test]
     fn the_unknown_dependency_is_silent_on_a_manifest_the_dependents_odoo_reads() {
-        let message =
-            |reads: Option<OdooReads>, series: &str| unknown_dependency("x", reads, false, Series::parse(series));
+        let message = |reads: Option<OdooReads>, series: &str| {
+            unknown_dependency("x", reads.map(|r| taken(r, Series::parse(series), true)), false)
+        };
         let unreadable = Some("Odoo cannot read the manifest of module 'x'");
         assert_eq!(message(Some(OdooReads::No), "9.0").as_deref(), unreadable);
         assert_eq!(message(Some(OdooReads::AsPython2), "9.0"), None);
@@ -8266,7 +8270,7 @@ mod tests {
             OdooReads::AsPython2Expression,
         ] {
             assert_eq!(
-                unknown_dependency("x", Some(reads), false, None).as_deref(),
+                unknown_dependency("x", Some(taken(reads, None, true)), false).as_deref(),
                 unreadable,
                 "{reads:?}"
             );
@@ -8277,8 +8281,9 @@ mod tests {
 
     #[test]
     fn the_unknown_dependency_names_an_uninstallable_module_odoo_reads() {
-        let message =
-            |reads: Option<OdooReads>, series: &str| unknown_dependency("x", reads, true, Series::parse(series));
+        let message = |reads: Option<OdooReads>, series: &str| {
+            unknown_dependency("x", reads.map(|r| taken(r, Series::parse(series), false)), true)
+        };
         let retired = Some("module 'x' is not installable: its manifest sets installable to False");
         let unreadable = Some("Odoo cannot read the manifest of module 'x'");
         assert_eq!(message(None, "18.0").as_deref(), retired);

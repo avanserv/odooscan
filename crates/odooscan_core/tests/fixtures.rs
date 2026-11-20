@@ -848,10 +848,10 @@ fn a_seriesless_web_runs_the_owl_of_the_module_checked() {
 
 #[test]
 fn a_legacy_manifest_dependency_gets_od503_where_odoo_cannot_read_or_install_it() {
-    // `legacy_depends_modern` and `legacy_depends_ten` name a series, so the default one decides
-    // how the Odoo of the others reads them; the 18.0 module cannot install either dependency
-    // whatever that is. The `*_retired` ones set `installable` to False, which only the Odoo that
-    // reads them sees. `python2_eval` holds Python 2 that only the `eval` of 9.0 reads.
+    // A dependency is read as each dependent's series, whatever the default or the series it
+    // names, so the 9.0 module installs `versioned_eval`, which names 10.0. The `*_retired` ones
+    // set `installable` to False, which only the Odoo that reads them sees. `python2_eval` and
+    // `versioned_eval` hold code only the `eval` of 9.0 reads.
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
     let scan_as = |series: &str| {
         scan(&ScanOptions {
@@ -889,6 +889,8 @@ fn a_legacy_manifest_dependency_gets_od503_where_odoo_cannot_read_or_install_it(
     let user = &module("legacy_depends_user");
     let modern = &module("legacy_depends_modern");
     let ten_module = &module("legacy_depends_ten");
+    let nine_module = &module("legacy_depends_nine");
+    let nine_deps = [retired("python2_retired")];
 
     let nine = scan_as("9.0");
     let nine_user = [
@@ -900,6 +902,7 @@ fn a_legacy_manifest_dependency_gets_od503_where_odoo_cannot_read_or_install_it(
     assert_eq!(od503(&nine, user), nine_user);
     assert_eq!(od503(&nine, modern), unreadable_both);
     assert_eq!(od503(&nine, ten_module), [unreadable("python2_eval")]);
+    assert_eq!(od503(&nine, nine_module), nine_deps);
     for notice in [python2("9.0").as_str(), eval, python2_eval] {
         assert!(
             nine.notices.iter().any(|n| n == notice),
@@ -919,6 +922,7 @@ fn a_legacy_manifest_dependency_gets_od503_where_odoo_cannot_read_or_install_it(
     assert_eq!(od503(&ten, user), ten_user);
     assert_eq!(od503(&ten, modern), unreadable_both);
     assert_eq!(od503(&ten, ten_module), [unreadable("python2_eval")]);
+    assert_eq!(od503(&ten, nine_module), nine_deps);
     assert!(ten.notices.contains(&python2("10.0")), "{:#?}", ten.notices);
     let eighteen = scan_as("18.0");
     let all = [
@@ -933,13 +937,8 @@ fn a_legacy_manifest_dependency_gets_od503_where_odoo_cannot_read_or_install_it(
     .map(unreadable);
     assert_eq!(od503(&eighteen, user), all);
     assert_eq!(od503(&eighteen, modern), unreadable_both);
-    // Whether a 10.0 module reads `python2_manifest` when the default series is 18.0 is left to
-    // how a version-less manifest is classified, so only `python2_eval` is pinned here.
-    let ten_on_eighteen = od503(&eighteen, ten_module);
-    assert!(
-        ten_on_eighteen.contains(&unreadable("python2_eval")),
-        "{ten_on_eighteen:#?}"
-    );
+    assert_eq!(od503(&eighteen, ten_module), [unreadable("python2_eval")]);
+    assert_eq!(od503(&eighteen, nine_module), nine_deps);
 }
 
 #[test]

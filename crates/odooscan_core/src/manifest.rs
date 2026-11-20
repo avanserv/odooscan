@@ -590,6 +590,36 @@ impl Rejection {
     pub fn diag(&self) -> RawDiag {
         RawDiag::new("OD000", self.error.pos, self.error.value.clone())
     }
+
+    /// How the Odoo of `series` takes the manifest, read as `self` in its own series.
+    pub fn taken_on(&self, series: Option<Series>) -> Taken {
+        Taken {
+            reads: self.odoo.on(series),
+            installable: self.installable,
+        }
+    }
+}
+
+/// How the Odoo of a series takes a manifest odooscan rejects.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Taken {
+    /// Whether that Odoo reads the manifest.
+    pub reads: bool,
+    /// Whether the manifest leaves the module installable, as far as odooscan reads its entries.
+    pub installable: bool,
+}
+
+/// How the Odoo of `series` takes the manifest in `bytes`, read as that series whatever it names,
+/// since a module's own Odoo reads the manifests of its dependencies. A manifest one series
+/// rejects may read in another, as a latin-1 one does on 10.0.
+pub fn taken_as(bytes: &[u8], series: Option<Series>) -> Taken {
+    match read(bytes, |_| series) {
+        Ok(m) => Taken {
+            reads: true,
+            installable: m.installable,
+        },
+        Err(r) => r.taken_on(series),
+    }
 }
 
 /// Whether the Odoo of the series reads a manifest odooscan rejects.
@@ -608,9 +638,9 @@ pub enum OdooReads {
 }
 
 impl OdooReads {
-    /// Whether the Odoo of `series` also reads a manifest read as `self` in its own series, which
-    /// may differ: a dependency without a readable version is read in the default series, while
-    /// the module depending on it installs it on the Odoo of its own.
+    /// Whether the Odoo of `series` also reads a manifest read as `self` in the series odooscan
+    /// read it as. A module of another series depending on it reads it again as its own
+    /// (`taken_as`).
     pub fn on(self, series: Option<Series>) -> bool {
         match self {
             OdooReads::No => false,
@@ -2058,6 +2088,28 @@ mod tests {
             }
         }
         assert_eq!(odoo_reads(b"[('a', 0755), 1]", "10.0"), Some(OdooReads::No));
+    }
+
+    #[test]
+    fn a_rejected_manifest_is_taken_as_the_series_asked() {
+        let taken = |src: &[u8], series: &str| taken_as(src, Series::parse(series));
+        let retired = b"{'sequence': 0755, 'installable': False}";
+        let nine = Taken {
+            reads: true,
+            installable: false,
+        };
+        assert_eq!(taken(retired, "9.0"), nine);
+        assert!(!taken(retired, "18.0").reads);
+        let latin1 = b"{'category': 'r\xe9sum\xe9'}";
+        let ten = Taken {
+            reads: true,
+            installable: true,
+        };
+        assert_eq!(taken(latin1, "10.0"), ten);
+        assert!(!taken(latin1, "18.0").reads);
+        let versioned = b"{'version': '10.0.1.0.0', 'name': 'a' + 'b'}";
+        assert_eq!(taken(versioned, "9.0"), ten);
+        assert!(!taken(versioned, "10.0").reads);
     }
 
     /// Whether the manifest `src`, which `series` rejects, leaves its module installable.

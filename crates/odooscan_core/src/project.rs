@@ -7,7 +7,7 @@ use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::facts::{DataFacts, JsFacts, PoFacts, Pos, PyFacts, RawDiag, TemplateEntry, TemplateFacts};
-use crate::manifest::{self, Manifest, OdooReads, Rejection, normalize};
+use crate::manifest::{self, Manifest, OdooReads, Rejection, Taken, normalize};
 use crate::mentions::{Mentions, Words};
 use crate::module_state::UPGRADE_DIRS;
 use crate::series::Series;
@@ -405,9 +405,10 @@ pub struct Discovery {
     /// The checked modules whose manifest Odoo cannot read, by path.
     pub broken: Vec<Broken>,
     /// The modules, checked or indexed, whose manifest `manifest::read` rejects, by name.
-    pub rejected: FxHashMap<String, OdooReads>,
+    pub rejected: FxHashMap<String, Unindexed>,
     /// The modules, checked or indexed, whose manifest sets `installable` to false, so Odoo never
-    /// installs them, by name. A rejected one is among them when odooscan reads that much of it.
+    /// installs them, by name. A rejected one is not among them: whether it is installable
+    /// depends on the series reading it (`Unindexed::on`).
     pub uninstallable: FxHashSet<String>,
 }
 
@@ -417,6 +418,23 @@ pub struct Broken {
     /// The OD000 it gets.
     pub diag: RawDiag,
     pub suppressions: Suppressions,
+}
+
+/// How the Odoo of each checked module's series takes a manifest `manifest::read` rejects.
+#[derive(Debug)]
+pub struct Unindexed {
+    /// Why the series odooscan read the manifest as rejects it.
+    rejection: Rejection,
+    /// The manifest read again as the series of each checked module but that one.
+    again: Vec<(Option<Series>, Taken)>,
+}
+
+impl Unindexed {
+    /// How the Odoo of `series`, a checked module's, takes the manifest.
+    pub fn on(&self, series: Option<Series>) -> Taken {
+        let again = self.again.iter().find(|(s, _)| *s == series);
+        again.map_or_else(|| self.rejection.taken_on(series), |&(_, taken)| taken)
+    }
 }
 
 /// A manifest `manifest::read` rejects, of the module `name`.
@@ -470,20 +488,21 @@ pub fn load(
         .zip(&known)
         .for_each(|(module, known)| read_again(module, default_series, known, &routes, taint));
     notices.extend(python2_notices(&modules, default_series));
-    let odoo_reads = rejected.iter().map(|r| (r.name.clone(), r.rejection.odoo)).collect();
-    let (broken, rejected_notices) = rejected_manifests(rejected);
+    let (broken, rejected_notices) = rejected_manifests(&rejected);
     notices.extend(rejected_notices);
+    let series = checked_series(&modules, default_series);
+    let unindexed = rejected.into_iter().map(|r| unindexed(r, &series)).collect();
     Discovery {
         modules,
         notices,
         broken,
-        rejected: odoo_reads,
+        rejected: unindexed,
         uninstallable,
     }
 }
 
-/// The rejected manifests of `unread`, and the names of the modules that are not installable,
-/// rejected ones included.
+/// The rejected manifests of `unread`, and the names of the other modules, which are not
+/// installable.
 fn split_unread(unread: Vec<Unread>) -> (Vec<Rejected>, FxHashSet<String>) {
     let mut rejected = vec![];
     let mut uninstallable = FxHashSet::default();
@@ -495,16 +514,37 @@ fn split_unread(unread: Vec<Unread>) -> (Vec<Rejected>, FxHashSet<String>) {
             }
         }
     }
-    let retired = rejected.iter().filter(|r| !r.rejection.installable);
-    uninstallable.extend(retired.map(|r| r.name.clone()));
     (rejected, uninstallable)
+}
+
+/// The series of the checked modules, sorted and each once.
+fn checked_series(modules: &[Module], default_series: Option<Series>) -> Vec<Option<Series>> {
+    let checked = modules.iter().filter(|m| m.checked);
+    let mut series: Vec<_> = checked.map(|m| m.series.or(default_series)).collect();
+    series.sort_unstable();
+    series.dedup();
+    series
+}
+
+/// The name of `r` and how the Odoo of each of `series` takes its manifest. Odooscan read it as
+/// the series it names, else the default one, and a checked one as `target` when given, while
+/// the Odoo of the module installing it reads it whatever series it names, so it is read again
+/// as each other one.
+fn unindexed(r: Rejected, series: &[Option<Series>]) -> (String, Unindexed) {
+    let other = series.iter().copied().filter(|&s| s != r.rejection.series);
+    let again = other.map(|s| (s, manifest::taken_as(&r.bytes, s))).collect();
+    let unindexed = Unindexed {
+        rejection: r.rejection,
+        again,
+    };
+    (r.name, unindexed)
 }
 
 /// The checked manifests of `rejected` that get OD000, by path, and a sorted notice for each other
 /// one: its module is not indexed. A module depending on it gets OD503 unless the Odoo of that
 /// module's series reads the manifest, as 9.0 does a Python 2 file, and the manifest leaves the
 /// module installable; then this notice alone names it.
-fn rejected_manifests(rejected: Vec<Rejected>) -> (Vec<Broken>, Vec<String>) {
+fn rejected_manifests(rejected: &[Rejected]) -> (Vec<Broken>, Vec<String>) {
     let mut broken = vec![];
     let mut notices = vec![];
     for r in rejected {
@@ -520,7 +560,7 @@ fn rejected_manifests(rejected: Vec<Rejected>) -> (Vec<Broken>, Vec<String>) {
                 broken.push(Broken {
                     diag: r.rejection.diag(),
                     suppressions: Suppressions::parse(&String::from_utf8_lossy(&r.bytes)),
-                    path: r.path,
+                    path: r.path.clone(),
                 });
                 continue;
             }
@@ -1682,7 +1722,10 @@ mod tests {
             discovery.notices
         );
         assert_eq!(discovery.rejected.len(), 1);
-        assert_eq!(discovery.rejected.get("open"), Some(&OdooReads::No));
+        assert_eq!(
+            discovery.rejected.get("open").map(|u| u.rejection.odoo),
+            Some(OdooReads::No)
+        );
     }
 
     #[test]
@@ -1703,10 +1746,16 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         let mut uninstallable: Vec<_> = discovery.uninstallable.iter().map(String::as_str).collect();
         uninstallable.sort_unstable();
-        assert_eq!(uninstallable, ["legacy", "off", "retired"]);
+        assert_eq!(uninstallable, ["off", "retired"]);
         let modules: Vec<_> = discovery.modules.iter().map(|m| m.name.as_str()).collect();
         assert_eq!(modules, ["on"]);
-        assert_eq!(discovery.rejected.get("legacy"), Some(&OdooReads::AsPython2));
+        let legacy = &discovery.rejected["legacy"];
+        assert_eq!(legacy.rejection.odoo, OdooReads::AsPython2);
+        let ten = Taken {
+            reads: true,
+            installable: false,
+        };
+        assert_eq!(legacy.on(Series::parse("10.0")), ten);
     }
 
     #[test]
@@ -1790,8 +1839,39 @@ mod tests {
             ]
         );
         assert_eq!(discovery.rejected.len(), 2);
-        assert_eq!(discovery.rejected.get("legacy"), Some(&OdooReads::AsPython2));
-        assert_eq!(discovery.rejected.get("latin"), Some(&OdooReads::No));
+        assert_eq!(
+            discovery.rejected.get("legacy").map(|u| u.rejection.odoo),
+            Some(OdooReads::AsPython2)
+        );
+        assert_eq!(
+            discovery.rejected.get("latin").map(|u| u.rejection.odoo),
+            Some(OdooReads::No)
+        );
+    }
+
+    #[test]
+    fn a_rejected_manifest_is_read_as_each_dependent_series() {
+        let dir = scratch("manifest-dependent-series");
+        let checked = dir.join("checked");
+        let nine = written(&checked, "nine", "{'version': '9.0.1.0.0', 'depends': ['legacy']}");
+        let eighteen = written(&checked, "eighteen", "{'version': '18.0.1.0.0', 'depends': ['legacy']}");
+        let addons = dir.join("addons");
+        written(&addons, "legacy", "{'sequence': 0755}");
+        written(&addons, "versioned", "{'version': '10.0.1.0.0', 'name': 'a' + 'b'}");
+        let discovery = load(
+            &[nine, eighteen],
+            &[addons],
+            Series::parse("18.0"),
+            None,
+            &TaintTable::default(),
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+        let legacy = &discovery.rejected["legacy"];
+        assert!(legacy.on(Series::parse("9.0")).reads);
+        assert!(!legacy.on(Series::parse("18.0")).reads);
+        let versioned = &discovery.rejected["versioned"];
+        assert!(versioned.on(Series::parse("9.0")).reads);
+        assert!(!versioned.on(Series::parse("18.0")).reads);
     }
 
     #[test]

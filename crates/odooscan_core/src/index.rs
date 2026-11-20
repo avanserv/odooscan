@@ -11,9 +11,9 @@ use crate::facts::{
     StaticWrite, UNREAD_TYPE, ViewFact, WrittenValue, mangled, private_name,
 };
 use crate::js::{self, OWL_MODULE};
-use crate::manifest::{AutoInstall, DEPENDS_BASE, OdooReads};
+use crate::manifest::{AutoInstall, DEPENDS_BASE};
 use crate::mentions::{HOOK_PREFIXES, Words};
-use crate::project::{Module, SourceFile, code_loaded};
+use crate::project::{Module, SourceFile, Unindexed, code_loaded};
 use crate::series::{self, Series};
 use crate::{bundles, imports, routing};
 
@@ -2033,11 +2033,12 @@ pub struct Index<'m> {
     /// When each module first runs each of its files (`imports::Graph::run_order`), none for one
     /// whose order the scan cannot read.
     build_order: Vec<Option<FxHashMap<String, imports::RunKey>>>,
-    /// The modules whose manifest odooscan rejects, so none of them is in `modules`; `build` leaves
-    /// it empty for the caller to fill.
-    pub rejected: FxHashMap<String, OdooReads>,
-    /// The modules whose manifest sets `installable` to false, none of them in `modules`; `build`
-    /// leaves it empty for the caller to fill.
+    /// The modules whose manifest odooscan rejects, so none of them is in `modules`, with how the
+    /// Odoo of each checked module's series takes it; `build` leaves it empty for the caller to
+    /// fill.
+    pub rejected: FxHashMap<String, Unindexed>,
+    /// The modules whose manifest odooscan reads and sets `installable` to false, none of them in
+    /// `modules`; `build` leaves it empty for the caller to fill.
     pub uninstallable: FxHashSet<String>,
 }
 
