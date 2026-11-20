@@ -219,9 +219,13 @@ pub struct ClassFact {
     pub paths: Vec<Spanned<String>>,
     /// The field paths each method decorated with `@api.depends` names, by method.
     pub depends: Vec<(String, Vec<Spanned<String>>)>,
-    /// The fields `_order` sorts by and `_parent_name` and `_fold_name` name, which must exist on the
-    /// model when Odoo reads them.
+    /// The fields `_order` sorts by and `_fold_name` names, which must exist on the model when Odoo
+    /// reads them.
     pub order_fields: Vec<Spanned<String>>,
+    /// The field `_parent_name` names. `_auto_init` reads it when the merged attributes of the module
+    /// turn `_parent_store` on for a table without a `parent_path` column, so only data that loads
+    /// before the module counts; otherwise the check resolves it against the module's data files too.
+    pub parent_fields: Vec<Spanned<String>>,
     /// The fields `_rec_name` and `_active_name` name, which Odoo asserts as it sets up the model.
     pub setup_fields: Vec<Spanned<String>>,
     /// The field paths of `_rec_names_search`.
@@ -317,6 +321,7 @@ impl ClassFact {
             paths: vec![],
             depends: vec![],
             order_fields: vec![],
+            parent_fields: vec![],
             setup_fields: vec![],
             rec_names_search: vec![],
             super_calls: vec![],

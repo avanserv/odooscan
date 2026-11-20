@@ -1,0 +1,8 @@
+<odoo>
+    <record id="field_x_legacy_parent_id" model="ir.model.fields">
+        <field name="name">x_legacy_parent_id</field>
+        <field name="model_id" ref="base.model_res_partner"/>
+        <field name="ttype">many2one</field>
+        <field name="relation">res.partner</field>
+    </record>
+</odoo>

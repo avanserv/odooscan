@@ -1,0 +1,14 @@
+<odoo>
+    <record id="field_x_tree_parent_id" model="ir.model.fields">
+        <field name="name">x_tree_parent_id</field>
+        <field name="model_id" ref="data_fields.model_data_ticket"/>
+        <field name="ttype">many2one</field>
+        <field name="relation">data.ticket</field>
+    </record>
+    <record id="field_x_node_parent_id" model="ir.model.fields">
+        <field name="name">x_node_parent_id</field>
+        <field name="model_id" ref="model_data_tree_node"/>
+        <field name="ttype">many2one</field>
+        <field name="relation">data.tree.node</field>
+    </record>
+</odoo>

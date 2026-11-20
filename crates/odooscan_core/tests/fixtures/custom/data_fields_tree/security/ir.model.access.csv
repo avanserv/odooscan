@@ -1,0 +1,4 @@
+id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
+access_data_tree_node,data.tree.node,model_data_tree_node,base.group_user,1,0,0,0
+access_data_tree_leaf,data.tree.leaf,model_data_tree_leaf,base.group_user,1,0,0,0
+access_data_tree_branch,data.tree.branch,model_data_tree_branch,base.group_user,1,0,0,0

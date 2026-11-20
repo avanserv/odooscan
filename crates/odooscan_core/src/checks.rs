@@ -2219,7 +2219,8 @@ impl<'m> Ctx<'_, 'm> {
         }
     }
 
-    /// OD203 on a path Odoo resolves as it sets up the model, when a failure refuses the install.
+    /// OD203 on a path Odoo resolves as it sets up the model or as `_auto_init` reads it, when a
+    /// failure refuses the install.
     /// The module's own data files load after that, so only an unread file of a module `setup_scope`
     /// records may add the field, and not to a model the module defines whole.
     fn setup_path(&self, out: &mut Out<'m>, file: &'m Path, model: &str, path: &Spanned<String>) {
@@ -2712,6 +2713,7 @@ impl<'m> Ctx<'_, 'm> {
             .paths
             .iter()
             .chain(&class.order_fields)
+            .chain(self.parent_fields(class, false))
             .chain(self.rec_names_search(class));
         for p in paths.filter(|_| class.kind != ModelKind::Abstract) {
             self.path(out, path, &class.model, p);
@@ -2720,7 +2722,8 @@ impl<'m> Ctx<'_, 'm> {
             .depends
             .iter()
             .flat_map(|(_, paths)| paths)
-            .chain(&class.setup_fields);
+            .chain(&class.setup_fields)
+            .chain(self.parent_fields(class, true));
         for p in setup_paths.filter(|_| class.kind != ModelKind::Abstract) {
             self.setup_path(out, path, &class.model, p);
         }
@@ -2751,6 +2754,58 @@ impl<'m> Ctx<'_, 'm> {
         } else {
             &[]
         }
+    }
+
+    /// The `_parent_name` of `class` when `ahead` matches `fills_parent_path`: with `ahead` true when
+    /// `_auto_init` reads it before the module's data files load, with `ahead` false otherwise.
+    fn parent_fields<'c>(&self, class: &'c ClassFact, ahead: bool) -> &'c [Spanned<String>] {
+        if !class.parent_fields.is_empty() && self.fills_parent_path(&class.model) == ahead {
+            &class.parent_fields
+        } else {
+            &[]
+        }
+    }
+
+    /// Whether the merged `_parent_store` of this module turns it on for a table that has no
+    /// `parent_path` column yet. `_auto_init` then adds the column and fills it through
+    /// `_parent_name` before the module's data files load (20.0 `odoo/orm/models.py:2561-2584`).
+    /// From `TABLE_WITH_COLUMNS` a table the module creates takes `parent_path` from its stored
+    /// fields instead.
+    fn fills_parent_path(&self, model: &str) -> bool {
+        let Some(series) = self.series else {
+            return false;
+        };
+        let turned_on = |stores: Vec<&Spanned<OptionValue>>| {
+            !stores.is_empty() && stores.iter().all(|a| a.value == OptionValue::Bool(true))
+        };
+        let created = series >= TABLE_WITH_COLUMNS && self.index.introduces_model(self.mi, model);
+        series >= PARENT_PATH_FILLED
+            && !created
+            && turned_on(self.last_attrs(model, "_parent_store"))
+            && self.has_table(model)
+            && !self.had_parent_path(model)
+    }
+
+    /// Whether the table of `model` may have its `parent_path` column before this module: a class
+    /// of another module in scope sets `_parent_store` or a `parent_path` field on the model, or on
+    /// a model it mixes in, or a module outside the index or a file that does not parse may.
+    fn had_parent_path(&self, model: &str) -> bool {
+        let gives = |c: &ClassFact| sets_parent_store(c) || c.fields.iter().any(|f| f.name == "parent_path");
+        let other = |&&(mi, _): &&(usize, &ClassFact)| mi != self.mi && self.scope.sees(mi);
+        let mixes_in = |c: &ClassFact| {
+            c.inherit.iter().filter(|p| p.value != model).any(|p| {
+                let merged = self.index.merged_classes(&p.value, self.scope);
+                merged.iter().filter(other).any(|(_, m)| gives(m))
+            })
+        };
+        self.partial
+            || self.index.unread_class(model, self.scope)
+            || self
+                .index
+                .classes(model)
+                .iter()
+                .filter(other)
+                .any(|(_, c)| gives(c) || mixes_in(c))
     }
 
     /// A new `_name` that a module in scope already defines builds a fresh model in its place.
@@ -4762,6 +4817,17 @@ const MIXIN_TRACKING: Series = Series { major: 19, minor: 3 };
 /// `odoo/models.py:3514-3519`, 20.0 `odoo/orm/models.py:2592-2597`). `saas~11.2` asks for
 /// `parent_left` and `parent_right`.
 const PARENT_PATH: Series = Series { major: 11, minor: 3 };
+
+/// The first series whose `_auto_init` fills a `parent_path` column it adds, through
+/// `_parent_name` (12.0, commit 2fc7657975c2; 20.0 `odoo/orm/models.py:2561-2584`). From
+/// `saas~11.3` to `saas~11.5` the column starts empty.
+const PARENT_PATH_FILLED: Series = Series { major: 12, minor: 0 };
+
+/// The first series that creates a table with the stored columns of its model, `parent_path` among
+/// them, so `_auto_init` fills nothing on a model the module introduces (`saas~13.3`, commit
+/// 0727cacf5194, which `saas~13.4` and later carry as 3ecb6fdcb0ef; 20.0
+/// `odoo/orm/models.py:2536-2546`). `saas~13.2` creates it with `id` alone.
+const TABLE_WITH_COLUMNS: Series = Series { major: 13, minor: 3 };
 
 /// The first series that warns of a repeated label as it reflects a model (`saas~11.2`; 18.0
 /// `odoo/addons/base/models/ir_model.py:1224`, 20.0 `:1376`). `saas~11.1` says nothing.
