@@ -3577,8 +3577,8 @@ impl<'m> Index<'m> {
     }
 
     /// `field` of `model`: the model's own definitions, which shadow those of a model it delegates
-    /// to, and else the record that adds it. `Err(Some(module))` when the field exists only outside
-    /// the scope.
+    /// to, and a delegated model's definitions shadow those of its own parents; else the record
+    /// that adds it. `Err(Some(module))` when the field exists only outside the scope.
     pub fn field(&self, model: &str, field: &str, scope: &Scope) -> Result<Option<FieldInfo<'m>>, Option<&'m str>> {
         self.field_from(model, field, scope, &mut vec![])
     }
@@ -3598,7 +3598,7 @@ impl<'m> Index<'m> {
         let mut defs = self.merged_fields(model, scope);
         defs.retain(|d| d.2.name == field);
         if defs.is_empty() {
-            defs = self.field_defs(model, field, Some(scope));
+            defs = self.delegated_defs(model, field, scope, &mut FxHashSet::default());
         }
         let Some((_, _, first)) = defs.first() else {
             // Odoo skips a manual field whose name a class already gave the model.
@@ -3633,6 +3633,38 @@ impl<'m> Index<'m> {
             ftype: &first.ftype,
             comodel,
         }))
+    }
+
+    /// The in-scope definitions of `field` at the nearest level `model` delegates to that has it.
+    /// Odoo sets up each `_inherits` parent before the child and copies its resolved fields, so a
+    /// parent's own field wins over its parents', and of two parents the later entry wins. `seen`
+    /// ends a delegation ring.
+    fn delegated_defs(
+        &self,
+        model: &str,
+        field: &str,
+        scope: &Scope,
+        seen: &mut FxHashSet<&'m str>,
+    ) -> Vec<FieldDef<'m>> {
+        let classes = self.merged_classes(model, scope);
+        let parents: Vec<&'m str> = classes
+            .iter()
+            .flat_map(|(_, c)| c.inherits.iter().map(|(parent, _)| parent.as_str()))
+            .collect();
+        for parent in parents.into_iter().rev() {
+            if !seen.insert(parent) {
+                continue;
+            }
+            let mut defs = self.merged_fields(parent, scope);
+            defs.retain(|d| d.2.name == field);
+            if defs.is_empty() {
+                defs = self.delegated_defs(parent, field, scope, seen);
+            }
+            if !defs.is_empty() {
+                return defs;
+            }
+        }
+        vec![]
     }
 
     /// Every in-scope definition of the field a dotted path ends on, or None when the path does not
@@ -4894,6 +4926,39 @@ mod tests {
         assert!(!index.lists_unindexed_parent(main, "vendor.thing", &scope));
         assert!(index.unindexed_parent("vendor.thing", &scope));
         assert!(index.lists_unindexed_parent(vendor, "vendor.thing", &index.scope(vendor)));
+    }
+
+    #[test]
+    fn a_delegated_field_comes_from_the_nearest_level_that_defines_it() {
+        let manifest = |depends: &str| format!("{{'version': '18.0.1.0', 'depends': [{depends}]}}");
+        let mut modules = [module("base", &manifest("")), module("main", &manifest("'base'"))];
+        modules[0]
+            .python
+            .push(python_18("class P(models.Model):\n    _name = 'res.partner'\n"));
+        modules[1].python.push(python_18(
+            "class A(models.Model):\n    _name = 'a'\n    x = fields.Many2one('res.partner')\n\n\
+             class A2(models.Model):\n    _name = 'a2'\n    x = fields.Many2one('res.partner')\n\n\
+             class B(models.Model):\n    _name = 'b'\n    _inherits = {'a': 'a_id'}\n    x = fields.Char()\n\n\
+             class D(models.Model):\n    _name = 'd'\n    _inherits = {'b': 'b_id'}\n\n\
+             class B2(models.Model):\n    _name = 'b2'\n    _inherits = {'a': 'a_id'}\n\n\
+             class E(models.Model):\n    _name = 'e'\n    _inherits = {'b2': 'b2_id'}\n\n\
+             class F(models.Model):\n    _name = 'f'\n    _inherits = {'a2': 'a2_id', 'b': 'b_id'}\n\n\
+             class G(models.Model):\n    _name = 'g'\n    _inherits = {'b': 'b_id', 'a2': 'a2_id'}\n\n\
+             class H(models.Model):\n    _name = 'h'\n    _inherits = {'b': 'b_id', 'b2': 'b2_id'}\n",
+        ));
+        let index = Index::build(&modules, None);
+        let scope = index.scope(index.by_name["main"]);
+        let x = |model: &str| {
+            let info = index.field(model, "x", &scope).ok().flatten().unwrap();
+            (info.ftype, info.comodel)
+        };
+        let partner = Some("res.partner".to_owned());
+        assert_eq!(x("d"), ("Char", None));
+        assert_eq!(x("e"), ("Many2one", partner.clone()));
+        assert_eq!(x("f"), ("Char", None));
+        assert_eq!(x("g"), ("Many2one", partner.clone()));
+        // b2 has no `x` of its own, yet as the later entry its delegated Many2one beats b's Char.
+        assert_eq!(x("h"), ("Many2one", partner));
     }
 
     #[test]
