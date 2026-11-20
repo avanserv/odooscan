@@ -1469,8 +1469,8 @@ fn upgrade_scripts<'m>(module: &'m Module, series: Option<Series>, out: &mut Out
 /// OD513 on an `assets` path of the module's own that resolves to no file, which Odoo drops with a
 /// warning when it is a glob and keeps as a URL that fails to load otherwise (18.0
 /// `odoo/addons/base/models/ir_asset.py:336-376`). From saas~16.3 Odoo serves only files under
-/// `static/`; before, a script or a style may sit anywhere in the module, so only an XML path
-/// outside `static/` is reported there, since Odoo refuses templates elsewhere.
+/// `static/`; before, a script or a style may sit anywhere in the module, so outside `static/` an
+/// XML path is reported, since Odoo refuses templates there, and a plain path naming no file.
 fn unmatched_assets<'m>(module: &'m Module, series: Option<Series>, out: &mut Out<'m>) {
     for path in module.manifest.bundles.iter().flat_map(|b| &b.paths) {
         if let Some(message) = unmatched_asset(module, &path.value, static_only(series)) {
@@ -1493,7 +1493,7 @@ fn unmatched_asset(module: &Module, path: &str, static_only: bool) -> Option<Str
     }
     let parts = normal_parts(path);
     if !in_static(name, &parts) {
-        return outside_static(name, path, &parts, static_only);
+        return outside_static(module, path, &parts, static_only);
     }
     let rel = parts.join("/");
     if wildcard(path) {
@@ -1509,13 +1509,19 @@ fn unmatched_asset(module: &Module, path: &str, static_only: bool) -> Option<Str
             )
         });
     }
+    missing_file(path, &rel, &module.static_assets)
+}
+
+/// Why `path`, normalized to `rel`, names an asset that is not among `files`.
+fn missing_file(path: &str, rel: &str, files: &[String]) -> Option<String> {
     let extension = rel.rsplit('.').next().unwrap_or_default();
-    (ASSET_EXTENSIONS.contains(&extension) && !module.static_assets.contains(&rel))
+    (ASSET_EXTENSIONS.contains(&extension) && !files.iter().any(|f| f == rel))
         .then(|| format!("'{path}' does not exist, so the bundle fails to load it"))
 }
 
-/// Why `path`, normalized to `parts` outside `name/static/`, is not served, none when it is.
-fn outside_static(name: &str, path: &str, parts: &[&str], static_only: bool) -> Option<String> {
+/// Why `path`, normalized to `parts` outside `static/` of `module`, is not served, none when it is.
+fn outside_static(module: &Module, path: &str, parts: &[&str], static_only: bool) -> Option<String> {
+    let name = module.name.as_str();
     if static_only {
         return Some(format!(
             "'{path}' is outside {name}/static/, the only files Odoo serves as assets"
@@ -1528,8 +1534,22 @@ fn outside_static(name: &str, path: &str, parts: &[&str], static_only: bool) -> 
         .and_then(|p| p.rsplit_once('.'))
         .is_some_and(|(_, ext)| ext == "xml");
     let may_reach_static = parts.len() > 2 && parts[0] == name && wildcard(parts[1]);
-    (xml && !may_reach_static)
-        .then(|| format!("'{path}' is outside {name}/static/, the only place Odoo serves XML assets from"))
+    if xml && !may_reach_static {
+        return Some(format!(
+            "'{path}' is outside {name}/static/, the only place Odoo serves XML assets from"
+        ));
+    }
+    missing_outside(module, path, parts)
+}
+
+/// Why a plain `path` outside `static/`, normalized to `parts`, names no file of `module`, none
+/// for a glob or a path leading out of the module. The scan lists only the files such paths name,
+/// in `outside_assets`.
+fn missing_outside(module: &Module, path: &str, parts: &[&str]) -> Option<String> {
+    if wildcard(path) || parts.first() != Some(&module.name.as_str()) {
+        return None;
+    }
+    missing_file(path, &parts.join("/"), &module.outside_assets)
 }
 
 /// OD505 on a `qweb` key, which from saas~14.3 nothing reads, and OD506 on a `web.assets_qweb`
@@ -8145,6 +8165,7 @@ mod tests {
             "loan/static/src/js/a.js".to_owned(),
             "loan/static/lib/b.scss".to_owned(),
         ];
+        module.outside_assets = vec!["loan/lib/b.js".to_owned()];
         let unmatched = |path: &str, static_only: bool| unmatched_asset(&module, path, static_only).is_some();
         for path in [
             "loan/static/src/**/*",
@@ -8179,11 +8200,16 @@ mod tests {
             "loan/**/*.xml",
             "loan/*/src/a.xml",
             "loan/views/a.XML",
-            "loan/views/a.js",
+            "loan/lib/b.js",
+            "/loan/lib/./b.js",
+            "loan/lib/b.JS",
+            "loan/../other/lib/a.js",
         ] {
             assert!(!unmatched(path, false), "{path}");
         }
         assert!(unmatched("loan/static/src/jss/**/*", false));
+        assert!(unmatched("loan/views/a.js", false));
+        assert!(unmatched("loan/lib/b.js", true));
     }
 
     #[test]

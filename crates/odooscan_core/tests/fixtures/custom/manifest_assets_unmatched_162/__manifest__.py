@@ -6,6 +6,9 @@
     "assets": {
         "web.assets_backend": [
             "manifest_assets_unmatched_162/lib/shelf.js",
+            "manifest_assets_unmatched_162/lib/missing.js",
+            "/manifest_assets_unmatched_162/lib/./rack.js",
+            "manifest_assets_unmatched_162/static/../lib/rack.js",
             "manifest_assets_unmatched_162/views/shelf_templates.xml",
         ],
     },
