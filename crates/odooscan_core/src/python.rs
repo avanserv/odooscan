@@ -13,7 +13,7 @@ use crate::api_table::{self, Kind};
 use crate::facts::{
     BaseSource, ClassBase, ClassFact, Definition, DefinitionSource, DomainFact, FieldClass, FieldFact, FlowSummary,
     GuardedRef, MethodDef, ModelKind, OptionValue, Param, Pos, PyFacts, RawDiag, Receiver, Signature, Spanned,
-    SqlColumn, SqlView, Subject, UNREAD_TYPE, XmlRef, private_name,
+    SqlColumn, SqlView, Subject, UNREAD_TYPE, XmlRef, mangled, private_name,
 };
 use crate::fix::{self, Edit, Fix};
 use crate::placeholders::{self, Specs};
@@ -1213,20 +1213,47 @@ fn caught_lookups(t: &ast::StmtTry, settled: bool) -> Vec<Option<Subject>> {
 /// The methods called as `super().name(...)` or `super(Class, self).name(...)`, each with whether
 /// a `hasattr` test on the same `super()` and name encloses the call. In a class the method defines,
 /// only an explicit `super(Class, self)` outside the class's functions and lambdas is the method's.
+/// When `records`, `dynamic` holds the calls of the methods of a class that subclasses the type of
+/// the method's records, which the model's classes answer, each with the method that makes it.
 struct SuperCalls<'a> {
-    calls: Vec<(&'a str, TextSize, bool)>,
+    calls: Vec<SuperCall<'a>>,
     guards: Vec<(&'a Expr, &'a str)>,
     outer: Outer<'a>,
     nested: bool,
+    records: bool,
+    dynamic: Vec<(&'a str, SuperCall<'a>)>,
 }
 
+/// A method called through `super()`, where, and whether a `hasattr` test guards the call.
+type SuperCall<'a> = (&'a str, TextSize, bool);
+
 impl<'a> SuperCalls<'a> {
-    fn new(outer: Outer<'a>) -> Self {
+    fn new(outer: Outer<'a>, records: bool) -> Self {
         Self {
             calls: vec![],
             guards: vec![],
             outer,
             nested: false,
+            records,
+            dynamic: vec![],
+        }
+    }
+
+    /// Reads the `super()` calls of each method of `stmt` when it is a class whose bases are all the
+    /// type of the records: Odoo builds that type from every class of the model, so their MRO
+    /// answers the call.
+    fn dynamic_class(&mut self, stmt: &'a Stmt) {
+        let Stmt::ClassDef(class) = stmt else {
+            return;
+        };
+        if !self.records || !self.outer.subclassed_by(class) {
+            return;
+        }
+        for def in class.body.iter().filter_map(Stmt::as_function_def_stmt) {
+            let mut calls = SuperCalls::new(Outer::bare(class.name.as_str(), def), false);
+            calls.visit_body(&def.body);
+            self.dynamic
+                .extend(calls.calls.into_iter().map(|call| (def.name.as_str(), call)));
         }
     }
 
@@ -1263,11 +1290,13 @@ fn is_super(func: &Expr) -> bool {
 }
 
 /// The class and the first parameter of a method, which name its own `super()` in a class the
-/// method defines. A bare `super()` there names that class instead.
+/// method defines. A bare `super()` there names that class instead. A `bare` method counts only
+/// `super()` and `super(class, this)` as its class's own.
 #[derive(Clone, Copy)]
 struct Outer<'a> {
     class: &'a str,
     this: Option<&'a str>,
+    bare: bool,
 }
 
 impl<'a> Outer<'a> {
@@ -1277,7 +1306,24 @@ impl<'a> Outer<'a> {
         Self {
             class,
             this: this.map(|p| p.parameter.name.as_str()),
+            bare: false,
         }
+    }
+
+    fn bare(class: &'a str, func: &'a ast::StmtFunctionDef) -> Self {
+        Self {
+            bare: true,
+            ..Self::new(class, func)
+        }
+    }
+
+    /// Whether `class` has at least one positional base and each is `type(this)` or
+    /// `this.__class__`.
+    fn subclassed_by(&self, class: &ast::StmtClassDef) -> bool {
+        let (Some(this), Some(arguments)) = (self.this, &class.arguments) else {
+            return false;
+        };
+        !arguments.args.is_empty() && arguments.args.iter().all(|base| type_of(base, this))
     }
 
     /// Whether the call is `super(class, this)`, positional and nothing else.
@@ -1289,7 +1335,22 @@ impl<'a> Outer<'a> {
 
     /// Whether the call is a `super()` of the method, `nested` when it stands in a class body.
     fn counts(&self, call: &ast::ExprCall, nested: bool) -> bool {
-        is_super(&call.func) && (!nested || self.names(call))
+        let bare = || call.arguments.args.is_empty() && call.arguments.keywords.is_empty();
+        is_super(&call.func) && (self.names(call) || (!nested && (!self.bare || bare())))
+    }
+}
+
+/// Whether `expr` is `type(this)` or `this.__class__`.
+fn type_of(expr: &Expr, this: &str) -> bool {
+    let is_this = |e: &Expr| matches!(e, Expr::Name(n) if n.id.as_str() == this);
+    match expr {
+        Expr::Call(call) => {
+            matches!(&*call.func, Expr::Name(n) if n.id.as_str() == "type")
+                && call.arguments.keywords.is_empty()
+                && matches!(&*call.arguments.args, [arg] if is_this(arg))
+        }
+        Expr::Attribute(a) => a.attr.as_str() == "__class__" && is_this(&a.value),
+        _ => false,
     }
 }
 
@@ -1354,6 +1415,7 @@ impl<'a> MethodWalk<'a> for SuperCalls<'a> {
 
 impl<'a> Visitor<'a> for SuperCalls<'a> {
     fn visit_stmt(&mut self, stmt: &'a Stmt) {
+        self.dynamic_class(stmt);
         if visit_method_stmt(self, stmt) {
             return;
         }
@@ -2370,6 +2432,12 @@ fn assigned(stmt: &Stmt) -> Option<(&[Expr], &Expr)> {
     }
 }
 
+/// Whether the method `fact` defines last takes records as its first parameter, not a class.
+fn records(fact: &ClassFact) -> bool {
+    let unbound = |d: &String| matches!(d.as_str(), "classmethod" | "staticmethod");
+    !fact.defs.last().is_some_and(|def| def.decorators.iter().any(unbound))
+}
+
 /// Records that a class has a method, and whether `@api.private` marks it.
 fn method_name(func: &ast::StmtFunctionDef, fact: &mut ClassFact) {
     fact.methods.push(func.name.to_string());
@@ -3344,7 +3412,7 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
             fact.views = self.init_views(func);
         }
         let class = fact.class_name.clone();
-        let mut calls = SuperCalls::new(Outer::new(&class, func));
+        let mut calls = SuperCalls::new(Outer::new(&class, func), records(fact));
         calls.visit_body(&func.body);
         self.method_checks(func, fact, &calls.calls);
         self.override_checks(func, &calls.calls);
@@ -3354,17 +3422,20 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
         // A guarded call cannot fail, so only OD211 skips it: OD119 and OD223 still see an override.
         // No class defines `__getattr__` to end the chain: the AttributeError the last call raises
         // is what `__getattr__` owes its caller.
-        let fails = |name: &str| name != "__getattr__" || func.name.as_str() != name;
-        fact.super_calls.extend(
-            calls
-                .calls
-                .into_iter()
-                .filter(|(name, _, guarded)| !guarded && fails(name))
-                .map(|(name, at, _)| Spanned {
-                    value: name.to_owned(),
-                    pos: self.loc.pos(at),
-                }),
-        );
+        let fails =
+            |(method, (name, _, guarded)): &(&str, SuperCall)| !guarded && (*name != "__getattr__" || method != name);
+        let spanned = |(_, (name, at, _)): (&str, SuperCall)| Spanned {
+            value: name.to_owned(),
+            pos: self.loc.pos(at),
+        };
+        let own = calls.calls.into_iter().map(|call| (func.name.as_str(), call));
+        fact.super_calls.extend(own.filter(fails).map(spanned));
+        // Python renames a `__name` call after the nested class, a name the lookup does not have.
+        let dynamic = calls
+            .dynamic
+            .into_iter()
+            .filter(|call| fails(call) && !mangled(call.1.0));
+        fact.model_super_calls.extend(dynamic.map(spanned));
     }
 
     fn method_def(&self, func: &ast::StmtFunctionDef) -> MethodDef {
@@ -5869,6 +5940,33 @@ mod tests {
         assert_eq!(called(&facts.classes[1]), ["_own"]);
         assert!(facts.classes[0].extended.is_empty());
         assert!(!facts.diags.iter().any(|d| d.code == "OD119"));
+    }
+
+    #[test]
+    fn a_dynamic_nested_class_reaches_the_model() {
+        let facts = analyze(
+            "class X(models.Model):\n    _name = 'x'\n    def write(self, vals):\n        \
+             class K(type(self)):\n            def write(self, v):\n                return super().write(v)\n            \
+             def m(s):\n                super().a()\n                super(K, s).b()\n                \
+             super(X, self).d()\n                if hasattr(super(), 'g'):\n                    super().g()\n                \
+             return super().__e()\n            \
+             def __getattr__(self, name):\n                return super().__getattr__(name)\n            \
+             def get(self, name):\n                return super().__getattr__(name)\n        \
+             class C(self.__class__):\n            def m(self):\n                return super().c()\n        \
+             class M(type(self), dict):\n            def m(self):\n                return super().f()\n        \
+             class P(dict):\n            def m(self):\n                return super().f()\n        \
+             return K, C, M, P\n    \
+             @classmethod\n    def make(cls):\n        class Meta(type(cls)):\n            \
+             def m(self):\n                return super().h()\n        return Meta\n    \
+             @staticmethod\n    def build(self):\n        class S(type(self)):\n            \
+             def m(s):\n                return super().i()\n        return S\n",
+            None,
+        );
+        let class = &facts.classes[0];
+        let called: Vec<_> = class.model_super_calls.iter().map(|c| c.value.as_str()).collect();
+        assert_eq!(called, ["write", "a", "b", "__getattr__", "c"]);
+        assert!(class.super_calls.is_empty());
+        assert!(class.extended.is_empty());
     }
 
     #[test]
