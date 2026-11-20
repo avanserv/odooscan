@@ -18,6 +18,10 @@ class Routes(http.Controller):
     def moved(self):
         return "moved"
 
+    @http.route("/route_widen/pair", methods=["POST"])
+    def pair(self):
+        return "pair"
+
 
 class Other(http.Controller):
     @http.route("/route_widen/x", methods=["GET"])
@@ -35,3 +39,7 @@ class Other(http.Controller):
     @http.route("/route_widen/moved", methods=["GET"])
     def other_moved(self):
         return "other moved"
+
+    @http.route("/route_widen/pair", methods=["GET"])
+    def other_pair(self):
+        return "other pair"

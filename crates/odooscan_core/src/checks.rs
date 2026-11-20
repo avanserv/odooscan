@@ -437,7 +437,7 @@ fn bringers<'t>(ours: &Endpoint<'t>, theirs: &Endpoint<'t>) -> Vec<Origin<'t>> {
     let widened: Vec<_> = ours
         .widened
         .iter()
-        .filter(|w| !overlap(w.before.as_ref(), theirs.methods.as_ref()))
+        .filter(|w| !reaches(theirs, w.origin.at.addon, w.before.as_ref()))
         .map(|w| w.origin)
         .collect();
     if widened.is_empty() {
@@ -445,6 +445,18 @@ fn bringers<'t>(ours: &Endpoint<'t>, theirs: &Endpoint<'t>) -> Vec<Origin<'t>> {
     } else {
         widened
     }
+}
+
+/// Whether `methods` reach `theirs` as it stood before the overrides of `addon`: the methods
+/// before its widenings there, else those it serves. Two widenings of one module that clash only
+/// with each other then each bring the clash in, while a widening below a module that widened
+/// `theirs` finds the clash that module brought in already there.
+fn reaches(theirs: &Endpoint, addon: &str, methods: Option<&Option<Vec<String>>>) -> bool {
+    let mut own = theirs.widened.iter().filter(|w| w.origin.at.addon == addon).peekable();
+    if own.peek().is_none() {
+        return overlap(methods, theirs.methods.as_ref());
+    }
+    own.any(|w| overlap(methods, w.before.as_ref()))
 }
 
 /// OD231's message for a path that `other`, a route bringing in the other endpoint, serves too.
@@ -9064,6 +9076,84 @@ mod tests {
         // The methods before S's override already reach GET.
         let all = [("a", a.as_str()), ("b", &b), ("c", &c)];
         assert_eq!(shadows(&all, "c"), []);
+    }
+
+    /// A class `class` that overrides `base` to give GET and POST on `method`.
+    fn widen_class(class: &str, base: &str, method: &str) -> String {
+        format!(
+            "\nclass {class}({base}):\n    @http.route(methods=['GET', 'POST'])\n    def {method}(self):\n        pass\n"
+        )
+    }
+
+    /// The routes of `module` that report OD231 in the scan of `files`, as class and method.
+    fn reported(files: &[(&str, &str)], module: &str) -> Vec<(String, String)> {
+        let found = shadows(files, module);
+        found.into_iter().map(|(_, class, method, _)| (class, method)).collect()
+    }
+
+    #[test]
+    fn two_widenings_of_one_module_that_clash_with_each_other_report_once_at_the_later() {
+        let a = format!(
+            "{POST_ROUTE}\n{}",
+            GET_ROUTE.trim_start_matches("from odoo import http\n")
+        );
+        let head = "from odoo import http\nfrom odoo.addons.a.main import Other, Routes\n";
+        let (r, o) = (widen_class("R", "Routes", "x"), widen_class("O", "Other", "y"));
+        let found = shadows(&[("a", &a), ("b", &format!("{head}{r}{o}"))], "b");
+        assert_eq!(found.len(), 1, "{found:?}");
+        assert_eq!((found[0].1.as_str(), found[0].2.as_str()), ("O", "y"));
+        assert!(found[0].3.contains("routed by R.x in module b"), "{}", found[0].3);
+        let found = reported(&[("a", &a), ("b", &format!("{head}{o}{r}"))], "b");
+        assert_eq!(found, [("R".to_owned(), "x".to_owned())]);
+        // Either override alone widens into the other endpoint as module a left it.
+        let found = reported(&[("a", &a), ("b", &format!("{head}{r}"))], "b");
+        assert_eq!(found, [("R".to_owned(), "x".to_owned())]);
+        let found = reported(&[("a", &a), ("b", &format!("{head}{o}"))], "b");
+        assert_eq!(found, [("O".to_owned(), "y".to_owned())]);
+    }
+
+    #[test]
+    fn a_widening_reads_the_other_endpoint_as_its_module_found_it() {
+        let a = format!(
+            "{POST_ROUTE}\n{}",
+            GET_ROUTE.trim_start_matches("from odoo import http\n")
+        );
+        let head = "from odoo import http\nfrom odoo.addons.a.main import Other, Routes\n";
+        let narrow = "\nclass O2(O1):\n    @http.route(methods=['GET'])\n    def y(self):\n        pass\n";
+        let (o1, r) = (widen_class("O1", "Other", "y"), widen_class("R", "Routes", "x"));
+        let found = reported(&[("a", &a), ("b", &format!("{head}{o1}{narrow}{r}"))], "b");
+        assert_eq!(found, [("R".to_owned(), "x".to_owned())]);
+    }
+
+    #[test]
+    fn a_widening_over_one_of_its_own_module_brings_the_clash_in() {
+        let a = format!(
+            "{POST_ROUTE}\n{}",
+            GET_ROUTE.trim_start_matches("from odoo import http\n")
+        );
+        let head = "from odoo import http\nfrom odoo.addons.a.main import Routes\n";
+        let more = "\nclass R2(R1):\n    @http.route(methods=['GET', 'POST', 'PUT'])\n    def x(self):\n        pass\n";
+        let b = format!("{head}{}{more}", widen_class("R1", "Routes", "x"));
+        assert_eq!(
+            reported(&[("a", &a), ("b", &b)], "b"),
+            [("R2".to_owned(), "x".to_owned())]
+        );
+    }
+
+    #[test]
+    fn a_module_below_a_widening_does_not_report_the_clash_it_brought_in_again() {
+        let a = format!(
+            "{POST_ROUTE}\n{}",
+            GET_ROUTE.trim_start_matches("from odoo import http\n")
+        );
+        let e = format!(
+            "from odoo import http\nfrom odoo.addons.a.main import Other\n{}",
+            widen_class("O", "Other", "y")
+        );
+        let d = widening("a", "Routes", "R", "['GET', 'POST']");
+        let found = reported(&[("a", &a), ("e", &e)], "e");
+        assert_eq!(found, [("O".to_owned(), "y".to_owned())]);
+        assert_eq!(shadows(&[("a", &a), ("e", &e), ("d", &d)], "d"), []);
     }
 
     #[test]
