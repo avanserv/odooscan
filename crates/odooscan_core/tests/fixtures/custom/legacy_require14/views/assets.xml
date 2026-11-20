@@ -3,6 +3,7 @@
         <xpath expr="." position="inside">
             <script type="text/javascript" src="/legacy_require14/static/src/js/counter.js"/>
             <script type="text/javascript" src="/legacy_require14/static/src/js/dropped.js"/>
+            <script type="text/javascript" src="/legacy_require14/static/src/js/kept.js"/>
             <script type="text/javascript" src="/legacy_require14/static/src/js/module.js"/>
             <script type="text/javascript" src="/legacy_require14/static/src/js/rpc.js"/>
         </xpath>
@@ -10,5 +11,8 @@
 
     <template id="assets_backend_trimmed" inherit_id="legacy_require14.assets_backend">
         <xpath expr="//script[@src='/legacy_require14/static/src/js/dropped.js']" position="replace"/>
+        <xpath expr="//script[@src='/legacy_require14/static/src/js/kept.js']" position="replace">
+            <script type="text/javascript" src="/legacy_require14/static/src/js/kept.js"/>
+        </xpath>
     </template>
 </odoo>
