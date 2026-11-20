@@ -1713,6 +1713,9 @@ custom/soft_guards/models/soft_partner.py:164:52: OD210 'code': field 'code' of 
 custom/soft_guards/models/soft_partner.py:169:52: OD210 'code': field 'code' of soft.thing comes from module soft_guards_side, which is not in depends
 custom/soft_guards/models/soft_partner.py:174:52: OD210 'code': field 'code' of soft.thing comes from module soft_guards_side, which is not in depends
 custom/soft_guards/models/soft_partner.py:179:52: OD210 'code': field 'code' of soft.thing comes from module soft_guards_side, which is not in depends
+custom/soft_guards/models/soft_partner.py:184:52: OD210 'code': field 'code' of soft.thing comes from module soft_guards_side, which is not in depends
+custom/soft_guards/models/soft_partner.py:189:52: OD210 'code': field 'code' of soft.thing comes from module soft_guards_side, which is not in depends
+custom/soft_guards/models/soft_partner.py:194:52: OD210 'code': field 'code' of soft.thing comes from module soft_guards_side, which is not in depends
 custom/soft_guards/tests/test_soft_guards.py:37:34: OD206 no indexed module defines model 'soft.absent'
 custom/soft_guards/tests/test_soft_guards.py:42:57: OD210 'code': field 'code' of soft.thing comes from module soft_guards_side, which is not in depends
 custom/soft_guards/tests/test_soft_guards.py:49:57: OD210 'code': field 'code' of soft.thing comes from module soft_guards_side, which is not in depends
