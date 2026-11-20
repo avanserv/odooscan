@@ -2010,6 +2010,9 @@ pub struct Index<'m> {
     hook_prefixes: Vec<&'m str>,
     /// The modules in the scope of a module with a file the scan cannot read at all.
     unread_reach: Vec<bool>,
+    /// When each module first runs each of its files (`imports::Graph::run_order`), none for one
+    /// whose order the scan cannot read.
+    build_order: Vec<Option<FxHashMap<String, imports::RunKey>>>,
     /// The modules whose manifest odooscan rejects, so none of them is in `modules`; `build` leaves
     /// it empty for the caller to fill.
     pub rejected: FxHashMap<String, OdooReads>,
@@ -2099,6 +2102,7 @@ impl<'m> Index<'m> {
             hook_names,
             hook_prefixes,
             unread_reach: Vec::new(),
+            build_order: Vec::new(),
             rejected: FxHashMap::default(),
             uninstallable: FxHashSet::default(),
         };
@@ -2112,7 +2116,19 @@ impl<'m> Index<'m> {
         index.client_views = index.client_views();
         index.data_fields = index.data_fields(default_series);
         index.unread_reach = index.unread_reach();
+        index.build_order = index.build_order();
         index
+    }
+
+    /// `imports::Graph::run_order` of each module, none for one a module other than its dependents
+    /// imports a file of, as that module may run the file first.
+    fn build_order(&self) -> Vec<Option<FxHashMap<String, imports::RunKey>>> {
+        let order = self.modules.iter().enumerate().map(|(mi, m)| {
+            let mut importers = self.imports.elsewhere(&m.name).map(|(_, importer)| importer);
+            let foreign = importers.any(|importer| !self.imports_later(importer, mi));
+            if foreign { None } else { self.imports.run_order(&m.name) }
+        });
+        order.collect()
     }
 
     /// The union of the scopes of the modules with `unread_text`.
@@ -3050,6 +3066,13 @@ impl<'m> Index<'m> {
         self.load_rank[a] < self.load_rank[b]
     }
 
+    /// Whether `importer` is a module that loads after `module` and not before it, so that its
+    /// imports of `module`'s files run once `module` has loaded.
+    pub fn imports_later(&self, importer: &str, module: usize) -> bool {
+        let d = self.by_name.get(importer).copied();
+        d.is_some_and(|d| self.loads_after(d, module) && !self.loads_after(module, d))
+    }
+
     /// Whether a module other than `module` that depends on it, directly or not, has a file that may
     /// import any file of it (`imports::Graph::unread`).
     pub fn has_unread_dependent(&self, module: usize) -> bool {
@@ -3468,21 +3491,17 @@ impl<'m> Index<'m> {
         self.model_by_xmlid.get(id).copied()
     }
 
-    /// Whether `model` is defined in scope, ignoring every class of module `extender` that only
-    /// extends it: Odoo builds a module's classes in turn, so one that lists the model as a parent
-    /// fails unless a class that introduces it, or a dependency, puts it in the registry first. A
-    /// module that depends on `extender` loads after it, so none of its classes count either, and
+    /// Whether `model` is defined in scope for class `extender` of a module, when one lists it as a
+    /// parent. Odoo builds a module's classes in the order Python creates them (18.0
+    /// `odoo/modules/registry.py:290-292`, 20.0 `odoo/orm/registry.py:449-451`), and building one
+    /// whose parent is not in the registry yet fails (18.0 `odoo/models.py:759-761`, 20.0
+    /// `odoo/orm/model_classes.py:208-210`), so an introducer of the extender's module counts
+    /// unless `builds_before` puts it after the extender.
+    /// A module that depends on the extender's loads after it, so none of its classes count, and
     /// naming it as the source would ask for a cycle in `depends`.
-    pub fn model_status(&self, model: &str, scope: &Scope, extender: Option<usize>) -> Status<'m> {
+    pub fn model_status(&self, model: &str, scope: &Scope, extender: Option<(usize, &ClassFact)>) -> Status<'m> {
         let classes = self.models.get(model).map(Vec::as_slice).unwrap_or_default();
-        let counts = |mi: usize, c: &ClassFact| match extender {
-            Some(e) if mi == e => c.new_model,
-            // `loads_before` first, as a lookup: outside a cycle, which is OD504's, a module that
-            // reaches `e` loads after it.
-            Some(e) => !(self.loads_before(e, mi) && self.reaches(mi, e)),
-            None => true,
-        };
-        let others = || classes.iter().filter(|(mi, c)| counts(*mi, c));
+        let others = || classes.iter().filter(|(mi, c)| self.counts(*mi, c, extender));
         if others().any(|(mi, _)| scope.sees(*mi)) {
             Status::Visible
         } else if let Some((first, _)) = others().next() {
@@ -3491,6 +3510,37 @@ impl<'m> Index<'m> {
         } else {
             Status::Missing
         }
+    }
+
+    /// Whether class `c` of module `mi` puts its model in the registry for `model_status`.
+    fn counts(&self, mi: usize, c: &ClassFact, extender: Option<(usize, &ClassFact)>) -> bool {
+        match extender {
+            Some((e, class)) if mi == e => c.new_model && !self.builds_before(e, class, c),
+            // `loads_before` first, as a lookup: outside a cycle, which is OD504's, a module that
+            // reaches `e` loads after it.
+            Some((e, _)) => !(self.loads_before(e, mi) && self.reaches(mi, e)),
+            None => true,
+        }
+    }
+
+    /// Whether module `mi` builds its class `first` before its class `then`: in one file by place,
+    /// else by `build_order` of their files. False when the scan cannot tell.
+    fn builds_before(&self, mi: usize, first: &ClassFact, then: &ClassFact) -> bool {
+        let (Some((a, _)), Some((b, _))) = (self.file_of(mi, first), self.file_of(mi, then)) else {
+            return false;
+        };
+        if std::ptr::eq(a, b) {
+            return first.pos < then.pos;
+        }
+        let Some(order) = &self.build_order[mi] else {
+            return false;
+        };
+        let key = |rel: &str, class: &ClassFact| {
+            let mut key = order.get(rel)?.clone();
+            key.push((class.pos, 0));
+            Some(key)
+        };
+        key(&a.rel, first).zip(key(&b.rel, then)).is_some_and(|(a, b)| a < b)
     }
 
     /// The module of the class that introduces the model with `_name`, the first in load order
@@ -5848,7 +5898,7 @@ mod tests {
     }
 
     #[test]
-    fn a_class_parent_ignores_the_module_s_own_extensions() {
+    fn a_class_parent_ignores_the_module_s_own_extensions_and_later_introducers() {
         let manifest = |depends: &str| format!("{{'version': '18.0.1.0', 'depends': [{depends}]}}");
         let mut modules = [
             module("base", &manifest("")),
@@ -5869,6 +5919,10 @@ mod tests {
              class S1(models.Model):\n    _inherit = 'side.thing'\n\n\
              class P0(models.Model):\n    _inherit = 'res.partner'\n\n\
              class P1(models.Model):\n    _inherit = 'res.partner'\n\n\
+             class T0(models.Model):\n    _inherit = 'side.thing'\n\n\
+             class T(models.Model):\n    _name = 'side.thing'\n\n\
+             class T1(models.Model):\n    _inherit = 'side.thing'\n\n\
+             class X0(models.Model):\n    _inherit = 'main.lamp'\n\n\
              class L(models.Model):\n    _name = 'main.lamp'\n\n\
              class X(models.Model):\n    _inherit = 'main.lamp'\n",
         ));
@@ -5877,21 +5931,28 @@ mod tests {
             .push(python_18("class G(models.Model):\n    _inherit = 'ghost.lamp'\n"));
         let index = Index::build(&modules, None);
         let (main, heir) = (index.by_name["main"], index.by_name["heir"]);
-        let status = |model: &str, mi: usize, extender: Option<usize>| {
+        let class = |mi: usize, name: &str| {
+            let classes = modules[mi].python.iter().flat_map(|f| &f.facts.classes);
+            classes.into_iter().find(|c| c.class_name == name).unwrap()
+        };
+        let status = |model: &str, mi: usize, extender: Option<(usize, &str)>| {
             let scope = index.scope(mi);
-            match index.model_status(model, &scope, extender) {
+            match index.model_status(model, &scope, extender.map(|(e, name)| (e, class(e, name)))) {
                 Status::Visible => "visible".to_owned(),
                 Status::Hidden(m) => format!("hidden {m}"),
                 Status::Missing => "missing".to_owned(),
             }
         };
-        assert_eq!(status("ghost.lamp", main, Some(main)), "missing");
-        assert_eq!(status("side.thing", main, Some(main)), "hidden side");
-        assert_eq!(status("res.partner", main, Some(main)), "visible");
-        assert_eq!(status("main.lamp", main, Some(main)), "visible");
+        assert_eq!(status("ghost.lamp", main, Some((main, "G1"))), "missing");
+        assert_eq!(status("side.thing", main, Some((main, "S1"))), "hidden side");
+        assert_eq!(status("side.thing", main, Some((main, "T0"))), "hidden side");
+        assert_eq!(status("side.thing", main, Some((main, "T1"))), "visible");
+        assert_eq!(status("res.partner", main, Some((main, "P1"))), "visible");
+        assert_eq!(status("main.lamp", main, Some((main, "X0"))), "missing");
+        assert_eq!(status("main.lamp", main, Some((main, "X"))), "visible");
         assert_eq!(status("ghost.lamp", main, None), "visible");
         assert_eq!(status("side.thing", main, None), "visible");
-        assert_eq!(status("ghost.lamp", heir, Some(heir)), "visible");
+        assert_eq!(status("ghost.lamp", heir, Some((heir, "G"))), "visible");
     }
 
     #[test]

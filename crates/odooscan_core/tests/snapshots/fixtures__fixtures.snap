@@ -777,6 +777,10 @@ custom/inherited_ids_use9/data/refs.xml:12:9: OD301 module inherited_ids_mix9 de
 custom/inherited_ids_use9/data/refs.xml:15:9: OD301 module inherited_ids_use9 defines no XML id 'inherited_ids_use9.field_inherited_b9_plain_tag'
 custom/inherited_ids_use9/data/refs.xml:24:9: OD301 module inherited_ids_mix9 defines no XML id 'inherited_ids_mix9.field_inherited_b9_host_tag'
 custom/inherited_ids_use9/data/refs.xml:30:9: OD301 module inherited_ids_mix9 defines no XML id 'inherited_ids_mix9.field_inherited_b9_forwarded_title'
+custom/late_introducer/ahead.py:5:16: OD201 model 'late.stand' is not in the registry yet: class Stand of this module introduces it after this class
+custom/late_introducer/lamps.py:5:16: OD201 model 'late.lamp' is not in the registry yet: class Lamp of this module introduces it after this class
+custom/late_introducer/lamps.py:12:17: OD201 model 'late.lamp' is not in the registry yet: class Lamp of this module introduces it after this class
+custom/late_introducer/lamps.py:35:16: OD202 model 'late.shade' is not in the registry yet: class Shade of this module introduces it after this class
 custom/legacy10/data/calls.xml:5:34: OD320 res.partner has no method '_nope_default_code'
 custom/legacy10/data/calls.xml:12:30: OD319 Odoo refuses this code when it loads the record: Expected an expression
 custom/legacy10/models/columns.py:27:32: OD203 'holder_id.code': legacy10.columns has no field 'code'

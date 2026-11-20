@@ -107,7 +107,7 @@ base class: only Python knows its fields and methods, so a rule whose page says 
 
 | Code | Name | Reports |
 | --- | --- | --- |
-| [OD201](OD201.md) | `unknown-model` | The model is not defined by any indexed module. |
+| [OD201](OD201.md) | `unknown-model` | No indexed module defines the model, or its module defines it only after the class that extends it. |
 | [OD202](OD202.md) | `model-not-in-depends` | The model comes from a module missing from depends. |
 | [OD203](OD203.md) | `unresolved-field-path` | A field path does not resolve on its model. |
 | [OD204](OD204.md) | `missing-method` | compute, inverse, search, selection or group_expand names a method the model does not have. |

@@ -894,6 +894,8 @@ pub struct ImportFact {
     pub from: bool,
     /// In a function, which runs it only when called.
     pub deferred: bool,
+    /// Under `if TYPE_CHECKING:`, which never runs it, while a `try` with the same `guard` does.
+    pub typing: bool,
     pub guard: ImportGuard,
 }
 
