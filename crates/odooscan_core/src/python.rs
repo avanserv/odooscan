@@ -3270,6 +3270,15 @@ impl HiddenNaming {
     fn any(self) -> bool {
         self.name || self.inherit || self.register
     }
+
+    /// Clears what a binding of `binding` hides, as a later plain `=` replaces it in the namespace
+    /// `MetaModel` reads at the end of the class body.
+    fn read_again(&mut self, binding: &str) {
+        let read = Self::of(binding);
+        self.name &= !read.name;
+        self.inherit &= !read.inherit;
+        self.register &= !read.register;
+    }
 }
 
 impl std::ops::BitOr for HiddenNaming {
@@ -3358,7 +3367,7 @@ struct Naming {
     own_body_names: bool,
     /// What the body binds of `_name`, `_inherit` or `_register` where the scan does not read it,
     /// with `_register` set to a value only a run tells, which may name the class otherwise or keep
-    /// it out of the registry. A later plain `=` to `_name` or `_inherit` reads that one again.
+    /// it out of the registry. A later plain `=` to any of them reads that one again.
     hidden: HiddenNaming,
     inherit: InheritShape,
     /// The last `_columns` hides a key. Waits here for the name: `_inherit` assigns `inherit_unknown`,
@@ -4570,6 +4579,7 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
 
     fn class_attrs(&mut self, targets: &[Expr], value: &Expr, fact: &mut ClassFact, naming: &mut Naming) {
         for target in targets.iter().filter_map(Expr::as_name_expr) {
+            naming.hidden.read_again(target.id.as_str());
             match target.id.as_str() {
                 name @ ("_name" | "_inherit") => self.naming_attr(name, value, fact, naming),
                 "_order" | "_fold_name" | "_rec_name" | "_active_name" => {
@@ -4633,11 +4643,9 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
     fn naming_attr(&mut self, name: &str, value: &Expr, fact: &mut ClassFact, naming: &mut Naming) {
         self.naming_bases.insert(fact.class_name.clone());
         if name == "_inherit" {
-            naming.hidden.inherit = false;
             naming.inherit = self.inherit(value, fact, naming.name.as_deref());
             return;
         }
-        naming.hidden.name = false;
         naming.named = true;
         naming.name = str_lit(value).map(str::to_owned);
         naming.falsy_name = record_eval::falsy(value);
@@ -6394,7 +6402,7 @@ mod tests {
 
     /// Class bodies that bind `_name`, `_inherit` or `_register` where neither reader takes the
     /// value, so that no class of them is named.
-    const HIDING_BODIES: [&str; 12] = [
+    const HIDING_BODIES: [&str; 13] = [
         "    for _ in range(1):\n        _inherit = 'a'",
         "    while FLAG:\n        _name = 'a'",
         "    for _name in NAMES:\n        pass",
@@ -6407,6 +6415,7 @@ mod tests {
         "    _register = True\n    del _register",
         "    _inherit = ['a']\n    _inherit += ['b']",
         "    _name = 'a'\n    _name += '.b'",
+        "    _register = True\n    [_register] = [FLAG]",
     ];
 
     /// Class bodies that hide `_name` or `_inherit` beside a binding of them the readers take, which
@@ -6423,7 +6432,7 @@ mod tests {
     /// Class bodies that bind a naming attribute where neither reader takes the value, yet some
     /// series names: a later plain `=` replaces the hidden binding, and a falsy `_name` reads no
     /// `_inherit` entry from saas~18.1.
-    const SERIES_NAMED_BODIES: [&str; 7] = [
+    const SERIES_NAMED_BODIES: [&str; 9] = [
         "    for _ in range(1):\n        _inherit = 'b'\n    _inherit = 'a'",
         "    _name = None\n    _inherit = ['a']\n    _inherit += ['b']",
         "    _name = False\n    _inherit = ['a', 'b']\n    if FLAG:\n        _inherit = 'c'",
@@ -6431,6 +6440,8 @@ mod tests {
         "    _name = False\n    _inherit = ['a', 'b']\n    [_register] = [False]",
         "    _name = False\n    _inherit = ['a', 'b']\n    if FLAG:\n        _inherit = _name = 'c'",
         "    for _name in NAMES: pass\n    _name = False\n    _inherit = ['a', 'b']",
+        "    [_register] = [FLAG]\n    _register = True",
+        "    _name = False\n    _inherit = ['a', 'b']\n    [_register] = [False]\n    _register = True",
     ];
 
     /// Class bodies that read `_name` and hide it in one statement, which names no class but leaves
@@ -9450,6 +9461,11 @@ class U(HttpCase):
             (SERIES_NAMED_BODIES[4], [&falsy; 4]),
             (SERIES_NAMED_BODIES[5], [&falsy; 4]),
             (SERIES_NAMED_BODIES[6], [&falsy, &derived, &derived, &falsy]),
+            (
+                SERIES_NAMED_BODIES[7],
+                [&verbatim, &derived, &derived, &model("ResPartnerX", true, true)],
+            ),
+            (SERIES_NAMED_BODIES[8], [&falsy, &derived, &derived, &falsy]),
         ];
         let unknown = model("ResPartnerX", true, true);
         let headers = NAMING_BODIES.map(|body| (body, [&verbatim, &derived, &derived, &unknown]));

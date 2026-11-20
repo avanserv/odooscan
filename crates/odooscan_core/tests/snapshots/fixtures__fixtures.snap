@@ -1160,6 +1160,7 @@ custom/modifiers17/views/jobs.xml:390:49: OD316 readonly names 'true': modifier.
 custom/modifiers17/views/unlisted.xml:1:1: OD502 'views/unlisted.xml' is not in the manifest's data or demo, so Odoo never loads it
 custom/modifiers173/views/tasks.xml:8:47: OD316 invisible names 'active_id': modifier.task has no field 'active_id'
 custom/nameless_models/models/desk_lamp.py:10:7: OD401 model 'DeskShade' has no ir.model.access rule, so only the superuser can use it
+custom/nameless_models/models/desk_lamp.py:29:7: OD401 model 'DeskHood' has no ir.model.access rule, so only the superuser can use it
 custom/nameless_models/models/foreign.py:15:7: OD401 model 'DeskClamp' has no ir.model.access rule, so only the superuser can use it
 custom/nameless_models/models/foreign.py:25:7: OD401 model 'DeskArm' has no ir.model.access rule, so only the superuser can use it
 custom/nameless_models/views/desk_lamp_views.xml:8:17: OD304 'lumens': DeskLamp has no field 'lumens'

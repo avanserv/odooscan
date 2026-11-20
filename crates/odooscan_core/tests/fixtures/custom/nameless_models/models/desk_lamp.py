@@ -24,3 +24,11 @@ class LampBase(models.Model):
     _register = False
 
     socket = fields.Char()
+
+
+class DeskHood(models.Model):
+    _description = "Desk hood"
+    [_register] = [False]
+    _register = True
+
+    tilt = fields.Integer()
