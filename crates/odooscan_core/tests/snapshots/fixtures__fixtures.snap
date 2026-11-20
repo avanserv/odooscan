@@ -642,6 +642,7 @@ custom/field_classes/models/seal.py:24:12: OD205 'kind' is a Selection field els
 custom/field_classes/models/seal.py:25:11: OD205 'ref' is a Integer field elsewhere and is redefined here as Many2oneReference
 custom/field_classes/models/seal.py:26:12: OD205 'back' is a Reference field elsewhere and is redefined here as Selection
 custom/field_classes/models/seal.py:27:12: OD205 'code' is a Char field elsewhere and is redefined here as Integer
+custom/field_classes/models/seal.py:30:37: OD203 'back.name': x.seal.back is not a relational field, so the path cannot continue
 custom/field_classes/views/lens_views.xml:7:45: OD312 x.lens has no method 'embedding'
 custom/field_classes14/data/badges.xml:2:5: OD324 x.badge.old.label is required and has no default, so creating this record fails if the column is NOT NULL; give the field a value
 custom/field_classes14/data/seals.xml:2:5: OD324 x.seal.old.kind is required and has no default, so creating this record fails if the column is NOT NULL; give the field a value

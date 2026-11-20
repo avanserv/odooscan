@@ -6,7 +6,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::facts::{
     ActionFact, Annotation, ArchElement, ArchEmptied, ArchSubview, ArchValued, BaseSource, ClassFact, ComponentItem,
-    DataFacts, FieldFact, FlowSummary, Heritage, JsClass, JsFacts, JsName, ModelKind, OptionValue, OwlTemplate,
+    DataFacts, FieldFact, FlowSummary, Heritage, JsClass, JsFacts, JsName, ModelKind, OptionValue, OwlTemplate, Pos,
     PropItem, PyFacts, Receiver, RecordWrite, ReportFact, RouteKey, Rows, RuleFact, ServerFact, Signature, Static,
     StaticWrite, UNREAD_TYPE, ViewFact, WrittenValue, mangled, private_name,
 };
@@ -3822,6 +3822,40 @@ impl<'m> Index<'m> {
         self.modules[mi].python.iter().find_map(|f| at(f).map(|at| (f, at)))
     }
 
+    /// Whether classes `a` and `b` of module `mi` sit in one file.
+    pub fn in_one_file(&self, mi: usize, a: &ClassFact, b: &ClassFact) -> bool {
+        let file = |c: &ClassFact| self.file_of(mi, c).map(|(f, _)| f);
+        file(a).zip(file(b)).is_some_and(|(fa, fb)| std::ptr::eq(fa, fb))
+    }
+
+    /// Whether the registry certainly merges what module `a.0`'s class `a.1` gives `model` at `a.2`
+    /// before what `b` gives. The classes of `model` come after those of the models they inherit,
+    /// unless one of them lists another model before its own in `_inherit`, which puts that model
+    /// after the classes loaded before it. Among them, `base`'s and a dependency's come first, then
+    /// in each module the class that introduces the model, then the others of one file in order;
+    /// files load in the order of the imports, which is not indexed.
+    pub fn merges_before(
+        &self,
+        model: &str,
+        a: (usize, &ClassFact, Pos),
+        b: (usize, &ClassFact, Pos),
+        scope: &Scope,
+    ) -> bool {
+        match (a.1.model == model, b.1.model == model) {
+            (_, false) => false,
+            (false, true) => !self.inherits_ahead(model, scope),
+            _ if a.0 != b.0 => self.loads_after(b.0, a.0) && !self.loads_after(a.0, b.0),
+            _ if a.1.new_model != b.1.new_model => a.1.new_model,
+            _ => self.in_one_file(a.0, a.1, b.1) && a.2 < b.2,
+        }
+    }
+
+    /// Whether a class of `model` in scope lists another model before `model` in `_inherit`.
+    pub fn inherits_ahead(&self, model: &str, scope: &Scope) -> bool {
+        let ahead = |c: &ClassFact| c.inherit.iter().position(|i| i.value == model).is_some_and(|p| p > 0);
+        self.classes(model).iter().any(|(mi, c)| scope.sees(*mi) && ahead(c))
+    }
+
     /// Whether a class merged into `model` has a parent the scan cannot see. A parent reached through
     /// `_inherits` does not count: it gives the model its fields, so its hidden methods do not reach
     /// the model.
@@ -4067,8 +4101,7 @@ impl<'m> Index<'m> {
         self.field_from(model, field, scope, &mut vec![])
     }
 
-    /// `field`, where `open` holds the related definitions being followed. One met again has no
-    /// comodel: Odoo cannot resolve a related cycle either, and refuses it unless it is manual.
+    /// `field`, where `open` holds the related definitions being followed.
     fn field_from(
         &self,
         model: &str,
@@ -4079,64 +4112,135 @@ impl<'m> Index<'m> {
         if self.magic_field(field) || EXTRA_FIELDS.contains(&(model, field)) {
             return Ok(None);
         }
-        let defs = self.nearest_defs(model, field, scope);
-        let Some((_, _, first)) = defs.first() else {
-            // Odoo skips a manual field whose name a class already gave the model.
-            if let Some(data) = self.data_field(model, field, Some(scope), true, |f| scope.holds(f)) {
-                return Ok(Some(FieldInfo {
-                    ftype: data.ftype,
-                    comodel: data.comodel.map(str::to_owned),
-                }));
-            }
-            let python = self.field_defs(model, field, None).first().map(|(mi, _, _)| *mi);
-            // A record in scope that has not loaded yet is no matter of `depends`.
-            let elsewhere = |f: &DataField| !scope.sees(f.module);
-            let definer = python.or_else(|| self.data_field(model, field, None, true, elsewhere).map(|d| d.module));
-            return Err(definer.map(|mi| self.modules[mi].name.as_str()));
+        let (level, defs) = self.nearest_defs(model, field, scope);
+        if defs.is_empty() {
+            return self.record_field(model, field, scope);
+        }
+        let merge = self.merge_order(level, defs, scope);
+        // Odoo builds the field with the class of the definition it merges last (18.0
+        // `odoo/models.py:3653-3657`, `:3687`; 20.0 `odoo/orm/model_classes.py:395-399`, `:441`, `:446`).
+        let last = merge.last(|_| true);
+        let Some(ftype) = agreed(last.iter().map(|&i| merge.defs[i].2.ftype.as_str())) else {
+            return Ok(Some(FieldInfo {
+                ftype: UNREAD_TYPE,
+                comodel: None,
+            }));
         };
-        let comodel = defs
-            .iter()
-            .find_map(|(_, _, f)| f.comodel.as_ref().map(|c| c.value.clone()))
-            .or_else(|| {
-                let (_, class, related) = defs.iter().find(|(_, _, f)| f.related.is_some())?;
-                let path = &related.related.as_ref()?.value;
-                if open.iter().any(|f| std::ptr::eq(*f, *related)) {
-                    return None;
-                }
-                open.push(related);
-                let comodel = self.related_comodel(&class.model, path, scope, open);
-                // A path may repeat a field, so only the fields being followed stay open.
-                open.pop();
-                comodel
-            });
-        Ok(Some(FieldInfo {
-            ftype: &first.ftype,
-            comodel,
-        }))
+        let comodel = self.def_comodel(&merge, ftype, scope, open);
+        Ok(Some(FieldInfo { ftype, comodel }))
     }
 
-    /// The in-scope definitions of `field` the registry gives `model`: its own when it has any, which
-    /// shadow every delegated level's, else those of `delegated_defs`.
-    fn nearest_defs(&self, model: &str, field: &str, scope: &Scope) -> Vec<FieldDef<'m>> {
+    /// `field` of `model` when no class in scope defines it: the record that adds it, else the
+    /// module outside the scope that defines it.
+    fn record_field(&self, model: &str, field: &str, scope: &Scope) -> Result<Option<FieldInfo<'m>>, Option<&'m str>> {
+        // Odoo skips a manual field whose name a class already gave the model.
+        if let Some(data) = self.data_field(model, field, Some(scope), true, |f| scope.holds(f)) {
+            return Ok(Some(FieldInfo {
+                ftype: data.ftype,
+                comodel: data.comodel.map(str::to_owned),
+            }));
+        }
+        let python = self.field_defs(model, field, None).first().map(|(mi, _, _)| *mi);
+        // A record in scope that has not loaded yet is no matter of `depends`.
+        let elsewhere = |f: &DataField| !scope.sees(f.module);
+        let definer = python.or_else(|| self.data_field(model, field, None, true, elsewhere).map(|d| d.module));
+        Err(definer.map(|mi| self.modules[mi].name.as_str()))
+    }
+
+    /// The comodel of a field built as `ftype` from the definitions of `merge` Odoo keeps: the one
+    /// the last that may name one agree on, else what the related path of the last related ones
+    /// ends on when they agree on it. A definition that unpacks arguments may name it unread.
+    fn def_comodel(
+        &self,
+        merge: &Merge<'m>,
+        ftype: &str,
+        scope: &Scope,
+        open: &mut Vec<&'m FieldFact>,
+    ) -> Option<String> {
+        let kept = merge.kept(ftype)?;
+        let def = |i: usize| merge.defs[i].2;
+        let named = merge.last(|i| kept[i] && (def(i).splat || def(i).comodel.is_some()));
+        if !named.is_empty() {
+            let comodels = named.iter().map(|&i| def(i).comodel.as_ref().map(|c| c.value.as_str()));
+            return agreed(comodels).flatten().map(str::to_owned);
+        }
+        let related = merge.last(|i| kept[i] && def(i).related.is_some());
+        let path = |i: usize| {
+            (
+                merge.defs[i].1.model.as_str(),
+                def(i).related.as_ref().map(|r| r.value.as_str()),
+            )
+        };
+        agreed(related.iter().map(|&i| path(i)))?;
+        let (_, class, first) = merge.defs[*related.first()?];
+        self.related_def_comodel(&class.model, first, scope, open)
+    }
+
+    /// The comodel the related path of `def`, a field of `model`, ends on. A definition met again
+    /// has none: Odoo cannot resolve a related cycle either, and refuses it unless it is manual.
+    fn related_def_comodel(
+        &self,
+        model: &str,
+        def: &'m FieldFact,
+        scope: &Scope,
+        open: &mut Vec<&'m FieldFact>,
+    ) -> Option<String> {
+        let path = &def.related.as_ref()?.value;
+        if open.iter().any(|f| std::ptr::eq(*f, def)) {
+            return None;
+        }
+        open.push(def);
+        let comodel = self.related_comodel(model, path, scope, open);
+        // A path may repeat a field, so only the fields being followed stay open.
+        open.pop();
+        comodel
+    }
+
+    /// `defs`, which `level` merges, with the order of each pair, worked out once since a pair may
+    /// need a walk of the dependency graph.
+    fn merge_order(&self, level: &str, defs: Vec<FieldDef<'m>>, scope: &Scope) -> Merge<'m> {
+        let before = |a: &FieldDef<'m>, b: &FieldDef<'m>| {
+            // Two classes of one model another level inherits keep that model's order in its MRO.
+            let model = if a.1.model == b.1.model {
+                a.1.model.as_str()
+            } else {
+                level
+            };
+            self.merges_before(model, (a.0, a.1, a.2.pos), (b.0, b.1, b.2.pos), scope)
+        };
+        let n = defs.len();
+        let row = |i: usize| (0..n).map(|j| i != j && before(&defs[i], &defs[j])).collect();
+        let before = (0..n).map(row).collect();
+        Merge { defs, before }
+    }
+
+    /// The in-scope definitions of `field` the registry gives `model`, with the model whose merge
+    /// orders them: its own when it has any, which shadow every delegated level's, else those of
+    /// `delegated_defs`.
+    fn nearest_defs<'a>(&self, model: &'a str, field: &str, scope: &Scope) -> (&'a str, Vec<FieldDef<'m>>)
+    where
+        'm: 'a,
+    {
         let mut defs = self.merged_fields(model, scope);
         defs.retain(|d| d.2.name == field);
-        if defs.is_empty() {
-            defs = self.delegated_defs(model, field, scope, &mut FxHashSet::default());
+        if !defs.is_empty() {
+            return (model, defs);
         }
-        defs
+        self.delegated_defs(model, field, scope, &mut FxHashSet::default())
+            .unwrap_or((model, defs))
     }
 
-    /// The in-scope definitions of `field` at the nearest level `model` delegates to that has it.
-    /// Odoo sets up each `_inherits` parent before the child and copies its resolved fields, so a
-    /// parent's own field wins over its parents', and of two parents the later entry wins. `seen`
-    /// ends a delegation ring.
+    /// The in-scope definitions of `field` at the nearest level `model` delegates to that has it,
+    /// with that level. Odoo sets up each `_inherits` parent before the child and copies its resolved
+    /// fields, so a parent's own field wins over its parents', and of two parents the later entry
+    /// wins. `seen` ends a delegation ring.
     fn delegated_defs(
         &self,
         model: &str,
         field: &str,
         scope: &Scope,
         seen: &mut FxHashSet<&'m str>,
-    ) -> Vec<FieldDef<'m>> {
+    ) -> Option<(&'m str, Vec<FieldDef<'m>>)> {
         let classes = self.merged_classes(model, scope);
         let parents: Vec<&'m str> = classes
             .iter()
@@ -4148,14 +4252,14 @@ impl<'m> Index<'m> {
             }
             let mut defs = self.merged_fields(parent, scope);
             defs.retain(|d| d.2.name == field);
-            if defs.is_empty() {
-                defs = self.delegated_defs(parent, field, scope, seen);
-            }
             if !defs.is_empty() {
-                return defs;
+                return Some((parent, defs));
+            }
+            if let Some(found) = self.delegated_defs(parent, field, scope, seen) {
+                return Some(found);
             }
         }
-        vec![]
+        None
     }
 
     /// The in-scope definitions of the field a dotted path ends on, or None when the path does not
@@ -4168,6 +4272,7 @@ impl<'m> Index<'m> {
         };
         let defs: Vec<_> = self
             .nearest_defs(&head, last, scope)
+            .1
             .into_iter()
             .map(|(_, _, f)| f)
             .collect();
@@ -4664,6 +4769,65 @@ struct Member<'m> {
     method: bool,
 }
 
+/// The definitions of a field one level of the registry merges.
+struct Merge<'m> {
+    defs: Vec<FieldDef<'m>>,
+    /// `before[i][j]` when the level certainly merges `defs[i]` before `defs[j]`.
+    before: Vec<Vec<bool>>,
+}
+
+impl<'m> Merge<'m> {
+    /// The definitions `pick` keeps after which no other one it keeps certainly merges.
+    fn last(&self, pick: impl Fn(usize) -> bool) -> Vec<usize> {
+        let picked: Vec<usize> = (0..self.defs.len()).filter(|&i| pick(i)).collect();
+        let open = |i: &usize| !picked.iter().any(|&j| self.before[*i][j]);
+        picked.iter().copied().filter(open).collect()
+    }
+
+    /// Which definitions a field built as `ftype` keeps of those of `ftype` that may set its
+    /// comodel. A definition of another class drops what came before it (18.0
+    /// `odoo/fields.py:415-421`, 20.0 `odoo/orm/fields.py:446-455`). None when one of another type
+    /// is not certainly before or after such a definition, or one of an unread type, which may be
+    /// of either class, is not certainly before it.
+    fn kept(&self, ftype: &str) -> Option<Vec<bool>> {
+        let other: Vec<usize> = (0..self.defs.len())
+            .filter(|&j| self.defs[j].2.ftype != ftype)
+            .collect();
+        let sets = |d: &FieldFact| d.ftype == ftype && (d.splat || d.comodel.is_some() || d.related.is_some());
+        (0..self.defs.len())
+            .map(|i| {
+                if sets(self.defs[i].2) {
+                    self.survives(i, &other)
+                } else {
+                    Some(false)
+                }
+            })
+            .collect()
+    }
+
+    /// Whether every definition of `other` certainly merges before `defs[i]`, false when one of a
+    /// read type certainly merges after it, None when that is unknown.
+    fn survives(&self, i: usize, other: &[usize]) -> Option<bool> {
+        let mut survives = true;
+        for &j in other {
+            if self.before[j][i] {
+                continue;
+            }
+            if !self.before[i][j] || self.defs[j].2.ftype == UNREAD_TYPE {
+                return None;
+            }
+            survives = false;
+        }
+        Some(survives)
+    }
+}
+
+/// The value every item of `values` has, or None when they differ or there are none.
+fn agreed<T: PartialEq>(mut values: impl Iterator<Item = T>) -> Option<T> {
+    let first = values.next()?;
+    values.all(|v| v == first).then_some(first)
+}
+
 /// What `Index::members` holds: the name of each field, method and `selection_add` value of each
 /// class, to the modules and models that define it.
 fn members<'m>(models: &Models<'m>) -> FxHashMap<&'m str, Vec<Member<'m>>> {
@@ -4819,7 +4983,7 @@ mod tests {
         base_rpc_method, class_file, depends_closure, field_id_prefixes, fold_writes, js_module_path, last_text,
         mangles_alike, old_base_method, test_bundle, triggers, unseen_table_id,
     };
-    use crate::facts::BaseSource;
+    use crate::facts::{BaseSource, UNREAD_TYPE};
     use crate::mentions::{Mentions, Words};
     use crate::project::{Module, SourceFile, module};
     use crate::python;
@@ -6070,6 +6234,106 @@ mod tests {
         assert_eq!(x("g"), ("Many2one", partner.clone()));
         // b2 has no `x` of its own, yet as the later entry its delegated Many2one beats b's Char.
         assert_eq!(x("h"), ("Many2one", partner));
+    }
+
+    #[test]
+    fn a_redefined_field_takes_the_type_and_comodel_of_its_last_definition() {
+        let manifest = |depends: &str| format!("{{'version': '18.0.1.0', 'depends': [{depends}]}}");
+        let mut modules = [
+            module("base", &manifest("")),
+            module("main", &manifest("'base'")),
+            module("left", &manifest("'main'")),
+            module("right", &manifest("'main'")),
+            module("top", &manifest("'left', 'right'")),
+        ];
+        modules[0].python.push(python_18(
+            "class P(models.Model):\n    _name = 'res.partner'\n\n\
+             class U(models.Model):\n    _name = 'res.users'\n",
+        ));
+        modules[1].python.push(python_18(
+            "class A(models.Model):\n    _name = 'a'\n    x = fields.Char()\n    \
+             y = fields.Many2one('res.partner')\n    z = fields.Many2one('res.partner')\n    w = fields.Char()\n\n\
+             class A1(models.Model):\n    _inherit = 'a'\n    x = fields.Integer()\n    y = fields.Char()\n    \
+             z = fields.Many2one('res.users')\n\n\
+             class B(models.Model):\n    _name = 'b'\n    _inherits = {'a': 'a_id'}\n",
+        ));
+        modules[2].python.push(python_18(
+            "class A(models.Model):\n    _inherit = 'a'\n    w = fields.Char()\n",
+        ));
+        modules[3].python.push(python_18(
+            "class A(models.Model):\n    _inherit = 'a'\n    w = fields.Integer()\n",
+        ));
+        let index = Index::build(&modules, None);
+        let info = |module: &str, model: &str, name: &str| {
+            let scope = index.scope(index.by_name[module]);
+            let info = index.field(model, name, &scope).ok().flatten().unwrap();
+            (info.ftype, info.comodel)
+        };
+        assert_eq!(info("main", "a", "x"), ("Integer", None));
+        assert_eq!(info("main", "a", "y"), ("Char", None));
+        assert_eq!(info("main", "a", "z"), ("Many2one", Some("res.users".to_owned())));
+        assert_eq!(info("main", "b", "x"), ("Integer", None));
+        assert_eq!(info("left", "a", "w"), ("Char", None));
+        assert_eq!(info("top", "a", "w"), (UNREAD_TYPE, None));
+    }
+
+    #[test]
+    fn a_redefined_field_takes_its_comodel_from_the_definitions_odoo_keeps() {
+        let manifest = |depends: &str| format!("{{'version': '18.0.1.0', 'depends': [{depends}]}}");
+        let mut modules = [
+            module("base", &manifest("")),
+            module("main", &manifest("'base'")),
+            module("left", &manifest("'main'")),
+            module("right", &manifest("'main'")),
+            module("top", &manifest("'left', 'right'")),
+        ];
+        modules[0].python.push(python_18(
+            "class P(models.Model):\n    _name = 'res.partner'\n\n\
+             class U(models.Model):\n    _name = 'res.users'\n\n\
+             class D(models.Model):\n    _name = 'd'\n    q = fields.Many2one('res.users')\n",
+        ));
+        modules[1].python.push(python_18(
+            "class A(models.Model):\n    _name = 'a'\n    p = fields.Many2one('d')\n    \
+             v = fields.Many2one('res.partner')\n    k = fields.Many2one('res.partner')\n    \
+             j = fields.Many2one(string='J')\n    s = fields.Many2one('res.partner')\n    \
+             g = fields.Many2one('res.partner')\n\n\
+             class A1(models.Model):\n    _inherit = 'a'\n    v = fields.Char()\n    k = fields.Many2one(string='K')\n    \
+             j = fields.Many2one(related='p.q')\n    s = fields.Many2one(**kwargs)\n\n\
+             class A2(models.Model):\n    _inherit = 'a'\n    v = fields.Many2one(related='p.q')\n\n\
+             class M(models.AbstractModel):\n    _name = 'm'\n    t = fields.Char()\n\n\
+             class M1(models.AbstractModel):\n    _inherit = 'm'\n    t = fields.Integer()\n\n\
+             class X(models.Model):\n    _name = 'x'\n    _inherit = 'm'\n",
+        ));
+        modules[2].python.push(python_18(
+            "class A(models.Model):\n    _inherit = 'a'\n    g = fields.Char()\n    \
+             h = fields.Many2one('res.partner')\n    r = fields.Many2one(related='p.q')\n    \
+             u = fields.Many2one('res.partner')\n",
+        ));
+        modules[3].python.push(python_18(
+            "class A(models.Model):\n    _inherit = 'a'\n    h = fields.Char()\n    \
+             r = fields.Many2one(related='p.q')\n    u = fields.Many2one('res.users')\n",
+        ));
+        modules[4].python.push(python_18(
+            "class A(models.Model):\n    _inherit = 'a'\n    g = fields.Many2one(string='G')\n    \
+             h = fields.Many2one(string='H')\n",
+        ));
+        let index = Index::build(&modules, None);
+        let info = |module: &str, model: &str, name: &str| {
+            let scope = index.scope(index.by_name[module]);
+            let info = index.field(model, name, &scope).ok().flatten().unwrap();
+            (info.ftype, info.comodel)
+        };
+        let users = Some("res.users".to_owned());
+        // The Char drops the first comodel, so the related path names it.
+        assert_eq!(info("main", "a", "v"), ("Many2one", users.clone()));
+        assert_eq!(info("main", "a", "k"), ("Many2one", Some("res.partner".to_owned())));
+        assert_eq!(info("main", "a", "j"), ("Many2one", users.clone()));
+        assert_eq!(info("main", "a", "s"), ("Many2one", None));
+        assert_eq!(info("main", "x", "t"), ("Integer", None));
+        assert_eq!(info("top", "a", "g"), ("Many2one", None));
+        assert_eq!(info("top", "a", "h"), ("Many2one", None));
+        assert_eq!(info("top", "a", "r"), ("Many2one", users));
+        assert_eq!(info("top", "a", "u"), ("Many2one", None));
     }
 
     #[test]

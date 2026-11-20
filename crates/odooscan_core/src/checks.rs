@@ -3407,14 +3407,7 @@ impl<'m> Ctx<'_, 'm> {
     /// is that of the imports, which is not indexed.
     fn defined_before(&self, first: &ClassFact, then: &ClassFact) -> bool {
         let me = self.index.by_name[self.module.name.as_str()];
-        self.in_one_file(me, first, then) && first.pos < then.pos
-    }
-
-    fn in_one_file(&self, mi: usize, a: &ClassFact, b: &ClassFact) -> bool {
-        self.index.modules[mi].python.iter().any(|f| {
-            let has = |c: &ClassFact| f.facts.classes.iter().any(|x| std::ptr::eq(x, c));
-            has(a) && has(b)
-        })
+        self.index.in_one_file(me, first, then) && first.pos < then.pos
     }
 
     fn field(&self, out: &mut Out<'m>, path: &'m Path, class: &ClassFact, field: &FieldFact) {
@@ -5838,23 +5831,8 @@ impl<'m> Ctx<'_, 'm> {
 
     /// Whether the registry certainly merges definition `a` of a field of `model` before `b`.
     fn before(&self, model: &str, a: &FieldDef<'m>, b: &FieldDef<'m>) -> bool {
-        self.merges_before(model, (a.0, a.1, a.2.pos), (b.0, b.1, b.2.pos))
-    }
-
-    /// Whether the registry certainly merges what module `a.0`'s class `a.1` gives `model` at `a.2`
-    /// before what `b` gives. The classes of `model` come after those of the models they inherit,
-    /// unless one of them lists another model before its own in `_inherit`, which puts that model
-    /// after the classes loaded before it. Among them, `base`'s and a dependency's come first, then
-    /// in each module the class that introduces the model, then the others of one file in order;
-    /// files load in the order of the imports, which is not indexed.
-    fn merges_before(&self, model: &str, a: (usize, &ClassFact, Pos), b: (usize, &ClassFact, Pos)) -> bool {
-        match (a.1.model == model, b.1.model == model) {
-            (_, false) => false,
-            (false, true) => !self.inherits_ahead(model),
-            _ if a.0 != b.0 => self.index.loads_after(b.0, a.0) && !self.index.loads_after(a.0, b.0),
-            _ if a.1.new_model != b.1.new_model => a.1.new_model,
-            _ => self.in_one_file(a.0, a.1, b.1) && a.2 < b.2,
-        }
+        self.index
+            .merges_before(model, (a.0, a.1, a.2.pos), (b.0, b.1, b.2.pos), self.scope)
     }
 
     /// `merges_before` for the `_inherits` entries of `model`, which also orders two classes of
@@ -5880,10 +5858,10 @@ impl<'m> Ctx<'_, 'm> {
     {
         if std::ptr::eq(a.1, b.1) {
             // One class keeps its own order whichever path merges it.
-            return self.merges_before(&a.1.model, a, b);
+            return self.index.merges_before(&a.1.model, a, b, self.scope);
         }
         if a.1.model == model || b.1.model == model {
-            return self.merges_before(model, a, b);
+            return self.index.merges_before(model, a, b, self.scope);
         }
         let parents = self.parents_of(model);
         let (Some(pa), Some(pb)) = (parents.through(a.1), parents.through(b.1)) else {
@@ -5915,15 +5893,6 @@ impl<'m> Ctx<'_, 'm> {
         Listed {
             parents: parents.collect(),
         }
-    }
-
-    /// Whether a class of `model` in scope lists another model before `model` in `_inherit`.
-    fn inherits_ahead(&self, model: &str) -> bool {
-        let ahead = |c: &ClassFact| c.inherit.iter().position(|i| i.value == model).is_some_and(|p| p > 0);
-        self.index
-            .classes(model)
-            .iter()
-            .any(|(mi, c)| self.scope.sees(*mi) && ahead(c))
     }
 
     /// Where this module's definition loads, among those `before` leaves unordered: by the module's
@@ -6511,7 +6480,7 @@ impl<'m> Ctx<'_, 'm> {
             MagicBase::Replaced
         } else if name == "display_name" && era == MagicEra::Base {
             MagicBase::Kept(text, After::Every)
-        } else if field.defs.iter().any(|d| d.1.model != model) && self.inherits_ahead(model) {
+        } else if field.defs.iter().any(|d| d.1.model != model) && self.index.inherits_ahead(model, self.scope) {
             MagicBase::Unknown
         } else {
             MagicBase::Kept(text, After::Extensions)
@@ -7947,8 +7916,10 @@ impl<'m> Ctx<'_, 'm> {
         let sets = |&(mi, c): &(usize, &'m ClassFact)| c.attr(attr).map(|a| (mi, c, a));
         let set: Vec<_> = merged.iter().filter_map(sets).collect();
         let overridden = |&(mi, class, at): &(usize, &ClassFact, &Spanned<OptionValue>)| {
-            set.iter()
-                .any(|&(mj, other, by)| self.merges_before(model, (mi, class, at.pos), (mj, other, by.pos)))
+            set.iter().any(|&(mj, other, by)| {
+                self.index
+                    .merges_before(model, (mi, class, at.pos), (mj, other, by.pos), self.scope)
+            })
         };
         set.iter().filter(|t| !overridden(t)).map(|&(_, _, a)| a).collect()
     }
@@ -7980,8 +7951,12 @@ impl<'m> Ctx<'_, 'm> {
         let defs: Vec<_> = merged.iter().flat_map(applied).collect();
         let replaced = |(mi, c, d): (usize, &ClassFact, &Definition)| {
             let same = |e: &Definition| e.source == d.source && e.key.is_some() && e.key == d.key;
-            defs.iter()
-                .any(|&(mj, other, e)| same(e) && self.merges_before(model, (mi, c, d.at), (mj, other, e.at)))
+            defs.iter().any(|&(mj, other, e)| {
+                same(e)
+                    && self
+                        .index
+                        .merges_before(model, (mi, c, d.at), (mj, other, e.at), self.scope)
+            })
         };
         let names = |d: &Definition| d.column.as_ref().is_some_and(|c| c.value == name);
         defs.iter().any(|&t| names(t.2) && !replaced(t))

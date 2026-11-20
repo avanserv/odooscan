@@ -25,3 +25,7 @@ class SealExtension(models.Model):
     ref = fields.Many2oneReference(model_field="res_model", string="R")
     back = fields.Selection([("plain", "Plain")], string="B")
     code = fields.Integer(string="C")
+    # A path follows the definition Odoo loads last: back's is a Selection, which a path cannot
+    # pass, and kind's a Reference, which has no fixed comodel.
+    back_name = fields.Char(related="back.name")
+    kind_name = fields.Char(related="kind.name")
