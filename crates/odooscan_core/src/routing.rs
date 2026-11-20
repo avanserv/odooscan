@@ -139,12 +139,40 @@ impl Table {
     fn endpoint<'t>(&'t self, leaves: &[ClassAt<'t>], method: &str) -> Option<Endpoint<'t>> {
         let walks: Vec<_> = leaves.iter().map(|&leaf| self.walk(leaf, method)).collect();
         let (urls, origins) = self.decide(&walks, |r| &r.urls)?;
-        let methods = self.decide(&walks, |r| &r.methods).map(|(m, _)| m.cloned().flatten());
+        let (methods, widened) = match self.decide(&walks, |r| &r.methods) {
+            Some((methods, givers)) => (
+                Some(methods.cloned().flatten()),
+                self.widenings(&walks, &givers, &origins),
+            ),
+            None => (None, vec![]),
+        };
         Some(Endpoint {
             urls: urls?,
             origins,
+            widened,
             methods,
         })
+    }
+
+    /// The `methods` givers of `walks` below a route of `origins`, each with the methods of the
+    /// definitions its walk lays out before it.
+    fn widenings<'t>(
+        &'t self,
+        walks: &[Vec<Option<Origin<'t>>>],
+        givers: &[Origin<'t>],
+        origins: &[Origin<'t>],
+    ) -> Vec<Widening<'t>> {
+        let below = |g: &&Origin<'t>| origins.iter().any(|o| self.inherits(g.at, o.at.class));
+        let layer = |walk: &[Option<Origin<'t>>], route: &RouteDef| {
+            walk.iter()
+                .position(|l| l.is_some_and(|o| std::ptr::eq(o.route, route)))
+        };
+        let widening = |origin: Origin<'t>| {
+            let (walk, at) = walks.iter().find_map(|w| Some((w, layer(w, origin.route)?)))?;
+            let before = last_given(&walk[..at], None, |r| &r.methods);
+            Some(Widening { origin, before })
+        };
+        givers.iter().filter(below).filter_map(|&g| widening(g)).collect()
     }
 
     /// A key over the walks of the leaves, with the routes that give it: the last giving layer of
@@ -278,9 +306,19 @@ pub struct Endpoint<'t> {
     pub urls: &'t [String],
     /// The routes that give `urls`, several when the leaves of the controller agree on them.
     pub origins: Vec<Origin<'t>>,
+    /// The routes below a route of `origins` that give `methods` and leave `urls` to it.
+    pub widened: Vec<Widening<'t>>,
     /// The literal request methods, none inside when every method passes, none when the scan
     /// cannot tell them.
     pub methods: Option<Option<Vec<String>>>,
+}
+
+/// A route that gives the `methods` of an endpoint and keeps the paths of a route it overrides.
+#[derive(Debug)]
+pub struct Widening<'t> {
+    pub origin: Origin<'t>,
+    /// The methods the definitions before it give, read as `Endpoint::methods` is.
+    pub before: Option<Option<Vec<String>>>,
 }
 
 /// Where the file a scan reads sits among the controllers of the scan. `rel` also decides whether
@@ -896,6 +934,28 @@ mod tests {
         );
     }
 
+    #[test]
+    fn an_override_giving_only_methods_widens_the_endpoint_from_those_before_it() {
+        let widened = |args: &str| {
+            let ext = format!(
+                "from odoo import http\nfrom odoo.addons.shop.controllers.main import Shop\n\nclass Ext(Shop):\n    @http.route({args})\n    def a(self):\n        pass\n"
+            );
+            let scan = table(&[SHOP, ("ext", "main.py", &ext)]);
+            let summary = |w: &Widening| (w.origin.at.class.name.clone(), w.before.clone());
+            endpoints_in(&scan, |_| true)[0]
+                .widened
+                .iter()
+                .map(summary)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            widened("methods=['GET', 'POST']"),
+            [("Ext".to_owned(), only(&["POST"]))]
+        );
+        assert_eq!(widened(""), []);
+        assert_eq!(widened("'/b'"), []);
+    }
+
     /// An endpoint as its method, paths, origin classes and request methods.
     type Summary<'t> = (&'t str, Vec<&'t str>, Vec<&'t str>, Option<Option<Vec<String>>>);
 
@@ -904,15 +964,19 @@ mod tests {
         Some(Some(verbs.iter().map(|&v| v.to_owned()).collect()))
     }
 
-    /// The endpoints of the classes of `table` that `keep` keeps, sorted.
-    fn endpoints_of(table: &Table, keep: impl Fn(&ClassAt) -> bool) -> Vec<Summary<'_>> {
+    /// The endpoints of the classes of `table` that `keep` keeps.
+    fn endpoints_in(table: &Table, keep: impl Fn(&ClassAt) -> bool) -> Vec<Endpoint<'_>> {
         let classes: Vec<_> = table
             .addons()
             .flat_map(|a| table.module(a))
             .filter(|c| keep(c))
             .collect();
-        let mut summary: Vec<_> = table
-            .endpoints(&classes)
+        table.endpoints(&classes)
+    }
+
+    /// The endpoints of the classes of `table` that `keep` keeps, summarised and sorted.
+    fn endpoints_of(table: &Table, keep: impl Fn(&ClassAt) -> bool) -> Vec<Summary<'_>> {
+        let mut summary: Vec<_> = endpoints_in(table, keep)
             .into_iter()
             .map(|e| {
                 let mut names: Vec<_> = e.origins.iter().map(|o| o.at.class.name.as_str()).collect();
