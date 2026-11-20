@@ -3595,11 +3595,7 @@ impl<'m> Index<'m> {
         if self.magic_field(field) || EXTRA_FIELDS.contains(&(model, field)) {
             return Ok(None);
         }
-        let mut defs = self.merged_fields(model, scope);
-        defs.retain(|d| d.2.name == field);
-        if defs.is_empty() {
-            defs = self.delegated_defs(model, field, scope, &mut FxHashSet::default());
-        }
+        let defs = self.nearest_defs(model, field, scope);
         let Some((_, _, first)) = defs.first() else {
             // Odoo skips a manual field whose name a class already gave the model.
             if let Some(data) = self.data_field(model, field, Some(scope), |f| scope.holds(f)) {
@@ -3635,6 +3631,17 @@ impl<'m> Index<'m> {
         }))
     }
 
+    /// The in-scope definitions of `field` the registry gives `model`: its own when it has any, which
+    /// shadow every delegated level's, else those of `delegated_defs`.
+    fn nearest_defs(&self, model: &str, field: &str, scope: &Scope) -> Vec<FieldDef<'m>> {
+        let mut defs = self.merged_fields(model, scope);
+        defs.retain(|d| d.2.name == field);
+        if defs.is_empty() {
+            defs = self.delegated_defs(model, field, scope, &mut FxHashSet::default());
+        }
+        defs
+    }
+
     /// The in-scope definitions of `field` at the nearest level `model` delegates to that has it.
     /// Odoo sets up each `_inherits` parent before the child and copies its resolved fields, so a
     /// parent's own field wins over its parents', and of two parents the later entry wins. `seen`
@@ -3667,15 +3674,16 @@ impl<'m> Index<'m> {
         vec![]
     }
 
-    /// Every in-scope definition of the field a dotted path ends on, or None when the path does not
-    /// resolve or ends on a field every model has.
+    /// The in-scope definitions of the field a dotted path ends on, or None when the path does not
+    /// resolve or ends on a field every model has. As in `field`, the model's own definitions shadow
+    /// a delegated level's, since Odoo reads the target from the resolved fields of the model.
     pub fn path_target(&self, model: &str, path: &str, scope: &Scope) -> Option<Vec<&'m FieldFact>> {
         let (head, last) = match path.rsplit_once('.') {
             Some((head, last)) => (self.path_comodel(model, head, scope)?, last),
             None => (model.to_owned(), path),
         };
         let defs: Vec<_> = self
-            .field_defs(&head, last, Some(scope))
+            .nearest_defs(&head, last, scope)
             .into_iter()
             .map(|(_, _, f)| f)
             .collect();
@@ -4959,6 +4967,31 @@ mod tests {
         assert_eq!(x("g"), ("Many2one", partner.clone()));
         // b2 has no `x` of its own, yet as the later entry its delegated Many2one beats b's Char.
         assert_eq!(x("h"), ("Many2one", partner));
+    }
+
+    #[test]
+    fn a_path_ends_on_the_model_s_own_definition_before_a_delegated_one() {
+        let manifest = |depends: &str| format!("{{'version': '18.0.1.0', 'depends': [{depends}]}}");
+        let mut modules = [module("base", &manifest("")), module("main", &manifest("'base'"))];
+        modules[0]
+            .python
+            .push(python_18("class P(models.Model):\n    _name = 'res.partner'\n"));
+        modules[1].python.push(python_18(
+            "class A(models.Model):\n    _name = 'a'\n    x = fields.Many2one('res.partner')\n\n\
+             class B(models.Model):\n    _name = 'b'\n    _inherits = {'a': 'a_id'}\n    x = fields.Char()\n\n\
+             class D(models.Model):\n    _name = 'd'\n    _inherits = {'b': 'b_id'}\n    b_link = fields.Many2one('b')\n\n\
+             class E(models.Model):\n    _name = 'e'\n    _inherits = {'a': 'a_id'}\n",
+        ));
+        let index = Index::build(&modules, None);
+        let scope = index.scope(index.by_name["main"]);
+        let types = |model: &str, path: &str| -> Vec<&str> {
+            let targets = index.path_target(model, path, &scope).unwrap();
+            targets.iter().map(|f| f.ftype.as_str()).collect()
+        };
+        assert_eq!(types("b", "x"), ["Char"]);
+        assert_eq!(types("d", "x"), ["Char"]);
+        assert_eq!(types("d", "b_link.x"), ["Char"]);
+        assert_eq!(types("e", "x"), ["Many2one"]);
     }
 
     #[test]

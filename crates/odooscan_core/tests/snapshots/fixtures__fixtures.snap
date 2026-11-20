@@ -395,7 +395,10 @@ custom/data_fields_dep/views/partner_views.xml:8:17: OD304 'x_demo': res.partner
 custom/data_fields_old/data/properties.xml:4:9: OD309 ir.property has no field 'value'
 custom/data_fields_old/data/properties.xml:5:9: OD309 ir.property has no field 'ghost'
 custom/data_fields_side/views/partner_views.xml:7:17: OD304 'x_flag': field 'x_flag' of res.partner comes from module data_fields, which is not in depends
-custom/delegate_levels/models/levels.py:26:39: OD203 'holder.name': level.bottom.holder is not a relational field, so the path cannot continue
+custom/delegate_levels/models/levels.py:20:42: OD207 'rank_number' is a Integer field related to 'rank', which is a Char field
+custom/delegate_levels/models/levels.py:30:39: OD203 'holder.name': level.bottom.holder is not a relational field, so the path cannot continue
+custom/delegate_levels/models/levels.py:31:42: OD207 'rank_number' is a Integer field related to 'rank', which is a Char field
+custom/delegate_levels/models/levels.py:32:42: OD207 'middle_rank' is a Integer field related to 'middle_id.rank', which is a Char field
 custom/depends_unused/__manifest__.py:5:9: OD520 module 'base' already comes with 'sale', also in depends
 custom/depends_unused/__manifest__.py:6:9: OD520 module 'mail' already comes with 'sale', also in depends
 custom/depends_unused/__manifest__.py:7:9: OD521 nothing of module 'sale' is used, nor of what only it brings
