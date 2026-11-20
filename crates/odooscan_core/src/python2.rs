@@ -59,7 +59,7 @@ fn expand_tabs(src: &str) -> (Cow<'_, str>, Vec<u32>) {
 type Edit = (TextRange, Cow<'static, str>);
 
 /// `code` with each Python 2 form its tokens show replaced by Python 3 of the same length.
-fn rewrite(code: &str) -> String {
+pub(crate) fn rewrite(code: &str) -> String {
     let parsed = parse_unchecked(code, Mode::Module.into());
     let tokens: Vec<&Token> = parsed.tokens().iter().filter(|t| !t.kind().is_trivia()).collect();
     let mut forms = Forms {

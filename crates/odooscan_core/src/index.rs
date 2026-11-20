@@ -1973,6 +1973,9 @@ pub struct Index<'m> {
     /// The modules whose manifest odooscan rejects, so none of them is in `modules`; `build` leaves
     /// it empty for the caller to fill.
     pub rejected: FxHashMap<String, OdooReads>,
+    /// The modules whose manifest sets `installable` to false, none of them in `modules`; `build`
+    /// leaves it empty for the caller to fill.
+    pub uninstallable: FxHashSet<String>,
 }
 
 impl<'m> Index<'m> {
@@ -2056,6 +2059,7 @@ impl<'m> Index<'m> {
             hook_names,
             hook_prefixes,
             rejected: FxHashMap::default(),
+            uninstallable: FxHashSet::default(),
         };
         index.patched = index.patched_classes();
         index.template_bases = index.template_bases();

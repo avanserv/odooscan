@@ -813,9 +813,10 @@ fn a_seriesless_web_runs_the_owl_of_the_module_checked() {
 }
 
 #[test]
-fn a_legacy_manifest_dependency_gets_od503_only_where_odoo_cannot_read_it() {
+fn a_legacy_manifest_dependency_gets_od503_where_odoo_cannot_read_or_install_it() {
     // Only `legacy_depends_modern` names a series, so the default one decides how the Odoo of the
-    // others reads them; the 18.0 module cannot install either dependency whatever that is.
+    // others reads them; the 18.0 module cannot install either dependency whatever that is. The
+    // `*_retired` ones set `installable` to False, which only the Odoo that reads them sees.
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
     let scan_as = |series: &str| {
         scan(&ScanOptions {
@@ -833,6 +834,7 @@ fn a_legacy_manifest_dependency_gets_od503_only_where_odoo_cannot_read_it() {
         found.map(|d| d.message.clone()).collect()
     };
     let unreadable = |dep: &str| format!("Odoo cannot read the manifest of module '{dep}'");
+    let retired = |dep: &str| format!("module '{dep}' is not installable: its manifest sets installable to False");
     let unreadable_both = [unreadable("python2_manifest"), unreadable("eval_manifest")];
     let python2 = |series: &str| {
         format!(
@@ -847,7 +849,10 @@ fn a_legacy_manifest_dependency_gets_od503_only_where_odoo_cannot_read_it() {
     let modern = modern.to_str().unwrap();
 
     let nine = scan_as("9.0");
-    assert_eq!(od503(&nine, user), Vec::<String>::new());
+    assert_eq!(
+        od503(&nine, user),
+        [retired("python2_retired"), retired("eval_retired")]
+    );
     assert_eq!(od503(&nine, modern), unreadable_both);
     for notice in [python2("9.0").as_str(), eval] {
         assert!(
@@ -857,11 +862,17 @@ fn a_legacy_manifest_dependency_gets_od503_only_where_odoo_cannot_read_it() {
         );
     }
     let ten = scan_as("10.0");
-    assert_eq!(od503(&ten, user), [unreadable("eval_manifest")]);
+    let ten_user = [
+        unreadable("eval_manifest"),
+        retired("python2_retired"),
+        unreadable("eval_retired"),
+    ];
+    assert_eq!(od503(&ten, user), ten_user);
     assert_eq!(od503(&ten, modern), unreadable_both);
     assert!(ten.notices.contains(&python2("10.0")), "{:#?}", ten.notices);
     let eighteen = scan_as("18.0");
-    assert_eq!(od503(&eighteen, user), unreadable_both);
+    let all = ["python2_manifest", "eval_manifest", "python2_retired", "eval_retired"].map(unreadable);
+    assert_eq!(od503(&eighteen, user), all);
     assert_eq!(od503(&eighteen, modern), unreadable_both);
 }
 
