@@ -95,24 +95,50 @@ impl AsyncScope {
     }
 }
 
-/// Puts back the spelling of `src` in a tree parsed from the renamed text. Patterns and type
-/// parameters are left out: the Pythons that have them reserve both words.
+/// `word` where the parser read it as `id` only by the rename. A name the parser normalized differs
+/// from `word` by more than case, and a real `ASYNC` does not differ at all.
+fn spelled<'a>(word: &'a str, id: &'a str) -> &'a str {
+    if word != id && word.eq_ignore_ascii_case(id) {
+        word
+    } else {
+        id
+    }
+}
+
+/// Puts back the spelling of `src` in a tree parsed from the renamed text, one component at a time
+/// in a dotted name. Patterns and type parameters are left out: the Pythons that have them reserve
+/// both words.
 struct Spelling<'a> {
     src: &'a str,
 }
 
 impl Spelling<'_> {
-    /// A name the parser normalized differs from `src` by more than case, and a real `ASYNC` does
-    /// not differ at all.
     fn name(&self, id: &mut Name, range: TextRange) {
-        let word = &self.src[range];
-        if word != id.as_str() && word.eq_ignore_ascii_case(id) {
+        let word = spelled(&self.src[range], id);
+        if word != id.as_str() {
             *id = Name::new(word);
         }
     }
 
     fn identifier(&self, identifier: &mut ast::Identifier) {
         self.name(&mut identifier.id, identifier.range);
+    }
+
+    /// The parser joins a dotted name without the spaces, tabs, form feeds and line continuations
+    /// its range spans, so each component is compared on its own.
+    fn dotted(&self, identifier: &mut ast::Identifier) {
+        let mut words = self.src[identifier.range]
+            .split('.')
+            .map(|word| word.trim_matches(|c: char| c.is_ascii_whitespace() || c == '\\'));
+        let joined = identifier
+            .id
+            .split('.')
+            .map(|id| words.next().map_or(id, |word| spelled(word, id)))
+            .collect::<Vec<_>>()
+            .join(".");
+        if joined != identifier.id.as_str() {
+            identifier.id = Name::new(joined);
+        }
     }
 }
 
@@ -123,7 +149,7 @@ impl Transformer for Spelling<'_> {
             Stmt::ClassDef(def) => self.identifier(&mut def.name),
             Stmt::Global(s) => s.names.iter_mut().for_each(|name| self.identifier(name)),
             Stmt::Nonlocal(s) => s.names.iter_mut().for_each(|name| self.identifier(name)),
-            Stmt::ImportFrom(s) => s.module.iter_mut().for_each(|module| self.identifier(module)),
+            Stmt::ImportFrom(s) => s.module.iter_mut().for_each(|module| self.dotted(module)),
             _ => {}
         }
         transformer::walk_stmt(self, stmt);
@@ -149,7 +175,7 @@ impl Transformer for Spelling<'_> {
     }
 
     fn visit_alias(&self, alias: &mut ast::Alias) {
-        self.identifier(&mut alias.name);
+        self.dotted(&mut alias.name);
         alias.asname.iter_mut().for_each(|name| self.identifier(name));
     }
 
@@ -198,6 +224,12 @@ mod tests {
             "from a import async",
             "from a import b as async",
             "try:\n    pass\nexcept E as async:\n    pass",
+            "import a . async",
+            "from a . async import b",
+            "from . async import b",
+            "from .a . async . c import b",
+            "import a .\\\n    async",
+            "from a\t.\tasync import b",
         ] {
             for code in [code.to_owned(), code.replace("async", "await")] {
                 let tree = tree(&code, NAMES);
@@ -219,6 +251,30 @@ mod tests {
     fn a_normalized_name_stays_as_the_parser_reads_it() {
         let tree = tree("\u{FF21}SYNC = async", NAMES);
         assert!(tree.contains("\"ASYNC\""), "{tree}");
+    }
+
+    #[test]
+    fn a_spaced_dotted_import_names_the_joined_words() {
+        let module = parse("import a . async\nfrom a . async import b\n", NAMES)
+            .unwrap()
+            .module;
+        let [Stmt::Import(import), Stmt::ImportFrom(from)] = &module.body[..] else {
+            panic!("{module:?}");
+        };
+        assert_eq!(import.names[0].name.as_str(), "a.async");
+        assert_eq!(from.module.as_ref().map(ast::Identifier::as_str), Some("a.async"));
+    }
+
+    #[test]
+    fn a_real_uppercase_component_keeps_its_spelling() {
+        let tree = tree("import ASYNC . async", NAMES);
+        assert!(tree.contains("\"ASYNC.async\""), "{tree}");
+    }
+
+    #[test]
+    fn a_normalized_component_stays_as_the_parser_reads_it() {
+        let tree = tree("import \u{FF21}SYNC . async", NAMES);
+        assert!(tree.contains("\"ASYNC.async\""), "{tree}");
     }
 
     #[test]
