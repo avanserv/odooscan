@@ -25,9 +25,9 @@ module defines is not reported, [OD201](rules/OD201.md) skips a model no indexed
 
 [OD202](rules/OD202.md) and [OD603](rules/OD603.md) stay silent on a model only a module missing
 from `depends` defines, and [OD206](rules/OD206.md) on a model no indexed module defines, when its
-name fits what code outside `tests/` may build: the start an expression shows, every name when it
-shows no literal start, and for a class of unknown series the name the other reading gives it,
-unless that name is one of the class's parents.
+name fits what code outside `tests/`, `examples/`, `migrations/` and `upgrades/` may build: the
+start an expression shows, every name when it shows no literal start, and for a class of unknown
+series the name the other reading gives it, unless that name is one of the class's parents.
 
 `--target-series 19.0` checks every module given to `check` as if its manifest named 19.0, against
 the core on the addons path, or the one fetched below when none is given, so a port shows what that

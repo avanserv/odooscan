@@ -330,6 +330,14 @@ fn served(rel: &str) -> bool {
     dir != "tests" && !UPGRADE_DIRS.contains(&dir)
 }
 
+/// Whether the model classes of a file of a module join its registry build. A test class exists
+/// only in a test run, code under an upgrade directory loads outside `odoo.addons` so its class
+/// joins no module's build, and examples are no module code.
+fn builds_models(rel: &str) -> bool {
+    let dir = rel.split('/').next().unwrap_or_default();
+    dir != "tests" && dir != "examples" && !UPGRADE_DIRS.contains(&dir)
+}
+
 /// The paths a route spells out, none when it leaves them to the route it overrides or computes
 /// one of them.
 fn literal_urls(route: &RouteDef) -> &[String] {
@@ -1936,15 +1944,8 @@ struct BuiltModels<'m> {
 }
 
 impl<'m> BuiltModels<'m> {
-    /// A class under `tests/` exists only in a test run, so it builds nothing the module's code or
-    /// data can rely on.
     fn of(module: &'m Module) -> Self {
-        let loaded = || {
-            module
-                .python
-                .iter()
-                .filter(|f| f.rel.split('/').next() != Some("tests"))
-        };
+        let loaded = || module.python.iter().filter(|f| builds_models(&f.rel));
         Self {
             starts: loaded()
                 .flat_map(|f| &f.facts.built_model_starts)
@@ -1977,7 +1978,7 @@ struct Ctx<'a, 'm> {
     loaded: &'a Scope,
     /// The module builds model names at runtime, so its models and their ids cannot be listed.
     dynamic: bool,
-    /// What the module may build, outside `tests/`.
+    /// What the module may build, outside tests, examples and upgrade scripts.
     built: &'a BuiltModels<'m>,
     /// A module in scope depends on one that is not indexed, such as an Enterprise module, which
     /// may hold anything a rule misses.
@@ -7470,11 +7471,11 @@ mod tests {
     use rustc_hash::FxHashSet;
 
     use super::{
-        CACHE_KEY_GLOBALS, MEMBER_SERIES, MagicEra, REPORT_TAG, applies, bundle_list, cache_global, callable_attr,
-        csv_label, derived_label, es_module, exported_text, fetches_own_view, field_name, has_last_update, hoot_adds,
-        keeps_set, magic_era, no_access_message, page_miss, parent_path_children, patch_form, public_write_message,
-        reads_model_access, reads_requires, shadowed_member, static_only, stores_parent_path, tuple_checked,
-        tuple_listed, unknown_dependency, unmatched_asset, warns_on_labels,
+        CACHE_KEY_GLOBALS, MEMBER_SERIES, MagicEra, REPORT_TAG, applies, builds_models, bundle_list, cache_global,
+        callable_attr, csv_label, derived_label, es_module, exported_text, fetches_own_view, field_name,
+        has_last_update, hoot_adds, keeps_set, magic_era, no_access_message, page_miss, parent_path_children,
+        patch_form, public_write_message, reads_model_access, reads_requires, shadowed_member, static_only,
+        stores_parent_path, tuple_checked, tuple_listed, unknown_dependency, unmatched_asset, warns_on_labels,
     };
     use crate::facts::{AccessRow, Annotation, DefinitionSource, JsName, Perms, Pos, Spanned, UNREAD_TYPE};
     use crate::manifest::OdooReads;
@@ -7512,6 +7513,17 @@ mod tests {
         assert_eq!(keeps_set(None, char, ("Integer", &["Integer".to_owned()])), Some(false));
         let unread = (UNREAD_TYPE, unread.as_slice());
         assert_eq!(keeps_set(None, unread, unread), Some(true));
+    }
+
+    #[test]
+    fn only_module_code_builds_models() {
+        assert!(builds_models("models/a.py"));
+        assert!(builds_models("a.py"));
+        assert!(builds_models("models/examples/a.py"));
+        assert!(!builds_models("tests/common.py"));
+        assert!(!builds_models("examples/a.py"));
+        assert!(!builds_models("migrations/18.0.1.0.0/pre-a.py"));
+        assert!(!builds_models("upgrades/18.0.1.0.0/post-a.py"));
     }
 
     #[test]
