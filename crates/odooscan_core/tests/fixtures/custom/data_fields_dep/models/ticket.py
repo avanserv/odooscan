@@ -27,3 +27,18 @@ class DataTicket(models.Model):
 
     def init(self):
         self.env.cr.execute("UPDATE data_ticket t SET name = t.x_column")
+
+
+class DataTicketSlip(models.Model):
+    _inherit = "data.ticket.slip"
+
+    # data_fields has loaded, so the note's record of x_owner_id beats the stage's field.
+    dep_owner_ticket_id = fields.Many2one(related="x_owner_id.ticket_id")
+    dep_owner_kind = fields.Selection(related="x_owner_id.kind")
+
+
+class DataTicketCard(models.Model):
+    _inherit = "data.ticket.card"
+
+    # The stage comes later here, so its x_owner_id decides.
+    dep_card_kind = fields.Selection(related="x_owner_id.kind")

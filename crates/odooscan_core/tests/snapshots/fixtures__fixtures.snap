@@ -388,6 +388,7 @@ custom/data_fields/models/ticket.py:125:53: OD224 l.kind: data_ticket_leaf has n
 custom/data_fields/models/ticket.py:144:39: OD224 t.x_column: data_ticket has no such column, since data.ticket has no field x_column; name the column of a stored field of data.ticket
 custom/data_fields/models/ticket.py:147:39: OD224 t.x_column: data_ticket has no such column, since data.ticket has no field x_column; name the column of a stored field of data.ticket
 custom/data_fields/models/ticket.py:176:37: OD227 x_grade: data_ticket_card has no such column, since x_grade is a field of data.ticket.stage, which data.ticket.card reaches through _inherits; declare the definition on data.ticket.stage
+custom/data_fields/models/ticket.py:215:30: OD210 'x_owner_id.kind': data.ticket.line has no field 'kind'
 custom/data_fields/security/rules.xml:16:36: OD210 'x_unloaded': res.partner has no field 'x_unloaded'
 custom/data_fields/security/rules.xml:21:36: OD210 'x_demo': res.partner has no field 'x_demo'
 custom/data_fields/security/rules.xml:26:36: OD210 'x_partner_id.no_partner_field': res.partner has no field 'no_partner_field'
@@ -412,6 +413,7 @@ custom/data_fields/views/ticket_views.xml:18:53: OD312 data.ticket.line has no m
 custom/data_fields_dep/models/ticket.py:11:45: OD207 'dep_wrong_type' is a Integer field related to 'x_partner_id.name', which is a Char field
 custom/data_fields_dep/models/ticket.py:16:36: OD203 'x_demo_text': data.ticket has no field 'x_demo_text'
 custom/data_fields_dep/models/ticket.py:23:18: OD221 'x_parent_id.dep_depth' makes 'dep_depth' depend on itself on other records, so Odoo logs a warning; declare 'dep_depth' with recursive=True
+custom/data_fields_dep/models/ticket.py:37:47: OD203 'x_owner_id.kind': data.ticket.line has no field 'kind'
 custom/data_fields_dep/views/partner_views.xml:8:17: OD304 'x_demo': res.partner has no field 'x_demo'
 custom/data_fields_old/data/properties.xml:4:9: OD309 ir.property has no field 'value'
 custom/data_fields_old/data/properties.xml:5:9: OD309 ir.property has no field 'ghost'

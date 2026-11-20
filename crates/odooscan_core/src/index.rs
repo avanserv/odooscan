@@ -4141,8 +4141,9 @@ impl<'m> Index<'m> {
     }
 
     /// `field` of `model`: the model's own definitions, which shadow those of a model it delegates
-    /// to, and a delegated model's definitions shadow those of its own parents; else the record
-    /// that adds it. `Err(Some(module))` when the field exists only outside the scope.
+    /// to, and a delegated model's definitions or own record shadow those of its own parents, so a
+    /// later parent's record beats an earlier parent's class; else the record that adds it.
+    /// `Err(Some(module))` when the field exists only outside the scope.
     pub fn field(&self, model: &str, field: &str, scope: &Scope) -> Result<Option<FieldInfo<'m>>, Option<&'m str>> {
         self.field_from(model, field, scope, &mut vec![])
     }
@@ -4160,7 +4161,7 @@ impl<'m> Index<'m> {
         }
         let (level, defs) = self.nearest_defs(model, field, scope);
         if defs.is_empty() {
-            return self.record_field(model, field, scope);
+            return self.level_record_field(model, level, field, scope);
         }
         let merge = self.merge_order(level, defs, scope);
         // Odoo builds the field with the class of the definition it merges last (18.0
@@ -4176,18 +4177,42 @@ impl<'m> Index<'m> {
         Ok(Some(FieldInfo { ftype, comodel }))
     }
 
+    /// `field` of `model` when no class in scope gives it at `level`, which is either `model` or
+    /// the delegated model whose own record stopped `nearest_defs`.
+    fn level_record_field(
+        &self,
+        model: &str,
+        level: &str,
+        field: &str,
+        scope: &Scope,
+    ) -> Result<Option<FieldInfo<'m>>, Option<&'m str>> {
+        // Odoo adds the model's own manual fields before it copies any from a parent.
+        let own = || self.own_record(model, field, scope);
+        if level != model
+            && let Some(data) = own().or_else(|| self.own_record(level, field, scope))
+        {
+            return Ok(Some(record_info(data)));
+        }
+        self.record_field(model, field, scope)
+    }
+
     /// `field` of `model` when no class in scope defines it: the record that adds it, else the
     /// module outside the scope that defines it.
     fn record_field(&self, model: &str, field: &str, scope: &Scope) -> Result<Option<FieldInfo<'m>>, Option<&'m str>> {
         // Odoo skips a manual field whose name a class already gave the model.
         if let Some(data) = self.data_field(model, field, Some(scope), true, |f| scope.holds(f)) {
-            return Ok(Some(FieldInfo {
-                ftype: data.ftype,
-                comodel: data.comodel.map(str::to_owned),
-            }));
+            return Ok(Some(record_info(data)));
         }
         let definer = self.outside_definer(model, field, scope, |_| true);
         Err(definer.map(|mi| self.modules[mi].name.as_str()))
+    }
+
+    /// The record in scope that adds `field` to `model` itself. Odoo adds a manual field only to
+    /// the model the record names, so neither an inherited model's nor an `_inherits` parent's
+    /// record counts, and neither does one whose model only a run tells.
+    fn own_record(&self, model: &str, field: &str, scope: &Scope) -> Option<&DataField<'m>> {
+        let candidates = self.data_fields.get(field)?;
+        candidates.iter().find(|f| f.model == Some(model) && scope.holds(f))
     }
 
     /// The module that defines `field` of `model` outside `scope`: of the modules with a class that
@@ -4314,7 +4339,8 @@ impl<'m> Index<'m> {
     /// The in-scope definitions of `field` at the nearest level `model` delegates to that has it,
     /// with that level. Odoo sets up each `_inherits` parent before the child and copies its resolved
     /// fields, so a parent's own field wins over its parents', and of two parents the later entry
-    /// wins. `seen` ends a delegation ring.
+    /// wins. A parent's record decides when no class of it gives the field, the parent then coming
+    /// with no definitions. `seen` ends a delegation ring.
     fn delegated_defs(
         &self,
         model: &str,
@@ -4333,7 +4359,8 @@ impl<'m> Index<'m> {
             }
             let mut defs = self.merged_fields(parent, scope);
             defs.retain(|d| d.2.name == field);
-            if !defs.is_empty() {
+            // Odoo adds a parent's manual fields before those it copies from the parent's parents.
+            if !defs.is_empty() || self.own_record(parent, field, scope).is_some() {
                 return Some((parent, defs));
             }
             if let Some(found) = self.delegated_defs(parent, field, scope, seen) {
@@ -4924,6 +4951,14 @@ impl<'m> Merge<'m> {
             survives = false;
         }
         Some(survives)
+    }
+}
+
+/// The field `data` adds, as `Index::field` reads it.
+fn record_info<'m>(data: &DataField<'m>) -> FieldInfo<'m> {
+    FieldInfo {
+        ftype: data.ftype,
+        comodel: data.comodel.map(str::to_owned),
     }
 }
 
@@ -6345,6 +6380,74 @@ mod tests {
         assert_eq!(x("g"), ("Many2one", partner.clone()));
         // b2 has no `x` of its own, yet as the later entry its delegated Many2one beats b's Char.
         assert_eq!(x("h"), ("Many2one", partner));
+    }
+
+    #[test]
+    fn a_later_parent_s_record_decides_a_delegated_field() {
+        let manifest = |depends: &str| format!("{{'version': '18.0.1.0', 'depends': [{depends}]}}");
+        let record = |model: &str, relation: &str| {
+            format!(
+                r#"<record id="field_{model}_x_f" model="ir.model.fields">
+                    <field name="name">x_f</field>
+                    <field name="model_id" ref="model_{model}"/>
+                    <field name="ttype">many2one</field>
+                    <field name="relation">{relation}</field>
+                </record>"#
+            )
+        };
+        let mut modules = [module("base", &manifest("")), module("main", &manifest("'base'"))];
+        modules[0].python.push(python_18(
+            "class P(models.Model):\n    _name = 'res.partner'\n\n\
+             class U(models.Model):\n    _name = 'res.users'\n",
+        ));
+        modules[1].python.push(python_18(
+            "class P1(models.Model):\n    _name = 'p1'\n    x_f = fields.Many2one('res.partner')\n\n\
+             class P2(models.Model):\n    _name = 'p2'\n\n\
+             class C(models.Model):\n    _name = 'c'\n    _inherits = {'p1': 'p1_id', 'p2': 'p2_id'}\n\n\
+             class R(models.Model):\n    _name = 'r'\n    _inherits = {'p2': 'p2_id', 'p1': 'p1_id'}\n\n\
+             class G(models.Model):\n    _name = 'g'\n    x_f = fields.Many2one('res.partner')\n\n\
+             class P3(models.Model):\n    _name = 'p3'\n    _inherits = {'g': 'g_id'}\n\n\
+             class K(models.Model):\n    _name = 'k'\n    _inherits = {'p3': 'p3_id'}\n\n\
+             class D(models.Model):\n    _name = 'd'\n    _inherits = {'p2': 'p2_id'}\n\n\
+             class A(models.AbstractModel):\n    _name = 'a'\n\n\
+             class Q(models.Model):\n    _name = 'q'\n    _inherit = ['a']\n\n\
+             class M(models.Model):\n    _name = 'm'\n    _inherits = {'p1': 'p1_id', 'q': 'q_id'}\n",
+        ));
+        modules[1].data.push(SourceFile {
+            path: PathBuf::new(),
+            rel: "data/fields.xml".to_owned(),
+            rank: Some(0),
+            demo: false,
+            facts: xml::analyze(
+                &format!(
+                    "<odoo>{}{}{}{}</odoo>",
+                    record("p2", "res.users"),
+                    record("p3", "res.users"),
+                    record("d", "res.partner"),
+                    record("a", "res.users"),
+                ),
+                Series::parse("18.0"),
+            ),
+            suppressions: Default::default(),
+            mentions: Mentions::default(),
+        });
+        let index = Index::build(&modules, None);
+        let scope = index.scope(index.by_name["main"]);
+        let comodel = |model: &str| index.field(model, "x_f", &scope).ok().flatten().unwrap().comodel;
+        let users = Some("res.users".to_owned());
+        // p2 gives `x_f` only by its record, yet as the later entry it beats p1's Python field.
+        assert_eq!(comodel("c"), users);
+        assert_eq!(comodel("r"), Some("res.partner".to_owned()));
+        // p3's own record comes before the field it would copy from g.
+        assert_eq!(comodel("k"), users);
+        // d's own record comes before the one it would copy from p2.
+        assert_eq!(comodel("d"), Some("res.partner".to_owned()));
+        // a's record adds `x_f` to a only, so q gives none and p1's field stands.
+        assert_eq!(comodel("m"), Some("res.partner".to_owned()));
+        for model in ["c", "k"] {
+            assert!(index.path_target(model, "x_f", &scope).is_none(), "{model}");
+        }
+        assert!(index.path_target("r", "x_f", &scope).is_some());
     }
 
     #[test]

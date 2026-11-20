@@ -201,3 +201,23 @@ class DataTicketLabel(models.Model):
 
     note_id = fields.Many2one("data.ticket.note", delegate=True, required=True, ondelete="cascade")
     stage_id = fields.Many2one("data.ticket.stage", required=True, ondelete="cascade")
+
+
+class DataTicketSlipOwner(models.Model):
+    _inherit = "data.ticket.slip"
+
+    # Once the data has loaded, the note's record of x_owner_id beats the stage's field, the
+    # note coming later in _inherits.
+    def _x_owner_tickets(self):
+        return self.search([("x_owner_id.ticket_id", "=", 1)])
+
+    def _x_owner_kinds(self):
+        return self.search([("x_owner_id.kind", "=", "open")])
+
+
+class DataTicketCardOwner(models.Model):
+    _inherit = "data.ticket.card"
+
+    # The stage comes later here, so its x_owner_id decides even once the note's record loads.
+    def _x_owner_card_kinds(self):
+        return self.search([("x_owner_id.kind", "=", "open")])
