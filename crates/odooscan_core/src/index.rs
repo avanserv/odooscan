@@ -978,6 +978,14 @@ fn model_chain<'m>(
     out
 }
 
+/// The definitions named `field` in the classes of `chain`, in its order.
+fn defs_named<'m>(chain: Vec<(usize, &'m ClassFact)>, field: &str) -> Vec<FieldDef<'m>> {
+    chain
+        .into_iter()
+        .flat_map(|(mi, c)| c.fields.iter().filter(|f| f.name == field).map(move |f| (mi, c, f)))
+        .collect()
+}
+
 /// The fields `class` of module `mi` gets from its parents, each with a module that may hold its id.
 /// Odoo tests a module against the model's original one, so a later class of the module that
 /// introduces the model takes its place, and against the modules that declare the field, so every
@@ -3677,10 +3685,7 @@ impl<'m> Index<'m> {
     }
 
     pub fn field_defs(&self, model: &str, field: &str, scope: Option<&Scope>) -> Vec<FieldDef<'m>> {
-        self.chain(model, scope, true)
-            .into_iter()
-            .flat_map(|(mi, c)| c.fields.iter().filter(|f| f.name == field).map(move |f| (mi, c, f)))
-            .collect()
+        defs_named(self.chain(model, scope, true), field)
     }
 
     /// Every class in scope of `model` and of the models it inherits by `_inherit`, `base` included:
@@ -4215,8 +4220,12 @@ impl<'m> Index<'m> {
         candidates.iter().find(|f| f.model == Some(model) && scope.holds(f))
     }
 
-    /// The module that defines `field` of `model` outside `scope`: of the modules with a class that
-    /// defines it, the first `prefer` keeps, else the first, else that of a record that adds it.
+    /// The module that defines `field` of `model` outside `scope`: of the model's own definitions
+    /// (its classes, its `_inherit` parents', `base`'s), the first `prefer` keeps, else of those of
+    /// its `_inherits` parents, else the first own, else the first delegated, else that of a record
+    /// that adds it. Odoo copies a delegated field only under a name the model lacks (18.0
+    /// `odoo/models.py:3572-3573`, 20.0 `odoo/orm/model_classes.py:525-526`), so a parent only
+    /// names the field when no own definition `prefer` keeps, as one may be absent while it loads.
     fn outside_definer(
         &self,
         model: &str,
@@ -4224,12 +4233,16 @@ impl<'m> Index<'m> {
         scope: &Scope,
         prefer: impl Fn(usize) -> bool,
     ) -> Option<usize> {
-        let defs = self.field_defs(model, field, None);
-        let python = defs
+        let own = defs_named(self.chain(model, None, false), field);
+        // Every own definition is also in `all`, so `all` adds the delegated ones after them.
+        let all = self.field_defs(model, field, None);
+        let module = |(mi, _, _): &FieldDef| *mi;
+        let python = own
             .iter()
-            .map(|(mi, _, _)| *mi)
+            .chain(&all)
+            .map(module)
             .find(|&mi| prefer(mi))
-            .or(defs.first().map(|(mi, _, _)| *mi));
+            .or(own.first().or(all.first()).map(module));
         // A record in scope that has not loaded yet is no matter of `depends`.
         let elsewhere = |f: &DataField| !scope.sees(f.module);
         python.or_else(|| self.data_field(model, field, None, true, elsewhere).map(|d| d.module))
@@ -6779,6 +6792,108 @@ mod tests {
         assert_eq!(source("main.lamp", "wick"), Some(("side", false)));
         assert_eq!(source("main.lamp", "flame"), None);
         assert!(matches!(index.field("main.lamp", "shade", &scope), Err(Some("heir"))));
+    }
+
+    #[test]
+    fn a_hidden_field_names_the_model_s_own_module() {
+        let manifest = |depends: &str| format!("{{'version': '18.0.1.0', 'depends': [{depends}]}}");
+        let mut modules = [
+            module("base", &manifest("")),
+            module("main", &manifest("'base'")),
+            module("side", &manifest("'base'")),
+            module("deleg", &manifest("'base'")),
+        ];
+        let sources = [
+            (
+                2,
+                "class T(models.Model):\n    _name = 'side.thing'\n    name = fields.Char()\n\n\
+                 class B(models.Model):\n    _name = 'side.bare'\n",
+            ),
+            (
+                3,
+                "class D(models.Model):\n    _name = 'deleg.depot'\n    name = fields.Char()\n\n\
+                 class B(models.AbstractModel):\n    _inherit = 'base'\n    _inherits = {'deleg.depot': 'x_depot_id'}\n",
+            ),
+        ];
+        for (mi, source) in sources {
+            modules[mi].python.push(python_18(source));
+        }
+        let index = Index::build(&modules, None);
+        let main = index.by_name["main"];
+        let scope = index.scope(main);
+        // `base` delegates to `deleg.depot`, yet Odoo copies its `name` only to a model without one.
+        assert!(matches!(index.field("side.thing", "name", &scope), Err(Some("side"))));
+        assert_eq!(
+            index.field_source("side.thing", "name", &scope, main),
+            Some(("side", false))
+        );
+        assert!(matches!(index.field("side.bare", "name", &scope), Err(Some("deleg"))));
+    }
+
+    #[test]
+    fn a_hidden_field_source_falls_back_to_a_delegated_parent_that_loads_first() {
+        let manifest = |depends: &str| format!("{{'version': '18.0.1.0', 'depends': [{depends}]}}");
+        let mut modules = [
+            module("base", &manifest("")),
+            module("main", &manifest("'base'")),
+            module("side", &manifest("'base'")),
+            module("heir", &manifest("'main', 'side'")),
+            module("deleg", &manifest("'base'")),
+        ];
+        let sources = [
+            (2, "class T(models.Model):\n    _name = 'side.thing'\n"),
+            (
+                3,
+                "class T(models.Model):\n    _inherit = 'side.thing'\n    name = fields.Char()\n",
+            ),
+            (
+                4,
+                "class D(models.Model):\n    _name = 'deleg.depot'\n    name = fields.Char()\n\n\
+                 class B(models.AbstractModel):\n    _inherit = 'base'\n    _inherits = {'deleg.depot': 'x_depot_id'}\n",
+            ),
+        ];
+        for (mi, source) in sources {
+            modules[mi].python.push(python_18(source));
+        }
+        let index = Index::build(&modules, None);
+        let main = index.by_name["main"];
+        // `heir` is absent while `main` loads, so `side.thing` then gets `name` from `deleg.depot`.
+        assert_eq!(
+            index.field_source("side.thing", "name", &index.scope(main), main),
+            Some(("deleg", false))
+        );
+    }
+
+    #[test]
+    fn a_hidden_field_source_falls_back_to_a_delegated_parent_that_loads_after() {
+        let manifest = |depends: &str| format!("{{'version': '18.0.1.0', 'depends': [{depends}]}}");
+        let mut modules = [
+            module("base", &manifest("")),
+            module("main", &manifest("'base'")),
+            module("heir", &manifest("'main'")),
+            module("loose", &manifest("'base'")),
+        ];
+        let sources = [
+            (
+                2,
+                "class D(models.Model):\n    _name = 'heir.depot'\n    name = fields.Char()\n\n\
+                 class T(models.Model):\n    _name = 'heir.thing'\n    _inherits = {'heir.depot': 'x_depot_id'}\n",
+            ),
+            (
+                3,
+                "class B(models.AbstractModel):\n    _inherit = 'base'\n    name = fields.Char()\n",
+            ),
+        ];
+        for (mi, source) in sources {
+            modules[mi].python.push(python_18(source));
+        }
+        let index = Index::build(&modules, None);
+        let main = index.by_name["main"];
+        // Only `heir` introduces `heir.thing`, so no module `main` may depend on fixes the read.
+        assert_eq!(
+            index.field_source("heir.thing", "name", &index.scope(main), main),
+            Some(("heir", true))
+        );
     }
 
     #[test]
