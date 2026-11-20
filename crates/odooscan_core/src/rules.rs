@@ -162,7 +162,7 @@ rules! {
     "OD113" "fields-view-get-removed" Deprecation Error Some(">=16.0"), false, "fields_view_get() is removed; override _get_view() or get_views().";
     "OD114" "depends-on-id" Correctness Error None, false, "@api.depends names the field id, which Odoo refuses.";
     "OD115" "dotted-onchange-constrains" Correctness Warning None, false, "@api.onchange or @api.constrains names a dotted path, which Odoo ignores.";
-    "OD116" "field-shadows-model-member" Correctness Error None, false, "A field is named like a method or an attribute every model has.";
+    "OD116" "field-shadows-model-member" Correctness Error None, false, "A field is named like a method or an attribute its model inherits.";
     // saas~15.2 warns (18.0 `odoo/api.py:430-431`, `:484-487`), saas~15.1 does not; saas~18.2 batches such
     // a create (20.0 `odoo/orm/decorators.py:283-284`), saas~18.1 does not.
     "OD117" "create-not-batched" Deprecation Warning Some(">=saas~15.2,<saas~18.2"), false, "create() is decorated with @api.model, so Odoo calls it once per record.";

@@ -6,4 +6,6 @@
         <field name="code">model.env(su=True)
 model.pool('res.partner')</field>
     </record>
+
+    <function model="modern.rate" name="_cached_data"/>
 </odoo>

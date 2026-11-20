@@ -71,7 +71,7 @@ in one file.
 | [OD113](OD113.md) | `fields-view-get-removed` | fields_view_get() is removed; override _get_view() or get_views(). |
 | [OD114](OD114.md) | `depends-on-id` | @api.depends names the field id, which Odoo refuses. |
 | [OD115](OD115.md) | `dotted-onchange-constrains` | @api.onchange or @api.constrains names a dotted path, which Odoo ignores. |
-| [OD116](OD116.md) | `field-shadows-model-member` | A field is named like a method or an attribute every model has. |
+| [OD116](OD116.md) | `field-shadows-model-member` | A field is named like a method or an attribute its model inherits. |
 | [OD117](OD117.md) | `create-not-batched` | create() is decorated with @api.model, so Odoo calls it once per record. |
 | [OD118](OD118.md) | `create-reads-dict` | create() under @api.model reads its argument as one dict, but receives a list of them. |
 | [OD119](OD119.md) | `override-drops-result` | A create(), write() or copy() override calls super() but returns nothing. |
@@ -101,8 +101,8 @@ in one file.
 
 Models, fields and methods, checked against every module in the dependency graph. A class is a
 model when its bases include `Model`, `TransientModel` or `AbstractModel`, their aliases `osv`,
-`osv_memory` and `osv_abstract`, or from 20.0 `CachedModel`. Any other base is a plain Python base
-class: only Python knows its fields and methods, so a rule whose page says so skips the model.
+`osv_memory` and `osv_abstract`, or from saas~19.1 `CachedModel`. Any other base is a plain Python
+base class: only Python knows its fields and methods, so a rule whose page says so skips the model.
 
 | Code | Name | Reports |
 | --- | --- | --- |

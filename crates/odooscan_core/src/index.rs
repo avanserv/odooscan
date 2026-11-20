@@ -595,6 +595,41 @@ pub(crate) fn base_private_method(name: &str, series: Option<Series>) -> bool {
     })
 }
 
+/// The first series with `CachedModel`, so a model on it runs on this series or a later one.
+pub(crate) const CACHED_MODEL_SINCE: Series = Series { major: 19, minor: 1 };
+
+/// The methods `CachedModel` defines, by the range of series that has them (20.0
+/// `odoo/orm/models_cached.py:30-63`). `_fetch_field` and the `_clear_cache_*` pair stay out:
+/// `BaseModel` has them in every series that has `CachedModel`.
+const CACHED_MODEL_METHODS: &[(&str, &[&str])] = &[(">=saas~19.1", &["_cached_data"]), (">=saas~19.4", &["get_all"])];
+
+/// The plain values `CachedModel` binds in every series that has it (20.0
+/// `odoo/orm/models_cached.py:19-24`): a field must not replace them, a button or a `<function>`
+/// finds them as `getattr` does, and a `super()` call to one raises `TypeError`.
+const CACHED_MODEL_VALUES: &[&str] = &["_cached_data_domain", "_cached_data_fields"];
+
+/// The `@api.private` methods of `CachedModel`, by the range of series that decorates them (20.0
+/// `odoo/orm/models_cached.py:60`).
+const CACHED_PRIVATE_METHODS: &[(&str, &[&str])] = &[(">=saas~19.4", &["get_all"])];
+
+/// Whether a row of `rows` lists `name` for `series`. A module of unknown series may run on any, so
+/// every row counts.
+pub(crate) fn dated_member(rows: &[(&str, &[&str])], name: &str, series: Option<Series>) -> bool {
+    rows.iter()
+        .any(|(spec, names)| names.contains(&name) && series.is_none_or(|s| series::matches(spec, s)))
+}
+
+/// Whether `CachedModel` defines the method `name` in `series`, or in any series when unknown.
+pub(crate) fn cached_model_method(name: &str, series: Option<Series>) -> bool {
+    dated_member(CACHED_MODEL_METHODS, name, series)
+}
+
+/// Whether `CachedModel` binds the value `name` in `series`, or in any series that has it when
+/// unknown. A series before it may have a class of its own named so, whose values are not these.
+pub(crate) fn cached_model_value(name: &str, series: Option<Series>) -> bool {
+    CACHED_MODEL_VALUES.contains(&name) && series.is_none_or(|s| s >= CACHED_MODEL_SINCE)
+}
+
 /// The public methods of `BaseModel` that `BASE_MODEL_METHODS` lacks, by the range of series that
 /// has them, so OD604 keeps reporting a call a series cannot answer. Names only, read off each
 /// branch head: when adding a series, reread the methods of `BaseModel` and date what changed.
@@ -647,10 +682,7 @@ const BASE_RPC_METHODS: &[(&str, &[&str])] = &[
 /// Whether a client may call `name` as a public method of `BaseModel` in `series`. A module of
 /// unknown series may run on any, so every listed name counts.
 pub(crate) fn base_rpc_method(name: &str, series: Option<Series>) -> bool {
-    !base_private_method(name, series)
-        && BASE_RPC_METHODS
-            .iter()
-            .any(|(spec, names)| names.contains(&name) && series.is_none_or(|s| series::matches(spec, s)))
+    !base_private_method(name, series) && dated_member(BASE_RPC_METHODS, name, series)
 }
 
 pub fn full_id(module: &str, id: &str) -> String {
@@ -3875,15 +3907,34 @@ impl<'m> Index<'m> {
     }
 
     /// Whether `super().method()` in class `except` of `model` finds a definition. It looks in
-    /// `BaseModel`, `object`, the classes of `model` and of the models it inherits by `_inherit`,
-    /// other than `except` itself, and the plain bases all of those classes read, `except`'s too. A
-    /// model it delegates to is not searched: Odoo builds the class bases from `_inherit` and `base`
-    /// alone. A module outside the scope is searched, as an override of its method is called only by
-    /// that module. A property or plain value of `BaseModel` does not count, as calling it raises
-    /// `TypeError`, and a `__name` counts only from a class or base whose name mangles it alike.
+    /// `BaseModel`, `object`, `CachedModel` when a class reads it, the classes of `model` and of the
+    /// models it inherits by `_inherit`, other than `except` itself, and the plain bases all of those
+    /// classes read, `except`'s too. A model it delegates to is not searched: Odoo builds the class
+    /// bases from `_inherit` and `base` alone. A module outside the scope is searched, as an override
+    /// of its method is called only by that module. A property or plain value of `BaseModel` or
+    /// `CachedModel` does not count, as calling it raises `TypeError`, and a `__name` counts only
+    /// from a class or base whose name mangles it alike.
     pub fn has_parent_method(&self, model: &str, method: &str, except: &ClassFact, series: Option<Series>) -> bool {
         let parent = |c: &ClassFact| c.base_binds(method, &except.class_name) || defines_for(c, method, except);
-        base_parent_method(method, series) || self.chain_classes(model).iter().any(|(_, c)| parent(c))
+        base_parent_method(method, series)
+            || self.chain_classes(model).iter().any(|(_, c)| parent(c))
+            || (cached_model_method(method, series) && self.cached_model(model))
+    }
+
+    /// Whether a class of `model` or of a model it inherits, in any indexed module, is on
+    /// `CachedModel`, which then sits in the MRO of the model's registry class. A `super()` call from
+    /// a class past it in that MRO misses its members; the callers do not read the order, so they
+    /// let such a call pass.
+    pub fn cached_model(&self, model: &str) -> bool {
+        self.chain_classes(model).iter().any(|(_, c)| c.cached)
+    }
+
+    /// Whether Odoo refuses a button on `name` because `CachedModel` makes it private in `series`
+    /// and a class in `scope` puts `model` on it. An unknown series counts none: saas~19.1 to
+    /// saas~19.3 have `CachedModel` without a private `get_all`, so a module's own one works there.
+    pub fn cached_private_method(&self, model: &str, name: &str, scope: &Scope, series: Option<Series>) -> bool {
+        series.is_some_and(|s| dated_member(CACHED_PRIVATE_METHODS, name, Some(s)))
+            && self.merged_classes(model, scope).iter().any(|(_, c)| c.cached)
     }
 
     /// Whether a parent class defines `name` as `has_parent_method` reads it, or `BaseModel` binds
@@ -3949,10 +4000,17 @@ impl<'m> Index<'m> {
         {
             return Status::Visible;
         }
+        self.unscoped_status(model, |c| c.methods.iter().any(|m| m == method))
+    }
+
+    /// The status of what a class of `model` or of a model it inherits matching `holds` gives,
+    /// once the scoped walk missed it: `Hidden` by the first such module, unless one is always
+    /// installed.
+    fn unscoped_status(&self, model: &str, holds: impl Fn(&ClassFact) -> bool) -> Status<'m> {
         let defining: Vec<usize> = self
             .chain_classes(model)
             .iter()
-            .filter(|(_, c)| c.methods.iter().any(|m| m == method))
+            .filter(|(_, c)| holds(c))
             .map(|(mi, _)| *mi)
             .collect();
         match defining.first() {
@@ -3962,13 +4020,26 @@ impl<'m> Index<'m> {
         }
     }
 
-    /// Whether a button or a `<function>` finds `method` on `model`: any method of `BaseModel`, or
-    /// what `rpc_method` finds. Python looks both up on the model's class.
+    /// Whether a button or a `<function>` finds `method` on `model`: any method of `BaseModel`, what
+    /// `rpc_method` finds, or a member of `CachedModel` on a model on it, `Hidden` as a method is
+    /// when only a module outside `scope` puts the model there. Python looks both up on the model's
+    /// class.
     pub fn data_method(&self, model: &str, method: &str, scope: &Scope, series: Option<Series>) -> Status<'m> {
         if BASE_MODEL_EXTRA.contains(&method) || old_base_method(method, series) {
             return Status::Visible;
         }
-        self.rpc_method(model, method, scope, series)
+        let found = self.rpc_method(model, method, scope, series);
+        let cached = cached_model_method(method, series) || cached_model_value(method, series);
+        if matches!(found, Status::Visible) || !cached {
+            return found;
+        }
+        if self.merged_classes(model, scope).iter().any(|(_, c)| c.cached) {
+            return Status::Visible;
+        }
+        match self.unscoped_status(model, |c| c.cached) {
+            Status::Missing => found,
+            status => status,
+        }
     }
 
     /// Whether a class in scope of `model` or of a model it inherits gives `kind` a default view. The
@@ -4398,10 +4469,11 @@ mod tests {
 
     use super::{
         BASE_MODEL_DUNDERS, BASE_MODEL_EXTRA, BASE_MODEL_METHODS, BASE_MODEL_VALUES, BASE_PRIVATE_METHODS,
-        BASE_RPC_METHODS, Export, FIELD_CLASSES, FieldHolder, FieldSpelling, Index, JsSpec, OLD_BASE_METHODS,
-        OWL_COMPONENT, OWL1_COMPONENT, PlacedWrite, Scope, Status, XmlIdDef, absolute_import, base_parent_method,
-        base_private_method, base_rpc_method, class_file, depends_closure, field_id_prefixes, fold_writes,
-        js_module_path, last_text, mangles_alike, old_base_method, test_bundle, triggers, unseen_table_id,
+        BASE_RPC_METHODS, CACHED_MODEL_VALUES, CACHED_PRIVATE_METHODS, Export, FIELD_CLASSES, FieldHolder,
+        FieldSpelling, Index, JsSpec, OLD_BASE_METHODS, OWL_COMPONENT, OWL1_COMPONENT, PlacedWrite, Scope, Status,
+        XmlIdDef, absolute_import, base_parent_method, base_private_method, base_rpc_method, class_file,
+        depends_closure, field_id_prefixes, fold_writes, js_module_path, last_text, mangles_alike, old_base_method,
+        test_bundle, triggers, unseen_table_id,
     };
     use crate::mentions::{Mentions, Words};
     use crate::project::{Module, SourceFile, module};
@@ -4711,6 +4783,110 @@ mod tests {
                 BASE_MODEL_METHODS.contains(name) || BASE_MODEL_EXTRA.contains(name),
                 "{name} would raise OD312 on an earlier series"
             );
+        }
+    }
+
+    const TARIFFS: &str = "class Tariff(models.CachedModel):\n    _name = 'x.tariff'\n\n\
+                           class TariffMore(models.Model):\n    _inherit = 'x.tariff'\n\n\
+                           class Plain(models.Model):\n    _name = 'x.plain'\n";
+
+    #[test]
+    fn a_super_call_finds_the_methods_of_cached_model_on_a_model_on_it() {
+        let mut modules = [module("base", "{'version': '20.0.1.0'}")];
+        modules[0].python.push(python_18(TARIFFS));
+        let index = Index::build(&modules, None);
+        let [_, more, plain] = &modules[0].python[0].facts.classes[..] else {
+            panic!("three classes");
+        };
+        let tariff = |name: &str, series: &str| index.has_parent_method("x.tariff", name, more, Series::parse(series));
+        assert!(!tariff("get_all", "saas~19.3") && tariff("get_all", "saas~19.4"));
+        assert!(index.has_parent_method("x.tariff", "get_all", more, None));
+        assert!(tariff("_cached_data", "saas~19.1") && !tariff("_cached_data_domain", "20.0"));
+        assert!(!index.has_parent_method("x.plain", "get_all", plain, Series::parse("20.0")));
+    }
+
+    #[test]
+    fn get_all_is_private_on_a_model_on_cached_model_from_saas_19_4() {
+        let mut modules = [module("base", "{'version': '20.0.1.0'}")];
+        modules[0].python.push(python_18(TARIFFS));
+        let index = Index::build(&modules, None);
+        let scope = index.scope(0);
+        let private = |model: &str, series: Option<&str>| {
+            index.cached_private_method(model, "get_all", &scope, series.and_then(Series::parse))
+        };
+        assert!(!private("x.tariff", Some("saas~19.3")) && private("x.tariff", Some("saas~19.4")));
+        assert!(!private("x.tariff", None));
+        assert!(!private("x.plain", Some("20.0")));
+    }
+
+    #[test]
+    fn a_data_file_finds_the_members_of_cached_model_on_a_model_on_it() {
+        let mut modules = [module("base", "{'version': '20.0.1.0'}")];
+        modules[0].python.push(python_18(TARIFFS));
+        let index = Index::build(&modules, None);
+        let scope = index.scope(0);
+        let found = |model: &str, name: &str, series: &str| {
+            matches!(
+                index.data_method(model, name, &scope, Series::parse(series)),
+                Status::Visible
+            )
+        };
+        for name in ["get_all", "_cached_data"].iter().chain(CACHED_MODEL_VALUES) {
+            assert!(
+                found("x.tariff", name, "20.0") && !found("x.plain", name, "20.0"),
+                "{name}"
+            );
+            assert!(!found("x.tariff", name, "18.0"), "{name}");
+        }
+    }
+
+    /// A module that extends a model on `CachedModel` without the module that puts it there in its
+    /// `depends`: OD116 and OD211 read the whole index, OD313, OD314 and OD320 only the scope.
+    #[test]
+    fn cached_model_reads_a_class_of_another_module() {
+        let mut modules = [
+            module("base", "{'version': '20.0.1.0'}"),
+            module("tariff", "{'version': '20.0.1.0', 'depends': ['base']}"),
+            module("reader", "{'version': '20.0.1.0', 'depends': ['base']}"),
+        ];
+        modules[1]
+            .python
+            .push(python_18("class Tariff(models.CachedModel):\n    _name = 'x.tariff'\n"));
+        modules[2]
+            .python
+            .push(python_18("class More(models.Model):\n    _inherit = 'x.tariff'\n"));
+        let index = Index::build(&modules, None);
+        let twenty = Series::parse("20.0");
+        let (tariff, reader) = (
+            index.scope(index.by_name["tariff"]),
+            index.scope(index.by_name["reader"]),
+        );
+        assert!(index.cached_model("x.tariff"));
+        assert!(index.cached_private_method("x.tariff", "get_all", &tariff, twenty));
+        assert!(!index.cached_private_method("x.tariff", "get_all", &reader, twenty));
+        let status = |scope: &Scope, name: &str| match index.data_method("x.tariff", name, scope, twenty) {
+            Status::Visible => "visible".to_owned(),
+            Status::Hidden(m) => format!("hidden {m}"),
+            Status::Missing => "missing".to_owned(),
+        };
+        assert_eq!(status(&tariff, "_cached_data"), "visible");
+        assert_eq!(status(&reader, "_cached_data"), "hidden tariff");
+        assert_eq!(status(&reader, "_cached_data_fields"), "hidden tariff");
+        assert_eq!(status(&reader, "x_none"), "missing");
+    }
+
+    #[test]
+    fn cached_private_methods_are_known_to_data_method() {
+        let mut modules = [module("base", "{'version': '20.0.1.0'}")];
+        modules[0].python.push(python_18(TARIFFS));
+        let index = Index::build(&modules, None);
+        let scope = index.scope(0);
+        for (spec, names) in CACHED_PRIVATE_METHODS {
+            let first = Series::parse(spec.trim_start_matches(">="));
+            for name in *names {
+                let found = index.data_method("x.tariff", name, &scope, first);
+                assert!(matches!(found, Status::Visible), "{name} would raise OD312 on {spec}");
+            }
         }
     }
 

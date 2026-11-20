@@ -1726,8 +1726,8 @@ fn class_body_supers(body: &[Stmt], loc: &Locator) -> Vec<RawDiag> {
         .collect()
 }
 
-/// The kind of an ORM model base class by its name. `CachedModel`, from 20.0, is a `Model` that
-/// caches some fields of its records. The `osv` names alias the first three up to 17.0: a later
+/// The kind of an ORM model base class by its name. `CachedModel`, from saas~19.1, is a `Model`
+/// that caches some fields of its records. The `osv` names alias the first three up to 17.0: a later
 /// class that names one does not import, so they need no gate.
 fn orm_kind(name: &str) -> Option<ModelKind> {
     match name {
@@ -1745,6 +1745,15 @@ fn model_kind(class: &ast::StmtClassDef, kinds: &FxHashMap<String, ModelKind>) -
         .iter()
         .filter_map(tail_name)
         .find_map(|name| orm_kind(name).or_else(|| kinds.get(name).copied()))
+}
+
+/// Whether a base of `class` is `CachedModel`, by its last name as `orm_kind` reads it.
+fn on_cached_model(class: &ast::StmtClassDef) -> bool {
+    class
+        .bases()
+        .iter()
+        .filter_map(tail_name)
+        .any(|name| name == "CachedModel")
 }
 
 pub(crate) fn declares_model(class: &ast::StmtClassDef) -> bool {
@@ -2116,6 +2125,7 @@ struct UnreadClass {
 /// What the header of a class of a file that does not parse says, as `class_fact` reads it.
 struct UnreadHeader {
     kind: Option<ModelKind>,
+    cached: bool,
     own_body_names: bool,
     may_reach_orm: bool,
 }
@@ -2179,6 +2189,7 @@ impl UnreadFile<'_, '_, '_> {
         self.classes.push(UnreadClass {
             fact: ClassFact {
                 kind: header.kind.unwrap_or(ModelKind::Model),
+                cached: header.cached,
                 ..ClassFact::new(self.visitor.loc.pos(name.start()), class_name)
             },
             naming: Naming {
@@ -2208,6 +2219,7 @@ impl UnreadFile<'_, '_, '_> {
         let Some(Stmt::ClassDef(class)) = parsed.as_ref().and_then(|parsed| parsed.suite().first()) else {
             return UnreadHeader {
                 kind: None,
+                cached: false,
                 own_body_names: false,
                 may_reach_orm: true,
             };
@@ -2215,6 +2227,7 @@ impl UnreadFile<'_, '_, '_> {
         let kind = model_kind(class, &self.visitor.kinds);
         UnreadHeader {
             kind,
+            cached: on_cached_model(class),
             own_body_names: self.visitor.own_body_names(class, kind),
             may_reach_orm: may_reach_orm(class),
         }
@@ -3489,6 +3502,7 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
         let (opaque_bases, base_methods) = self.read_bases(class, &plain_bases, &plain_sources);
         let mut fact = ClassFact {
             kind: kind.unwrap_or(ModelKind::Model),
+            cached: on_cached_model(class),
             plain_bases,
             plain_sources,
             opaque_bases,
@@ -7076,6 +7090,20 @@ class U(HttpCase):
     }
 
     #[test]
+    fn flags_a_class_on_cached_model() {
+        for (base, cached) in [
+            ("models.CachedModel", true),
+            ("CachedModel", true),
+            ("models.CachedModel, Layout", true),
+            ("models.Model", false),
+            ("Layout, models.Model", false),
+        ] {
+            let facts = analyze(&format!("class X({base}):\n    _name = 'x'\n"), None);
+            assert_eq!(facts.classes[0].cached, cached, "{base}");
+        }
+    }
+
+    #[test]
     fn names_a_plain_base_only_when_written_as_a_bare_name() {
         let facts = analyze(
             "class X(models.Model, Layout, mixins.Layout, Layout()):\n    _name = 'x'\n",
@@ -7762,6 +7790,13 @@ class U(HttpCase):
         let pos = Pos { line: 1, col: 1 };
         let undecoded = undecoded(src, pos, None, &TaintTable::default());
         assert_eq!(extracted(undecoded), (false, 0));
+    }
+
+    #[test]
+    fn a_file_that_does_not_parse_still_flags_a_class_on_cached_model() {
+        let cached = |base: &str| unparsed(&format!("class X({base}):\n    _name = 'a'")).classes[0].cached;
+        assert!(cached("models.CachedModel") && cached("CachedModel"));
+        assert!(!cached("models.Model"));
     }
 
     #[test]
