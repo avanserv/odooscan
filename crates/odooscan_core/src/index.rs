@@ -2805,10 +2805,11 @@ impl<'m> Index<'m> {
     }
 
     /// The scope of what Odoo reads as it sets up the Python fields and attributes of `module`, and
-    /// of what `init()` and `_auto_init()` run. That comes ahead of the data files of `module`, so the
-    /// `ir.model.fields` records that count are those of its dependencies and of the always-installed
-    /// modules that load first: one that loads after has not run its data files yet on the database
-    /// that installs both. A failure there refuses the install whatever the file order.
+    /// of the queries it runs ahead of the module's data, from `pre_init_hook` to `init()`. That
+    /// comes ahead of the data files of `module`, so the `ir.model.fields` records that count are
+    /// those of its dependencies and of the always-installed modules that load first: one that
+    /// loads after has not run its data files yet on the database that installs both. A failure
+    /// there refuses the install whatever the file order.
     pub fn setup_scope(&self, module: usize) -> Scope {
         let (mut records, _) = depends_closure(self.modules, &self.by_name, [module], self.default_series);
         for (mi, held) in records.iter_mut().enumerate() {

@@ -352,6 +352,7 @@ custom/cursor_state/models/sql_writes.py:209:9: OD122 DELETE on res_partner bypa
 custom/cursor_state/models/sql_writes.py:213:9: OD122 INSERT on x_partner_tier bypasses the ORM, so records this transaction already read keep stale values; call flush_model() before the query and invalidate_model() after it (flush() and invalidate_cache() before 16.0)
 custom/cycle_a/__manifest__.py:1:66: OD504 module 'cycle_b' depends back on cycle_a, so Odoo installs neither
 custom/cycle_b/__manifest__.py:1:58: OD504 module 'cycle_a' depends back on cycle_b, so Odoo installs neither
+custom/data_fields/__init__.py:5:30: OD224 t.x_column: data_ticket has no such column, since data.ticket has no field x_column; name the column of a stored field of data.ticket
 custom/data_fields/data/partners.xml:5:9: OD309 res.partner has no field 'x_unloaded'
 custom/data_fields/data/partners.xml:6:9: OD309 res.partner has no field 'x_demo'
 custom/data_fields/data/partners.xml:9:28: OD322 data.ticket.leaf.kind has no value 'nope'
@@ -373,6 +374,8 @@ custom/data_fields/models/ticket.py:93:38: OD227 x_column: data_ticket_copy has 
 custom/data_fields/models/ticket.py:97:53: OD224 c.x_column: data_ticket_copy has no such column, since x_column is a field of data.ticket, which data.ticket.copy reaches through _inherits; join data_ticket on ticket_id
 custom/data_fields/models/ticket.py:122:34: OD227 kind: data_ticket_leaf has no such column, since kind is a field of data.ticket.mid, which data.ticket.leaf reaches through _inherits; declare the definition on data.ticket.mid
 custom/data_fields/models/ticket.py:125:53: OD224 l.kind: data_ticket_leaf has no such column, since kind is a field of data.ticket.mid, which data.ticket.leaf reaches through _inherits; join data_ticket_mid on mid_id
+custom/data_fields/models/ticket.py:144:39: OD224 t.x_column: data_ticket has no such column, since data.ticket has no field x_column; name the column of a stored field of data.ticket
+custom/data_fields/models/ticket.py:147:39: OD224 t.x_column: data_ticket has no such column, since data.ticket has no field x_column; name the column of a stored field of data.ticket
 custom/data_fields/security/rules.xml:16:36: OD210 'x_unloaded': res.partner has no field 'x_unloaded'
 custom/data_fields/security/rules.xml:21:36: OD210 'x_demo': res.partner has no field 'x_demo'
 custom/data_fields/security/rules.xml:26:36: OD210 'x_partner_id.no_partner_field': res.partner has no field 'no_partner_field'
@@ -400,6 +403,7 @@ custom/data_fields_dep/models/ticket.py:23:18: OD221 'x_parent_id.dep_depth' mak
 custom/data_fields_dep/views/partner_views.xml:8:17: OD304 'x_demo': res.partner has no field 'x_demo'
 custom/data_fields_old/data/properties.xml:4:9: OD309 ir.property has no field 'value'
 custom/data_fields_old/data/properties.xml:5:9: OD309 ir.property has no field 'ghost'
+custom/data_fields_old/models/follower.py:20:39: OD224 f.x_res_model: old_follower has no such column, since old.follower has no field x_res_model; name the column of a stored field of old.follower
 custom/data_fields_side/views/partner_views.xml:7:17: OD304 'x_flag': field 'x_flag' of res.partner comes from module data_fields, which is not in depends
 custom/data_fields_tree/models/ticket.py:9:20: OD203 'x_tree_parent_id': data.ticket has no field 'x_tree_parent_id'
 custom/data_fields_twig/models/tree.py:23:20: OD203 'x_line_parent_id': data.ticket.line has no field 'x_line_parent_id'

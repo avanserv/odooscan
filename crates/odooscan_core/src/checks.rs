@@ -1969,7 +1969,7 @@ struct Ctx<'a, 'm> {
     module: &'m Module,
     scope: &'a Scope,
     /// The scope of what Odoo reads as it sets up the module's Python fields and attributes, and of
-    /// the queries of `init()` and `_auto_init()`.
+    /// the queries it runs ahead of the module's data (`SqlColumn::before_data`, `pre_init_hook`).
     setup: &'a Scope,
     /// `scope` and what installing the module auto-installs with it.
     installs: &'a Scope,
@@ -6340,7 +6340,9 @@ const VIEW_MAKERS: &[&str] = &["init", "_auto_init", "_table_query", "_table_sql
 /// OD224 on a qualified column a literal query names on the table of a model, which no stored
 /// field of the model provides, or on a view whose columns its `init()` spells, which selects no
 /// column of that name. The rule does not run for a module whose scope is partial, nor in upgrade
-/// scripts, and reads only tables `column_model` or `view_model` accepts.
+/// scripts, and reads only tables `column_model` or `view_model` accepts. A query that runs ahead
+/// of the module's data, in a setup method or in the function `pre_init_hook` names, reads the
+/// setup scope.
 impl<'m> Ctx<'_, 'm> {
     fn sql_columns(&self, out: &mut Out<'m>, path: &'m Path, columns: &[SqlColumn]) {
         if self.partial {
@@ -6350,8 +6352,10 @@ impl<'m> Ctx<'_, 'm> {
             scope: self.setup,
             ..*self
         };
+        let hook = self.module.manifest.pre_init_hook.as_deref();
         for column in columns {
-            let ctx = if column.before_data { &setup } else { self };
+            let in_hook = hook.is_some() && column.function.as_deref() == hook;
+            let ctx = if column.before_data || in_hook { &setup } else { self };
             if let Some(message) = ctx.unknown_column(column) {
                 out.push(path, "OD224", column.pos, message);
             }
