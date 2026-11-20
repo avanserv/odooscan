@@ -22,3 +22,9 @@ class ResPartnerHeld(models.Model):
     sa18_level = fields.Selection(selection_add=[("held",)], ondelete={"held": "cascade"})
     sa18_grade = fields.Selection(selection_add=[("held",)])
     sa18_tier = fields.Selection(selection_add=(("high", "High"),), ondelete={"high": "cascade"})
+
+
+class ResPartnerLabel(models.Model):
+    _inherit = "res.partner"
+
+    sa18_level = fields.Selection(selection_add=[("held", "Held")])

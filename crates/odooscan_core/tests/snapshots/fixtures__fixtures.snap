@@ -1705,6 +1705,11 @@ custom/saas193/security/ir.model.access.csv:2:1: OD402 no group limits this row,
 custom/saas193/security/ir.model.access.csv:3:1: OD402 base.group_portal gets write, create or unlink on model_saas_before_desk; public and portal access should be read-only and go through controllers
 custom/saas194/models/ledger.py:4:7: OD401 model 'saas.after.ledger' has no ir.access rule with a group, so only the superuser can use it
 custom/selection_add14/models/res_partner.py:8:45: OD216 'sa14_stage' is required, so Odoo refuses ondelete 'set null' for the selection_add value 'held'; give it 'cascade', 'set default' or a function
+custom/selection_add171/models/res_partner.py:23:50: OD216 Odoo looks up the label of the new selection_add value 'held' of 'sa171_level' among the values the field has, and raises a KeyError; give it a label
+custom/selection_add171/models/res_partner.py:24:50: OD216 Odoo looks up the label of the new selection_add value 'held' of 'sa171_grade' among the values the field has, and raises a KeyError; give it a label
+custom/selection_add171/models/res_partner.py:25:49: OD216 Odoo looks up the label of the new selection_add value 'held' of 'sa171_rank' among the values the field has, and raises a KeyError; give it a label
+custom/selection_add171/models/res_partner.py:27:49: OD216 Odoo looks up the label of the new selection_add value 'held' of 'sa171_mode' among the values the field has, and raises a KeyError; give it a label
+custom/selection_add171_auto/models/res_partner.py:13:55: OD216 Odoo looks up the label of the new selection_add value 'held' of 'sa171_auto_stage' among the values the field has, and raises a KeyError; give it a label
 custom/selection_add18/models/res_partner.py:20:49: OD216 Odoo only takes a list as the selection_add of 'sa18_stage' before saas~19.4; make the tuple a list
 custom/selection_add18/models/res_partner.py:21:49: OD216 Odoo only takes a list as the selection_add of 'sa18_phase' before saas~19.4; make the tuple a list
 custom/selection_add18/models/res_partner.py:22:49: OD216 Odoo looks up the label of the new selection_add value 'held' of 'sa18_level' among the values the field has, and raises a KeyError; give it a label

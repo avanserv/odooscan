@@ -724,9 +724,9 @@ fn selection_labels(ftype: &str, call: &ast::ExprCall, args: &[Expr]) -> Vec<Opt
         .collect()
 }
 
-/// The values of a literal `selection_add` given as a one-item tuple or list, which Odoo labels
-/// from the values the field already has.
-fn unlabelled_adds(ftype: &str, call: &ast::ExprCall) -> Vec<String> {
+/// The values of a literal `selection_add` given as a tuple or list of `size` items: one item has
+/// no label, and Odoo only keeps the label of two.
+fn sized_adds(ftype: &str, call: &ast::ExprCall, size: usize) -> Vec<String> {
     if ftype != "Selection" {
         return vec![];
     }
@@ -735,12 +735,12 @@ fn unlabelled_adds(ftype: &str, call: &ast::ExprCall) -> Vec<String> {
         Some(Expr::Tuple(t)) => &t.elts,
         _ => return vec![],
     };
-    let lone = |item: &Expr| match item {
-        Expr::Tuple(t) if t.elts.len() == 1 => str_lit(&t.elts[0]).map(str::to_owned),
-        Expr::List(l) if l.elts.len() == 1 => str_lit(&l.elts[0]).map(str::to_owned),
+    let sized = |item: &Expr| match item {
+        Expr::Tuple(t) if t.elts.len() == size => str_lit(&t.elts[0]).map(str::to_owned),
+        Expr::List(l) if l.elts.len() == size => str_lit(&l.elts[0]).map(str::to_owned),
         _ => None,
     };
-    items.iter().filter_map(lone).collect()
+    items.iter().filter_map(sized).collect()
 }
 
 /// A literal label, translated or not.
@@ -4592,6 +4592,7 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
             methods: vec![],
             labels: vec![],
             unlabelled: vec![],
+            paired: vec![],
             domain: vec![],
             domain_string: false,
             options: vec![],
@@ -4873,7 +4874,8 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
             related: kw_str("related").map(|s| self.spanned(s)),
             methods: methods(&options),
             labels: selection_labels(ftype, call, args.unwrap_or_default()),
-            unlabelled: unlabelled_adds(ftype, call),
+            unlabelled: sized_adds(ftype, call, 1),
+            paired: sized_adds(ftype, call, 2),
             domain: keyword(call, "domain").map(|d| self.domain(d)).unwrap_or_default(),
             domain_string: keyword(call, "domain").is_some_and(|d| matches!(d, Expr::StringLiteral(_))),
             options,
@@ -6490,6 +6492,13 @@ mod tests {
         );
         assert!(field("fields.Selection([('f',)], string='F')").unlabelled.is_empty());
         assert!(field("fields.Char(selection_add=[('g',)])").unlabelled.is_empty());
+    }
+
+    #[test]
+    fn reads_the_selection_add_values_given_as_a_pair() {
+        let f = field("fields.Selection(selection_add=[('a', 'A'), ('b',), ['c', 'C'], ('d', 'D', 1), 'e'])");
+        assert_eq!(f.paired, ["a", "c"]);
+        assert!(field("fields.Selection([('f', 'F')], string='F')").paired.is_empty());
     }
 
     #[test]

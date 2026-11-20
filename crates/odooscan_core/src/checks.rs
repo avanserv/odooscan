@@ -202,6 +202,11 @@ const LONE_ADD_IGNORED: Series = Series { major: 14, minor: 4 };
 /// up after that check (18.0 `odoo/fields.py:2989`); either way a new value raises a KeyError.
 const UNLABELLED_LOOKUP: Series = Series { major: 19, minor: 3 };
 
+/// The first series that looks up the label of a one-item `selection_add` entry as its definition
+/// applies (18.0 `odoo/fields.py:2988-2991`). Before, Odoo collects the labels of every definition
+/// and looks them up once all have applied, so a later definition may label the value.
+const LABELS_PER_DEFINITION: Series = Series { major: 17, minor: 2 };
+
 /// The first series that takes a tuple as a `selection_add` (20.0
 /// `odoo/orm/fields_selection.py:127`). Before, Odoo asserts a list (18.0 `odoo/fields.py:2946-2947`).
 const TUPLE_ADDED: Series = Series { major: 19, minor: 4 };
@@ -6333,7 +6338,7 @@ impl<'m> Ctx<'_, 'm> {
         }
         let known = earlier_values(field, at, tuple_listed(self.series))?;
         let unlabelled = || {
-            let value = own.unlabelled.iter().find(|v| !known.contains(v.as_str()))?;
+            let value = new_unlabelled(field, at, &known, labels_at_end(self.series))?;
             Some(format!(
                 "Odoo looks up the label of the new selection_add value '{value}' of '{}' among the values the field has, and raises a KeyError; give it a label",
                 own.name
@@ -6752,6 +6757,32 @@ fn earlier_setters(field: &Field, at: usize) -> Option<Vec<usize>> {
     Some(setters)
 }
 
+/// The first value definition `at` adds as one item that the field does not have before it. When
+/// `late`, Odoo looks the labels up once every definition has applied, so a value that a definition
+/// certainly applied later may label is skipped.
+fn new_unlabelled<'m>(field: &Field<'m>, at: usize, known: &FxHashSet<&str>, late: bool) -> Option<&'m str> {
+    let new = |v: &&'m String| !known.contains(v.as_str()) && !(late && labelled_later(field, at, v));
+    field.defs[at].2.unlabelled.iter().find(new).map(String::as_str)
+}
+
+/// Whether a definition of the same module certainly applied after definition `at` may label
+/// `value`. Odoo sets the models up once each module has loaded, so one of a module that loads
+/// later comes too late (18.0 `odoo/modules/loading.py:197-207`).
+fn labelled_later(field: &Field, at: usize, value: &str) -> bool {
+    let later = |i: &usize| field.before[at][*i] && field.defs[*i].0 == field.defs[at].0;
+    (0..field.defs.len())
+        .filter(later)
+        .any(|i| may_label(field.defs[i].2, value))
+}
+
+/// Whether the definition may label `value` or drop it: it may set what it does not name, its
+/// `selection` replaces the values, or its `selection_add` is no literal or gives `value` as a pair,
+/// the only entry whose label Odoo keeps.
+fn may_label(def: &FieldFact, value: &str) -> bool {
+    let labels = |add: &Spanned<OptionValue>| add.value.listed(true).is_none() || def.paired.iter().any(|v| v == value);
+    def.splat || def.option("selection").is_some() || def.option("selection_add").is_some_and(labels)
+}
+
 /// The setter whose `selection` list Odoo applies last, so that only it and the `selection_add` of
 /// the setters after it count. None when no setter has a list, or no setter with a list is known
 /// to come after every other setter.
@@ -6792,6 +6823,10 @@ fn lone_add_applied(series: Option<Series>) -> bool {
 
 fn labels_before_ondelete(series: Option<Series>) -> bool {
     series.is_some_and(|s| s >= UNLABELLED_LOOKUP)
+}
+
+fn labels_at_end(series: Option<Series>) -> bool {
+    series.is_some_and(|s| s < LABELS_PER_DEFINITION)
 }
 
 fn tuple_add_refused(series: Option<Series>) -> bool {
@@ -7976,11 +8011,11 @@ mod tests {
     use super::{
         CACHE_KEY_GLOBALS, MEMBER_SERIES, MagicEra, Merged, Paths, REPORT_TAG, Reach, applies, builds_models,
         bundle_list, cache_global, cached_member, callable_attr, check_module, csv_label, derived_label, exported_text,
-        fetches_own_view, field_name, has_last_update, hoot_adds, keeps_set, labels_before_ondelete, lacks_domain,
-        lone_add_applied, magic_era, no_access_message, page_miss, parent_path_children, patch_form,
-        public_write_message, qweb_asset_glob, reads_model_access, reads_requires, shadowed_member, static_only,
-        stores_parent_path, tuple_add_refused, tuple_checked, tuple_listed, unknown_dependency, unmatched_asset,
-        warns_on_labels,
+        fetches_own_view, field_name, has_last_update, hoot_adds, keeps_set, labels_at_end, labels_before_ondelete,
+        lacks_domain, lone_add_applied, magic_era, may_label, no_access_message, page_miss, parent_path_children,
+        patch_form, public_write_message, qweb_asset_glob, reads_model_access, reads_requires, shadowed_member,
+        static_only, stores_parent_path, tuple_add_refused, tuple_checked, tuple_listed, unknown_dependency,
+        unmatched_asset, warns_on_labels,
     };
     use crate::facts::{AccessRow, DefinitionSource, JsName, OptionValue, Perms, Pos, Spanned, UNREAD_TYPE};
     use crate::index::Index;
@@ -8277,6 +8312,28 @@ mod tests {
         assert!(!first("18.0") && !first("saas~19.2"));
         assert!(first("saas~19.3") && first("20.0"));
         assert!(!labels_before_ondelete(None));
+    }
+
+    #[test]
+    fn a_selection_add_label_is_looked_up_at_the_end_through_saas_17_1() {
+        let late = |series: &str| labels_at_end(Series::parse(series));
+        assert!(late("14.0") && late("17.0") && late("saas~17.1"));
+        assert!(!late("saas~17.2") && !late("18.0"));
+        assert!(!labels_at_end(None));
+    }
+
+    #[test]
+    fn a_definition_labels_a_value_as_a_pair_or_where_the_scan_cannot_read_it() {
+        let labels = |args: &str| {
+            let src = format!("class X(models.Model):\n    _inherit = 'x'\n    f = fields.Selection({args})\n");
+            may_label(&analyze(&src, None).classes.remove(0).fields.remove(0), "held")
+        };
+        assert!(labels("selection_add=[('held', 'Held')]") && labels("selection_add=[['held', 'Held']]"));
+        assert!(labels("selection=[('draft', 'Draft')]") && labels("selection='_values'"));
+        assert!(labels("selection_add=HELD") && labels("selection_add=[ITEM]") && labels("**attrs"));
+        assert!(!labels("selection_add=[('held',)]") && !labels("selection_add=[('held', 'Held', 'On hold')]"));
+        assert!(!labels("selection_add=['held']") && !labels("selection_add=[('done', 'Done')]"));
+        assert!(!labels("string='Held'"));
     }
 
     #[test]
