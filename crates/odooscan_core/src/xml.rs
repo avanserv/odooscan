@@ -1768,8 +1768,8 @@ fn asset_of(node: Node) -> Option<AssetEntry> {
 }
 
 /// What the specs of an extending template, through `<data>`, put in its bundle. A spec placed
-/// against a script it locates chains its scripts from there; any other spec appends, as the
-/// rendered order is out of reach.
+/// against a script it locates chains its scripts from there and appends what its calls render;
+/// any other spec appends, as the rendered order is out of reach.
 fn extension_assets(node: Node, assets: &mut Vec<AssetEntry>) {
     for spec in node.children().filter(Node::is_element) {
         if spec.has_tag_name("data") {
@@ -1797,20 +1797,23 @@ fn spec_directive(spec: Node) -> Directive {
 }
 
 /// Chains the scripts of `added` from `target`, the first placed by `directive`, or `before` it for
-/// a replace. Odoo replaces a node by adding each child before it, then dropping it, in every series
-/// (18.0 `odoo/tools/template_inheritance.py:208-212`, 20.0 `:209-213`), so a replacing script whose
-/// path normalises to the target's keeps it in the bundle.
+/// a replace, then appends what its calls render. Odoo replaces a node by adding each child before
+/// it, then dropping it (18.0 `odoo/tools/template_inheritance.py:208-212`, 20.0 `:209-213`), so a
+/// replacing script whose path normalises to the target's keeps it. A call renders its template
+/// where it stands (18.0 `odoo/addons/base/models/ir_qweb.py:2151`, 20.0 `:2632`), and before
+/// saas~14.3 the bundle reads the rendered scripts in order (commit `cc0060e88960`,
+/// `_get_asset_content`), so a called template rendering the target keeps it too: its include
+/// comes after the remove.
 fn place(added: impl Iterator<Item = AssetEntry>, directive: Directive, target: String, assets: &mut Vec<AssetEntry>) {
+    let (scripts, includes): (Vec<_>, Vec<_>) = added.partition(|e| e.directive == Directive::Append);
     let replace = directive == Directive::Replace;
     let mut next = if replace { Directive::Before } else { directive };
     let mut kept = false;
     let mut anchor = target.clone();
-    for mut entry in added {
-        if entry.directive == Directive::Append {
-            kept |= normal_parts(&entry.path) == normal_parts(&target);
-            entry.directive = std::mem::replace(&mut next, Directive::After);
-            entry.target = Some(std::mem::replace(&mut anchor, entry.path.clone()));
-        }
+    for mut entry in scripts {
+        kept |= normal_parts(&entry.path) == normal_parts(&target);
+        entry.directive = std::mem::replace(&mut next, Directive::After);
+        entry.target = Some(std::mem::replace(&mut anchor, entry.path.clone()));
         assets.push(entry);
     }
     if replace && !kept {
@@ -1820,6 +1823,7 @@ fn place(added: impl Iterator<Item = AssetEntry>, directive: Directive, target: 
             path: target,
         });
     }
+    assets.extend(includes);
 }
 
 /// The aggregated script a spec locates: a `<script>` spec by its `src`, or an xpath whose last step
@@ -2374,7 +2378,8 @@ mod tests {
             </xpath>
             <xpath expr="//script[@src='/web/static/src/gone.js']" position="replace"/>
             <xpath expr="//script[last()]" position="after"><script src="/a/static/src/last.js"/></xpath>
-            <script src="/web/static/src/kept.js" position="replace"><script src="/web/static/src/kept.js"/></script>"#,
+            <script src="/web/static/src/kept.js" position="replace"><script src="/web/static/src/kept.js"/></script>
+            <script src="/web/static/src/called.js" position="replace"><t t-call="a.again"/><script src="/a/static/src/c.js"/></script>"#,
         );
         assert_eq!(
             assets(&spec),
@@ -2389,6 +2394,9 @@ mod tests {
                 "Remove:>web/static/src/gone.js",
                 "Append:>a/static/src/last.js",
                 "Before:web/static/src/kept.js>web/static/src/kept.js",
+                "Before:web/static/src/called.js>a/static/src/c.js",
+                "Remove:>web/static/src/called.js",
+                "Include:>a.again",
             ]
         );
         // The bundle loads a path by its normalised parts, so a `.` part still names the target.

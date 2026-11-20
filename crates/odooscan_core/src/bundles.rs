@@ -584,6 +584,29 @@ mod tests {
     }
 
     #[test]
+    fn a_template_replacing_a_script_with_a_call_that_renders_it_keeps_it() {
+        let called = |call: &str| {
+            let x = rendered(
+                "x",
+                "14.0.1.0.0",
+                "'web'",
+                &[],
+                &format!(
+                    r#"<template id="assets" inherit_id="web.assets_backend">
+                        <xpath expr="//script[@src='/web/static/src/a.js']" position="replace"><t t-call="{call}"/></xpath>
+                    </template>
+                    <template id="again"><script src="/web/static/src/a.js"/></template>"#
+                ),
+            );
+            contents(&[web14(), x])["web.assets_backend"].clone()
+        };
+        // The call renders where the script stood, but a called path joins at the end, as every
+        // include does.
+        assert_eq!(called("x.again"), ["web/h.js", "web/a.js"]);
+        assert_eq!(called("web._helpers"), ["web/h.js"]);
+    }
+
+    #[test]
     fn an_inheritance_cycle_ends() {
         let x = rendered(
             "x",
