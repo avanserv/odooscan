@@ -1167,7 +1167,7 @@ fn reports(stdout: &str, place: &str, code: &str) -> bool {
 }
 
 #[test]
-fn a_fix_keeps_what_a_child_view_finds_or_sets_by_the_old_name() {
+fn a_fix_keeps_what_a_child_view_finds_by_the_old_name_or_meets_once_renamed() {
     let dir = scratch("fix_old_names");
     let parent =
         |id: &str| format!("<odoo><template id=\"{id}\"><span class=\"{id}\" t-esc=\"a\"/></template></odoo>\n");
