@@ -887,9 +887,11 @@ pub struct PyFacts {
     pub inherits_routes: bool,
     /// Models and their ids are built at runtime: a class names its model with an expression, or
     /// with a non-string literal that tests false and that the series does not replace. In a module
-    /// of unknown series, a class is named apart before and from saas~18.1, or sits on a model class
-    /// of its file with no `_name` and no `_inherit` or an empty one. A file that does not parse
-    /// also counts when it holds a `_name` or an `_inherit` its tokens do not spell.
+    /// of unknown series, a class is named apart before and from saas~18.1, or is on a proven Odoo
+    /// base and on a model class of its file, a class of it that binds `_name` or `_inherit`, or a
+    /// class of it that derives from such a class, with no `_name` and no `_inherit` or an empty one.
+    /// A file that does not parse also counts when it holds a `_name` or an `_inherit` its tokens do
+    /// not spell.
     pub dynamic_models: bool,
     /// The literal start of each name the file's classes may give a model at runtime, empty when
     /// the expression shows none, which fits every name.
