@@ -16,3 +16,11 @@ class HeirHolder(models.Model):
             self.env["heir.ghost"],
             self.env["x_heir.note"],
         )
+
+
+class HeirPaths(models.Model):
+    _inherit = "heir.holder"
+    _rec_names_search = ["large_id.size"]
+
+    large_size = fields.Integer(related="large_id.size")
+    sized_id = fields.Many2one("bad.generated.large", domain="[('size', '>', 0)]")

@@ -33,14 +33,20 @@ scripts call.
 [OD201](rules/OD201.md), [OD206](rules/OD206.md) and [OD603](rules/OD603.md) stay silent on a model
 no indexed module defines, and [OD202](rules/OD202.md) and OD603 on one only a module missing from
 `depends` defines, when its name fits what the module, a module in its `depends` or an
-always-installed module may build. For OD201, an always-installed module that depends on the module
-does not count, since it loads after it. What a module may build is read from its code outside
-`tests/`, `tests.py`, `examples/`, `migrations/` and `upgrades/`: the start an expression shows,
-every name when it shows no literal start, and for a class of unknown series each name another
-reading gives it, unless that name is one of the class's parents. An expression that shows no
-literal start counts only for the module's own code, so a helper that names the models of an
-always-installed module silences no other module. For these four rules, `base` builds only names
-that start with `x_`, the custom models a user creates in the database, whatever its code shows.
+always-installed module may build. [OD203](rules/OD203.md), [OD210](rules/OD210.md) and
+[OD304](rules/OD304.md) stay silent on a path that fails on such a model. For OD201, OD304 and a
+path or domain Odoo checks as the module loads, an always-installed module that depends on the
+module does not count, since it loads after it. What a module may build is read from its code
+outside `tests/`, `tests.py`, `examples/`, `migrations/` and `upgrades/`: the start an expression
+shows, every name when it shows no literal start, and for a class of unknown series each name
+another reading gives it, unless that name is one of the class's parents. An expression that shows
+no literal start counts only for the module's own code, so a helper that names the models of an
+always-installed module silences no other module. For these rules, `base` builds only names that
+start with `x_`, the custom models a user creates in the database, whatever its code shows. For
+OD203, OD210 and OD304, such a model holds beyond every model's fields only those whose names start
+with `x_` and those of the mixins `mail` adds to it when its `ir.model` row asks (`mail.thread`,
+`mail.activity.mixin` and `mail.thread.blacklist`; 18.0 `addons/mail/models/ir_model.py:101-116`,
+20.0 `:72-88`), or any field when `mail` is not indexed, as the database may still install it.
 
 `--target-series 19.0` checks every module given to `check` as if its manifest named 19.0, against
 the core on the addons path, or the one fetched below when none is given, so a port shows what that

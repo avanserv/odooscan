@@ -1,0 +1,27 @@
+<odoo>
+    <record id="auto_large_form" model="ir.ui.view">
+        <field name="name">auto.late.large.form</field>
+        <field name="model">auto.late.large</field>
+        <field name="arch" type="xml">
+            <form>
+                <field name="size"/>
+            </form>
+        </field>
+    </record>
+
+    <record id="action_auto_large" model="ir.actions.act_window">
+        <field name="name">Sized</field>
+        <field name="res_model">auto.late.large</field>
+        <field name="domain">[('size', '>', 0)]</field>
+    </record>
+
+    <record id="auto_holder_form" model="ir.ui.view">
+        <field name="name">auto.holder.form</field>
+        <field name="model">auto.holder</field>
+        <field name="arch" type="xml">
+            <form>
+                <field name="late_id"/>
+            </form>
+        </field>
+    </record>
+</odoo>
