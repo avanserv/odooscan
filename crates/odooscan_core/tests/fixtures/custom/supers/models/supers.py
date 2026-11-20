@@ -213,3 +213,17 @@ class SuperNestedDynamic(models.Model):
                 return super()._meta_gone()
 
         return Meta
+
+
+class SuperClassBody(models.Model):
+    _inherit = "bad.super"
+
+    def _body(self):
+        class Holder(dict):
+            gone = super()._body_gone()
+            names = [super()._comp_gone() for _ in range(2)]
+
+            def _later(self):
+                return super().get("x")
+
+        return Holder
