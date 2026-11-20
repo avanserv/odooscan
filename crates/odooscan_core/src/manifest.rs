@@ -596,11 +596,15 @@ impl Rejection {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OdooReads {
     No,
-    /// It parses only as the Python 2 the series runs.
+    /// It parses only as the Python 2 the series runs, and holds no node `literal_eval` refuses
+    /// where odooscan can tell.
     AsPython2,
-    /// It is an expression 9.0 evaluates but odooscan rejects: no dict or iterable of pairs, or one
-    /// whose item is no pair or cannot be hashed.
+    /// It is an expression of neither shape odooscan reads, such as a call, that 9.0 evaluates and
+    /// may update a dict with.
     AsExpression,
+    /// It parses only as Python 2 and holds a node `literal_eval` refuses, or is read as
+    /// `AsExpression`, so that only 9.0 reads it.
+    AsPython2Expression,
 }
 
 impl OdooReads {
@@ -611,7 +615,7 @@ impl OdooReads {
         match self {
             OdooReads::No => false,
             OdooReads::AsPython2 => python2::runs_on(series),
-            OdooReads::AsExpression => series.is_some_and(|s| s < LITERAL_EVAL),
+            OdooReads::AsExpression | OdooReads::AsPython2Expression => series.is_some_and(|s| s < LITERAL_EVAL),
         }
     }
 }
@@ -653,7 +657,11 @@ pub fn read(bytes: &[u8], series: impl FnOnce(Option<Series>) -> Option<Series>)
     }
     let top = top.map_err(|(e, syntax)| {
         let python2 = syntax && python2::runs_on(series) && python2::remaining_error(body, series).is_none();
-        reject((e, if python2 { OdooReads::AsPython2 } else { OdooReads::No }))
+        reject(if python2 {
+            python2_reads(body, &loc, series, e)
+        } else {
+            (e, OdooReads::No)
+        })
     })?;
     literal_manifest(&loc, top, manifest, series).map_err(reject)
 }
@@ -664,7 +672,7 @@ pub fn read(bytes: &[u8], series: impl FnOnce(Option<Series>) -> Option<Series>)
 /// spells `False` as `FALSE`, so the value is judged by its text in `body`.
 fn installable(body: &str, loc: &Source, odoo: OdooReads) -> bool {
     let code = match odoo {
-        OdooReads::AsPython2 => Cow::Owned(python2::rewrite(body)),
+        OdooReads::AsPython2 | OdooReads::AsPython2Expression => Cow::Owned(python2::rewrite(body)),
         _ => Cow::Borrowed(body),
     };
     let Ok(parsed) = parse_module(&code) else {
@@ -682,6 +690,34 @@ fn installable(body: &str, loc: &Source, odoo: OdooReads) -> bool {
         None => dict_keyword(top, "installable"),
     };
     value.is_none_or(|v| &body[v.range()] != "False")
+}
+
+/// How the Odoo of `series` reads `body`, which parses only as the Python 2 it runs and fails in
+/// Python 3 with `error`, kept for the notice. It is read rewritten with its literals kept, as 10.0
+/// hands it to `literal_eval` and 9.0 to `eval`. A rewrite that does not parse is taken for one
+/// Odoo reads.
+fn python2_reads(
+    body: &str,
+    loc: &Source,
+    series: Option<Series>,
+    error: Spanned<String>,
+) -> (Spanned<String>, OdooReads) {
+    let code = python2::rewrite_expression(body);
+    let Ok(parsed) = parse_module(&code) else {
+        return (error, OdooReads::AsPython2);
+    };
+    let top = match top_expression(loc, &parsed.syntax().body) {
+        Ok(top) => top,
+        Err(statement) => return (statement, OdooReads::No),
+    };
+    let manifest = pairs(top).map(|p| entries(loc, p));
+    match literal_manifest(loc, top, manifest, series) {
+        Err((refused, OdooReads::No)) => (refused, OdooReads::No),
+        Err(_) => (error, OdooReads::AsPython2Expression),
+        // 9.0 does not hand it to `literal_eval`, so only it reads what that refuses.
+        Ok(_) if unliteral(top, Reading::Python2).is_some() => (error, OdooReads::AsPython2Expression),
+        Ok(_) => (error, OdooReads::AsPython2),
+    }
 }
 
 /// The value of the last `keyword` of `top` when it is a `dict(...)` call.
@@ -741,12 +777,12 @@ fn literal_manifest(
     } else {
         Reading::Python2
     };
-    let odoo = if literal {
-        OdooReads::No
-    } else {
-        OdooReads::AsExpression
-    };
     let Some(manifest) = manifest else {
+        let odoo = if literal || refused_leaf(top) {
+            OdooReads::No
+        } else {
+            OdooReads::AsExpression
+        };
         return Err((
             error(
                 loc.at(top),
@@ -759,9 +795,20 @@ fn literal_manifest(
         return Err((error(loc.at(node), why), OdooReads::No));
     }
     match refused_item(top, python2) {
-        Some((item, why)) => Err((error(loc.at(item), why), odoo)),
+        Some((item, why)) => Err((error(loc.at(item), why), OdooReads::No)),
         None => Ok(manifest),
     }
+}
+
+/// Whether `dict.update` refuses `top`, a manifest of neither shape, once 9.0 evaluates it: a
+/// literal with no literal inside it, except an empty string or bytes, which update with nothing.
+fn refused_leaf(top: &Expr) -> bool {
+    let empty = match top {
+        Expr::StringLiteral(s) => s.value.to_str().is_empty(),
+        Expr::BytesLiteral(b) => b.value.bytes().next().is_none(),
+        _ => false,
+    };
+    leaf(top) && !empty
 }
 
 /// The first item of a list, tuple or set `top` that Odoo cannot load, with why. Python builds a
@@ -1917,18 +1964,100 @@ mod tests {
         assert_eq!(odoo_reads(b"{'name': NAME}", "10.0"), Some(OdooReads::No));
         assert_eq!(odoo_reads(b"dict(name='x')", "9.0"), Some(OdooReads::AsExpression));
         assert_eq!(odoo_reads(b"dict(name='x')", "10.0"), Some(OdooReads::No));
-        assert_eq!(odoo_reads(b"[1, 2]", "9.0"), Some(OdooReads::AsExpression));
+        assert_eq!(odoo_reads(b"[1, 2]", "9.0"), Some(OdooReads::No));
         assert_eq!(odoo_reads(b"[1, 2]", "10.0"), Some(OdooReads::No));
         assert!(parse_bytes(b"[('name', NAME)]", "9.0").is_ok());
         assert!(parse_bytes(b"{('name', NAME)}", "9.0").is_ok());
         assert!(parse_bytes(b"[{NAME, 1}]", "9.0").is_ok());
         assert!(parse_bytes(b"{'depends': {['base']}}", "9.0").is_ok());
         assert!(parse_bytes(b"[('depends', {['base']})]", "9.0").is_ok());
-        assert_eq!(odoo_reads(b"{['name', 'x']}", "9.0"), Some(OdooReads::AsExpression));
+        assert_eq!(odoo_reads(b"{['name', 'x']}", "9.0"), Some(OdooReads::No));
         assert_eq!(odoo_reads(b"'doc'\n{}", "9.0"), Some(OdooReads::No));
         assert_eq!(odoo_reads(b"{'name': 'x',", "9.0"), Some(OdooReads::No));
         assert_eq!(odoo_reads(b"{'sequence': 0755}", "9.0"), Some(OdooReads::AsPython2));
         assert_eq!(odoo_reads(b"{'sequence': 0755}", "11.0"), Some(OdooReads::No));
+    }
+
+    #[test]
+    fn nine_refuses_a_literal_dict_update_refuses() {
+        for src in ["[1, 2]", "{['name', 'x']}", "1", "'ab'", "None", "[('a', 0755), 1]"] {
+            assert_eq!(odoo_reads(src.as_bytes(), "9.0"), Some(OdooReads::No), "{src}");
+        }
+        for src in ["''", "b''", "'' ''"] {
+            assert_eq!(
+                odoo_reads(src.as_bytes(), "9.0"),
+                Some(OdooReads::AsExpression),
+                "{src}"
+            );
+            assert_eq!(odoo_reads(src.as_bytes(), "10.0"), Some(OdooReads::No), "{src}");
+        }
+    }
+
+    #[test]
+    fn python_2_reads_the_literals_of_a_python_2_manifest() {
+        for src in [
+            "{'sequence': 0755, 'installable': True}",
+            "{'name': ur'x'}",
+            "[('sequence', 10L), ('name', ur'x')]",
+        ] {
+            for series in ["9.0", "10.0"] {
+                assert_eq!(
+                    odoo_reads(src.as_bytes(), series),
+                    Some(OdooReads::AsPython2),
+                    "{src} {series}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn only_nine_evaluates_a_python_2_manifest_of_other_nodes() {
+        for src in [
+            "dict(sequence=0755)",
+            "{'sequence': 0755, 'name': 'a' + 'b'}",
+            "{'sequence': 0755, 'depends': {'base'}}",
+            "{'sequence': 0755, 'name': `x`}",
+        ] {
+            let nine = odoo_reads(src.as_bytes(), "9.0");
+            assert_eq!(nine, Some(OdooReads::AsPython2Expression), "{src}");
+            assert_eq!(odoo_reads(src.as_bytes(), "10.0"), Some(OdooReads::No), "{src}");
+        }
+        let error = read(b"{'sequence': 0755, 'name': 'a' + 'b'}", |_| Series::parse("10.0")).unwrap_err();
+        assert_eq!(
+            (error.error.pos, error.error.value.as_str()),
+            (Pos { line: 1, col: 28 }, NOT_LITERAL)
+        );
+        let error = read(b"{'sequence': 0755, 'name': 'a' + 'b'}", |_| Series::parse("9.0")).unwrap_err();
+        assert_eq!(error.error.pos, Pos { line: 1, col: 14 });
+    }
+
+    #[test]
+    fn literal_eval_refuses_the_repr_of_a_literal() {
+        let src = b"{'name': `1`, 'sequence': 0755}";
+        assert_eq!(odoo_reads(src, "9.0"), Some(OdooReads::AsPython2Expression));
+        let error = read(src, |_| Series::parse("10.0")).unwrap_err();
+        assert_eq!(error.odoo, OdooReads::No);
+        assert_eq!(
+            (error.error.pos, error.error.value.as_str()),
+            (Pos { line: 1, col: 10 }, NOT_LITERAL)
+        );
+    }
+
+    #[test]
+    fn a_python_2_statement_is_no_manifest() {
+        for series in ["9.0", "10.0"] {
+            let error = read(b"print 'x'", |_| Series::parse(series)).unwrap_err();
+            assert_eq!(error.odoo, OdooReads::No, "{series}");
+            assert_eq!(error.error.value, "a statement: the manifest is one expression");
+            for src in ["ur'ab'", "ur\"\"\"doc\"\"\"\n{'sequence': 0755}"] {
+                assert_eq!(
+                    odoo_reads(src.as_bytes(), series),
+                    Some(OdooReads::No),
+                    "{src} {series}"
+                );
+            }
+        }
+        assert_eq!(odoo_reads(b"[('a', 0755), 1]", "10.0"), Some(OdooReads::No));
     }
 
     /// Whether the manifest `src`, which `series` rejects, leaves its module installable.
@@ -1947,7 +2076,10 @@ mod tests {
         assert!(!rejected_installable("dict(name='x', installable=False)", "9.0"));
         assert!(!rejected_installable("dict(installable=False)", "10.0"));
         let python2_call = "dict(sequence=0755, installable=False)";
-        assert_eq!(odoo_reads(python2_call.as_bytes(), "9.0"), Some(OdooReads::AsPython2));
+        assert_eq!(
+            odoo_reads(python2_call.as_bytes(), "9.0"),
+            Some(OdooReads::AsPython2Expression)
+        );
         assert!(!rejected_installable(python2_call, "9.0"));
         assert!(rejected_installable("dict(sequence=0755, installable=True)", "9.0"));
         assert!(!rejected_installable(
@@ -1968,7 +2100,7 @@ mod tests {
         assert!(parse_bytes("['\u{e9}a']".as_bytes(), "10.0").is_ok());
         assert!(parse_bytes("['\u{e9}']".as_bytes(), "11.0").is_err());
         let same_key = b"[{'a': 1, b'a': 2}]";
-        assert_eq!(odoo_reads(same_key, "9.0"), Some(OdooReads::AsExpression));
+        assert_eq!(odoo_reads(same_key, "9.0"), Some(OdooReads::No));
         assert_eq!(odoo_reads(same_key, "10.0"), Some(OdooReads::No));
         assert_eq!(odoo_reads(same_key, "11.0"), None);
         let escaped = br"[{'\u0041': 1, 'A': 2}]";

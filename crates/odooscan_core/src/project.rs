@@ -512,7 +512,7 @@ fn rejected_manifests(rejected: Vec<Rejected>) -> (Vec<Broken>, Vec<String>) {
         let file = r.path.file_name().unwrap_or_default().to_string_lossy();
         let series = r.rejection.series.map(|s| s.to_string()).unwrap_or_default();
         let what = match r.rejection.odoo {
-            OdooReads::AsPython2 => format!("Python 2 syntax, which {series} runs"),
+            OdooReads::AsPython2 | OdooReads::AsPython2Expression => format!("Python 2 syntax, which {series} runs"),
             OdooReads::AsExpression => {
                 format!("{series} evaluates the manifest, which odooscan reads only as literal key/value pairs")
             }
@@ -1730,6 +1730,35 @@ mod tests {
         assert_eq!(ten.notices, [notice]);
         assert_eq!(eleven.broken.len(), 1);
         assert!(eleven.notices.is_empty(), "{:#?}", eleven.notices);
+    }
+
+    #[test]
+    fn a_python_2_manifest_10_0_cannot_evaluate_is_broken() {
+        let dir = scratch("manifest-python2-eval");
+        let module = written(&dir, "legacy", "{'name': 'leg' + 'acy', 'sequence': 0755}");
+        let read = |series: &str| {
+            load(
+                std::slice::from_ref(&module),
+                &[],
+                Series::parse(series),
+                None,
+                &TaintTable::default(),
+            )
+        };
+        let (nine, ten) = (read("9.0"), read("10.0"));
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(nine.broken.is_empty());
+        let notice = "legacy/__manifest__.py:1:37: Python 2 syntax, which 9.0 runs; this module is not checked";
+        assert_eq!(nine.notices, [notice]);
+        let [broken] = &ten.broken[..] else {
+            panic!("{} broken", ten.broken.len());
+        };
+        assert_eq!((broken.diag.pos.line, broken.diag.pos.col), (1, 10));
+        assert_eq!(
+            broken.diag.message,
+            "not a literal: Odoo reads the manifest with ast.literal_eval"
+        );
+        assert!(ten.notices.is_empty(), "{:#?}", ten.notices);
     }
 
     #[test]
