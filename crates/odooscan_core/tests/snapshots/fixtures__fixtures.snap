@@ -985,7 +985,10 @@ custom/legacy_rpc16/static/src/js/partner_widget.js:9:32: OD603 no indexed modul
 custom/legacy_rpc16/static/src/js/partner_widget.js:10:59: OD604 model 'res.partner' has no method 'action_gone'
 custom/legacy_rpc16/static/src/js/partner_widget.js:11:55: OD607 method '_compute_secret' is private, so the server refuses to call it over RPC
 custom/legacy_rpc16/static/src/js/partner_widget.js:12:56: OD607 method '_hidden_helper' is private, so the server refuses to call it over RPC
-custom/m2m_rows_user/models/bin.py:20:5: OD226 _auto = False leaves x.bin.tag without a table, and nothing creates the view x_bin_tag_rel; create it in init(), or drop _auto = False
+custom/m2m_rows_bin_user/models/bin_note.py:12:5: OD226 _auto = False leaves x.bin.note without a table, and nothing creates the view x_bin_note_rel; create it in init(), or drop _auto = False
+custom/m2m_rows_user/models/bin.py:33:5: OD226 _auto = False leaves x.bin.tag without a table, and nothing creates the view x_bin_tag_rel; create it in init(), or drop _auto = False
+custom/m2m_rows_user/models/bin.py:43:5: OD226 _auto = False leaves x.bin.shelf without a table, and nothing creates the view x_bin_shelf_rel; create it in init(), or drop _auto = False
+custom/m2m_rows_user/models/bin.py:53:5: OD226 _auto = False leaves x.bin.country without a table, and nothing creates the view res_country_x_bin_rel; create it in init(), or drop _auto = False
 custom/manifest_assets_unmatched/__manifest__.py:8:13: OD513 'manifest_assets_unmatched/static/src/jss/**/*' matches no js, css, scss, sass, less or xml file under manifest_assets_unmatched/static/, so Odoo adds nothing
 custom/manifest_assets_unmatched/__manifest__.py:9:13: OD513 'manifest_assets_unmatched/static/src/js/missing.js' does not exist, so the bundle fails to load it
 custom/manifest_assets_unmatched/__manifest__.py:10:24: OD513 'manifest_assets_unmatched/static/src/legacy/**/*.js' matches no js, css, scss, sass, less or xml file under manifest_assets_unmatched/static/, so Odoo adds nothing

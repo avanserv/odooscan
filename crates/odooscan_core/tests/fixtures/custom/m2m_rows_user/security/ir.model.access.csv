@@ -1,3 +1,6 @@
 id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
 access_x_bin,x bin,model_x_bin,base.group_user,1,0,0,0
 access_x_bin_tag,x bin tag,model_x_bin_tag,base.group_user,1,0,0,0
+access_x_bin_shelf,x bin shelf,model_x_bin_shelf,base.group_user,1,0,0,0
+access_x_bin_country,x bin country,model_x_bin_country,base.group_user,1,0,0,0
+access_x_bin_kept,x bin kept,model_x_bin_kept,base.group_user,1,0,0,0
