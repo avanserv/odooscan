@@ -1,4 +1,4 @@
-from odoo import api, fields, models
+from odoo import api, fields, http, models
 from odoo.tools import SQL
 
 
@@ -123,3 +123,8 @@ class DataTicketLeaf(models.Model):
 
     def _leaf_kinds(self):
         return self.env.execute_query(SQL("SELECT l.kind FROM data_ticket_leaf l"))
+
+
+class DataTicketHelper(http.Controller):
+    def init(self):
+        self.env.cr.execute("SELECT t.x_column FROM data_ticket t")
