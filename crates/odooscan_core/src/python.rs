@@ -2296,8 +2296,9 @@ struct PyVisitor<'a, 'ast> {
     collections: Vec<&'ast str>,
     /// The names the file's imports from `ORM_PACKAGES` bind at import, each with its dotted path.
     orm_names: Vec<(&'ast str, String)>,
-    /// Where the method name starts in each `super()` call of the overridden method made by an
-    /// override `api_table` reports. That finding covers the call of the method's name.
+    /// The start of the method name in each `super()` call of the overridden method made by an
+    /// override that the visitor reports through an `Override` row of `api_table`. `api_calls` skips
+    /// the `Method` row of the same name at those calls, since it would report the same form again.
     covered_supers: FxHashSet<TextSize>,
 }
 
@@ -7237,6 +7238,7 @@ class U(HttpCase):
             "env['ir.cron'].create({'name': 'x', 'numbercall': -1})",
             "env['ir.cron'].sudo().create([{'name': 'x'}, {'name': 'y', 'doall': True}])",
             "env['ir.cron'].with_context(a=1).write({'numbercall': 1})",
+            "env['ir.cron'].create(({'name': 'x'}, {'numbercall': 1}))",
         ];
         for line in written {
             assert_eq!(codes(&src(line), Series::parse("saas~17.3")), ["OD126"], "{line}");
