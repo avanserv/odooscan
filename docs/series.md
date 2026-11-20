@@ -16,18 +16,21 @@ a spelling such as `9.10` or `10.1` stay unknown: a module whose version names o
 rules that carry no range, and both flags refuse them.
 
 The series also decides the model of a class without `_name` whose `_inherit` is absent, a list or a
-tuple, which saas~18.1 names after the class as [OD209](rules/OD209.md) describes. A module of
-unknown series reads it as before saas~18.1, and where the two readings differ, the module's models
-count as built at runtime, as with a `_name` given by an expression: a model id that no indexed
-module defines is not reported, [OD201](rules/OD201.md) skips a model no indexed module defines, and
-[OD604](rules/OD604.md) checks no method the module's scripts call.
+tuple, and of a class whose `_name` tests false, which saas~18.1 names after the class as
+[OD209](rules/OD209.md) describes. A module of unknown series reads it as before saas~18.1, and
+where the two readings differ, the module's models count as built at runtime. The module's models
+also count as built at runtime for a class of unknown series with no `_name` and no `_inherit` or an
+empty one, whose base is a model class of its file: the scan leaves it unnamed, while saas~14.4
+names it after itself. Models built at runtime act as with a `_name` given by an expression: a model
+id that no indexed module defines is not reported, [OD201](rules/OD201.md) skips a model no indexed
+module defines, and [OD604](rules/OD604.md) checks no method the module's scripts call.
 
 [OD202](rules/OD202.md) and [OD603](rules/OD603.md) stay silent on a model only a module missing
 from `depends` defines when its name fits what the module, a module in its `depends` or an
 always-installed module may build, and [OD206](rules/OD206.md) on a model no indexed module defines
 when its name fits what the module itself may build. What a module may build is read from its code
 outside `tests/`, `examples/`, `migrations/` and `upgrades/`: the start an expression shows, every
-name when it shows no literal start, and for a class of unknown series the name the other reading
+name when it shows no literal start, and for a class of unknown series each name another reading
 gives it, unless that name is one of the class's parents. An expression that shows no literal start
 counts only for the module's own code, so a helper that names the models of an always-installed
 module silences no other module. For OD202 and OD603, `base` builds only names that start with `x_`,

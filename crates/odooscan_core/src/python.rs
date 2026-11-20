@@ -28,7 +28,7 @@ use crate::sql::{
 };
 use crate::superuser::{self, Escalation};
 use crate::taint::{self, Params, TaintTable};
-use crate::{async_names, domain, imports, messages, method_body, module_state, orm_queries, python2};
+use crate::{async_names, domain, imports, messages, method_body, module_state, orm_queries, python2, record_eval};
 
 const FIELD_TYPES: &[&str] = &[
     "Boolean",
@@ -2186,6 +2186,7 @@ struct UnreadHeader {
     kind: Option<ModelKind>,
     cached: bool,
     own_body_names: bool,
+    file_model_base: bool,
     may_reach_orm: bool,
 }
 
@@ -2253,6 +2254,7 @@ impl UnreadFile<'_, '_, '_> {
             },
             naming: Naming {
                 own_body_names: header.own_body_names,
+                file_model_base: header.file_model_base,
                 ..Naming::default()
             },
             depth: self.depth,
@@ -2280,6 +2282,7 @@ impl UnreadFile<'_, '_, '_> {
                 kind: None,
                 cached: false,
                 own_body_names: false,
+                file_model_base: false,
                 may_reach_orm: true,
             };
         };
@@ -2288,6 +2291,7 @@ impl UnreadFile<'_, '_, '_> {
             kind,
             cached: on_cached_model(class),
             own_body_names: self.visitor.own_body_names(class, kind),
+            file_model_base: self.visitor.file_model_base(class),
             may_reach_orm: may_reach_orm(class),
         }
     }
@@ -2894,6 +2898,12 @@ struct Naming {
     named: bool,
     /// `_name` when it is a literal.
     name: Option<String>,
+    /// `_name` is a literal that tests false, which from saas~18.1 Odoo replaces with the dotted
+    /// class name whatever `_inherit` holds.
+    falsy_name: bool,
+    /// A base of the class is a model class of its file, whose attributes name the class before
+    /// saas~14.4.
+    file_model_base: bool,
     /// The literal start of the names `_name` may build.
     built_start: Option<String>,
     /// Odoo may register the class, so a name it reads as another model may be built.
@@ -2932,6 +2942,12 @@ impl Naming {
 
     fn named_after_class(&self) -> bool {
         self.own_body_names && self.registers && !self.hidden_naming
+    }
+
+    /// Whether a series from saas~14.4 names the class from its own body while an earlier one reads
+    /// its name through a base of its file.
+    fn named_by_file_base(&self) -> bool {
+        self.file_model_base && self.registers && !self.hidden_naming
     }
 
     fn term(&mut self, name: &str, fields: Vec<Spanned<String>>) {
@@ -2978,9 +2994,9 @@ impl InheritShape {
 }
 
 /// The literal start of the names a `_name` may build, up to the first value it splices in. A
-/// literal builds nothing, and a false `_name` names no model.
+/// literal builds nothing, nor does one that tests false, which `falsy_named` reads.
 fn built_name_start(value: &Expr) -> Option<String> {
-    if str_lit(value).is_some() || matches!(option_value(value), OptionValue::Bool(false) | OptionValue::Falsy) {
+    if str_lit(value).is_some() || record_eval::falsy(value) {
         return None;
     }
     let head = query_head(value).unwrap_or_default();
@@ -3593,6 +3609,7 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
         }
         let mut naming = Naming {
             own_body_names: self.own_body_names(class, kind),
+            file_model_base: self.file_model_base(class),
             ..Naming::default()
         };
         if let Some(kind) = kind {
@@ -3629,13 +3646,17 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
     /// saas~14.4 any, else one with no base that is a model class of the file, whose `_name` and
     /// `_inherit` it would read.
     fn own_body_names(&self, class: &ast::StmtClassDef, kind: Option<ModelKind>) -> bool {
-        let own_body = self.series.is_some_and(|s| s >= OWN_BODY_NAMING)
-            || !class
-                .bases()
-                .iter()
-                .filter_map(tail_name)
-                .any(|b| self.kinds.contains_key(b));
+        let own_body = self.series.is_some_and(|s| s >= OWN_BODY_NAMING) || !self.file_model_base(class);
         kind.is_some() && own_body
+    }
+
+    /// Whether a base of `class` is a model class of its file.
+    fn file_model_base(&self, class: &ast::StmtClassDef) -> bool {
+        class
+            .bases()
+            .iter()
+            .filter_map(tail_name)
+            .any(|b| self.kinds.contains_key(b))
     }
 
     /// The `plain_bases` of `class`, and the `plain_sources` beside them.
@@ -3709,8 +3730,9 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
 
     /// `fact` with the model what a class says about it gives, when that gives one.
     fn named_model(&mut self, mut fact: ClassFact, mut naming: Naming, may_reach_orm: bool) -> Option<ClassFact> {
-        // Read here rather than at `_name`, as only the last binding names the model.
-        self.facts.dynamic_models |= naming.named && naming.name.is_none();
+        // Read here rather than at `_name`, as only the last binding names the model. `falsy_named`
+        // decides for a falsy literal, which a series from saas~18.1 replaces.
+        self.facts.dynamic_models |= naming.named && naming.name.is_none() && !naming.falsy_name;
         // `registered` counts a non-literal `_register` in, which is safe for a class that has a
         // name but would give one to a class Odoo may leave out of the registry.
         naming.hidden_naming |= fact
@@ -3752,13 +3774,21 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
     /// that the two readings name apart makes the file's models dynamic. A list with a non-literal
     /// entry hides the name before saas~18.1 and whether the model is new from it, so the class
     /// extends its first literal entry. With no `_inherit`, or an empty one, only a class that
-    /// `Naming::named_after_class` accepts gets the name of the class.
+    /// `Naming::named_after_class` accepts gets the name of the class; in an unknown series, one
+    /// that `Naming::named_by_file_base` accepts records both names a series from saas~14.4 may
+    /// give it.
     fn model_name(&mut self, class_name: &str, naming: &Naming, fact: &ClassFact) -> Option<String> {
         let first = || fact.inherit.first().map(|i| i.value.clone());
+        if naming.falsy_name {
+            return self.falsy_named(class_name, naming, fact);
+        }
         if naming.named {
             return naming.name.clone().or_else(first);
         }
         let Some(count) = naming.listed(fact.inherit_unknown) else {
+            if self.series.is_none() && naming.named_by_file_base() {
+                self.file_base_readings(class_name, naming, fact);
+            }
             return first();
         };
         let earlier = if count == 1 {
@@ -3766,6 +3796,51 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
         } else {
             Some(class_name.to_owned())
         };
+        self.series_name(class_name, earlier, naming, fact)
+    }
+
+    /// Records the names a class of unknown series that the scan drops may take from saas~14.4 when
+    /// it has no `_inherit` or an empty one: the class name verbatim up to 18.0, dotted after.
+    fn file_base_readings(&mut self, class_name: &str, naming: &Naming, fact: &ClassFact) {
+        if !matches!(naming.inherit, InheritShape::Absent | InheritShape::List(0)) {
+            return;
+        }
+        self.unknown_series_reading(class_name.to_owned(), None, naming, fact);
+        let later = dotted(class_name);
+        if later != class_name {
+            self.unknown_series_reading(later, None, naming, fact);
+        }
+    }
+
+    /// The model of a class whose `_name` is a literal that tests false. From saas~18.1 Odoo gives a
+    /// class it names from its own body the dotted class name instead, a reading an unknown series
+    /// records, also for a class the scan reads through a base of its file. Otherwise an empty
+    /// string names the model, and any other literal leaves the file's models dynamic and the class
+    /// extending its first `_inherit` entry.
+    fn falsy_named(&mut self, class_name: &str, naming: &Naming, fact: &ClassFact) -> Option<String> {
+        let earlier = naming
+            .name
+            .clone()
+            .or_else(|| fact.inherit.first().map(|i| i.value.clone()));
+        if naming.named_after_class() && self.series.is_none_or(|s| s >= DOTTED_CLASS_NAME) {
+            return self.series_name(class_name, earlier, naming, fact);
+        }
+        self.facts.dynamic_models |= naming.name.is_none();
+        if self.series.is_none() && naming.named_by_file_base() {
+            self.unknown_series_reading(dotted(class_name), earlier.as_deref(), naming, fact);
+        }
+        earlier
+    }
+
+    /// The name the module's series gives a class that saas~18.1 names after itself and an earlier
+    /// series `earlier`. An unknown series takes `earlier` and records the other reading.
+    fn series_name(
+        &mut self,
+        class_name: &str,
+        earlier: Option<String>,
+        naming: &Naming,
+        fact: &ClassFact,
+    ) -> Option<String> {
         match self.series {
             Some(series) if series >= DOTTED_CLASS_NAME => Some(dotted(class_name)),
             Some(_) => earlier,
@@ -3855,6 +3930,7 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
                 "_name" => {
                     naming.named = true;
                     naming.name = str_lit(value).map(str::to_owned);
+                    naming.falsy_name = record_eval::falsy(value);
                     naming.built_start = built_name_start(value);
                 }
                 "_inherit" => naming.inherit = self.inherit(value, fact, naming.name.as_deref()),
@@ -7982,6 +8058,9 @@ class U(HttpCase):
         };
         assert_eq!(named("10.0"), ("mail.thread".to_owned(), false));
         assert_eq!(named("20.0"), ("foo.bar".to_owned(), true));
+        let src = "class FooBar(models.Model):\n    _name = False\n    _inherit = ['mail.thread']\nprint 'x'\n";
+        let facts = analyze(src, Series::parse("20.0"));
+        assert_eq!(facts.classes[0].model, "foo.bar");
     }
 
     /// Each of these sits in its statement at an offset that, in the whole file, falls inside `©`.
@@ -8041,6 +8120,11 @@ class U(HttpCase):
         let named_x = model("x", true, false);
         // Both readings name it after the class, so an unknown series needs no runtime models.
         let own = model("res.partner.x", false, false);
+        // Where no saas~18.1 renaming applies, Odoo keeps a falsy name that is no string: from
+        // saas~14.4 to 18.0 a class it registers then fails at load, and it never builds one with
+        // `_register = False`. The scan has such a class extend its first entry and leaves the
+        // file's models dynamic.
+        let falsy = model("a", false, true);
         let cases = [
             ("    _inherit = 'a'", [&extended, &extended, &extended, &extended]),
             (
@@ -8097,6 +8181,32 @@ class U(HttpCase):
                 ],
             ),
             ("    _inherit = ['res.partner.x']", [&own; 4]),
+            (
+                "    _name = False\n    _inherit = ['a', 'b']",
+                [&falsy, &derived, &derived, &falsy],
+            ),
+            (
+                "    _name = False\n    _inherit = 'a'",
+                [&falsy, &derived, &derived, &falsy],
+            ),
+            ("    _name = None", [&None, &derived, &derived, &None]),
+            (
+                "    _name = ''\n    _inherit = ['a']",
+                [&model("", true, false), &derived, &derived, &model("", true, true)],
+            ),
+            (
+                "    _name = False\n    _inherit = ['a', 'b']\n    _register = False",
+                [&falsy; 4],
+            ),
+            (
+                "    _name = 0\n    _inherit = ['a']",
+                [&falsy, &derived, &derived, &falsy],
+            ),
+            ("    _name = []", [&None, &derived, &derived, &None]),
+            (
+                "    _name = b''\n    _inherit = 'a'",
+                [&falsy, &derived, &derived, &falsy],
+            ),
         ];
         for (body, expected) in cases {
             for (series, want) in [Some("18.0"), Some("saas~18.1"), Some("20.0"), None]
@@ -8132,6 +8242,46 @@ class U(HttpCase):
         }
         let direct = "class C(models.Model):\n    x = fields.Char()\n";
         assert_eq!(model_of(direct, "C", Some("14.0")).as_deref(), Some("C"));
+        // An unknown series may be one from saas~14.4, which names `B` verbatim, then dotted from
+        // saas~18.1.
+        let built = |series: Option<&str>| {
+            let facts = analyze(src, series.and_then(Series::parse));
+            (facts.dynamic_models, facts.built_model_names)
+        };
+        assert_eq!(built(None), (true, vec!["B".to_owned(), "b".to_owned()]));
+        assert_eq!(built(Some("14.0")), (false, vec![]));
+        // A class that its `_inherit` names, that Odoo may not register, or whose naming the scan
+        // does not read takes no class-name reading.
+        for body in [
+            "_inherit = 'x'",
+            "_inherit = PARENT",
+            "_register = False",
+            "if X:\n        _inherit = []",
+        ] {
+            let src = format!("class A(models.Model):\n    _name = 'a'\n\nclass B(A):\n    {body}\n");
+            let facts = analyze(&src, None);
+            assert_eq!(
+                (facts.dynamic_models, facts.built_model_names),
+                (false, vec![]),
+                "{body}"
+            );
+        }
+        let unread = |src: &str| {
+            let facts = analyze(&format!("{src}print 'x'\n"), None);
+            assert!(facts.classes.iter().all(|c| c.unread));
+            (facts.dynamic_models, facts.built_model_names)
+        };
+        assert_eq!(unread(src), (true, vec!["B".to_owned(), "b".to_owned()]));
+        // From saas~18.1 a falsy `_name` gives the dotted class name, which an unknown series may be.
+        for name in ["''", "False"] {
+            let falsy = format!("class A(models.Model):\n    _name = 'a'\n\nclass B(A):\n    _name = {name}\n");
+            let built = |series: Option<&str>| {
+                let facts = analyze(&falsy, series.and_then(Series::parse));
+                (facts.dynamic_models, facts.built_model_names)
+            };
+            assert_eq!(built(None), (true, vec!["b".to_owned()]), "{name}");
+            assert_eq!(built(Some("14.0")), (name == "False", vec![]), "{name}");
+        }
     }
 
     #[test]
@@ -8159,6 +8309,12 @@ class U(HttpCase):
             "    _name = 'a'",
             "    _name = None",
             "    _name = False",
+            "    _name = []",
+            "    _name = ()",
+            "    _name = {}",
+            "    _name = b''",
+            "    _name = f''",
+            "    _name = 0",
             "    _name = MODEL\n    _register = False",
             "    _register = False\n    _name = MODEL",
             "    _register = None\n    _name = f'a.{kind}'",
@@ -8214,6 +8370,8 @@ class U(HttpCase):
             assert_eq!(read(parents, Some(series)), (false, vec![]), "{series}");
         }
         assert_eq!(read("    _inherit = ['res.partner.x']", None), (false, vec![]));
+        let falsy = "    _name = False\n    _inherit = 'a'";
+        assert_eq!(read(falsy, None), (true, vec!["res.partner.x".to_owned()]));
         assert_eq!(
             read("    _inherit = ['a']\n    _register = False", None),
             (true, vec![])

@@ -1,0 +1,12 @@
+<odoo>
+    <record id="desk_lamp_view_form" model="ir.ui.view">
+        <field name="name">desk.lamp.form</field>
+        <field name="model">desk.lamp</field>
+        <field name="arch" type="xml">
+            <form>
+                <field name="wattage"/>
+                <field name="lumens"/>
+            </form>
+        </field>
+    </record>
+</odoo>
