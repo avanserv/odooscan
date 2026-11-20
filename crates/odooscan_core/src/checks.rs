@@ -2953,11 +2953,14 @@ impl<'m> Ctx<'_, 'm> {
     }
 
     /// Odoo replaces the compute and inverse of a related field with its own, and a dependency
-    /// outside the index or a parent the scan cannot see may hold methods only Python knows.
+    /// outside the index, a parent the scan cannot see or a parent the module's own classes list
+    /// that no indexed class introduces may hold methods only Python knows.
     fn missing_methods(&self, out: &mut Out<'m>, path: &'m Path, class: &ClassFact, field: &FieldFact) {
-        if field.related.is_some()
+        if field.methods.is_empty()
+            || field.related.is_some()
             || self.index.merged_hidden_parents(&class.model, self.scope)
             || self.may_gain(&class.model)
+            || self.index.lists_unindexed_parent(self.mi, &class.model, self.scope)
         {
             return;
         }
