@@ -3076,6 +3076,14 @@ mod tests {
             [Some(Expected::Raises), None]
         );
         assert_eq!(
+            expected(&format!("with self.assertRaises(E) as cm:\n    {write}\n{write}")),
+            [Some(Expected::Raises), None]
+        );
+        assert_eq!(
+            expected(&format!("with self.assertRaisesRegex(E, 'y') as cm:\n    {write}")),
+            [Some(Expected::RaisesRegex)]
+        );
+        assert_eq!(
             expected(&format!(
                 "with mute_logger('x'), self.assertRaisesRegex(E, 'y'):\n    {write}"
             )),
