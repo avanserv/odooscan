@@ -3485,8 +3485,8 @@ impl<'m> Index<'m> {
         })
     }
 
-    /// Whether a Many2many field of a module in `scope` keeps its rows in `table`, which it names
-    /// with `relation`, or which Odoo names after the tables of its model and comodel.
+    /// Whether a field of a module in `scope` that may be a Many2many keeps its rows in `table`,
+    /// which it names with `relation`, or which Odoo names after the tables of its model and comodel.
     pub fn relation_table(&self, table: &str, scope: &Scope) -> bool {
         let named = |model: &str, field: &FieldFact| match field.option("relation").map(|r| &r.value) {
             Some(OptionValue::Str(relation)) => relation == table,
@@ -3502,7 +3502,7 @@ impl<'m> Index<'m> {
                 && class
                     .fields
                     .iter()
-                    .any(|f| f.ftype == "Many2many" && named(&class.model, f))
+                    .any(|f| f.may_be_many2many() && named(&class.model, f))
         })
     }
 

@@ -43,3 +43,8 @@ class CompanyLink(fields.Many2one):
 
 class SubCompanyLink(CompanyLink):
     pass
+
+
+# orm/mark.py has a Char of this name, so the scan cannot tell whether a call means a Many2many.
+class Pair(fields.Many2many):
+    pass

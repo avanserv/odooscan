@@ -27,6 +27,20 @@ only logs a warning, and Odoo installs the module without its demo data, with tw
 - From saas~12.5 to 19.0 a write to an existing record that the database refuses stops the install,
   as [OD321](OD321.md) explains.
 
+## Field classes
+
+A call names its field class by name alone, so when two classes known under one name, as
+[OD210](OD210.md) describes, give different types, such as `class Tag(fields.Char)` and
+`class Tag(fields.Many2one)`, the type of every field built from that name is unknown. A rule that
+judges a field's type, its column or an attribute given by position skips such a field. Positional
+arguments to it leave every attribute unknown, as `**kwargs` does, since each type reads them under
+other names.
+
+[OD223](OD223.md) does not judge which numbers such a field takes, so it counts a real number the
+field is assigned first as a value it takes. [OD226](OD226.md) counts the field as a Many2many when
+one of the classes is one, keeping its rows in the table its `relation` keyword names or, without
+one, in the table Odoo names after the tables of its model and comodel.
+
 ## OD0: parsing
 
 A file that does not parse. Nothing else is checked in it.

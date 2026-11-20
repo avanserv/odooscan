@@ -5207,6 +5207,36 @@ mod tests {
     }
 
     #[test]
+    fn a_field_of_two_types_may_be_a_many2many() {
+        let known = FieldClasses::from_iter([
+            kind("Pair", UNREAD_TYPE, &["Char", "Many2many"]),
+            kind("Mark", UNREAD_TYPE, &["Char", "Many2one"]),
+        ]);
+        let src = "class X(models.Model):\n    _name = 'x'\n    a = Pair('res.country')\n    \
+                   b = Pair(comodel_name='res.country')\n    c = Mark(comodel_name='res.country')\n    \
+                   d = fields.Many2many('res.country')\n    _columns = {'e': 1}\n";
+        let facts = analyze_with(
+            src,
+            Series::parse("8.0"),
+            &known,
+            &TaintTable::default(),
+            Scope::default(),
+        );
+        let fields = &facts.classes[0].fields;
+        let read: Vec<_> = (fields.iter())
+            .map(|f| (f.name.as_str(), f.may_be_many2many(), f.comodel.is_some()))
+            .collect();
+        let expected = [
+            ("a", true, false),
+            ("b", true, true),
+            ("c", false, true),
+            ("d", true, true),
+            ("e", false, false),
+        ];
+        assert_eq!(read, expected);
+    }
+
+    #[test]
     fn a_field_with_its_own_init_gives_nothing_by_position() {
         let known = FieldClasses::from_iter([
             own(pair("Company", "Many2one")),

@@ -10,6 +10,8 @@ use ruff_python_ast::{self as ast, CmpOp, Expr, ExprContext, Stmt};
 use ruff_python_parser::parse_expression;
 use ruff_python_stdlib::builtins::is_python_builtin;
 
+use crate::facts::UNREAD_TYPE;
+
 /// Past every Python minor version, so that a builtin of any version counts.
 const ANY_PYTHON: u8 = u8::MAX;
 
@@ -892,9 +894,10 @@ impl<'a> Paths<'a> {
 
     /// Whether the field takes a constant without raising. Odoo converts the value before it
     /// stores it: a `Selection` raises `ValueError` on a value outside its list, and a `One2many`
-    /// or `Many2many` on any falsy value but `False` and `None`.
+    /// or `Many2many` on any falsy value but `False` and `None`. A field whose class name has two
+    /// types takes any real number, as the scan does not judge its type.
     fn takes(&self, value: &Expr) -> bool {
-        let numbers = matches!(self.ftype, "Integer" | "Float" | "Monetary" | "Many2one");
+        let numbers = matches!(self.ftype, "Integer" | "Float" | "Monetary" | "Many2one" | UNREAD_TYPE);
         let real = |e: &Expr| matches!(e, Expr::NumberLiteral(n) if !matches!(n.value, ast::Number::Complex { .. }));
         match value {
             Expr::NoneLiteral(_) | Expr::BooleanLiteral(ast::ExprBooleanLiteral { value: false, .. }) => true,
@@ -1360,6 +1363,9 @@ mod tests {
         assert!(numbered("    rec.f = 'archived'\n") && numbered("    rec.f = 1j\n") && numbered("    rec.f = -1j\n"));
         assert!(!typed("    rec.f = False\n", "Many2many") && !typed("    rec.f = None\n", "One2many"));
         assert!(typed("    rec.f = 0\n", "Many2many") && typed("    rec.f = ''\n", "One2many"));
+        let unread = |first: &str| typed(first, UNREAD_TYPE);
+        assert!(!unread("    rec.f = 5\n") && !unread("    rec.f = -1\n") && !unread("    rec.f = 0\n"));
+        assert!(unread("    rec.f = 1j\n"));
     }
 
     /// Walking a body twice would take 2^depth walks here.
