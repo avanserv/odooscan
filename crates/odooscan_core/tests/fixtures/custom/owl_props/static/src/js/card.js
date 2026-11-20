@@ -70,3 +70,8 @@ export class ChipCopy extends Component {
     static template = "owl_props.Card";
     static props = { ...Chip.props };
 }
+
+export class Peg extends Component {
+    static template = "owl_props.Card";
+    static props = { title: String };
+}

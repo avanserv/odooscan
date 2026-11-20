@@ -1124,6 +1124,7 @@ custom/owl_props/static/src/xml/board.xml:8:50: OD614 FancyCard declares no prop
 custom/owl_props/static/src/xml/board.xml:9:14: OD615 <Pair> leaves out 'left' and 'right', which Pair requires, so Owl throws when it renders the tag in debug mode; pass them, or make them optional
 custom/owl_props/static/src/xml/board.xml:25:14: OD615 <ListCard> leaves out 'title', which ListCard requires, so Owl throws when it renders the tag in debug mode; pass it, or make it optional
 custom/owl_props/static/src/xml/board.xml:51:35: OD614 Chip declares no prop 'extra', so Owl throws when it renders <Chip> in debug mode; fix the name, or declare the prop
+custom/owl_props/static/src/xml/board.xml:58:35: OD614 Card declares no prop 'titel', so Owl throws when it renders <Card> in debug mode; fix the name, or declare the prop
 custom/parent_store12/models/node.py:10:20: OD203 'x_node_parent_id': parent.store12.node has no field 'x_node_parent_id'
 custom/partial_sites/__manifest__.py:5:25: OD503 module 'ghost_enterprise' is not on the addons path
 custom/partial_sites/models/sites.py:24:22: OD301 module base defines no XML id 'base.no_such_id'

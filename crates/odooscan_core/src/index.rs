@@ -2295,7 +2295,7 @@ impl<'m> Index<'m> {
             for (fi, file) in module.js.iter().enumerate().filter(|&(fi, _)| !self.js_test(mi, fi)) {
                 let here = self.js_target(mi, fi);
                 for write in &file.facts.static_writes {
-                    let Some((t, class)) = self.js_class(here, &write.binding, 0) else {
+                    let Some((t, class)) = self.written_class(here, write) else {
                         continue;
                     };
                     written.insert(((t.module, t.file, class.name.clone()), write.member));
@@ -2306,6 +2306,17 @@ impl<'m> Index<'m> {
             }
         }
         written
+    }
+
+    /// The class whose member `write` changes: the one `binding` names, or the class its
+    /// `components` hold under each key of `through`. This pass fills the writes `component_child`
+    /// heeds, so the lookup reads the literal `components` alone.
+    fn written_class(&self, here: JsTarget, write: &StaticWrite) -> Option<(JsTarget, &'m JsClass)> {
+        let mut found = self.js_class(here, &write.binding, 0)?;
+        for key in &write.through {
+            found = self.component_child(found.0, found.1, key)?;
+        }
+        Some(found)
     }
 
     /// Marks what a write into the member of `class` changes: the object of the class up the chain
@@ -6658,6 +6669,9 @@ Loop.props.extra = {};
 export class Knot extends Component { static props = { ...Bow.props, title: String }; }
 export class Bow extends Component { static props = { ...Knot.props }; }
 Knot.props.title.optional = true;
+export class Tile2 extends Component { static props = { title: String }; }
+export class Leaf extends Component { static props = { title: String }; }
+export class Hub extends Component { static props = { title: String }; static components = { Leaf }; }
 "#,
         )];
         let mut sale = module(
@@ -6668,7 +6682,7 @@ Knot.props.title.optional = true;
             script(
                 "static/src/order.js",
                 r#"import { Component } from "@odoo/owl";
-import { Card, BigCard, Written, SharedSub, KeptSub, TileAlias, BadgeCopy, ChipCopy } from "@web/card";
+import { Card, BigCard, Written, SharedSub, KeptSub, TileAlias, BadgeCopy, ChipCopy, Tile2, Hub } from "@web/card";
 export class Order extends Component {
     static template = "sale.Order";
     static components = { Card, Big: BigCard, Gone: missing() };
@@ -6696,6 +6710,10 @@ export class ShelfCopy extends Component { static components = { ...Shelf.compon
 ShelfCopy.components.Card.reset();
 export class Called extends Component { static template = "sale.Called"; }
 export class Parent extends Component { static template = "sale.Parent"; }
+export class Rack extends Component { static props = { a: String }; static components = { Card, Hook: Tile2, Hub }; }
+Rack.components.Hook.props.extra = {};
+Rack.components.Hub.components.Leaf.props.extra = {};
+Rack.components.Missing.props.extra = {};
 "#,
             ),
             script(
@@ -6768,6 +6786,10 @@ Order.components.Card = null;
         assert_eq!(child("Lazy", "Card"), Some("Card"));
         // A spread copies the class references, so a write into one changes the class, not Shelf's.
         assert_eq!(child("Shelf", "Card"), Some("Card"));
+        // A write past a key changes the class the key holds, not Rack's mapping, nor Rack's props
+        // when the key holds no class it knows.
+        assert_eq!(child("Rack", "Card"), Some("Card"));
+        assert!(index.component_props(here, class("Rack")).is_some());
         // A write through a class that shares the object changes the source's too.
         for (owner, tag) in [
             ("Order", "Gone"),
@@ -6807,6 +6829,8 @@ Order.components.Card = null;
         // into a description, or any through the source's own object, reaches the source, however
         // long the chain of aliases and through a cycle.
         assert_eq!(props("Chip").as_deref(), Some("title"));
+        // A write through two keys changes the class the last holds, not the one between.
+        assert_eq!(props("Hub").as_deref(), Some("title"));
         for name in [
             "MixCard",
             "Bare",
@@ -6824,6 +6848,8 @@ Order.components.Card = null;
             "Ring",
             "Knot",
             "Bow",
+            "Tile2",
+            "Leaf",
         ] {
             assert_eq!(props(name), None, "{name}");
         }

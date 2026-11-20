@@ -93,6 +93,7 @@ pub fn analyze(text: &str) -> JsFacts {
         let Some(c) = facts.classes.iter_mut().find(|c| c.name == binding) else {
             facts.static_writes.push(StaticWrite {
                 binding,
+                through: vec![],
                 member: value.kind(),
                 inner: false,
                 deep: false,
@@ -466,6 +467,20 @@ impl Collector<'_> {
             self.owl_exempt.push(m.span.start);
         }
     }
+
+    /// Records `X.props = { ... }` as X's literal member, and any other assignment that is or
+    /// reaches into a class's `props` or `components` as a write to it.
+    fn static_assignment(&mut self, m: &MemberExpression, assignment: &AssignmentExpression) {
+        let Some(path) = static_of(m) else {
+            return;
+        };
+        if path.depth == 0 && path.through.is_empty() && assignment.operator == AssignmentOperator::Assign {
+            let value = StaticValue::read(path.kind, Some(&assignment.right));
+            self.statics.push((path.binding, value));
+        } else {
+            self.facts.static_writes.push(path.write());
+        }
+    }
 }
 
 fn is_owl(expr: &Expression) -> bool {
@@ -594,14 +609,7 @@ impl<'a> Visit<'a> for Collector<'_> {
             self.templates.push((class.name.to_string(), template));
         }
         if let Some(m) = assignment.left.as_member_expression() {
-            match (static_of(m), assignment.operator) {
-                (Some((binding, kind, 0)), AssignmentOperator::Assign) => {
-                    let value = StaticValue::read(kind, Some(&assignment.right));
-                    self.statics.push((binding, value));
-                }
-                (Some(_), _) => self.facts.static_writes.extend(static_write(m)),
-                (None, _) => {}
-            }
+            self.static_assignment(m, assignment);
         }
         self.assigned(assignment);
         self.facts.diags.extend(html_assignment(assignment, self.lines));
@@ -644,7 +652,7 @@ impl<'a> Visit<'a> for Collector<'_> {
         if unary.operator == UnaryOperator::Delete
             && let Some(m) = unary.argument.as_member_expression()
         {
-            self.facts.static_writes.extend(static_write(m));
+            self.facts.static_writes.extend(static_of(m).map(StaticPath::write));
         }
         walk_unary_expression(self, unary);
     }
@@ -790,29 +798,65 @@ fn static_kind(name: &str) -> Option<Static> {
     }
 }
 
-/// The binding and member of `X.props` or `X.components` that `m` is or reaches into, as in
-/// `X.props.title.optional`, and how many members past it `m` reaches: 0 for the member itself.
-fn static_of(m: &MemberExpression) -> Option<(String, Static, usize)> {
-    if let MemberExpression::StaticMemberExpression(s) = m
-        && let Expression::Identifier(i) = &s.object
-        && let Some(kind) = static_kind(&s.property.name)
-    {
-        return Some((i.name.to_string(), kind, 0));
-    }
-    let (binding, kind, depth) = static_of(m.object().as_member_expression()?)?;
-    Some((binding, kind, depth + 1))
+/// The `props` or `components` a member chain is or reaches into: X's, as in
+/// `X.props.title.optional`, or those of the class a key of `X.components` holds, as `Y.props` in
+/// `X.components.Y.props`, which Owl validates a `<Y>` tag against (18.0
+/// `addons/web/static/lib/owl/owl.js:3232-3241`).
+struct StaticPath {
+    binding: String,
+    through: Vec<String>,
+    kind: Static,
+    /// How many members past the member the chain reaches: 0 for the member itself.
+    depth: usize,
 }
 
-/// The write that assigning or deleting `m` makes when it is or reaches into `X.props` or
-/// `X.components`.
-fn static_write(m: &MemberExpression) -> Option<StaticWrite> {
-    let (binding, member, depth) = static_of(m)?;
-    Some(StaticWrite {
+impl StaticPath {
+    /// The write that assigning or deleting the path makes.
+    fn write(self) -> StaticWrite {
+        StaticWrite {
+            binding: self.binding,
+            through: self.through,
+            member: self.kind,
+            inner: self.depth > 0,
+            deep: self.depth > 1,
+        }
+    }
+}
+
+/// The identifier a chain of members starts from, and each member's name, None when computed
+/// from anything but a string literal.
+fn member_names(m: &MemberExpression) -> Option<(String, Vec<Option<String>>)> {
+    let name = m.static_property_name().and_then(|n| n.as_str()).map(str::to_owned);
+    if let Expression::Identifier(i) = m.object() {
+        return Some((i.name.to_string(), vec![name]));
+    }
+    let (root, mut names) = member_names(m.object().as_member_expression()?)?;
+    names.push(name);
+    Some((root, names))
+}
+
+/// None for a path that goes on past `X.components.Y` to another member of Y than its `props` or
+/// `components`, as `.prototype`. A key computed from anything but a string literal, or a key with
+/// nothing after it, keeps the write on X's `components`; a string literal key walks on as a name.
+fn static_of(m: &MemberExpression) -> Option<StaticPath> {
+    let (binding, names) = member_names(m)?;
+    let kind = static_kind(names.first()?.as_deref()?)?;
+    let mut path = StaticPath {
         binding,
-        member,
-        inner: depth > 0,
-        deep: depth > 1,
-    })
+        through: vec![],
+        kind,
+        depth: 0,
+    };
+    let mut rest = &names[1..];
+    while path.kind == Static::Components
+        && let [Some(key), Some(next), tail @ ..] = rest
+    {
+        path.kind = static_kind(next)?;
+        path.through.push(key.clone());
+        rest = tail;
+    }
+    path.depth = rest.len();
+    Some(path)
 }
 
 /// What a call changes of a class's `props` or `components`: through a method of their own, as
@@ -820,11 +864,10 @@ fn static_write(m: &MemberExpression) -> Option<StaticWrite> {
 fn static_calls(call: &CallExpression) -> Vec<StaticWrite> {
     // A call changes the object it is given or is called on, so past `X.props` itself it reaches
     // into one a key holds.
-    let inner = |(binding, member, depth)| StaticWrite {
-        binding,
-        member,
+    let inner = |path: StaticPath| StaticWrite {
+        deep: path.depth > 0,
         inner: true,
-        deep: depth > 0,
+        ..path.write()
     };
     if let Some(callee) = call.callee.as_member_expression()
         && let Some(written) = callee.object().as_member_expression().and_then(static_of)
@@ -845,6 +888,7 @@ fn static_calls(call: &CallExpression) -> Vec<StaticWrite> {
             .filter_map(|m| {
                 Some(StaticWrite {
                     binding: class.name.to_string(),
+                    through: vec![],
                     member: static_kind(m)?,
                     inner: false,
                     deep: false,
@@ -2105,6 +2149,7 @@ class E extends D {
         assert_eq!(components(&c[4]), Some(vec!["=super".to_owned()]));
         let own = StaticWrite {
             binding: "Imported".to_owned(),
+            through: vec![],
             member: Static::Props,
             inner: false,
             deep: false,
@@ -2131,6 +2176,15 @@ Object.keys(L.props);
 delete M.other.x;
 delete N.props;
 Object.assign(O.props.title, { optional: true });
+Q.components.Card = Card;
+R.components.Card.props.t.optional = 1;
+S.components.Card.props = {};
+T.components.Card.label = 1;
+patch(T2.components.Card.prototype, {});
+U.components[k].props.x = 1;
+V.components.A.components.B.props.x = 1;
+Object.assign(W.components.Card.props, {});
+P["props"].x = 1;
 "#,
         );
         let writes: Vec<_> = facts
@@ -2143,7 +2197,9 @@ Object.assign(O.props.title, { optional: true });
                     "components"
                 };
                 let inner = if w.inner { " inner" } else { "" };
-                format!("{}.{member}{inner}{}", w.binding, if w.deep { " deep" } else { "" })
+                let through: String = w.through.iter().map(|key| format!(">{key}")).collect();
+                let deep = if w.deep { " deep" } else { "" };
+                format!("{}{through}.{member}{inner}{deep}", w.binding)
             })
             .collect();
         assert_eq!(
@@ -2160,7 +2216,14 @@ Object.assign(O.props.title, { optional: true });
                 "H.components",
                 "I.props",
                 "N.props",
-                "O.props inner deep"
+                "O.props inner deep",
+                "Q.components inner",
+                "R>Card.props inner deep",
+                "S>Card.props",
+                "U.components inner deep",
+                "V>A>B.props inner",
+                "W>Card.props inner",
+                "P.props inner"
             ]
         );
     }
