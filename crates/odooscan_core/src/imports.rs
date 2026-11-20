@@ -264,9 +264,29 @@ fn type_checking(test: &Expr) -> bool {
     tail_name(test) == Some("TYPE_CHECKING")
 }
 
-/// What the file binds to `__all__` at import.
+/// What the file binds to `__all__` at import, unread when `unmodelled` holds.
 fn exports(body: &[Stmt]) -> Exports {
+    if unmodelled(body) {
+        return Exports::Unread;
+    }
     block(Exports::Absent, body, false)
+}
+
+/// Whether the file binds `__all__` where `block` does not read it: a statement `module_state::binds`
+/// sees binding it other than as an `Assign`, `AnnAssign`, `AugAssign` or `For` target, or code
+/// `module_state::binds_unseen` finds. The whole file counts, since a function that binds it may
+/// run at any later point.
+fn unmodelled(body: &[Stmt]) -> bool {
+    let folded = |stmt: &Stmt| {
+        matches!(
+            stmt,
+            Stmt::Assign(_) | Stmt::AnnAssign(_) | Stmt::AugAssign(_) | Stmt::For(_)
+        )
+    };
+    module_state::binds_unseen(body, "__all__")
+        || module_state::bound(body)
+            .into_iter()
+            .any(|stmt| !folded(stmt) && module_state::binds(stmt, "__all__"))
 }
 
 /// `__all__` after `body` runs, where `may_skip` says some of it may not run, so that an
@@ -329,7 +349,8 @@ fn looped(exports: Exports, stmt: &Stmt) -> Exports {
 }
 
 /// `__all__` after an assignment that may not run. With no earlier list, a star import takes
-/// either no submodule or those the assignment lists, so the list holds every name it may.
+/// either no submodule or those the assignment lists, so the list holds every name it may. A list
+/// bound where the fold does not see it is caught before, by `unmodelled`.
 fn assigned_maybe(exports: Exports, stmt: &Stmt) -> Exports {
     match exports {
         Exports::Absent => bound(Exports::Absent, stmt),
@@ -607,27 +628,32 @@ impl Graph {
 
     /// When loading `addon` first runs each file its root `__init__.py` reaches, as keys that sort
     /// in that order: Python runs a module's imports depth first, each once, an import in a
-    /// function only when called and one under `if TYPE_CHECKING:` never. None where `reached` is
-    /// none, and for an addon the scan lost or does not know.
+    /// function only when called and one under `if TYPE_CHECKING:` never. None where `reached` or
+    /// `run_from` is none, and for an addon the scan lost or does not know.
     pub fn run_order(&self, addon: &str) -> Option<FxHashMap<String, RunKey>> {
         let files = &self.addons.get(addon).filter(|a| !a.lost)?.files;
         self.reached(addon, &[ROOT])?;
         let mut order = FxHashMap::default();
         if files.contains_key(ROOT) {
             order.insert(ROOT.to_owned(), vec![]);
-            self.run_from(addon, ROOT, &mut order);
+            self.run_from(addon, ROOT, &mut order)?;
         }
         Some(order)
     }
 
     /// Gives each file `rel` of `addon` runs first the key of `rel` and where the import runs it.
-    fn run_from(&self, addon: &str, rel: &str, order: &mut FxHashMap<String, RunKey>) {
+    /// None past a star import of a package whose `__all__` the scan does not read, as `star` then
+    /// runs every submodule in an order Python need not follow.
+    fn run_from(&self, addon: &str, rel: &str, order: &mut FxHashMap<String, RunKey>) -> Option<()> {
         let Some(Some(imports)) = self.addons[addon].files.get(rel) else {
-            return;
+            return Some(());
         };
         let mut facts: Vec<&ImportFact> = imports.list.iter().filter(|f| !f.deferred && !f.typing).collect();
         facts.sort_by_key(|f| f.pos);
         for fact in facts {
+            if self.stars_unread(addon, rel, fact) {
+                return None;
+            }
             let targets = self.targets(addon, rel, fact).into_iter().enumerate();
             for (i, (_, file)) in targets.filter(|(_, (to, _))| to == addon) {
                 if order.contains_key(&file) {
@@ -636,8 +662,21 @@ impl Graph {
                 let mut key = order[rel].clone();
                 key.push((fact.pos, i));
                 order.insert(file.clone(), key);
-                self.run_from(addon, &file, order);
+                self.run_from(addon, &file, order)?;
             }
+        }
+        Some(())
+    }
+
+    /// Whether `fact` of file `rel` star-imports a package of `addon` whose `__all__` the scan
+    /// does not read.
+    fn stars_unread(&self, addon: &str, rel: &str, fact: &ImportFact) -> bool {
+        if !fact.from || !fact.names.iter().any(|n| n.value == "*") {
+            return false;
+        }
+        match self.place(addon, rel, fact.level, fact.module.as_deref()) {
+            Some(Place::In(to, path)) => to == addon && *self.package_exports(&to, &path) == Exports::Unread,
+            _ => false,
         }
     }
 
@@ -809,6 +848,22 @@ impl Graph {
         located
     }
 
+    /// What the `__init__.py` of package `path` of `addon` binds to `__all__`, unread when it does
+    /// not parse.
+    fn package_exports(&self, addon: &str, path: &[String]) -> &Exports {
+        let dir = path.join("/");
+        let init = if dir.is_empty() {
+            ROOT.to_owned()
+        } else {
+            format!("{dir}/__init__.py")
+        };
+        match self.addons.get(addon).and_then(|files| files.files.get(&init)) {
+            Some(Some(imports)) => &imports.exports,
+            Some(None) => &Exports::Unread,
+            None => &Exports::Absent,
+        }
+    }
+
     /// The submodules a star import of package `path` of `addon` runs: those its `__all__` lists,
     /// none without one, and every one when the scan does not read it.
     fn star(&self, addon: &str, path: &[String]) -> Vec<String> {
@@ -816,17 +871,7 @@ impl Graph {
             return vec![];
         };
         let dir = path.join("/");
-        let init = if dir.is_empty() {
-            ROOT.to_owned()
-        } else {
-            format!("{dir}/__init__.py")
-        };
-        let exports = match files.files.get(&init) {
-            Some(Some(imports)) => &imports.exports,
-            Some(None) => &Exports::Unread,
-            None => &Exports::Absent,
-        };
-        match exports {
+        match self.package_exports(addon, path) {
             Exports::Absent => vec![],
             Exports::Literal(names) => names.clone(),
             Exports::Unread => {
@@ -1328,6 +1373,50 @@ mod tests {
     }
 
     #[test]
+    fn all_bound_unseen_is_unread() {
+        let read = |src: &str| imports(src).exports;
+        for bound in [
+            "from .m import __all__\n",
+            "def f():\n    global __all__\n    __all__ = ['a']\nf()\n",
+            "(__all__ := ['a'])\n",
+            "@register(__all__ := ['a'])\ndef f():\n    pass\n",
+            "def f(x=(__all__ := ['a'])):\n    pass\n",
+            "globals()['__all__'] = ['a']\n",
+            "try:\n    pass\nexcept E as __all__:\n    pass\n",
+            "match x:\n    case [*__all__]:\n        pass\n",
+            "class __all__:\n    pass\n",
+            "type __all__ = list[str]\n",
+        ] {
+            assert_eq!(read(bound), Exports::Unread, "{bound}");
+            let src = format!("{bound}if x:\n    __all__ = ['b']\n");
+            assert_eq!(read(&src), Exports::Unread, "{src}");
+        }
+        for src in [
+            "import pkg as __all__\n",
+            "with f() as __all__:\n    pass\n",
+            "def __all__():\n    pass\n",
+            "del __all__\n",
+            "[(__all__ := ['a']) for _ in x]\n",
+            "sys.modules[__name__].__all__ = ['a']\n",
+            "setattr(sys.modules[__name__], '__all__', ['a'])\n",
+            "globals().update(__all__=['a'])\n",
+        ] {
+            assert_eq!(read(src), Exports::Unread, "{src}");
+        }
+        for src in [
+            "x = eval(s)\n",
+            "globals().update(d)\n",
+            "def f():\n    __all__ = ['a']\n",
+            "def f():\n    (__all__ := ['a'])\n",
+        ] {
+            assert_eq!(read(src), Exports::Absent, "{src}");
+        }
+        for src in ["__all__ = ['a']\nx = eval(s)\n", "from x import *\n__all__ = ['a']\n"] {
+            assert_eq!(read(src), Exports::Literal(owned(&["a"])), "{src}");
+        }
+    }
+
+    #[test]
     fn a_try_with_only_finally_runs_its_body() {
         let read = |src: &str| imports(src).exports;
         let only_finally = "try:\n    __all__ = ['b']\nfinally:\n    pass\n";
@@ -1759,6 +1848,27 @@ mod tests {
         g.addons.get_mut("shop").unwrap().lost = true;
         assert!(g.run_order("shop").is_none());
         assert!(g.run_order("gone").is_none());
+    }
+
+    #[test]
+    fn the_run_order_is_unknown_past_a_star_import_of_an_unread_all() {
+        let files = |base: &'static str| {
+            vec![
+                ("__init__.py", Some("from .pkg import *\n")),
+                ("pkg/__init__.py", Some(base)),
+                ("pkg/base.py", Some("__all__ = ['z_parent', 'a_child']\n")),
+                ("pkg/z_parent.py", Some("")),
+                ("pkg/a_child.py", Some("")),
+            ]
+        };
+        let listed = graph(&[("shop", false, files("__all__ = ['z_parent', 'a_child']\n").as_slice())]);
+        assert_eq!(
+            run_order(&listed, "shop").unwrap(),
+            owned(&["__init__.py", "pkg/__init__.py", "pkg/z_parent.py", "pkg/a_child.py"])
+        );
+        let unread = graph(&[("shop", false, files("from .base import __all__\n").as_slice())]);
+        assert!(unread.run_order("shop").is_none());
+        assert!(unread.reached("shop", &[ROOT]).is_some());
     }
 
     #[test]
