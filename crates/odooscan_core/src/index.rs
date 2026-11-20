@@ -3770,12 +3770,21 @@ impl<'m> Index<'m> {
     }
 
     /// Whether a class in scope of `model`, or of a model it inherits, lists in `_inherit` a model
-    /// no class of the index defines, whose methods it does not know.
+    /// no class of the index introduces, whose methods it does not know. A model the index only
+    /// extends counts: its introducer is outside the scan.
     pub fn unindexed_parent(&self, model: &str, scope: &Scope) -> bool {
         self.merged_classes(model, scope)
             .iter()
             .flat_map(|(_, c)| &c.inherit)
-            .any(|parent| !self.has_model(&parent.value))
+            .any(|parent| !self.has_introducer(&parent.value))
+    }
+
+    /// Whether a class of any module introduces `model` with `_name`. Odoo refuses to extend or
+    /// inherit a model absent from the registry (18.0 `odoo/models.py:739-741`, `:759-761`; 20.0
+    /// `odoo/orm/model_classes.py:186-188`, `:208-210`), so one only extended here is introduced
+    /// outside the scan.
+    fn has_introducer(&self, model: &str) -> bool {
+        self.classes(model).iter().any(|(_, c)| c.new_model)
     }
 
     /// Follows a dotted field path from `model`. Paths through models nobody defines are accepted.
@@ -4804,6 +4813,49 @@ mod tests {
             "_compute_kind",
         ] {
             assert!(!takes(text), "{text}");
+        }
+    }
+
+    #[test]
+    fn an_inherit_parent_is_indexed_only_where_a_class_introduces_it() {
+        fn python(source: &str) -> SourceFile<crate::facts::PyFacts> {
+            SourceFile {
+                path: PathBuf::new(),
+                rel: String::new(),
+                rank: None,
+                demo: false,
+                facts: python::analyze(source, Series::parse("18.0")),
+                suppressions: Default::default(),
+                mentions: Mentions::default(),
+            }
+        }
+        let manifest = |depends: &str| format!("{{'version': '18.0.1.0', 'depends': [{depends}]}}");
+        let mut modules = [
+            module("base", &manifest("")),
+            module("side", &manifest("'base'")),
+            module("main", &manifest("'base'")),
+        ];
+        modules[0]
+            .python
+            .push(python("class P(models.Model):\n    _name = 'res.partner'\n"));
+        modules[1]
+            .python
+            .push(python("class T(models.Model):\n    _name = 'side.thing'\n"));
+        modules[2].python.push(python(
+            "class W(models.AbstractModel):\n    _inherit = 'ghost.widget'\n\n\
+             class S(models.AbstractModel):\n    _name = 'parent.shelf'\n    _inherit = ['ghost.tray']\n\n\
+             class G(models.AbstractModel):\n    _inherit = 'ghost.tray'\n\n\
+             class B(models.AbstractModel):\n    _name = 'parent.bench'\n    _inherit = ['res.partner']\n\n\
+             class P(models.Model):\n    _inherit = 'res.partner'\n\n\
+             class T(models.Model):\n    _inherit = 'side.thing'\n",
+        ));
+        let index = Index::build(&modules, None);
+        let scope = index.scope(index.by_name["main"]);
+        for model in ["ghost.widget", "parent.shelf", "ghost.tray"] {
+            assert!(index.unindexed_parent(model, &scope), "{model}");
+        }
+        for model in ["parent.bench", "res.partner", "side.thing"] {
+            assert!(!index.unindexed_parent(model, &scope), "{model}");
         }
     }
 
