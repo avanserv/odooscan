@@ -13,8 +13,8 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use crate::api_table::{self, Kind};
 use crate::facts::{
     BaseSource, ClassBase, ClassFact, Definition, DefinitionSource, DomainFact, FieldClass, FieldFact, FlowSummary,
-    GuardedRef, MethodDef, ModelKind, OptionValue, Param, Pos, PyFacts, RawDiag, Receiver, Signature, Spanned,
-    SqlColumn, SqlView, Subject, UNREAD_TYPE, XmlRef, mangled, private_name,
+    GuardedRef, MethodDef, ModelKind, OptionValue, Param, Pos, PyFacts, RawDiag, Receiver, Rows, RowsTable, Signature,
+    Spanned, SqlColumn, SqlView, Subject, UNREAD_TYPE, XmlRef, mangled, private_name,
 };
 use crate::fix::{self, Edit, Fix};
 use crate::method_body::is_name;
@@ -1990,10 +1990,48 @@ impl<'a> Visitor<'a> for Calls<'a> {
 
 /// Whether a field call may set attributes it does not name.
 fn hides_options(ftype: &str, call: &ast::ExprCall) -> bool {
-    let args = &call.arguments.args;
-    args.iter().any(Expr::is_starred_expr)
-        || call.arguments.keywords.iter().any(|k| k.arg.is_none())
-        || (ftype == UNREAD_TYPE && !args.is_empty())
+    unpacks(call) || (ftype == UNREAD_TYPE && !call.arguments.args.is_empty())
+}
+
+/// Whether a call unpacks `*args` or `**kwargs`.
+fn unpacks(call: &ast::ExprCall) -> bool {
+    call.arguments.args.iter().any(Expr::is_starred_expr) || call.arguments.keywords.iter().any(|k| k.arg.is_none())
+}
+
+/// Where a field that may be a Many2many keeps its rows, read as a Many2many whatever the type of
+/// its class name. `args` is None when the class maps its positional arguments in its own
+/// `__init__`. Odoo names the table itself for a false `relation`, as `None` or `''` (20.0
+/// `odoo/orm/fields_relational.py:1320-1329`).
+fn rows(call: &ast::ExprCall, args: Option<&[Expr]>) -> RowsTable {
+    let given = many2many_arg(call, args, "relation").filter(|r| option_value(r).truth() != Some(false));
+    let Some(relation) = given else {
+        return comodel_rows(call, args);
+    };
+    let literal = str_lit(relation).map(|r| Rows::Relation(r.to_owned()));
+    RowsTable {
+        unread: literal.is_none(),
+        table: literal,
+    }
+}
+
+/// The rows of a Many2many given no `relation`, which Odoo keeps in a table named after the tables
+/// of the model and the comodel.
+fn comodel_rows(call: &ast::ExprCall, args: Option<&[Expr]>) -> RowsTable {
+    let comodel = many2many_arg(call, args, "comodel_name");
+    let literal = comodel.and_then(str_lit);
+    RowsTable {
+        table: literal.map(|c| Rows::Comodel(c.to_owned())),
+        unread: (comodel.is_some() && literal.is_none()) || unpacks(call) || args.is_none(),
+    }
+}
+
+/// The argument a Many2many takes as `name`, by keyword or else by position before any starred
+/// argument.
+fn many2many_arg<'e>(call: &'e ast::ExprCall, args: Option<&'e [Expr]>, name: &str) -> Option<&'e Expr> {
+    keyword(call, name).or_else(|| {
+        let at = positional_names("Many2many").iter().position(|n| *n == name)?;
+        args?.iter().take_while(|a| !a.is_starred_expr()).nth(at)
+    })
 }
 
 fn is_delegate(value: &Expr, known: &FieldClasses) -> bool {
@@ -4353,7 +4391,9 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
             domain_string: false,
             options: vec![],
             splat: true,
+            keywords_hidden: true,
             lineage: vec![],
+            rows: None,
         }
     }
 
@@ -4618,7 +4658,7 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
             self.fixed_api_use(Kind::FieldOption("track_visibility"), k, fix);
         }
         let options = self.options(ftype, call, args.unwrap_or_default());
-        Some(FieldFact {
+        let mut fact = FieldFact {
             name: target.id.to_string(),
             name_pos: self.loc.at(target),
             ftype: ftype.to_owned(),
@@ -4633,8 +4673,12 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
             domain_string: keyword(call, "domain").is_some_and(|d| matches!(d, Expr::StringLiteral(_))),
             options,
             splat: hides_options(ftype, call) || args.is_none(),
+            keywords_hidden: call.arguments.keywords.iter().any(|k| k.arg.is_none()) || args.is_none(),
             lineage: lineage(call, self.known),
-        })
+            rows: None,
+        };
+        fact.rows = fact.may_be_many2many().then(|| rows(call, args));
+        Some(fact)
     }
 
     fn options(&self, ftype: &str, call: &ast::ExprCall, args: &[Expr]) -> Vec<(String, Spanned<OptionValue>)> {
@@ -6719,6 +6763,107 @@ mod tests {
             ("e", false, false),
         ];
         assert_eq!(read, expected);
+    }
+
+    #[test]
+    fn a_many2many_names_its_rows_by_keyword_or_by_position() {
+        let known = FieldClasses::from_iter([
+            kind("Pair", UNREAD_TYPE, &["Char", "Many2many"]),
+            own(pair("Tags", "Many2many")),
+        ]);
+        let src = "class X(models.Model):\n    _name = 'x'\n    \
+                   a = fields.Many2many('p.q', relation='a_rel')\n    \
+                   b = fields.Many2many('p.q', 'b_rel')\n    \
+                   c = fields.Many2many(comodel_name='p.q')\n    \
+                   d = Pair('p.q')\n    \
+                   e = Pair('p.q', 'e_rel')\n    \
+                   f = fields.Many2many('p.q', relation=TABLE)\n    \
+                   g = fields.Many2many(COMODEL)\n    \
+                   h = fields.Many2many('p.q', **kw)\n    \
+                   i = fields.Many2many('p.q', *args)\n    \
+                   j = Tags('p.q')\n    \
+                   k = fields.Many2many('p.q', relation='k_rel', **kw)\n    \
+                   l = fields.Many2many(*args, relation='l_rel')\n    \
+                   m = fields.Many2many(string='M')\n    \
+                   n = fields.Many2one('p.q')\n    \
+                   o = fields.Many2many('p.q', relation=None)\n    \
+                   p = fields.Many2many('p.q', '')\n    \
+                   q = fields.Many2many(COMODEL, relation=False)\n";
+        let facts = analyze_with(src, None, &known, &TaintTable::default(), Scope::default());
+        let rows: Vec<_> = facts.classes[0].fields.iter().map(|f| f.rows.clone()).collect();
+        let read = |table: Option<Rows>, unread| Some(RowsTable { table, unread });
+        let relation = |r: &str| Some(Rows::Relation(r.to_owned()));
+        let comodel = || Some(Rows::Comodel("p.q".to_owned()));
+        let expected = [
+            read(relation("a_rel"), false),
+            read(relation("b_rel"), false),
+            read(comodel(), false),
+            read(comodel(), false),
+            read(relation("e_rel"), false),
+            read(None, true),
+            read(None, true),
+            read(comodel(), true),
+            read(comodel(), true),
+            read(None, true),
+            read(relation("k_rel"), false),
+            read(relation("l_rel"), false),
+            read(None, false),
+            None,
+            read(comodel(), false),
+            read(comodel(), false),
+            read(None, true),
+        ];
+        assert_eq!(rows, expected);
+    }
+
+    #[test]
+    fn a_field_may_be_stored_unless_store_or_a_related_or_compute_says_not() {
+        for (call, stored) in [
+            ("fields.Many2many('p.q')", true),
+            ("fields.Many2many('p.q', store=False)", false),
+            ("fields.Many2many('p.q', store=None)", false),
+            ("fields.Many2many('p.q', store=0)", false),
+            ("fields.Many2many('p.q', store=STORE)", true),
+            ("fields.Many2many('p.q', related='a.b')", false),
+            ("fields.Many2many('p.q', compute='_compute_f')", false),
+            ("fields.Many2many('p.q', related='a.b', store=True)", true),
+            ("fields.Many2many('p.q', related='')", true),
+            ("fields.Many2many('p.q', related=PATH)", true),
+            ("fields.Many2many('p.q', related='a.b', **kw)", true),
+            ("fields.Many2many('p.q', *args, related='a.b')", false),
+        ] {
+            assert_eq!(field(call).may_be_stored(), stored, "{call}");
+        }
+    }
+
+    #[test]
+    fn only_a_keyword_the_call_may_hide_keeps_a_related_field_stored() {
+        let known = FieldClasses::from_iter([
+            kind("Pair", UNREAD_TYPE, &["Char", "Many2many"]),
+            own(pair("Tags", "Many2many")),
+        ]);
+        let src = "class X(models.Model):\n    _name = 'x'\n    \
+                   a = Pair('p.q', 'a_rel', related='a.b')\n    \
+                   b = Tags('p.q', related='a.b')\n";
+        let facts = analyze_with(src, None, &known, &TaintTable::default(), Scope::default());
+        let stored: Vec<_> = facts.classes[0].fields.iter().map(FieldFact::may_be_stored).collect();
+        assert_eq!(stored, [false, true]);
+    }
+
+    #[test]
+    fn a_literal_option_has_the_truth_python_gives_it() {
+        for (value, truth) in [
+            (OptionValue::Falsy, Some(false)),
+            (OptionValue::Bool(true), Some(true)),
+            (OptionValue::Str(String::new()), Some(false)),
+            (OptionValue::Str("a".to_owned()), Some(true)),
+            (OptionValue::Strs(vec![]), Some(false)),
+            (OptionValue::Tuple(vec!["a".to_owned()]), Some(true)),
+            (OptionValue::Dict(vec![]), Some(false)),
+            (OptionValue::Other, None),
+        ] {
+            assert_eq!(value.truth(), truth, "{value:?}");
+        }
     }
 
     #[test]

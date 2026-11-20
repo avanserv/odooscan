@@ -6,3 +6,4 @@ access_x_lens_country,x lens country,model_x_lens_country,base.group_user,1,0,0,
 access_x_lens_partner,x lens partner,model_x_lens_partner,base.group_user,1,0,0,0
 access_x_lens_currency,x lens currency,model_x_lens_currency,base.group_user,1,0,0,0
 access_x_seal,x seal,model_x_seal,base.group_user,1,0,0,0
+access_x_lens_region,x lens region,model_x_lens_region,base.group_user,1,0,0,0

@@ -1,0 +1,3 @@
+id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
+access_x_crate,x crate,model_x_crate,base.group_user,1,0,0,0
+access_x_crate_tag,x crate tag,model_x_crate_tag,base.group_user,1,0,0,0
