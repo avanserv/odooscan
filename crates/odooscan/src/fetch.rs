@@ -379,15 +379,9 @@ fn checkout(dir: &Path, remote: &str, sha: &str) -> Result<(), Failure> {
     Ok(())
 }
 
-/// The standard output of git run in `dir`, or the error its standard error gives. Only `ls-remote`
-/// writes nothing, so only its failure is the remote's: a fetch or a checkout also fails on a full
-/// disk or a lock, and git translates the messages that would tell them apart.
+/// The standard output of git run in `dir`, or the error its standard error gives.
 fn git(dir: &Path, args: &[&str]) -> Result<String, Failure> {
     let step = args[0];
-    let fail = |why: String| match step {
-        "ls-remote" => Failure::Unreachable(why),
-        _ => Failure::Other(format!("git {step} failed: {why}")),
-    };
     let limit = if matches!(step, "fetch" | "checkout") {
         TRANSFER
     } else {
@@ -395,11 +389,22 @@ fn git(dir: &Path, args: &[&str]) -> Result<String, Failure> {
     };
     let out = output_within(command(dir).args(args), limit)
         .map_err(|e| Failure::Other(format!("git could not run ({e})")))?
-        .ok_or_else(|| fail(format!("ran for over {} s", limit.as_secs())))?;
+        .ok_or_else(|| failed(step, format!("ran for over {} s", limit.as_secs())))?;
     if out.status.success() {
         return Ok(String::from_utf8_lossy(&out.stdout).into_owned());
     }
-    Err(fail(error_of(&out)))
+    Err(failed(step, error_of(&out)))
+}
+
+/// Why git `step` failed. Only `ls-remote` writes nothing, so only its failure is the remote's: a
+/// fetch or a checkout also fails on a full disk or a lock, and git translates the messages that
+/// would tell them apart.
+fn failed(step: &str, why: String) -> Failure {
+    let why = format!("git {step} failed: {why}");
+    match step {
+        "ls-remote" => Failure::Unreachable(why),
+        _ => Failure::Other(why),
+    }
 }
 
 /// The first fatal line of standard error says why; the last is often advice such as "and the
@@ -412,8 +417,9 @@ fn error_of(out: &Output) -> String {
 }
 
 /// The output of `command`, or `None` once it has run longer than `limit` and is killed with every
-/// process it started. The pipes are read on threads, so that a full one never blocks the child,
-/// and for at most `LINGER` after it exits, since a helper it started may hold them open past it.
+/// process still running under it. The pipes are read on threads, so that a full one never blocks
+/// the child, and for at most `LINGER` after it exits, since a helper it started may hold them open
+/// past it.
 fn output_within(command: &mut Command, limit: Duration) -> std::io::Result<Option<Output>> {
     let mut child = command
         .stdin(Stdio::null())
@@ -477,14 +483,26 @@ fn lock(sink: &Sink) -> std::sync::MutexGuard<'_, Vec<u8>> {
 
 /// Stops `root`, then round by round the processes the stopped ones started, so that none forks
 /// past the kill. A stopped parent reaps no child, so an id found stays its process's until the
-/// kill. The rounds end when none is new, or after 8 against a tree that keeps growing.
+/// kill.
 #[cfg(unix)]
 fn kill_tree(root: u32) {
+    let tree = leaves_first(root, |new| {
+        signal("STOP", new);
+        processes()
+    });
+    signal("KILL", &tree);
+}
+
+/// `root` and the processes under it, each before its ancestors: a dead parent's exited children
+/// are reaped by init, and their ids could be reused before their own kill. `stop` stops the ids
+/// of a round and returns every process id with its parent's. The rounds end when none is new, or
+/// after 8 against a tree that keeps growing.
+#[cfg(unix)]
+fn leaves_first(root: u32, mut stop: impl FnMut(&[u32]) -> Vec<(u32, u32)>) -> Vec<u32> {
     let mut tree = vec![root];
     let mut new = tree.clone();
     for _ in 0..8 {
-        signal("STOP", &new);
-        new = processes()
+        new = stop(&new)
             .into_iter()
             .filter(|(pid, parent)| tree.contains(parent) && !tree.contains(pid))
             .map(|(pid, _)| pid)
@@ -494,7 +512,8 @@ fn kill_tree(root: u32) {
         }
         tree.extend(&new);
     }
-    signal("KILL", &tree);
+    tree.reverse();
+    tree
 }
 
 /// Sends `name` through the shell's `kill`, since a slim image may have no `kill` program.
@@ -564,8 +583,9 @@ fn kill_tree(root: u32) {
 }
 
 /// Git in `dir` alone: no repository above it, none the caller's environment names, and none of
-/// the user's hooks, the fsmonitor one included, which `core.hooksPath` does not cover. A remote that asks for credentials fails rather than waiting on a prompt
-/// nobody may see.
+/// the user's hooks, the fsmonitor one included, which `core.hooksPath` does not cover. That one
+/// is emptied rather than set to `false`, which Git 2.35.1 and earlier run as a hook program. A
+/// remote that asks for credentials fails rather than waiting on a prompt nobody may see.
 fn command(dir: &Path) -> Command {
     let mut command = isolated(dir);
     if !ssh_chosen(dir) {
@@ -574,7 +594,7 @@ fn command(dir: &Path) -> Command {
     let hooks = dir.join(".git/hooks");
     command
         .args(STALL)
-        .args(["-c", "core.fsmonitor=false"])
+        .args(["-c", "core.fsmonitor="])
         .arg("-c")
         .arg(format!("core.hooksPath={}", hooks.display()));
     command
@@ -771,6 +791,29 @@ mod tests {
         let _ = std::fs::remove_dir_all(root);
     }
 
+    #[test]
+    fn a_git_failure_names_its_step() {
+        let timeout = failed("ls-remote", "ran for over 60 s".into());
+        assert!(
+            matches!(&timeout, Failure::Unreachable(why) if why == "git ls-remote failed: ran for over 60 s"),
+            "{timeout:?}"
+        );
+        let fetch = failed("fetch", "disk full".into());
+        assert!(
+            matches!(&fetch, Failure::Other(why) if why.starts_with("git fetch failed: ")),
+            "{fetch:?}"
+        );
+        let root = std::env::temp_dir().join(format!("odooscan-gone-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        let gone = root.join("gone.git").display().to_string();
+        let failure = git(&root, &["ls-remote", "--", &gone, "refs/heads/18.0"]).unwrap_err();
+        assert!(
+            matches!(&failure, Failure::Unreachable(why) if why.starts_with("git ls-remote failed: ")),
+            "{failure:?}"
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
     /// Without the tree kill, the subshell outlives its killed parent and writes the mark.
     #[cfg(unix)]
     #[test]
@@ -784,11 +827,34 @@ mod tests {
         assert!(!mark.exists());
     }
 
+    /// Ordered parent first, the final kill could reach a reaped child's id after its reuse.
+    #[cfg(unix)]
+    #[test]
+    fn the_final_kill_reaches_each_process_before_its_parent() {
+        let table = vec![(100, 1), (101, 100), (102, 100), (103, 101), (104, 103), (200, 1)];
+        let mut rounds = vec![];
+        let tree = leaves_first(100, |new| {
+            rounds.push(new.to_vec());
+            table.clone()
+        });
+        assert_eq!(rounds, [vec![100], vec![101, 102], vec![103], vec![104]]);
+        let mut found = tree.clone();
+        found.sort_unstable();
+        assert_eq!(found, [100, 101, 102, 103, 104]);
+        let at = |pid| tree.iter().position(|&p| p == pid).unwrap();
+        for &(pid, parent) in &table {
+            if tree.contains(&pid) && tree.contains(&parent) {
+                assert!(at(pid) < at(parent), "{pid} after its parent {parent} in {tree:?}");
+            }
+        }
+    }
+
+    /// The background sleep must outlast the 5 s bound, so that a missing `LINGER` fails the test.
     #[cfg(unix)]
     #[test]
     fn a_helper_holding_the_pipes_open_delays_the_output_by_at_most_the_linger() {
         let start = Instant::now();
-        let out = output_within(Command::new("sh").args(["-c", "sleep 30 & echo done"]), ANSWER)
+        let out = output_within(Command::new("sh").args(["-c", "sleep 6 & echo done"]), ANSWER)
             .unwrap()
             .unwrap();
         assert_eq!(String::from_utf8_lossy(&out.stdout), "done\n");

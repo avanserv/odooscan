@@ -72,8 +72,8 @@ seconds and drops a connection silent for about 45 seconds, unless `GIT_SSH_COMM
 `core.sshCommand` says how to run ssh.
 
 Resolving the head gives up after a minute, and the fetch and the checkout after 30 minutes each; a
-step that runs out of time is killed with every process it started. A transfer also gives up when it
-stays below 1 kB/s for 30 seconds over HTTP. When the remote cannot be reached, a transfer stalls or
-runs out of time, the branch is missing, `git` cannot run or the cache cannot be written, a notice
-says why and the commit last fetched for the branch is used. Without one, `oscn` exits with status 2
-and asks for `--addons-path`.
+step that runs out of time is killed with every process still running under it. A transfer also
+gives up when it stays below 1 kB/s for 30 seconds over HTTP. When the remote cannot be reached, a
+transfer stalls or runs out of time, the branch is missing, `git` cannot run or the cache cannot be
+written, a notice says why and the commit last fetched for the branch is used. Without one, `oscn`
+exits with status 2 and asks for `--addons-path`.

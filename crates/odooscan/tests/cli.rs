@@ -473,6 +473,7 @@ fn an_unreachable_remote_falls_back_to_the_cached_core() {
         stderr.contains("notice: could not reach file://") && stderr.contains(&fallback),
         "{stderr}"
     );
+    assert!(stderr.contains("(git ls-remote failed: "), "{stderr}");
 }
 
 #[test]
@@ -500,6 +501,7 @@ fn an_unreachable_remote_without_a_cached_core_is_an_error() {
         stderr.starts_with("error: could not fetch the 18.0 core of file://"),
         "{stderr}"
     );
+    assert!(stderr.contains("(git ls-remote failed: "), "{stderr}");
     assert!(stderr.contains("pass --addons-path"), "{stderr}");
 }
 
@@ -582,17 +584,13 @@ fn a_remote_starting_with_a_dash_is_an_error() {
 #[cfg(unix)]
 #[test]
 fn a_fetch_runs_none_of_the_users_hooks() {
-    use std::os::unix::fs::PermissionsExt;
     let dir = scratch("target_fetch_user_hooks");
     let remote = odoo_remote(&dir, "18.0", RELEASE_18);
     let ran = dir.join("ran");
     let global = dir.join("hooks");
     let template = dir.join("template");
     for hooks in [global.clone(), template.join("hooks")] {
-        fs::create_dir_all(&hooks).unwrap();
-        let hook = hooks.join("post-checkout");
-        fs::write(&hook, format!("#!/bin/sh\ntouch '{}'\n", ran.display())).unwrap();
-        fs::set_permissions(&hook, fs::Permissions::from_mode(0o755)).unwrap();
+        script(&hooks.join("post-checkout"), &format!("touch '{}'", ran.display()));
     }
     let config = dir.join("gitconfig");
     let text = format!(
