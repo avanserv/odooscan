@@ -1175,6 +1175,10 @@ custom/orm_overrides/models/computes.py:347:9: OD223 _compute_tier() can leave '
 custom/orm_overrides/models/computes.py:365:9: OD223 _compute_area_hint() can leave 'area_hint' unassigned on a record, so reading it raises ValueError; assign it on every path through the loop, False when there is no value
 custom/orm_overrides/models/computes.py:395:9: OD223 _compute_named_child() can leave 'named_child' unassigned on a record, so reading it raises ValueError; assign it on every path through the loop, False when there is no value
 custom/orm_overrides/models/computes.py:443:9: OD223 _compute_shim_hint() can leave 'shim_hint' unassigned on a record, so reading it raises ValueError; assign it on every path through the loop, False when there is no value
+custom/orm_overrides/models/loop_defs.py:65:9: OD223 _compute_loop_label() can leave 'loop_label' unassigned on a record, so reading it raises ValueError; assign it on every path through the loop, False when there is no value
+custom/orm_overrides/models/loop_defs.py:101:13: OD122 UPDATE on res_partner bypasses the ORM, so records this transaction already read keep stale values; call flush_model() before the query and invalidate_model() after it (flush() and invalidate_cache() before 16.0)
+custom/orm_overrides/models/loop_defs.py:123:32: OD126 user_has_groups() no longer works from saas~17.2; use self.env.user.has_groups()
+custom/orm_overrides/models/loop_defs.py:126:21: OD126 user_has_groups() no longer works from saas~17.2; use self.env.user.has_groups()
 custom/orm_overrides/models/overrides.py:7:9: OD119 write() calls super() but returns nothing, so callers get None instead of True; return what super().write() returns
 custom/orm_overrides/models/overrides.py:14:9: OD119 copy() calls super() but returns nothing, so callers get None instead of the new records; return what super().copy() returns
 custom/orm_overrides/models/overrides.py:24:5: OD117 @api.model on create() makes Odoo call it once per record; decorate it with @api.model_create_multi and take a list of dicts
