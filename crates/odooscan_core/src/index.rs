@@ -2756,6 +2756,16 @@ impl<'m> Index<'m> {
         }
     }
 
+    /// A scope that sees every indexed module, as on a database that installs them all.
+    fn every_module(&self) -> Scope {
+        let all = vec![true; self.modules.len()];
+        Scope {
+            records: all.clone(),
+            visible: all,
+            demo: false,
+        }
+    }
+
     /// What `scope` of `module` grows to on the database that installs it: each module its install
     /// auto-installs, as `triggers` reads them, repeated until nothing is added. A module with
     /// `countries` stays out where the key counts, as whether it installs depends on the companies.
@@ -3410,6 +3420,21 @@ impl<'m> Index<'m> {
             let mut parents = delegates.chain(c.inherit.iter().map(|parent| &parent.value));
             c.inherits_unknown || c.delegate_unknown || parents.any(|parent| !self.has_model(parent))
         })
+    }
+
+    /// Whether `model`, defined only by modules outside `scope`, may get fields from a parent the
+    /// scan cannot read on any class of it, its parents or `base` in any indexed module. Odoo
+    /// builds the model from the classes of every installed module (18.0
+    /// `odoo/modules/registry.py:290-292`, `odoo/modules/loading.py:195`; 20.0
+    /// `odoo/orm/registry.py:449-451`, `odoo/modules/loading.py:181`) and takes fields from every
+    /// class of its MRO (18.0 `odoo/models.py:3640`, `:3653-3657`; 20.0
+    /// `odoo/orm/model_classes.py:382`, `:395-399`), and any of those modules may be installed.
+    pub fn hidden_outside(&self, model: &str, scope: &Scope) -> bool {
+        if !matches!(self.model_status(model, scope, None), Status::Hidden(_)) {
+            return false;
+        }
+        let every = self.every_module();
+        self.hidden_field_parents(model, &every) || self.unread_delegate(model, &every)
     }
 
     /// What `holds_fields` asks, and no plain base the scan does not read, which may hold methods
@@ -5971,5 +5996,30 @@ Order.components.Card = null;
         assert!(index.hidden_field_parents("main.foreign", &scope));
         assert!(index.hidden_method_parents("main.foreign", &scope));
         assert!(index.holds_model(main, "main.local", &scope));
+    }
+
+    #[test]
+    fn a_model_only_outside_scope_is_judged_on_all_its_classes() {
+        let manifest = |depends: &str| format!("{{'version': '18.0.1.0', 'depends': [{depends}]}}");
+        let mut modules = [
+            module("base", &manifest("")),
+            module("side", &manifest("'base'")),
+            module("main", &manifest("'base'")),
+            module("reader", &manifest("'side'")),
+        ];
+        modules[0]
+            .python
+            .push(python_18("class B(models.Model):\n    _name = 'base'\n"));
+        modules[1].python.push(python_18(
+            "from odoo.addons.other.models import Imported\n\n\
+             class Hidden(models.Model, Imported):\n    _name = 'side.hidden'\n\n\
+             class Plain(models.Model):\n    _name = 'side.plain'\n",
+        ));
+        let index = Index::build(&modules, None);
+        let main = index.scope(index.by_name["main"]);
+        let reader = index.scope(index.by_name["reader"]);
+        assert!(index.hidden_outside("side.hidden", &main));
+        assert!(!index.hidden_outside("side.plain", &main));
+        assert!(!index.hidden_outside("side.hidden", &reader));
     }
 }
