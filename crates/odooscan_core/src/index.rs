@@ -1618,8 +1618,8 @@ type Loaded = FxHashSet<bundles::File>;
 type ScriptBundles = FxHashMap<bundles::File, Vec<usize>>;
 
 /// The bundles some indexed manifest names, sorted, the bundles each script is in, and the template
-/// files some bundle loads, as (module, file). A bundle may load another module's files, and a file
-/// only removed from bundles is not loaded.
+/// files listed by some bundle that loads templates in the file's series, as (module, file). A
+/// bundle may load another module's files, and a file only removed from bundles is not loaded.
 fn loaded_static(
     modules: &[Module],
     by_name: &FxHashMap<&str, usize>,
@@ -1635,7 +1635,16 @@ fn loaded_static(
             js.entry(file).or_default().push(bi);
         }
     }
-    let templates = bundles.values().flat_map(|c| &c.templates).copied().collect();
+    let file_series = |(mi, _): &bundles::File| modules[*mi].series.or(series);
+    let templates = bundles
+        .iter()
+        .flat_map(|(name, c)| {
+            c.templates
+                .iter()
+                .filter(|f| bundles::loads_templates(name, file_series(f)))
+        })
+        .copied()
+        .collect();
     (names, js, templates)
 }
 
@@ -6046,6 +6055,73 @@ mod tests {
         assert_eq!(index.js_bundles(0, 0).collect::<Vec<_>>(), ["b.pages", "z.pages"]);
         assert_eq!(index.js_bundles(0, 1).count(), 0);
         assert!(index.js_loaded(0, 0) && !index.js_loaded(0, 1));
+    }
+
+    /// Whether `old.xml` and `both.xml` are loaded for a module of `version` (none for no version,
+    /// whose series is then `default`), when `web.assets_qweb` lists both, `web.assets_backend` lists
+    /// `both.xml`, and, when `included`, a third bundle includes `web.assets_qweb`.
+    fn qweb_bundle_loaded(version: Option<&str>, default: Option<&str>, included: bool) -> [bool; 2] {
+        let version = version.map_or(String::new(), |v| format!("'version': '{v}', "));
+        let include = if included { "('include', 'web.assets_qweb')" } else { "" };
+        let mut a = module(
+            "a",
+            &format!(
+                "{{{version}'assets': {{
+                    'web.assets_qweb': ['a/static/src/*.xml'],
+                    'web.assets_backend': ['a/static/src/both.xml'],
+                    'a.pages': [{include}],
+                }}}}"
+            ),
+        );
+        a.templates = ["static/src/old.xml", "static/src/both.xml"]
+            .iter()
+            .map(|rel| SourceFile {
+                path: PathBuf::new(),
+                rel: (*rel).to_owned(),
+                rank: None,
+                demo: false,
+                facts: Default::default(),
+                suppressions: Default::default(),
+                mentions: Mentions::default(),
+            })
+            .collect();
+        let modules = [a];
+        let index = Index::build(&modules, default.and_then(Series::parse));
+        [0, 1].map(|fi| index.template_loaded(0, fi))
+    }
+
+    #[test]
+    fn web_assets_qweb_loads_templates_only_before_16() {
+        for version in ["15.0.1.0.0", "15.4.1.0.0"] {
+            assert_eq!(
+                qweb_bundle_loaded(Some(version), None, false),
+                [true, true],
+                "{version}"
+            );
+        }
+        assert_eq!(
+            qweb_bundle_loaded(None, None, false),
+            [true, true],
+            "an unknown series reads as before 16.0"
+        );
+        for version in ["16.0.1.0.0", "18.0.1.0.0"] {
+            assert_eq!(
+                qweb_bundle_loaded(Some(version), None, false),
+                [false, true],
+                "{version}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_module_without_a_version_reads_web_assets_qweb_in_the_default_series() {
+        assert_eq!(qweb_bundle_loaded(None, Some("18.0"), false), [false, true]);
+        assert_eq!(qweb_bundle_loaded(None, Some("15.0"), false), [true, true]);
+    }
+
+    #[test]
+    fn a_bundle_including_web_assets_qweb_loads_its_templates_from_16() {
+        assert_eq!(qweb_bundle_loaded(Some("16.0.1.0.0"), None, true), [true, true]);
     }
 
     #[test]

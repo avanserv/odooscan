@@ -9,6 +9,7 @@ use globset::GlobSet;
 use regex::Regex;
 use rustc_hash::{FxHashMap, FxHashSet};
 
+use crate::bundles::XML_IN_BUNDLES;
 use crate::facts::{
     AccessRow, ActionFact, ActionValue, ActionViewId, Annotation, ArchElement, ArchModifier, ArchSubview, ArchWidget,
     ClassBase, ClassFact, ComponentTag, DataFacts, Definition, DefinitionSource, DomainFact, FieldFact, FieldWrite,
@@ -210,11 +211,6 @@ const TUPLE_ADDED: Series = Series { major: 19, minor: 4 };
 /// before that for a lone definition: only several definitions or a field from another model get
 /// there, which `listed_values` cannot tell apart from a lone one.
 const TUPLE_CHECKED: Series = Series { major: 19, minor: 3 };
-
-/// The first series that loads the XML of a bundle with its scripts (18.0
-/// `odoo/addons/base/models/assetsbundle.py:323-336`, 20.0 `:358-371`). It never loads
-/// `web.assets_qweb`, which 15.0 fetches apart.
-const XML_IN_BUNDLES: Series = Series { major: 16, minor: 0 };
 
 /// The first series that serves assets from `static/` alone: it globs only under `<addon>/static/`
 /// (18.0 `odoo/addons/base/models/ir_asset.py:352-353`, 20.0 `:345-346`), where saas~16.2 serves a

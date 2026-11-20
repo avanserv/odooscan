@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<templates xml:space="preserve">
+    <t t-name="qweb_bundle_unloaded15.Old">
+        <div class="o_old"/>
+        <t t-call="qweb_bundle_unloaded15.Absent"/>
+    </t>
+</templates>

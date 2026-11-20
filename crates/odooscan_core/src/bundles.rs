@@ -23,6 +23,18 @@ use crate::xml::QWEB;
 /// `odoo/addons/base/models/ir_qweb.py:2579-2582`, 20.0 `:2957-2960`).
 const ASSET_RECORDS: Series = Series { major: 14, minor: 3 };
 
+/// The first series that loads the XML of a bundle with its scripts (18.0
+/// `odoo/addons/base/models/assetsbundle.py:323-336`, 20.0 `:358-371`). It never loads
+/// `web.assets_qweb`, which 15.0 fetches apart: 5410b7c238f2 removes that fetch in 16.0.
+pub(crate) const XML_IN_BUNDLES: Series = Series { major: 16, minor: 0 };
+
+/// Whether a page loads the templates `bundle` lists in `series`. From `XML_IN_BUNDLES` no page
+/// loads `web.assets_qweb`, though a bundle that includes it still gets its files. An unknown
+/// series reads as before 16.0, as OD505 and OD506 do.
+pub(crate) fn loads_templates(bundle: &str, series: Option<Series>) -> bool {
+    bundle != "web.assets_qweb" || series.is_none_or(|s| s < XML_IN_BUNDLES)
+}
+
 /// How far a template's root is looked for up `inherit_id`, so that a cycle ends.
 const INHERIT_STEPS: usize = 32;
 
