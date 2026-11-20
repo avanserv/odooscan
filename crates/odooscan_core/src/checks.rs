@@ -2992,7 +2992,8 @@ impl<'m> Ctx<'_, 'm> {
     }
 
     /// Whether `def` is a hook method that only its name could run, bound by nothing else in the
-    /// class, which no parent class defines and no file names, as far as the scan can read them.
+    /// class, which no parent class defines, as a method or a value, and no file names, as far as
+    /// the scan can read them.
     fn orphan_hook(&self, class: &ClassFact, def: &MethodDef) -> bool {
         let name = def.name.value.as_str();
         runs_as_hook(name, def.signature.as_ref())
@@ -3001,7 +3002,7 @@ impl<'m> Ctx<'_, 'm> {
                 .iter()
                 .all(|d| NAMED_HOOK_DECORATORS.contains(&d.as_str()))
             && class.methods.iter().filter(|m| *m == name).count() == 1
-            && !self.index.has_parent_method(&class.model, name, class, self.series)
+            && !self.index.has_parent_member(&class.model, name, class, self.series)
             && !self.index.names_hook(name)
     }
 
