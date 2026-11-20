@@ -2050,8 +2050,8 @@ impl<'m> Ctx<'_, 'm> {
 
     /// A dependency outside the index may load a model the scope does not reach, or define one no
     /// indexed module does.
-    fn model_ref(&self, out: &mut Out<'m>, path: &'m Path, model: &Spanned<String>, except: Option<&ClassFact>) {
-        match self.index.model_status(&model.value, self.scope, except) {
+    fn model_ref(&self, out: &mut Out<'m>, path: &'m Path, model: &Spanned<String>, extender: Option<usize>) {
+        match self.index.model_status(&model.value, self.scope, extender) {
             Status::Visible => {}
             Status::Hidden(_) if self.partial || self.built.fit(&model.value) => {}
             Status::Hidden(m) => out.push(
@@ -2703,7 +2703,7 @@ impl<'m> Ctx<'_, 'm> {
 
     fn class(&self, out: &mut Out<'m>, path: &'m Path, class: &ClassFact) {
         for parent in &class.inherit {
-            self.model_ref(out, path, parent, Some(class));
+            self.model_ref(out, path, parent, Some(self.mi));
         }
         for field in &class.fields {
             self.field(out, path, class, field);

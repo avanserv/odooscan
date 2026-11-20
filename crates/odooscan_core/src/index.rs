@@ -3208,14 +3208,21 @@ impl<'m> Index<'m> {
         self.models.contains_key(model)
     }
 
-    /// Whether `model` is defined in scope, ignoring the class `except` (the one asking).
-    pub fn model_status(&self, model: &str, scope: &Scope, except: Option<&ClassFact>) -> Status<'m> {
+    /// Whether `model` is defined in scope, ignoring every class of module `extender` that only
+    /// extends it: Odoo builds a module's classes in turn, so one that lists the model as a parent
+    /// fails unless a class that introduces it, or a dependency, puts it in the registry first. A
+    /// module that depends on `extender` loads after it, so none of its classes count either, and
+    /// naming it as the source would ask for a cycle in `depends`.
+    pub fn model_status(&self, model: &str, scope: &Scope, extender: Option<usize>) -> Status<'m> {
         let classes = self.models.get(model).map(Vec::as_slice).unwrap_or_default();
-        let others = || {
-            classes
-                .iter()
-                .filter(|(_, c)| !except.is_some_and(|e| std::ptr::eq(*c, e)))
+        let counts = |mi: usize, c: &ClassFact| match extender {
+            Some(e) if mi == e => c.new_model,
+            // `loads_before` first, as a lookup: outside a cycle, which is OD504's, a module that
+            // reaches `e` loads after it.
+            Some(e) => !(self.loads_before(e, mi) && self.reaches(mi, e)),
+            None => true,
         };
+        let others = || classes.iter().filter(|(mi, c)| counts(*mi, c));
         if others().any(|(mi, _)| scope.sees(*mi)) {
             Status::Visible
         } else if let Some((first, _)) = others().next() {
@@ -4887,6 +4894,53 @@ mod tests {
         assert!(!index.lists_unindexed_parent(main, "vendor.thing", &scope));
         assert!(index.unindexed_parent("vendor.thing", &scope));
         assert!(index.lists_unindexed_parent(vendor, "vendor.thing", &index.scope(vendor)));
+    }
+
+    #[test]
+    fn a_class_parent_ignores_the_module_s_own_extensions() {
+        let manifest = |depends: &str| format!("{{'version': '18.0.1.0', 'depends': [{depends}]}}");
+        let mut modules = [
+            module("base", &manifest("")),
+            module("side", &manifest("'base'")),
+            module("main", &manifest("'base'")),
+            module("heir", &manifest("'main'")),
+        ];
+        modules[0]
+            .python
+            .push(python_18("class P(models.Model):\n    _name = 'res.partner'\n"));
+        modules[1]
+            .python
+            .push(python_18("class S(models.Model):\n    _name = 'side.thing'\n"));
+        modules[2].python.push(python_18(
+            "class G0(models.Model):\n    _inherit = 'ghost.lamp'\n\n\
+             class G1(models.Model):\n    _inherit = 'ghost.lamp'\n\n\
+             class S0(models.Model):\n    _inherit = 'side.thing'\n\n\
+             class S1(models.Model):\n    _inherit = 'side.thing'\n\n\
+             class P0(models.Model):\n    _inherit = 'res.partner'\n\n\
+             class P1(models.Model):\n    _inherit = 'res.partner'\n\n\
+             class L(models.Model):\n    _name = 'main.lamp'\n\n\
+             class X(models.Model):\n    _inherit = 'main.lamp'\n",
+        ));
+        modules[3]
+            .python
+            .push(python_18("class G(models.Model):\n    _inherit = 'ghost.lamp'\n"));
+        let index = Index::build(&modules, None);
+        let (main, heir) = (index.by_name["main"], index.by_name["heir"]);
+        let status = |model: &str, mi: usize, extender: Option<usize>| {
+            let scope = index.scope(mi);
+            match index.model_status(model, &scope, extender) {
+                Status::Visible => "visible".to_owned(),
+                Status::Hidden(m) => format!("hidden {m}"),
+                Status::Missing => "missing".to_owned(),
+            }
+        };
+        assert_eq!(status("ghost.lamp", main, Some(main)), "missing");
+        assert_eq!(status("side.thing", main, Some(main)), "hidden side");
+        assert_eq!(status("res.partner", main, Some(main)), "visible");
+        assert_eq!(status("main.lamp", main, Some(main)), "visible");
+        assert_eq!(status("ghost.lamp", main, None), "visible");
+        assert_eq!(status("side.thing", main, None), "visible");
+        assert_eq!(status("ghost.lamp", heir, Some(heir)), "visible");
     }
 
     #[test]

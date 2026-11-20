@@ -619,6 +619,7 @@ custom/form_patches/static/src/quick_form_card.xml:15:9: OD606 <div> with class 
 custom/form_patches/static/src/quick_form_card.xml:18:19: OD605 no indexed bundle defines template 'web.FormCompiler'
 custom/ghost_parents/models/computes.py:21:33: OD204 parent.bench has no method '_compute_label'
 custom/ghost_parents/models/parents.py:5:16: OD201 no indexed module defines model 'ghost.widget'
+custom/ghost_parents/models/parents.py:11:17: OD201 no indexed module defines model 'ghost.tray'
 custom/ghost_parents/models/parents.py:15:16: OD201 no indexed module defines model 'ghost.tray'
 custom/ghost_parents/views/functions.xml:4:42: OD314 parent.bench has no method 'action_ghost'
 custom/ghost_parents_heir/models/shelf.py:7:32: OD204 parent.shelf has no method '_compute_note'
@@ -1576,6 +1577,10 @@ custom/server_code/data/updates.xml:30:5: OD323 XML id 'model_hidden' is already
 custom/server_code/demo/rewrites.xml:15:34: OD320 server.job has no method '_nope_demo_breaks'
 custom/server_code_extension/data/updates.xml:7:34: OD320 server.job has no method '_nope_extension'
 custom/session15/controllers/main.py:9:9: OD130 assigning request.uid switches the request to another user; check that the caller has proven to be that user
+custom/sibling_extensions/models/siblings.py:5:16: OD201 no indexed module defines model 'ghost.lamp'
+custom/sibling_extensions/models/siblings.py:9:16: OD201 no indexed module defines model 'ghost.lamp'
+custom/sibling_extensions/models/siblings.py:13:16: OD202 model 'project.task' comes from module project; add it to depends
+custom/sibling_extensions/models/siblings.py:17:16: OD202 model 'project.task' comes from module project; add it to depends
 custom/signatures_ext/models/bad_signature.py:11:9: OD229 this override takes no 'line' by position, which _prepare(self, order, line) in module signatures requires, so a call that passes it fails
 custom/signatures_ext/models/bad_signature.py:14:9: OD229 this override requires 'extra', which _stamp(self, order) in module signatures does not take, so a call made for the parent fails
 custom/signatures_ext/models/bad_signature.py:17:9: OD229 this override requires 'style', which _render(self, *, mode=None) in module signatures does not take, so a call made for the parent fails
