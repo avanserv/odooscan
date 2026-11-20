@@ -440,7 +440,6 @@ custom/depends_unused_implied/__manifest__.py:4:25: OD520 module 'mail' already 
 custom/depends_unused_mist/__manifest__.py:4:30: OD521 nothing of module 'prov_veil' is used, nor of what only it brings
 custom/depends_unused_reach/__manifest__.py:4:17: OD521 nothing of module 'prov_glen' is used, nor of what only it brings
 custom/depends_unused_smudge/__manifest__.py:4:46: OD521 nothing of module 'prov_spark' is used, nor of what only it brings
-custom/depends_unused_smudge/static/src/form_note.xml:4:9: OD606 no <div> with class 'o_smudge_panel' in template web.FormController or the templates that extend it
 custom/domain_bases/models/domain_delegates.py:74:30: OD210 'no_literal_stamp': domain.literal.delegate has no field 'no_literal_stamp'
 custom/domain_bases/models/domain_imports.py:14:30: OD210 'no_relative_stamp': domain.relative has no field 'no_relative_stamp'
 custom/domain_bases/models/domain_imports.py:23:30: OD210 'no_module_stamp': domain.module has no field 'no_module_stamp'
@@ -1963,6 +1962,10 @@ custom/supers/models/supers.py:299:21: OD211 no parent class of bad.super define
 custom/supers/models/supers.py:300:59: OD211 no parent class of bad.super defines '_and_other', so this super() call fails
 custom/supers/models/supers.py:311:24: OD211 no parent class of bad.super defines '_populate_sizes', so this super() call fails
 custom/supers/models/supers.py:318:24: OD211 '__lid' is private to class SuperSealLater: this super() call looks up '_SuperSealFirst__lid', which no parent class of bad.super defines, so it fails
+custom/template_names_read/static/src/note.js:4:24: OD605 no indexed bundle defines template 'template_names_read.Gone'
+custom/template_names_read/static/src/note.xml:4:20: OD605 no indexed bundle defines template 'template_names_read.Absent'
+custom/template_names_read/static/src/note.xml:6:19: OD605 no indexed bundle defines template 'template_names_read.Absent'
+custom/template_names_read/static/src/note.xml:12:9: OD606 no <div> with class 'o_smudge_panel' in template web.FormController or the templates that extend it
 custom/test_imports/static/src/widget.js:4:24: OD605 no indexed bundle defines template 'test_imports.Gone'
 custom/test_imports/static/src/widget_patch.js:7:22: OD602 neither Widget nor its parents have 'prepare', so super.prepare() fails
 custom/test_imports/static/tests/widget.test.js:3:10: OD601 '@web/../tests/web_test_helpers' does not export 'mountGone'

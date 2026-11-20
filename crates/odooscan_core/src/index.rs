@@ -3439,6 +3439,12 @@ impl<'m> Index<'m> {
         modules.any(|(mi, m)| scope.records[mi] && m.lost_data())
     }
 
+    /// Whether a module of `scope` loads a template file the scan cannot read, which may define any
+    /// template name and extend any template tree.
+    pub fn lost_templates(&self, scope: &Scope) -> bool {
+        self.loses_templates(&scope.visible)
+    }
+
     /// Whether `module`, or a module with it in its scope, loads a data file the scan cannot read that
     /// may hold an access row. A dependency loads first, so its rows cannot name the model.
     pub fn lost_access(&self, module: usize) -> bool {
@@ -6465,6 +6471,43 @@ mod tests {
         assert!(locates("smudge", true, "web.Other"));
         assert!(!locates("spark", true, "web.Root"));
         assert!(!locates("smudge", false, "web.Root"));
+    }
+
+    #[test]
+    fn lost_templates_reads_the_scope() {
+        let file = |text: &str| SourceFile {
+            path: PathBuf::new(),
+            rel: "static/src/a.xml".to_owned(),
+            rank: None,
+            demo: false,
+            facts: crate::owl::analyze(text),
+            suppressions: Default::default(),
+            mentions: Mentions::default(),
+        };
+        let manifest = |name: &str, depends: &str, bundled: bool| {
+            let assets = if bundled {
+                format!("'assets': {{'web.assets_backend': ['{name}/static/src/*.xml']}}")
+            } else {
+                String::new()
+            };
+            format!("{{'version': '18.0.1.0.0', 'depends': [{depends}], {assets}}}")
+        };
+        // Whether the scope of `reader` loses a template, smudge's unclosed file bundled or not.
+        let lost = |reader: &str, bundled: bool| {
+            let mut modules = [
+                module("web", &manifest("web", "", true)),
+                module("smudge", &manifest("smudge", "'web'", bundled)),
+                module("main", &manifest("main", "'smudge'", true)),
+                module("aside", &manifest("aside", "'web'", true)),
+            ];
+            let unclosed = r#"<templates><t t-name="smudge.Panel"><div>"#;
+            modules[1].templates.push(file(unclosed));
+            let index = Index::build(&modules, None);
+            index.lost_templates(&index.scope(index.by_name[reader]))
+        };
+        assert!(lost("main", true));
+        assert!(!lost("main", false));
+        assert!(!lost("aside", true));
     }
 
     #[test]
