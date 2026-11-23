@@ -238,6 +238,29 @@
         </t>
     </template>
 
+    <!-- The last inherit_id decides: the first record has no parent and calls, the second extends home. -->
+    <record id="last_parent_unset" model="ir.ui.view">
+        <field name="name">last.parent.unset</field>
+        <field name="type">qweb</field>
+        <field name="inherit_id" ref="home"/>
+        <field name="inherit_id" eval="False"/>
+        <field name="arch" type="xml">
+            <t t-call="web.layot_last_unset"/>
+        </field>
+    </record>
+
+    <record id="last_parent_set" model="ir.ui.view">
+        <field name="name">last.parent.set</field>
+        <field name="inherit_id" eval="False"/>
+        <field name="inherit_id" ref="no_parent_eval"/>
+        <field name="inherit_id" ref="home"/>
+        <field name="arch" type="xml">
+            <t t-call="web.layot" position="after">
+                <span/>
+            </t>
+        </field>
+    </record>
+
     <!-- With no id there is no tree to ask, so each view's own kind decides. -->
     <record model="ir.ui.view">
         <field name="name">no.id.qweb</field>
