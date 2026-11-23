@@ -266,6 +266,7 @@ custom/button_calls/views/buttons.xml:71:45: OD312 button.ticket has no method '
 custom/button_calls/views/buttons.xml:81:45: OD312 method 'action_follow' of res.partner comes from module mail, which is not in depends
 custom/button_calls/views/buttons.xml:111:9: OD301 module button_calls defines no XML id 'button_calls.order_nowhere'
 custom/button_calls/views/buttons.xml:124:45: OD312 button.order has no method 'env'
+custom/button_calls/views/buttons.xml:140:45: OD312 button.order has no method 'action_stomp'
 custom/button_calls/views/calls.xml:5:42: OD314 button.order has no method '_run_misspelled'
 custom/button_calls/views/calls.xml:6:41: OD314 method 'action_follow' of res.partner comes from module mail, which is not in depends
 custom/button_calls/views/calls.xml:9:42: OD314 button.order has no method 'pool'
@@ -2102,6 +2103,9 @@ custom/view_modifiers/views/extensions.xml:493:49: OD316 readonly names 'true': 
 custom/view_modifiers/views/extensions.xml:508:45: OD315 invalid invisible expression: Expected an expression
 custom/view_modifiers/views/extensions.xml:543:25: OD304 'line_ids.no_line_field': modifier.line has no field 'no_line_field'
 custom/view_modifiers/views/extensions.xml:579:17: OD210 'no_ticket_filter': modifier.ticket has no field 'no_ticket_filter'
+custom/view_modifiers/views/extensions.xml:592:17: OD304 'stat': modifier.ticket has no field 'stat'
+custom/view_modifiers/views/extensions.xml:592:47: OD316 invisible names 'stat': modifier.ticket has no field 'stat'
+custom/view_modifiers/views/extensions.xml:604:54: OD316 readonly names 'nowhere': modifier.line has no field 'nowhere'
 custom/view_modifiers/views/tickets.xml:7:47: OD315 invalid invisible expression: Expected an expression
 custom/view_modifiers/views/tickets.xml:8:46: OD316 readonly names 'stat': modifier.ticket has no field 'stat'
 custom/view_modifiers/views/tickets.xml:9:46: OD315 invalid required expression: Odoo does not read this construct, such as a comprehension, a set or a lambda

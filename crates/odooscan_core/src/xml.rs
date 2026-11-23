@@ -827,13 +827,13 @@ impl Walker<'_> {
         view.subviews.push(opened);
     }
 
-    /// A button only calls a method of the model when it has no `special`, which Odoo reads first,
-    /// and a `position` makes it a spec, whose `name` locates a button of the parent view.
+    /// A button calls a method of the model only when it has no `special`, which Odoo reads first,
+    /// and is no spec: a spec's `name` locates a button of the parent view, `position` or not.
     fn arch_button(&self, node: Node, path: &[String], view: &mut ViewFact) {
         if !node.has_tag_name("button")
             || node.attribute("type") != Some("object")
             || node.has_attribute("special")
-            || node.has_attribute("position")
+            || locates(node)
         {
             return;
         }
@@ -845,11 +845,12 @@ impl Walker<'_> {
         }
     }
 
-    /// The attributes of a `position` node or an xpath locate an element, so they are no modifiers.
+    /// The attributes of a spec or an xpath locate an element, so they are no modifiers. Content keeps
+    /// its attributes, `position` among them.
     fn arch_modifiers(&self, node: Node, path: &[String], view: &mut ViewFact) {
         let found: Vec<(&'static str, Spanned<String>)> = if node.has_tag_name("attribute") {
             spec_modifier(node, self.lines).into_iter().collect()
-        } else if node.has_attribute("position") || node.has_tag_name("xpath") {
+        } else if locates(node) || node.has_tag_name("xpath") {
             vec![]
         } else {
             let read = |attr| Some((attr, attr_value(node, attr, self.lines)?));
@@ -931,7 +932,7 @@ impl Walker<'_> {
     }
 
     fn arch_field(&mut self, node: Node, name: &str, pos: Pos, path: &mut Vec<String>, view: &mut ViewFact) {
-        if node.has_attribute("position") {
+        if locates(node) {
             // A locator matches the first such field anywhere in the parent arch, subviews included.
             path.push(format!("{LOCATOR}{name}"));
             for child in node.children().filter(Node::is_element) {
@@ -2049,7 +2050,7 @@ fn spec_subview(node: Node, path: &[String]) -> Option<Vec<String>> {
     let Some(field) = path.last()?.strip_prefix(LOCATOR) else {
         return beside_subview(spec).then(|| path.to_vec());
     };
-    let is_spec = spec.has_tag_name("xpath") || spec.has_attribute("position");
+    let is_spec = spec.has_tag_name("xpath") || locates(spec);
     let inside = matches!(spec.attribute("position"), None | Some("inside"));
     let opened = path.iter().map(String::as_str).chain([field]);
     (is_spec && inside).then(|| opened.map(str::to_owned).collect())
@@ -2650,11 +2651,25 @@ mod tests {
         }
     }
 
+    /// The view of a record that adds `arch`, on the second line.
+    fn second_line(arch: &str) -> ViewFact {
+        view(&format!(
+            "<record id=\"x\" model=\"ir.ui.view\">\n<field name=\"arch\" type=\"xml\">{arch}</field></record>"
+        ))
+    }
+
+    /// The view of a record that extends another with the specs `arch`.
+    fn inheriting(arch: &str) -> ViewFact {
+        view(&format!(
+            r#"<record id="x" model="ir.ui.view"><field name="inherit_id" ref="y"/><field name="arch" type="xml"><data>{arch}</data></field></record>"#
+        ))
+    }
+
     fn buttons(arch: &str) -> Vec<(Vec<String>, String, u32, u32)> {
-        let facts = analyze(&format!(
-            "<odoo><record id=\"x\" model=\"ir.ui.view\">\n<field name=\"arch\" type=\"xml\">{arch}</field></record></odoo>"
-        ));
-        let view = &facts.views[0];
+        read_buttons(&second_line(arch))
+    }
+
+    fn read_buttons(view: &ViewFact) -> Vec<(Vec<String>, String, u32, u32)> {
         let read = |b: &ArchButton| {
             (
                 b.path.clone(),
@@ -2673,7 +2688,24 @@ mod tests {
         let grouped = r#"<list><groupby name="b"><button type="object" name="c"/></groupby></list>"#;
         assert_eq!(buttons(grouped)[0].0, ["b"]);
         let inserted = r#"<xpath expr="//header" position="inside"><button type="object" name="d"/></xpath>"#;
-        assert_eq!(buttons(inserted)[0].1, "d");
+        assert_eq!(read_buttons(&inheriting(inserted))[0].1, "d");
+    }
+
+    #[test]
+    fn a_spec_button_locates_and_content_button_calls() {
+        let methods = |view: ViewFact| view.buttons.into_iter().map(|b| b.method.value).collect::<Vec<_>>();
+        for spec in [
+            r#"<button type="object" name="a"/>"#,
+            r#"<button type="object" name="a" position="replace"/>"#,
+            r#"<xpath expr="//header" position="inside"><button type="object" name="a" position="move"/></xpath>"#,
+        ] {
+            assert_eq!(methods(inheriting(spec)), [""; 0], "{spec}");
+        }
+        let content =
+            r#"<xpath expr="//header" position="inside"><button type="object" name="b" position="after"/></xpath>"#;
+        assert_eq!(methods(inheriting(content)), ["b"]);
+        let plain = r#"<form><button type="object" name="c" position="after"/></form>"#;
+        assert_eq!(methods(second_line(plain)), ["c"]);
     }
 
     #[test]
@@ -2682,7 +2714,6 @@ mod tests {
             r#"<button name="a"/>"#,
             r#"<button type="action" name="a"/>"#,
             r#"<button type="object" name="a" special="cancel"/>"#,
-            r#"<button type="object" name="a" position="after"/>"#,
             r#"<button type="object" t-att-name="a"/>"#,
             r#"<button type="object" name="%(a)d"/>"#,
             r#"<button type="object" name="{{ a }}"/>"#,
@@ -2694,18 +2725,23 @@ mod tests {
     }
 
     fn modifiers(arch: &str) -> Vec<(Vec<String>, &'static str, String, u32, u32)> {
-        let facts = analyze(&format!(
-            "<odoo><record id=\"x\" model=\"ir.ui.view\">\n<field name=\"arch\" type=\"xml\">{arch}</field></record></odoo>"
-        ));
+        read_modifiers(&second_line(arch))
+    }
+
+    fn read_modifiers(view: &ViewFact) -> Vec<(Vec<String>, &'static str, String, u32, u32)> {
         let read = |m: &ArchModifier| {
             let pos = m.value.pos;
             (m.path.clone(), m.attr, m.value.value.clone(), pos.line, pos.col)
         };
-        facts.views[0].modifiers.iter().map(read).collect()
+        view.modifiers.iter().map(read).collect()
     }
 
     fn values(arch: &str) -> Vec<String> {
         modifiers(arch).into_iter().map(|m| m.2).collect()
+    }
+
+    fn spec_values(arch: &str) -> Vec<String> {
+        read_modifiers(&inheriting(arch)).into_iter().map(|m| m.2).collect()
     }
 
     #[test]
@@ -2741,10 +2777,20 @@ mod tests {
 
     #[test]
     fn an_attribute_of_a_spec_locates_and_is_no_modifier() {
-        assert_eq!(values(r#"<field name="a" invisible="b" position="after"/>"#), [""; 0]);
-        assert_eq!(values(r#"<xpath expr="//a" invisible="b" position="after"/>"#), [""; 0]);
+        assert_eq!(
+            spec_values(r#"<field name="a" invisible="b" position="after"/>"#),
+            [""; 0]
+        );
+        assert_eq!(spec_values(r#"<field name="a" invisible="b"/>"#), [""; 0]);
+        assert_eq!(
+            spec_values(r#"<xpath expr="//a" invisible="b" position="after"/>"#),
+            [""; 0]
+        );
         let inserted = r#"<field name="a" position="after"><field name="b" invisible="c"/></field>"#;
-        assert_eq!(values(inserted), ["c"]);
+        assert_eq!(spec_values(inserted), ["c"]);
+        let positioned =
+            r#"<xpath expr="//a" position="after"><field name="b" invisible="c" position="after"/></xpath>"#;
+        assert_eq!(spec_values(positioned), ["c"]);
     }
 
     #[test]
@@ -2752,8 +2798,8 @@ mod tests {
         let spec =
             "<field name=\"a\" position=\"attributes\"><attribute name=\"invisible\">\n  b\n</attribute></field>";
         assert_eq!(
-            modifiers(spec),
-            [(vec!["~a".to_owned()], "invisible", "\n  b\n".to_owned(), 3, 3)]
+            read_modifiers(&inheriting(spec)),
+            [(vec!["~a".to_owned()], "invisible", "\n  b\n".to_owned(), 2, 3)]
         );
         assert_eq!(values(r#"<attribute name="string">b</attribute>"#), [""; 0]);
     }
@@ -2782,7 +2828,7 @@ mod tests {
     #[test]
     fn an_add_joins_the_element_its_spec_locates() {
         let joined = |spec: &str| {
-            let joins = arch_view(spec).modifiers.swap_remove(0).joins;
+            let joins = inheriting(spec).modifiers.swap_remove(0).joins;
             joins.map(|e| (e.tag, e.attr, e.value))
         };
         let add = r#"<attribute name="invisible" add="true" separator="or"/>"#;
@@ -2813,7 +2859,7 @@ mod tests {
         ] {
             let add = r#"<attribute name="invisible" add="b" separator="or"/>"#;
             let spec = format!(r#"<xpath expr="{expr}" position="attributes">{add}</xpath>"#);
-            assert_eq!(arch_view(&spec).modifiers[0].joins, None, "{expr}");
+            assert_eq!(inheriting(&spec).modifiers[0].joins, None, "{expr}");
         }
     }
 
@@ -2821,7 +2867,7 @@ mod tests {
     fn a_constant_add_is_kept_only_when_it_joins_an_element() {
         let spec = |attrs: &str| {
             let attribute = format!(r#"<attribute name="invisible" {attrs} separator="or"/>"#);
-            arch_view(&format!(r#"<field name="a" position="attributes">{attribute}</field>"#)).modifiers
+            inheriting(&format!(r#"<field name="a" position="attributes">{attribute}</field>"#)).modifiers
         };
         assert_eq!(spec(r#"add="true""#)[0].value.value, "true");
         assert!(spec(r#"add="true" remove="""#)[0].joins.is_some());
@@ -2924,11 +2970,6 @@ mod tests {
             r#"<form><field name="a" widget="tags"/><widget name="ribbon"/><field name="b" widget=""/><widget/></form>"#,
         );
         assert_eq!(widgets(&arch), ["field:tags@101", "view:ribbon@122"]);
-        let inheriting = |arch: &str| {
-            view(&format!(
-                r#"<record id="x" model="ir.ui.view"><field name="inherit_id" ref="y"/><field name="arch" type="xml"><data>{arch}</data></field></record>"#
-            ))
-        };
         let specs = inheriting(concat!(
             r#"<field name="a" widget="old" position="attributes"><attribute name="widget">new</attribute></field>"#,
             r#"<widget name="old" position="after"><widget name="added"/><field name="c" widget="w"/></widget>"#,
@@ -2951,21 +2992,23 @@ mod tests {
             r#"<div class="oe_chatter_box"><field name="b" widget="w"/></div></form>"#,
         ));
         assert_eq!(in_chatter(&arch), [true, true, false]);
-        let specs = view(concat!(
-            r#"<record id="x" model="ir.ui.view"><field name="inherit_id" ref="y"/><field name="arch" type="xml"><data>"#,
+        let specs = inheriting(concat!(
             r#"<xpath expr="//div[hasclass('oe_chatter')]" position="inside"><field name="a" widget="w"/></xpath>"#,
             r#"<xpath expr="//div[hasclass('oe_chatter')]/field[@name='m']" position="after"><field name="b" widget="w"/></xpath>"#,
             r#"<xpath expr="//div[hasclass('oe_chatter')]" position="before"><field name="c" widget="w"/></xpath>"#,
             r#"<div class="oe_chatter" position="inside"><field name="d" widget="w"/></div>"#,
             r#"<div class="oe_chatter" position="replace"><field name="e" widget="w"/></div>"#,
             r#"<field name="m" position="attributes"><attribute name="widget">w</attribute></field>"#,
-            r#"</data></field></record>"#,
         ));
         assert_eq!(in_chatter(&specs), [true, true, false, true, false, false]);
     }
 
     fn subviews(arch: &str) -> Vec<Vec<String>> {
         arch_view(arch).subviews.into_iter().map(|s| s.path).collect()
+    }
+
+    fn spec_subviews(arch: &str) -> Vec<Vec<String>> {
+        inheriting(arch).subviews.into_iter().map(|s| s.path).collect()
     }
 
     #[test]
@@ -2975,7 +3018,8 @@ mod tests {
             tags(r#"<form><field name="a"><calendar/></field></form>"#),
             ["calendar"]
         );
-        assert_eq!(tags(r#"<field name="a" position="inside"><graph/></field>"#), ["graph"]);
+        let spec = inheriting(r#"<field name="a" position="inside"><graph/></field>"#);
+        assert_eq!(spec.subviews[0].tag, "graph");
         assert_eq!(tags(r#"<tree><groupby name="a"/></tree>"#), ["groupby"]);
     }
 
@@ -2996,32 +3040,32 @@ mod tests {
         let spec =
             |position| format!(r#"<xpath expr="//field[@name='a']/tree" position="{position}"><calendar/></xpath>"#);
         for position in ["before", "after", "replace"] {
-            assert_eq!(subviews(&spec(position)), [vec!["a"]]);
+            assert_eq!(spec_subviews(&spec(position)), [vec!["a"]]);
         }
-        assert!(subviews(&spec("inside")).is_empty());
+        assert!(spec_subviews(&spec("inside")).is_empty());
         let nested =
             r#"<xpath expr="//field[@name='a']/form//field[@name='b']/tree[1]" position="after"><form/></xpath>"#;
-        assert_eq!(subviews(nested), [vec!["a", "b"]]);
+        assert_eq!(spec_subviews(nested), [vec!["a", "b"]]);
         let through = r#"<xpath expr="//field[@name='a']/form/group" position="after"><form/></xpath>"#;
-        assert!(subviews(through).is_empty());
+        assert!(spec_subviews(through).is_empty());
         let sibling = r#"<xpath expr="//field[@name='a']/following-sibling::tree" position="after"><form/></xpath>"#;
-        assert!(subviews(sibling).is_empty());
+        assert!(spec_subviews(sibling).is_empty());
     }
 
     #[test]
     fn a_modifier_keeps_the_subviews_around_it() {
-        let around = |arch: &str| {
-            let subviews = arch_view(arch).modifiers.swap_remove(0).subviews;
+        let around = |mut view: ViewFact| {
+            let subviews = view.modifiers.swap_remove(0).subviews;
             subviews.into_iter().map(|s| s.tag).collect::<Vec<_>>()
         };
         let inline = r#"<form><field name="a"><calendar/><tree><field name="b" invisible="c"/></tree></field></form>"#;
-        assert_eq!(around(inline), ["tree"]);
+        assert_eq!(around(arch_view(inline)), ["tree"]);
         let reached = r#"<xpath expr="//field[@name='a']/calendar/field[@name='b']" position="after"><field name="c" invisible="d"/></xpath>"#;
-        assert_eq!(around(reached), ["calendar"]);
+        assert_eq!(around(inheriting(reached)), ["calendar"]);
         let swapped = r#"<xpath expr="//field[@name='a']/calendar" position="replace"><tree><field name="c" invisible="d"/></tree></xpath>"#;
-        assert_eq!(around(swapped), ["calendar", "tree"]);
+        assert_eq!(around(inheriting(swapped)), ["calendar", "tree"]);
         let unnamed = r#"<xpath expr="//field[@name='a']//field[@name='b']" position="after"><field name="c" invisible="d"/></xpath>"#;
-        assert!(around(unnamed).is_empty());
+        assert!(around(inheriting(unnamed)).is_empty());
     }
 
     #[test]
@@ -3033,25 +3077,26 @@ mod tests {
     #[test]
     fn records_a_subview_a_spec_adds_past_its_locator() {
         let spec = r#"<field name="a" position="inside"><list/></field>"#;
-        assert_eq!(subviews(spec), [vec!["~a", "a"]]);
+        assert_eq!(spec_subviews(spec), [vec!["~a", "a"]]);
+        assert_eq!(spec_subviews(r#"<field name="a"><list/></field>"#), [vec!["~a", "a"]]);
         let xpath = r#"<xpath expr="//field[@name='b']//field[@name='a']" position="inside"><form/></xpath>"#;
-        assert_eq!(subviews(xpath), [vec!["b", "~a", "a"]]);
+        assert_eq!(spec_subviews(xpath), [vec!["b", "~a", "a"]]);
         let bare = r#"<xpath expr="//field[@name='a']"><form/></xpath>"#;
-        assert_eq!(subviews(bare), [vec!["~a", "a"]]);
+        assert_eq!(spec_subviews(bare), [vec!["~a", "a"]]);
         assert_eq!(
-            subviews(r#"<field name="a" position="after"><field name="b"/></field>"#),
+            spec_subviews(r#"<field name="a" position="after"><field name="b"/></field>"#),
             [[""; 0]; 0]
         );
         assert_eq!(
-            subviews(r#"<field name="a" position="after"><list/></field>"#),
+            spec_subviews(r#"<field name="a" position="after"><list/></field>"#),
             [[""; 0]; 0]
         );
         assert_eq!(
-            subviews(r#"<field name="a" position="inside"><group><list/></group></field>"#),
+            spec_subviews(r#"<field name="a" position="inside"><group><list/></group></field>"#),
             [[""; 0]; 0]
         );
         let nested = r#"<field name="a" position="inside"><list><field name="b"><form/></field></list></field>"#;
-        assert_eq!(subviews(nested), [vec!["~a", "a"], vec!["~a", "a", "b"]]);
+        assert_eq!(spec_subviews(nested), [vec!["~a", "a"], vec!["~a", "a", "b"]]);
     }
 
     #[test]
