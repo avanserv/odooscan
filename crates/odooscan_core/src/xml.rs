@@ -468,7 +468,7 @@ impl Walker<'_> {
             context_kinds: last("context").map(|f| context_view_kinds(eval_of(f).or_else(|| f.text()))),
             ..ActionFact::default()
         };
-        let view_ids = field_of(node, "view_ids");
+        let view_ids = last_field_of(node, "view_ids");
         if let Some(eval) = view_ids.and_then(|f| f.attribute("eval")) {
             let rows = record_eval::view_rows(eval);
             action.view_of_any_kind = rows.contains(&None);
@@ -482,12 +482,12 @@ impl Walker<'_> {
 
     /// Odoo sets the inverse field of a record nested in a one2many, whatever the record says.
     fn rule(&mut self, node: Node, domain_field: &str) {
-        let (model, by_name) = match field_of(node, "model_id") {
+        let (model, by_name) = match last_field_of(node, "model_id") {
             _ if node.parent_element().is_some_and(|p| p.has_tag_name("field")) => (ActionValue::Opaque, false),
             Some(field) => rule_model(field, self.lines),
             None => (ActionValue::Unset, false),
         };
-        let domain = field_of(node, domain_field).map_or(ActionValue::Unset, |f| rule_domain(f, self.lines));
+        let domain = last_field_of(node, domain_field).map_or(ActionValue::Unset, |f| rule_domain(f, self.lines));
         let access = domain_field == "domain";
         let (groups, perms) = if access {
             let groups = last_field_of(node, "group_id").map(|f| access_group(f, self.lines));
@@ -511,7 +511,7 @@ impl Walker<'_> {
             by_name,
             fields: domain::written_fields(&domain),
             domain,
-            active: field_of(node, "active").map(|f| rule_active(f, self.series)),
+            active: last_field_of(node, "active").map(|f| rule_active(f, self.series)),
             groups: groups.unwrap_or_default(),
             perms,
         });
@@ -948,11 +948,6 @@ fn has_class(node: Node, class: &str) -> bool {
         .is_some_and(|c| c.split_whitespace().any(|token| token == class))
 }
 
-fn field_of<'a, 'i>(node: Node<'a, 'i>, name: &str) -> Option<Node<'a, 'i>> {
-    node.children()
-        .find(|c| c.has_tag_name("field") && c.attribute("name") == Some(name))
-}
-
 /// What `field` writes, in the order Odoo reads it: a `search`, a `ref`, an `eval`, then the text.
 /// An empty attribute counts as absent. An empty text gives no value to check: it clears a
 /// selection below saas~19.3, and from there writes `''`, which OD322 leaves unreported.
@@ -1104,7 +1099,7 @@ fn refused_expression(text: &str, series: Option<Series>, at: impl Fn(usize) -> 
 fn names_group(model_id: Node) -> bool {
     let group = model_id
         .parent_element()
-        .and_then(|record| field_of(record, "group_id"));
+        .and_then(|record| last_field_of(record, "group_id"));
     group.is_some_and(|f| {
         let blank = |attr: &str| f.attribute(attr).is_none_or(str::is_empty);
         !blank("ref") || !blank("eval") || !blank("search") || f.text().is_some_and(|t| !t.trim().is_empty())
@@ -1669,15 +1664,15 @@ fn spec(node: Node) -> bool {
     !node.has_tag_name("data") && owner.is_some_and(inheriting_root)
 }
 
-/// Whether the children of `node` are specs. A record may write `inherit_id` after its arch, and
-/// writing it does not give the record a parent.
+/// Whether the children of `node` are specs. The last `inherit_id` of a record decides, wherever
+/// it stands around the arch, as each field of a name replaces the one before.
 fn inheriting_root(node: Node) -> bool {
     let record_arch = || {
         node.has_tag_name("field")
             && matches!(node.attribute("name"), Some("arch" | "arch_db"))
             && node
                 .parent_element()
-                .is_some_and(|r| r.has_tag_name("record") && field_of(r, "inherit_id").is_some_and(holds_record))
+                .is_some_and(|r| r.has_tag_name("record") && last_field_of(r, "inherit_id").is_some_and(holds_record))
     };
     node.has_attribute("t-inherit") || node.attribute("inherit_id").is_some_and(|p| !p.is_empty()) || record_arch()
 }
@@ -2490,6 +2485,33 @@ mod tests {
     }
 
     #[test]
+    fn the_last_inherit_id_decides_the_specs() {
+        let arch = r#"<field name="arch" type="xml"><t t-call="a.b"/></field>"#;
+        let record = |first: &str, second: &str, arch_first: bool| {
+            let inherit = format!(r#"<field name="inherit_id" {first}/><field name="inherit_id" {second}/>"#);
+            let fields = if arch_first {
+                format!("{arch}{inherit}")
+            } else {
+                format!("{inherit}{arch}")
+            };
+            view(&format!(r#"<record id="x" model="ir.ui.view">{fields}</record>"#))
+        };
+        for arch_first in [false, true] {
+            let b = record(r#"ref="a""#, r#"ref="b""#, arch_first);
+            assert_eq!(b.inherit.as_deref(), Some("b"));
+            assert_eq!(located_values(&b), ["t[t-call=a.b]"]);
+            assert_eq!(b.primary, Some(false));
+            assert!(!b.unread_parent);
+            let unset = record(r#"ref="y""#, r#"eval="False""#, arch_first);
+            assert_eq!(call_names(&unset), ["a.b"]);
+            assert!(unset.locators.is_empty());
+            let set = record(r#"eval="False""#, r#"ref="y""#, arch_first);
+            assert_eq!(call_names(&set), [""; 0]);
+            assert_eq!(located_values(&set), ["t[t-call=a.b]"]);
+        }
+    }
+
+    #[test]
     fn an_xpath_step_locates_a_call() {
         let spec = extension(r#"<xpath expr="//t[@t-call='a.old']/div[@id='b']" position="inside"/>"#);
         assert_eq!(located_values(&spec), ["t[t-call=a.old]", "div[id=b]"]);
@@ -3055,6 +3077,15 @@ mod tests {
     }
 
     #[test]
+    fn the_last_view_ids_names_the_views() {
+        let action = action_facts(&action_record(
+            r#"<field name="view_ids" eval="[(0, 0, {'view_mode': 'gantt', 'view_id': ref('v')})]"/><field name="view_ids" eval="[(0, 0, {'view_mode': 'map', 'view_id': ref('w')})]"/>"#,
+        ))
+        .remove(0);
+        assert_eq!(action.view_kinds, ["map"]);
+    }
+
+    #[test]
     fn reads_the_last_context_of_an_action() {
         let kinds_of = |fields: &str| action_facts(&action_record(fields)).remove(0).context_kinds;
         let some = |k: &[&str]| Some(k.iter().map(|k| (*k).to_owned()).collect::<Vec<_>>());
@@ -3515,6 +3546,30 @@ mod tests {
         assert_eq!(access("ir.access", r#"<field name="group_id" ref=""/>"#), 0);
         assert_eq!(access("ir.access", r#"<field name="group_id" ref="g"/>"#), 1);
         assert_eq!(access("ir.access", r#"<field name="group_id" eval="ref('g')"/>"#), 1);
+    }
+
+    #[test]
+    fn a_rule_reads_the_last_field_of_a_name() {
+        let rule = rule_of(
+            r#"<field name="model_id" ref="model_a"/><field name="model_id" ref="model_b"/><field name="domain_force">[('a', '=', 1)]</field><field name="domain_force">[('b', '=', 1)]</field><field name="active" eval="True"/><field name="active" eval="False"/>"#,
+        );
+        assert!(matches!(rule.model, ActionValue::Literal(ref m) if m.value == "model_b"));
+        assert_eq!(rule.fields.iter().map(|f| f.value.as_str()).collect::<Vec<_>>(), ["b"]);
+        assert_eq!(rule.active, Some(false));
+        let access = |groups: &str| {
+            let record = format!(
+                r#"<odoo><record id="a" model="ir.access"><field name="model_id" ref="model_a"/>{groups}</record></odoo>"#
+            );
+            analyze(&record).access.len()
+        };
+        assert_eq!(
+            access(r#"<field name="group_id" ref=""/><field name="group_id" ref="g"/>"#),
+            1
+        );
+        assert_eq!(
+            access(r#"<field name="group_id" ref="g"/><field name="group_id" ref=""/>"#),
+            0
+        );
     }
 
     fn server_facts(model: &str, fields: &str) -> DataFacts {
