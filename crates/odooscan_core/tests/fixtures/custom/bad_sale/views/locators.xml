@@ -22,4 +22,33 @@
         <xpath expr="//div[@id='card']/span[@name='title']" position="after"/>
         <xpath expr="//div[@id='crad']" position="inside"/>
     </template>
+
+    <!-- Odoo resolves a parent given by search at load, so the scan does not know the parent and root
+         above view_partner_searched and leaves the specs of its tree alone; the same spec on a known
+         tree is reported. -->
+    <record id="view_partner_searched" model="ir.ui.view">
+        <field name="model">res.partner</field>
+        <field name="inherit_id" search="[('name', '=', 'x')]"/>
+        <field name="arch" type="xml">
+            <xpath expr="//form" position="inside">
+                <div name="searched_block"/>
+            </xpath>
+        </field>
+    </record>
+
+    <record id="view_partner_searched_low" model="ir.ui.view">
+        <field name="model">res.partner</field>
+        <field name="inherit_id" ref="view_partner_searched"/>
+        <field name="arch" type="xml">
+            <field name="nmae_searched" position="after"/>
+        </field>
+    </record>
+
+    <record id="view_partner_searched_ref" model="ir.ui.view">
+        <field name="model">res.partner</field>
+        <field name="inherit_id" ref="base.view_partner_simple"/>
+        <field name="arch" type="xml">
+            <field name="nmae_searched" position="after"/>
+        </field>
+    </record>
 </odoo>

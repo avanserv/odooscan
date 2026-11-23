@@ -4781,12 +4781,13 @@ impl<'m> Inheritance<'m> {
         nodes.iter().filter(|n| n.defines).map(|n| n.module)
     }
 
-    /// The root of the inheritance tree above `id`, or None when an id on the way is not defined
-    /// or its arch was not read, so the tree's elements would be incomplete.
+    /// The root of the inheritance tree above `id`, or None when an id on the way is not defined,
+    /// its arch was not read, or it names its parent by a `search` or an `eval` other than `False`,
+    /// which Odoo resolves at load, so the tree's elements would be incomplete.
     pub fn root(&self, mut id: String) -> Option<String> {
         for _ in 0..32 {
             let nodes = self.nodes.get(&id)?;
-            if !nodes.iter().any(|n| n.defines && n.fact.has_arch) {
+            if !nodes.iter().any(|n| n.defines && n.fact.has_arch) || nodes.iter().any(|n| n.fact.unread_parent) {
                 return None;
             }
             match nodes.iter().find_map(|n| n.inherit.clone()) {
@@ -6948,19 +6949,8 @@ mod tests {
 
     #[test]
     fn a_spec_locates_in_a_set_that_extends_its_tree_unread() {
-        fn file(rel: &str, facts: crate::facts::DataFacts) -> SourceFile<crate::facts::DataFacts> {
-            SourceFile {
-                path: PathBuf::new(),
-                rel: rel.to_owned(),
-                rank: Some(0),
-                demo: false,
-                facts,
-                suppressions: Default::default(),
-                mentions: Mentions::default(),
-            }
-        }
         let view = |record: &str| {
-            file(
+            data_file(
                 "views/views.xml",
                 xml::analyze(&format!("<odoo>{record}</odoo>"), Series::parse("18.0")),
             )
@@ -6999,7 +6989,7 @@ mod tests {
                 unreadable: true,
                 ..Default::default()
             };
-            modules[1].data.extend(lost.map(|rel| file(rel, unreadable)));
+            modules[1].data.extend(lost.map(|rel| data_file(rel, unreadable)));
             modules[2]
                 .data
                 .push(view(&extension("view_veil", &adds("arch", "veil_block"))));
@@ -7030,20 +7020,39 @@ mod tests {
     }
 
     #[test]
+    fn a_view_with_an_unread_parent_roots_no_tree() {
+        let manifest = "{'version': '18.0.1.0', 'depends': []}";
+        let arch = r#"<field name="arch" type="xml"><form/></field>"#;
+        let roots = |mid_parent: &str, top: &str| {
+            let records = format!(
+                r#"{top}<record id="view_mid" model="ir.ui.view">
+                    <field name="model">res.partner</field>
+                    <field name="inherit_id" {mid_parent}/>
+                    {arch}
+                </record>
+                <record id="view_low" model="ir.ui.view">
+                    <field name="inherit_id" ref="view_mid"/>
+                    {arch}
+                </record>"#
+            );
+            let mut modules = [module("m", manifest)];
+            let facts = xml::analyze(&format!("<odoo>{records}</odoo>"), Series::parse("18.0"));
+            modules[0].data.push(data_file("views/views.xml", facts));
+            let index = Index::build(&modules, None);
+            ["m.view_mid", "m.view_low"].map(|id| index.views.root(id.to_owned()))
+        };
+        assert_eq!(roots(r#"search="[('name', '=', 'x')]""#, ""), [None, None]);
+        let top = format!(
+            r#"<record id="view_top" model="ir.ui.view"><field name="model">res.partner</field>{arch}</record>"#
+        );
+        let held = roots(r#"ref="view_top""#, &top);
+        assert_eq!(held[1].as_deref(), Some("m.view_top"));
+    }
+
+    #[test]
     fn a_spec_on_a_rootless_tree_locates_in_a_set_with_a_view_of_its_model() {
-        fn file(rel: &str, facts: crate::facts::DataFacts) -> SourceFile<crate::facts::DataFacts> {
-            SourceFile {
-                path: PathBuf::new(),
-                rel: rel.to_owned(),
-                rank: Some(0),
-                demo: false,
-                facts,
-                suppressions: Default::default(),
-                mentions: Mentions::default(),
-            }
-        }
         let view = |records: &str| {
-            file(
+            data_file(
                 "views/views.xml",
                 xml::analyze(&format!("<odoo>{records}</odoo>"), Series::parse("18.0")),
             )
@@ -7078,7 +7087,7 @@ mod tests {
                 unreadable: true,
                 ..Default::default()
             };
-            modules[1].data.extend(lost.map(|rel| file(rel, unreadable)));
+            modules[1].data.extend(lost.map(|rel| data_file(rel, unreadable)));
             modules[2].data.push(view(main_records));
             let index = Index::build(&modules, None);
             let main = index.by_name["main"];
@@ -7117,6 +7126,10 @@ mod tests {
         let opaque = record("view_mid", "res.partner", "base.view_top", &unread)
             .replace(r#"ref="base.view_top""#, r#"eval="ref('base.view_top')""#);
         assert!(locates(&main(opaque), &country, None));
+        // Odoo resolves the parent at load, so a read arch does not make the view a root.
+        let evaluated = record("view_mid", "res.partner", "base.view_top", &arch)
+            .replace(r#"ref="base.view_top""#, r#"eval="ref('base.view_top')""#);
+        assert!(locates(&main(evaluated), &country, None));
         // A record updating in place a view of a module the scan does not index names no model or
         // parent, so the view may sit below one of any model.
         let update =
@@ -7463,6 +7476,18 @@ mod tests {
         assert!(!index.js_test(0, 1), "no bundle loads it");
         assert!(index.js_test(0, 2), "only test bundles load it");
         assert!(index.js_test(0, 3), "its path makes it a test");
+    }
+
+    fn data_file(rel: &str, facts: crate::facts::DataFacts) -> SourceFile<crate::facts::DataFacts> {
+        SourceFile {
+            path: PathBuf::new(),
+            rel: rel.to_owned(),
+            rank: Some(0),
+            demo: false,
+            facts,
+            suppressions: Default::default(),
+            mentions: Mentions::default(),
+        }
     }
 
     fn template_file(rel: &str, text: &str) -> SourceFile<crate::facts::TemplateFacts> {

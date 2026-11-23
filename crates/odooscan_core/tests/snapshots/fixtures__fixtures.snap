@@ -211,6 +211,7 @@ custom/bad_sale/views/locators.xml:8:17: OD310 no <field name="nmae"> in view ba
 custom/bad_sale/views/locators.xml:9:17: OD310 no <group name="mian"> in view base.view_partner_simple or the views that extend it
 custom/bad_sale/views/locators.xml:10:17: OD310 <page name="mail_page"> is added by module mail, which is not in depends
 custom/bad_sale/views/locators.xml:23:9: OD310 no <div id="crad"> in view base.partner_card or the views that extend it
+custom/bad_sale/views/locators.xml:51:13: OD310 no <field name="nmae_searched"> in view base.view_partner_simple or the views that extend it
 custom/bad_sale/views/views.xml:6:13: OD306 the <tree> view is renamed <list>
 custom/bad_sale/views/views.xml:7:17: OD305 the attrs attribute is removed; write invisible, readonly or required as a Python expression
 custom/bad_sale/views/views.xml:12:25: OD304 'line_ids.amonut': bad.order.line has no field 'amonut'

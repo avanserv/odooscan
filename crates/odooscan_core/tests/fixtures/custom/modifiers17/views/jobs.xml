@@ -391,4 +391,17 @@
             </field>
         </field>
     </record>
+
+    <!-- Odoo resolves a parent given by search at load, so the scan does not know which fields the
+         tree shows and leaves the modifier alone. -->
+    <record id="job_searched" model="ir.ui.view">
+        <field name="name">modifier.job.searched</field>
+        <field name="model">modifier.job</field>
+        <field name="inherit_id" search="[('name', '=', 'modifier.job.form')]"/>
+        <field name="arch" type="xml">
+            <form>
+                <field name="name" invisible="state"/>
+            </form>
+        </field>
+    </record>
 </odoo>
