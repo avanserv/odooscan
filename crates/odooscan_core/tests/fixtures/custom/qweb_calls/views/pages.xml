@@ -118,6 +118,42 @@
 
     <template id="empty_parent" inherit_id=""/>
 
+    <!-- An empty inherit_id sets no parent, so empty_parent is a QWeb root that extensions find. -->
+    <template id="extends_empty_parent" inherit_id="empty_parent">
+        <xpath expr="//div[@name='absent_block']" position="inside">
+            <span/>
+        </xpath>
+    </template>
+
+    <record id="extends_empty_parent_record" model="ir.ui.view">
+        <field name="name">extends.empty.parent.record</field>
+        <field name="inherit_id" ref="empty_parent"/>
+        <field name="arch" type="xml">
+            <xpath expr="//t" position="inside">
+                <t t-call="web.layot_empty_parent"/>
+            </xpath>
+        </field>
+    </record>
+
+    <!-- Odoo drops all attributes of an extending root and of a data that wraps the specs of an inheriting arch. -->
+    <template id="root_raw_dropped" inherit_id="home" t-raw="a"/>
+
+    <record id="data_root_dropped" model="ir.ui.view">
+        <field name="name">data.root.dropped</field>
+        <field name="arch" type="xml">
+            <data t-call="absent.z" t-raw="a">
+                <data t-call="absent.nested">
+                    <xpath expr="//t" position="inside">
+                        <data t-call="web.layot_data_content"/>
+                    </xpath>
+                </data>
+            </data>
+        </field>
+        <field name="inherit_id" ref="home"/>
+    </record>
+
+    <template id="root_raw" t-raw="a"/>
+
     <template id="loaded_files">
         <t t-call="qweb_calls.aside_page"/>
         <t t-call="qweb_calls.aside_key"/>

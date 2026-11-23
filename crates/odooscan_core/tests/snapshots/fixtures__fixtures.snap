@@ -1330,23 +1330,27 @@ custom/qweb_calls/views/pages.xml:106:20: OD311 no indexed module defines templa
 custom/qweb_calls/views/pages.xml:107:20: OD311 no indexed module defines template 'qweb_calls.not_a_name'
 custom/qweb_calls/views/pages.xml:108:20: OD311 no indexed module defines template 'not_a_name'
 custom/qweb_calls/views/pages.xml:113:24: OD311 no indexed module defines template 'web.layot_inside_extension'
-custom/qweb_calls/views/pages.xml:122:20: OD311 no indexed module defines template 'qweb_calls.aside_page'
-custom/qweb_calls/views/pages.xml:123:20: OD311 no indexed module defines template 'qweb_calls.aside_key'
-custom/qweb_calls/views/pages.xml:124:20: OD311 no indexed module defines template 'qweb_calls.test_page'
-custom/qweb_calls/views/pages.xml:125:20: OD311 no indexed module defines template 'qweb_calls.migration_page'
-custom/qweb_calls/views/pages.xml:126:20: OD311 no indexed module defines template 'qweb_outside.aside_page'
-custom/qweb_calls/views/pages.xml:132:9: OD310 no <div name="aside_block"> in view qweb_calls.home or the views that extend it
-custom/qweb_calls/views/pages.xml:142:9: OD310 no <t t-call="web.layot_stale"> in view qweb_calls.home or the views that extend it
-custom/qweb_calls/views/pages.xml:143:24: OD311 no indexed module defines template 'web.layot_replacement'
-custom/qweb_calls/views/pages.xml:148:9: OD310 no <t t-call="web.layot_stale_xpath"> in view qweb_calls.home or the views that extend it
-custom/qweb_calls/views/pages.xml:155:13: OD310 no <t t-call="web.layot_moved"> in view qweb_calls.home or the views that extend it
-custom/qweb_calls/views/pages.xml:163:17: OD310 no <t t-call="web.layot_stale_record"> in view qweb_calls.home or the views that extend it
-custom/qweb_calls/views/pages.xml:171:24: OD311 no indexed module defines template 'web.layot_positioned'
-custom/qweb_calls/views/pages.xml:176:20: OD311 no indexed module defines template 'web.layot_positioned_plain'
-custom/qweb_calls/views/pages.xml:182:38: OD311 no indexed module defines template 'web.layot_set'
-custom/qweb_calls/views/pages.xml:248:24: OD311 no indexed module defines template 'web.layot_last_unset'
-custom/qweb_calls/views/pages.xml:270:28: OD311 no indexed module defines template 'web.layot_no_id'
-custom/qweb_calls/views/pages.xml:290:20: OD311 template 'qweb_outside.alias' comes from module qweb_outside, which is not in depends
+custom/qweb_calls/views/pages.xml:123:9: OD310 no <div name="absent_block"> in view qweb_calls.empty_parent or the views that extend it
+custom/qweb_calls/views/pages.xml:133:28: OD311 no indexed module defines template 'web.layot_empty_parent'
+custom/qweb_calls/views/pages.xml:147:39: OD311 no indexed module defines template 'web.layot_data_content'
+custom/qweb_calls/views/pages.xml:155:5: OD307 t-raw renders unescaped HTML; use t-out and wrap trusted HTML in Markup
+custom/qweb_calls/views/pages.xml:158:20: OD311 no indexed module defines template 'qweb_calls.aside_page'
+custom/qweb_calls/views/pages.xml:159:20: OD311 no indexed module defines template 'qweb_calls.aside_key'
+custom/qweb_calls/views/pages.xml:160:20: OD311 no indexed module defines template 'qweb_calls.test_page'
+custom/qweb_calls/views/pages.xml:161:20: OD311 no indexed module defines template 'qweb_calls.migration_page'
+custom/qweb_calls/views/pages.xml:162:20: OD311 no indexed module defines template 'qweb_outside.aside_page'
+custom/qweb_calls/views/pages.xml:168:9: OD310 no <div name="aside_block"> in view qweb_calls.home or the views that extend it
+custom/qweb_calls/views/pages.xml:178:9: OD310 no <t t-call="web.layot_stale"> in view qweb_calls.home or the views that extend it
+custom/qweb_calls/views/pages.xml:179:24: OD311 no indexed module defines template 'web.layot_replacement'
+custom/qweb_calls/views/pages.xml:184:9: OD310 no <t t-call="web.layot_stale_xpath"> in view qweb_calls.home or the views that extend it
+custom/qweb_calls/views/pages.xml:191:13: OD310 no <t t-call="web.layot_moved"> in view qweb_calls.home or the views that extend it
+custom/qweb_calls/views/pages.xml:199:17: OD310 no <t t-call="web.layot_stale_record"> in view qweb_calls.home or the views that extend it
+custom/qweb_calls/views/pages.xml:207:24: OD311 no indexed module defines template 'web.layot_positioned'
+custom/qweb_calls/views/pages.xml:212:20: OD311 no indexed module defines template 'web.layot_positioned_plain'
+custom/qweb_calls/views/pages.xml:218:38: OD311 no indexed module defines template 'web.layot_set'
+custom/qweb_calls/views/pages.xml:284:24: OD311 no indexed module defines template 'web.layot_last_unset'
+custom/qweb_calls/views/pages.xml:306:28: OD311 no indexed module defines template 'web.layot_no_id'
+custom/qweb_calls/views/pages.xml:326:20: OD311 template 'qweb_outside.alias' comes from module qweb_outside, which is not in depends
 custom/qweb_outside/views/aside.xml:1:1: OD502 'views/aside.xml' is not in the manifest's data or demo, so Odoo never loads it
 custom/qweb_partial/__manifest__.py:4:24: OD503 module 'ghost_enterprise' is not on the addons path
 custom/qweb_partial/views/partial.xml:5:20: OD311 no indexed module defines template 'web.layot'

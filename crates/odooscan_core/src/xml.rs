@@ -259,7 +259,10 @@ impl Walker<'_> {
     }
 
     fn unsafe_qweb(&mut self, node: Node) {
-        for n in node.descendants().filter(|n| n.has_attribute("t-raw")) {
+        for n in node
+            .descendants()
+            .filter(|n| n.has_attribute("t-raw") && !lends_children(*n))
+        {
             let pos = self.pos(n);
             self.facts.diags.push(RawDiag::new(
                 "OD307",
@@ -316,19 +319,22 @@ impl Walker<'_> {
     fn template(&mut self, node: Node) {
         let mut view = ViewFact {
             id: defined_id(node).map(str::to_owned),
-            inherit: node.attribute("inherit_id").map(str::to_owned),
+            // Odoo reads an empty `inherit_id` as no parent.
+            inherit: node
+                .attribute("inherit_id")
+                .filter(|p| !p.is_empty())
+                .map(str::to_owned),
             has_arch: true,
             kind: Some(QWEB.to_owned()),
             ..ViewFact::default()
         };
         self.facts.view_keys.extend(node.attribute("key").map(str::to_owned));
         // The loader turns the `<template>` into the arch's root, which keeps its `t-call`, unless
-        // it extends a parent: a truthy `inherit_id` renames the root to `<data>`, which only
-        // lends its children to the inheritance, `primary` included.
-        let extends = node.attribute("inherit_id").is_some_and(|p| !p.is_empty());
+        // it extends a parent: then the root lends only its children, as `lends_children` says.
+        let extends = view.inherit.is_some();
         view.primary = Some(!extends || node.attribute("primary") == Some("True"));
-        let body = node.descendants().skip(usize::from(extends));
-        view.calls.extend(body.filter_map(|n| t_call(n, self.lines)));
+        view.calls
+            .extend(node.descendants().filter_map(|n| t_call(n, self.lines)));
         if extends {
             extension_assets(node, &mut view.assets);
         } else {
@@ -345,7 +351,11 @@ impl Walker<'_> {
                 value: value.to_owned(),
             });
         }
-        for n in node.descendants().skip(1).filter(Node::is_element) {
+        for n in node
+            .descendants()
+            .skip(1)
+            .filter(|n| n.is_element() && !lends_children(*n))
+        {
             let pos = self.pos(n);
             arch_element(n, pos, &mut view);
             if bare_attr(n, "t-esc").is_some() && !locates(n) {
@@ -733,6 +743,10 @@ impl Walker<'_> {
     }
 
     fn arch(&mut self, node: Node, path: &mut Vec<String>, view: &mut ViewFact) {
+        if lends_children(node) {
+            self.lent_children(node, path, view);
+            return;
+        }
         let pos = self.pos(node);
         let tag = node.tag_name().name();
         arch_element(node, pos, view);
@@ -771,6 +785,20 @@ impl Walker<'_> {
         }
         path.truncate(depth);
         self.around.truncate(around);
+    }
+
+    /// Walks a node whose inheritance applies only its children.
+    fn lent_children(&mut self, node: Node, path: &mut Vec<String>, view: &mut ViewFact) {
+        // The loader resolves every `%(xmlid)d` of the arch text before the inheritance drops
+        // the node's attributes, and a missing id stops the load.
+        for attr in node.attributes() {
+            for cap in ACTION_REF.captures_iter(attr.value()) {
+                self.reference(&cap[1], node);
+            }
+        }
+        for child in node.children().filter(Node::is_element) {
+            self.arch(child, path, view);
+        }
     }
 
     /// Extends `path` with where the children of `node` sit.
@@ -1664,6 +1692,24 @@ fn spec(node: Node) -> bool {
     !node.has_tag_name("data") && owner.is_some_and(inheriting_root)
 }
 
+/// Whether Odoo applies only the children of `node`, dropping all its attributes: an extending
+/// `<template>`, which the loader renames `<data>` (18.0 `odoo/tools/convert.py:463-467`, 20.0
+/// `:499-503`), and a `<data>` that wraps the specs of an inheriting arch, at any depth (18.0
+/// `odoo/tools/template_inheritance.py:152-154`, 20.0 `:153-155`). The web client applies a
+/// `<data>` under `t-inherit` as an operation instead (18.0
+/// `addons/web/static/src/core/template_inheritance.js:79-83`).
+fn lends_children(node: Node) -> bool {
+    match node.tag_name().name() {
+        "template" => node.attribute("inherit_id").is_some_and(|p| !p.is_empty()),
+        "data" => node
+            .ancestors()
+            .skip(1)
+            .find(|a| !a.has_tag_name("data"))
+            .is_some_and(|owner| !owner.has_attribute("t-inherit") && inheriting_root(owner)),
+        _ => false,
+    }
+}
+
 /// Whether the children of `node` are specs. The last `inherit_id` of a record decides, wherever
 /// it stands around the arch, as each field of a name replaces the one before.
 fn inheriting_root(node: Node) -> bool {
@@ -1690,14 +1736,15 @@ fn holds_record(field: Node) -> bool {
     }
 }
 
-/// The template a node calls by a literal name: its `t-call` at the value, unless that locates a
-/// call of the parent view, or the text of an `<attribute name="t-call">` spec. An empty, numeric,
-/// formatted or path target names no template a scan can look up: Odoo reads digits as a view id,
-/// and `{{ }}` and `#{}` only at render time.
+/// The template a node calls by a literal name. An `<attribute name="t-call">` spec calls its text.
+/// Any other node calls its `t-call` at the value, unless that locates a call of the parent view or
+/// Odoo drops it with the node's other attributes. An empty, numeric, formatted or path target names
+/// no template a scan can look up: Odoo reads digits as a view id, and `{{ }}` and `#{}` only at
+/// render time.
 pub fn t_call(node: Node, lines: &Lines) -> Option<Spanned<String>> {
     let target = if node.has_tag_name("attribute") && node.attribute("name") == Some("t-call") {
         spec_text(node, lines)?
-    } else if node.has_attribute("t-call") && !locates(node) {
+    } else if node.has_attribute("t-call") && !locates(node) && !lends_children(node) {
         attr_value(node, "t-call", lines)?
     } else {
         return None;
@@ -2548,6 +2595,59 @@ mod tests {
         assert_eq!(calls(r#"inherit_id="y""#), ["a.inner"]);
         assert_eq!(calls(r#"inherit_id="y" primary="True""#), ["a.inner"]);
         assert_eq!(calls(r#"inherit_id="""#), ["a.root", "a.inner"]);
+    }
+
+    fn raw_lines(facts: &DataFacts) -> Vec<u32> {
+        facts
+            .diags
+            .iter()
+            .filter(|d| d.code == "OD307")
+            .map(|d| d.pos.line)
+            .collect()
+    }
+
+    #[test]
+    fn an_extending_template_root_reads_no_t_raw() {
+        let facts = |attrs: &str| {
+            analyze(&format!(
+                r#"<odoo><template id="x" {attrs} t-raw="a" t-call="a.b"/></odoo>"#
+            ))
+        };
+        let extending = facts(r#"inherit_id="y""#);
+        assert_eq!(raw_lines(&extending), [] as [u32; 0]);
+        assert_eq!(call_names(&extending.views[0]), [] as [&str; 0]);
+        let nested = analyze(
+            r#"<odoo><template id="x" inherit_id="y"><data t-raw="a" t-call="a.b" name="n"/></template></odoo>"#,
+        );
+        assert_eq!(raw_lines(&nested), [] as [u32; 0]);
+        assert_eq!(call_names(&nested.views[0]), [] as [&str; 0]);
+        assert!(nested.views[0].elements.is_empty());
+        for attrs in ["", r#"inherit_id="""#] {
+            let root = facts(attrs);
+            assert_eq!(raw_lines(&root), [1], "{attrs}");
+            assert_eq!(root.views[0].inherit, None, "{attrs}");
+        }
+    }
+
+    #[test]
+    fn a_wrapping_data_lends_only_its_children() {
+        let arch = r#"<field name="arch" type="xml">
+<data t-call="a.root" t-raw="r" groups="g.root" context="{'a': %(a.act)d}">
+<data t-call="a.nested" t-raw="r" groups="g.nested">
+<xpath expr="//t"><t t-call="a.inner" t-raw="r"/><data t-call="a.content"/></xpath>
+</data>
+</data>
+</field>"#;
+        let parent = r#"<field name="inherit_id" ref="y"/>"#;
+        for fields in [format!("{parent}{arch}"), format!("{arch}{parent}")] {
+            let facts = analyze(&format!(
+                r#"<odoo><record id="x" model="ir.ui.view">{fields}</record></odoo>"#
+            ));
+            assert_eq!(call_names(&facts.views[0]), ["a.inner", "a.content"]);
+            assert_eq!(raw_lines(&facts), [4]);
+            assert!(!facts.refs.iter().any(|r| r.id.starts_with("g.")));
+            assert!(facts.refs.iter().any(|r| r.id == "a.act"));
+        }
     }
 
     fn buttons(arch: &str) -> Vec<(Vec<String>, String, u32, u32)> {
