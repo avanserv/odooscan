@@ -325,4 +325,17 @@
     <template id="hidden_key">
         <t t-call="qweb_outside.alias"/>
     </template>
+
+    <!-- not() holds when its argument finds nothing, so a step under it need not exist. -->
+    <template id="negated_steps" inherit_id="keyed">
+        <xpath expr="//div[not(t[@t-call='web.layot_negated'])]" position="inside">
+            <span/>
+        </xpath>
+        <xpath expr="//div[t[@t-call='web.layot_required']]" position="inside">
+            <span/>
+        </xpath>
+        <xpath expr="//div[not(t[@t-call='web.layot_negated_too'])]/span[@name='kept']" position="inside">
+            <span/>
+        </xpath>
+    </template>
 </odoo>
