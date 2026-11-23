@@ -129,4 +129,16 @@
     <template id="order_snippet">
         <button type="object" name="action_nothing"/>
     </template>
+
+    <record id="order_form_specs" model="ir.ui.view">
+        <field name="name">button.order.form.specs</field>
+        <field name="inherit_id" ref="order_form"/>
+        <field name="arch" type="xml">
+            <button type="object" name="action_confrim"/>
+            <xpath expr="//header" position="inside">
+                <button type="object" name="action_confrim" position="move"/>
+                <button type="object" name="action_stomp" position="after"/>
+            </xpath>
+        </field>
+    </record>
 </odoo>
