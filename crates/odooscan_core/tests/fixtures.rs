@@ -386,6 +386,7 @@ fn raw_severity_is_an_error_from_saas_19_1() {
         ("bad_sale", Severity::Warning),
         ("modern19", Severity::Warning),
         ("modern20", Severity::Error),
+        ("qweb_calls", Severity::Warning),
     ];
     assert_eq!(severities("OD307"), expected.map(|(m, s)| (m.to_owned(), s)));
 }
