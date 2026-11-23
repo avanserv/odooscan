@@ -1987,8 +1987,10 @@ fn step_element(step: &Captures) -> ArchElement {
     }
 }
 
-/// The named steps of an xpath, each of which must match some element, so an expression with
-/// optional steps is not checked.
+/// The named steps of an xpath outside any `not(...)`, each of which must match some element, so
+/// an expression with optional steps is not checked. A step inside `not(...)` need not exist:
+/// XPath `not(...)` holds when its argument finds nothing, and Odoo evaluates the whole expression
+/// with `etree.ETXPath` (18.0 `odoo/tools/template_inheritance.py:89-93`).
 fn xpath_locators(expr: &str, pos: Pos) -> Vec<Spanned<ArchElement>> {
     if optional_steps(expr) {
         return vec![];
@@ -1997,7 +1999,71 @@ fn xpath_locators(expr: &str, pos: Pos) -> Vec<Spanned<ArchElement>> {
         value: step_element(&c),
         pos,
     };
-    XPATH_NAMED_STEP.captures_iter(expr).map(located).collect()
+    XPATH_NAMED_STEP.captures_iter(&unnegated(expr)).map(located).collect()
+}
+
+/// `expr` with each `not(...)` group blanked to spaces of the same byte length. A group left open
+/// blanks to the end, as ETXPath refuses the expression anyway.
+fn unnegated(expr: &str) -> String {
+    let mut out = String::with_capacity(expr.len());
+    let (mut kept, mut at) = (0, 0);
+    while at < expr.len() {
+        if matches!(expr.as_bytes()[at], b'\'' | b'"') {
+            // A literal outside a group may hold `not(`, as in `@name='not(x'`.
+            at = literal_end(expr, at);
+        } else if let Some(open) = negation_open(expr, at) {
+            let end = group_end(expr, open);
+            out.push_str(&expr[kept..at]);
+            out.push_str(&" ".repeat(end - at));
+            (kept, at) = (end, end);
+        } else {
+            at += 1;
+        }
+    }
+    out.push_str(&expr[kept..]);
+    out
+}
+
+/// The offset of the `(` when a `not` call starts at `at`: no name character before it, so
+/// `knot(` is no negation, and only XPath whitespace between it and the parenthesis.
+fn negation_open(expr: &str, at: usize) -> Option<usize> {
+    let rest = expr.get(at..)?.strip_prefix("not")?;
+    let name_char = |c: char| c.is_alphanumeric() || matches!(c, '_' | '.' | '-');
+    if expr[..at].chars().next_back().is_some_and(name_char) {
+        return None;
+    }
+    let args = rest.trim_start_matches([' ', '\t', '\r', '\n']);
+    args.starts_with('(').then(|| expr.len() - args.len())
+}
+
+/// The offset past the `)` that balances the `(` at `open`, or the end of `expr`.
+fn group_end(expr: &str, open: usize) -> usize {
+    let mut depth = 0;
+    let mut at = open;
+    while at < expr.len() {
+        match expr.as_bytes()[at] {
+            b'\'' | b'"' => {
+                at = literal_end(expr, at);
+                continue;
+            }
+            b'(' => depth += 1,
+            b')' if depth == 1 => return at + 1,
+            b')' => depth -= 1,
+            _ => {}
+        }
+        at += 1;
+    }
+    expr.len()
+}
+
+/// The offset past the literal whose quote is at `at`. XPath 1.0 has no escapes in a literal, so
+/// the next quote of the same kind closes it.
+fn literal_end(expr: &str, at: usize) -> usize {
+    let quote = expr.as_bytes()[at];
+    expr.as_bytes()[at + 1..]
+        .iter()
+        .position(|&b| b == quote)
+        .map_or(expr.len(), |i| at + i + 2)
 }
 
 /// The element an xpath lands on, when its last step names it. Anything after that step, such as
@@ -2563,6 +2629,24 @@ mod tests {
     fn an_xpath_step_locates_a_call() {
         let spec = extension(r#"<xpath expr="//t[@t-call='a.old']/div[@id='b']" position="inside"/>"#);
         assert_eq!(located_values(&spec), ["t[t-call=a.old]", "div[id=b]"]);
+    }
+
+    #[test]
+    fn a_step_under_not_locates_nothing() {
+        let located = |expr: &str| located_values(&extension(&format!(r#"<xpath expr="{expr}" position="inside"/>"#)));
+        assert_eq!(located("//div[not(t[@t-call='a.x'])]"), [""; 0]);
+        assert_eq!(
+            located("//div[@id='b'][not(field[@name='c'])]/span[@name='d']"),
+            ["div[id=b]", "span[name=d]"]
+        );
+        assert_eq!(
+            located("//div[not (contains(@class, ')') and t[@t-call='a.x'])]/p[@name='e']"),
+            ["p[name=e]"]
+        );
+        assert_eq!(located("//div[@name='not(x']"), ["div[name=not(x]"]);
+        assert_eq!(located("//knot[@name='k']"), ["knot[name=k]"]);
+        assert_eq!(located("//div[not(t[@t-call='a.x']"), [""; 0]);
+        assert_eq!(located("//div[not(@a or @b)]/span[@name='s']"), [""; 0]);
     }
 
     #[test]
