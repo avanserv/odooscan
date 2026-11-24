@@ -1,0 +1,11 @@
+<odoo>
+    <record id="view_partner_moor" model="ir.ui.view">
+        <field name="model">res.partner</field>
+        <field name="inherit_id" search="[('name', '=', 'res.partner.simple')]"/>
+        <field name="arch" type="xml">
+            <xpath expr="//div[@id='notes']" position="after">
+                <div id="moor_block"/>
+            </xpath>
+        </field>
+    </record>
+</odoo>
