@@ -3354,10 +3354,10 @@ impl<'m> Index<'m> {
     /// the scan did not read, or loads a data file it cannot read that may hold one, or a template
     /// file it cannot read, which may extend any template tree: Odoo combines every extension below
     /// the root. A spec on a tree whose way up to the root the index does not hold counts, as it may
-    /// locate what `set` adds, unless it is a view tree whose views the index holds all the way up,
-    /// each naming its parent in a form the scan reads, with an arch it did not read on the way:
-    /// that spec counts only when `set` loads a view of a model on the way, or a data file it cannot
-    /// read that may hold a view.
+    /// locate what `set` adds, unless it is a view tree whose views the index holds all the way up
+    /// from modules that each parse every data file that may hold a view, each naming its parent in
+    /// a form the scan reads, with an arch it did not read on the way: that spec counts only when
+    /// `set` loads a view of a model on the way, or a data file it cannot read that may hold a view.
     pub fn locates_in(&self, module: usize, set: &[bool], scope: &Scope) -> bool {
         let m = &self.modules[module];
         let name = m.name.as_str();
@@ -3386,8 +3386,9 @@ impl<'m> Index<'m> {
     /// `locates_in` for the view `v` of the module `name`. On a tree whose arch the scan did not read
     /// all the way up, `set` may add to it only with a view of a model on the way, or a data file it
     /// cannot read that may hold one: Odoo combines only extensions whose model equals their
-    /// parent's. Above a view the index does not hold from its own module, or one whose parent the
-    /// scan does not read, any model may sit, so the spec counts.
+    /// parent's. Above a view the index does not hold from its own module, or whose module loads a
+    /// data file that may hold a view and does not parse, or one whose parent the scan does not
+    /// read, any model may sit, so the spec counts.
     fn view_locates_in(&self, v: &ViewFact, name: &str, set: &[bool], scope: &Scope, lost: bool) -> bool {
         let Some(parent) = &v.inherit else { return false };
         let parent = full_id(name, parent);
@@ -4852,18 +4853,19 @@ impl<'m> Inheritance<'m> {
     }
 
     /// The models of every node on the way up from `id`, None for a node that names no model. None
-    /// when the index does not hold an id on the way from the module the id names, or a node names
-    /// its parent in a form the scan does not read, so a model above is unknown.
+    /// when the index does not hold an id on the way from the module the id names, that module
+    /// loads a data file that may hold a view and does not parse, or a node names its parent in a
+    /// form the scan does not read, so a model above is unknown.
     pub fn models(&self, mut id: String, modules: &[Module]) -> Option<Vec<Option<&'m str>>> {
         let mut models = vec![];
         for _ in 0..32 {
             let nodes = self.nodes.get(&id)?;
-            // Another module's record may update the view in place, naming no model or parent, so
-            // only one from the module the id names tells what the view is.
+            // Odoo writes only the fields a record gives, so one naming no model or parent may update
+            // the view in place: from another module, or from the owner when its defining record sits
+            // in a file the scan lost. Only the owner's node, while it loses no view file, tells.
             let owner = id.split_once('.').map(|(owner, _)| owner);
-            if !nodes.iter().any(|n| Some(modules[n.module].name.as_str()) == owner)
-                || nodes.iter().any(|n| n.fact.unread_parent)
-            {
+            let owned = nodes.iter().find(|n| Some(modules[n.module].name.as_str()) == owner);
+            if owned.is_none_or(|n| modules[n.module].lost_views()) || nodes.iter().any(|n| n.fact.unread_parent) {
                 return None;
             }
             models.extend(nodes.iter().map(|n| n.fact.model.as_ref().map(|m| m.value.as_str())));
@@ -7144,6 +7146,52 @@ mod tests {
         let page = format!(r#"<template id="prov_page" inherit_id="base.other_page">{spec}</template>"#);
         assert!(locates(&template, &page, None));
         assert!(!locates(&template, &partner, None));
+    }
+
+    #[test]
+    fn a_view_whose_module_loses_a_view_file_has_no_models() {
+        let view = |records: &str| {
+            data_file(
+                "views/views.xml",
+                xml::analyze(&format!("<odoo>{records}</odoo>"), Series::parse("18.0")),
+            )
+        };
+        let manifest = |depends: &str| format!("{{'version': '18.0.1.0', 'depends': [{depends}]}}");
+        let country = r#"<record id="view_prov" model="ir.ui.view"><field name="model">res.country</field>
+            <field name="arch" type="xml"><form><div id="prov_block"/></form></field></record>"#;
+        // The defining record of `view_mid` may sit in the lost file, so this one may only update it.
+        let main = r#"<record id="view_mid" model="ir.ui.view"><field name="priority">20</field></record>
+            <record id="view_main" model="ir.ui.view">
+                <field name="model">res.partner</field>
+                <field name="inherit_id" ref="view_mid"/>
+                <field name="arch" type="xml">
+                    <xpath expr="//div[@id='prov_block']" position="inside"><span/></xpath>
+                </field>
+            </record>"#;
+        // The models above main's spec, and whether it locates in prov, main losing a file at `lost`.
+        let scan = |lost: Option<&str>| {
+            let mut modules = [
+                module("base", &manifest("")),
+                module("prov", &manifest("'base'")),
+                module("main", &manifest("'prov'")),
+            ];
+            modules[1].data.push(view(country));
+            modules[2].data.push(view(main));
+            let unreadable = crate::facts::DataFacts {
+                unreadable: true,
+                ..Default::default()
+            };
+            modules[2].data.extend(lost.map(|rel| data_file(rel, unreadable)));
+            let index = Index::build(&modules, None);
+            let main = index.by_name["main"];
+            let set: Vec<bool> = modules.iter().map(|m| m.name == "prov").collect();
+            let models = index.views.models("main.view_mid".to_owned(), &modules);
+            let models = models.map(|m| m.into_iter().map(|m| m.map(str::to_owned)).collect::<Vec<_>>());
+            (models, index.locates_in(main, &set, &index.scope(main)))
+        };
+        assert_eq!(scan(Some("views/lost.xml")), (None, true));
+        assert_eq!(scan(Some("data/res.partner.csv")), (Some(vec![None]), false));
+        assert_eq!(scan(None), (Some(vec![None]), false));
     }
 
     #[test]
