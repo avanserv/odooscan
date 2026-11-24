@@ -2187,6 +2187,7 @@ custom/window_gantt/__manifest__.py:4:17: OD521 nothing of module 'window_defaul
 custom/window_hidden/views/actions.xml:4:33: OD202 model 'window.plain' comes from module window_actions; add it to depends
 custom/window_named/views/actions.xml:19:33: OD318 window.plain has no primary gantt view, and nothing generates one
 custom/window_named/views/actions.xml:32:33: OD318 window.plain has no primary map view, and nothing generates one
+custom/window_named/views/actions.xml:39:33: OD318 window.plain has no primary gantt view, and nothing generates one
 custom/window_named/views/actions.xml:39:33: OD318 window.plain has no primary map view, and nothing generates one
 custom/window_named/views/actions.xml:58:33: OD318 window.plain has no primary gantt view, and nothing generates one
 custom/window_named/views/actions.xml:69:33: OD318 window.plain has no primary map view, and nothing generates one
@@ -2213,6 +2214,8 @@ custom/window_named/views/actions.xml:299:9: OD302 'nowhere.view_y' belongs to m
 custom/window_named/views/actions.xml:330:41: OD318 window.plain has no primary gantt view, and nothing generates one
 custom/window_named/views/actions.xml:336:33: OD318 window.plain has no primary map view, and nothing generates one
 custom/window_named/views/actions.xml:348:33: OD318 window.plain has no primary gantt view, and nothing generates one
+custom/window_named/views/actions.xml:360:33: OD318 window.plain has no primary gantt view, and nothing generates one
+custom/window_named/views/actions.xml:391:33: OD318 window.plain has no primary gantt view, and nothing generates one
 custom/window_named/views/later.xml:6:5: OD323 XML id 'action_view_id_undone' is already defined in views/actions.xml, and this definition overwrites the fields both name; remove the copy when the two say the same thing, or rename one when both are meant to exist
 custom/window_named/views/later.xml:10:5: OD323 XML id 'action_context_undone' is already defined in views/actions.xml, and this definition overwrites the fields both name; remove the copy when the two say the same thing, or rename one when both are meant to exist
 custom/window_nested15/views/actions.xml:5:33: OD318 window.nested.old has no primary gantt view, and nothing generates one

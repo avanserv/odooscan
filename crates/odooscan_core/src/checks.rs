@@ -4275,13 +4275,40 @@ impl<'m> Ctx<'_, 'm> {
         let of_kind = |kinds: &[String]| kinds.iter().any(|k| k == kind);
         writes
             .iter()
-            .any(|w| self.scope.loads(w) && w.fact.row_names_view(kind, nested))
+            .any(|w| self.scope.loads(w) && !self.row_taken(w) && w.fact.row_names_view(kind, nested))
             || self
                 .held(writes, |a| !matches!(a.view_id, ActionViewId::Unset))
                 .any(|w| self.view_id_names(w, kind))
             || self
                 .held(writes, |a| a.context_kinds.is_some())
                 .any(|w| w.fact.context_kinds.as_deref().is_some_and(of_kind))
+    }
+
+    /// Whether an action's `view_ids` takes the row of `write` off the action `write` gives it. A
+    /// taker counts when the scope reads it, as a module outside `depends` may be missing, or when
+    /// the module of `write` makes it in a file the scope loads, so a demo taker there does not count
+    /// for a data reader. It must also surely load after `write`: it is in the write's module and
+    /// not a data taker of a demo write, or its module loads after the write's.
+    fn row_taken(&self, write: &Placed<&ActionFact>) -> bool {
+        let Some(row) = &write.fact.row else {
+            return false;
+        };
+        let id = full_id(&self.index.modules[write.module].name, row);
+        let takers = self.index.row_takers.get(&id).map_or(&[][..], Vec::as_slice);
+        takers.iter().any(|t| {
+            (self.scope.reads(t) || t.module == write.module && self.scope.loads(t)) && self.loads_after_write(t, write)
+        })
+    }
+
+    /// Whether `taker` loads after `write` on every database holding both, on a fresh install.
+    /// Inside one module Odoo loads data files before demo files (18.0
+    /// `odoo/modules/loading.py:230-231`); for two data writes of one module the scan cannot see the
+    /// order and takes it as safe.
+    fn loads_after_write(&self, taker: &Placed<&ActionFact>, write: &Placed<&ActionFact>) -> bool {
+        if taker.module == write.module {
+            return taker.demo || !write.demo;
+        }
+        self.index.loads_after(taker.module, write.module)
     }
 
     /// The writes of a field that may be what the action holds: only a write in scope undoes those

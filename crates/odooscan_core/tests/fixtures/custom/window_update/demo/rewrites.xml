@@ -22,4 +22,21 @@
     <record id="action_demo_view_undone" model="ir.actions.act_window">
         <field name="view_id" eval="False"/>
     </record>
+
+    <record id="action_demo_taker" model="ir.actions.act_window">
+        <field name="name">action_demo_taker</field>
+        <field name="res_model">window.plain</field>
+        <field name="view_mode">list</field>
+        <field name="view_ids" eval="[(6, 0, [ref('row_demo_taken')])]"/>
+    </record>
+
+    <record id="action_row_demo_back" model="ir.actions.act_window">
+        <field name="view_mode">gantt</field>
+    </record>
+
+    <record id="row_demo_back" model="ir.actions.act_window.view">
+        <field name="view_mode">gantt</field>
+        <field name="view_id" ref="window_actions.view_shown_gantt"/>
+        <field name="act_window_id" ref="action_row_demo_back"/>
+    </record>
 </odoo>

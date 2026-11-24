@@ -1626,12 +1626,24 @@ fn record_writes<'m, T>(
     facts: fn(&DataFacts) -> &[T],
     id: fn(&T) -> Option<&String>,
 ) -> Writes<'m, T> {
+    keyed_writes(modules, by_name, series, facts, |fact| id(fact).into_iter().collect())
+}
+
+/// Every write of the files manifests load, in load order, under each id that `keys` gives it in
+/// the spelling of its module.
+fn keyed_writes<'m, T>(
+    modules: &'m [Module],
+    by_name: &FxHashMap<&str, usize>,
+    series: Option<Series>,
+    facts: fn(&DataFacts) -> &[T],
+    keys: impl Fn(&'m T) -> Vec<&'m String>,
+) -> Writes<'m, T> {
     let mut writes: Writes<'m, T> = FxHashMap::default();
     for mi in load_order(modules, by_name, series) {
         let module = &modules[mi];
         for file in module.data.iter().filter(|f| f.rank.is_some()) {
             for fact in facts(&file.facts) {
-                if let Some(id) = id(fact) {
+                for id in keys(fact) {
                     writes.entry(full_id(&module.name, id)).or_default().push(Placed {
                         module: mi,
                         demo: file.demo,
@@ -2082,6 +2094,8 @@ pub struct Index<'m> {
     /// draws those from a view of another kind, so an action lists them with no view of their own.
     pub client_views: FxHashSet<&'m str>,
     pub action_writes: Writes<'m, ActionFact>,
+    /// The action writes whose `view_ids` take each row of `ir.actions.act_window.view`.
+    pub row_takers: Writes<'m, ActionFact>,
     pub rule_writes: Writes<'m, RuleFact>,
     pub server_writes: Writes<'m, ServerFact>,
     pub report_writes: Writes<'m, ReportFact>,
@@ -2194,6 +2208,13 @@ impl<'m> Index<'m> {
             view_types: FxHashSet::default(),
             client_views: FxHashSet::default(),
             action_writes: record_writes(modules, &by_name, default_series, |f| &f.actions, |a| a.id.as_ref()),
+            row_takers: keyed_writes(
+                modules,
+                &by_name,
+                default_series,
+                |f| &f.actions,
+                |a| a.takes_rows.iter().collect(),
+            ),
             rule_writes: record_writes(modules, &by_name, default_series, |f| &f.rules, |r| r.id.as_ref()),
             server_writes: record_writes(modules, &by_name, default_series, |f| &f.servers, |s| s.id.as_ref()),
             report_writes: record_writes(modules, &by_name, default_series, |f| &f.reports, |r| r.id.as_ref()),

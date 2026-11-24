@@ -50,4 +50,41 @@
     <record id="window_actions.action_own_list" model="ir.actions.act_window">
         <field name="view_mode">gantt</field>
     </record>
+
+    <record id="action_row_demo_taken" model="ir.actions.act_window">
+        <field name="name">action_row_demo_taken</field>
+        <field name="res_model">window.plain</field>
+        <field name="view_mode">gantt</field>
+    </record>
+
+    <record id="row_demo_taken" model="ir.actions.act_window.view">
+        <field name="view_mode">gantt</field>
+        <field name="view_id" ref="window_actions.view_shown_gantt"/>
+        <field name="act_window_id" ref="action_row_demo_taken"/>
+    </record>
+
+    <record id="window_actions.row_unordered" model="ir.actions.act_window.view">
+        <field name="view_mode">gantt</field>
+        <field name="view_id" ref="window_actions.view_shown_gantt"/>
+        <field name="act_window_id" ref="window_actions.action_row_unordered"/>
+    </record>
+
+    <record id="action_row_demo_back" model="ir.actions.act_window">
+        <field name="name">action_row_demo_back</field>
+        <field name="res_model">window.plain</field>
+        <field name="view_mode">list</field>
+    </record>
+
+    <record id="row_demo_back" model="ir.actions.act_window.view">
+        <field name="view_mode">gantt</field>
+        <field name="view_id" ref="window_actions.view_shown_gantt"/>
+        <field name="act_window_id" ref="action_row_demo_back"/>
+    </record>
+
+    <record id="action_row_demo_back_taker" model="ir.actions.act_window">
+        <field name="name">action_row_demo_back_taker</field>
+        <field name="res_model">window.plain</field>
+        <field name="view_mode">list</field>
+        <field name="view_ids" eval="[(4, ref('row_demo_back'))]"/>
+    </record>
 </odoo>
