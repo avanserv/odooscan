@@ -454,6 +454,7 @@ custom/depends_unused/__manifest__.py:9:9: OD521 nothing of module 'prov_shared'
 custom/depends_unused/__manifest__.py:25:9: OD503 module 'ghost_unused' is not on the addons path
 custom/depends_unused/__manifest__.py:26:9: OD504 module 'prov_back' depends back on depends_unused, so Odoo installs neither
 custom/depends_unused_implied/__manifest__.py:4:25: OD520 module 'mail' already comes with 'sale', also in depends
+custom/depends_unused_lost_view/views/lost_views.xml:1:1: OD000 the root node was opened but never closed
 custom/depends_unused_mist/__manifest__.py:4:30: OD521 nothing of module 'prov_veil' is used, nor of what only it brings
 custom/depends_unused_reach/__manifest__.py:4:17: OD521 nothing of module 'prov_glen' is used, nor of what only it brings
 custom/depends_unused_smudge/__manifest__.py:4:46: OD521 nothing of module 'prov_spark' is used, nor of what only it brings

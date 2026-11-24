@@ -1,0 +1,15 @@
+<odoo>
+    <!-- Updates the view the file that does not parse defines, so its model is that one's. -->
+    <record id="view_lost_top" model="ir.ui.view">
+        <field name="priority">20</field>
+    </record>
+    <record id="view_lost_note" model="ir.ui.view">
+        <field name="model">res.partner</field>
+        <field name="inherit_id" ref="view_lost_top"/>
+        <field name="arch" type="xml">
+            <xpath expr="//div[@id='lost_block']" position="inside">
+                <span/>
+            </xpath>
+        </field>
+    </record>
+</odoo>
