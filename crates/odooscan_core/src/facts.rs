@@ -283,9 +283,11 @@ pub struct ClassFact {
     /// fields it names is unknown.
     pub inherits_unknown: bool,
     /// A Many2one may delegate to a parent `inherits` lacks: its comodel or its `delegate` is not a
-    /// literal. Apart from `inherits_unknown`, which says the `_inherits` entries are unknown, as
-    /// such a field still has no entry there.
+    /// literal, or a `**` may give `delegate`. Apart from `inherits_unknown`, which says the
+    /// `_inherits` entries are unknown, as such a field still has no entry there.
     pub delegate_unknown: bool,
+    /// What `delegate_unknown` says, from a `delegate` keyword alone: a bare `**` sets only that.
+    pub delegate_named: bool,
     pub fields: Vec<FieldFact>,
     /// Methods the class defines, in its body or under an `if`, `for`, `while`, `match`, `try` or
     /// `with` block, the names it binds to a value that may be a method, as Python finds those as
@@ -425,6 +427,7 @@ impl ClassFact {
             delegations: vec![],
             inherits_unknown: false,
             delegate_unknown: false,
+            delegate_named: false,
             fields: vec![],
             methods: vec![],
             defs: vec![],

@@ -12,3 +12,5 @@ access_window_unread_options,window.unread.options,model_window_unread_options,b
 access_window_unread_absent,window.unread.absent,model_window_unread_absent,base.group_user,1,1,1,1
 access_window_unread_part,window.unread.part,model_window_unread_part,base.group_user,1,1,1,1
 access_window_unread_whole,window.unread.whole,model_window_unread_whole,base.group_user,1,1,1,1
+access_window_splat_parent,window.splat.parent,model_window_splat_parent,base.group_user,1,1,1,1
+access_window_splat_child,window.splat.child,model_window_splat_child,base.group_user,1,1,1,1

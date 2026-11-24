@@ -4167,16 +4167,27 @@ impl<'m> Index<'m> {
     pub fn unread_delegate(&self, model: &str, scope: &Scope) -> bool {
         self.chain(model, Some(scope), true)
             .iter()
-            .any(|(_, c)| self.delegates_unread(c))
+            .any(|(_, c)| self.delegates_unread(c, false))
+    }
+
+    /// What `unread_delegate` asks, with a Many2one counted only when a `delegate` keyword names
+    /// it a delegate: a bare `**` names none. From saas~18.3 Odoo raises for a delegate field
+    /// outside `_inherits` (20.0 `odoo/orm/fields_relational.py:250-260`), so there a `**` that
+    /// gives `delegate` is an error, and before it the cost is a report on a true delegate.
+    pub fn named_unread_delegate(&self, model: &str, scope: &Scope) -> bool {
+        self.chain(model, Some(scope), true)
+            .iter()
+            .any(|(_, c)| self.delegates_unread(c, true))
     }
 
     /// Whether class `c` delegates to a parent the scan cannot read, or is such a parent: see
-    /// `unread_delegate`.
-    fn delegates_unread(&self, c: &ClassFact) -> bool {
+    /// `unread_delegate`, and `named_unread_delegate` for `named`.
+    fn delegates_unread(&self, c: &ClassFact, named: bool) -> bool {
         let delegates = c.inherits.iter().map(|(parent, _)| parent);
         let mut parents = delegates.chain(c.inherit.iter().map(|parent| &parent.value));
         let unread = |parent: &String| *parent != c.model && !self.has_introducer(parent);
-        c.inherits_unknown || c.delegate_unknown || parents.any(unread)
+        let delegate = if named { c.delegate_named } else { c.delegate_unknown };
+        c.inherits_unknown || delegate || parents.any(unread)
     }
 
     /// Whether `model`, defined only by modules outside `scope`, may get fields from a parent the
@@ -4186,6 +4197,7 @@ impl<'m> Index<'m> {
     /// `odoo/modules/loading.py:195`; 20.0 `odoo/orm/registry.py:449-451`,
     /// `odoo/modules/loading.py:181`) and takes fields from every class of its MRO (18.0
     /// `odoo/models.py:3640`, `:3653-3657`; 20.0 `odoo/orm/model_classes.py:382`, `:395-399`).
+    /// A Many2one counts as a delegate only as `named_unread_delegate` reads one.
     pub fn hidden_outside(&self, model: &str, scope: &Scope) -> bool {
         let Status::Hidden(owner) = self.model_status(model, scope, None) else {
             return false;
@@ -4197,7 +4209,7 @@ impl<'m> Index<'m> {
         chain.retain(|&(mi, c)| c.model != "base" || installed.sees(mi));
         chain
             .iter()
-            .any(|&(mi, c)| self.unread_parents(mi, c, &chain, &c.opaque_bases) || self.delegates_unread(c))
+            .any(|&(mi, c)| self.unread_parents(mi, c, &chain, &c.opaque_bases) || self.delegates_unread(c, true))
     }
 
     /// What `holds_fields` asks, and no plain base the scan does not read, which may hold methods
@@ -6618,6 +6630,29 @@ mod tests {
     }
 
     #[test]
+    fn a_bare_splat_names_no_delegate() {
+        let manifest = "{'version': '18.0.1.0', 'depends': ['base']}";
+        let mut modules = [
+            module("base", "{'version': '18.0.1.0', 'depends': []}"),
+            module("main", manifest),
+        ];
+        modules[0]
+            .python
+            .push(python_18("class P(models.Model):\n    _name = 'res.partner'\n"));
+        modules[1].python.push(python_18(
+            "class S(models.Model):\n    _name = 'main.splat'\n    \
+             partner_id = fields.Many2one('res.partner', **OPTIONS)\n\n\
+             class N(models.Model):\n    _name = 'main.named'\n    \
+             partner_id = fields.Many2one('res.partner', delegate=DELEGATE)\n",
+        ));
+        let index = Index::build(&modules, None);
+        let scope = index.scope(index.by_name["main"]);
+        assert!(index.unread_delegate("main.splat", &scope));
+        assert!(!index.named_unread_delegate("main.splat", &scope));
+        assert!(index.named_unread_delegate("main.named", &scope));
+    }
+
+    #[test]
     fn a_module_lists_an_unindexed_parent_only_in_its_own_classes() {
         let manifest = |depends: &str| format!("{{'version': '18.0.1.0', 'depends': [{depends}]}}");
         let mut modules = [
@@ -9023,6 +9058,33 @@ Order.components.Card = null;
         assert!(index.hidden_outside("side.hidden", &main));
         assert!(!index.hidden_outside("side.plain", &main));
         assert!(!index.hidden_outside("side.hidden", &reader));
+    }
+
+    #[test]
+    fn a_bare_splat_hides_no_parent_of_a_model_only_outside_scope() {
+        let manifest = |depends: &str| format!("{{'version': '18.0.1.0', 'depends': [{depends}]}}");
+        let mut modules = [
+            module("base", &manifest("")),
+            module("side", &manifest("'base'")),
+            module("main", &manifest("'base'")),
+        ];
+        modules[0].python.push(python_18(
+            "class B(models.Model):\n    _name = 'base'\n\n\
+             class P(models.Model):\n    _name = 'res.partner'\n",
+        ));
+        modules[1].python.push(python_18(
+            "class Parent(models.Model):\n    _name = 'side.parent'\n    \
+             partner_id = fields.Many2one('res.partner', **OPTIONS)\n\n\
+             class Child(models.Model):\n    _name = 'side.child'\n    \
+             _inherits = {'side.parent': 'parent_id'}\n    \
+             parent_id = fields.Many2one('side.parent', required=True)\n\n\
+             class Named(models.Model):\n    _name = 'side.named'\n    \
+             partner_id = fields.Many2one('res.partner', delegate=DELEGATE)\n",
+        ));
+        let index = Index::build(&modules, None);
+        let main = index.scope(index.by_name["main"]);
+        assert!(!index.hidden_outside("side.child", &main));
+        assert!(index.hidden_outside("side.named", &main));
     }
 
     const REBOUND_BASE: &str = "class Base(models.AbstractModel):\n    _inherit = 'base'\n\n\

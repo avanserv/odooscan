@@ -2159,8 +2159,13 @@ fn may_delegate(value: &Expr, known: &FieldClasses) -> bool {
     let Some(("Many2one" | UNREAD_TYPE, call)) = field_call(value, known) else {
         return false;
     };
+    names_delegate(call) || call.arguments.keywords.iter().any(|k| k.arg.is_none())
+}
+
+/// The `delegate` keyword limb of `may_delegate`: a `delegate` that is not falsy.
+fn names_delegate(call: &ast::ExprCall) -> bool {
     let falsy = |d: &Expr| matches!(option_value(d), OptionValue::Bool(false) | OptionValue::Falsy);
-    call.arguments.keywords.iter().any(|k| k.arg.is_none()) || keyword(call, "delegate").is_some_and(|d| !falsy(d))
+    keyword(call, "delegate").is_some_and(|d| !falsy(d))
 }
 
 fn is_api(expr: &Expr, name: &str) -> bool {
@@ -4927,6 +4932,7 @@ impl<'a, 'ast> PyVisitor<'a, 'ast> {
             }
         } else if may_delegate(value, self.known) {
             fact.delegate_unknown = true;
+            fact.delegate_named |= field_call(value, self.known).is_some_and(|(_, call)| names_delegate(call));
         }
         fact.fields.push(field);
     }
@@ -8831,21 +8837,26 @@ class U(HttpCase):
 
     #[test]
     fn marks_a_many2one_that_may_delegate_to_an_unread_parent() {
-        let unknown = |field: &str| {
+        let read = |field: &str| {
             let facts = analyze(
                 &format!("class X(models.Model):\n    _name = 'x'\n    y_id = {field}\n"),
                 None,
             );
-            facts.classes[0].delegate_unknown
+            (facts.classes[0].delegate_unknown, facts.classes[0].delegate_named)
         };
         for field in [
             "fields.Many2one(PARTNER, delegate=True)",
             "fields.Many2one(comodel_name=PARTNER, delegate=True)",
             "fields.Many2one('res.partner', delegate=DELEGATE)",
             "fields.Many2one('res.partner', delegate=1)",
-            "fields.Many2one('res.partner', **OPTIONS)",
         ] {
-            assert!(unknown(field), "{field}");
+            assert_eq!(read(field), (true, true), "{field}");
+        }
+        for field in [
+            "fields.Many2one('res.partner', **OPTIONS)",
+            "fields.Many2one('res.partner', delegate=False, **OPTIONS)",
+        ] {
+            assert_eq!(read(field), (true, false), "{field}");
         }
         for field in [
             "fields.Many2one('res.partner', delegate=True)",
@@ -8855,7 +8866,7 @@ class U(HttpCase):
             "fields.Char(delegate=True)",
             "fields.Many2many('res.partner', delegate=True)",
         ] {
-            assert!(!unknown(field), "{field}");
+            assert_eq!(read(field), (false, false), "{field}");
         }
     }
 
