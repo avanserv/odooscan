@@ -633,13 +633,11 @@ impl Walker<'_> {
         if node.parent_element().is_some_and(|p| p.has_tag_name("field")) {
             return;
         }
-        let action = last_field_of(node, "act_window_id").map(|f| written(f, self.lines));
-        let Some(WrittenValue::Ids(ids)) = action else {
+        let Some(action) = last_field_of(node, "act_window_id").and_then(|f| record_ref(f, self.lines)) else {
             return;
         };
-        let [action] = ids.as_slice() else { return };
         let mut row = ActionFact {
-            id: Some(action.value.clone()),
+            id: Some(action.value),
             ..ActionFact::default()
         };
         name_row_view(&mut row.view_kinds, &mut row.view_of_any_kind, node);
@@ -1008,6 +1006,18 @@ fn written(field: Node, lines: &Lines) -> WrittenValue {
     }
 }
 
+/// The XML id a many2one `field` names without a run. Odoo casts an `eval` to an id with `int()`,
+/// so a list names none: an empty one writes False and any other fails to load.
+fn record_ref(field: Node, lines: &Lines) -> Option<Spanned<String>> {
+    if !filled(field, "ref") && eval_of(field).is_some_and(record_eval::is_list) {
+        return None;
+    }
+    let WrittenValue::Ids(mut ids) = written(field, lines) else {
+        return None;
+    };
+    (ids.len() == 1).then(|| ids.remove(0))
+}
+
 /// The `eval` of `field` that Odoo runs: it tests the attribute for truth, so an empty one leaves
 /// the text.
 fn eval_of<'a>(field: Node<'a, '_>) -> Option<&'a str> {
@@ -1077,8 +1087,11 @@ fn primary_view(node: Node, lines: &Lines) -> Option<bool> {
     let Some(parent) = last_field_of(node, "inherit_id").filter(|f| holds_record(*f)) else {
         return Some(true);
     };
+    if record_ref(parent, lines).is_some() {
+        return Some(false);
+    }
     match written(parent, lines) {
-        WrittenValue::Ids(_) | WrittenValue::Text(_) => Some(false),
+        WrittenValue::Text(_) => Some(false),
         _ => None,
     }
 }
@@ -3496,6 +3509,9 @@ mod tests {
                 r#"<field name="act_window_id" ref="b"/><field name="act_window_id" eval="ref('a')"/>"#,
                 "a",
             ),
+            (r#"<field name="act_window_id" eval="ref ('a')"/>"#, "a"),
+            (r#"<field name="act_window_id" eval="ref ( 'm.a' )"/>"#, "m.a"),
+            (r#"<field name="act_window_id" ref="a" eval="[(4, ref('b'))]"/>"#, "a"),
         ] {
             assert_eq!(action_of(fields).as_deref(), Some(action), "{fields}");
         }
@@ -3504,6 +3520,10 @@ mod tests {
             r#"<field name="act_window_id" eval="False"/>"#,
             r#"<field name="act_window_id" eval="ref('a') or False"/>"#,
             r#"<field name="act_window_id" ref="a"/><field name="act_window_id" eval="False"/>"#,
+            r#"<field name="act_window_id" eval="[(4, ref('a'))]"/>"#,
+            r#"<field name="act_window_id" eval="[(6, 0, [ref('a')])]"/>"#,
+            r#"<field name="act_window_id" eval="[Command.link(ref('a'))]"/>"#,
+            r#"<field name="act_window_id" eval="a"/>"#,
         ] {
             assert_eq!(action_of(fields), None, "{fields}");
         }
@@ -4293,6 +4313,9 @@ mod tests {
             r#"<field name="inherit_id" model="ir.model" search="[('model', '=', 'y')]"/>"#.to_owned(),
             r#"<field name="mode" eval="x"/>"#.to_owned(),
             format!(r#"{parent}<field name="mode" eval="x"/>"#),
+            r#"<field name="inherit_id" eval="[(0, 0, {'name': 'refx'})]"/>"#.to_owned(),
+            r#"<field name="inherit_id" eval="[(4, ref('y'))]"/>"#.to_owned(),
+            r#"<field name="inherit_id" eval="[ref('y'), ref('z')]"/>"#.to_owned(),
         ] {
             assert_eq!(primary(&fields), None, "{fields}");
         }

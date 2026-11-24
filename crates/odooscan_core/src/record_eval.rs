@@ -7,9 +7,10 @@ use ruff_python_parser::parse_expression;
 use crate::facts::{Spanned, WrittenValue};
 
 /// The value of an `eval`. Most are other expressions, so only those that may hold a value are parsed.
+/// Python allows spaces before the parenthesis of a call, so the parser decides what calls `ref`.
 pub fn written(eval: &Spanned<String>) -> WrittenValue {
     let text = eval.value.trim();
-    if !text.contains("ref(") && !text.starts_with(['\'', '"']) {
+    if !text.contains("ref") && !text.starts_with(['\'', '"']) {
         return WrittenValue::Opaque;
     }
     let Ok(parsed) = parse_expression(text) else {
@@ -31,6 +32,12 @@ pub fn written(eval: &Spanned<String>) -> WrittenValue {
 /// call only a run can tell is not one.
 pub fn is_false(eval: &str) -> bool {
     parse_expression(eval.trim()).is_ok_and(|p| falsy(p.expr()))
+}
+
+/// Whether an `eval` is a list literal, which names no record as a many2one: Odoo writes False
+/// for an empty one and fails to cast any other to an id.
+pub fn is_list(eval: &str) -> bool {
+    parse_expression(eval.trim()).is_ok_and(|p| matches!(p.expr(), Expr::List(_)))
 }
 
 /// The text of an `eval` that is a string literal, an empty one included.
@@ -327,6 +334,19 @@ mod tests {
         assert_eq!(read(" ref('a.b') "), ids(&["a.b"]));
         assert_eq!(read("ref('a', False)"), ids(&["a"]));
         assert_eq!(read("ref('a', raise_if_not_found=False)"), ids(&["a"]));
+        assert_eq!(read("ref ('a.b')"), ids(&["a.b"]));
+        assert_eq!(read("ref\t('a')"), ids(&["a"]));
+        assert_eq!(read("[(4, ref ('a'))]"), ids(&["a"]));
+    }
+
+    #[test]
+    fn tells_a_list_literal() {
+        for eval in ["[]", " [(4, ref('a'))] ", "[Command.link(ref('a'))]"] {
+            assert!(is_list(eval), "{eval}");
+        }
+        for eval in ["ref('a')", "(4, 7)", "[(4, ", ""] {
+            assert!(!is_list(eval), "{eval}");
+        }
     }
 
     #[test]
