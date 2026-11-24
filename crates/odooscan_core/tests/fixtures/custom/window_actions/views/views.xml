@@ -114,4 +114,50 @@
             </xpath>
         </field>
     </record>
+
+    <record id="view_demoted_gantt" model="ir.ui.view">
+        <field name="name">window.demoted.gantt</field>
+        <field name="model">window.demoted</field>
+        <field name="arch" type="xml">
+            <gantt string="Demoted"/>
+        </field>
+    </record>
+
+    <record id="view_kept_extension" model="ir.ui.view">
+        <field name="name">window.kept.gantt</field>
+        <field name="model">window.kept</field>
+        <field name="inherit_id" ref="view_shown_gantt"/>
+        <field name="arch" type="xml">
+            <xpath expr="." position="attributes">
+                <attribute name="string">Kept</attribute>
+            </xpath>
+        </field>
+    </record>
+
+    <record id="view_chained_extension" model="ir.ui.view">
+        <field name="name">window.chained.gantt</field>
+        <field name="model">window.chained</field>
+        <field name="inherit_id" ref="view_adopted_gantt"/>
+        <field name="arch" type="xml">
+            <xpath expr="." position="attributes">
+                <attribute name="string">Chained</attribute>
+            </xpath>
+        </field>
+    </record>
+
+    <record id="view_shared_gantt" model="ir.ui.view">
+        <field name="name">window.shared.gantt</field>
+        <field name="model">window.shared</field>
+        <field name="arch" type="xml">
+            <gantt string="Shared"/>
+        </field>
+    </record>
+
+    <record id="view_staged_gantt" model="ir.ui.view">
+        <field name="name">window.staged.gantt</field>
+        <field name="model">window.staged</field>
+        <field name="arch" type="xml">
+            <gantt string="Staged"/>
+        </field>
+    </record>
 </odoo>

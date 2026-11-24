@@ -1644,6 +1644,77 @@ fn record_writes<'m, T>(
     writes
 }
 
+/// Whether the view the `records` of one id leave may be stored as primary, None when only a run
+/// can tell. Odoo loads an id of another module only once that module is installed (18.0
+/// `odoo/tools/convert.py:235-237`), so the data records of `creator`, the module the id names,
+/// come first and the first creates the view. After it, a `mode` wins; without one, a falsy
+/// `inherit_id` makes the view primary, and a truthy one makes a view with no parent an extension
+/// and keeps the mode of one with a parent (18.0 `odoo/addons/base/models/ir_ui_view.py:460-466,535,557`,
+/// 20.0 `:575-581,650,671`). A parent the scan does not read counts as one. Only those records load
+/// on every database that has the view, so any other can make it primary but never take that away;
+/// when `creator` writes none of them, no record can. An update loads every record again as a write
+/// onto the stored view, so the fold repeats from the state each pass leaves until one repeats, and
+/// a mode any pass leaves counts.
+fn stored_primary(records: &[Placed<&ViewFact>], creator: Option<usize>) -> Option<bool> {
+    let has_parent = |view: &ViewFact| view.inherit.is_some() || view.unread_parent;
+    let (sure, others): (Vec<&Placed<&ViewFact>>, Vec<_>) =
+        records.iter().partition(|r| Some(r.module) == creator && !r.demo);
+    let mut state = match sure.first() {
+        Some(first) => (first.fact.primary, has_parent(first.fact)),
+        None => (Some(true), false),
+    };
+    // On install the first record creates the view; an update writes it like any later one.
+    let mut pass: &[&Placed<&ViewFact>] = sure.get(1..).unwrap_or_default();
+    let mut seen = Vec::new();
+    // `Some(false)` leaves the first pass's mode as it is in `may_be_primary`.
+    let mut stored = Some(false);
+    while !seen.contains(&state) {
+        seen.push(state);
+        let (mut primary, mut parented) = state;
+        for record in pass {
+            primary = written_primary(primary, parented, record.fact);
+            if record.fact.writes_parent {
+                parented = has_parent(record.fact);
+            }
+        }
+        for record in &others {
+            primary = may_be_primary(primary, written_primary(primary, parented, record.fact));
+            if record.fact.writes_parent {
+                parented = has_parent(record.fact);
+            }
+        }
+        stored = may_be_primary(stored, primary);
+        state = (primary, parented);
+        pass = &sure;
+    }
+    stored
+}
+
+/// The mode a later record of a view leaves it with, `parented` saying whether it had a parent.
+fn written_primary(primary: Option<bool>, parented: bool, view: &ViewFact) -> Option<bool> {
+    if view.writes_mode {
+        return view.primary;
+    }
+    if !view.writes_parent {
+        return primary;
+    }
+    // Without `mode`, `primary` says whether the parent is truthy: false when it is.
+    match view.primary {
+        Some(false) if parented => primary,
+        other => other,
+    }
+}
+
+/// The mode a view may have when a database may skip the record that leaves it `written`.
+fn may_be_primary(before: Option<bool>, written: Option<bool>) -> Option<bool> {
+    match (before, written) {
+        (_, Some(false)) => before,
+        (Some(false), _) => written,
+        _ if before == written => before,
+        _ => None,
+    }
+}
+
 /// Asset globs as Odoo expands them: `*` stops at a slash. An invalid glob matches nothing.
 pub(crate) fn asset_glob_set<'g>(globs: impl IntoIterator<Item = &'g String>) -> GlobSet {
     let mut builder = GlobSetBuilder::new();
@@ -2170,7 +2241,7 @@ impl<'m> Index<'m> {
         index.static_writes = index.static_writes();
         index.registries = index.registries();
         (index.templates_called, index.templates_set_attributes) = index.template_uses();
-        index.view_types = index.view_types();
+        index.view_types = index.view_types(default_series);
         index.client_views = index.client_views();
         index.data_fields = index.data_fields(default_series);
         index.unread_reach = index.unread_reach();
@@ -2256,12 +2327,28 @@ impl<'m> Index<'m> {
         named.or_else(|| last_text(record, "model"))
     }
 
-    fn view_types(&self) -> FxHashSet<(&'m str, Option<&'m str>)> {
+    /// Each record of a view counts with the mode the records of its id leave, as `stored_primary`
+    /// folds them: only the data records of the module the id names can take its type away, as a
+    /// type counts when some database may have it. A record without an id creates a view of its own.
+    fn view_types(&self, series: Option<Series>) -> FxHashSet<(&'m str, Option<&'m str>)> {
         let mut types = FxHashSet::default();
+        let ids = record_writes(self.modules, &self.by_name, series, |f| &f.views, |v| v.id.as_ref());
+        for (id, records) in &ids {
+            let creator = id.split_once('.').and_then(|(name, _)| self.by_name.get(name));
+            let primary = stored_primary(records, creator.copied());
+            if primary != Some(false) {
+                let types_of = records
+                    .iter()
+                    .map(|r| self.view_type(&self.modules[r.module], r.fact, primary));
+                types.extend(types_of.flatten());
+            }
+        }
         for module in self.modules {
             let loaded = module.data.iter().filter(|f| f.rank.is_some());
-            let views = loaded.flat_map(|f| &f.facts.views).filter(|v| v.primary != Some(false));
-            types.extend(views.filter_map(|view| self.view_type(module, view)));
+            let views = loaded
+                .flat_map(|f| &f.facts.views)
+                .filter(|v| v.id.is_none() && v.primary != Some(false));
+            types.extend(views.filter_map(|view| self.view_type(module, view, view.primary)));
         }
         types
     }
@@ -2279,27 +2366,29 @@ impl<'m> Index<'m> {
             .collect()
     }
 
-    /// The entry of `view` in `view_types`, if it has one. Odoo gives a view with a parent the type
-    /// of its tree's root, so with a view above it not indexed, its own root says nothing. The top's
-    /// unread parent counts when the walk reaches the top through a parent, or when `view` writes
-    /// `mode` or `inherit_id`. An update writing neither keeps the stored mode (18.0
-    /// `odoo/addons/base/models/ir_ui_view.py:460-466,541-557`, 20.0 `:575-581,656-671`), so an
-    /// update of an extension stays one and takes no unread parent from another record of its id.
-    fn view_type(&self, module: &'m Module, view: &'m ViewFact) -> Option<(&'m str, Option<&'m str>)> {
+    /// The entry of `view` in `view_types`, if it has one, with `primary` the mode its id is left
+    /// with. Odoo gives a view with a parent the type of its tree's root, so with a view above it not
+    /// indexed, or a parent above the top not read, its own root says nothing.
+    fn view_type(
+        &self,
+        module: &'m Module,
+        view: &'m ViewFact,
+        primary: Option<bool>,
+    ) -> Option<(&'m str, Option<&'m str>)> {
         let id = view.id.as_ref().map(|id| full_id(&module.name, id));
         let own_model = view.model.as_ref().map(|m| m.value.as_str());
         let model = own_model.or_else(|| self.view_model(id.clone()?))?;
         let parent = view.inherit.as_ref().map(|parent| full_id(&module.name, parent));
-        let top = id.clone().or(parent).and_then(|start| self.view_top(start));
-        if view.inherit.is_some() && top.is_none() {
+        let start = id.or(parent);
+        let top = start.as_ref().and_then(|start| self.view_top(start.clone()));
+        if start.is_some() && top.is_none() {
             return Some((model, None));
         }
-        let (top_id, top) = top.unwrap_or_default();
+        let top = top.map(|(_, nodes)| nodes).unwrap_or_default();
         let kind = top.iter().find_map(|n| n.fact.kind.as_deref());
         let kind = kind.or(view.kind.as_deref());
-        let reached = id.as_deref() != Some(top_id.as_str()) || view.writes_mode;
-        let unread = view.unread_parent || reached && top.iter().any(|n| n.fact.unread_parent);
-        (kind.is_some() || unread || view.primary.is_none()).then_some((model, kind))
+        let unread = view.unread_parent || top.iter().any(|n| n.fact.unread_parent);
+        (kind.is_some() || unread || primary.is_none()).then_some((model, kind))
     }
 
     /// A test that subclasses a component with a template of its own leaves the base's template used.
@@ -5262,10 +5351,11 @@ mod tests {
     use super::{
         BASE_MODEL_DUNDERS, BASE_MODEL_EXTRA, BASE_MODEL_METHODS, BASE_MODEL_VALUES, BASE_PRIVATE_METHODS,
         BASE_RPC_METHODS, BASE_VALUE_SERIES, CACHED_MODEL_VALUES, CACHED_PRIVATE_METHODS, Export, FIELD_CLASSES,
-        FieldHolder, FieldSpelling, Index, JsSpec, OLD_BASE_METHODS, OWL_COMPONENT, OWL1_COMPONENT, PlacedWrite, Scope,
-        Status, TagFix, XmlIdDef, absolute_import, base_model_value, base_parent_method, base_private_method,
-        base_rpc_method, class_file, depends_closure, field_id_prefixes, fold_writes, js_module_path, last_text,
-        mangles_alike, old_base_method, test_bundle, triggers, unseen_table_id,
+        FieldHolder, FieldSpelling, Index, JsSpec, OLD_BASE_METHODS, OWL_COMPONENT, OWL1_COMPONENT, Placed,
+        PlacedWrite, Scope, Status, TagFix, XmlIdDef, absolute_import, base_model_value, base_parent_method,
+        base_private_method, base_rpc_method, class_file, depends_closure, field_id_prefixes, fold_writes,
+        js_module_path, last_text, mangles_alike, old_base_method, stored_primary, test_bundle, triggers,
+        unseen_table_id,
     };
     use crate::facts::{BaseSource, UNREAD_TYPE};
     use crate::mentions::{Mentions, Words};
@@ -7391,6 +7481,150 @@ mod tests {
         );
         let held = roots(r#"ref="view_top""#, &top);
         assert_eq!(held[1].as_deref(), Some("m.view_top"));
+    }
+
+    #[test]
+    fn the_records_of_a_view_fold_to_the_mode_odoo_stores() {
+        // The first record loads as data of module `first`, and the later ones at `(module, demo)`;
+        // the id names module 0.
+        let fold_from = |first: usize, (module, demo): (usize, bool), records: &[&str]| {
+            let records: String = records
+                .iter()
+                .map(|fields| format!(r#"<record id="v" model="ir.ui.view">{fields}</record>"#))
+                .collect();
+            let facts = xml::analyze(&format!("<odoo>{records}</odoo>"), Series::parse("18.0"));
+            let placed: Vec<_> = facts
+                .views
+                .iter()
+                .enumerate()
+                .map(|(at, fact)| Placed {
+                    module: if at == 0 { first } else { module },
+                    demo: at != 0 && demo,
+                    fact,
+                })
+                .collect();
+            stored_primary(&placed, Some(0))
+        };
+        let fold_at = |later: (usize, bool), records: &[&str]| fold_from(0, later, records);
+        let fold = |records: &[&str]| fold_at((0, false), records);
+        let parent = r#"<field name="inherit_id" ref="p"/>"#;
+        let other = r#"<field name="inherit_id" ref="q"/>"#;
+        let mode = r#"<field name="mode">primary</field>"#;
+        let key = r#"<field name="key">m.v</field>"#;
+        let search = r#"<field name="inherit_id" search="[('name', '=', 'p')]"/>"#;
+        let falsy = r#"<field name="inherit_id" eval="False"/>"#;
+        assert_eq!(fold(&["", parent]), Some(false), "a primary view later given a parent");
+        assert_eq!(
+            fold(&[&format!("{parent}{mode}"), other]),
+            Some(true),
+            "a clone re-parented"
+        );
+        assert_eq!(
+            fold(&[parent, falsy]),
+            Some(true),
+            "an extension later given a falsy parent"
+        );
+        assert_eq!(fold(&[parent, key]), Some(false), "an extension later given a key");
+        assert_eq!(
+            fold(&[mode, parent]),
+            Some(true),
+            "an update writes the mode again onto a view that keeps its parent"
+        );
+        assert_eq!(fold(&[parent, mode]), Some(true), "an extension later given a mode");
+        assert_eq!(
+            fold(&["", search]),
+            None,
+            "a primary view later given a searched parent"
+        );
+        assert_eq!(
+            fold(&[&format!("{search}{mode}"), parent]),
+            Some(true),
+            "a searched parent counts as one"
+        );
+        assert_eq!(
+            fold_at((1, false), &["", parent]),
+            Some(true),
+            "a record of another module keeps the view primary"
+        );
+        assert_eq!(
+            fold_at((0, true), &["", parent]),
+            Some(true),
+            "a demo record keeps the view primary"
+        );
+        assert_eq!(
+            fold_at((1, false), &["", search]),
+            None,
+            "a record of another module may leave the mode unknown"
+        );
+        assert_eq!(
+            fold_at((1, false), &[parent, mode]),
+            Some(true),
+            "a record of another module can make the view primary"
+        );
+        assert_eq!(
+            fold_from(1, (0, false), &[parent, ""]),
+            Some(true),
+            "a record of another module loading first still loads after the view's own"
+        );
+        assert_eq!(
+            fold_from(1, (1, false), &[parent, key]),
+            Some(true),
+            "records of other modules alone never take the type away"
+        );
+    }
+
+    #[test]
+    fn an_extension_of_an_unindexed_parent_made_primary_serves_any_type() {
+        let mut modules = [
+            module("a", "{'version': '18.0.1.0', 'depends': []}"),
+            module("b", "{'version': '18.0.1.0', 'depends': ['a']}"),
+        ];
+        let extension = r#"<odoo><record id="ext" model="ir.ui.view">
+            <field name="model">res.partner</field>
+            <field name="inherit_id" ref="ghost.v"/>
+            <field name="arch" type="xml"><xpath expr="." position="inside"/></field>
+        </record></odoo>"#;
+        let raised =
+            r#"<odoo><record id="a.ext" model="ir.ui.view"><field name="mode">primary</field></record></odoo>"#;
+        modules[0].data.push(data_file(
+            "views/views.xml",
+            xml::analyze(extension, Series::parse("18.0")),
+        ));
+        modules[1].data.push(data_file(
+            "views/views.xml",
+            xml::analyze(raised, Series::parse("18.0")),
+        ));
+        let index = Index::build(&modules, None);
+        assert!(index.view_types.contains(&("res.partner", None)));
+        modules[1].data.clear();
+        assert!(Index::build(&modules, None).view_types.is_empty());
+    }
+
+    #[test]
+    fn a_module_loading_before_the_view_it_writes_never_takes_its_type_away() {
+        // `a_fix` does not depend on `b`, so it sorts first, though Odoo loads it after `b`.
+        let mut modules = [
+            module("b", "{'version': '18.0.1.0', 'depends': []}"),
+            module("a_fix", "{'version': '18.0.1.0', 'depends': []}"),
+        ];
+        let views = r#"<odoo><record id="view_g" model="ir.ui.view">
+            <field name="model">res.partner</field>
+            <field name="arch" type="xml"><gantt/></field>
+        </record><record id="other" model="ir.ui.view">
+            <field name="model">res.country</field>
+            <field name="arch" type="xml"><gantt/></field>
+        </record></odoo>"#;
+        let fix = r#"<odoo><record id="b.view_g" model="ir.ui.view">
+            <field name="inherit_id" ref="b.other"/>
+        </record></odoo>"#;
+        modules[0]
+            .data
+            .push(data_file("views/views.xml", xml::analyze(views, Series::parse("18.0"))));
+        modules[1]
+            .data
+            .push(data_file("views/fix.xml", xml::analyze(fix, Series::parse("18.0"))));
+        let index = Index::build(&modules, None);
+        assert!(index.view_types.contains(&("res.partner", Some("gantt"))));
     }
 
     #[test]

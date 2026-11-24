@@ -332,7 +332,9 @@ impl Walker<'_> {
         // The loader turns the `<template>` into the arch's root, which keeps its `t-call`, unless
         // it extends a parent: then the root lends only its children, as `lends_children` says.
         let extends = view.inherit.is_some();
-        view.primary = Some(!extends || node.attribute("primary") == Some("True"));
+        view.writes_mode = node.attribute("primary") == Some("True");
+        view.writes_parent = node.has_attribute("inherit_id");
+        view.primary = Some(!extends || view.writes_mode);
         view.calls
             .extend(node.descendants().filter_map(|n| t_call(n, self.lines)));
         if extends {
@@ -409,7 +411,8 @@ impl Walker<'_> {
         }
         if model == "ir.ui.view" {
             view.primary = primary_view(node, self.lines);
-            view.writes_mode = ["mode", "inherit_id"].iter().any(|f| last_field_of(node, f).is_some());
+            view.writes_mode = last_field_of(node, "mode").is_some();
+            view.writes_parent = last_field_of(node, "inherit_id").is_some();
             view.unread_parent = view.inherit.is_none() && last_field_of(node, "inherit_id").is_some_and(holds_record);
             self.facts.views.push(view);
         }
@@ -4260,21 +4263,26 @@ mod tests {
         ] {
             assert_eq!(primary(&fields), None, "{fields}");
         }
-        let writes_mode =
-            |fields: &str| view(&format!(r#"<record id="x" model="ir.ui.view">{fields}</record>"#)).writes_mode;
-        assert!(writes_mode(mode));
-        assert!(writes_mode(r#"<field name="mode" eval="'extension'"/>"#));
-        assert!(writes_mode(&format!(r#"{parent}<field name="mode" eval="x"/>"#)));
+        let writes = |fields: &str| {
+            let v = view(&format!(r#"<record id="x" model="ir.ui.view">{fields}</record>"#));
+            (v.writes_mode, v.writes_parent)
+        };
+        assert_eq!(writes(mode), (true, false));
+        assert_eq!(writes(r#"<field name="mode" eval="'extension'"/>"#), (true, false));
+        assert_eq!(
+            writes(&format!(r#"{parent}<field name="mode" eval="x"/>"#)),
+            (true, true)
+        );
         for fields in [
             parent,
             r#"<field name="inherit_id" eval="False"/>"#,
             r#"<field name="inherit_id" ref=""/>"#,
             r#"<field name="inherit_id"/>"#,
         ] {
-            assert!(writes_mode(fields), "{fields}");
+            assert_eq!(writes(fields), (false, true), "{fields}");
         }
-        assert!(!writes_mode(""));
-        assert!(!writes_mode(r#"<field name="active" eval="False"/>"#));
+        assert_eq!(writes(""), (false, false));
+        assert_eq!(writes(r#"<field name="active" eval="False"/>"#), (false, false));
     }
 
     #[test]
@@ -4361,6 +4369,16 @@ mod tests {
         assert_eq!(primary(r#"inherit_id="y" primary="True""#), Some(true));
         assert_eq!(primary(r#"inherit_id="y""#), Some(false));
         assert_eq!(primary(r#"inherit_id="y" primary="true""#), Some(false));
+        let writes = |attrs: &str| {
+            let v = view(&format!(r#"<template id="x" {attrs}/>"#));
+            (v.writes_mode, v.writes_parent)
+        };
+        assert_eq!(writes(""), (false, false));
+        assert_eq!(writes(r#"inherit_id="""#), (false, true));
+        assert_eq!(writes(r#"inherit_id="y""#), (false, true));
+        assert_eq!(writes(r#"primary="True""#), (true, false));
+        assert_eq!(writes(r#"inherit_id="y" primary="True""#), (true, true));
+        assert_eq!(writes(r#"inherit_id="y" primary="true""#), (false, true));
     }
 
     #[test]

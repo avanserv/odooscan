@@ -1246,10 +1246,11 @@ pub struct ViewFact {
     /// Whether the view can be the default of its model and type, which only a `primary` one is.
     /// None when only a run can tell.
     pub primary: Option<bool>,
-    /// The record writes `mode` or `inherit_id`. A falsy `inherit_id` makes Odoo set the mode to
-    /// primary; a truthy one leaves the parent to `inherit` or `unread_parent`. An update writing
-    /// neither keeps the stored mode, so without it `primary` only says what a new record gets.
+    /// The record writes `mode`. An update writing neither `mode` nor `inherit_id` keeps the stored
+    /// mode, so `primary` only says what a new record gets; `Index::view_types` folds the records.
     pub writes_mode: bool,
+    /// The record writes `inherit_id`, a falsy one included, which Odoo reads to set the mode.
+    pub writes_parent: bool,
     /// `inherit_id` holds a parent `inherit` does not read, such as a `search` or a CSV cell naming
     /// it by name or database id, so what the view takes from it, such as its type, is unknown.
     pub unread_parent: bool,
