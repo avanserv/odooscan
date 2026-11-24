@@ -329,4 +329,28 @@
         <field name="res_model">window.plain</field>
         <field name="view_mode" eval="">gantt</field>
     </record>
+
+    <record id="action_row_spaced" model="ir.actions.act_window">
+        <field name="name">action_row_spaced</field>
+        <field name="res_model">window.plain</field>
+        <field name="view_mode">gantt,map</field>
+    </record>
+
+    <record id="row_spaced" model="ir.actions.act_window.view">
+        <field name="view_mode">gantt</field>
+        <field name="view_id" ref="window_actions.view_shown_gantt"/>
+        <field name="act_window_id" eval="ref ('action_row_spaced')"/>
+    </record>
+
+    <record id="action_row_listed" model="ir.actions.act_window">
+        <field name="name">action_row_listed</field>
+        <field name="res_model">window.plain</field>
+        <field name="view_mode">gantt</field>
+    </record>
+
+    <record id="row_listed" model="ir.actions.act_window.view">
+        <field name="view_mode">gantt</field>
+        <field name="view_id" ref="window_actions.view_shown_gantt"/>
+        <field name="act_window_id" eval="[(4, ref('action_row_listed'))]"/>
+    </record>
 </odoo>
