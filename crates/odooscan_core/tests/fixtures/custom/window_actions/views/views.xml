@@ -73,4 +73,45 @@
             </xpath>
         </field>
     </record>
+
+    <record id="view_updated_extension" model="ir.ui.view">
+        <field name="name">window.updated.gantt</field>
+        <field name="model">window.updated</field>
+        <field name="inherit_id" eval="ref('view_shown_gantt')"/>
+        <field name="arch" type="xml">
+            <xpath expr="." position="attributes">
+                <attribute name="string">Updated</attribute>
+            </xpath>
+        </field>
+    </record>
+
+    <record id="view_updated_extension" model="ir.ui.view">
+        <field name="key">window_actions.updated_extension</field>
+    </record>
+
+    <record id="view_promoted_extension" model="ir.ui.view">
+        <field name="name">window.promoted.gantt</field>
+        <field name="model">window.promoted</field>
+        <field name="inherit_id" eval="ref('view_shown_gantt')"/>
+        <field name="arch" type="xml">
+            <xpath expr="." position="attributes">
+                <attribute name="string">Promoted</attribute>
+            </xpath>
+        </field>
+    </record>
+
+    <record id="view_promoted_extension" model="ir.ui.view">
+        <field name="mode">primary</field>
+    </record>
+
+    <record id="view_unparented_extension" model="ir.ui.view">
+        <field name="name">window.unparented.gantt</field>
+        <field name="model">window.unparented</field>
+        <field name="inherit_id" eval="ref('view_shown_gantt')"/>
+        <field name="arch" type="xml">
+            <xpath expr="." position="attributes">
+                <attribute name="string">Unparented</attribute>
+            </xpath>
+        </field>
+    </record>
 </odoo>

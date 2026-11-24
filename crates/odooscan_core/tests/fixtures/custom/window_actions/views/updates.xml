@@ -1,0 +1,6 @@
+<odoo>
+    <record id="view_unparented_extension" model="ir.ui.view">
+        <field name="key">window_actions.unparented_extension</field>
+        <field name="inherit_id" eval="False"/>
+    </record>
+</odoo>

@@ -229,4 +229,22 @@
         <field name="view_mode">list</field>
         <field name="view_id" ref="view_plain_own_list"/>
     </record>
+
+    <record id="action_updated_view" model="ir.actions.act_window">
+        <field name="name">action_updated_view</field>
+        <field name="res_model">window.updated</field>
+        <field name="view_mode">gantt</field>
+    </record>
+
+    <record id="action_promoted_view" model="ir.actions.act_window">
+        <field name="name">action_promoted_view</field>
+        <field name="res_model">window.promoted</field>
+        <field name="view_mode">gantt,map</field>
+    </record>
+
+    <record id="action_unparented_view" model="ir.actions.act_window">
+        <field name="name">action_unparented_view</field>
+        <field name="res_model">window.unparented</field>
+        <field name="view_mode">gantt,map</field>
+    </record>
 </odoo>

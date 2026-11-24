@@ -393,6 +393,12 @@ fn view_row(facts: &mut DataFacts, row: &csv::StringRecord, columns: &[(&str, bo
     let model = field_cell(row, columns, "model").trim();
     let kind = Some(field_cell(row, columns, "type").to_lowercase()).filter(|k| !k.is_empty());
     let archs = ["arch", "arch_db", "arch_base"];
+    let mode = field_cell(row, columns, "mode");
+    // The import writes an empty cell as False, which still sets the mode (18.0
+    // `odoo/addons/base/models/ir_fields.py:123-125`).
+    let writes_parent = columns
+        .iter()
+        .any(|&(c, _)| c == "inherit_id" || database_field(c) == Some("inherit_id"));
     facts.views.push(ViewFact {
         id: row_id(row, columns),
         model: (!model.is_empty()).then(|| Spanned {
@@ -402,7 +408,8 @@ fn view_row(facts: &mut DataFacts, row: &csv::StringRecord, columns: &[(&str, bo
         inherit,
         arch_unread: archs.iter().any(|c| !field_cell(row, columns, c).is_empty()),
         kind,
-        primary: view_mode(field_cell(row, columns, "mode")).unwrap_or(Some(!extends)),
+        primary: view_mode(mode).unwrap_or(Some(!extends)),
+        writes_mode: !mode.is_empty() || writes_parent,
         unread_parent,
         ..ViewFact::default()
     });
@@ -1315,6 +1322,20 @@ mod tests {
         assert_eq!(last.model.map(|m| m.value).as_deref(), Some("res.partner"));
         assert_eq!(last.kind.as_deref(), Some("form"));
         assert_eq!(last.primary, Some(true));
+        assert!(last.writes_mode);
+        assert!(view(header, "v,,extension,").writes_mode);
+        for header in [
+            "id,inherit_id:id",
+            "id,inherit_id",
+            "id,inherit_id/.id",
+            "id,inherit_id.id",
+        ] {
+            assert!(view(header, "v,").writes_mode, "{header}");
+            assert!(view(header, "v,0").writes_mode, "{header}");
+        }
+        assert!(view(header, "v,base.p,,").writes_mode);
+        assert!(!view("id,mode", "v,").writes_mode);
+        assert!(!view("id,name", "v,n").writes_mode);
     }
 
     #[test]
