@@ -1,0 +1,27 @@
+<odoo>
+    <record id="action_sibling_taker" model="ir.actions.act_window">
+        <field name="name">action_sibling_taker</field>
+        <field name="res_model">window.plain</field>
+        <field name="view_mode">list</field>
+        <field name="view_ids" eval="[(4, ref('window_named.row_sibling'))]"/>
+    </record>
+
+    <record id="row_outside" model="ir.actions.act_window.view">
+        <field name="view_mode">gantt</field>
+        <field name="view_id" ref="window_actions.view_shown_gantt"/>
+        <field name="act_window_id" ref="window_named.action_row_outside"/>
+    </record>
+
+    <record id="action_outside_taker" model="ir.actions.act_window">
+        <field name="name">action_outside_taker</field>
+        <field name="res_model">window.plain</field>
+        <field name="view_mode">list</field>
+        <field name="view_ids" eval="[(4, ref('row_outside'))]"/>
+    </record>
+
+    <record id="window_named.row_put_back" model="ir.actions.act_window.view">
+        <field name="view_mode">gantt</field>
+        <field name="view_id" ref="window_actions.view_shown_gantt"/>
+        <field name="act_window_id" ref="window_named.action_row_put_back"/>
+    </record>
+</odoo>

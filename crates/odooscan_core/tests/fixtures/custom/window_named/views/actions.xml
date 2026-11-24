@@ -353,4 +353,71 @@
         <field name="view_id" ref="window_actions.view_shown_gantt"/>
         <field name="act_window_id" eval="[(4, ref('action_row_listed'))]"/>
     </record>
+
+    <record id="action_row_deleted" model="ir.actions.act_window">
+        <field name="name">action_row_deleted</field>
+        <field name="res_model">window.plain</field>
+        <field name="view_mode">gantt</field>
+    </record>
+
+    <record id="row_deleted" model="ir.actions.act_window.view">
+        <field name="view_mode">gantt</field>
+        <field name="view_id" ref="window_actions.view_shown_gantt"/>
+        <field name="act_window_id" ref="action_row_deleted"/>
+    </record>
+
+    <record id="action_row_deleter" model="ir.actions.act_window">
+        <field name="name">action_row_deleter</field>
+        <field name="res_model">window.plain</field>
+        <field name="view_mode">list</field>
+        <field name="view_ids" eval="[Command.delete(ref('row_deleted'))]"/>
+    </record>
+
+    <record id="action_row_sibling" model="ir.actions.act_window">
+        <field name="name">action_row_sibling</field>
+        <field name="res_model">window.plain</field>
+        <field name="view_mode">gantt</field>
+    </record>
+
+    <record id="row_sibling" model="ir.actions.act_window.view">
+        <field name="view_mode">gantt</field>
+        <field name="view_id" ref="window_actions.view_shown_gantt"/>
+        <field name="act_window_id" ref="action_row_sibling"/>
+    </record>
+
+    <record id="action_row_outside" model="ir.actions.act_window">
+        <field name="name">action_row_outside</field>
+        <field name="res_model">window.plain</field>
+        <field name="view_mode">gantt</field>
+    </record>
+
+    <record id="action_row_put_back" model="ir.actions.act_window">
+        <field name="name">action_row_put_back</field>
+        <field name="res_model">window.plain</field>
+        <field name="view_mode">gantt</field>
+    </record>
+
+    <record id="row_put_back" model="ir.actions.act_window.view">
+        <field name="view_mode">gantt</field>
+        <field name="view_id" ref="window_actions.view_shown_gantt"/>
+        <field name="act_window_id" ref="action_row_put_back"/>
+    </record>
+
+    <record id="action_row_put_back_taker" model="ir.actions.act_window">
+        <field name="name">action_row_put_back_taker</field>
+        <field name="res_model">window.plain</field>
+        <field name="view_mode">list</field>
+        <field name="view_ids" eval="[(4, ref('row_put_back'))]"/>
+    </record>
+
+    <record id="window_actions.action_row_unordered" model="ir.actions.act_window">
+        <field name="view_mode">gantt</field>
+    </record>
+
+    <record id="action_row_unordered_taker" model="ir.actions.act_window">
+        <field name="name">action_row_unordered_taker</field>
+        <field name="res_model">window.plain</field>
+        <field name="view_mode">list</field>
+        <field name="view_ids" eval="[(4, ref('window_actions.row_unordered'))]"/>
+    </record>
 </odoo>

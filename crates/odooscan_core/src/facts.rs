@@ -1399,6 +1399,10 @@ pub struct ActionFact {
     pub nested_view_kinds: Vec<String>,
     /// As `view_of_any_kind`, from a record nested in `view_ids`.
     pub nested_view_of_any_kind: bool,
+    /// The XML id of the `ir.actions.act_window.view` record of a row.
+    pub row: Option<String>,
+    /// The XML ids of the rows of other records its `view_ids` moves here or removes.
+    pub takes_rows: Vec<String>,
 }
 
 impl ActionFact {

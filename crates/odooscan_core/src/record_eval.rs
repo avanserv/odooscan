@@ -212,6 +212,28 @@ fn link(linked: &mut Linked, code: u64, rest: &[Expr]) -> Option<()> {
     }
 }
 
+/// The `ref()` ids of the rows an `eval` of a one2many links, sets, unlinks or deletes. Each moves
+/// the row to the record written or removes it, so the row leaves the record it was on. An item
+/// that does not read is skipped, as it may name any row or none.
+pub fn taken_rows(eval: &str) -> Vec<String> {
+    let mut ids = vec![];
+    let Ok(parsed) = parse_expression(eval.trim()) else {
+        return ids;
+    };
+    let Expr::List(list) = parsed.expr() else {
+        return ids;
+    };
+    for (code, rest) in list.elts.iter().filter_map(command) {
+        // A tuple and a `Command` call both hold the id of a single row first and a set's ids last.
+        match code {
+            2..=4 => rest.first().and_then(|id| push_ref(id, &mut ids)),
+            6 => rest.last().and_then(|set| push_refs(set, &mut ids)),
+            _ => None,
+        };
+    }
+    ids
+}
+
 /// The items of a tuple or a list, each none unless it is a string literal.
 pub fn strings(eval: &str) -> Vec<Option<String>> {
     let Ok(parsed) = parse_expression(eval.trim()) else {
@@ -522,6 +544,38 @@ mod tests {
             view_rows("[(0, 0, {'view_mode': 'gantt', 'view_id': 1}), (4, ref('a'))]"),
             [mode("gantt"), None]
         );
+    }
+
+    #[test]
+    fn reads_the_rows_commands_take() {
+        let taken = |ids: &[&str]| ids.iter().map(|i| (*i).to_owned()).collect::<Vec<_>>();
+        for (eval, ids) in [
+            ("[(4, ref('a'))]", taken(&["a"])),
+            ("[(6, 0, [ref('a'), ref('b')])]", taken(&["a", "b"])),
+            ("[(3, ref('a')), (2, ref('b'))]", taken(&["a", "b"])),
+            ("[Command.link(ref('a')), Command.set([ref('b')])]", taken(&["a", "b"])),
+            (
+                "[Command.unlink(ref('a')), Command.delete(ref('b'))]",
+                taken(&["a", "b"]),
+            ),
+            ("[(4, x), (4, ref('a'))]", taken(&["a"])),
+        ] {
+            assert_eq!(taken_rows(eval), ids, "{eval}");
+        }
+        for eval in [
+            "[(0, 0, {'view_id': ref('a')})]",
+            "[(1, ref('a'), {})]",
+            "[Command.update(ref('a'), {})]",
+            "[(5, 0, 0)]",
+            "[(4, 7)]",
+            "[Other.link(ref('a'))]",
+            "(4, ref('a'))",
+            "False",
+            "",
+            "[(4, ",
+        ] {
+            assert!(taken_rows(eval).is_empty(), "{eval}");
+        }
     }
 
     #[test]

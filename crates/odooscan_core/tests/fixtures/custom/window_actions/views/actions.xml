@@ -301,4 +301,16 @@
         <field name="res_model">window.typed</field>
         <field name="view_mode">gantt,map</field>
     </record>
+
+    <record id="action_row_unordered" model="ir.actions.act_window">
+        <field name="name">action_row_unordered</field>
+        <field name="res_model">window.plain</field>
+        <field name="view_mode">list</field>
+    </record>
+
+    <record id="row_unordered" model="ir.actions.act_window.view">
+        <field name="view_mode">gantt</field>
+        <field name="view_id" ref="view_shown_gantt"/>
+        <field name="act_window_id" ref="action_row_unordered"/>
+    </record>
 </odoo>

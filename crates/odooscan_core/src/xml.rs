@@ -489,6 +489,7 @@ impl Walker<'_> {
             let rows = record_eval::view_rows(eval);
             action.view_of_any_kind = rows.contains(&None);
             action.view_kinds = rows.into_iter().flatten().collect();
+            action.takes_rows = record_eval::taken_rows(eval);
         }
         for row in view_ids.iter().flat_map(|f| f.children()).filter(is_view_row) {
             name_row_view(&mut action.nested_view_kinds, &mut action.nested_view_of_any_kind, row);
@@ -638,6 +639,7 @@ impl Walker<'_> {
         };
         let mut row = ActionFact {
             id: Some(action.value),
+            row: node.attribute("id").map(str::to_owned),
             ..ActionFact::default()
         };
         name_row_view(&mut row.view_kinds, &mut row.view_of_any_kind, node);
@@ -3362,6 +3364,21 @@ mod tests {
         assert_eq!(named(r#"<field name="view_ids" eval="[(5, 0, 0)]"/>"#), none);
         assert_eq!(named(r#"<field name="view_ids" eval=""/>"#), none);
         assert_eq!(named(r#"<field name="view_ids"/>"#), none);
+    }
+
+    #[test]
+    fn reads_the_rows_an_action_takes_and_a_row_id() {
+        let action = action_facts(&action_record(
+            r#"<field name="view_ids" eval="[(4, ref('r'))]"/><field name="view_ids" eval="[Command.delete(ref('s'))]"/>"#,
+        ))
+        .remove(0);
+        assert_eq!(action.takes_rows, ["s"]);
+        assert_eq!(action.row, None);
+        let row = action_facts(
+            r#"<record id="r" model="ir.actions.act_window.view"><field name="view_mode">gantt</field><field name="view_id" ref="v"/><field name="act_window_id" ref="a"/></record>"#,
+        )
+        .remove(0);
+        assert_eq!((row.id.as_deref(), row.row.as_deref()), (Some("a"), Some("r")));
     }
 
     #[test]
