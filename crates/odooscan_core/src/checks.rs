@@ -4418,13 +4418,15 @@ impl<'m> Ctx<'_, 'm> {
     /// Why the client cannot open `model` as `kind` whatever view it gets: from `ACTIVITY_IN_MAIL`
     /// its domain names `activity_ids`, and the server refuses a field the model lacks. A field only
     /// a module outside `depends` adds counts, as that module may be installed, and so may one that
-    /// a delegate the scan cannot read gives, or a hidden parent of a delegate. A bare `**` names
-    /// no delegate: see `Index::named_unread_delegate`.
+    /// a delegate the scan cannot read gives, or a hidden parent of a delegate, or an unread parent
+    /// of a class outside `depends`. A bare `**` names no delegate: see
+    /// `Index::named_unread_delegate`.
     fn activity_gap(&self, model: &str, kind: &str) -> Option<String> {
         let searched = kind == "activity" && self.series.is_some_and(|s| s >= ACTIVITY_IN_MAIL);
         let absent = || {
             !self.index.named_unread_delegate(model, self.scope)
                 && !self.index.hidden_parents(model, self.scope)
+                && !self.index.parents_outside(model, self.scope)
                 && matches!(self.index.field(model, "activity_ids", self.scope), Err(None))
         };
         (searched && absent()).then(|| {

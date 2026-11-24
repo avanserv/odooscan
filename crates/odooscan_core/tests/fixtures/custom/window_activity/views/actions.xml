@@ -83,4 +83,34 @@
         <field name="res_model">window.splat.child</field>
         <field name="view_mode">list,activity</field>
     </record>
+
+    <record id="action_bridged_plain" model="ir.actions.act_window">
+        <field name="name">action_bridged_plain</field>
+        <field name="res_model">window.bridged.plain</field>
+        <field name="view_mode">list,activity</field>
+    </record>
+
+    <record id="action_bridged_listed" model="ir.actions.act_window">
+        <field name="name">action_bridged_listed</field>
+        <field name="res_model">window.bridged.listed</field>
+        <field name="view_mode">list,activity</field>
+    </record>
+
+    <record id="action_bridged_mixin" model="ir.actions.act_window">
+        <field name="name">action_bridged_mixin</field>
+        <field name="res_model">window.bridged.mixin</field>
+        <field name="view_mode">list,activity</field>
+    </record>
+
+    <record id="action_bridged_delegate" model="ir.actions.act_window">
+        <field name="name">action_bridged_delegate</field>
+        <field name="res_model">window.bridged.delegate</field>
+        <field name="view_mode">list,activity</field>
+    </record>
+
+    <record id="action_bridged_read" model="ir.actions.act_window">
+        <field name="name">action_bridged_read</field>
+        <field name="res_model">window.bridged.read</field>
+        <field name="view_mode">list,activity</field>
+    </record>
 </odoo>
