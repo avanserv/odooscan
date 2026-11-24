@@ -22,4 +22,10 @@
             </form>
         </field>
     </record>
+
+    <record id="action_company_tree" model="ir.actions.act_window">
+        <field name="name">action_company_tree</field>
+        <field name="res_model">res.company</field>
+        <field name="view_mode">tree,gantt</field>
+    </record>
 </odoo>
