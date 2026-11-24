@@ -87,4 +87,36 @@
     <record id="window_actions.view_shared_gantt" model="ir.ui.view">
         <field name="inherit_id" ref="window_actions.view_shown_gantt"/>
     </record>
+
+    <record id="ghost_enterprise.view_ghost_untyped" model="ir.ui.view">
+        <field name="key">window_clone.untyped</field>
+    </record>
+
+    <record id="view_untyped_gantt" model="ir.ui.view">
+        <field name="name">window.untyped.gantt</field>
+        <field name="model">window.untyped</field>
+        <field name="inherit_id" ref="ghost_enterprise.view_ghost_untyped"/>
+        <field name="mode">primary</field>
+        <field name="arch" type="xml">
+            <xpath expr="." position="attributes">
+                <attribute name="string">Untyped</attribute>
+            </xpath>
+        </field>
+    </record>
+
+    <record id="ghost_enterprise.view_ghost_rehomed" model="ir.ui.view">
+        <field name="inherit_id" ref="window_actions.view_shown_gantt"/>
+    </record>
+
+    <record id="view_rehomed_gantt" model="ir.ui.view">
+        <field name="name">window.rehomed.gantt</field>
+        <field name="model">window.rehomed</field>
+        <field name="inherit_id" ref="ghost_enterprise.view_ghost_rehomed"/>
+        <field name="mode">primary</field>
+        <field name="arch" type="xml">
+            <xpath expr="." position="attributes">
+                <attribute name="string">Rehomed</attribute>
+            </xpath>
+        </field>
+    </record>
 </odoo>

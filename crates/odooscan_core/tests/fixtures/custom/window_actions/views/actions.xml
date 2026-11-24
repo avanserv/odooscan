@@ -283,4 +283,16 @@
         <field name="res_model">window.staged</field>
         <field name="view_mode">gantt</field>
     </record>
+
+    <record id="action_untyped_view" model="ir.actions.act_window">
+        <field name="name">action_untyped_view</field>
+        <field name="res_model">window.untyped</field>
+        <field name="view_mode">gantt,map</field>
+    </record>
+
+    <record id="action_rehomed_view" model="ir.actions.act_window">
+        <field name="name">action_rehomed_view</field>
+        <field name="res_model">window.rehomed</field>
+        <field name="view_mode">gantt,map</field>
+    </record>
 </odoo>
