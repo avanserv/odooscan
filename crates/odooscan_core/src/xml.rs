@@ -672,12 +672,9 @@ impl Walker<'_> {
         }
     }
 
+    /// Odoo writes each field of a name in turn, so the last one holds the value it keeps.
     fn action_domain(&mut self, node: Node) {
-        let field = |name: &str| {
-            node.children()
-                .find(|c| c.has_tag_name("field") && c.attribute("name") == Some(name))
-        };
-        let Some(model) = field("res_model").and_then(|f| f.text()).map(str::trim) else {
+        let Some(model) = last_field_of(node, "res_model").and_then(char_value).flatten() else {
             return;
         };
         let mut fields = vec![];
@@ -685,17 +682,14 @@ impl Walker<'_> {
             ("domain", read_domain as fn(&str) -> Vec<String>),
             ("context", domain::group_by),
         ] {
-            if let Some(f) = field(name) {
+            if let Some(f) = last_field_of(node, name) {
                 let pos = self.pos(f);
-                let text = f.attribute("eval").or_else(|| f.text()).unwrap_or_default();
+                let text = eval_of(f).or_else(|| f.text()).unwrap_or_default();
                 fields.extend(read(text).into_iter().map(|value| Spanned { value, pos }));
             }
         }
         if !fields.is_empty() {
-            self.facts.action_domains.push(DomainFact {
-                model: model.to_owned(),
-                fields,
-            });
+            self.facts.action_domains.push(DomainFact { model, fields });
         }
     }
 
@@ -4006,6 +4000,49 @@ mod tests {
             access(r#"<field name="group_id" ref="g"/><field name="group_id" ref=""/>"#),
             0
         );
+    }
+
+    /// The model and the fields of each domain fact a window action with `fields` gives.
+    fn action_domains_of(fields: &str) -> Vec<(String, Vec<String>)> {
+        let record = format!(r#"<odoo><record id="a" model="ir.actions.act_window">{fields}</record></odoo>"#);
+        let facts = analyze(&record).action_domains;
+        let named = |d: DomainFact| (d.model, d.fields.into_iter().map(|f| f.value).collect());
+        facts.into_iter().map(named).collect()
+    }
+
+    #[test]
+    fn a_window_action_reads_the_last_model_domain_and_context() {
+        let fact =
+            |model: &str, fields: &[&str]| vec![(model.to_owned(), fields.iter().map(|f| (*f).to_owned()).collect())];
+        assert_eq!(
+            action_domains_of(
+                r#"<field name="res_model">a</field><field name="res_model">b</field><field name="domain">[('x', '=', 1)]</field><field name="domain">[('y', '=', 1)]</field><field name="context">{'group_by': 'p'}</field><field name="context">{'group_by': 'q'}</field>"#
+            ),
+            fact("b", &["y", "q"])
+        );
+        assert_eq!(
+            action_domains_of(
+                r#"<field name="res_model">b</field><field name="domain" eval="">[('y', '=', 1)]</field>"#
+            ),
+            fact("b", &["y"])
+        );
+        assert_eq!(
+            action_domains_of(
+                r#"<field name="res_model" eval="'b'">a</field><field name="domain">[('y', '=', 1)]</field>"#
+            ),
+            fact("b", &["y"])
+        );
+        assert_eq!(
+            action_domains_of(
+                r#"<field name="res_model" eval="">b</field><field name="domain">[('y', '=', 1)]</field>"#
+            ),
+            fact("b", &["y"])
+        );
+        for model in [r#"ref="model_b""#, r#"eval="name""#, r#"search="[]""#] {
+            let fields =
+                format!(r#"<field name="res_model" {model}>a</field><field name="domain">[('y', '=', 1)]</field>"#);
+            assert!(action_domains_of(&fields).is_empty(), "{model}");
+        }
     }
 
     fn server_facts(model: &str, fields: &str) -> DataFacts {
