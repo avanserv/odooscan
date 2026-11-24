@@ -247,4 +247,40 @@
         <field name="res_model">window.unparented</field>
         <field name="view_mode">gantt,map</field>
     </record>
+
+    <record id="action_demoted_view" model="ir.actions.act_window">
+        <field name="name">action_demoted_view</field>
+        <field name="res_model">window.demoted</field>
+        <field name="view_mode">gantt</field>
+    </record>
+
+    <record id="action_kept_view" model="ir.actions.act_window">
+        <field name="name">action_kept_view</field>
+        <field name="res_model">window.kept</field>
+        <field name="view_mode">gantt</field>
+    </record>
+
+    <record id="action_chained_view" model="ir.actions.act_window">
+        <field name="name">action_chained_view</field>
+        <field name="res_model">window.chained</field>
+        <field name="view_mode">gantt</field>
+    </record>
+
+    <record id="action_raised_view" model="ir.actions.act_window">
+        <field name="name">action_raised_view</field>
+        <field name="res_model">window.raised</field>
+        <field name="view_mode">gantt,map</field>
+    </record>
+
+    <record id="action_shared_view" model="ir.actions.act_window">
+        <field name="name">action_shared_view</field>
+        <field name="res_model">window.shared</field>
+        <field name="view_mode">gantt</field>
+    </record>
+
+    <record id="action_staged_view" model="ir.actions.act_window">
+        <field name="name">action_staged_view</field>
+        <field name="res_model">window.staged</field>
+        <field name="view_mode">gantt</field>
+    </record>
 </odoo>

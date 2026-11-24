@@ -409,7 +409,8 @@ fn view_row(facts: &mut DataFacts, row: &csv::StringRecord, columns: &[(&str, bo
         arch_unread: archs.iter().any(|c| !field_cell(row, columns, c).is_empty()),
         kind,
         primary: view_mode(mode).unwrap_or(Some(!extends)),
-        writes_mode: !mode.is_empty() || writes_parent,
+        writes_mode: !mode.is_empty(),
+        writes_parent,
         unread_parent,
         ..ViewFact::default()
     });
@@ -1322,20 +1323,25 @@ mod tests {
         assert_eq!(last.model.map(|m| m.value).as_deref(), Some("res.partner"));
         assert_eq!(last.kind.as_deref(), Some("form"));
         assert_eq!(last.primary, Some(true));
-        assert!(last.writes_mode);
-        assert!(view(header, "v,,extension,").writes_mode);
+        let writes = |header: &str, row: &str| {
+            let v = view(header, row);
+            (v.writes_mode, v.writes_parent)
+        };
+        assert!(last.writes_mode && last.writes_parent);
+        assert_eq!(writes(header, "v,,extension,"), (true, true));
         for header in [
             "id,inherit_id:id",
             "id,inherit_id",
             "id,inherit_id/.id",
             "id,inherit_id.id",
         ] {
-            assert!(view(header, "v,").writes_mode, "{header}");
-            assert!(view(header, "v,0").writes_mode, "{header}");
+            assert_eq!(writes(header, "v,"), (false, true), "{header}");
+            assert_eq!(writes(header, "v,0"), (false, true), "{header}");
         }
-        assert!(view(header, "v,base.p,,").writes_mode);
-        assert!(!view("id,mode", "v,").writes_mode);
-        assert!(!view("id,name", "v,n").writes_mode);
+        assert_eq!(writes(header, "v,base.p,,"), (false, true));
+        assert_eq!(writes("id,mode", "v,"), (false, false));
+        assert_eq!(writes("id,mode", "v,primary"), (true, false));
+        assert_eq!(writes("id,name", "v,n"), (false, false));
     }
 
     #[test]

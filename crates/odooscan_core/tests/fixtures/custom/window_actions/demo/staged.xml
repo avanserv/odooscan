@@ -1,0 +1,5 @@
+<odoo>
+    <record id="view_staged_gantt" model="ir.ui.view">
+        <field name="inherit_id" ref="view_shown_gantt"/>
+    </record>
+</odoo>

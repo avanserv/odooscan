@@ -3,4 +3,16 @@
         <field name="key">window_actions.unparented_extension</field>
         <field name="inherit_id" eval="False"/>
     </record>
+
+    <record id="view_demoted_gantt" model="ir.ui.view">
+        <field name="inherit_id" ref="view_shown_gantt"/>
+    </record>
+
+    <record id="view_kept_extension" model="ir.ui.view">
+        <field name="key">window_actions.kept_extension</field>
+    </record>
+
+    <record id="view_chained_extension" model="ir.ui.view">
+        <field name="key">window_actions.chained_extension</field>
+    </record>
 </odoo>

@@ -222,3 +222,45 @@ class WindowUnparented(models.Model):
     _description = "Window unparented"
 
     name = fields.Char()
+
+
+class WindowDemoted(models.Model):
+    _name = "window.demoted"
+    _description = "Window demoted"
+
+    name = fields.Char()
+
+
+class WindowKept(models.Model):
+    _name = "window.kept"
+    _description = "Window kept"
+
+    name = fields.Char()
+
+
+class WindowChained(models.Model):
+    _name = "window.chained"
+    _description = "Window chained"
+
+    name = fields.Char()
+
+
+class WindowRaised(models.Model):
+    _name = "window.raised"
+    _description = "Window raised"
+
+    name = fields.Char()
+
+
+class WindowShared(models.Model):
+    _name = "window.shared"
+    _description = "Window shared"
+
+    name = fields.Char()
+
+
+class WindowStaged(models.Model):
+    _name = "window.staged"
+    _description = "Window staged"
+
+    name = fields.Char()

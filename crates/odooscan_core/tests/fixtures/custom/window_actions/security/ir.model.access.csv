@@ -29,3 +29,9 @@ access_window_lent,window.lent,model_window_lent,base.group_user,1,1,1,1
 access_window_updated,window.updated,model_window_updated,base.group_user,1,1,1,1
 access_window_promoted,window.promoted,model_window_promoted,base.group_user,1,1,1,1
 access_window_unparented,window.unparented,model_window_unparented,base.group_user,1,1,1,1
+access_window_demoted,window.demoted,model_window_demoted,base.group_user,1,1,1,1
+access_window_kept,window.kept,model_window_kept,base.group_user,1,1,1,1
+access_window_chained,window.chained,model_window_chained,base.group_user,1,1,1,1
+access_window_raised,window.raised,model_window_raised,base.group_user,1,1,1,1
+access_window_shared,window.shared,model_window_shared,base.group_user,1,1,1,1
+access_window_staged,window.staged,model_window_staged,base.group_user,1,1,1,1
