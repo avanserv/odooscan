@@ -2181,6 +2181,7 @@ custom/window_activity/views/actions.xml:11:33: OD318 window.noted has no field 
 custom/window_activity/views/actions.xml:17:33: OD318 window.boxed has no field activity_ids, which the activity view searches; inherit mail.activity.mixin
 custom/window_activity/views/actions.xml:23:33: OD318 window.boxed has no field activity_ids, which the activity view searches; inherit mail.activity.mixin
 custom/window_activity/views/actions.xml:36:33: OD318 window.delegated.bare has no field activity_ids, which the activity view searches; inherit mail.activity.mixin
+custom/window_cleared12/views/actions.xml:21:33: OD318 window.cleared.old has no primary gantt view, and nothing generates one
 custom/window_clone/__manifest__.py:4:35: OD503 module 'ghost_enterprise' is not on the addons path
 custom/window_delegate/views/actions.xml:5:33: OD318 window.borrower has no primary gantt view, and nothing generates one
 custom/window_gantt/__manifest__.py:4:17: OD521 nothing of module 'window_default' is used, nor of what only it brings
@@ -2216,6 +2217,9 @@ custom/window_named/views/actions.xml:336:33: OD318 window.plain has no primary 
 custom/window_named/views/actions.xml:348:33: OD318 window.plain has no primary gantt view, and nothing generates one
 custom/window_named/views/actions.xml:360:33: OD318 window.plain has no primary gantt view, and nothing generates one
 custom/window_named/views/actions.xml:391:33: OD318 window.plain has no primary gantt view, and nothing generates one
+custom/window_named/views/actions.xml:427:33: OD318 window.plain has no primary gantt view, and nothing generates one
+custom/window_named/views/actions.xml:435:33: OD318 window.plain has no primary gantt view, and nothing generates one
+custom/window_named/views/actions.xml:447:33: OD318 window.plain has no primary gantt view, and nothing generates one
 custom/window_named/views/later.xml:6:5: OD323 XML id 'action_view_id_undone' is already defined in views/actions.xml, and this definition overwrites the fields both name; remove the copy when the two say the same thing, or rename one when both are meant to exist
 custom/window_named/views/later.xml:10:5: OD323 XML id 'action_context_undone' is already defined in views/actions.xml, and this definition overwrites the fields both name; remove the copy when the two say the same thing, or rename one when both are meant to exist
 custom/window_nested15/views/actions.xml:5:33: OD318 window.nested.old has no primary gantt view, and nothing generates one

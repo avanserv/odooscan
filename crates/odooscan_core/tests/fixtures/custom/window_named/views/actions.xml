@@ -420,4 +420,170 @@
         <field name="view_mode">list</field>
         <field name="view_ids" eval="[(4, ref('window_actions.row_unordered'))]"/>
     </record>
+
+    <record id="action_bare_beside_view_id" model="ir.actions.act_window">
+        <field name="name">action_bare_beside_view_id</field>
+        <field name="res_model">window.plain</field>
+        <field name="view_mode">gantt</field>
+        <field name="view_id" ref="window_actions.view_shown_gantt"/>
+        <field name="view_ids" eval="[(0, 0, {'view_mode': 'gantt'})]"/>
+    </record>
+
+    <record id="action_bare_row_beside_view_id" model="ir.actions.act_window">
+        <field name="name">action_bare_row_beside_view_id</field>
+        <field name="res_model">window.plain</field>
+        <field name="view_mode">gantt</field>
+        <field name="view_id" ref="window_actions.view_shown_gantt"/>
+    </record>
+
+    <record id="row_bare_beside_view_id" model="ir.actions.act_window.view">
+        <field name="view_mode">gantt</field>
+        <field name="act_window_id" ref="action_bare_row_beside_view_id"/>
+    </record>
+
+    <record id="action_row_cleared_later" model="ir.actions.act_window">
+        <field name="name">action_row_cleared_later</field>
+        <field name="res_model">window.plain</field>
+        <field name="view_mode">gantt</field>
+    </record>
+
+    <record id="row_cleared_later" model="ir.actions.act_window.view">
+        <field name="view_mode">gantt</field>
+        <field name="view_id" ref="window_actions.view_shown_gantt"/>
+        <field name="act_window_id" ref="action_row_cleared_later"/>
+    </record>
+
+    <record id="action_bare_list_beside_view_id" model="ir.actions.act_window">
+        <field name="name">action_bare_list_beside_view_id</field>
+        <field name="res_model">window.plain</field>
+        <field name="view_mode">gantt</field>
+        <field name="view_id" ref="window_actions.view_shown_gantt"/>
+        <field name="view_ids" eval="[(0, 0, {'view_mode': 'list'})]"/>
+    </record>
+
+    <record id="action_bare_cleared_later" model="ir.actions.act_window">
+        <field name="name">action_bare_cleared_later</field>
+        <field name="res_model">window.plain</field>
+        <field name="view_mode">gantt</field>
+        <field name="view_id" ref="window_actions.view_shown_gantt"/>
+    </record>
+
+    <record id="row_bare_cleared_later" model="ir.actions.act_window.view">
+        <field name="view_mode">gantt</field>
+        <field name="act_window_id" ref="action_bare_cleared_later"/>
+    </record>
+
+    <record id="action_cleared_before_row" model="ir.actions.act_window">
+        <field name="name">action_cleared_before_row</field>
+        <field name="res_model">window.plain</field>
+        <field name="view_mode">gantt</field>
+        <field name="view_ids" eval="[(5, 0, 0)]"/>
+    </record>
+
+    <record id="action_cleared_listing_row" model="ir.actions.act_window">
+        <field name="name">action_cleared_listing_row</field>
+        <field name="res_model">window.plain</field>
+        <field name="view_mode">gantt</field>
+    </record>
+
+    <record id="row_listed_by_clear" model="ir.actions.act_window.view">
+        <field name="view_mode">gantt</field>
+        <field name="view_id" ref="window_actions.view_shown_gantt"/>
+        <field name="act_window_id" ref="action_cleared_listing_row"/>
+    </record>
+
+    <record id="action_row_cleared_outside" model="ir.actions.act_window">
+        <field name="name">action_row_cleared_outside</field>
+        <field name="res_model">window.plain</field>
+        <field name="view_mode">gantt</field>
+    </record>
+
+    <record id="row_cleared_outside" model="ir.actions.act_window.view">
+        <field name="view_mode">gantt</field>
+        <field name="view_id" ref="window_actions.view_shown_gantt"/>
+        <field name="act_window_id" ref="action_row_cleared_outside"/>
+    </record>
+
+    <record id="action_bare_cleared_outside" model="ir.actions.act_window">
+        <field name="name">action_bare_cleared_outside</field>
+        <field name="res_model">window.plain</field>
+        <field name="view_mode">gantt</field>
+        <field name="view_id" ref="window_actions.view_shown_gantt"/>
+        <field name="view_ids" eval="[(0, 0, {'view_mode': 'gantt'})]"/>
+    </record>
+
+    <record id="action_view_id_bare_outside" model="ir.actions.act_window">
+        <field name="name">action_view_id_bare_outside</field>
+        <field name="res_model">window.plain</field>
+        <field name="view_mode">gantt</field>
+        <field name="view_id" ref="window_actions.view_shown_gantt"/>
+    </record>
+
+    <record id="action_view_id_bare_taken" model="ir.actions.act_window">
+        <field name="name">action_view_id_bare_taken</field>
+        <field name="res_model">window.plain</field>
+        <field name="view_mode">gantt</field>
+        <field name="view_id" ref="window_actions.view_shown_gantt"/>
+    </record>
+
+    <record id="row_bare_taken" model="ir.actions.act_window.view">
+        <field name="view_mode">gantt</field>
+        <field name="act_window_id" ref="action_view_id_bare_taken"/>
+    </record>
+
+    <record id="action_bare_taker" model="ir.actions.act_window">
+        <field name="name">action_bare_taker</field>
+        <field name="res_model">window.plain</field>
+        <field name="view_mode">list</field>
+        <field name="view_ids" eval="[(4, ref('row_bare_taken'))]"/>
+    </record>
+
+    <record id="action_bare_row_rewritten" model="ir.actions.act_window">
+        <field name="name">action_bare_row_rewritten</field>
+        <field name="res_model">window.plain</field>
+        <field name="view_mode">gantt</field>
+        <field name="view_id" ref="window_actions.view_shown_gantt"/>
+    </record>
+
+    <record id="row_bare_rewritten" model="ir.actions.act_window.view">
+        <field name="view_mode">gantt</field>
+        <field name="act_window_id" ref="action_bare_row_rewritten"/>
+    </record>
+
+    <record id="action_bare_row_deleted" model="ir.actions.act_window">
+        <field name="name">action_bare_row_deleted</field>
+        <field name="res_model">window.plain</field>
+        <field name="view_mode">gantt</field>
+        <field name="view_id" ref="window_actions.view_shown_gantt"/>
+    </record>
+
+    <record id="row_bare_deleted" model="ir.actions.act_window.view">
+        <field name="view_mode">gantt</field>
+        <field name="act_window_id" ref="action_bare_row_deleted"/>
+    </record>
+
+    <record id="action_bare_searched" model="ir.actions.act_window">
+        <field name="name">action_bare_searched</field>
+        <field name="res_model">window.plain</field>
+        <field name="view_mode">gantt</field>
+        <field name="view_id" ref="window_actions.view_shown_gantt"/>
+        <field
+            name="view_ids"
+            model="ir.actions.act_window.view"
+            search="[('id', '=', 0)]"
+            eval="[(0, 0, {'view_mode': 'gantt'})]"
+        />
+    </record>
+
+    <record id="action_bare_row_updated" model="ir.actions.act_window">
+        <field name="name">action_bare_row_updated</field>
+        <field name="res_model">window.plain</field>
+        <field name="view_mode">gantt</field>
+        <field name="view_id" ref="window_actions.view_shown_gantt"/>
+    </record>
+
+    <record id="row_bare_updated" model="ir.actions.act_window.view">
+        <field name="view_mode">gantt</field>
+        <field name="act_window_id" ref="action_bare_row_updated"/>
+    </record>
 </odoo>

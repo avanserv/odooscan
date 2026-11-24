@@ -16,8 +16,8 @@ use crate::facts::{
     ClassBase, ClassFact, ComponentTag, DataFacts, Definition, DefinitionSource, DomainFact, FieldFact, FieldWrite,
     Flag, FunctionCall, GuardedRef, ImportFact, ImportGuard, JsClass, JsFacts, JsName, MethodDef, Migrate, ModelKind,
     OptionValue, OrmCall, OwlTemplate, Pos, PyFacts, RawDiag, RecordFact, RecordWrite, Refusal, ReportFact, RouteDef,
-    RouteKey, RuleFact, ServerFact, Signature, Spanned, SqlColumn, SqlView, Subject, TemplateEntry, UNREAD_TYPE,
-    ViewFact, WrittenValue, XmlDef, XmlRef, private_name,
+    RouteKey, RowsClear, RuleFact, ServerFact, Signature, Spanned, SqlColumn, SqlView, Subject, TemplateEntry,
+    UNREAD_TYPE, ViewFact, WrittenValue, XmlDef, XmlRef, private_name,
 };
 use crate::grants::{self, AttachmentGrant, Grant, Grants};
 use crate::imports::{AddonImport, Fault, Graph, ROOT};
@@ -104,6 +104,10 @@ const CALENDAR_STOPS: &[&str] = &[
 /// 18.0 and 19.0 refuse to generate a calendar without a stop (18.0
 /// `odoo/addons/base/models/ir_ui_view.py:2575-2582`), saas~19.1 does not (20.0 `:2957-2958`).
 const CALENDAR_STOP_OPTIONAL: Series = Series { major: 19, minor: 1 };
+
+/// The first series that reads a false value written to a one2many as a clear (`9920f20e4c77`,
+/// 18.0 `odoo/fields.py:4589-4590`). Through saas~12.4 Odoo writes nothing for it.
+const FALSE_CLEARS: Series = Series { major: 12, minor: 5 };
 
 /// The first series that loads a record nested in a one2many field (`2b80f3e5f1be`). Below it the
 /// schema refuses the file, so a row nested in `view_ids` gives the action no view.
@@ -4269,19 +4273,92 @@ impl<'m> Ctx<'_, 'm> {
 
     /// Whether `writes` give the action a view of `kind`. A view counts from any indexed module, as one
     /// in `view_types` does, as long as the scope loads that write. A module of unknown series may run
-    /// from `NESTED_RECORDS`.
+    /// from `NESTED_RECORDS`. Odoo gives `view_id` only to a type no row holds (18.0
+    /// `odoo/addons/base/models/ir_actions.py:282-291`).
     fn action_names(&self, writes: &[Placed<&ActionFact>], kind: &str) -> bool {
         let nested = self.series.is_none_or(|s| s >= NESTED_RECORDS);
         let of_kind = |kinds: &[String]| kinds.iter().any(|k| k == kind);
+        let row_stays = |at: usize, w: &Placed<&ActionFact>| {
+            self.scope.loads(w) && !self.row_taken(w) && !self.rows_cleared(writes, at)
+        };
         writes
             .iter()
-            .any(|w| self.scope.loads(w) && !self.row_taken(w) && w.fact.row_names_view(kind, nested))
-            || self
-                .held(writes, |a| !matches!(a.view_id, ActionViewId::Unset))
-                .any(|w| self.view_id_names(w, kind))
+            .enumerate()
+            .any(|(at, w)| w.fact.row_names_view(kind, nested) && row_stays(at, w))
+            || !self.bare_row_stays(writes, kind)
+                && self
+                    .held(writes, |a| !matches!(a.view_id, ActionViewId::Unset))
+                    .any(|w| self.view_id_names(w, kind))
             || self
                 .held(writes, |a| a.context_kinds.is_some())
                 .any(|w| w.fact.context_kinds.as_deref().is_some_and(of_kind))
+    }
+
+    /// Whether a write the scope reads drops the rows of `writes[at]` from the action, as it surely
+    /// clears `view_ids` and loads after it.
+    fn rows_cleared(&self, writes: &[Placed<&ActionFact>], at: usize) -> bool {
+        let read_clear =
+            |c: &Placed<&ActionFact>| surely_clears(c.fact.clears_rows, self.series) && self.scope.reads(c);
+        (0..writes.len()).any(|by| read_clear(&writes[by]) && self.placed_after(writes, by, at))
+    }
+
+    /// Whether a row of `kind` without a view stays on the action whatever else loads: the scope
+    /// reads its write, and no write the scope loads, from any module, may clear `view_ids` after
+    /// it or take, rewrite or delete the row.
+    fn bare_row_stays(&self, writes: &[Placed<&ActionFact>], kind: &str) -> bool {
+        let cleared = |at: usize| {
+            let clears = |by: usize| {
+                by != at && may_clear(writes[by].fact.clears_rows, self.series) && self.scope.loads(&writes[by])
+            };
+            (0..writes.len()).any(|by| clears(by) && !self.placed_after(writes, at, by))
+        };
+        let bare = |w: &Placed<&ActionFact>| w.fact.bare_kinds.iter().any(|k| k == kind) && self.scope.reads(w);
+        let kept = |w: &Placed<&ActionFact>| !self.row_listed(w) && !self.row_may_change(w);
+        (0..writes.len()).any(|at| bare(&writes[at]) && !cleared(at) && kept(&writes[at]))
+    }
+
+    /// Whether `writes[later]` loads after `writes[earlier]` on every database holding both, on a
+    /// fresh install. `writes` holds the writes of one id in load order: a module keeps the rank of
+    /// its files, data before demo, and a file the order of its records.
+    fn placed_after(&self, writes: &[Placed<&ActionFact>], later: usize, earlier: usize) -> bool {
+        let (module, before) = (writes[later].module, writes[earlier].module);
+        if module == before {
+            return later > earlier;
+        }
+        self.index.loads_after(module, before)
+    }
+
+    /// The action writes whose `view_ids` take the row of `write`, none for a row without an id.
+    fn takers(&self, write: &Placed<&ActionFact>) -> &[Placed<&'m ActionFact>] {
+        let Some(row) = &write.fact.row else {
+            return &[];
+        };
+        let id = full_id(&self.index.modules[write.module].name, row);
+        self.index.row_takers.get(&id).map_or(&[], Vec::as_slice)
+    }
+
+    /// Whether a write the scope loads lists the row of `write` in `view_ids`, which may take it.
+    fn row_listed(&self, write: &Placed<&ActionFact>) -> bool {
+        self.takers(write).iter().any(|t| self.scope.loads(t))
+    }
+
+    /// Whether a record the scope loads other than `write` may change or remove its row: another
+    /// write of its id, which Odoo files under no action or under another, an update command in
+    /// `view_ids`, a `<delete>` of it, or an element that may remove any row.
+    fn row_may_change(&self, write: &Placed<&ActionFact>) -> bool {
+        if self.index.unlinked_models.contains("ir.actions.act_window.view") {
+            return true;
+        }
+        let Some(row) = &write.fact.row else {
+            return false;
+        };
+        let id = full_id(&self.index.modules[write.module].name, row);
+        let writes = self.index.value_writes.get(&id).into_iter().flatten();
+        let mut updaters = self.index.row_updaters.get(&id).into_iter().flatten();
+        let mut deletes = self.index.deletes.get(&id).into_iter().flatten();
+        writes.filter(|w| self.scope.loads(w)).count() > 1
+            || updaters.any(|u| self.scope.loads(u))
+            || deletes.any(|d| self.scope.loads(d))
     }
 
     /// Whether an action's `view_ids` takes the row of `write` off the action `write` gives it. A
@@ -4290,21 +4367,16 @@ impl<'m> Ctx<'_, 'm> {
     /// for a data reader. It must also surely load after `write`: it is in the write's module and
     /// not a data taker of a demo write, or its module loads after the write's.
     fn row_taken(&self, write: &Placed<&ActionFact>) -> bool {
-        let Some(row) = &write.fact.row else {
-            return false;
-        };
-        let id = full_id(&self.index.modules[write.module].name, row);
-        let takers = self.index.row_takers.get(&id).map_or(&[][..], Vec::as_slice);
-        takers.iter().any(|t| {
-            (self.scope.reads(t) || t.module == write.module && self.scope.loads(t)) && self.loads_after_write(t, write)
+        self.takers(write).iter().any(|t| {
+            (self.scope.reads(t) || t.module == write.module && self.scope.loads(t)) && self.taker_after(t, write)
         })
     }
 
-    /// Whether `taker` loads after `write` on every database holding both, on a fresh install.
-    /// Inside one module Odoo loads data files before demo files (18.0
-    /// `odoo/modules/loading.py:230-231`); for two data writes of one module the scan cannot see the
-    /// order and takes it as safe.
-    fn loads_after_write(&self, taker: &Placed<&ActionFact>, write: &Placed<&ActionFact>) -> bool {
+    /// Whether `taker` loads after `write` on every database holding both, on a fresh install. The
+    /// two come from different lists, so no place tells their order inside one module: there Odoo
+    /// loads data files before demo files (18.0 `odoo/modules/loading.py:230-231`), and a taker of
+    /// the same kind names the row with `ref`, which fails until the row loads.
+    fn taker_after(&self, taker: &Placed<&ActionFact>, write: &Placed<&ActionFact>) -> bool {
         if taker.module == write.module {
             return taker.demo || !write.demo;
         }
@@ -5091,6 +5163,26 @@ impl<'m> Ctx<'_, 'm> {
                 out.push(path, "OD309", field.pos, format!("field '{fname}' of {model} {clause}"));
             }
         }
+    }
+}
+
+/// Whether a write of `view_ids` surely drops the rows before it on `series`: an unknown one may
+/// run below `FALSE_CLEARS`.
+fn surely_clears(clear: RowsClear, series: Option<Series>) -> bool {
+    match clear {
+        RowsClear::Listed => true,
+        RowsClear::Falsy => series.is_some_and(|s| s >= FALSE_CLEARS),
+        RowsClear::Kept | RowsClear::Maybe => false,
+    }
+}
+
+/// Whether a write of `view_ids` may drop the rows before it on `series`: an unknown one may run
+/// from `FALSE_CLEARS`.
+fn may_clear(clear: RowsClear, series: Option<Series>) -> bool {
+    match clear {
+        RowsClear::Listed | RowsClear::Maybe => true,
+        RowsClear::Falsy => series.is_none_or(|s| s >= FALSE_CLEARS),
+        RowsClear::Kept => false,
     }
 }
 
@@ -8081,12 +8173,12 @@ mod tests {
         CACHE_KEY_GLOBALS, MEMBER_SERIES, MagicEra, Merged, Paths, REPORT_TAG, Reach, applies, bundle_list,
         cache_global, cached_member, callable_attr, check_module, csv_label, derived_label, exported_text,
         fetches_own_view, field_name, has_last_update, hoot_adds, keeps_set, labels_at_end, labels_before_ondelete,
-        lacks_domain, lone_add_applied, magic_era, may_label, no_access_message, page_miss, parent_path_children,
-        patch_form, public_write_message, qweb_asset_glob, reads_model_access, reads_requires, shadowed_member,
-        static_only, stores_parent_path, tuple_add_refused, tuple_checked, tuple_listed, types_differ,
-        unknown_dependency, unmatched_asset, warns_on_labels,
+        lacks_domain, lone_add_applied, magic_era, may_clear, may_label, no_access_message, page_miss,
+        parent_path_children, patch_form, public_write_message, qweb_asset_glob, reads_model_access, reads_requires,
+        shadowed_member, static_only, stores_parent_path, surely_clears, tuple_add_refused, tuple_checked,
+        tuple_listed, types_differ, unknown_dependency, unmatched_asset, warns_on_labels,
     };
-    use crate::facts::{AccessRow, DefinitionSource, JsName, OptionValue, Perms, Pos, Spanned, UNREAD_TYPE};
+    use crate::facts::{AccessRow, DefinitionSource, JsName, OptionValue, Perms, Pos, RowsClear, Spanned, UNREAD_TYPE};
     use crate::index::Index;
     use crate::manifest::{OdooReads, Taken};
     use crate::python::analyze;
@@ -8125,6 +8217,76 @@ mod tests {
         assert_eq!(keeps_set(None, char, ("Integer", &["Integer".to_owned()])), Some(false));
         let unread = (UNREAD_TYPE, unread.as_slice());
         assert_eq!(keeps_set(None, unread, unread), Some(true));
+    }
+
+    #[test]
+    fn a_false_view_ids_clears_from_saas_12_5() {
+        let at = |s: &str| Series::parse(s);
+        for (series, surely, may) in [
+            (at("12.0"), false, false),
+            (at("saas~12.4"), false, false),
+            (at("saas~12.5"), true, true),
+            (at("18.0"), true, true),
+            (None, false, true),
+        ] {
+            assert_eq!(surely_clears(RowsClear::Falsy, series), surely, "{series:?}");
+            assert_eq!(may_clear(RowsClear::Falsy, series), may, "{series:?}");
+        }
+        for series in [at("9.0"), at("18.0"), None] {
+            assert!(surely_clears(RowsClear::Listed, series) && may_clear(RowsClear::Listed, series));
+            assert!(!surely_clears(RowsClear::Maybe, series) && may_clear(RowsClear::Maybe, series));
+            assert!(!surely_clears(RowsClear::Kept, series) && !may_clear(RowsClear::Kept, series));
+        }
+    }
+
+    #[test]
+    fn a_function_on_rows_keeps_a_bare_row_from_taking_the_view_id() {
+        let file = |rel: &str, xml: &str| crate::project::SourceFile {
+            path: std::path::PathBuf::new(),
+            rel: rel.to_owned(),
+            rank: Some(0),
+            demo: false,
+            facts: crate::xml::analyze(xml, Series::parse("18.0")),
+            suppressions: Default::default(),
+            mentions: Default::default(),
+        };
+        let action = r#"<odoo>
+            <record id="v" model="ir.ui.view"><field name="model">m.other</field><field name="arch" type="xml"><gantt/></field></record>
+            <record id="a" model="ir.actions.act_window">
+                <field name="res_model">m.plan</field>
+                <field name="view_mode">gantt</field>
+                <field name="view_id" ref="v"/>
+                <field name="view_ids" eval="[(0, 0, {'view_mode': 'gantt'})]"/>
+            </record>
+        </odoo>"#;
+        let od318 = |function: bool| {
+            let manifest = |depends: &str| format!("{{'version': '18.0.1.0', 'depends': [{depends}]}}");
+            let mut modules = vec![
+                crate::project::module("base", &manifest("")),
+                crate::project::module("main", &manifest("'base'")),
+                crate::project::module("heir", &manifest("'main'")),
+            ];
+            modules[1].python.push(crate::project::SourceFile {
+                path: std::path::PathBuf::new(),
+                rel: "models/plan.py".to_owned(),
+                rank: None,
+                demo: false,
+                facts: analyze("class P(models.Model):\n    _name = 'm.plan'\n", Series::parse("18.0")),
+                suppressions: Default::default(),
+                mentions: Default::default(),
+            });
+            modules[1].data.push(file("views/actions.xml", action));
+            if function {
+                // Any module the scope may load can unlink the row, so the view_id may serve gantt.
+                let call = r#"<odoo><function model="ir.actions.act_window.view" name="unlink"/></odoo>"#;
+                modules[2].data.push(file("data/rows.xml", call));
+            }
+            let index = Index::build(&modules, None);
+            let diags = check_module(&index, 1, Series::parse("18.0"));
+            diags.iter().filter(|(_, d)| d.code == "OD318").count()
+        };
+        assert_eq!(od318(false), 1);
+        assert_eq!(od318(true), 0);
     }
 
     #[test]

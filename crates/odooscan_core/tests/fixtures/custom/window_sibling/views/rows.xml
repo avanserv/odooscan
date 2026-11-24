@@ -24,4 +24,33 @@
         <field name="view_id" ref="window_actions.view_shown_gantt"/>
         <field name="act_window_id" ref="window_named.action_row_put_back"/>
     </record>
+
+    <record id="window_named.action_row_cleared_outside" model="ir.actions.act_window">
+        <field name="view_ids" eval="[(5, 0, 0)]"/>
+    </record>
+
+    <record id="window_named.action_bare_cleared_outside" model="ir.actions.act_window">
+        <field name="view_ids" eval="False"/>
+    </record>
+
+    <record id="row_bare_outside" model="ir.actions.act_window.view">
+        <field name="view_mode">gantt</field>
+        <field name="act_window_id" ref="window_named.action_view_id_bare_outside"/>
+    </record>
+
+    <record id="window_named.row_bare_rewritten" model="ir.actions.act_window.view">
+        <field name="view_id" ref="window_actions.view_shown_gantt"/>
+    </record>
+
+    <delete model="ir.actions.act_window.view" id="window_named.row_bare_deleted"/>
+
+    <record id="action_bare_updater" model="ir.actions.act_window">
+        <field name="name">action_bare_updater</field>
+        <field name="res_model">window.plain</field>
+        <field name="view_mode">list</field>
+        <field
+            name="view_ids"
+            eval="[(1, ref('window_named.row_bare_updated'), {'view_id': ref('window_actions.view_shown_gantt')})]"
+        />
+    </record>
 </odoo>

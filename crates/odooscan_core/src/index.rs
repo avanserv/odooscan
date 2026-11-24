@@ -7,9 +7,9 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::facts::{
     ActionFact, Annotation, ArchElement, ArchEmptied, ArchSubview, ArchValued, BaseSource, ClassFact, ComponentItem,
-    DataFacts, FieldFact, FlowSummary, Heritage, JsClass, JsFacts, JsName, ModelKind, OptionValue, OwlTemplate, Pos,
-    PropItem, PyFacts, Receiver, RecordWrite, ReportFact, RouteKey, Rows, RuleFact, ServerFact, Signature, Static,
-    StaticWrite, UNREAD_TYPE, ViewFact, WrittenValue, mangled, private_name,
+    DataFacts, DeleteFact, FieldFact, FlowSummary, Heritage, JsClass, JsFacts, JsName, ModelKind, OptionValue,
+    OwlTemplate, Pos, PropItem, PyFacts, Receiver, RecordWrite, ReportFact, RouteKey, Rows, RuleFact, ServerFact,
+    Signature, Static, StaticWrite, UNREAD_TYPE, ViewFact, WrittenValue, mangled, private_name,
 };
 use crate::js::{self, OWL_MODULE};
 use crate::manifest::{AutoInstall, DEPENDS_BASE};
@@ -1629,6 +1629,18 @@ fn record_writes<'m, T>(
     keyed_writes(modules, by_name, series, facts, |fact| id(fact).into_iter().collect())
 }
 
+/// The models whose records a file manifests load may remove whichever ids they hold: a
+/// `<function>` may call `unlink`.
+fn unlinked_models(modules: &[Module]) -> FxHashSet<&str> {
+    let files = modules.iter().flat_map(|m| &m.data).filter(|f| f.rank.is_some());
+    files
+        .flat_map(|f| {
+            let searched = f.facts.deletes.iter().filter(|d| d.search).map(|d| d.model.as_str());
+            searched.chain(f.facts.functions.iter().map(|c| c.model.as_str()))
+        })
+        .collect()
+}
+
 /// Every write of the files manifests load, in load order, under each id that `keys` gives it in
 /// the spelling of its module.
 fn keyed_writes<'m, T>(
@@ -2096,10 +2108,16 @@ pub struct Index<'m> {
     pub action_writes: Writes<'m, ActionFact>,
     /// The action writes whose `view_ids` take each row of `ir.actions.act_window.view`.
     pub row_takers: Writes<'m, ActionFact>,
+    /// The action writes whose `view_ids` update each row of `ir.actions.act_window.view`.
+    pub row_updaters: Writes<'m, ActionFact>,
     pub rule_writes: Writes<'m, RuleFact>,
     pub server_writes: Writes<'m, ServerFact>,
     pub report_writes: Writes<'m, ReportFact>,
     pub value_writes: Writes<'m, RecordWrite>,
+    /// The `<delete>` elements under the id each names.
+    pub deletes: Writes<'m, DeleteFact>,
+    /// The models a `<delete search>` or a `<function>` may remove any record of.
+    pub unlinked_models: FxHashSet<&'m str>,
     data_fields: DataFields<'m>,
     /// The ids of records Odoo creates alongside others.
     pub derived: FxHashSet<String>,
@@ -2215,10 +2233,19 @@ impl<'m> Index<'m> {
                 |f| &f.actions,
                 |a| a.takes_rows.iter().collect(),
             ),
+            row_updaters: keyed_writes(
+                modules,
+                &by_name,
+                default_series,
+                |f| &f.actions,
+                |a| a.updates_rows.iter().collect(),
+            ),
             rule_writes: record_writes(modules, &by_name, default_series, |f| &f.rules, |r| r.id.as_ref()),
             server_writes: record_writes(modules, &by_name, default_series, |f| &f.servers, |s| s.id.as_ref()),
             report_writes: record_writes(modules, &by_name, default_series, |f| &f.reports, |r| r.id.as_ref()),
             value_writes: record_writes(modules, &by_name, default_series, |f| &f.writes, |w| w.id.as_ref()),
+            deletes: record_writes(modules, &by_name, default_series, |f| &f.deletes, |d| d.id.as_ref()),
+            unlinked_models: unlinked_models(modules),
             data_fields: FxHashMap::default(),
             derived,
             ir_defaults: ir_defaults(modules),
