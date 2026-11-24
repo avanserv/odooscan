@@ -1358,6 +1358,14 @@ pub struct FunctionCall {
     pub default_of: Option<(String, String)>,
 }
 
+/// A `<delete>`: the record its `id` names, and with a `search` any record of its model.
+#[derive(Debug)]
+pub struct DeleteFact {
+    pub model: String,
+    pub id: Option<String>,
+    pub search: bool,
+}
+
 /// What one element writes to a field of a window action or a record rule. A write that is no
 /// literal still replaces what an earlier one gave, so it differs from no write at all.
 #[derive(Debug, Default)]
@@ -1403,6 +1411,26 @@ pub struct ActionFact {
     pub row: Option<String>,
     /// The XML ids of the rows of other records its `view_ids` moves here or removes.
     pub takes_rows: Vec<String>,
+    /// The XML ids of the rows of other records its `view_ids` updates in place.
+    pub updates_rows: Vec<String>,
+    /// The types of its rows of `view_ids` that name no view, so take none from `view_id`.
+    pub bare_kinds: Vec<String>,
+    /// Whether its `view_ids` drops every row the action holds before it.
+    pub clears_rows: RowsClear,
+}
+
+/// Whether a write of `view_ids` drops every row the action holds before it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum RowsClear {
+    /// It keeps them on every series.
+    #[default]
+    Kept,
+    /// A clear or a set before any create or link, which drops them on every series.
+    Listed,
+    /// A false value other than a list, which Odoo reads as a clear from saas~12.5 alone.
+    Falsy,
+    /// A value that may drop them on some series or once a run tells what it holds.
+    Maybe,
 }
 
 impl ActionFact {
@@ -1527,6 +1555,7 @@ pub struct DataFacts {
     pub servers: Vec<ServerFact>,
     pub reports: Vec<ReportFact>,
     pub functions: Vec<FunctionCall>,
+    pub deletes: Vec<DeleteFact>,
     pub diags: Vec<RawDiag>,
     /// The file does not decode or parse, or Odoo refuses it, so these facts say nothing of what
     /// it holds.

@@ -14,4 +14,22 @@
     <record id="window_actions.action_undone_outside" model="ir.actions.act_window">
         <field name="view_id" eval="False"/>
     </record>
+
+    <record id="action_row_cleared_later" model="ir.actions.act_window">
+        <field name="view_ids" eval="[(5, 0, 0)]"/>
+    </record>
+
+    <record id="action_bare_cleared_later" model="ir.actions.act_window">
+        <field name="view_ids" eval="[Command.clear()]"/>
+    </record>
+
+    <record id="row_after_clear" model="ir.actions.act_window.view">
+        <field name="view_mode">gantt</field>
+        <field name="view_id" ref="window_actions.view_shown_gantt"/>
+        <field name="act_window_id" ref="action_cleared_before_row"/>
+    </record>
+
+    <record id="action_cleared_listing_row" model="ir.actions.act_window">
+        <field name="view_ids" eval="[(6, 0, [ref('row_listed_by_clear')])]"/>
+    </record>
 </odoo>

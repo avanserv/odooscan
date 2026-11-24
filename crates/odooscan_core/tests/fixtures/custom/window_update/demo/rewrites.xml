@@ -39,4 +39,8 @@
         <field name="view_id" ref="window_actions.view_shown_gantt"/>
         <field name="act_window_id" ref="action_row_demo_back"/>
     </record>
+
+    <record id="action_row_demo_cleared" model="ir.actions.act_window">
+        <field name="view_ids" eval="[(5, 0, 0)]"/>
+    </record>
 </odoo>

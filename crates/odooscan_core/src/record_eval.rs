@@ -4,7 +4,7 @@ use ruff_python_ast::helpers::Truthiness;
 use ruff_python_ast::{self as ast, Expr};
 use ruff_python_parser::parse_expression;
 
-use crate::facts::{Spanned, WrittenValue};
+use crate::facts::{RowsClear, Spanned, WrittenValue};
 
 /// The value of an `eval`. Most are other expressions, so only those that may hold a value are parsed.
 /// Python allows spaces before the parenthesis of a call, so the parser decides what calls `ref`.
@@ -98,10 +98,82 @@ fn created_view_row(values: &Expr) -> Option<Option<String>> {
     let Some(values) = row_values(values) else {
         return Some(None);
     };
-    // A key given twice keeps its last value, as in Python.
-    let value = |name: &str| values.iter().rev().find(|(key, _)| *key == name).map(|(_, v)| *v);
-    value("view_id").filter(|view| !falsy(view))?;
-    Some(value("view_mode").and_then(string))
+    row_value(&values, "view_id").filter(|view| !falsy(view))?;
+    Some(row_value(&values, "view_mode").and_then(string))
+}
+
+/// The value of `name` among the values of a row. A key given twice keeps its last value, as in
+/// Python.
+fn row_value<'a>(values: &[(&str, &'a Expr)], name: &str) -> Option<&'a Expr> {
+    values.iter().rev().find(|(key, _)| *key == name).map(|(_, v)| *v)
+}
+
+/// The literal types of the rows without a view an `eval` of `view_ids` creates after its last
+/// clear or set. Odoo gives the action's `view_id` only to a type no row holds (18.0
+/// `odoo/addons/base/models/ir_actions.py:282-291`). Below saas~12.5 a clear drops the rows before
+/// it in its list, from there it keeps them; a set drops them through 15.0, and an item that does
+/// not read may be either, so only the rows after the last of these count.
+pub fn bare_rows(eval: &str) -> Vec<String> {
+    let Ok(parsed) = parse_expression(eval.trim()) else {
+        return vec![];
+    };
+    let Expr::List(list) = parsed.expr() else {
+        return vec![];
+    };
+    let mut kinds = vec![];
+    for item in &list.elts {
+        match command(item) {
+            Some((0, rest)) => kinds.extend(rest.last().and_then(bare_row)),
+            Some((1..=4, _)) => {}
+            _ => kinds.clear(),
+        }
+    }
+    kinds
+}
+
+/// The type of a created row whose values read without a view that may be true.
+fn bare_row(values: &Expr) -> Option<String> {
+    let values = row_values(values)?;
+    if row_value(&values, "view_id").is_some_and(|view| !falsy(view)) {
+        return None;
+    }
+    row_value(&values, "view_mode").and_then(string)
+}
+
+/// How an `eval` of `view_ids` drops the rows the action holds. Through saas~12.4 Odoo writes
+/// nothing for a false value, from there it clears (`9920f20e4c77`, 18.0 `odoo/fields.py:4590`).
+/// Once a create or a link came before it in the write, from saas~12.5 Odoo skips a clear or an
+/// empty set, and from 16.0 links the ids of a set instead (18.0 `odoo/fields.py:4777-4794`, 20.0
+/// `odoo/orm/fields_relational.py:1100`), so only a clear or a set before both drops the rows on
+/// every series.
+pub fn clears_rows(eval: &str) -> RowsClear {
+    // Odoo tests `eval` for truth, so an empty one writes the text, which it skips.
+    if eval.trim().is_empty() {
+        return RowsClear::Kept;
+    }
+    let Ok(parsed) = parse_expression(eval.trim()) else {
+        return RowsClear::Maybe;
+    };
+    let Expr::List(list) = parsed.expr() else {
+        return if falsy(parsed.expr()) {
+            RowsClear::Falsy
+        } else {
+            RowsClear::Maybe
+        };
+    };
+    let codes: Vec<_> = list
+        .elts
+        .iter()
+        .map(|item| command(item).map(|(code, _)| code))
+        .collect();
+    let first = codes.iter().find(|code| !matches!(code, Some(1..=3)));
+    if first.is_some_and(|code| matches!(code, Some(5 | 6))) {
+        RowsClear::Listed
+    } else if codes.iter().any(|code| matches!(code, None | Some(5 | 6))) {
+        RowsClear::Maybe
+    } else {
+        RowsClear::Kept
+    }
 }
 
 /// The pairs of a dict literal or a keyword `dict()`, none when a key only a run tells may be any.
@@ -216,6 +288,16 @@ fn link(linked: &mut Linked, code: u64, rest: &[Expr]) -> Option<()> {
 /// the row to the record written or removes it, so the row leaves the record it was on. An item
 /// that does not read is skipped, as it may name any row or none.
 pub fn taken_rows(eval: &str) -> Vec<String> {
+    commanded_rows(eval, |code| matches!(code, 2..=4 | 6))
+}
+
+/// The `ref()` ids of the rows an `eval` of a one2many updates, which stay where they are.
+pub fn updated_rows(eval: &str) -> Vec<String> {
+    commanded_rows(eval, |code| code == 1)
+}
+
+/// The `ref()` ids the commands of `eval` whose code `picked` accepts name.
+fn commanded_rows(eval: &str, picked: fn(u64) -> bool) -> Vec<String> {
     let mut ids = vec![];
     let Ok(parsed) = parse_expression(eval.trim()) else {
         return ids;
@@ -223,10 +305,10 @@ pub fn taken_rows(eval: &str) -> Vec<String> {
     let Expr::List(list) = parsed.expr() else {
         return ids;
     };
-    for (code, rest) in list.elts.iter().filter_map(command) {
+    for (code, rest) in list.elts.iter().filter_map(command).filter(|(code, _)| picked(*code)) {
         // A tuple and a `Command` call both hold the id of a single row first and a set's ids last.
         match code {
-            2..=4 => rest.first().and_then(|id| push_ref(id, &mut ids)),
+            1..=4 => rest.first().and_then(|id| push_ref(id, &mut ids)),
             6 => rest.last().and_then(|set| push_refs(set, &mut ids)),
             _ => None,
         };
@@ -547,6 +629,94 @@ mod tests {
     }
 
     #[test]
+    fn reads_the_rows_without_a_view() {
+        let kinds = |k: &[&str]| k.iter().map(|k| (*k).to_owned()).collect::<Vec<_>>();
+        for (eval, expected) in [
+            ("[(0, 0, {'view_mode': 'gantt'})]", kinds(&["gantt"])),
+            (
+                " [(0, 0, {'view_mode': 'gantt', 'view_id': False})] ",
+                kinds(&["gantt"]),
+            ),
+            ("[Command.create(dict(view_mode='map', view_id=None))]", kinds(&["map"])),
+            (
+                "[(0, 0, {'view_mode': 'list'}), (5, 0, 0), (0, 0, {'view_mode': 'gantt'})]",
+                kinds(&["gantt"]),
+            ),
+            (
+                "[Command.set([]), (4, ref('a')), (0, 0, {'view_mode': 'gantt'})]",
+                kinds(&["gantt"]),
+            ),
+            (
+                "[(0, 0, {'view_mode': 'gantt'}), (0, 0, {'view_mode': 'map'})]",
+                kinds(&["gantt", "map"]),
+            ),
+            ("[(0, 0, {'view_mode': 'gantt', 'view_id': ref('v')})]", kinds(&[])),
+            ("[(0, 0, {'view_mode': 'gantt', 'view_id': view})]", kinds(&[])),
+            ("[(0, 0, {'view_mode': mode})]", kinds(&[])),
+            ("[(0, 0, {'view_mode': 'gantt', **extra})]", kinds(&[])),
+            ("[(0, 0, {'view_mode': 'gantt'}), Command.clear()]", kinds(&[])),
+            ("[(0, 0, {'view_mode': 'gantt'}), (6, 0, [])]", kinds(&[])),
+            ("[(0, 0, {'view_mode': 'gantt'}), rows]", kinds(&[])),
+            ("((0, 0, {'view_mode': 'gantt'}),)", kinds(&[])),
+            ("False", kinds(&[])),
+            ("", kinds(&[])),
+            ("[(0, 0, {", kinds(&[])),
+        ] {
+            assert_eq!(bare_rows(eval), expected, "{eval}");
+        }
+    }
+
+    #[test]
+    fn tells_how_a_write_drops_the_rows() {
+        let cases = [
+            (RowsClear::Falsy, &["False", " None ", "''", "0", "()"][..]),
+            (
+                RowsClear::Listed,
+                &[
+                    "[(5, 0, 0)]",
+                    "[(5,)]",
+                    "[(6, 0, [])]",
+                    "[(6, 0, [ref('a')])]",
+                    "[Command.clear()]",
+                    "[Command.set([])]",
+                    "[(1, 7, {}), (2, 7), (3, 7), (5, 0, 0)]",
+                    "[(5, 0, 0), (0, 0, {'view_mode': 'gantt'})]",
+                ],
+            ),
+            (
+                RowsClear::Maybe,
+                &[
+                    "(6, 0, [])",
+                    "ref('a')",
+                    "rows",
+                    "[(0, 0, {'view_mode': 'gantt'}), (5, 0, 0)]",
+                    "[(4, ref('a')), Command.clear()]",
+                    "[Command.create({}), (6, 0, [ref('a')])]",
+                    "[rows, (5, 0, 0)]",
+                    "[(x, 0, 0)]",
+                    "[Other.clear()]",
+                    "[(5, 0",
+                ],
+            ),
+            (
+                RowsClear::Kept,
+                &[
+                    "",
+                    " ",
+                    "[]",
+                    "[(0, 0, {'view_mode': 'gantt'}), (4, ref('a'))]",
+                    "[(1, 7, {}), (7, 0)]",
+                ],
+            ),
+        ];
+        for (expected, evals) in cases {
+            for eval in evals {
+                assert_eq!(clears_rows(eval), expected, "{eval}");
+            }
+        }
+    }
+
+    #[test]
     fn reads_the_rows_commands_take() {
         let taken = |ids: &[&str]| ids.iter().map(|i| (*i).to_owned()).collect::<Vec<_>>();
         for (eval, ids) in [
@@ -575,6 +745,27 @@ mod tests {
             "[(4, ",
         ] {
             assert!(taken_rows(eval).is_empty(), "{eval}");
+        }
+    }
+
+    #[test]
+    fn reads_the_rows_commands_update() {
+        for eval in [
+            "[(1, ref('a'), {'view_id': ref('v')})]",
+            "[Command.update(ref('a'), {})]",
+            "[(4, ref('b')), (1, ref('a'), {}), (1, x, {})]",
+        ] {
+            assert_eq!(updated_rows(eval), ["a"], "{eval}");
+        }
+        for eval in [
+            "[(4, ref('a'))]",
+            "[(6, 0, [ref('a')])]",
+            "[(1, 7, {})]",
+            "(1, ref('a'), {})",
+            "False",
+            "",
+        ] {
+            assert!(updated_rows(eval).is_empty(), "{eval}");
         }
     }
 

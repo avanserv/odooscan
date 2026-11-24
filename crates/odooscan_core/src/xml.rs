@@ -7,9 +7,9 @@ use roxmltree::{Attribute, Document, ExpandedName, Node, ParsingOptions};
 use crate::domain;
 use crate::facts::{
     AccessRow, ActionFact, ActionValue, ActionViewId, ArchButton, ArchDomain, ArchElement, ArchEmptied, ArchField,
-    ArchModifier, ArchSubview, ArchValued, ArchWidget, DataFacts, DomainFact, FieldWrite, Flag, FunctionCall, Lines,
-    Perms, Pos, RawDiag, RecordFact, RecordWrite, ReportFact, RuleFact, RuleGroups, ServerFact, Spanned, ViewFact,
-    WrittenValue, XmlDef, XmlRef,
+    ArchModifier, ArchSubview, ArchValued, ArchWidget, DataFacts, DeleteFact, DomainFact, FieldWrite, Flag,
+    FunctionCall, Lines, Perms, Pos, RawDiag, RecordFact, RecordWrite, ReportFact, RowsClear, RuleFact, RuleGroups,
+    ServerFact, Spanned, ViewFact, WrittenValue, XmlDef, XmlRef,
 };
 use crate::fix::{Edit, Fix};
 use crate::index::normal_parts;
@@ -294,9 +294,21 @@ impl Walker<'_> {
                     self.eval_refs(child);
                     self.function_call(child);
                 }
+                "delete" => self.delete(child),
                 _ => {}
             }
         }
+    }
+
+    /// Odoo skips an empty `id` or `search`, and fails on a `<delete>` without a model.
+    fn delete(&mut self, node: Node) {
+        let Some(model) = node.attribute("model") else { return };
+        let given = |name: &str| node.attribute(name).filter(|v| !v.is_empty());
+        self.facts.deletes.push(DeleteFact {
+            model: model.to_owned(),
+            id: given("id").map(str::to_owned),
+            search: given("search").is_some(),
+        });
     }
 
     /// The tags that stand for a record, with the id and the groups of one.
@@ -490,6 +502,17 @@ impl Walker<'_> {
             action.view_of_any_kind = rows.contains(&None);
             action.view_kinds = rows.into_iter().flatten().collect();
             action.takes_rows = record_eval::taken_rows(eval);
+            action.updates_rows = record_eval::updated_rows(eval);
+            action.bare_kinds = record_eval::bare_rows(eval);
+            action.clears_rows = record_eval::clears_rows(eval);
+        }
+        // Odoo takes a `search` and ignores the `eval` beside it, and writes False when it finds
+        // nothing (18.0 `odoo/tools/convert.py:390-404`).
+        if view_ids.is_some_and(|f| f.has_attribute("search")) {
+            action.takes_rows.clear();
+            action.updates_rows.clear();
+            action.bare_kinds.clear();
+            action.clears_rows = RowsClear::Maybe;
         }
         for row in view_ids.iter().flat_map(|f| f.children()).filter(is_view_row) {
             name_row_view(&mut action.nested_view_kinds, &mut action.nested_view_of_any_kind, row);
@@ -643,7 +666,8 @@ impl Walker<'_> {
             ..ActionFact::default()
         };
         name_row_view(&mut row.view_kinds, &mut row.view_of_any_kind, node);
-        if row.view_of_any_kind || !row.view_kinds.is_empty() {
+        row.bare_kinds.extend(bare_row_kind(node));
+        if row.view_of_any_kind || !row.view_kinds.is_empty() || !row.bare_kinds.is_empty() {
             self.facts.actions.push(row);
         }
     }
@@ -1359,6 +1383,15 @@ fn name_row_view(kinds: &mut Vec<String>, of_any_kind: &mut bool, row: Node) {
         Some(kind) => kinds.push(kind.to_owned()),
         None => *of_any_kind = true,
     }
+}
+
+/// The literal type of a row of `view_ids` that names no view.
+fn bare_row_kind(row: Node) -> Option<String> {
+    if last_field_of(row, "view_id").is_some_and(holds_record) {
+        return None;
+    }
+    let kind = last_field_of(row, "view_mode").and_then(char_value).flatten();
+    kind.filter(|k| !k.is_empty())
 }
 
 fn action_view_id(field: Node, lines: &Lines) -> ActionViewId {
@@ -3367,6 +3400,61 @@ mod tests {
     }
 
     #[test]
+    fn reads_the_rows_without_a_view_and_a_clear_of_an_action() {
+        let read = |fields: &str| {
+            let action = action_facts(&action_record(fields)).remove(0);
+            (action.bare_kinds, action.clears_rows)
+        };
+        assert_eq!(
+            read(r#"<field name="view_ids" eval="[(5, 0, 0), (0, 0, {'view_mode': 'gantt'})]"/>"#),
+            (vec!["gantt".to_owned()], RowsClear::Listed)
+        );
+        assert_eq!(
+            read(
+                r#"<field name="view_ids" eval="[(0, 0, {'view_mode': 'gantt'})]"/><field name="view_ids" eval="False"/>"#
+            ),
+            (vec![], RowsClear::Falsy)
+        );
+        assert_eq!(
+            read(r#"<field name="view_ids" eval="[(0, 0, {'view_mode': 'map'}), (5, 0, 0)]"/>"#),
+            (vec![], RowsClear::Maybe)
+        );
+        assert_eq!(
+            read(r#"<field name="view_ids" search="[]" eval="[(4, ref('r'))]"/>"#).1,
+            RowsClear::Maybe
+        );
+        assert_eq!(
+            read(r#"<field name="view_ids" search="[]" eval="[(0, 0, {'view_mode': 'gantt'})]"/>"#),
+            (vec![], RowsClear::Maybe)
+        );
+        for fields in [
+            "",
+            r#"<field name="view_ids"/>"#,
+            r#"<field name="view_ids" eval=""/>"#,
+            r#"<field name="view_ids" eval="[]"/>"#,
+            r#"<field name="view_ids"><record model="ir.actions.act_window.view"><field name="view_mode">gantt</field></record></field>"#,
+        ] {
+            assert_eq!(read(fields), (vec![], RowsClear::Kept), "{fields}");
+        }
+    }
+
+    #[test]
+    fn reads_what_a_delete_removes() {
+        let facts = analyze(
+            r#"<odoo><delete model="m" id="r"/><data><delete model="m" search="[]" id=""/></data><delete id="x"/><delete model="m" search=""/></odoo>"#,
+        );
+        let deletes: Vec<_> = facts
+            .deletes
+            .iter()
+            .map(|d| (d.model.as_str(), d.id.as_deref(), d.search))
+            .collect();
+        assert_eq!(
+            deletes,
+            [("m", Some("r"), false), ("m", None, true), ("m", None, false)]
+        );
+    }
+
+    #[test]
     fn reads_the_rows_an_action_takes_and_a_row_id() {
         let action = action_facts(&action_record(
             r#"<field name="view_ids" eval="[(4, ref('r'))]"/><field name="view_ids" eval="[Command.delete(ref('s'))]"/>"#,
@@ -3374,6 +3462,19 @@ mod tests {
         .remove(0);
         assert_eq!(action.takes_rows, ["s"]);
         assert_eq!(action.row, None);
+        let updater = action_facts(&action_record(
+            r#"<field name="view_ids" eval="[(4, ref('r')), Command.update(ref('s'), {})]"/>"#,
+        ))
+        .remove(0);
+        assert_eq!(
+            (updater.takes_rows, updater.updates_rows),
+            (vec!["r".to_owned()], vec!["s".to_owned()])
+        );
+        let searched = action_facts(&action_record(
+            r#"<field name="view_ids" search="[]" eval="[(4, ref('r')), (1, ref('s'), {})]"/>"#,
+        ))
+        .remove(0);
+        assert!(searched.takes_rows.is_empty() && searched.updates_rows.is_empty());
         let row = action_facts(
             r#"<record id="r" model="ir.actions.act_window.view"><field name="view_mode">gantt</field><field name="view_id" ref="v"/><field name="act_window_id" ref="a"/></record>"#,
         )
@@ -3499,9 +3600,32 @@ mod tests {
         let cleared = row(
             r#"<field name="view_mode">gantt</field><field name="view_id" ref="v"/><field name="view_id" eval="False"/><field name="act_window_id" ref="a"/>"#,
         );
-        assert!(action_facts(&cleared).is_empty());
+        let cleared = action_facts(&cleared);
+        assert!(cleared[0].view_kinds.is_empty() && !cleared[0].view_of_any_kind);
+        assert_eq!(cleared[0].bare_kinds, ["gantt"]);
         let no_view = row(r#"<field name="view_mode">gantt</field><field name="act_window_id" ref="a"/>"#);
-        assert!(action_facts(&no_view).is_empty());
+        let bare = action_facts(&no_view);
+        assert_eq!(
+            (bare[0].bare_kinds.as_slice(), bare[0].row.as_deref()),
+            (&["gantt".to_owned()][..], Some("r"))
+        );
+        assert!(bare[0].view_kinds.is_empty() && !bare[0].view_of_any_kind);
+        for fields in [
+            r#"<field name="view_mode" eval="'gantt'"/><field name="view_id" eval="False"/>"#,
+            r#"<field name="view_mode"> gantt </field><field name="view_id" ref="v"/><field name="view_id" eval="None"/>"#,
+        ] {
+            let bare = action_facts(&row(&format!(r#"{fields}<field name="act_window_id" ref="a"/>"#)));
+            assert_eq!(bare[0].bare_kinds, ["gantt"], "{fields}");
+        }
+        for fields in [
+            r#"<field name="view_mode" eval="mode"/>"#,
+            r#"<field name="view_mode"> </field>"#,
+            r#"<field name="view_mode">gantt</field><field name="view_id" eval="view"/>"#,
+            "",
+        ] {
+            let rows = action_facts(&row(&format!(r#"{fields}<field name="act_window_id" ref="a"/>"#)));
+            assert!(rows.iter().all(|r| r.bare_kinds.is_empty()), "{fields}");
+        }
         let no_action = row(r#"<field name="view_mode">gantt</field><field name="view_id" ref="v"/>"#);
         assert!(action_facts(&no_action).is_empty());
         let searched = action_facts(&row(
