@@ -27,6 +27,7 @@ access_domain_unread_comodel,domain.unread.comodel,model_domain_unread_comodel,b
 access_domain_unread_key,domain.unread.key,model_domain_unread_key,base.group_user,1,0,0,0
 access_domain_unread_above,domain.unread.above,model_domain_unread_above,base.group_user,1,0,0,0
 access_domain_literal_delegate,domain.literal.delegate,model_domain_literal_delegate,base.group_user,1,0,0,0
+access_domain_splat,domain.splat,model_domain_splat,base.group_user,1,0,0,0
 access_domain_relative,domain.relative,model_domain_relative,base.group_user,1,0,0,0
 access_domain_module,domain.module,model_domain_module,base.group_user,1,0,0,0
 access_domain_reimported,domain.reimported,model_domain_reimported,base.group_user,1,0,0,0

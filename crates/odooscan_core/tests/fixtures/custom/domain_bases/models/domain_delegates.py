@@ -3,6 +3,7 @@ from odoo import fields, models
 UNREAD_PARENTS = {"domain.stamped": "stamped_id"}
 STAMPED = "domain.stamped"
 DELEGATE = True
+SPLAT = {"required": True, "ondelete": "cascade"}
 
 
 class DomainUnreadInherits(models.Model):
@@ -72,3 +73,14 @@ class DomainLiteralDelegate(models.Model):
         self.search([("stamp", "=", "a")])
         self.search([("unread_id.stamp", "=", "a")])
         return self.search([("no_literal_stamp", "=", "a")])
+
+
+class DomainSplat(models.Model):
+    _name = "domain.splat"
+    _description = "Splat with no delegate"
+
+    stamped_id = fields.Many2one("domain.stamped", **SPLAT)
+    splat_stamp = fields.Char(related="stamp")
+
+    def x_lookup(self):
+        return self.search([("stamp", "=", "a")])

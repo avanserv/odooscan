@@ -2342,10 +2342,10 @@ impl<'m> Ctx<'_, 'm> {
     /// Whether a parent the scan cannot read, of a class in `scope` of `model` or of a model it
     /// inherits or delegates to, may give `model` a field. For a model only modules outside `scope`
     /// define, any class of it, its parents or `base` in any indexed module is judged, since any
-    /// may be installed.
+    /// may be installed. A bare `**` names no delegate: see `Index::named_unread_delegate`.
     fn parents_may_give(&self, model: &str, scope: &Scope) -> bool {
         self.index.hidden_field_parents(model, scope)
-            || self.index.unread_delegate(model, scope)
+            || self.index.named_unread_delegate(model, scope)
             || self.index.hidden_outside(model, scope)
     }
 
@@ -4418,11 +4418,12 @@ impl<'m> Ctx<'_, 'm> {
     /// Why the client cannot open `model` as `kind` whatever view it gets: from `ACTIVITY_IN_MAIL`
     /// its domain names `activity_ids`, and the server refuses a field the model lacks. A field only
     /// a module outside `depends` adds counts, as that module may be installed, and so may one that
-    /// a delegate the scan cannot read gives, or a hidden parent of a delegate.
+    /// a delegate the scan cannot read gives, or a hidden parent of a delegate. A bare `**` names
+    /// no delegate: see `Index::named_unread_delegate`.
     fn activity_gap(&self, model: &str, kind: &str) -> Option<String> {
         let searched = kind == "activity" && self.series.is_some_and(|s| s >= ACTIVITY_IN_MAIL);
         let absent = || {
-            !self.index.unread_delegate(model, self.scope)
+            !self.index.named_unread_delegate(model, self.scope)
                 && !self.index.hidden_parents(model, self.scope)
                 && matches!(self.index.field(model, "activity_ids", self.scope), Err(None))
         };

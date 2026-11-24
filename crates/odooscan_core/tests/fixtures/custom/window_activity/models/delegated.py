@@ -4,6 +4,7 @@ PARENTS = {"res.partner": "partner_id"}
 PARTNER = "res.partner"
 DELEGATE = True
 OPTIONS = {"delegate": True, "required": True, "ondelete": "cascade"}
+SPLAT = {"required": True, "ondelete": "cascade"}
 
 
 class WindowDelegated(models.Model):
@@ -79,3 +80,18 @@ class WindowUnreadWhole(models.Model):
     _inherits = {"window.unread.part": "part_id"}
 
     part_id = fields.Many2one("window.unread.part", required=True, ondelete="cascade")
+
+
+class WindowSplatParent(models.Model):
+    _name = "window.splat.parent"
+    _description = "Window splat parent"
+
+    partner_id = fields.Many2one("res.partner", **SPLAT)
+
+
+class WindowSplatChild(models.Model):
+    _name = "window.splat.child"
+    _description = "Window splat child"
+    _inherits = {"window.splat.parent": "parent_id"}
+
+    parent_id = fields.Many2one("window.splat.parent", required=True, ondelete="cascade")
