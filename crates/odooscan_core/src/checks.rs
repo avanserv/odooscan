@@ -121,6 +121,11 @@ const NESTED_RECORDS: Series = Series { major: 15, minor: 1 };
 /// type. saas~11.2 to 11.4 load it with no default, which the rule leaves unreported.
 const ACTIVITY_IN_MAIL: Series = Series { major: 12, minor: 4 };
 
+/// The first series whose activity view reads its column labels from the `activity_state` field
+/// (`97cc94269d98`, 18.0 `addons/mail/static/src/views/web/activity/activity_renderer.js:75`), so
+/// opening it fails on a model without that field. The 16.0 renderer hard-codes the labels.
+const ACTIVITY_STATE_READ: Series = Series { major: 16, minor: 1 };
+
 /// The first series that names the `tree` type `list` (`e401171c804b`): no view can be a tree (18.0
 /// `odoo/addons/base/models/ir_ui_view.py:153-160`), nothing generates one, and the client refuses
 /// a type it has no view info for
@@ -4257,7 +4262,7 @@ impl<'m> Ctx<'_, 'm> {
         }
     }
 
-    /// An unread data file may hold a view, but not `activity_ids`: a field it adds is named `x_`.
+    /// An unread data file may hold a view, but no activity field: a field it adds is named `x_`.
     fn view_mode(
         &self,
         out: &mut Out<'m>,
@@ -4416,21 +4421,29 @@ impl<'m> Ctx<'_, 'm> {
     }
 
     /// Why the client cannot open `model` as `kind` whatever view it gets: from `ACTIVITY_IN_MAIL`
-    /// its domain names `activity_ids`, and the server refuses a field the model lacks. A field only
-    /// a module outside `depends` adds counts, as that module may be installed, and so may one that
-    /// a delegate the scan cannot read gives, or a hidden parent of a delegate, or an unread parent
-    /// of a class outside `depends`. A bare `**` names no delegate: see
-    /// `Index::named_unread_delegate`.
+    /// its domain names `activity_ids`, which the server refuses on a model without it, and from
+    /// `ACTIVITY_STATE_READ` its renderer reads the selection of `activity_state`. A field only a
+    /// module outside `depends` adds counts, as that module may be installed, and so may one that a
+    /// delegate the scan cannot read gives, or a hidden parent of a delegate, or an unread parent of
+    /// a class outside `depends`. A bare `**` names no delegate: see `Index::named_unread_delegate`.
     fn activity_gap(&self, model: &str, kind: &str) -> Option<String> {
-        let searched = kind == "activity" && self.series.is_some_and(|s| s >= ACTIVITY_IN_MAIL);
-        let absent = || {
-            !self.index.named_unread_delegate(model, self.scope)
-                && !self.index.hidden_parents(model, self.scope)
-                && !self.index.parents_outside(model, self.scope)
-                && matches!(self.index.field(model, "activity_ids", self.scope), Err(None))
-        };
-        (searched && absent()).then(|| {
-            format!("{model} has no field activity_ids, which the activity view searches; inherit mail.activity.mixin")
+        let series = self.series.filter(|s| kind == "activity" && *s >= ACTIVITY_IN_MAIL)?;
+        if self.index.named_unread_delegate(model, self.scope)
+            || self.index.hidden_parents(model, self.scope)
+            || self.index.parents_outside(model, self.scope)
+        {
+            return None;
+        }
+        let lacks = |field| matches!(self.index.field(model, field, self.scope), Err(None));
+        if lacks("activity_ids") {
+            return Some(format!(
+                "{model} has no field activity_ids, which the activity view searches; inherit mail.activity.mixin"
+            ));
+        }
+        (series >= ACTIVITY_STATE_READ && lacks("activity_state")).then(|| {
+            format!(
+                "{model} has no field activity_state, which the activity view reads its column labels from; inherit mail.activity.mixin"
+            )
         })
     }
 

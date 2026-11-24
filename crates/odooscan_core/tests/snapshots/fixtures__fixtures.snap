@@ -2192,6 +2192,7 @@ custom/window_activity/views/actions.xml:36:33: OD318 window.delegated.bare has 
 custom/window_activity/views/actions.xml:66:33: OD318 window.unread.options has no field activity_ids, which the activity view searches; inherit mail.activity.mixin
 custom/window_activity/views/actions.xml:84:33: OD318 window.splat.child has no field activity_ids, which the activity view searches; inherit mail.activity.mixin
 custom/window_activity/views/actions.xml:114:33: OD318 window.bridged.read has no field activity_ids, which the activity view searches; inherit mail.activity.mixin
+custom/window_activity/views/actions.xml:120:33: OD318 window.halved has no field activity_state, which the activity view reads its column labels from; inherit mail.activity.mixin
 custom/window_activity_bridge/models/bridges.py:10:7: OD209 module window_activity already defines model 'window.bridged.listed', and this class replaces it; extend it with _inherit = 'window.bridged.listed'
 custom/window_activity_bridge/models/bridges.py:17:41: OD201 no indexed module defines model 'window.tracker.mixin'
 custom/window_activity_bridge/models/bridges.py:24:34: OD201 no indexed module defines model 'window.tracker'
