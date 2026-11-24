@@ -37,3 +37,4 @@ access_window_shared,window.shared,model_window_shared,base.group_user,1,1,1,1
 access_window_staged,window.staged,model_window_staged,base.group_user,1,1,1,1
 access_window_untyped,window.untyped,model_window_untyped,base.group_user,1,1,1,1
 access_window_rehomed,window.rehomed,model_window_rehomed,base.group_user,1,1,1,1
+access_window_typed,window.typed,model_window_typed,base.group_user,1,1,1,1

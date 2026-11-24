@@ -326,6 +326,8 @@ impl Walker<'_> {
                 .map(str::to_owned),
             has_arch: true,
             kind: Some(QWEB.to_owned()),
+            // The loader writes `type` qweb on every template's record.
+            written_type: Some(QWEB.to_owned()),
             ..ViewFact::default()
         };
         self.facts.view_keys.extend(node.attribute("key").map(str::to_owned));
@@ -722,13 +724,16 @@ impl Walker<'_> {
         match name {
             "model" => {
                 let pos = self.pos(field);
-                let model = view_model(field);
+                let model = char_value(field);
                 view.model_unread = model.is_none();
                 view.model = model.flatten().map(|value| Spanned { value, pos });
             }
             "inherit_id" => view.inherit = field.attribute("ref").filter(|r| !r.is_empty()).map(str::to_owned),
             // A `type` wins over the arch's root wherever the record sets it.
-            "type" => view.kind = field.text().map(|t| t.trim().to_owned()),
+            "type" => {
+                view.kind = field.text().map(|t| t.trim().to_owned());
+                view.written_type = char_value(field).flatten().filter(|t| !t.is_empty());
+            }
             // Odoo writes `arch_base` through to `arch`.
             "arch_base" => view.arch_unread = true,
             "arch" | "arch_db" => self.view_arch(field, view),
@@ -1761,10 +1766,10 @@ fn arch_from_elements(field: Node) -> bool {
     !set("file") && text.all(|t| t.trim().is_empty())
 }
 
-/// The model a view's `model` field writes, None when only a run can tell. Odoo reads `search`, then
-/// `ref`, then `eval`, then the text, which a `file` or a `type` other than `char` replaces (18.0
-/// `odoo/tools/convert.py:99-152,390-415`).
-fn view_model(field: Node) -> Option<Option<String>> {
+/// The string a record's char or selection field writes, such as a view's `model` or `type`, None
+/// when only a run can tell. Odoo reads `search`, then `ref`, then `eval`, then the text, which a
+/// `file` or a `type` other than `char` replaces (18.0 `odoo/tools/convert.py:99-152,390-415`).
+fn char_value(field: Node) -> Option<Option<String>> {
     let set = |attr: &str| field.attribute(attr).filter(|v| !v.is_empty());
     if set("search").is_some() || set("ref").is_some() {
         return None;
@@ -4223,6 +4228,34 @@ mod tests {
         assert_eq!(kind(&arch("xpath")), None);
         let typed = format!(r#"{}<field name="type">qweb</field>"#, arch("div"));
         assert_eq!(kind(&typed).as_deref(), Some(QWEB));
+    }
+
+    #[test]
+    fn keeps_the_written_type_apart_from_the_root() {
+        let written =
+            |fields: &str| view(&format!(r#"<record id="x" model="ir.ui.view">{fields}</record>"#)).written_type;
+        let arch = r#"<field name="arch" type="xml"><form/></field>"#;
+        let typed = r#"<field name="type"> gantt </field>"#;
+        assert_eq!(written(&format!("{typed}{arch}")).as_deref(), Some("gantt"));
+        assert_eq!(written(&format!("{arch}{typed}")).as_deref(), Some("gantt"));
+        assert_eq!(written(arch), None);
+        assert_eq!(written(&format!(r#"{arch}<field name="type"></field>"#)), None);
+        // Odoo stores what `eval` gives over the text, and only a run tells a computed one.
+        assert_eq!(
+            written(r#"<field name="type" eval="'map'">gantt</field>"#).as_deref(),
+            Some("map")
+        );
+        for field in [r#"eval="kind""#, r#"ref="a.b""#, r#"search="[]""#] {
+            assert_eq!(
+                written(&format!(r#"<field name="type" {field}>gantt</field>"#)),
+                None,
+                "{field}"
+            );
+        }
+        assert_eq!(
+            view(r#"<template id="t"><div/></template>"#).written_type.as_deref(),
+            Some(QWEB)
+        );
     }
 
     #[test]

@@ -2368,7 +2368,8 @@ impl<'m> Index<'m> {
 
     /// The entry of `view` in `view_types`, if it has one, with `primary` the mode its id is left
     /// with. Odoo gives a view with a parent the type of its tree's root, so with a view above it not
-    /// indexed, or a parent above the top not read, its own root says nothing.
+    /// indexed, it counts under the type its record writes, which Odoo keeps over the parent's, else
+    /// under any. With a parent above the top not read, its own root says nothing.
     fn view_type(
         &self,
         module: &'m Module,
@@ -2382,7 +2383,7 @@ impl<'m> Index<'m> {
         let start = id.or(parent);
         let top = start.as_ref().and_then(|start| self.view_top(start.clone()));
         if start.is_some() && top.is_none() {
-            return Some((model, None));
+            return Some((model, view.written_type.as_deref()));
         }
         let top = top.map(|(_, nodes)| nodes).unwrap_or_default();
         let kind = top.iter().find_map(|n| n.fact.kind.as_deref());
@@ -7609,6 +7610,34 @@ mod tests {
         assert!(index.view_types.contains(&("res.partner", None)));
         modules[1].data.clear();
         assert!(Index::build(&modules, None).view_types.is_empty());
+    }
+
+    #[test]
+    fn a_typed_clone_of_an_unindexed_parent_serves_its_written_type() {
+        let types = |typed: &str| {
+            let mut modules = [module("a", "{'version': '18.0.1.0', 'depends': []}")];
+            let clone = format!(
+                r#"<odoo><record id="clone" model="ir.ui.view">
+                <field name="model">res.partner</field>
+                <field name="inherit_id" ref="ghost.v"/>
+                <field name="mode">primary</field>{typed}
+                <field name="arch" type="xml"><xpath expr="." position="inside"/></field>
+            </record></odoo>"#
+            );
+            modules[0].data.push(data_file(
+                "views/views.xml",
+                xml::analyze(&clone, Series::parse("18.0")),
+            ));
+            let index = Index::build(&modules, None);
+            let owned = index
+                .view_types
+                .iter()
+                .map(|&(m, t)| (m.to_owned(), t.map(str::to_owned)));
+            owned.collect::<Vec<_>>()
+        };
+        let partner = |t: Option<&str>| vec![("res.partner".to_owned(), t.map(str::to_owned))];
+        assert_eq!(types(r#"<field name="type">gantt</field>"#), partner(Some("gantt")));
+        assert_eq!(types(""), partner(None));
     }
 
     #[test]
