@@ -15,6 +15,7 @@ class MailActivityMixin(models.AbstractModel):
     _name = "mail.activity.mixin"
 
     activity_ids = fields.One2many("res.partner", "parent_id")
+    activity_state = fields.Selection([("overdue", "Overdue"), ("today", "Today"), ("planned", "Planned")])
 
 
 class Base(models.AbstractModel):

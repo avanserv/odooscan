@@ -28,4 +28,23 @@
             </field>
         </field>
     </record>
+
+    <record id="view_halved_activity" model="ir.ui.view">
+        <field name="model">legacy.halved</field>
+        <field name="arch" type="xml">
+            <activity string="Halved">
+                <templates>
+                    <div t-name="activity-box">
+                        <field name="name"/>
+                    </div>
+                </templates>
+            </activity>
+        </field>
+    </record>
+
+    <record id="action_halved" model="ir.actions.act_window">
+        <field name="name">action_halved</field>
+        <field name="res_model">legacy.halved</field>
+        <field name="view_mode">tree,activity</field>
+    </record>
 </odoo>

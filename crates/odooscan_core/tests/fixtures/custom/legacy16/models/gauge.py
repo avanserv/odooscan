@@ -23,3 +23,11 @@ class LegacyBase(models.AbstractModel):
     _inherit = "base"
 
     legacy_mark = fields.Char()
+
+
+class LegacyHalved(models.Model):
+    _name = "legacy.halved"
+    _description = "Legacy halved"
+
+    name = fields.Char()
+    activity_ids = fields.Many2many("res.partner")

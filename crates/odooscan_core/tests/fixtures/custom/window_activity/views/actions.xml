@@ -113,4 +113,22 @@
         <field name="res_model">window.bridged.read</field>
         <field name="view_mode">list,activity</field>
     </record>
+
+    <record id="action_halved" model="ir.actions.act_window">
+        <field name="name">action_halved</field>
+        <field name="res_model">window.halved</field>
+        <field name="view_mode">list,activity</field>
+    </record>
+
+    <record id="action_stated" model="ir.actions.act_window">
+        <field name="name">action_stated</field>
+        <field name="res_model">window.stated</field>
+        <field name="view_mode">list,activity</field>
+    </record>
+
+    <record id="action_halved_unread" model="ir.actions.act_window">
+        <field name="name">action_halved_unread</field>
+        <field name="res_model">window.halved.unread</field>
+        <field name="view_mode">list,activity</field>
+    </record>
 </odoo>

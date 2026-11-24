@@ -19,3 +19,6 @@ access_window_bridged_listed,window.bridged.listed,model_window_bridged_listed,b
 access_window_bridged_mixin,window.bridged.mixin,model_window_bridged_mixin,base.group_user,1,1,1,1
 access_window_bridged_delegate,window.bridged.delegate,model_window_bridged_delegate,base.group_user,1,1,1,1
 access_window_bridged_read,window.bridged.read,model_window_bridged_read,base.group_user,1,1,1,1
+access_window_halved,window.halved,model_window_halved,base.group_user,1,1,1,1
+access_window_stated,window.stated,model_window_stated,base.group_user,1,1,1,1
+access_window_halved_unread,window.halved.unread,model_window_halved_unread,base.group_user,1,1,1,1

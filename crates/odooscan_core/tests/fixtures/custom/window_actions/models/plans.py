@@ -163,6 +163,7 @@ class WindowTracked(models.Model):
 
     name = fields.Char()
     activity_ids = fields.Many2many("res.partner")
+    activity_state = fields.Selection([("overdue", "Overdue"), ("today", "Today"), ("planned", "Planned")])
 
 
 class WindowPostponed(models.Model):
