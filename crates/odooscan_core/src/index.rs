@@ -3385,15 +3385,15 @@ impl<'m> Index<'m> {
     /// Whether a spec of a loaded view or template of `module` locates an element that, of the
     /// modules of `scope`, only those of `set` add to the tree it extends. A spec locating what no
     /// readable view outside `set` adds counts too, when `set` extends the tree with a view whose
-    /// arch the scan did not read (`arch_base`, `search`, `ref`, `eval`, file or text), or loads an
-    /// unreadable data file that may hold one, or an unreadable template file, which may extend any
-    /// template tree: Odoo combines every extension below the root. So it does when `set` holds a
-    /// stray, a view naming its parent in a form the scan does not read, which may extend any tree
-    /// of its model. A spec on a tree the index does not hold up to the root counts, as it may
-    /// locate what `set` adds, unless it is a view tree the index holds all the way up from modules
-    /// parsing every data file that may hold a view, each naming its parent and model in a form the
-    /// scan reads, with an unread arch on the way: that spec counts only when `set` loads a view of
-    /// a model on the way or of an unread model, or an unreadable data file that may hold a view.
+    /// arch the scan did not read (`arch_base`, `search`, `ref`, `eval`, file, text, a cell of an
+    /// `ir.ui.view` CSV), loads an unreadable data file that may hold one or an unreadable template
+    /// file, or holds a stray, a view naming its parent in a form the scan does not read, as by name
+    /// or database id in an `ir.ui.view` CSV, which may extend any tree of its model: Odoo combines
+    /// all extensions below the root. A spec on a tree the index does not hold up to the root counts,
+    /// unless the index holds that view tree all the way up from modules parsing every data file
+    /// that may hold a view, each naming its parent and model in a form the scan reads, with an
+    /// unread arch on the way: that spec counts only when `set` loads a view of a model on the way or
+    /// of an unread model, or an unreadable file that may hold one.
     pub fn locates_in(&self, module: usize, set: &[bool], scope: &Scope) -> bool {
         let m = &self.modules[module];
         let name = m.name.as_str();
@@ -4839,9 +4839,10 @@ impl<'m> Inheritance<'m> {
     }
 
     /// The root of the inheritance tree above `id`, or None when an id on the way is not defined,
-    /// its arch was not read, as when written to `arch_base`, by `search`, `ref`, `eval`, a file or
-    /// text, or it names its parent by a `search` or an `eval` other than `False`, which Odoo
-    /// resolves at load, so the tree's elements would be incomplete.
+    /// its arch was not read, as when written to `arch_base`, by `search`, `ref`, `eval`, a file,
+    /// text or a cell of an `ir.ui.view` CSV, or it names its parent by a `search`, an `eval` other
+    /// than `False`, or by name or database id in an `ir.ui.view` CSV, which Odoo resolves at load,
+    /// so the tree's elements would be incomplete.
     pub fn root(&self, mut id: String) -> Option<String> {
         for _ in 0..32 {
             let nodes = self.nodes.get(&id)?;
@@ -4912,7 +4913,8 @@ impl<'m> Inheritance<'m> {
     /// The models of every node on the way up from `id`, None for a node that names no model. None
     /// when the index does not hold an id on the way from the module the id names, that module
     /// loads a data file that may hold a view and does not parse, or a node names its parent or its
-    /// model in a form the scan does not read, so a model on the way is unknown.
+    /// model in a form the scan does not read, such as a `search`, or a parent by name or database
+    /// id in an `ir.ui.view` CSV, so a model on the way is unknown.
     pub fn models(&self, mut id: String, modules: &[Module]) -> Option<Vec<Option<&'m str>>> {
         let mut models = vec![];
         for _ in 0..32 {
@@ -7045,8 +7047,8 @@ mod tests {
         };
         let manifest = |depends: &str| format!("{{'version': '18.0.1.0', 'depends': [{depends}]}}");
         // Whether main's spec on `haze_block` locates in `member`, haze writing `haze_arch` and
-        // loading a file at `lost` the scan cannot read.
-        let locates = |haze_arch: &str, lost: Option<&str>, member: &str| {
+        // loading `files`.
+        let files_locate = |haze_arch: &str, files: Vec<SourceFile<crate::facts::DataFacts>>, member: &str| {
             let mut modules = [
                 module("base", &manifest("")),
                 module("haze", &manifest("'base'")),
@@ -7060,11 +7062,7 @@ mod tests {
                 </record>"#,
             ));
             modules[1].data.push(view(&extension("view_haze", haze_arch)));
-            let unreadable = crate::facts::DataFacts {
-                unreadable: true,
-                ..Default::default()
-            };
-            modules[1].data.extend(lost.map(|rel| data_file(rel, unreadable)));
+            modules[1].data.extend(files);
             modules[2]
                 .data
                 .push(view(&extension("view_veil", &adds("arch", "veil_block"))));
@@ -7075,6 +7073,18 @@ mod tests {
             let main = index.by_name["main"];
             let set: Vec<bool> = modules.iter().map(|m| m.name == member).collect();
             index.locates_in(main, &set, &index.scope(main))
+        };
+        // The same, haze loading a file at `lost` the scan cannot read.
+        let locates = |haze_arch: &str, lost: Option<&str>, member: &str| {
+            let unreadable = || crate::facts::DataFacts {
+                unreadable: true,
+                ..Default::default()
+            };
+            files_locate(
+                haze_arch,
+                lost.map(|rel| data_file(rel, unreadable())).into_iter().collect(),
+                member,
+            )
         };
         assert!(locates(&adds("arch_base", "haze_block"), None, "haze"));
         assert!(!locates(&adds("arch_base", "haze_block"), None, "veil"));
@@ -7103,6 +7113,29 @@ mod tests {
             "haze"
         ));
         assert!(locates(&adds("arch", "haze_other"), Some("views/lost.xml"), "haze"));
+        // A readable `ir.ui.view` CSV holds its arch in a cell the scan does not parse.
+        let csv = |rel: &str, model: &str, header: &str, row: &str| {
+            let text = format!("{header}\n{row}\n");
+            vec![data_file(rel, crate::csvdata::analyze(&text, model, &[]))]
+        };
+        let arch = r#""<xpath expr=""//div[@id='notes']"" position=""after""><div id=""haze_block""/></xpath>""#;
+        let row = format!("view_haze_csv,res.partner,base.view_partner_simple,{arch}");
+        let header = "id,model,inherit_id:id,arch";
+        let view_csv = || csv("data/ir.ui.view.csv", "ir.ui.view", header, &row);
+        assert!(files_locate("", view_csv(), "haze"));
+        assert!(!files_locate("", view_csv(), "veil"));
+        assert!(!files_locate(
+            "",
+            csv("data/res.partner.csv", "res.partner", header, &row),
+            "haze"
+        ));
+        let by_name = csv(
+            "data/ir.ui.view.csv",
+            "ir.ui.view",
+            "id,model,inherit_id,arch",
+            &format!("view_haze_csv,res.partner,res.partner.simple,{arch}"),
+        );
+        assert!(files_locate("", by_name, "haze"));
     }
 
     #[test]

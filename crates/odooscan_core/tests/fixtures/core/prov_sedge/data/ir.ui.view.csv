@@ -1,0 +1,2 @@
+id,name,model,inherit_id:id,arch
+view_partner_sedge,res.partner.sedge,res.partner,base.view_partner_simple,"<xpath expr=""//div[@id='notes']"" position=""after""><div id=""sedge_block""/></xpath>"

@@ -3,7 +3,7 @@ use ruff_text_size::TextSize;
 use crate::domain;
 use crate::facts::{
     AccessRow, ActionValue, DataFacts, FieldWrite, Flag, Perms, Pos, RawDiag, RecordFact, RecordWrite, RuleFact,
-    RuleGroups, Spanned, WrittenValue, XmlDef, XmlRef,
+    RuleGroups, Spanned, ViewFact, WrittenValue, XmlDef, XmlRef,
 };
 use crate::grants::PUBLIC_GROUPS;
 use crate::python::Locator;
@@ -121,6 +121,9 @@ pub fn analyze(text: &str, model: &str, strict: &[LineBreaks]) -> DataFacts {
         row_write(&mut facts, &row, &columns, model, pos);
         access_row(&mut facts, &row, &columns, model, pos);
         rule_row(&mut facts, &row, &columns, model, pos);
+        if model == "ir.ui.view" {
+            view_row(&mut facts, &row, &columns, pos);
+        }
     }
     facts
 }
@@ -155,12 +158,17 @@ fn nested_column(column: &str) -> bool {
     database_field(column).is_none() && column.contains('/')
 }
 
-/// What a row writes to the fields of its record. A database id or a nested `a/b` column replaces
-/// the field with what only a run tells, and an empty cell clears it. A row with values only in
-/// nested columns continues the record above, and Odoo skips a row of empty cells.
-fn row_write(facts: &mut DataFacts, row: &csv::StringRecord, columns: &[(&str, bool)], model: &str, pos: Pos) {
+/// Whether a row is no record of its own: one with values only in nested columns continues the
+/// record above, and Odoo skips a row of empty cells.
+fn continues(row: &csv::StringRecord, columns: &[(&str, bool)]) -> bool {
     let mut cells = columns.iter().zip(row.iter());
-    if !cells.any(|((column, _), cell)| !nested_column(column) && !cell.is_empty()) {
+    !cells.any(|((column, _), cell)| !nested_column(column) && !cell.is_empty())
+}
+
+/// What a row writes to the fields of its record. A database id or a nested `a/b` column replaces
+/// the field with what only a run tells, and an empty cell clears it.
+fn row_write(facts: &mut DataFacts, row: &csv::StringRecord, columns: &[(&str, bool)], model: &str, pos: Pos) {
+    if continues(row, columns) {
         return;
     }
     let mut fields = vec![];
@@ -227,6 +235,15 @@ fn row_id(row: &csv::StringRecord, columns: &[(&str, bool)]) -> Option<String> {
 
 fn cell<'r>(row: &'r csv::StringRecord, columns: &[(&str, bool)], name: &str) -> &'r str {
     column(columns, name).and_then(|i| row.get(i)).unwrap_or_default()
+}
+
+/// Unlike `cell`, the last column naming `field` with any subfield, such as `field:id` or
+/// `field/.id`: the import writes that cell as it is to a field that is not relational (18.0
+/// `odoo/models.py:1522-1525`).
+fn field_cell<'r>(row: &'r csv::StringRecord, columns: &[(&str, bool)], field: &str) -> &'r str {
+    let root = |c: &str| database_field(c).unwrap_or(c).split('/').next() == Some(field);
+    let i = columns.iter().rposition(|&(c, _)| root(c));
+    i.and_then(|i| row.get(i)).unwrap_or_default()
 }
 
 /// What an access row grants, or None for a file of another model. Odoo checks active rows only,
@@ -361,6 +378,67 @@ fn rule_groups(row: &csv::StringRecord, columns: &[(&str, bool)], field: &str) -
         };
     }
     RuleGroups::default()
+}
+
+/// A row of an `ir.ui.view` file. Its arch is the text of a cell, which the scan does not parse, so
+/// a row writing one leaves the view's elements unread. Without a `mode` cell, the view is an
+/// extension when it has a parent (18.0 `odoo/addons/base/models/ir_ui_view.py:461-466`, 20.0
+/// `:580`).
+fn view_row(facts: &mut DataFacts, row: &csv::StringRecord, columns: &[(&str, bool)], pos: Pos) {
+    if continues(row, columns) {
+        return;
+    }
+    let (inherit, unread_parent) = view_parent(row, columns);
+    let extends = inherit.is_some() || unread_parent;
+    let model = field_cell(row, columns, "model").trim();
+    let kind = Some(field_cell(row, columns, "type").to_lowercase()).filter(|k| !k.is_empty());
+    let archs = ["arch", "arch_db", "arch_base"];
+    facts.views.push(ViewFact {
+        id: row_id(row, columns),
+        model: (!model.is_empty()).then(|| Spanned {
+            value: model.to_owned(),
+            pos,
+        }),
+        inherit,
+        arch_unread: archs.iter().any(|c| !field_cell(row, columns, c).is_empty()),
+        kind,
+        primary: view_mode(field_cell(row, columns, "mode")).unwrap_or(Some(!extends)),
+        unread_parent,
+        ..ViewFact::default()
+    });
+}
+
+/// The parent a view row names by XML id, and whether it names one by name or database id, which
+/// only a run resolves. The import reads an empty cell as no parent, and an XML id or a database id
+/// of `0`, `false` or `no` too (18.0 `odoo/addons/base/models/ir_fields.py:328-336,541-570`).
+fn view_parent(row: &csv::StringRecord, columns: &[(&str, bool)]) -> (Option<String>, bool) {
+    let mut inherit = None;
+    let mut unread = false;
+    for (&(column, is_ref), cell) in columns.iter().zip(row.iter()) {
+        let falsy = ["", "0", "false", "no"].contains(&cell.to_lowercase().as_str());
+        if column == "inherit_id" && is_ref {
+            inherit = inherit.or((!falsy).then(|| cell.to_owned()));
+        } else if column == "inherit_id" {
+            unread |= !cell.is_empty();
+        } else if database_field(column) == Some("inherit_id") {
+            unread |= !falsy;
+        }
+    }
+    let unread = unread && inherit.is_none();
+    (inherit, unread)
+}
+
+/// What a `mode` cell gives `primary`, None without one. The import matches a selection to its
+/// values and labels in any case, and to the labels' translations, which only a run reads (18.0
+/// `odoo/addons/base/models/ir_fields.py:473-490`).
+fn view_mode(cell: &str) -> Option<Option<bool>> {
+    let mode = cell.to_lowercase();
+    match mode.as_str() {
+        "" => None,
+        "extension" | "extension view" => Some(Some(false)),
+        "primary" | "base view" => Some(Some(true)),
+        _ => Some(None),
+    }
 }
 
 /// Where Odoo's import of the CSV `text` fails, and why. It reads every row before it loads one,
@@ -1171,6 +1249,86 @@ mod tests {
         assert_eq!(defs, ["r", "s"]);
         assert_eq!(silent.refs.len(), 1);
         assert_eq!(silent.refs[0].id, "base.p");
+    }
+
+    fn views(text: &str, model: &str) -> Vec<ViewFact> {
+        analyze(text, model, &[]).views
+    }
+
+    fn view(header: &str, row: &str) -> ViewFact {
+        let mut views = views(&format!("{header}\n{row}\n"), "ir.ui.view");
+        assert_eq!(views.len(), 1);
+        views.remove(0)
+    }
+
+    #[test]
+    fn an_ir_ui_view_row_gives_a_view() {
+        let header = "id,name,model,inherit_id:id,arch";
+        let v = view(header, "v,n,res.partner,base.p,<div/>");
+        assert_eq!(v.id.as_deref(), Some("v"));
+        assert_eq!(v.model.map(|m| m.value).as_deref(), Some("res.partner"));
+        assert_eq!(v.inherit.as_deref(), Some("base.p"));
+        assert!(v.arch_unread && !v.has_arch && !v.unread_parent && !v.model_unread);
+        assert_eq!(v.primary, Some(false));
+        for row in [
+            "v,n,res.partner,false,<div/>",
+            "v,n,res.partner,,<div/>",
+            "v,n,res.partner,No,<div/>",
+        ] {
+            let v = view(header, row);
+            assert!(v.inherit.is_none() && !v.unread_parent);
+            assert_eq!(v.primary, Some(true));
+        }
+        let empty = view(header, "v,n,,base.p,");
+        assert!(empty.model.is_none() && !empty.model_unread && !empty.arch_unread);
+    }
+
+    #[test]
+    fn a_parent_by_name_or_database_id_is_unread() {
+        for header in ["id,inherit_id", "id,inherit_id/.id", "id,inherit_id.id"] {
+            let v = view(header, "v,7");
+            assert!(v.unread_parent && v.inherit.is_none());
+            assert_eq!(v.primary, Some(false));
+        }
+        assert!(!view("id,inherit_id/.id", "v,0").unread_parent);
+        assert!(view("id,inherit_id", "v,false").unread_parent);
+    }
+
+    #[test]
+    fn a_view_row_reads_its_mode_type_and_model() {
+        let header = "id,inherit_id:id,mode,type";
+        assert_eq!(view(header, "v,base.p,Base View,Form").primary, Some(true));
+        assert_eq!(view(header, "v,,EXTENSION,").primary, Some(false));
+        assert_eq!(view(header, "v,base.p,Vue de base,").primary, None);
+        assert_eq!(view(header, "v,base.p,,Form").kind.as_deref(), Some("form"));
+        assert!(view(header, "v,base.p,,").kind.is_none());
+        // `model` is a char field, so the import writes the cell whatever subfield the column names.
+        for header in ["id,model:id", "id,model/.id", "id,model.id", "id,model/id"] {
+            let v = view(header, "v,res.partner");
+            assert!(!v.model_unread);
+            assert_eq!(v.model.map(|m| m.value).as_deref(), Some("res.partner"));
+        }
+        let last = view(
+            "id,inherit_id:id,model,model:id,type:id,mode/.id",
+            "v,base.p,res.users,res.partner,Form,primary",
+        );
+        assert_eq!(last.model.map(|m| m.value).as_deref(), Some("res.partner"));
+        assert_eq!(last.kind.as_deref(), Some("form"));
+        assert_eq!(last.primary, Some(true));
+    }
+
+    #[test]
+    fn any_arch_cell_is_unread() {
+        assert!(view("id,arch_db", "v,<form/>").arch_unread);
+        assert!(view("id,arch_base", "v,<form/>").arch_unread);
+        assert!(view("id,arch:id", "v,<form/>").arch_unread);
+        assert!(!view("id,name", "v,n").arch_unread);
+    }
+
+    #[test]
+    fn only_a_record_row_of_an_ir_ui_view_file_gives_a_view() {
+        assert!(views("id,arch,lines/name\n,,x\n", "ir.ui.view").is_empty());
+        assert!(views("id,name,inherit_id:id,arch\nv,n,base.p,<div/>\n", "res.partner").is_empty());
     }
 
     #[test]
