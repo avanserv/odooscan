@@ -3336,15 +3336,15 @@ impl<'m> Index<'m> {
         self.template_losers.iter().any(|&mi| set[mi])
     }
 
-    /// Whether a module of `set` loads a view of one of `models`, a view without one matching None.
-    /// Read from the data files the view index reads, so a view without an XML id counts.
+    /// Whether a module of `set` loads a view of one of `models`, a view without one matching None,
+    /// and one whose model the scan does not read matching any. Read from the data files the view
+    /// index reads, so a view without an XML id counts.
     fn has_view_of(&self, set: &[bool], models: &[Option<&str>]) -> bool {
         let mut modules = self.modules.iter().enumerate().filter(|&(mi, _)| set[mi]);
         modules.any(|(_, module)| {
             let files = loaded_data(module, module.series.or(self.default_series));
-            let views = files.flat_map(|f| &f.facts.views);
-            let mut views = views.map(|v| v.model.as_ref().map(|m| m.value.as_str()));
-            views.any(|model| models.contains(&model))
+            let mut views = files.flat_map(|f| &f.facts.views);
+            views.any(|v| v.model_unread || models.contains(&v.model.as_ref().map(|m| m.value.as_str())))
         })
     }
 
@@ -3355,9 +3355,10 @@ impl<'m> Index<'m> {
     /// file it cannot read, which may extend any template tree: Odoo combines every extension below
     /// the root. A spec on a tree whose way up to the root the index does not hold counts, as it may
     /// locate what `set` adds, unless it is a view tree whose views the index holds all the way up
-    /// from modules that each parse every data file that may hold a view, each naming its parent in
-    /// a form the scan reads, with an arch it did not read on the way: that spec counts only when
-    /// `set` loads a view of a model on the way, or a data file it cannot read that may hold a view.
+    /// from modules that each parse every data file that may hold a view, each naming its parent and
+    /// its model in a form the scan reads, with an arch it did not read on the way: that spec counts
+    /// only when `set` loads a view of a model on the way, or one whose model the scan does not read,
+    /// or a data file it cannot read that may hold a view.
     pub fn locates_in(&self, module: usize, set: &[bool], scope: &Scope) -> bool {
         let m = &self.modules[module];
         let name = m.name.as_str();
@@ -3387,15 +3388,15 @@ impl<'m> Index<'m> {
     /// all the way up, `set` may add to it only with a view of a model on the way, or a data file it
     /// cannot read that may hold one: Odoo combines only extensions whose model equals their
     /// parent's. Above a view the index does not hold from its own module, or whose module loads a
-    /// data file that may hold a view and does not parse, or one whose parent the scan does not
-    /// read, any model may sit, so the spec counts.
+    /// data file that may hold a view and does not parse, or one whose parent or model the scan does
+    /// not read, any model may sit, so the spec counts, as it does when `v`'s own model is unread.
     fn view_locates_in(&self, v: &ViewFact, name: &str, set: &[bool], scope: &Scope, lost: bool) -> bool {
         let Some(parent) = &v.inherit else { return false };
         let parent = full_id(name, parent);
         let elements = v.locators.iter().map(|l| located(&l.value, name)).collect();
         self.sole(&self.views, set, scope, lost, parent.clone(), elements)
             .unwrap_or_else(|| {
-                let Some(mut models) = self.views.models(parent, self.modules) else {
+                let Some(mut models) = self.views.models(parent, self.modules).filter(|_| !v.model_unread) else {
                     return true;
                 };
                 models.push(v.model.as_ref().map(|m| m.value.as_str()));
@@ -4854,8 +4855,8 @@ impl<'m> Inheritance<'m> {
 
     /// The models of every node on the way up from `id`, None for a node that names no model. None
     /// when the index does not hold an id on the way from the module the id names, that module
-    /// loads a data file that may hold a view and does not parse, or a node names its parent in a
-    /// form the scan does not read, so a model above is unknown.
+    /// loads a data file that may hold a view and does not parse, or a node names its parent or its
+    /// model in a form the scan does not read, so a model on the way is unknown.
     pub fn models(&self, mut id: String, modules: &[Module]) -> Option<Vec<Option<&'m str>>> {
         let mut models = vec![];
         for _ in 0..32 {
@@ -4865,7 +4866,8 @@ impl<'m> Inheritance<'m> {
             // in a file the scan lost. Only the owner's node, while it loses no view file, tells.
             let owner = id.split_once('.').map(|(owner, _)| owner);
             let owned = nodes.iter().find(|n| Some(modules[n.module].name.as_str()) == owner);
-            if owned.is_none_or(|n| modules[n.module].lost_views()) || nodes.iter().any(|n| n.fact.unread_parent) {
+            let unread = nodes.iter().any(|n| n.fact.unread_parent || n.fact.model_unread);
+            if unread || owned.is_none_or(|n| modules[n.module].lost_views()) {
                 return None;
             }
             models.extend(nodes.iter().map(|n| n.fact.model.as_ref().map(|m| m.value.as_str())));
@@ -7146,6 +7148,21 @@ mod tests {
         let page = format!(r#"<template id="prov_page" inherit_id="base.other_page">{spec}</template>"#);
         assert!(locates(&template, &page, None));
         assert!(!locates(&template, &partner, None));
+        // A model only a run can tell may be any, on prov's view, on the way up or on main's own.
+        let literal = r#"<field name="model">res.country</field>"#;
+        let prov_by = |model: &str| {
+            let prov = country.replacen(literal, &format!(r#"<field name="model" {model}/>"#), 1);
+            locates(&held, &prov, None)
+        };
+        assert!(prov_by(r#"eval="'res.' + 'country'""#));
+        assert!(prov_by(r#"ref="model_res_country""#));
+        assert!(!prov_by(r#"eval="'res.country'""#));
+        let partner_model = r#"<field name="model">res.partner</field>"#;
+        let computed =
+            |records: String| records.replacen(partner_model, r#"<field name="model" eval="'res.' + 'partner'"/>"#, 1);
+        let mid = computed(record("view_mid", "res.partner", "base.view_top", &unread));
+        assert!(locates(&main(mid), &country, None));
+        assert!(locates(&computed(held.clone()), &country, None));
     }
 
     #[test]

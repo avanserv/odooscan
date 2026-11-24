@@ -1248,6 +1248,9 @@ pub struct ViewFact {
     /// `inherit_id` holds a parent `inherit` does not read, so what the view takes from it, such as
     /// its type, is out of reach.
     pub unread_parent: bool,
+    /// The `model` field gives its model in a form only a run can tell, such as a `ref`, so `model`
+    /// is None though the view may have one.
+    pub model_unread: bool,
     /// What a `<template>` adds to the bundle its root names, where a template is one: its scripts
     /// as files and its literal `t-call` as an `include`, placed as its specs place them.
     pub assets: Vec<AssetEntry>,
