@@ -971,6 +971,7 @@ custom/legacy17/models/upgrade.py:10:14: OD126 invalidate_cache() no longer work
 custom/legacy17/models/upgrade.py:11:14: OD126 refresh() no longer works from saas~16.2; use self.env.invalidate_all()
 custom/legacy17/models/upgrade.py:17:17: OD125 an onchange returning a domain is ignored from saas~16.3; set the domain on the field or in the view
 custom/legacy17/partner_tagline_views.xml:1:1: OD502 'partner_tagline_views.xml' is listed under update_xml, which Odoo ignores in this series; move it to data
+custom/legacy17/views/partner_cards.xml:29:33: OD318 res.company has no primary gantt view, and nothing generates one
 custom/legacy17/views/partner_motto_views.xml:1:1: OD502 'views/partner_motto_views.xml' is listed under update_xml, which Odoo ignores in this series; move it to data
 custom/legacy17/views/partner_nickname_views.xml:1:1: OD502 'views/partner_nickname_views.xml' is listed under init_xml, which Odoo ignores in this series; move it to data
 custom/legacy17/views/partner_pages.xml:4:20: OD311 no indexed module defines template 'legacy17.partner_motto_page'
@@ -2177,6 +2178,8 @@ custom/window_actions/views/actions.xml:260:33: OD318 window.kept has no primary
 custom/window_actions/views/actions.xml:266:33: OD318 window.chained has no primary gantt view, and nothing generates one
 custom/window_actions/views/actions.xml:296:33: OD318 window.rehomed has no primary map view, and nothing generates one
 custom/window_actions/views/actions.xml:302:33: OD318 window.typed has no primary map view, and nothing generates one
+custom/window_actions/views/actions.xml:320:9: OD306 view_mode 'tree' is renamed 'list'
+custom/window_actions/views/actions.xml:320:33: OD318 window.plain has no primary tree view, and from 18.0 Odoo names the type list
 custom/window_actions/views/unlisted.xml:1:1: OD502 'views/unlisted.xml' is not in the manifest's data or demo, so Odoo never loads it
 custom/window_activity/models/delegated.py:67:33: OD201 no indexed module defines model 'window.absent'
 custom/window_activity/models/delegated.py:73:17: OD201 no indexed module defines model 'window.absent'

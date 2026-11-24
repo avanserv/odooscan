@@ -83,8 +83,9 @@ const VIEW_FIELD_KINDS: &[&str] = &["form", "tree", "kanban"];
 /// (`:1614-1621`) on the outer view.
 const ATTRIBUTE_SUBVIEW: &str = "calendar";
 
-/// View types Odoo generates for any model. `activity` is not one: `ACTIVITY_IN_MAIL` says why.
-const GENERATED_VIEWS: &[&str] = &["form", "search", "list", "tree", "pivot", "kanban", "graph"];
+/// View types Odoo generates for any model. `activity` and `tree` are not: `ACTIVITY_IN_MAIL` and
+/// `TREE_RENAMED` say why.
+const GENERATED_VIEWS: &[&str] = &["form", "search", "list", "pivot", "kanban", "graph"];
 
 /// Fields Odoo's generated calendar takes its start from, after the model's `_date_name`.
 const CALENDAR_STARTS: &[&str] = &["date", "date_start", "x_date", "x_date_start"];
@@ -119,6 +120,12 @@ const NESTED_RECORDS: Series = Series { major: 15, minor: 1 };
 /// saas~11.5 up to here `BaseModel` gives the default, and before saas~11.2 the client drops the
 /// type. saas~11.2 to 11.4 load it with no default, which the rule leaves unreported.
 const ACTIVITY_IN_MAIL: Series = Series { major: 12, minor: 4 };
+
+/// The first series that names the `tree` type `list` (`e401171c804b`): no view can be a tree (18.0
+/// `odoo/addons/base/models/ir_ui_view.py:153-160`), nothing generates one, and the client refuses
+/// a type it has no view info for
+/// (`addons/web/static/src/webclient/actions/action_service.js:1163-1178`).
+const TREE_RENAMED: Series = Series { major: 18, minor: 0 };
 
 /// The first series whose client asks the server for each view by the kind the action lists, which
 /// fails on a kind with no view (18.0 `odoo/addons/base/models/ir_ui_view.py:2710-2713`), since
@@ -4424,18 +4431,12 @@ impl<'m> Ctx<'_, 'm> {
         })
     }
 
-    /// Whether this module's series needs no view of `kind` from the model. `activity` is reported
-    /// from `ACTIVITY_IN_MAIL` only, and a module of unknown series may run below it.
-    fn generated(&self, kind: &str) -> bool {
-        GENERATED_VIEWS.contains(&kind) || (kind == "activity" && self.series.is_none_or(|s| s < ACTIVITY_IN_MAIL))
-    }
-
     /// Why opening `model` as `kind` fails. A view counts from any indexed module, in `depends` or
     /// not, as a bridge module that depends on this one may be what adds it. A default counts in
     /// scope only: a fresh database of this module lacks one from a module outside `depends`.
     fn view_gap(&self, model: &str, kind: &str) -> Option<String> {
         let types = &self.index.view_types;
-        if self.generated(kind)
+        if generated_view(kind, self.series)
             || types.contains(&(model, Some(kind)))
             || types.contains(&(model, None))
             || self.index.default_view(model, kind, self.scope)
@@ -4447,6 +4448,11 @@ impl<'m> Ctx<'_, 'm> {
         }
         if fetches_own_view(self.series) && self.index.client_views.contains(kind) {
             return None;
+        }
+        if kind == "tree" {
+            return Some(format!(
+                "{model} has no primary tree view, and from 18.0 Odoo names the type list"
+            ));
         }
         Some(format!("{model} has no primary {kind} view, and nothing generates one"))
     }
@@ -5650,6 +5656,16 @@ fn magic_era(series: Option<Series>) -> MagicEra {
         Some(s) if s < METACLASS_MAGIC => MagicEra::Setup,
         Some(s) if s >= BASE_MAGIC => MagicEra::Base,
         _ => MagicEra::Metaclass,
+    }
+}
+
+/// Whether `series` needs no view of `kind` from the model. `activity` and `tree` are reported from
+/// `ACTIVITY_IN_MAIL` and `TREE_RENAMED` only, and a module of unknown series may run below either.
+fn generated_view(kind: &str, series: Option<Series>) -> bool {
+    match kind {
+        "activity" => series.is_none_or(|s| s < ACTIVITY_IN_MAIL),
+        "tree" => series.is_none_or(|s| s < TREE_RENAMED),
+        _ => GENERATED_VIEWS.contains(&kind),
     }
 }
 
@@ -8172,11 +8188,11 @@ mod tests {
     use super::{
         CACHE_KEY_GLOBALS, MEMBER_SERIES, MagicEra, Merged, Paths, REPORT_TAG, Reach, applies, bundle_list,
         cache_global, cached_member, callable_attr, check_module, csv_label, derived_label, exported_text,
-        fetches_own_view, field_name, has_last_update, hoot_adds, keeps_set, labels_at_end, labels_before_ondelete,
-        lacks_domain, lone_add_applied, magic_era, may_clear, may_label, no_access_message, page_miss,
-        parent_path_children, patch_form, public_write_message, qweb_asset_glob, reads_model_access, reads_requires,
-        shadowed_member, static_only, stores_parent_path, surely_clears, tuple_add_refused, tuple_checked,
-        tuple_listed, types_differ, unknown_dependency, unmatched_asset, warns_on_labels,
+        fetches_own_view, field_name, generated_view, has_last_update, hoot_adds, keeps_set, labels_at_end,
+        labels_before_ondelete, lacks_domain, lone_add_applied, magic_era, may_clear, may_label, no_access_message,
+        page_miss, parent_path_children, patch_form, public_write_message, qweb_asset_glob, reads_model_access,
+        reads_requires, shadowed_member, static_only, stores_parent_path, surely_clears, tuple_add_refused,
+        tuple_checked, tuple_listed, types_differ, unknown_dependency, unmatched_asset, warns_on_labels,
     };
     use crate::facts::{AccessRow, DefinitionSource, JsName, OptionValue, Perms, Pos, RowsClear, Spanned, UNREAD_TYPE};
     use crate::index::Index;
@@ -8458,6 +8474,15 @@ mod tests {
         assert!(!fetches("9.saas~11"));
         assert!(!fetches("10.0") && !fetches("12.0") && !fetches("18.0"));
         assert!(!fetches_own_view(None));
+    }
+
+    #[test]
+    fn tree_is_generated_below_18_0_and_on_an_unknown_series() {
+        let generated = |kind: &str, series: &str| generated_view(kind, Series::parse(series));
+        assert!(generated("tree", "17.0") && generated("tree", "saas~17.4") && generated_view("tree", None));
+        assert!(!generated("tree", "18.0") && !generated("tree", "19.0") && !generated("tree", "20.0"));
+        assert!(generated("form", "18.0") && generated("list", "18.0"));
+        assert!(!generated("activity", "18.0") && generated("activity", "12.0"));
     }
 
     #[test]
