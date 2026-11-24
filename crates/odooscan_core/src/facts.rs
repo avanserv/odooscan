@@ -1201,9 +1201,9 @@ pub struct ViewFact {
     pub fields: Vec<ArchField>,
     /// The view's arch was read from its elements, so `elements` is complete.
     pub has_arch: bool,
-    /// The record writes its arch in a form the scan does not read: to `arch_base`, or by
-    /// `search`, `ref`, `eval`, a file or text rather than elements, so the view may add elements
-    /// `elements` lacks. A record writing no arch adds none.
+    /// The record writes its arch in a form the scan does not read: to `arch_base`, by `search`,
+    /// `ref`, `eval`, a file or text rather than elements, or in a cell of an `ir.ui.view` CSV, so
+    /// the view may add elements `elements` lacks. A record writing no arch adds none.
     pub arch_unread: bool,
     /// Elements the arch adds, which views extending it can locate.
     pub elements: Vec<ArchElement>,
@@ -1246,8 +1246,8 @@ pub struct ViewFact {
     /// Whether the view can be the default of its model and type, which only a `primary` one is.
     /// None when only a run can tell.
     pub primary: Option<bool>,
-    /// `inherit_id` holds a parent `inherit` does not read, so what the view takes from it, such as
-    /// its type, is out of reach.
+    /// `inherit_id` holds a parent `inherit` does not read, such as a `search` or a CSV cell naming
+    /// it by name or database id, so what the view takes from it, such as its type, is unknown.
     pub unread_parent: bool,
     /// The `model` field gives its model in a form only a run can tell, such as a `ref`, so `model`
     /// is None though the view may have one.

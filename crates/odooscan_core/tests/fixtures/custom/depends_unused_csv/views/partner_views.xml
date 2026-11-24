@@ -1,0 +1,14 @@
+<odoo>
+    <record id="view_partner_csv_note" model="ir.ui.view">
+        <field name="model">res.partner</field>
+        <field name="inherit_id" ref="base.view_partner_simple"/>
+        <field name="arch" type="xml">
+            <xpath expr="//div[@id='sedge_block']" position="inside">
+                <span>Sedge</span>
+            </xpath>
+            <xpath expr="//div[@id='tarn_block']" position="inside">
+                <span>Tarn</span>
+            </xpath>
+        </field>
+    </record>
+</odoo>
