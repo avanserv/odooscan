@@ -457,6 +457,8 @@ custom/depends_unused_implied/__manifest__.py:4:25: OD520 module 'mail' already 
 custom/depends_unused_lost_view/views/lost_views.xml:1:1: OD000 the root node was opened but never closed
 custom/depends_unused_mist/__manifest__.py:4:30: OD521 nothing of module 'prov_veil' is used, nor of what only it brings
 custom/depends_unused_reach/__manifest__.py:4:17: OD521 nothing of module 'prov_glen' is used, nor of what only it brings
+custom/depends_unused_search/__manifest__.py:4:30: OD521 nothing of module 'prov_veil' is used, nor of what only it brings
+custom/depends_unused_search/views/partner_views.xml:6:13: OD310 no <div id="moor_block"> in view base.view_partner_simple or the views that extend it
 custom/depends_unused_smudge/__manifest__.py:4:46: OD521 nothing of module 'prov_spark' is used, nor of what only it brings
 custom/domain_bases/models/domain_delegates.py:74:30: OD210 'no_literal_stamp': domain.literal.delegate has no field 'no_literal_stamp'
 custom/domain_bases/models/domain_imports.py:14:30: OD210 'no_relative_stamp': domain.relative has no field 'no_relative_stamp'
