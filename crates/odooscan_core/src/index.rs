@@ -4945,12 +4945,19 @@ impl<'m> Index<'m> {
         top.iter().find_map(|n| n.fact.kind.as_deref())
     }
 
-    /// The id and nodes of the view at the root of `id`'s inheritance.
+    /// The id and nodes of the view at the root of `id`'s inheritance. None when the top is a view
+    /// only other modules' untyped records write, none of them a parent: Odoo sets the type only at
+    /// create, from the owner's record, which gives the parent too unless a later record writes it.
     fn view_top(&self, mut id: String) -> Option<(String, &[ViewNode<'m>])> {
         for _ in 0..32 {
             let nodes = self.views.nodes.get(&id)?;
             match nodes.iter().find_map(|n| n.inherit.clone()) {
                 Some(parent) => id = parent,
+                None if owner_node(&id, nodes, self.modules).is_none()
+                    && nodes.iter().all(|n| n.fact.kind.is_none()) =>
+                {
+                    return None;
+                }
                 None => return Some((id, nodes)),
             }
         }
@@ -5064,8 +5071,7 @@ impl<'m> Inheritance<'m> {
             // Odoo writes only the fields a record gives, so one naming no model or parent may update
             // the view in place: from another module, or from the owner when its defining record sits
             // in a file the scan lost. Only the owner's node, while it loses no view file, tells.
-            let owner = id.split_once('.').map(|(owner, _)| owner);
-            let owned = nodes.iter().find(|n| Some(modules[n.module].name.as_str()) == owner);
+            let owned = owner_node(&id, nodes, modules);
             let unread = nodes.iter().any(|n| n.fact.unread_parent || n.fact.model_unread);
             if unread || owned.is_none_or(|n| modules[n.module].lost_views()) {
                 return None;
@@ -5085,8 +5091,7 @@ impl<'m> Inheritance<'m> {
     /// not read, so the stored model is unknown.
     pub fn stored(&self, id: &str, modules: &[Module]) -> Option<Vec<Option<&'m str>>> {
         let nodes = self.nodes.get(id)?;
-        let owner = id.split_once('.').map(|(owner, _)| owner);
-        let owned = nodes.iter().find(|n| Some(modules[n.module].name.as_str()) == owner);
+        let owned = owner_node(id, nodes, modules);
         if owned.is_none_or(|n| modules[n.module].lost_views()) || nodes.iter().any(|n| n.fact.model_unread) {
             return None;
         }
@@ -5110,6 +5115,12 @@ impl<'m> Inheritance<'m> {
         }
         id
     }
+}
+
+/// The node of `id` from the module its id names.
+fn owner_node<'a, 'm>(id: &str, nodes: &'a [ViewNode<'m>], modules: &[Module]) -> Option<&'a ViewNode<'m>> {
+    let owner = id.split_once('.').map(|(owner, _)| owner);
+    nodes.iter().find(|n| Some(modules[n.module].name.as_str()) == owner)
 }
 
 impl PathError<'_> {
@@ -7598,6 +7609,44 @@ mod tests {
         assert!(index.view_types.contains(&("res.partner", None)));
         modules[1].data.clear();
         assert!(Index::build(&modules, None).view_types.is_empty());
+    }
+
+    #[test]
+    fn a_view_only_another_module_updates_roots_no_tree() {
+        let build = |update: &str| {
+            let mut modules = [
+                module("a", "{'version': '18.0.1.0', 'depends': []}"),
+                module("b", "{'version': '18.0.1.0', 'depends': ['a']}"),
+            ];
+            let root = r#"<odoo><record id="root" model="ir.ui.view">
+                <field name="model">res.country</field>
+                <field name="arch" type="xml"><gantt/></field>
+            </record></odoo>"#;
+            let records = format!(
+                r#"<odoo><record id="ghost.v" model="ir.ui.view">{update}</record>
+                <record id="clone" model="ir.ui.view">
+                    <field name="model">res.partner</field>
+                    <field name="inherit_id" ref="ghost.v"/>
+                    <field name="mode">primary</field>
+                    <field name="arch" type="xml"><xpath expr="." position="inside"/></field>
+                </record></odoo>"#
+            );
+            modules[0]
+                .data
+                .push(data_file("views/views.xml", xml::analyze(root, Series::parse("18.0"))));
+            modules[1].data.push(data_file(
+                "views/views.xml",
+                xml::analyze(&records, Series::parse("18.0")),
+            ));
+            modules
+        };
+        let keyed = build(r#"<field name="key">ghost.v</field>"#);
+        let index = Index::build(&keyed, None);
+        assert!(index.view_types.contains(&("res.partner", None)));
+        let rehomed = build(r#"<field name="inherit_id" ref="a.root"/>"#);
+        let index = Index::build(&rehomed, None);
+        assert!(index.view_types.contains(&("res.partner", Some("gantt"))));
+        assert_eq!(index.view_kind("ghost.v".to_owned()), Some("gantt"));
     }
 
     #[test]

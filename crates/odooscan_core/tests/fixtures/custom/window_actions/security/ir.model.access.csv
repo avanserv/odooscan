@@ -35,3 +35,5 @@ access_window_chained,window.chained,model_window_chained,base.group_user,1,1,1,
 access_window_raised,window.raised,model_window_raised,base.group_user,1,1,1,1
 access_window_shared,window.shared,model_window_shared,base.group_user,1,1,1,1
 access_window_staged,window.staged,model_window_staged,base.group_user,1,1,1,1
+access_window_untyped,window.untyped,model_window_untyped,base.group_user,1,1,1,1
+access_window_rehomed,window.rehomed,model_window_rehomed,base.group_user,1,1,1,1

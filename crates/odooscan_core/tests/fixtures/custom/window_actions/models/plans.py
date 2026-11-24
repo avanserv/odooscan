@@ -264,3 +264,17 @@ class WindowStaged(models.Model):
     _description = "Window staged"
 
     name = fields.Char()
+
+
+class WindowUntyped(models.Model):
+    _name = "window.untyped"
+    _description = "Window untyped"
+
+    name = fields.Char()
+
+
+class WindowRehomed(models.Model):
+    _name = "window.rehomed"
+    _description = "Window rehomed"
+
+    name = fields.Char()
