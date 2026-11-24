@@ -1,0 +1,20 @@
+<odoo>
+    <record id="view_partner_eval" model="ir.ui.view">
+        <field name="model">res.partner</field>
+        <field name="inherit_id" ref="base.view_partner_simple"/>
+        <field name="arch_base" type="xml">
+            <xpath expr="//div[@id='notes']" position="before">
+                <div id="eval_block"/>
+            </xpath>
+        </field>
+    </record>
+    <record id="view_partner_eval_note" model="ir.ui.view">
+        <field name="model">res.partner</field>
+        <field name="inherit_id" ref="view_partner_eval"/>
+        <field name="arch" type="xml">
+            <xpath expr="//div[@id='dell_block']" position="inside">
+                <span>Dell</span>
+            </xpath>
+        </field>
+    </record>
+</odoo>

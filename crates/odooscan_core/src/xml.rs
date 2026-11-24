@@ -718,10 +718,9 @@ impl Walker<'_> {
         match name {
             "model" => {
                 let pos = self.pos(field);
-                view.model = field.text().map(|t| Spanned {
-                    value: t.trim().to_owned(),
-                    pos,
-                });
+                let model = view_model(field);
+                view.model_unread = model.is_none();
+                view.model = model.flatten().map(|value| Spanned { value, pos });
             }
             "inherit_id" => view.inherit = field.attribute("ref").filter(|r| !r.is_empty()).map(str::to_owned),
             // A `type` wins over the arch's root wherever the record sets it.
@@ -1735,6 +1734,23 @@ fn holds_record(field: Node) -> bool {
         Some(eval) => !record_eval::is_false(eval),
         None => field.text().is_some_and(|t| !t.trim().is_empty()),
     }
+}
+
+/// The model a view's `model` field writes, None when only a run can tell. Odoo reads `search`, then
+/// `ref`, then `eval`, then the text, which a `file` or a `type` other than `char` replaces (18.0
+/// `odoo/tools/convert.py:99-152,390-415`).
+fn view_model(field: Node) -> Option<Option<String>> {
+    let set = |attr: &str| field.attribute(attr).filter(|v| !v.is_empty());
+    if set("search").is_some() || set("ref").is_some() {
+        return None;
+    }
+    if let Some(eval) = set("eval") {
+        return record_eval::literal_string(eval).map(Some);
+    }
+    if set("file").is_some() || field.attribute("type").is_some_and(|t| t != "char") {
+        return None;
+    }
+    Some(field.text().map(|t| t.trim().to_owned()))
 }
 
 /// The template a node calls by a literal name. An `<attribute name="t-call">` spec calls its text.
@@ -4237,6 +4253,38 @@ mod tests {
         assert!(unread(r#"<field name="inherit_id" eval="ref('y')"/>"#));
         assert!(unread(r#"<field name="inherit_id" search="[('name', '=', 'y')]"/>"#));
         assert!(unread(r#"<field name="inherit_id" ref="" eval="x"/>"#));
+    }
+
+    #[test]
+    fn a_view_model_reads_a_string_eval_and_leaves_other_forms_unread() {
+        let model = |fields: &str| {
+            let v = view(&format!(r#"<record id="x" model="ir.ui.view">{fields}</record>"#));
+            (v.model.map(|m| m.value), v.model_unread)
+        };
+        let read = |name: &str| (Some(name.to_owned()), false);
+        let unread = (None, true);
+        for fields in [
+            r#"<field name="model"> res.partner </field>"#,
+            r#"<field name="model" eval="'res.partner'"/>"#,
+            r#"<field name="model" type="char">res.partner</field>"#,
+        ] {
+            assert_eq!(model(fields), read("res.partner"), "{fields}");
+        }
+        assert_eq!(model(r#"<field name="model"/>"#), (None, false));
+        for fields in [
+            r#"<field name="model" eval="'res.' + 'partner'"/>"#,
+            r#"<field name="model" ref="model_res_partner"/>"#,
+            r#"<field name="model" search="[('model', '=', 'res.partner')]"/>"#,
+            r#"<field name="model" file="data/model.txt"/>"#,
+            r#"<field name="model" type="xml">res.partner</field>"#,
+        ] {
+            assert_eq!(model(fields), unread, "{fields}");
+        }
+        // Each `model` field replaces the one before.
+        let literal = r#"<field name="model">res.partner</field>"#;
+        let computed = r#"<field name="model" eval="'res.' + 'partner'"/>"#;
+        assert_eq!(model(&format!("{literal}{computed}")), unread);
+        assert_eq!(model(&format!("{computed}{literal}")), read("res.partner"));
     }
 
     #[test]
