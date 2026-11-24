@@ -295,4 +295,10 @@
         <field name="res_model">window.rehomed</field>
         <field name="view_mode">gantt,map</field>
     </record>
+
+    <record id="action_typed_view" model="ir.actions.act_window">
+        <field name="name">action_typed_view</field>
+        <field name="res_model">window.typed</field>
+        <field name="view_mode">gantt,map</field>
+    </record>
 </odoo>

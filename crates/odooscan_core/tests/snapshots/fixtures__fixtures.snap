@@ -2173,6 +2173,7 @@ custom/window_actions/views/actions.xml:254:33: OD318 window.demoted has no prim
 custom/window_actions/views/actions.xml:260:33: OD318 window.kept has no primary gantt view, and nothing generates one
 custom/window_actions/views/actions.xml:266:33: OD318 window.chained has no primary gantt view, and nothing generates one
 custom/window_actions/views/actions.xml:296:33: OD318 window.rehomed has no primary map view, and nothing generates one
+custom/window_actions/views/actions.xml:302:33: OD318 window.typed has no primary map view, and nothing generates one
 custom/window_actions/views/unlisted.xml:1:1: OD502 'views/unlisted.xml' is not in the manifest's data or demo, so Odoo never loads it
 custom/window_activity/models/delegated.py:67:33: OD201 no indexed module defines model 'window.absent'
 custom/window_activity/models/delegated.py:73:17: OD201 no indexed module defines model 'window.absent'

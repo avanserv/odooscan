@@ -278,3 +278,10 @@ class WindowRehomed(models.Model):
     _description = "Window rehomed"
 
     name = fields.Char()
+
+
+class WindowTyped(models.Model):
+    _name = "window.typed"
+    _description = "Window typed"
+
+    name = fields.Char()

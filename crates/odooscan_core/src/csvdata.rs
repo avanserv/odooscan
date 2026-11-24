@@ -18,6 +18,31 @@ const STRING_IO: Series = Series { major: 18, minor: 0 };
 /// The most characters Python's `csv` reads into one cell, `csv.field_size_limit()` by default.
 const FIELD_LIMIT: usize = 131_072;
 
+/// The values of a view's `type` across series in Odoo and Enterprise. The import also takes
+/// a label in any language, so a cell matching none of these says nothing a scan can trust (18.0
+/// `odoo/addons/base/models/ir_fields.py:473-490`).
+const VIEW_TYPES: &[&str] = &[
+    "activity",
+    "calendar",
+    "card",
+    "cohort",
+    "dashboard",
+    "diagram",
+    "form",
+    "gantt",
+    "graph",
+    "grid",
+    "hierarchy",
+    "kanban",
+    "list",
+    "map",
+    "pivot",
+    "qweb",
+    "sales_team_dashboard",
+    "search",
+    "tree",
+];
+
 /// Whether a CSV cell names a public or portal group, as a full XML id or as one of base's own.
 fn public_cell(group: &str) -> bool {
     PUBLIC_GROUPS
@@ -407,6 +432,7 @@ fn view_row(facts: &mut DataFacts, row: &csv::StringRecord, columns: &[(&str, bo
         }),
         inherit,
         arch_unread: archs.iter().any(|c| !field_cell(row, columns, c).is_empty()),
+        written_type: kind.clone().filter(|k| VIEW_TYPES.contains(&k.as_str())),
         kind,
         primary: view_mode(mode).unwrap_or(Some(!extends)),
         writes_mode: !mode.is_empty(),
@@ -1310,6 +1336,10 @@ mod tests {
         assert_eq!(view(header, "v,base.p,Vue de base,").primary, None);
         assert_eq!(view(header, "v,base.p,,Form").kind.as_deref(), Some("form"));
         assert!(view(header, "v,base.p,,").kind.is_none());
+        assert_eq!(view(header, "v,base.p,,Form").written_type.as_deref(), Some("form"));
+        assert!(view(header, "v,base.p,,").written_type.is_none());
+        // `Carte` is the French label of `map`, which the import stores as `map`.
+        assert!(view(header, "v,base.p,,Carte").written_type.is_none());
         // `model` is a char field, so the import writes the cell whatever subfield the column names.
         for header in ["id,model:id", "id,model/.id", "id,model.id", "id,model/id"] {
             let v = view(header, "v,res.partner");

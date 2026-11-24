@@ -119,4 +119,17 @@
             </xpath>
         </field>
     </record>
+
+    <record id="view_typed_gantt" model="ir.ui.view">
+        <field name="name">window.typed.gantt</field>
+        <field name="model">window.typed</field>
+        <field name="inherit_id" ref="ghost_enterprise.view_ghost"/>
+        <field name="mode">primary</field>
+        <field name="type">gantt</field>
+        <field name="arch" type="xml">
+            <xpath expr="." position="attributes">
+                <attribute name="string">Typed</attribute>
+            </xpath>
+        </field>
+    </record>
 </odoo>
