@@ -496,6 +496,9 @@ custom/domain_bases/views/domains.xml:85:17: OD304 'no_chained': domain.chained 
 custom/domain_bases/views/domains.xml:94:17: OD304 'no_fieldless_view': domain.fieldless has no field 'no_fieldless_view'
 custom/domain_bases/views/domains.xml:104:17: OD304 'stamp': domain.holding has no field 'stamp'
 custom/domain_bases/views/domains.xml:119:38: OD321 'domain_bases.action_domain_hidden' is a record of ir.actions.act_window, but domain.whole.parent_id takes domain.whole
+custom/domain_bases/views/domains.xml:126:9: OD210 'no_last_domain': domain.stamped has no field 'no_last_domain'
+custom/domain_bases/views/domains.xml:131:9: OD210 'no_empty_eval': domain.stamped has no field 'no_empty_eval'
+custom/domain_bases/views/domains.xml:137:9: OD210 'no_last_group': domain.stamped has no field 'no_last_group'
 custom/domain_bases15/views/plain.xml:7:17: OD304 'no_valued': plain.valued has no field 'no_valued'
 custom/domain_bases15/views/plain.xml:16:17: OD304 'no_hooked': plain.hooked has no field 'no_hooked'
 custom/domain_bases_outside/models/outside.py:11:43: OD210 'no_outside_whole': domain.whole has no field 'no_outside_whole'

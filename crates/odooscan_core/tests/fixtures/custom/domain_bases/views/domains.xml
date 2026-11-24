@@ -118,4 +118,39 @@
     <record id="domain_whole_action_link" model="domain.whole">
         <field name="parent_id" ref="action_domain_hidden"/>
     </record>
+
+    <record id="action_domain_last_domain" model="ir.actions.act_window">
+        <field name="name">Last domain read</field>
+        <field name="res_model">domain.stamped</field>
+        <field name="domain">[('stamp', '=', 'a')]</field>
+        <field name="domain">[('no_last_domain', '=', 'a')]</field>
+    </record>
+    <record id="action_domain_empty_eval" model="ir.actions.act_window">
+        <field name="name">Empty eval leaves the text</field>
+        <field name="res_model">domain.stamped</field>
+        <field name="domain" eval="">[('no_empty_eval', '=', 'a')]</field>
+    </record>
+    <record id="action_domain_last_context" model="ir.actions.act_window">
+        <field name="name">Last context read</field>
+        <field name="res_model">domain.stamped</field>
+        <field name="context">{'group_by': 'stamp'}</field>
+        <field name="context">{'group_by': 'no_last_group'}</field>
+    </record>
+    <record id="action_domain_last_model" model="ir.actions.act_window">
+        <field name="name">Last model read</field>
+        <field name="res_model">domain.whole</field>
+        <field name="res_model">domain.stamped</field>
+        <field name="domain">[('stamp', '=', 'a')]</field>
+    </record>
+    <record id="action_domain_first_domain" model="ir.actions.act_window">
+        <field name="name">First domain replaced</field>
+        <field name="res_model">domain.stamped</field>
+        <field name="domain">[('no_first_domain', '=', 'a')]</field>
+        <field name="domain">[('stamp', '=', 'a')]</field>
+    </record>
+    <record id="action_domain_eval_model" model="ir.actions.act_window">
+        <field name="name">Model eval over the text</field>
+        <field name="res_model" eval="'domain.stamped'">domain.whole</field>
+        <field name="domain">[('stamp', '=', 'a')]</field>
+    </record>
 </odoo>
