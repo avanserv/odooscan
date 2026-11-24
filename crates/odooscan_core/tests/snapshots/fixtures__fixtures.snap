@@ -211,7 +211,7 @@ custom/bad_sale/views/locators.xml:8:17: OD310 no <field name="nmae"> in view ba
 custom/bad_sale/views/locators.xml:9:17: OD310 no <group name="mian"> in view base.view_partner_simple or the views that extend it
 custom/bad_sale/views/locators.xml:10:17: OD310 <page name="mail_page"> is added by module mail, which is not in depends
 custom/bad_sale/views/locators.xml:23:9: OD310 no <div id="crad"> in view base.partner_card or the views that extend it
-custom/bad_sale/views/locators.xml:51:13: OD310 no <field name="nmae_searched"> in view base.view_partner_simple or the views that extend it
+custom/bad_sale/views/locators.xml:52:13: OD310 no <field name="nmae_searched"> in view base.view_partner_simple or the views that extend it
 custom/bad_sale/views/views.xml:6:13: OD306 the <tree> view is renamed <list>
 custom/bad_sale/views/views.xml:7:17: OD305 the attrs attribute is removed; write invisible, readonly or required as a Python expression
 custom/bad_sale/views/views.xml:12:25: OD304 'line_ids.amonut': bad.order.line has no field 'amonut'
@@ -454,18 +454,12 @@ custom/depends_unused/__manifest__.py:9:9: OD521 nothing of module 'prov_shared'
 custom/depends_unused/__manifest__.py:25:9: OD503 module 'ghost_unused' is not on the addons path
 custom/depends_unused/__manifest__.py:26:9: OD504 module 'prov_back' depends back on depends_unused, so Odoo installs neither
 custom/depends_unused_arch/__manifest__.py:4:56: OD521 nothing of module 'prov_veil' is used, nor of what only it brings
-custom/depends_unused_arch/views/partner_views.xml:6:13: OD310 no <div id="fern_block"> in view base.view_partner_simple or the views that extend it
-custom/depends_unused_arch/views/partner_views.xml:9:13: OD310 no <div id="wisp_block"> in view base.view_partner_simple or the views that extend it
-custom/depends_unused_arch/views/partner_views.xml:12:13: OD310 no <div id="loam_block"> in view base.view_partner_simple or the views that extend it
 custom/depends_unused_csv/__manifest__.py:4:31: OD521 nothing of module 'prov_tarn' is used, nor of what only it brings
-custom/depends_unused_csv/views/partner_views.xml:6:13: OD310 no <div id="sedge_block"> in view base.view_partner_simple or the views that extend it
-custom/depends_unused_csv/views/partner_views.xml:9:13: OD310 no <div id="tarn_block"> in view base.view_partner_simple or the views that extend it
 custom/depends_unused_implied/__manifest__.py:4:25: OD520 module 'mail' already comes with 'sale', also in depends
 custom/depends_unused_lost_view/views/lost_views.xml:1:1: OD000 the root node was opened but never closed
 custom/depends_unused_mist/__manifest__.py:4:30: OD521 nothing of module 'prov_veil' is used, nor of what only it brings
 custom/depends_unused_reach/__manifest__.py:4:17: OD521 nothing of module 'prov_glen' is used, nor of what only it brings
 custom/depends_unused_search/__manifest__.py:4:30: OD521 nothing of module 'prov_veil' is used, nor of what only it brings
-custom/depends_unused_search/views/partner_views.xml:6:13: OD310 no <div id="moor_block"> in view base.view_partner_simple or the views that extend it
 custom/depends_unused_smudge/__manifest__.py:4:46: OD521 nothing of module 'prov_spark' is used, nor of what only it brings
 custom/domain_bases/models/domain_delegates.py:74:30: OD210 'no_literal_stamp': domain.literal.delegate has no field 'no_literal_stamp'
 custom/domain_bases/models/domain_imports.py:14:30: OD210 'no_relative_stamp': domain.relative has no field 'no_relative_stamp'
@@ -1025,6 +1019,8 @@ custom/legacy_rpc16/static/src/js/partner_widget.js:9:32: OD603 no indexed modul
 custom/legacy_rpc16/static/src/js/partner_widget.js:10:59: OD604 model 'res.partner' has no method 'action_gone'
 custom/legacy_rpc16/static/src/js/partner_widget.js:11:55: OD607 method '_compute_secret' is private, so the server refuses to call it over RPC
 custom/legacy_rpc16/static/src/js/partner_widget.js:12:56: OD607 method '_hidden_helper' is private, so the server refuses to call it over RPC
+custom/locators_unread/views/views.xml:58:13: OD310 no <div id="ebb_gap"> in view locators_unread.view_ebb_form or the views that extend it
+custom/locators_unread/views/views.xml:107:13: OD310 no <div id="drift_gap"> in view locators_unread.view_drift_form or the views that extend it
 custom/m2m_rows_bin_user/models/bin_note.py:12:5: OD226 _auto = False leaves x.bin.note without a table, and nothing creates the view x_bin_note_rel; create it in init(), or drop _auto = False
 custom/m2m_rows_user/models/bin.py:33:5: OD226 _auto = False leaves x.bin.tag without a table, and nothing creates the view x_bin_tag_rel; create it in init(), or drop _auto = False
 custom/m2m_rows_user/models/bin.py:43:5: OD226 _auto = False leaves x.bin.shelf without a table, and nothing creates the view x_bin_shelf_rel; create it in init(), or drop _auto = False

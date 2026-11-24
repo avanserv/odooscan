@@ -1,5 +1,6 @@
 //! Rules that need facts from more than one file.
 
+use std::cell::OnceCell;
 use std::collections::BTreeMap;
 use std::path::Path;
 use std::rc::Rc;
@@ -4722,7 +4723,9 @@ impl<'m> Ctx<'_, 'm> {
 
     /// Specs of a view must each find their element in the tree of views it extends, which is
     /// built once per root and module. A dependency outside the index loads first, so it cannot add
-    /// a view to a tree whose root the module defines.
+    /// a view to a tree whose root the module defines. A spec locating no element of the tree may
+    /// still hold when a view in scope extends it in a form the scan does not read, or a stray in
+    /// scope joins it with a branch adding the element, as `Index::extra_elements` tells.
     fn locators(
         &self,
         out: &mut Out<'m>,
@@ -4738,24 +4741,28 @@ impl<'m> Ctx<'_, 'm> {
         if !self.index.views.visible(&parent, |m| self.scope.sees(m)) {
             return;
         }
-        let Some(tree) = self.view_tree(parent, trees) else {
+        let Some(tree) = self.view_tree(parent.clone(), trees) else {
             return;
         };
         if self.may_extend(&tree.root) {
             return;
         }
+        // Walking the strays of the scope costs, so only a spec that would be reported pays for it.
+        let extra = OnceCell::new();
+        let may_add = |e: &ArchElement| {
+            let extra = extra.get_or_init(|| {
+                if self.lost {
+                    return None;
+                }
+                self.index.extra_elements(view, parent.clone(), &tree.root, self.scope)
+            });
+            extra.as_ref().is_none_or(|extra| extra.contains(e))
+        };
         for locator in &view.locators {
             let e = located(&locator.value, &self.module.name);
-            if tree.visible.contains(&e) {
-                continue;
+            if let Some(message) = locator_gap(tree, &e, may_add) {
+                out.push(path, "OD310", locator.pos, message);
             }
-            let element = format!("<{} {}=\"{}\">", e.tag, e.attr, e.value);
-            let message = match tree.hidden.get(&e) {
-                Some(m) => format!("{element} is added by module {m}, which is not in depends"),
-                None if self.lost => continue,
-                None => format!("no {element} in view {} or the views that extend it", tree.root),
-            };
-            out.push(path, "OD310", locator.pos, message);
         }
     }
 
@@ -5057,6 +5064,24 @@ impl<'m> Ctx<'_, 'm> {
                 out.push(path, "OD309", field.pos, format!("field '{fname}' of {model} {clause}"));
             }
         }
+    }
+}
+
+/// OD310's message for a spec on `tree` locating `e`, None when it finds it. `may_add` says a view
+/// in scope outside the tree the scan read may add an element; one only a module outside `depends`
+/// adds is reported anyway, since the element is known to come from there.
+fn locator_gap(tree: &ViewTree, e: &ArchElement, may_add: impl FnOnce(&ArchElement) -> bool) -> Option<String> {
+    if tree.visible.contains(e) {
+        return None;
+    }
+    let element = format!("<{} {}=\"{}\">", e.tag, e.attr, e.value);
+    match tree.hidden.get(e) {
+        Some(m) => Some(format!("{element} is added by module {m}, which is not in depends")),
+        None if may_add(e) => None,
+        None => Some(format!(
+            "no {element} in view {} or the views that extend it",
+            tree.root
+        )),
     }
 }
 
