@@ -409,6 +409,7 @@ impl Walker<'_> {
         }
         if model == "ir.ui.view" {
             view.primary = primary_view(node, self.lines);
+            view.writes_mode = ["mode", "inherit_id"].iter().any(|f| last_field_of(node, f).is_some());
             view.unread_parent = view.inherit.is_none() && last_field_of(node, "inherit_id").is_some_and(holds_record);
             self.facts.views.push(view);
         }
@@ -4259,6 +4260,21 @@ mod tests {
         ] {
             assert_eq!(primary(&fields), None, "{fields}");
         }
+        let writes_mode =
+            |fields: &str| view(&format!(r#"<record id="x" model="ir.ui.view">{fields}</record>"#)).writes_mode;
+        assert!(writes_mode(mode));
+        assert!(writes_mode(r#"<field name="mode" eval="'extension'"/>"#));
+        assert!(writes_mode(&format!(r#"{parent}<field name="mode" eval="x"/>"#)));
+        for fields in [
+            parent,
+            r#"<field name="inherit_id" eval="False"/>"#,
+            r#"<field name="inherit_id" ref=""/>"#,
+            r#"<field name="inherit_id"/>"#,
+        ] {
+            assert!(writes_mode(fields), "{fields}");
+        }
+        assert!(!writes_mode(""));
+        assert!(!writes_mode(r#"<field name="active" eval="False"/>"#));
     }
 
     #[test]

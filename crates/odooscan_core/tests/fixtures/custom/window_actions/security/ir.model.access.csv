@@ -26,3 +26,6 @@ access_window_guessed,window.guessed,model_window_guessed,base.group_user,1,1,1,
 access_window_unplanned,window.unplanned,model_window_unplanned,base.group_user,1,1,1,1
 access_window_lender,window.lender,model_window_lender,base.group_user,1,1,1,1
 access_window_lent,window.lent,model_window_lent,base.group_user,1,1,1,1
+access_window_updated,window.updated,model_window_updated,base.group_user,1,1,1,1
+access_window_promoted,window.promoted,model_window_promoted,base.group_user,1,1,1,1
+access_window_unparented,window.unparented,model_window_unparented,base.group_user,1,1,1,1

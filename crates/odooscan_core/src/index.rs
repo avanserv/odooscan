@@ -2280,20 +2280,25 @@ impl<'m> Index<'m> {
     }
 
     /// The entry of `view` in `view_types`, if it has one. Odoo gives a view with a parent the type
-    /// of its tree's root, so with a view above it not indexed, its own root says nothing.
+    /// of its tree's root, so with a view above it not indexed, its own root says nothing. The top's
+    /// unread parent counts when the walk reaches the top through a parent, or when `view` writes
+    /// `mode` or `inherit_id`. An update writing neither keeps the stored mode (18.0
+    /// `odoo/addons/base/models/ir_ui_view.py:460-466,541-557`, 20.0 `:575-581,656-671`), so an
+    /// update of an extension stays one and takes no unread parent from another record of its id.
     fn view_type(&self, module: &'m Module, view: &'m ViewFact) -> Option<(&'m str, Option<&'m str>)> {
         let id = view.id.as_ref().map(|id| full_id(&module.name, id));
         let own_model = view.model.as_ref().map(|m| m.value.as_str());
         let model = own_model.or_else(|| self.view_model(id.clone()?))?;
         let parent = view.inherit.as_ref().map(|parent| full_id(&module.name, parent));
-        let top = id.or(parent).and_then(|start| self.view_top(start));
+        let top = id.clone().or(parent).and_then(|start| self.view_top(start));
         if view.inherit.is_some() && top.is_none() {
             return Some((model, None));
         }
-        let top = top.unwrap_or_default();
+        let (top_id, top) = top.unwrap_or_default();
         let kind = top.iter().find_map(|n| n.fact.kind.as_deref());
         let kind = kind.or(view.kind.as_deref());
-        let unread = view.unread_parent || top.iter().any(|n| n.fact.unread_parent);
+        let reached = id.as_deref() != Some(top_id.as_str()) || view.writes_mode;
+        let unread = view.unread_parent || reached && top.iter().any(|n| n.fact.unread_parent);
         (kind.is_some() || unread || view.primary.is_none()).then_some((model, kind))
     }
 
@@ -4844,20 +4849,20 @@ impl<'m> Index<'m> {
     /// tree. None when a view on the way is not indexed. A top with a parent out of reach is no root,
     /// so what its own arch opens with, such as a `<field>` spec, is no type.
     pub fn view_kind(&self, id: String) -> Option<&'m str> {
-        let top = self.view_top(id)?;
+        let (_, top) = self.view_top(id)?;
         if top.iter().any(|n| n.fact.unread_parent) {
             return None;
         }
         top.iter().find_map(|n| n.fact.kind.as_deref())
     }
 
-    /// The nodes of the view at the root of `id`'s inheritance.
-    fn view_top(&self, mut id: String) -> Option<&[ViewNode<'m>]> {
+    /// The id and nodes of the view at the root of `id`'s inheritance.
+    fn view_top(&self, mut id: String) -> Option<(String, &[ViewNode<'m>])> {
         for _ in 0..32 {
             let nodes = self.views.nodes.get(&id)?;
             match nodes.iter().find_map(|n| n.inherit.clone()) {
                 Some(parent) => id = parent,
-                None => return Some(nodes),
+                None => return Some((id, nodes)),
             }
         }
         None

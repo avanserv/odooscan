@@ -201,3 +201,24 @@ class WindowLent(models.Model):
     _inherits = {"window.lender": "lender_id"}
 
     lender_id = fields.Many2one("window.lender", required=True, ondelete="cascade")
+
+
+class WindowUpdated(models.Model):
+    _name = "window.updated"
+    _description = "Window updated"
+
+    name = fields.Char()
+
+
+class WindowPromoted(models.Model):
+    _name = "window.promoted"
+    _description = "Window promoted"
+
+    name = fields.Char()
+
+
+class WindowUnparented(models.Model):
+    _name = "window.unparented"
+    _description = "Window unparented"
+
+    name = fields.Char()
