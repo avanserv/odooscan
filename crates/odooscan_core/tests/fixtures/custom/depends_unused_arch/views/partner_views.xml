@@ -1,0 +1,17 @@
+<odoo>
+    <record id="view_partner_arch_note" model="ir.ui.view">
+        <field name="model">res.partner</field>
+        <field name="inherit_id" ref="base.view_partner_simple"/>
+        <field name="arch" type="xml">
+            <xpath expr="//div[@id='fern_block']" position="inside">
+                <span>Fern</span>
+            </xpath>
+            <xpath expr="//div[@id='wisp_block']" position="inside">
+                <span>Wisp</span>
+            </xpath>
+            <xpath expr="//div[@id='loam_block']" position="inside">
+                <span>Loam</span>
+            </xpath>
+        </field>
+    </record>
+</odoo>

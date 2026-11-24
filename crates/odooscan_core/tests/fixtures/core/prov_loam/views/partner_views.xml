@@ -1,0 +1,7 @@
+<odoo>
+    <record id="view_partner_loam" model="ir.ui.view">
+        <field name="model">res.partner</field>
+        <field name="inherit_id" ref="base.view_partner_simple"/>
+        <field name="arch" file="prov_loam/views/loam_arch.xml"/>
+    </record>
+</odoo>

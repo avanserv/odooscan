@@ -1,0 +1,7 @@
+<odoo>
+    <record id="view_partner_wisp" model="ir.ui.view">
+        <field name="model">res.partner</field>
+        <field name="inherit_id" ref="base.view_partner_simple"/>
+        <field name="arch" eval='"&lt;xpath expr=\"//div[@id=&apos;notes&apos;]\" position=\"after\"&gt;&lt;div id=\"wisp_block\"/&gt;&lt;/xpath&gt;"'/>
+    </record>
+</odoo>
