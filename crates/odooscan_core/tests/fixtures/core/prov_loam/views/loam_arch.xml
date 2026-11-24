@@ -1,0 +1,3 @@
+<xpath expr="//div[@id='notes']" position="after">
+    <div id="loam_block"/>
+</xpath>

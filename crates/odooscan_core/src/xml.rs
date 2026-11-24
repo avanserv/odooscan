@@ -727,17 +727,23 @@ impl Walker<'_> {
             "type" => view.kind = field.text().map(|t| t.trim().to_owned()),
             // Odoo writes `arch_base` through to `arch`.
             "arch_base" => view.arch_unread = true,
-            "arch" | "arch_db" => {
-                view.has_arch = true;
-                for root in field.children().filter(Node::is_element) {
-                    let tag = root.tag_name().name();
-                    if view.kind.is_none() && !UNTYPED_ROOTS.contains(&tag) {
-                        view.kind = Some(tag.to_owned());
-                    }
-                    self.arch(root, &mut Vec::new(), view);
-                }
-            }
+            "arch" | "arch_db" => self.view_arch(field, view),
             _ => {}
+        }
+    }
+
+    fn view_arch(&mut self, field: Node, view: &mut ViewFact) {
+        if !arch_from_elements(field) {
+            view.arch_unread = true;
+            return;
+        }
+        view.has_arch = true;
+        for root in field.children().filter(Node::is_element) {
+            let tag = root.tag_name().name();
+            if view.kind.is_none() && !UNTYPED_ROOTS.contains(&tag) {
+                view.kind = Some(tag.to_owned());
+            }
+            self.arch(root, &mut Vec::new(), view);
         }
     }
 
@@ -1734,6 +1740,21 @@ fn holds_record(field: Node) -> bool {
         Some(eval) => !record_eval::is_false(eval),
         None => field.text().is_some_and(|t| !t.trim().is_empty()),
     }
+}
+
+/// Whether an arch field writes its child elements, as Odoo reads `search`, then `ref`, then
+/// `eval`, then under `type="xml"` or `"html"` the elements alone, dropping the text before the
+/// first, and otherwise a `file` or that text (18.0 `odoo/tools/convert.py:80-152,390-415`).
+fn arch_from_elements(field: Node) -> bool {
+    let set = |attr: &str| field.attribute(attr).is_some_and(|v| !v.is_empty());
+    if set("search") || set("ref") || set("eval") {
+        return false;
+    }
+    if matches!(field.attribute("type"), Some("xml" | "html")) {
+        return true;
+    }
+    let mut text = field.children().take_while(Node::is_text).filter_map(|t| t.text());
+    !set("file") && text.all(|t| t.trim().is_empty())
 }
 
 /// The model a view's `model` field writes, None when only a run can tell. Odoo reads `search`, then
@@ -4285,6 +4306,35 @@ mod tests {
         let computed = r#"<field name="model" eval="'res.' + 'partner'"/>"#;
         assert_eq!(model(&format!("{literal}{computed}")), unread);
         assert_eq!(model(&format!("{computed}{literal}")), read("res.partner"));
+    }
+
+    #[test]
+    fn an_arch_not_given_as_elements_is_unread() {
+        let arch = |field: &str| {
+            let v = view(&format!(r#"<record id="x" model="ir.ui.view">{field}</record>"#));
+            (v.has_arch, v.arch_unread, v.kind)
+        };
+        for field in [
+            r#"<field name="arch"><![CDATA[<form/>]]></field>"#,
+            r#"<field name="arch">&lt;form/&gt;</field>"#,
+            r#"<field name="arch" eval="'&lt;form/&gt;'"><form/></field>"#,
+            r#"<field name="arch" file="x/views/arch.xml"/>"#,
+            r#"<field name="arch" ref="y"/>"#,
+            r#"<field name="arch" search="[('id', '=', 1)]"/>"#,
+            r#"<field name="arch_db"><![CDATA[<form/>]]></field>"#,
+        ] {
+            assert_eq!(arch(field), (false, true, None), "{field}");
+        }
+        let form = (true, false, Some("form".to_owned()));
+        for field in [
+            r#"<field name="arch" type="xml"><form/></field>"#,
+            r#"<field name="arch" type="html"><form/></field>"#,
+            r#"<field name="arch" type="xml" eval=""><form/></field>"#,
+            r#"<field name="arch" type="xml"><![CDATA[<tree/>]]><form/></field>"#,
+            "<field name=\"arch\">\n  <form/></field>",
+        ] {
+            assert_eq!(arch(field), form, "{field}");
+        }
     }
 
     #[test]

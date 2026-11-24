@@ -1,0 +1,11 @@
+<odoo>
+    <record id="view_partner_fern" model="ir.ui.view">
+        <field name="model">res.partner</field>
+        <field name="inherit_id" ref="base.view_partner_simple"/>
+        <field name="arch"><![CDATA[
+            <xpath expr="//div[@id='notes']" position="after">
+                <div id="fern_block"/>
+            </xpath>
+        ]]></field>
+    </record>
+</odoo>

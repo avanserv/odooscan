@@ -3384,16 +3384,16 @@ impl<'m> Index<'m> {
 
     /// Whether a spec of a loaded view or template of `module` locates an element that, of the
     /// modules of `scope`, only those of `set` add to the tree it extends. A spec locating what no
-    /// readable view outside `set` adds counts too, when `set` extends the tree with a view whose arch
-    /// the scan did not read, or loads a data file it cannot read that may hold one, or a template
-    /// file it cannot read, which may extend any template tree: Odoo combines every extension below
-    /// the root. So it does when `set` holds a stray, a view naming its parent in a form the scan does
-    /// not read, which may extend any tree of its model. A spec on a tree whose way up to the root the
-    /// index does not hold counts, as it may locate what `set` adds, unless it is a view tree whose
-    /// views the index holds all the way up from modules that each parse every data file that may
-    /// hold a view, each naming its parent and its model in a form the scan reads, with an arch it
-    /// did not read on the way: that spec counts only when `set` loads a view of a model on the way,
-    /// or one whose model the scan does not read, or a data file it cannot read that may hold a view.
+    /// readable view outside `set` adds counts too, when `set` extends the tree with a view whose
+    /// arch the scan did not read (`arch_base`, `search`, `ref`, `eval`, file or text), or loads an
+    /// unreadable data file that may hold one, or an unreadable template file, which may extend any
+    /// template tree: Odoo combines every extension below the root. So it does when `set` holds a
+    /// stray, a view naming its parent in a form the scan does not read, which may extend any tree
+    /// of its model. A spec on a tree the index does not hold up to the root counts, as it may
+    /// locate what `set` adds, unless it is a view tree the index holds all the way up from modules
+    /// parsing every data file that may hold a view, each naming its parent and model in a form the
+    /// scan reads, with an unread arch on the way: that spec counts only when `set` loads a view of
+    /// a model on the way or of an unread model, or an unreadable data file that may hold a view.
     pub fn locates_in(&self, module: usize, set: &[bool], scope: &Scope) -> bool {
         let m = &self.modules[module];
         let name = m.name.as_str();
@@ -4839,8 +4839,9 @@ impl<'m> Inheritance<'m> {
     }
 
     /// The root of the inheritance tree above `id`, or None when an id on the way is not defined,
-    /// its arch was not read, or it names its parent by a `search` or an `eval` other than `False`,
-    /// which Odoo resolves at load, so the tree's elements would be incomplete.
+    /// its arch was not read, as when written to `arch_base`, by `search`, `ref`, `eval`, a file or
+    /// text, or it names its parent by a `search` or an `eval` other than `False`, which Odoo
+    /// resolves at load, so the tree's elements would be incomplete.
     pub fn root(&self, mut id: String) -> Option<String> {
         for _ in 0..32 {
             let nodes = self.nodes.get(&id)?;
@@ -7078,6 +7079,17 @@ mod tests {
         assert!(locates(&adds("arch_base", "haze_block"), None, "haze"));
         assert!(!locates(&adds("arch_base", "haze_block"), None, "veil"));
         assert!(!locates(&adds("arch", "haze_other"), None, "haze"));
+        let cdata = r#"<![CDATA[<xpath expr="//div[@id='notes']" position="after"><div id="haze_block"/></xpath>]]>"#;
+        for arch in [
+            format!(r#"<field name="arch">{cdata}</field>"#),
+            r#"<field name="arch" eval="'&lt;form/&gt;'"/>"#.to_owned(),
+            r#"<field name="arch" file="haze/views/haze_arch.xml"/>"#.to_owned(),
+        ] {
+            assert!(locates(&arch, None, "haze"), "{arch}");
+        }
+        // Under `type="xml"`, Odoo drops the text and writes an empty arch.
+        let typed = format!(r#"<field name="arch" type="xml">{cdata}</field>"#);
+        assert!(!locates(&typed, None, "haze"));
         // A record that writes no arch adds nothing.
         assert!(!locates("", None, "haze"));
         assert!(!locates(
@@ -7198,6 +7210,36 @@ mod tests {
         );
         let held = roots(r#"ref="view_top""#, &top);
         assert_eq!(held[1].as_deref(), Some("m.view_top"));
+    }
+
+    #[test]
+    fn a_view_with_an_arch_the_scan_does_not_read_roots_no_tree() {
+        let manifest = "{'version': '18.0.1.0', 'depends': []}";
+        let root = |top_arch: &str| {
+            let records = format!(
+                r#"<record id="view_top" model="ir.ui.view">
+                    <field name="model">res.partner</field>
+                    {top_arch}
+                </record>
+                <record id="view_low" model="ir.ui.view">
+                    <field name="inherit_id" ref="view_top"/>
+                    <field name="arch" type="xml"><form/></field>
+                </record>"#
+            );
+            let mut modules = [module("m", manifest)];
+            let facts = xml::analyze(&format!("<odoo>{records}</odoo>"), Series::parse("18.0"));
+            modules[0].data.push(data_file("views/views.xml", facts));
+            Index::build(&modules, None).views.root("m.view_low".to_owned())
+        };
+        for top_arch in [
+            r#"<field name="arch"><![CDATA[<form/>]]></field>"#,
+            r#"<field name="arch" eval="'&lt;form/&gt;'"/>"#,
+            r#"<field name="arch" file="m/views/top_arch.xml"/>"#,
+        ] {
+            assert_eq!(root(top_arch), None, "{top_arch}");
+        }
+        let read = root(r#"<field name="arch" type="xml"><form/></field>"#);
+        assert_eq!(read.as_deref(), Some("m.view_top"));
     }
 
     #[test]

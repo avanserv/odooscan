@@ -1199,10 +1199,11 @@ pub struct ViewFact {
     pub model: Option<Spanned<String>>,
     pub inherit: Option<String>,
     pub fields: Vec<ArchField>,
-    /// The view's arch was read, so `elements` is complete.
+    /// The view's arch was read from its elements, so `elements` is complete.
     pub has_arch: bool,
-    /// The record writes its arch to a field the scan does not read (`arch_base`), so the view
-    /// may add elements `elements` lacks. A record writing no arch adds none.
+    /// The record writes its arch in a form the scan does not read: to `arch_base`, or by
+    /// `search`, `ref`, `eval`, a file or text rather than elements, so the view may add elements
+    /// `elements` lacks. A record writing no arch adds none.
     pub arch_unread: bool,
     /// Elements the arch adds, which views extending it can locate.
     pub elements: Vec<ArchElement>,
