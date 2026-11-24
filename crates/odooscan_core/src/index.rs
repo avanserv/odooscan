@@ -4202,10 +4202,22 @@ impl<'m> Index<'m> {
         let Status::Hidden(owner) = self.model_status(model, scope, None) else {
             return false;
         };
-        let installed = self.scope(self.by_name[owner]);
+        self.parents_hidden_in(model, &self.scope(self.by_name[owner]))
+    }
+
+    /// Whether a class of `model` or of its parents in any indexed module has a parent the scan
+    /// cannot read, as `hidden_outside` asks, for any model. A class outside `scope` may be
+    /// installed, so its parents count; a class of `base` there may not install with the model.
+    pub fn parents_outside(&self, model: &str, scope: &Scope) -> bool {
+        self.parents_hidden_in(model, scope)
+    }
+
+    /// What `hidden_outside` asks of the classes in every indexed module, a class of `base` kept
+    /// only where `installed` sees it.
+    fn parents_hidden_in(&self, model: &str, installed: &Scope) -> bool {
         let mut chain = self.chain(model, Some(&self.every_module()), true);
-        // Outside the owner's closure a class of `base` may not install with the model, so it
-        // neither hides fields nor reads as the parent of another class.
+        // Outside the closure that installs the model a class of `base` may not install with it,
+        // so it neither hides fields nor reads as the parent of another class.
         chain.retain(|&(mi, c)| c.model != "base" || installed.sees(mi));
         chain
             .iter()
@@ -9058,6 +9070,33 @@ Order.components.Card = null;
         assert!(index.hidden_outside("side.hidden", &main));
         assert!(!index.hidden_outside("side.plain", &main));
         assert!(!index.hidden_outside("side.hidden", &reader));
+    }
+
+    #[test]
+    fn a_class_outside_scope_hides_parents_of_a_model_in_scope() {
+        let manifest = |depends: &str| format!("{{'version': '18.0.1.0', 'depends': [{depends}]}}");
+        let mut modules = [
+            module("base", &manifest("")),
+            module("main", &manifest("'base'")),
+            module("bridge", &manifest("'main'")),
+        ];
+        modules[0]
+            .python
+            .push(python_18("class B(models.Model):\n    _name = 'base'\n"));
+        modules[1].python.push(python_18(
+            "class Thing(models.Model):\n    _name = 'main.thing'\n\n\
+             class Plain(models.Model):\n    _name = 'main.plain'\n",
+        ));
+        modules[2].python.push(python_18(
+            "from odoo.addons.other.models import Imported\n\n\
+             class Thing(models.Model, Imported):\n    _inherit = 'main.thing'\n\n\
+             class Base(models.AbstractModel, Imported):\n    _inherit = 'base'\n",
+        ));
+        let index = Index::build(&modules, None);
+        let main = index.scope(index.by_name["main"]);
+        assert!(index.parents_outside("main.thing", &main));
+        assert!(!index.parents_outside("main.plain", &main));
+        assert!(!index.hidden_outside("main.thing", &main));
     }
 
     #[test]
