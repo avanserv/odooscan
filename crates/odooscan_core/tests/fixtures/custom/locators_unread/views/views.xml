@@ -1,0 +1,123 @@
+<odoo>
+    <record id="view_tide_form" model="ir.ui.view">
+        <field name="name">res.partner.tide.form</field>
+        <field name="model">res.partner</field>
+        <field name="mode">primary</field>
+        <field name="arch" type="xml">
+            <form>
+                <div id="tide_top"/>
+            </form>
+        </field>
+    </record>
+
+    <record id="view_tide_extra" model="ir.ui.view">
+        <field name="model">res.partner</field>
+        <field name="inherit_id" ref="view_tide_form"/>
+        <field name="arch_base" type="xml">
+            <xpath expr="//div[@id='tide_top']" position="after">
+                <div id="tide_block"/>
+            </xpath>
+        </field>
+    </record>
+
+    <record id="view_tide_note" model="ir.ui.view">
+        <field name="model">res.partner</field>
+        <field name="inherit_id" ref="view_tide_form"/>
+        <field name="arch" type="xml">
+            <xpath expr="//div[@id='tide_block']" position="inside">
+                <span>Tide</span>
+            </xpath>
+        </field>
+    </record>
+
+    <record id="view_ebb_form" model="ir.ui.view">
+        <field name="name">res.partner.ebb.form</field>
+        <field name="model">res.partner</field>
+        <field name="mode">primary</field>
+        <field name="arch" type="xml">
+            <form>
+                <div id="ebb_top"/>
+            </form>
+        </field>
+    </record>
+
+    <record id="view_ebb_extra" model="ir.ui.view">
+        <field name="model">res.partner</field>
+        <field name="inherit_id" ref="view_ebb_form"/>
+        <field name="arch" type="xml">
+            <xpath expr="//div[@id='ebb_top']" position="after">
+                <div id="ebb_block"/>
+            </xpath>
+        </field>
+    </record>
+
+    <record id="view_ebb_note" model="ir.ui.view">
+        <field name="model">res.partner</field>
+        <field name="inherit_id" ref="view_ebb_form"/>
+        <field name="arch" type="xml">
+            <xpath expr="//div[@id='ebb_gap']" position="inside">
+                <span>Ebb</span>
+            </xpath>
+        </field>
+    </record>
+
+    <!-- A stray of res.partner may join any res.partner tree, so a spec on what it or a view below
+         it adds is left alone; one on what neither adds is reported. -->
+    <record id="view_drift_stray" model="ir.ui.view">
+        <field name="model">res.partner</field>
+        <field name="inherit_id" search="[('name', '=', 'res.partner.drift')]"/>
+        <field name="arch" type="xml">
+            <xpath expr="//form" position="inside">
+                <div id="drift_block"/>
+            </xpath>
+        </field>
+    </record>
+
+    <record id="view_drift_low" model="ir.ui.view">
+        <field name="model">res.partner</field>
+        <field name="inherit_id" ref="view_drift_stray"/>
+        <field name="arch" type="xml">
+            <xpath expr="//div[@id='drift_block']" position="after">
+                <div id="drift_low"/>
+            </xpath>
+        </field>
+    </record>
+
+    <record id="view_drift_form" model="ir.ui.view">
+        <field name="name">res.partner.drift.form</field>
+        <field name="model">res.partner</field>
+        <field name="mode">primary</field>
+        <field name="arch" type="xml">
+            <form>
+                <div id="drift_top"/>
+            </form>
+        </field>
+    </record>
+
+    <record id="view_drift_note" model="ir.ui.view">
+        <field name="model">res.partner</field>
+        <field name="inherit_id" ref="view_drift_form"/>
+        <field name="arch" type="xml">
+            <xpath expr="//div[@id='drift_block']" position="inside">
+                <span>Drift</span>
+            </xpath>
+            <xpath expr="//div[@id='drift_low']" position="inside">
+                <span>Low</span>
+            </xpath>
+            <xpath expr="//div[@id='drift_gap']" position="inside">
+                <span>Gap</span>
+            </xpath>
+        </field>
+    </record>
+
+    <!-- A stray of res.country joins no res.partner tree, so the ebb_gap and drift_gap lines stay. -->
+    <record id="view_country_stray" model="ir.ui.view">
+        <field name="model">res.country</field>
+        <field name="inherit_id" search="[('name', '=', 'res.country.form')]"/>
+        <field name="arch" type="xml">
+            <xpath expr="//form" position="inside">
+                <div id="country_block"/>
+            </xpath>
+        </field>
+    </record>
+</odoo>

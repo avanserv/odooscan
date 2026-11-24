@@ -834,6 +834,12 @@ fn of_models(may: Option<&[Option<&str>]>, models: &[Option<&str>]) -> bool {
     may.is_none_or(|may| may.iter().any(|m| models.contains(m)))
 }
 
+/// Whether a stray that may have the models `may` may extend a tree of `models`, either None when
+/// any.
+fn stray_on(may: Option<&[Option<&str>]>, models: Option<&[Option<&str>]>) -> bool {
+    models.is_none_or(|models| of_models(may, models))
+}
+
 /// The ids base generates for a module and for each level of its category.
 fn module_ids(module: &Module, base: usize, xmlids: &mut XmlIds) {
     xmlids
@@ -3364,10 +3370,14 @@ impl<'m> Index<'m> {
     /// not setting `mode` to `primary`, the models it may have: such a stray may extend any tree of
     /// one of them. None when any, as for a stray whose model the scan does not read.
     fn strays(&self, set: &[bool]) -> Vec<Option<Vec<Option<&'m str>>>> {
-        let strays = self
-            .set_views(set)
-            .filter(|(_, v)| v.unread_parent && v.primary != Some(true));
+        let strays = self.stray_views(set);
         strays.map(|(mi, v)| self.view_models(mi, v)).collect()
+    }
+
+    /// The views of `set` that `strays` gives the models of, with their modules.
+    fn stray_views<'s>(&'s self, set: &'s [bool]) -> impl Iterator<Item = (usize, &'m ViewFact)> + 's {
+        self.set_views(set)
+            .filter(|(_, v)| v.unread_parent && v.primary != Some(true))
     }
 
     /// The models the view `v` of module `mi` may have, None when any. Odoo writes only the fields
@@ -3443,20 +3453,58 @@ impl<'m> Index<'m> {
         let Some(parent) = &v.inherit else { return false };
         let parent = full_id(name, parent);
         let elements = v.locators.iter().map(|l| located(&l.value, name)).collect();
-        let models = self
-            .views
-            .models(parent.clone(), self.modules)
-            .filter(|_| !v.model_unread);
-        let models = models.map(|mut models| {
-            models.push(v.model.as_ref().map(|m| m.value.as_str()));
-            models
-        });
-        let lost = lost
-            || strays
-                .iter()
-                .any(|x| models.as_ref().is_none_or(|models| of_models(x.as_deref(), models)));
+        let models = self.tree_models(v, parent.clone());
+        let lost = lost || strays.iter().any(|x| stray_on(x.as_deref(), models.as_deref()));
         self.sole(&self.views, set, scope, lost, parent, elements)
             .unwrap_or_else(|| models.is_none_or(|models| lost || self.has_view_of(set, &models)))
+    }
+
+    /// The models on the way up from `parent`, the parent of the view `v`, with `v`'s own: those a
+    /// view may have to extend `v`'s tree unread. None when any, as `Inheritance::models` tells or
+    /// when `v`'s model is unread.
+    fn tree_models<'a>(&'a self, v: &'a ViewFact, parent: String) -> Option<Vec<Option<&'a str>>> {
+        let mut models = self.views.models(parent, self.modules).filter(|_| !v.model_unread)?;
+        models.push(v.model.as_ref().map(|m| m.value.as_str()));
+        Some(models)
+    }
+
+    /// The elements views of `scope` may add to the tree of the view `v`, whose parent is `parent`
+    /// and whose root is `root`, beyond those the tree holds: what each stray whose model is on the
+    /// way or is `v`'s adds, with the views below it, since Odoo combines every extension of the
+    /// tree from a loaded module. None when any, as when a view below the root or on such a branch
+    /// writes its arch in a form the scan does not read.
+    pub fn extra_elements(
+        &self,
+        v: &ViewFact,
+        parent: String,
+        root: &str,
+        scope: &Scope,
+    ) -> Option<FxHashSet<ArchElement>> {
+        if self.views.any(root, |mi, f| scope.sees(mi) && f.arch_unread) {
+            return None;
+        }
+        let models = self.tree_models(v, parent);
+        let on = |mi, s| stray_on(self.view_models(mi, s).as_deref(), models.as_deref());
+        let mut extra = FxHashSet::default();
+        for (mi, s) in self.stray_views(&scope.visible).filter(|&(mi, s)| on(mi, s)) {
+            extra.extend(self.branch(mi, s, scope)?);
+        }
+        Some(extra)
+    }
+
+    /// The elements the stray `s` of module `mi` and the views of `scope` below it add, None when
+    /// one of them writes its arch in a form the scan does not read. One without an XML id has
+    /// nothing below it.
+    fn branch(&self, mi: usize, s: &ViewFact, scope: &Scope) -> Option<FxHashSet<ArchElement>> {
+        let name = self.modules[mi].name.as_str();
+        let Some(id) = &s.id else {
+            return (!s.arch_unread).then(|| s.elements.iter().map(|e| located(e, name)).collect());
+        };
+        let id = full_id(name, id);
+        if self.views.any(&id, |m, f| scope.sees(m) && f.arch_unread) {
+            return None;
+        }
+        Some(self.views.tree(id, self.modules, |m| scope.sees(m)).visible)
     }
 
     /// Whether one of `elements`, located below `parent` in `tree`, is one only `set` adds of the
@@ -7213,6 +7261,101 @@ mod tests {
         let update = update.replace(search, by_ref);
         assert!(run(&format!("{unread}{}", kept(partner)), &update, partner));
         assert!(!run(&format!("{unread}{}", kept(country)), &update, partner));
+    }
+
+    #[test]
+    fn a_tree_extended_unread_in_scope() {
+        let view = |record: &str| {
+            data_file(
+                "views/views.xml",
+                xml::analyze(&format!("<odoo>{record}</odoo>"), Series::parse("18.0")),
+            )
+        };
+        let record = |id: &str, model: &str, fields: &str| {
+            format!(
+                r#"<record id="{id}" model="ir.ui.view">
+                    <field name="model" {model}/>{fields}
+                </record>"#
+            )
+        };
+        let manifest = |depends: &str| format!("{{'version': '18.0.1.0', 'depends': [{depends}]}}");
+        let by_ref = r#"<field name="inherit_id" ref="base.view_partner_simple"/>"#;
+        let search = r#"<field name="inherit_id" search="[('name', '=', 'res.partner.simple')]"/>"#;
+        let partner = r#"eval="'res.partner'""#;
+        let country = r#"eval="'res.country'""#;
+        // An arch written to `field` adding `block` after the element of id `after`.
+        let arch = |field: &str, after: &str, block: &str| {
+            format!(
+                r#"<field name="{field}" type="xml"><xpath expr="//div[@id='{after}']" position="after"><div id="{block}"/></xpath></field>"#
+            )
+        };
+        let notes = r#"<field name="arch" type="xml"><form><div id="notes"/></form></field>"#;
+        // Whether views of haze writing `haze` may add the element of main's spec to main's tree in
+        // main's scope, main naming `main_model` and depending on `main_depends`.
+        let extends = |haze: &str, main_model: &str, main_depends: &str| {
+            let mut modules = [
+                module("base", &manifest("")),
+                module("haze", &manifest("'base'")),
+                module("main", &manifest(main_depends)),
+            ];
+            modules[0]
+                .data
+                .push(view(&record("view_partner_simple", partner, notes)));
+            modules[1].data.push(view(haze));
+            let spec = r#"<field name="arch" type="xml"><xpath expr="//div[@id='haze_block']" position="inside"><span/></xpath></field>"#;
+            modules[2]
+                .data
+                .push(view(&record("view_main", main_model, &format!("{by_ref}{spec}"))));
+            let index = Index::build(&modules, None);
+            let main = index.by_name["main"];
+            let v = &modules[2].data[0].facts.views[0];
+            let e = super::located(&v.locators[0].value, "main");
+            let parent = "base.view_partner_simple".to_owned();
+            let root = index.views.root(parent.clone()).unwrap();
+            let extra = index.extra_elements(v, parent, &root, &index.scope(main));
+            extra.is_none_or(|extra| extra.contains(&e))
+        };
+        let haze = |model: &str, fields: &str| record("view_haze", model, fields);
+        let below = |field: &str| haze(partner, &format!("{by_ref}{}", arch(field, "notes", "haze_block")));
+        assert!(extends(&below("arch_base"), partner, "'haze'"));
+        assert!(!extends(&below("arch_base"), partner, "'base'"));
+        assert!(!extends(&below("arch"), partner, "'haze'"));
+        let stray = |model: &str, mode: &str, block: &str| {
+            haze(model, &format!("{search}{mode}{}", arch("arch", "notes", block)))
+        };
+        assert!(extends(&stray(partner, "", "haze_block"), partner, "'haze'"));
+        assert!(!extends(&stray(partner, "", "mist_block"), partner, "'haze'"));
+        assert!(!extends(&stray(country, "", "haze_block"), partner, "'haze'"));
+        let primary = r#"<field name="mode">primary</field>"#;
+        assert!(!extends(&stray(partner, primary, "haze_block"), partner, "'haze'"));
+        assert!(extends(
+            &stray(country, "", "haze_block"),
+            r#"eval="'res.' + 'partner'""#,
+            "'haze'"
+        ));
+        // A view below the stray joins the tree with it.
+        let low = |field: &str, block: &str| {
+            let by_stray = r#"<field name="inherit_id" ref="view_haze"/>"#;
+            let fields = format!("{by_stray}{}", arch(field, "mist_block", block));
+            format!(
+                "{}{}",
+                stray(partner, "", "mist_block"),
+                record("view_haze_low", partner, &fields)
+            )
+        };
+        assert!(extends(&low("arch", "haze_block"), partner, "'haze'"));
+        assert!(!extends(&low("arch", "dusk_block"), partner, "'haze'"));
+        assert!(extends(&low("arch_base", "dusk_block"), partner, "'haze'"));
+        // A stray without an XML id has no view below it, so only its own arch counts.
+        let anonymous = |field: &str, block: &str| {
+            format!(
+                r#"<record model="ir.ui.view"><field name="model" {partner}/>{search}{}</record>"#,
+                arch(field, "notes", block)
+            )
+        };
+        assert!(extends(&anonymous("arch", "haze_block"), partner, "'haze'"));
+        assert!(!extends(&anonymous("arch", "mist_block"), partner, "'haze'"));
+        assert!(extends(&anonymous("arch_base", "mist_block"), partner, "'haze'"));
     }
 
     #[test]
